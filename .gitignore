@@ -1,0 +1,8 @@
+/.idea/
+/bin/
+/*.zip
+/*.rar
+/*Zone.Identifier
+/.temp/
+/var/
+/application/var/

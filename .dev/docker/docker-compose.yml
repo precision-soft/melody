@@ -1,0 +1,15 @@
+services:
+    dev:
+        build:
+            context: ${RELATIVE_PATH_TO_ROOT}
+            dockerfile: ${DOCKER_PATH}/Dockerfile
+            args:
+                DOCKER_PATH: ${DOCKER_PATH}
+                WORKDIR: ${CONTAINER_ROOT_PATH}
+                CONFIG_PATH: ${DOCKER_PATH}
+                ROOT_PATH: ${CONTAINER_ROOT_PATH}
+        restart: unless-stopped
+        volumes:
+            - ${RELATIVE_PATH_TO_ROOT}:${CONTAINER_ROOT_PATH}
+        ports:
+            - "8180:8080"

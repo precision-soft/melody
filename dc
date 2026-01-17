@@ -1,0 +1,17 @@
+#!/bin/bash
+
+. "${PWD}/.dev/utility.sh"
+
+create_env() {
+    if [[ ! -e ${DOCKER_PATH}.env.local ]]; then
+        println "touch ${DOCKER_PATH}.env.local"
+
+        touch ${DOCKER_PATH}.env.local
+    fi
+
+    rm -rf .git/hooks && ln -s ../.dev/git-hooks .git/hooks
+}
+
+create_env
+
+docker_compose "$@"
