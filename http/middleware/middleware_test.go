@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	http "github.com/precision-soft/melody/http"
+	"github.com/precision-soft/melody/http"
 	httpcontract "github.com/precision-soft/melody/http/contract"
 	"github.com/precision-soft/melody/internal/testhelper"
 	runtimecontract "github.com/precision-soft/melody/runtime/contract"

@@ -74,9 +74,9 @@ func LogOnRecover(
 
 func LogOnRecoverAndExit(
 	logger loggingcontract.Logger,
+	recovered any,
 	exitCode int,
 ) {
-	recovered := recover()
 	if nil == recovered {
 		return
 	}

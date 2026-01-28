@@ -39,9 +39,9 @@ package example
 import (
 	"time"
 
-	clock "github.com/precision-soft/melody/clock"
+	"github.com/precision-soft/melody/clock"
 	clockcontract "github.com/precision-soft/melody/clock/contract"
-	container "github.com/precision-soft/melody/container"
+	"github.com/precision-soft/melody/container"
 	containercontract "github.com/precision-soft/melody/container/contract"
 )
 

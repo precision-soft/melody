@@ -45,7 +45,7 @@ package example
 import (
 	"time"
 
-	httpclient "github.com/precision-soft/melody/httpclient"
+	"github.com/precision-soft/melody/httpclient"
 )
 
 type HealthResponse struct {

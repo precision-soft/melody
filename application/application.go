@@ -37,12 +37,7 @@ func (instance *Application) Boot() kernelcontract.Kernel {
 		return instance.kernel
 	}
 
-	serviceContainer := instance.kernel.ServiceContainer()
-
-	defer func() {
-		logger, _ := logging.LoggerFromContainer(serviceContainer)
-		logging.LogOnRecoverAndExit(logger, 1)
-	}()
+	defer instance.logOnRecoverAndExit()
 
 	configuration := instance.configuration
 
@@ -50,7 +45,9 @@ func (instance *Application) Boot() kernelcontract.Kernel {
 
 	resolveErr := configuration.Resolve()
 	if nil != resolveErr {
-		exception.Panic(exception.NewError("could not resolve the config parameters on boot", nil, resolveErr))
+		exception.Panic(
+			exception.NewError("could not resolve the config parameters on boot", nil, resolveErr),
+		)
 	}
 
 	instance.ensureRuntimeDirectories()
@@ -88,12 +85,7 @@ func (instance *Application) RegisterParameter(
 func (instance *Application) Run(ctx context.Context) {
 	_ = instance.Boot()
 
-	serviceContainer := instance.kernel.ServiceContainer()
-
-	defer logging.LogOnRecoverAndExit(
-		logging.LoggerMustFromContainer(serviceContainer),
-		1,
-	)
+	defer instance.logOnRecoverAndExit()
 
 	defer instance.Close()
 
@@ -148,4 +140,22 @@ func (instance *Application) ensureRuntimeDirectories() {
 			),
 		)
 	}
+}
+
+func (instance *Application) logOnRecoverAndExit() {
+	recovered := recover()
+	if nil == recovered {
+		return
+	}
+
+	logger := logging.EmergencyLogger()
+
+	serviceContainer := instance.kernel.ServiceContainer()
+
+	containerLogger, loggerErr := logging.LoggerFromContainer(serviceContainer)
+	if nil == loggerErr && nil != containerLogger {
+		logger = containerLogger
+	}
+
+	logging.LogOnRecoverAndExit(logger, recovered, 1)
 }
