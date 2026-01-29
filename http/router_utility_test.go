@@ -1,12 +1,18 @@
 package http
 
 import (
+	`context`
 	"crypto/tls"
+	`errors`
 	nethttp "net/http"
 	"net/http/httptest"
+	`reflect`
 	"testing"
 
+	containercontract `github.com/precision-soft/melody/container/contract`
+	`github.com/precision-soft/melody/exception`
 	httpcontract "github.com/precision-soft/melody/http/contract"
+	runtimecontract `github.com/precision-soft/melody/runtime/contract`
 	"github.com/precision-soft/melody/session/contract"
 )
 
@@ -256,4 +262,320 @@ func TestWriteResponse_ClearsSessionCookieWithMaxAgeNegative(t *testing.T) {
 	if false == (0 >= cookie.MaxAge) {
 		t.Fatalf("expected cleared cookie MaxAge to be non-positive")
 	}
+}
+
+type dependencyA struct {
+	Value string
+}
+
+type testScope struct {
+	calledTypes []reflect.Type
+	values      map[reflect.Type]any
+	returnErr   error
+}
+
+func (instance *testScope) Get(serviceName string) (any, error) { return nil, nil }
+
+func (instance *testScope) MustGet(serviceName string) any { return nil }
+
+func (instance *testScope) GetByType(targetType reflect.Type) (any, error) {
+	instance.calledTypes = append(instance.calledTypes, targetType)
+
+	if nil != instance.returnErr {
+		return nil, instance.returnErr
+	}
+
+	if nil == instance.values {
+		return nil, nil
+	}
+
+	value, exists := instance.values[targetType]
+	if false == exists {
+		return nil, nil
+	}
+
+	return value, nil
+}
+
+func (instance *testScope) MustGetByType(targetType reflect.Type) any { return nil }
+
+func (instance *testScope) Has(serviceName string) bool { return false }
+
+func (instance *testScope) HasType(targetType reflect.Type) bool { return false }
+
+func (instance *testScope) OverrideInstance(serviceName string, value any) error { return nil }
+
+func (instance *testScope) MustOverrideInstance(serviceName string, value any) {}
+
+func (instance *testScope) OverrideProtectedInstance(serviceName string, value any) error { return nil }
+
+func (instance *testScope) MustOverrideProtectedInstance(serviceName string, value any) {}
+
+func (instance *testScope) Close() error { return nil }
+
+var _ containercontract.Scope = (*testScope)(nil)
+
+type testRuntime struct {
+	scope containercontract.Scope
+}
+
+func (instance *testRuntime) Context() context.Context { return context.Background() }
+
+func (instance *testRuntime) Scope() containercontract.Scope { return instance.scope }
+
+func (instance *testRuntime) Container() containercontract.Container { return nil }
+
+var _ runtimecontract.Runtime = (*testRuntime)(nil)
+
+func assertPanicWithExceptionMessage(t *testing.T, fn func(), expectedMessage string) {
+	t.Helper()
+
+	defer func() {
+		recovered := recover()
+		if nil == recovered {
+			t.Fatalf("expected panic")
+		}
+
+		panicErr, ok := recovered.(*exception.Error)
+		if false == ok {
+			t.Fatalf("expected panic to be *exception.Error, got %T", recovered)
+		}
+
+		if panicErr.Message() != expectedMessage {
+			t.Fatalf("expected panic message %q, got %q", expectedMessage, panicErr.Message())
+		}
+	}()
+
+	fn()
+}
+
+func TestWrapControllerWithContainer_AutowiresDependenciesByType(t *testing.T) {
+	dependencyInstance := &dependencyA{Value: "ok"}
+
+	scope := &testScope{
+		values: map[reflect.Type]any{
+			reflect.TypeOf((*dependencyA)(nil)): dependencyInstance,
+		},
+	}
+
+	runtimeInstance := &testRuntime{scope: scope}
+
+	var received *dependencyA
+
+	controller := func(request *Request, dep *dependencyA) (*Response, error) {
+		received = dep
+		return EmptyResponse(200), nil
+	}
+
+	handler := wrapControllerWithContainer(controller)
+
+	netRequest := httptest.NewRequest("GET", "http://example.com/", nil)
+	request := NewRequest(netRequest, nil, runtimeInstance, nil)
+
+	response, err := handler(runtimeInstance, httptest.NewRecorder(), request)
+	if nil != err {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+
+	if nil == response {
+		t.Fatalf("expected non-nil response")
+	}
+
+	if dependencyInstance != received {
+		t.Fatalf("expected dependency to be injected")
+	}
+
+	if 1 != len(scope.calledTypes) {
+		t.Fatalf("expected GetByType to be called once, got %d", len(scope.calledTypes))
+	}
+
+	if reflect.TypeOf((*dependencyA)(nil)) != scope.calledTypes[0] {
+		t.Fatalf("expected GetByType to be called with dependencyA type")
+	}
+}
+
+func TestWrapControllerWithContainer_ReturnsErrorWhenRuntimeIsNil(t *testing.T) {
+	controller := func(request *Request) (*Response, error) {
+		return EmptyResponse(200), nil
+	}
+
+	handler := wrapControllerWithContainer(controller)
+
+	netRequest := httptest.NewRequest("GET", "http://example.com/", nil)
+	request := NewRequest(netRequest, nil, nil, nil)
+
+	_, err := handler(nil, httptest.NewRecorder(), request)
+	if nil == err {
+		t.Fatalf("expected non-nil error")
+	}
+
+	if "runtime instance is nil in controller handler" != err.Error() {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestWrapControllerWithContainer_PropagatesScopeGetByTypeError(t *testing.T) {
+	expectedErr := errors.New("scope error")
+
+	scope := &testScope{
+		returnErr: expectedErr,
+	}
+
+	runtimeInstance := &testRuntime{scope: scope}
+
+	controller := func(request *Request, dep *dependencyA) (*Response, error) {
+		return EmptyResponse(200), nil
+	}
+
+	handler := wrapControllerWithContainer(controller)
+
+	netRequest := httptest.NewRequest("GET", "http://example.com/", nil)
+	request := NewRequest(netRequest, nil, runtimeInstance, nil)
+
+	_, err := handler(runtimeInstance, httptest.NewRecorder(), request)
+	if expectedErr != err {
+		t.Fatalf("expected scope error to be returned")
+	}
+
+	if 1 != len(scope.calledTypes) {
+		t.Fatalf("expected GetByType to be called once, got %d", len(scope.calledTypes))
+	}
+}
+
+func TestWrapControllerWithContainer_ReturnsControllerErrorAndNilResponse(t *testing.T) {
+	expectedErr := errors.New("controller failed")
+
+	controller := func(request *Request) (*Response, error) {
+		return nil, expectedErr
+	}
+
+	handler := wrapControllerWithContainer(controller)
+
+	runtimeInstance := &testRuntime{scope: &testScope{}}
+
+	netRequest := httptest.NewRequest("GET", "http://example.com/", nil)
+	request := NewRequest(netRequest, nil, runtimeInstance, nil)
+
+	response, err := handler(runtimeInstance, httptest.NewRecorder(), request)
+	if expectedErr != err {
+		t.Fatalf("expected controller error to be returned")
+	}
+
+	if nil != response {
+		t.Fatalf("expected nil response")
+	}
+}
+
+func TestWrapControllerWithContainer_ReturnsNilResponseWhenControllerReturnsNilResponseAndNilError(t *testing.T) {
+	controller := func(request *Request) (*Response, error) {
+		return nil, nil
+	}
+
+	handler := wrapControllerWithContainer(controller)
+
+	runtimeInstance := &testRuntime{scope: &testScope{}}
+
+	netRequest := httptest.NewRequest("GET", "http://example.com/", nil)
+	request := NewRequest(netRequest, nil, runtimeInstance, nil)
+
+	response, err := handler(runtimeInstance, httptest.NewRecorder(), request)
+	if nil != err {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+
+	if nil != response {
+		t.Fatalf("expected nil response")
+	}
+}
+
+func TestWrapControllerWithContainer_PanicsWhenControllerIsNotAFunction(t *testing.T) {
+	assertPanicWithExceptionMessage(
+		t,
+		func() {
+			_ = wrapControllerWithContainer(123)
+		},
+		"controller must be a function",
+	)
+}
+
+func TestWrapControllerWithContainer_PanicsWhenControllerHasNoArguments(t *testing.T) {
+	assertPanicWithExceptionMessage(
+		t,
+		func() {
+			_ = wrapControllerWithContainer(func() (*Response, error) { return EmptyResponse(200), nil })
+		},
+		"controller must have at least one argument",
+	)
+}
+
+func TestWrapControllerWithContainer_PanicsWhenFirstArgumentIsNotRequest(t *testing.T) {
+	assertPanicWithExceptionMessage(
+		t,
+		func() {
+			_ = wrapControllerWithContainer(func(value string) (*Response, error) { return EmptyResponse(200), nil })
+		},
+		"first controller argument must be a request",
+	)
+}
+
+func TestWrapControllerWithContainer_PanicsWhenControllerDoesNotReturnTwoResults(t *testing.T) {
+	assertPanicWithExceptionMessage(
+		t,
+		func() {
+			_ = wrapControllerWithContainer(func(request *Request) *Response { return EmptyResponse(200) })
+		},
+		"controller must return response",
+	)
+}
+
+func TestWrapControllerWithContainer_PanicsWhenFirstResultIsNotResponsePointer(t *testing.T) {
+	assertPanicWithExceptionMessage(
+		t,
+		func() {
+			_ = wrapControllerWithContainer(func(request *Request) (int, error) { return 1, nil })
+		},
+		"controller must return response as first result",
+	)
+}
+
+func TestWrapControllerWithContainer_PanicsWhenSecondResultIsNotError(t *testing.T) {
+	assertPanicWithExceptionMessage(
+		t,
+		func() {
+			_ = wrapControllerWithContainer(func(request *Request) (*Response, string) { return EmptyResponse(200), "" })
+		},
+		"controller must return error as second result",
+	)
+}
+
+func TestWrapControllerWithContainer_PanicsWhenDependencyIsNilFromScope(t *testing.T) {
+	scope := &testScope{
+		values: map[reflect.Type]any{
+			reflect.TypeOf((*dependencyA)(nil)): nil,
+		},
+	}
+
+	runtimeInstance := &testRuntime{scope: scope}
+
+	controller := func(request *Request, dep *dependencyA) (*Response, error) {
+		if nil == dep {
+			return nil, errors.New("unexpected nil dependency")
+		}
+
+		return EmptyResponse(200), nil
+	}
+
+	handler := wrapControllerWithContainer(controller)
+
+	netRequest := httptest.NewRequest("GET", "http://example.com/", nil)
+	request := NewRequest(netRequest, nil, runtimeInstance, nil)
+
+	defer func() {
+		recovered := recover()
+		if nil == recovered {
+			t.Fatalf("expected panic when dependency is nil")
+		}
+	}()
+
+	_, _ = handler(runtimeInstance, httptest.NewRecorder(), request)
 }

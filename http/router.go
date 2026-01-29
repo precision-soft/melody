@@ -84,11 +84,11 @@ func (instance *Router) HandleNamedController(
 	)
 }
 
-func (instance *Router) HandleWithOptions(pattern string, handler httpcontract.Handler, options *RouteOptions) {
+func (instance *Router) HandleWithOptions(pattern string, handler httpcontract.Handler, options httpcontract.RouteOptions) {
 	instance.addRoute(pattern, handler, options)
 }
 
-func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, options *RouteOptions) {
+func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, options httpcontract.RouteOptions) {
 	if nil == handler {
 		exception.Panic(
 			exception.NewError(
@@ -112,7 +112,7 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
 	}
 
 	requirements := make(map[string]*regexp.Regexp)
-	for key, value := range options.requirements {
+	for key, value := range options.Requirements() {
 		if "" == key {
 			continue
 		}
@@ -147,7 +147,7 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
 	}
 
 	defaults := map[string]string{}
-	for key, value := range options.defaults {
+	for key, value := range options.Defaults() {
 		if "" == key {
 			continue
 		}
@@ -156,7 +156,7 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
 	}
 
 	attributes := map[string]any{}
-	for key, value := range options.attributes {
+	for key, value := range options.Attributes() {
 		if "" == key {
 			continue
 		}
@@ -164,36 +164,36 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
 		attributes[key] = value
 	}
 
-	if "" != options.name {
-		attributes[RouteAttributeName] = options.name
+	if "" != options.Name() {
+		attributes[RouteAttributeName] = options.Name()
 	}
 	attributes[RouteAttributePattern] = normalizedPattern
-	if 0 < len(options.methods) {
-		attributes[RouteAttributeMethods] = append([]string{}, options.methods...)
+	if 0 < len(options.Methods()) {
+		attributes[RouteAttributeMethods] = append([]string{}, options.Methods()...)
 	}
-	if "" != options.host {
-		attributes[RouteAttributeHost] = options.host
+	if "" != options.Host() {
+		attributes[RouteAttributeHost] = options.Host()
 	}
-	if 0 < len(options.schemes) {
-		attributes[RouteAttributeSchemes] = append([]string{}, options.schemes...)
+	if 0 < len(options.Schemes()) {
+		attributes[RouteAttributeSchemes] = append([]string{}, options.Schemes()...)
 	}
-	if 0 < len(options.locales) {
-		attributes[RouteAttributeLocales] = append([]string{}, options.locales...)
+	if 0 < len(options.Locales()) {
+		attributes[RouteAttributeLocales] = append([]string{}, options.Locales()...)
 	}
 
 	instance.routeRegistry.registerRoute(
 		route{
-			name:         options.name,
+			name:         options.Name(),
 			pattern:      normalizedPattern,
 			parts:        parts,
 			handler:      handler,
-			methods:      append([]string{}, options.methods...),
-			host:         options.host,
-			schemes:      append([]string{}, options.schemes...),
+			methods:      append([]string{}, options.Methods()...),
+			host:         options.Host(),
+			schemes:      append([]string{}, options.Schemes()...),
 			requirements: requirements,
 			defaults:     defaults,
-			locales:      append([]string{}, options.locales...),
-			priority:     options.priority,
+			locales:      append([]string{}, options.Locales()...),
+			priority:     options.Priority(),
 			attributes:   attributes,
 		},
 	)

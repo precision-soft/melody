@@ -137,6 +137,10 @@ func wrapControllerWithContainer(
 			err = errorInterface.(error)
 		}
 
+		if nil == response {
+			return nil, err
+		}
+
 		return response, err
 	}
 }

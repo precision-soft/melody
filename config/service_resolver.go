@@ -11,5 +11,9 @@ const (
 )
 
 func ConfigMustFromContainer(serviceContainer containercontract.Container) configcontract.Configuration {
-	return container.MustFromResolver[configcontract.Configuration](serviceContainer, ServiceConfig)
+	return ConfigMustFromResolver(serviceContainer)
+}
+
+func ConfigMustFromResolver(resolver containercontract.Resolver) configcontract.Configuration {
+	return container.MustFromResolver[configcontract.Configuration](resolver, ServiceConfig)
 }
