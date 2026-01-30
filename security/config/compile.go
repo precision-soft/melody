@@ -38,44 +38,56 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
 			)
 		}
 
-		if "" == firewall.loginPath {
-			return nil, exception.NewError(
-				"security firewall login path may not be empty",
-				exceptioncontract.Context{
-					"firewallName": firewall.name,
-				},
-				nil,
-			)
-		}
+		if true == firewall.override.stateless {
+			if "" != firewall.loginPath || "" != firewall.logoutPath || nil != firewall.loginHandler || nil != firewall.logoutHandler {
+				return nil, exception.NewError(
+					"security stateless firewall may not define login or logout configuration",
+					exceptioncontract.Context{
+						"firewallName": firewall.name,
+					},
+					nil,
+				)
+			}
+		} else {
+			if "" == firewall.loginPath {
+				return nil, exception.NewError(
+					"security firewall login path may not be empty",
+					exceptioncontract.Context{
+						"firewallName": firewall.name,
+					},
+					nil,
+				)
+			}
 
-		if "" == firewall.logoutPath {
-			return nil, exception.NewError(
-				"security firewall logout path may not be empty",
-				exceptioncontract.Context{
-					"firewallName": firewall.name,
-				},
-				nil,
-			)
-		}
+			if "" == firewall.logoutPath {
+				return nil, exception.NewError(
+					"security firewall logout path may not be empty",
+					exceptioncontract.Context{
+						"firewallName": firewall.name,
+					},
+					nil,
+				)
+			}
 
-		if nil == firewall.loginHandler {
-			return nil, exception.NewError(
-				"security firewall login handler is nil",
-				exceptioncontract.Context{
-					"firewallName": firewall.name,
-				},
-				nil,
-			)
-		}
+			if nil == firewall.loginHandler {
+				return nil, exception.NewError(
+					"security firewall login handler is nil",
+					exceptioncontract.Context{
+						"firewallName": firewall.name,
+					},
+					nil,
+				)
+			}
 
-		if nil == firewall.logoutHandler {
-			return nil, exception.NewError(
-				"security firewall logout handler is nil",
-				exceptioncontract.Context{
-					"firewallName": firewall.name,
-				},
-				nil,
-			)
+			if nil == firewall.logoutHandler {
+				return nil, exception.NewError(
+					"security firewall logout handler is nil",
+					exceptioncontract.Context{
+						"firewallName": firewall.name,
+					},
+					nil,
+				)
+			}
 		}
 
 		effectiveRoleHierarchy := firewall.override.roleHierarchy

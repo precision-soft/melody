@@ -200,10 +200,30 @@ func (instance *adminSecurityModule) RegisterSecurity(builder *securityconfig.Bu
 		&apiKeyLogoutHandler{},
 		securityconfig.NewFirewallOverrideConfiguration(),
 	)
+
+	builder.AddStatelessFirewall(
+		"admin",
+		matcher,
+		[]securitycontract.Rule{},
+		tokenSource,
+		securityconfig.NewFirewallOverrideConfiguration(),
+	)
+
+	builder.AddFirewall(
+		"admin",
+		matcher,
+		[]securitycontract.Rule{},
+		tokenSource,
+		"",
+		"",
+		nil,
+		nil,
+		securityconfig.NewFirewallOverrideConfiguration().WithStateless(true),
+	)
 }
 
 var _ applicationcontract.HttpModule = (*adminSecurityModule)(nil)
-
+```
 
 ## Footguns & caveats
 

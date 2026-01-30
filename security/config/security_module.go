@@ -24,6 +24,7 @@ type GlobalConfiguration struct {
 }
 
 type FirewallOverrideConfiguration struct {
+	stateless                  bool
 	inheritGlobalAccessControl bool
 	mergeStrategy              AccessControlMergeStrategy
 	accessControl              *security.AccessControl
@@ -31,6 +32,12 @@ type FirewallOverrideConfiguration struct {
 	accessDecisionManager      securitycontract.AccessDecisionManager
 	entryPoint                 securitycontract.EntryPoint
 	accessDeniedHandler        securitycontract.AccessDeniedHandler
+}
+
+func (instance FirewallOverrideConfiguration) WithStateless(stateless bool) FirewallOverrideConfiguration {
+	instance.stateless = stateless
+
+	return instance
 }
 
 type FirewallConfiguration struct {
@@ -94,6 +101,121 @@ func (instance *Builder) AddFirewall(
 	logoutHandler securitycontract.LogoutHandler,
 	override FirewallOverrideConfiguration,
 ) *Builder {
+	return instance.addFirewall(
+		name,
+		matcher,
+		rules,
+		tokenSource,
+		loginPath,
+		logoutPath,
+		loginHandler,
+		logoutHandler,
+		override,
+	)
+}
+
+func (instance *Builder) AddStatelessFirewall(
+	name string,
+	matcher securitycontract.Matcher,
+	rules []securitycontract.Rule,
+	tokenSource securitycontract.TokenSource,
+	override FirewallOverrideConfiguration,
+) *Builder {
+	override.stateless = true
+
+	return instance.addFirewall(
+		name,
+		matcher,
+		rules,
+		tokenSource,
+		"",
+		"",
+		nil,
+		nil,
+		override,
+	)
+}
+
+func (instance *Builder) AddStatefulFirewall(
+	name string,
+	matcher securitycontract.Matcher,
+	rules []securitycontract.Rule,
+	tokenSource securitycontract.TokenSource,
+	loginPath string,
+	logoutPath string,
+	loginHandler securitycontract.LoginHandler,
+	logoutHandler securitycontract.LogoutHandler,
+	override FirewallOverrideConfiguration,
+) *Builder {
+	override.stateless = false
+
+	return instance.addFirewall(
+		name,
+		matcher,
+		rules,
+		tokenSource,
+		loginPath,
+		logoutPath,
+		loginHandler,
+		logoutHandler,
+		override,
+	)
+}
+
+func (instance *Builder) addFirewall(
+	name string,
+	matcher securitycontract.Matcher,
+	rules []securitycontract.Rule,
+	tokenSource securitycontract.TokenSource,
+	loginPath string,
+	logoutPath string,
+	loginHandler securitycontract.LoginHandler,
+	logoutHandler securitycontract.LogoutHandler,
+	override FirewallOverrideConfiguration,
+) *Builder {
+	instance.validateFirewall(
+		name,
+		matcher,
+		tokenSource,
+		loginPath,
+		logoutPath,
+		loginHandler,
+		logoutHandler,
+		override,
+	)
+
+	if "" == string(override.mergeStrategy) {
+		override.mergeStrategy = AccessControlMergeLocalFirst
+	}
+
+	instance.firewalls = append(
+		instance.firewalls,
+		FirewallConfiguration{
+			name:          name,
+			matcher:       matcher,
+			rules:         rules,
+			tokenSource:   tokenSource,
+			loginPath:     loginPath,
+			logoutPath:    logoutPath,
+			loginHandler:  loginHandler,
+			logoutHandler: logoutHandler,
+			override:      override,
+		},
+	)
+
+	return instance
+}
+
+func (instance *Builder) validateFirewall(
+	name string,
+	matcher securitycontract.Matcher,
+	tokenSource securitycontract.TokenSource,
+	loginPath string,
+	logoutPath string,
+	loginHandler securitycontract.LoginHandler,
+	logoutHandler securitycontract.LogoutHandler,
+	override FirewallOverrideConfiguration,
+) {
 	if "" == name {
 		exception.Panic(exception.NewError("security firewall name may not be empty", nil, nil))
 	}
@@ -120,6 +242,22 @@ func (instance *Builder) AddFirewall(
 				nil,
 			),
 		)
+	}
+
+	if true == override.stateless {
+		if "" != loginPath || "" != logoutPath || nil != loginHandler || nil != logoutHandler {
+			exception.Panic(
+				exception.NewError(
+					"security stateless firewall may not define login or logout configuration",
+					exceptioncontract.Context{
+						"firewallName": name,
+					},
+					nil,
+				),
+			)
+		}
+
+		return
 	}
 
 	if "" == loginPath {
@@ -169,27 +307,6 @@ func (instance *Builder) AddFirewall(
 			),
 		)
 	}
-
-	if "" == string(override.mergeStrategy) {
-		override.mergeStrategy = AccessControlMergeLocalFirst
-	}
-
-	instance.firewalls = append(
-		instance.firewalls,
-		FirewallConfiguration{
-			name:          name,
-			matcher:       matcher,
-			rules:         rules,
-			tokenSource:   tokenSource,
-			loginPath:     loginPath,
-			logoutPath:    logoutPath,
-			loginHandler:  loginHandler,
-			logoutHandler: logoutHandler,
-			override:      override,
-		},
-	)
-
-	return instance
 }
 
 func (instance *Builder) BuildAndCompile() *security.CompiledConfiguration {
