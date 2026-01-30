@@ -116,8 +116,15 @@ func wrapControllerWithContainer(
 		arguments := make([]reflect.Value, controllerType.NumIn())
 		arguments[0] = reflect.ValueOf(request)
 
+		runtimeInterfaceType := reflect.TypeOf((*runtimecontract.Runtime)(nil)).Elem()
+
 		for index := 1; index < controllerType.NumIn(); index++ {
 			paramType := controllerType.In(index)
+
+			if runtimeInterfaceType == paramType {
+				arguments[index] = reflect.ValueOf(runtimeInstance)
+				continue
+			}
 
 			dependency, err := runtimeInstance.Scope().GetByType(paramType)
 			if nil != err {

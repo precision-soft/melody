@@ -65,6 +65,16 @@ The package defines service names for common HTTP services (see [`service_resolv
 
 These services are typically registered by the application/kernel wiring. Userland code may resolve them from the runtime container when needed.
 
+### Runtime parameter injection
+
+When a controller function declares a parameter of type
+[`runtimecontract.Runtime`](../../runtime/contract),
+Melody injects the current `runtimeInstance` directly (it is **not** resolved from the scope/container by type).
+
+This allows controllers to access request-scoped state via `runtimeInstance.Scope()` without registering `runtimecontract.Runtime` as a service.
+
+Implementation detail: see [`wrapControllerWithContainer`](../../http/router_utility.go).
+
 ## Usage
 
 The example below demonstrates:

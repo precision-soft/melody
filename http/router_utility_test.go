@@ -394,6 +394,58 @@ func TestWrapControllerWithContainer_AutowiresDependenciesByType(t *testing.T) {
 	}
 }
 
+func TestWrapControllerWithContainer_InsertsRuntimeWhenControllerRequestsRuntimeParameter(t *testing.T) {
+	dependencyInstance := &dependencyA{Value: "ok"}
+
+	scope := &testScope{
+		values: map[reflect.Type]any{
+			reflect.TypeOf((*dependencyA)(nil)): dependencyInstance,
+		},
+	}
+
+	runtimeInstance := &testRuntime{scope: scope}
+
+	var receivedRuntime runtimecontract.Runtime
+	var receivedDependency *dependencyA
+
+	controller := func(request *Request, runtimeInstance runtimecontract.Runtime, dep *dependencyA) (*Response, error) {
+		receivedRuntime = runtimeInstance
+		receivedDependency = dep
+
+		return EmptyResponse(200), nil
+	}
+
+	handler := wrapControllerWithContainer(controller)
+
+	netRequest := httptest.NewRequest("GET", "http://example.com/", nil)
+	request := NewRequest(netRequest, nil, runtimeInstance, nil)
+
+	response, err := handler(runtimeInstance, httptest.NewRecorder(), request)
+	if nil != err {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+
+	if nil == response {
+		t.Fatalf("expected non-nil response")
+	}
+
+	if runtimeInstance != receivedRuntime {
+		t.Fatalf("expected runtime to be injected")
+	}
+
+	if dependencyInstance != receivedDependency {
+		t.Fatalf("expected dependency to be injected")
+	}
+
+	if 1 != len(scope.calledTypes) {
+		t.Fatalf("expected GetByType to be called once, got %d", len(scope.calledTypes))
+	}
+
+	if reflect.TypeOf((*dependencyA)(nil)) != scope.calledTypes[0] {
+		t.Fatalf("expected GetByType to be called with dependencyA type")
+	}
+}
+
 func TestWrapControllerWithContainer_ReturnsErrorWhenRuntimeIsNil(t *testing.T) {
 	controller := func(request *Request) (*Response, error) {
 		return EmptyResponse(200), nil
@@ -514,7 +566,7 @@ func TestWrapControllerWithContainer_PanicsWhenFirstArgumentIsNotRequest(t *test
 		func() {
 			_ = wrapControllerWithContainer(func(value string) (*Response, error) { return EmptyResponse(200), nil })
 		},
-		"first controller argument must be a request",
+		"first controller argument must implement http request contract",
 	)
 }
 
@@ -534,7 +586,7 @@ func TestWrapControllerWithContainer_PanicsWhenFirstResultIsNotResponsePointer(t
 		func() {
 			_ = wrapControllerWithContainer(func(request *Request) (int, error) { return 1, nil })
 		},
-		"controller must return response as first result",
+		"controller must return response contract as first result",
 	)
 }
 
