@@ -1,7 +1,7 @@
 package http
 
 import (
-	httpcontract `github.com/precision-soft/melody/http/contract`
+	httpcontract "github.com/precision-soft/melody/http/contract"
 )
 
 func NewRouteOptions(

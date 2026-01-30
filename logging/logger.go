@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/precision-soft/melody/exception"
-	exceptioncontract `github.com/precision-soft/melody/exception/contract`
+	exceptioncontract "github.com/precision-soft/melody/exception/contract"
 	loggingcontract "github.com/precision-soft/melody/logging/contract"
 )
 

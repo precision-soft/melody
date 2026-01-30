@@ -32,6 +32,10 @@ func RegisterKernelExceptionListener(eventDispatcher eventcontract.EventDispatch
 				return nil
 			}
 
+			if nil != exceptionEvent.Response() {
+				return nil
+			}
+
 			if nil == exceptionEvent.Err() {
 				return nil
 			}
