@@ -23,16 +23,6 @@ func ErrorJsonBodyHasExtraData() error {
 	return exception.NewError("json body has extra data", map[string]any{}, nil)
 }
 
-type Request struct {
-	httpRequest     *nethttp.Request
-	params          map[string]string
-	query           bagcontract.ParameterBag
-	post            bagcontract.ParameterBag
-	attributes      bagcontract.ParameterBag
-	runtimeInstance runtimecontract.Runtime
-	requestContext  httpcontract.RequestContext
-}
-
 func NewRequest(
 	httpRequest *nethttp.Request,
 	routeParams map[string]string,
@@ -76,6 +66,16 @@ func NewRequest(
 		runtimeInstance: runtimeInstance,
 		requestContext:  requestContext,
 	}
+}
+
+type Request struct {
+	httpRequest     *nethttp.Request
+	params          map[string]string
+	query           bagcontract.ParameterBag
+	post            bagcontract.ParameterBag
+	attributes      bagcontract.ParameterBag
+	runtimeInstance runtimecontract.Runtime
+	requestContext  httpcontract.RequestContext
 }
 
 func (instance *Request) HttpRequest() *nethttp.Request {

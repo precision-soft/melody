@@ -44,13 +44,15 @@ func wrapControllerWithContainer(
 	}
 
 	firstParamType := controllerType.In(0)
-	if firstParamType != reflect.TypeOf(&Request{}) {
+	requestContractType := reflect.TypeOf((*httpcontract.Request)(nil)).Elem()
+	if false == firstParamType.Implements(requestContractType) {
 		exception.Panic(
 			exception.NewError(
-				"first controller argument must be a request",
+				"first controller argument must implement http request contract",
 				exceptioncontract.Context{
 					"type":     controllerType.Kind().String(),
-					"expected": "*Request",
+					"expected": requestContractType.String(),
+					"actual":   firstParamType.String(),
 				},
 				nil,
 			),
@@ -69,13 +71,16 @@ func wrapControllerWithContainer(
 		)
 	}
 
-	if controllerType.Out(0) != reflect.TypeOf(&Response{}) {
+	firstReturnType := controllerType.Out(0)
+	responseContractType := reflect.TypeOf((*httpcontract.Response)(nil)).Elem()
+	if false == firstReturnType.Implements(responseContractType) {
 		exception.Panic(
 			exception.NewError(
-				"controller must return response as first result",
+				"controller must return response contract as first result",
 				exceptioncontract.Context{
 					"controllerType": controllerType.String(),
-					"expected":       "*Response",
+					"expected":       responseContractType.String(),
+					"actual":         firstReturnType.String(),
 				},
 				nil,
 			),
