@@ -38,7 +38,8 @@ func (instance *CreateTxSqlCommand) Run(runtimeInstance runtimecontract.Runtime,
 
 	migrationName := commandContext.Args().First()
 	if "" == migrationName {
-		return errors.New("migration name is required")
+		instance.base.printErrorLine(commandContext, option, errors.New("migration name is required"))
+		return nil
 	}
 
 	db, managerName, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext)
