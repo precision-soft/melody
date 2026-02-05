@@ -106,10 +106,10 @@ type userProfileMap map[string]any
 
 func registerCacheOverrides(
 	register func(
-		serviceName string,
-		provider any,
-		options ...any,
-	),
+	serviceName string,
+	provider any,
+	options ...any,
+),
 ) {
 	register(
 		cachepackage.ServiceCacheBackend,

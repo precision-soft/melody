@@ -74,70 +74,70 @@ This subpackage provides shared helpers that commands can use for consistent out
 package main
 
 import (
-    "context"
+	"context"
 
-    "github.com/precision-soft/melody/cli"
-    clicontract "github.com/precision-soft/melody/cli/contract"
-    "github.com/precision-soft/melody/container"
-    "github.com/precision-soft/melody/exception"
-    "github.com/precision-soft/melody/runtime"
-    runtimecontract "github.com/precision-soft/melody/runtime/contract"
+	"github.com/precision-soft/melody/cli"
+	clicontract "github.com/precision-soft/melody/cli/contract"
+	"github.com/precision-soft/melody/container"
+	"github.com/precision-soft/melody/exception"
+	"github.com/precision-soft/melody/runtime"
+	runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
 type HelloCommand struct{}
 
 func (instance *HelloCommand) Name() string {
-    return "example:hello"
+	return "example:hello"
 }
 
 func (instance *HelloCommand) Description() string {
-    return "prints a hello message"
+	return "prints a hello message"
 }
 
 func (instance *HelloCommand) Flags() []clicontract.Flag {
-    return []clicontract.Flag{}
+	return []clicontract.Flag{}
 }
 
 func (instance *HelloCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
-    writer := commandContext.Writer
-    if nil == writer {
-        return nil
-    }
+	writer := commandContext.Writer
+	if nil == writer {
+		return nil
+	}
 
-    _, _ = writer.Write([]byte("hello\n"))
+	_, _ = writer.Write([]byte("hello\n"))
 
-    return nil
+	return nil
 }
 
 func main() {
-    ctx := context.Background()
+	ctx := context.Background()
 
-    serviceContainer := container.NewContainer()
-    scope := serviceContainer.NewScope()
+	serviceContainer := container.NewContainer()
+	scope := serviceContainer.NewScope()
 
-    runtimeInstance := runtime.New(
-        ctx,
-        scope,
-        serviceContainer,
-    )
+	runtimeInstance := runtime.New(
+		ctx,
+		scope,
+		serviceContainer,
+	)
 
-    rootCli := cli.NewCommandContext(
-        "example",
-        "example application",
-    )
+	rootCli := cli.NewCommandContext(
+		"example",
+		"example application",
+	)
 
-    cli.Register(rootCli, &HelloCommand{}, runtimeInstance)
+	cli.Register(rootCli, &HelloCommand{}, runtimeInstance)
 
-    runErr := rootCli.Run(ctx, []string{"example", "example:hello"})
-    if nil != runErr {
-        exception.Panic(
-            exception.NewError(
-                "cli run failed",
-                nil,
-                runErr,
-            ),
-        )
-    }
+	runErr := rootCli.Run(ctx, []string{"example", "example:hello"})
+	if nil != runErr {
+		exception.Panic(
+			exception.NewError(
+				"cli run failed",
+				nil,
+				runErr,
+			),
+		)
+	}
 }
 ```
 

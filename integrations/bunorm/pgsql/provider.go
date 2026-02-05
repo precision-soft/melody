@@ -1,0 +1,162 @@
+package pgsql
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"
+	"github.com/uptrace/bun/driver/pgdriver"
+
+	"github.com/precision-soft/melody/config"
+	containercontract "github.com/precision-soft/melody/container/contract"
+	"github.com/precision-soft/melody/exception"
+	exceptioncontract "github.com/precision-soft/melody/exception/contract"
+
+	"github.com/precision-soft/melody/integrations/bunorm"
+)
+
+var _ bunorm.Provider = (*Provider)(nil)
+
+type dialectWithDefaultSchema struct {
+	*pgdialect.Dialect
+}
+
+func (instance dialectWithDefaultSchema) DefaultSchema() string {
+	return "public"
+}
+
+type Provider struct {
+	hostParameterName     string
+	portParameterName     string
+	databaseParameterName string
+	userParameterName     string
+	passwordParameterName string
+
+	poolConfig    *PoolConfig
+	timeoutConfig *TimeoutConfig
+}
+
+func NewProvider(
+	hostParameterName string,
+	portParameterName string,
+	databaseParameterName string,
+	userParameterName string,
+	passwordParameterName string,
+) *Provider {
+	return &Provider{
+		hostParameterName:     hostParameterName,
+		portParameterName:     portParameterName,
+		databaseParameterName: databaseParameterName,
+		userParameterName:     userParameterName,
+		passwordParameterName: passwordParameterName,
+		poolConfig:            nil,
+		timeoutConfig:         nil,
+	}
+}
+
+func NewProviderWithConfig(
+	hostParameterName string,
+	portParameterName string,
+	databaseParameterName string,
+	userParameterName string,
+	passwordParameterName string,
+	poolConfig *PoolConfig,
+	timeoutConfig *TimeoutConfig,
+) *Provider {
+	return &Provider{
+		hostParameterName:     hostParameterName,
+		portParameterName:     portParameterName,
+		databaseParameterName: databaseParameterName,
+		userParameterName:     userParameterName,
+		passwordParameterName: passwordParameterName,
+		poolConfig:            poolConfig,
+		timeoutConfig:         timeoutConfig,
+	}
+}
+
+func (instance *Provider) WithPoolConfig(poolConfig *PoolConfig) *Provider {
+	instance.poolConfig = poolConfig
+
+	return instance
+}
+
+func (instance *Provider) WithTimeoutConfig(timeoutConfig *TimeoutConfig) *Provider {
+	instance.timeoutConfig = timeoutConfig
+
+	return instance
+}
+
+func (instance *Provider) Open(resolver containercontract.Resolver) (*bun.DB, error) {
+	configuration := config.ConfigMustFromResolver(resolver)
+
+	host := configuration.MustGet(instance.hostParameterName).MustString()
+	port := configuration.MustGet(instance.portParameterName).MustString()
+	databaseName := configuration.MustGet(instance.databaseParameterName).MustString()
+	user := configuration.MustGet(instance.userParameterName).MustString()
+	password := configuration.MustGet(instance.passwordParameterName).MustString()
+
+	connectionConfig := NewConnectionConfig(host, port, databaseName, user, password)
+
+	poolConfig := instance.poolConfig
+	if nil == poolConfig {
+		poolConfig = DefaultPoolConfig()
+	}
+
+	timeoutConfig := instance.timeoutConfig
+	if nil == timeoutConfig {
+		timeoutConfig = DefaultTimeoutConfig()
+	}
+
+	address := fmt.Sprintf("%s:%s", host, port)
+
+	connector := pgdriver.NewConnector(
+		pgdriver.WithAddr(address),
+		pgdriver.WithDatabase(databaseName),
+		pgdriver.WithUser(user),
+		pgdriver.WithPassword(password),
+	)
+
+	sqlDatabase := sql.OpenDB(connector)
+
+	sqlDatabase.SetMaxOpenConns(poolConfig.MaxOpenConnections)
+	sqlDatabase.SetMaxIdleConns(poolConfig.MaxIdleConnections)
+	sqlDatabase.SetConnMaxLifetime(poolConfig.ConnectionMaxLifetime)
+	sqlDatabase.SetConnMaxIdleTime(poolConfig.ConnectionMaxIdleTime)
+
+	database := bun.NewDB(
+		sqlDatabase,
+		dialectWithDefaultSchema{
+			Dialect: pgdialect.New(),
+		},
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutConfig.ConnectTimeout)
+	defer cancel()
+
+	pingErr := database.PingContext(ctx)
+	if nil != pingErr {
+		_ = database.Close()
+
+		return nil, exception.NewError(
+			"database connection failed",
+			instance.toConnectionContext(connectionConfig, poolConfig, timeoutConfig),
+			pingErr,
+		)
+	}
+
+	return database, nil
+}
+
+func (instance *Provider) toConnectionContext(
+	connectionConfig *ConnectionConfig,
+	poolConfig *PoolConfig,
+	timeoutConfig *TimeoutConfig,
+) exceptioncontract.Context {
+	return map[string]any{
+		"connection":    connectionConfig.SafeContext(),
+		"poolConfig":    poolConfig,
+		"timeoutConfig": timeoutConfig,
+	}
+}
