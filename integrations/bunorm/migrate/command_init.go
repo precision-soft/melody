@@ -1,8 +1,6 @@
 package migrate
 
 import (
-	"time"
-
 	clicontract "github.com/precision-soft/melody/cli/contract"
 	"github.com/precision-soft/melody/cli/output"
 	runtimecontract "github.com/precision-soft/melody/runtime/contract"
@@ -11,10 +9,7 @@ import (
 
 func NewInitCommand(migrations *migrate.Migrations, options Options) *InitCommand {
 	return &InitCommand{
-		base: baseCommand{
-			migrations: migrations,
-			options:    options,
-		},
+		base: baseCommand{migrations: migrations, options: options},
 	}
 }
 
@@ -40,46 +35,47 @@ func (instance *InitCommand) Flags() []clicontract.Flag {
 }
 
 func (instance *InitCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
-	startedAt := time.Now()
 	option := instance.base.optionFromCommand(commandContext)
-	meta := instance.base.meta(instance.Name(), commandContext, option, startedAt)
-	envelope := output.NewEnvelope(meta)
+	outputInstance := newCommandOutput(commandContext.Writer, option)
 
 	db, managerName, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext)
 	if nil != dbErr {
-		instance.base.printErrorLine(commandContext, option, dbErr)
-		return nil
+		outputInstance.printError(dbErr)
+		return dbErr
 	}
 
 	migrator, migratorErr := instance.base.newMigrator(db)
 	if nil != migratorErr {
-		instance.base.printErrorLine(commandContext, option, migratorErr)
-		return nil
+		outputInstance.printError(migratorErr)
+		return migratorErr
+	}
+
+	if option.Verbose {
+		identity, identityErr := fetchDatabaseIdentity(runtimeInstance.Context(), db)
+		if nil != identityErr {
+			outputInstance.printError(identityErr)
+			return identityErr
+		}
+		if nil != identity {
+			outputInstance.printDatabaseBlock(identity)
+			outputInstance.newline()
+		}
 	}
 
 	initErr := migrator.Init(runtimeInstance.Context())
 	if nil != initErr {
-		instance.base.printErrorLine(commandContext, option, initErr)
-		return nil
+		outputInstance.printError(initErr)
+		return initErr
 	}
 
-	if output.FormatTable == option.Format {
-		builder := output.NewTableBuilder()
-		builder.AddSummaryLine("MIGRATIONS INITIALIZED")
-		block := builder.AddBlock("DETAILS", []string{"key", "value"})
-		block.AddRow("manager", managerName)
-		envelope.Table = builder.Build()
-	} else {
-		envelope.Data = map[string]any{
+	outputInstance.printSuccess("migrations tables initialized")
+
+	if option.Verbose {
+		outputInstance.newline()
+		outputInstance.printDetailsBlock(map[string]string{
 			"manager": managerName,
 			"status":  "initialized",
-		}
-	}
-
-	renderErr := instance.base.render(commandContext, &envelope, option, startedAt)
-	if nil != renderErr {
-		instance.base.printErrorLine(commandContext, option, renderErr)
-		return nil
+		})
 	}
 
 	return nil

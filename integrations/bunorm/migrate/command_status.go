@@ -1,8 +1,7 @@
 package migrate
 
 import (
-	"fmt"
-	"time"
+	"strconv"
 
 	clicontract "github.com/precision-soft/melody/cli/contract"
 	"github.com/precision-soft/melody/cli/output"
@@ -34,71 +33,69 @@ func (instance *StatusCommand) Flags() []clicontract.Flag {
 }
 
 func (instance *StatusCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
-	startedAt := time.Now()
 	option := instance.base.optionFromCommand(commandContext)
-	meta := instance.base.meta(instance.Name(), commandContext, option, startedAt)
-	envelope := output.NewEnvelope(meta)
+	outputInstance := newCommandOutput(commandContext.Writer, option)
 
 	db, managerName, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext)
 	if nil != dbErr {
-		instance.base.printErrorLine(commandContext, option, dbErr)
-		return nil
+		outputInstance.printError(dbErr)
+		return dbErr
 	}
 
 	migrator, migratorErr := instance.base.newMigrator(db)
 	if nil != migratorErr {
-		instance.base.printErrorLine(commandContext, option, migratorErr)
-		return nil
+		outputInstance.printError(migratorErr)
+		return migratorErr
+	}
+
+	if option.Verbose {
+		identity, identityErr := fetchDatabaseIdentity(runtimeInstance.Context(), db)
+		if nil != identityErr {
+			outputInstance.printError(identityErr)
+			return identityErr
+		}
+		if nil != identity {
+			outputInstance.printDatabaseBlock(identity)
+			outputInstance.newline()
+		}
 	}
 
 	items, statusErr := migrator.MigrationsWithStatus(runtimeInstance.Context())
 	if nil != statusErr {
-		instance.base.printErrorLine(commandContext, option, statusErr)
-		return nil
+		outputInstance.printError(statusErr)
+		return statusErr
 	}
 
 	applied := items.Applied()
 	unapplied := items.Unapplied()
 
-	if output.FormatTable == option.Format {
-		builder := output.NewTableBuilder()
-		builder.AddSummaryLine("MIGRATION STATUS")
-		builder.AddSummaryLine("manager: " + managerName)
-		builder.AddSummaryLine("applied: " + fmt.Sprintf("%d", len(applied)))
-		builder.AddSummaryLine("pending: " + fmt.Sprintf("%d", len(unapplied)))
+	outputInstance.printDetailsBlock(map[string]string{
+		"manager": managerName,
+		"applied": strconv.Itoa(len(applied)),
+		"status":  strconv.Itoa(len(unapplied)) + " pending",
+	})
 
-		appliedBlock := builder.AddBlock("APPLIED", []string{"migration"})
+	if 0 < len(applied) {
+		outputInstance.newline()
+		appliedNames := make([]string, 0, len(applied))
 		for _, migration := range applied {
-			appliedBlock.AddRow(migration.String())
+			appliedNames = append(appliedNames, migration.Name)
 		}
-
-		unappliedBlock := builder.AddBlock("PENDING", []string{"migration"})
-		for _, migration := range unapplied {
-			unappliedBlock.AddRow(migration.String())
-		}
-
-		envelope.Table = builder.Build()
-	} else {
-		appliedStrings := make([]string, 0, len(applied))
-		for _, migration := range applied {
-			appliedStrings = append(appliedStrings, migration.String())
-		}
-		pendingStrings := make([]string, 0, len(unapplied))
-		for _, migration := range unapplied {
-			pendingStrings = append(pendingStrings, migration.String())
-		}
-
-		envelope.Data = map[string]any{
-			"manager": managerName,
-			"applied": appliedStrings,
-			"pending": pendingStrings,
-		}
+		outputInstance.printMigrationsBlock("APPLIED", appliedNames)
 	}
 
-	renderErr := instance.base.render(commandContext, &envelope, option, startedAt)
-	if nil != renderErr {
-		instance.base.printErrorLine(commandContext, option, renderErr)
-		return nil
+	if 0 < len(unapplied) {
+		outputInstance.newline()
+		pendingNames := make([]string, 0, len(unapplied))
+		for _, migration := range unapplied {
+			pendingNames = append(pendingNames, migration.Name)
+		}
+		outputInstance.printMigrationsBlock("PENDING", pendingNames)
+	}
+
+	if 0 == len(applied) && 0 == len(unapplied) {
+		outputInstance.newline()
+		outputInstance.printWarning("no migrations found")
 	}
 
 	return nil

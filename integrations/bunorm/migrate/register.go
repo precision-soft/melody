@@ -31,6 +31,6 @@ func RegisterCommands(
 		NewRollbackCommand(migrations, options),
 		NewStatusCommand(migrations, options),
 		NewUnlockCommand(migrations, options),
-		NewCreateTxSqlCommand(migrations, options),
+		NewCreateGoCommand(migrations, options),
 	}
 }

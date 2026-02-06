@@ -4,18 +4,18 @@ This directory contains **optional Bun ORM integrations** for Melody.
 
 The integration is split into independent Go modules so consumers can depend only on what they need:
 
-* Core (dialect-agnostic): [`./integrations/bunorm/`](./)
-* MySQL provider: [`./integrations/bunorm/mysql/`](./mysql/)
-* PostgreSQL provider: [`./integrations/bunorm/pgsql/`](./pgsql/)
+* Core (dialect-agnostic): [`./`](./)
+* MySQL provider: [`./mysql/`](./mysql/)
+* PostgreSQL provider: [`./pgsql/`](./pgsql/)
 
 ## What you get
 
-* A dialect-agnostic **manager registry** (`bunorm.ManagerRegistry`) that:
-    * Caches managers **1:1** per provider definition.
+* A dialect-agnostic **manager registry** ([`bunorm.ManagerRegistry`](./manager_registry.go)) that:
+    * Caches managers **1:1** per provider definition ([`bunorm.ProviderDefinition`](./provider_definition.go)).
     * Supports **exactly one default** provider (error if multiple defaults).
     * Falls back to the **first** provider as default if none is marked.
 
-* A `bunorm.Manager` that owns a single `*bun.DB` and exposes:
+* A [`bunorm.Manager`](./manager.go) that owns a single Bun database handle and exposes:
     * `Database() *bun.DB`
     * `Close() error`
 
@@ -43,9 +43,9 @@ go get github.com/precision-soft/melody/integrations/bunorm/pgsql@latest
 
 The pattern is:
 
-1. Register a `*bunorm.ManagerRegistry` service (explicit id).
-2. Register **only** the default `*bunorm.Manager` as a service that can be autowired by type.
-3. Consume `*bunorm.Manager` (default) in your services/handlers.
+1. Register a [`*bunorm.ManagerRegistry`](./manager_registry.go) service (explicit id).
+2. Register **only** the default [`*bunorm.Manager`](./manager.go) as a service that can be autowired by type.
+3. Consume [`*bunorm.Manager`](./manager.go) (default) in your services/handlers.
 4. Optionally, resolve the registry and request a named manager when you need a non-default database.
 
 ### Service registration example
@@ -172,12 +172,12 @@ _ = adminDatabase
 
 ## Dialect providers
 
-* MySQL provider: [`./integrations/bunorm/mysql/`](./mysql/)
-* PostgreSQL provider: [`./integrations/bunorm/pgsql/`](./pgsql/)
+* MySQL provider: [`./mysql/`](./mysql/)
+* PostgreSQL provider: [`./pgsql/`](./pgsql/)
 
-Each dialect module implements `bunorm.Provider` and is responsible for:
+Each dialect module implements [`bunorm.Provider`](./provider.go) and is responsible for:
 
 * Reading connection parameters.
 * Building the driver connector.
-* Constructing `*bun.DB` with the correct dialect.
+* Constructing a Bun database handle with the correct dialect.
 * Performing an initial `PingContext` and failing fast on errors.

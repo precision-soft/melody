@@ -2,8 +2,6 @@ package migrate
 
 import (
 	"errors"
-	"fmt"
-	"time"
 
 	clicontract "github.com/precision-soft/melody/cli/contract"
 	"github.com/precision-soft/melody/cli/output"
@@ -31,22 +29,6 @@ func (instance *baseCommand) managerFlag() clicontract.Flag {
 func (instance *baseCommand) optionFromCommand(commandContext *clicontract.CommandContext) output.Option {
 	return output.NormalizeOption(
 		output.ParseOptionFromCommand(commandContext),
-	)
-}
-
-func (instance *baseCommand) meta(
-	commandName string,
-	commandContext *clicontract.CommandContext,
-	option output.Option,
-	startedAt time.Time,
-) output.Meta {
-	return output.NewMeta(
-		commandName,
-		commandContext.Args().Slice(),
-		option,
-		startedAt,
-		time.Duration(0),
-		output.Version{},
 	)
 }
 
@@ -95,33 +77,9 @@ func (instance *baseCommand) newMigrator(db *bun.DB) (*migrate.Migrator, error) 
 		return nil, errors.New("migrations collection is nil")
 	}
 
-	return migrate.NewMigrator(db, instance.migrations), nil
-}
-
-func (instance *baseCommand) render(
-	commandContext *clicontract.CommandContext,
-	envelope *output.Envelope,
-	option output.Option,
-	startedAt time.Time,
-) error {
-	envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
-
-	return output.Render(commandContext.Writer, *envelope, option)
-}
-
-func (instance *baseCommand) printErrorLine(
-	commandContext *clicontract.CommandContext,
-	option output.Option,
-	err error,
-) {
-	if nil == err {
-		return
-	}
-
-	if false == option.NoColor {
-		_, _ = fmt.Fprintf(commandContext.Writer, "\n\x1b[31mERROR: %s\x1b[0m\n\n", err.Error())
-		return
-	}
-
-	_, _ = fmt.Fprintf(commandContext.Writer, "\nERROR: %s\n\n", err.Error())
+	return migrate.NewMigrator(
+		db,
+		instance.migrations,
+		migrate.WithMarkAppliedOnSuccess(true),
+	), nil
 }

@@ -9,8 +9,8 @@ Import paths
 
 Key types
 
-- `mysql.Provider` implements `bunorm.Provider` and opens `*bun.DB` using `go-sql-driver/mysql` + `mysqldialect`.
-- `mysql.PoolConfig` and `mysql.TimeoutConfig` control connection pool and timeouts.
+- [`mysql.Provider`](./provider.go) implements [`bunorm.Provider`](../provider.go) and opens a Bun database handle using `go-sql-driver/mysql` + `mysqldialect`.
+- [`mysql.PoolConfig`](./pool_config.go) and [`mysql.TimeoutConfig`](./timeout_config.go) control connection pool and timeouts.
 
 Notes
 

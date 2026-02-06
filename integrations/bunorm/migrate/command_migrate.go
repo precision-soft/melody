@@ -1,7 +1,7 @@
 package migrate
 
 import (
-	"time"
+	"strconv"
 
 	clicontract "github.com/precision-soft/melody/cli/contract"
 	"github.com/precision-soft/melody/cli/output"
@@ -37,52 +37,71 @@ func (instance *MigrateCommand) Flags() []clicontract.Flag {
 }
 
 func (instance *MigrateCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
-	startedAt := time.Now()
 	option := instance.base.optionFromCommand(commandContext)
-	meta := instance.base.meta(instance.Name(), commandContext, option, startedAt)
-	envelope := output.NewEnvelope(meta)
+	outputInstance := newCommandOutput(commandContext.Writer, option)
 
 	db, managerName, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext)
 	if nil != dbErr {
-		instance.base.printErrorLine(commandContext, option, dbErr)
-		return nil
+		outputInstance.printError(dbErr)
+		return dbErr
 	}
 
 	migrator, migratorErr := instance.base.newMigrator(db)
 	if nil != migratorErr {
-		instance.base.printErrorLine(commandContext, option, migratorErr)
-		return nil
+		outputInstance.printError(migratorErr)
+		return migratorErr
+	}
+
+	if option.Verbose {
+		identity, identityErr := fetchDatabaseIdentity(runtimeInstance.Context(), db)
+		if nil != identityErr {
+			outputInstance.printError(identityErr)
+			return identityErr
+		}
+		if nil != identity {
+			outputInstance.printDatabaseBlock(identity)
+			outputInstance.newline()
+		}
 	}
 
 	group, migrateErr := migrator.Migrate(runtimeInstance.Context())
 	if nil != migrateErr {
-		instance.base.printErrorLine(commandContext, option, migrateErr)
+		outputInstance.printError(migrateErr)
+		return migrateErr
+	}
+
+	appliedCount := 0
+	if nil != group {
+		appliedCount = len(group.Migrations)
+	}
+
+	if 0 == appliedCount {
+		outputInstance.printWarning("no pending migrations")
 		return nil
 	}
 
-	groupString := "<none>"
-	if nil != group {
-		groupString = group.String()
-	}
+	if option.Verbose {
+		outputInstance.newline()
 
-	if output.FormatTable == option.Format {
-		builder := output.NewTableBuilder()
-		builder.AddSummaryLine("MIGRATIONS APPLIED")
-		block := builder.AddBlock("DETAILS", []string{"key", "value"})
-		block.AddRow("manager", managerName)
-		block.AddRow("group", groupString)
-		envelope.Table = builder.Build()
-	} else {
-		envelope.Data = map[string]any{
+		groupString := "<none>"
+		if nil != group {
+			groupString = group.String()
+		}
+
+		outputInstance.printDetailsBlock(map[string]string{
 			"manager": managerName,
 			"group":   groupString,
-		}
-	}
+			"applied": strconv.Itoa(appliedCount),
+		})
 
-	renderErr := instance.base.render(commandContext, &envelope, option, startedAt)
-	if nil != renderErr {
-		instance.base.printErrorLine(commandContext, option, renderErr)
-		return nil
+		if nil != group && 0 < len(group.Migrations) {
+			outputInstance.newline()
+			names := make([]string, 0, len(group.Migrations))
+			for _, migration := range group.Migrations {
+				names = append(names, migration.Name)
+			}
+			outputInstance.printMigrationsBlock("APPLIED MIGRATIONS", names)
+		}
 	}
 
 	return nil

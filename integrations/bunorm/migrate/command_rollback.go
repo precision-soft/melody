@@ -1,8 +1,6 @@
 package migrate
 
 import (
-	"time"
-
 	clicontract "github.com/precision-soft/melody/cli/contract"
 	"github.com/precision-soft/melody/cli/output"
 	runtimecontract "github.com/precision-soft/melody/runtime/contract"
@@ -33,52 +31,72 @@ func (instance *RollbackCommand) Flags() []clicontract.Flag {
 }
 
 func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
-	startedAt := time.Now()
 	option := instance.base.optionFromCommand(commandContext)
-	meta := instance.base.meta(instance.Name(), commandContext, option, startedAt)
-	envelope := output.NewEnvelope(meta)
+	outputInstance := newCommandOutput(commandContext.Writer, option)
 
 	db, managerName, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext)
 	if nil != dbErr {
-		instance.base.printErrorLine(commandContext, option, dbErr)
-		return nil
+		outputInstance.printError(dbErr)
+		return dbErr
 	}
 
 	migrator, migratorErr := instance.base.newMigrator(db)
 	if nil != migratorErr {
-		instance.base.printErrorLine(commandContext, option, migratorErr)
-		return nil
+		outputInstance.printError(migratorErr)
+		return migratorErr
+	}
+
+	if option.Verbose {
+		identity, identityErr := fetchDatabaseIdentity(runtimeInstance.Context(), db)
+		if nil != identityErr {
+			outputInstance.printError(identityErr)
+			return identityErr
+		}
+		if nil != identity {
+			outputInstance.printDatabaseBlock(identity)
+			outputInstance.newline()
+		}
 	}
 
 	group, rollbackErr := migrator.Rollback(runtimeInstance.Context())
 	if nil != rollbackErr {
-		instance.base.printErrorLine(commandContext, option, rollbackErr)
+		outputInstance.printError(rollbackErr)
+		return rollbackErr
+	}
+
+	rolledBackCount := 0
+	if nil != group {
+		rolledBackCount = len(group.Migrations)
+	}
+
+	if 0 == rolledBackCount {
+		outputInstance.printWarning("no migrations to rollback")
 		return nil
 	}
 
-	groupString := "<none>"
-	if nil != group {
-		groupString = group.String()
-	}
+	outputInstance.printSuccess("migrations rolled back successfully")
 
-	if output.FormatTable == option.Format {
-		builder := output.NewTableBuilder()
-		builder.AddSummaryLine("MIGRATIONS ROLLED BACK")
-		block := builder.AddBlock("DETAILS", []string{"key", "value"})
-		block.AddRow("manager", managerName)
-		block.AddRow("group", groupString)
-		envelope.Table = builder.Build()
-	} else {
-		envelope.Data = map[string]any{
+	if option.Verbose {
+		outputInstance.newline()
+
+		groupString := "<none>"
+		if nil != group {
+			groupString = group.String()
+		}
+
+		outputInstance.printDetailsBlock(map[string]string{
 			"manager": managerName,
 			"group":   groupString,
-		}
-	}
+		})
 
-	renderErr := instance.base.render(commandContext, &envelope, option, startedAt)
-	if nil != renderErr {
-		instance.base.printErrorLine(commandContext, option, renderErr)
-		return nil
+		if nil != group && 0 < len(group.Migrations) {
+			outputInstance.newline()
+			names := make([]string, 0, len(group.Migrations))
+			for _, migration := range group.Migrations {
+				names = append(names, migration.Name)
+			}
+			outputInstance.printMigrationsBlock("ROLLED BACK MIGRATIONS", names)
+		}
 	}
 
 	return nil

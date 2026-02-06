@@ -19,7 +19,7 @@ In your application module:
 
 ```bash
 go get github.com/precision-soft/melody/integrations/bunorm/migrate@latest
-````
+```
 
 ## Usage
 
@@ -32,9 +32,7 @@ package migrations
 
 import "github.com/uptrace/bun/migrate"
 
-var Migrations = migrate.NewMigrations(
-	migrate.WithMigrationsDirectory("./database/migrations"),
-)
+var Migrations = migrate.NewMigrations()
 ```
 
 ### 2) Register commands via a CliModule
@@ -98,4 +96,4 @@ With the default prefix (`db`), the commands are:
 * `db:rollback` – rolls back the last migration group.
 * `db:status` – shows applied and pending migrations.
 * `db:unlock` – unlocks the migrations table.
-* `db:create-tx-sql <name>` – creates transactional up/down SQL migration files.
+* `db:create <migration-name>` – creates a go migrations file.

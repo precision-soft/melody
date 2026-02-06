@@ -1,8 +1,6 @@
 package migrate
 
 import (
-	"time"
-
 	clicontract "github.com/precision-soft/melody/cli/contract"
 	"github.com/precision-soft/melody/cli/output"
 	runtimecontract "github.com/precision-soft/melody/runtime/contract"
@@ -22,7 +20,7 @@ func (instance *UnlockCommand) Name() string {
 }
 
 func (instance *UnlockCommand) Description() string {
-	return "Unlock Bun migrations table"
+	return "Unlock Bun migrations table (use when migration process crashed)"
 }
 
 func (instance *UnlockCommand) Flags() []clicontract.Flag {
@@ -30,46 +28,47 @@ func (instance *UnlockCommand) Flags() []clicontract.Flag {
 }
 
 func (instance *UnlockCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
-	startedAt := time.Now()
 	option := instance.base.optionFromCommand(commandContext)
-	meta := instance.base.meta(instance.Name(), commandContext, option, startedAt)
-	envelope := output.NewEnvelope(meta)
+	outputInstance := newCommandOutput(commandContext.Writer, option)
 
 	db, managerName, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext)
 	if nil != dbErr {
-		instance.base.printErrorLine(commandContext, option, dbErr)
-		return nil
+		outputInstance.printError(dbErr)
+		return dbErr
 	}
 
 	migrator, migratorErr := instance.base.newMigrator(db)
 	if nil != migratorErr {
-		instance.base.printErrorLine(commandContext, option, migratorErr)
-		return nil
+		outputInstance.printError(migratorErr)
+		return migratorErr
+	}
+
+	if option.Verbose {
+		identity, identityErr := fetchDatabaseIdentity(runtimeInstance.Context(), db)
+		if nil != identityErr {
+			outputInstance.printError(identityErr)
+			return identityErr
+		}
+		if nil != identity {
+			outputInstance.printDatabaseBlock(identity)
+			outputInstance.newline()
+		}
 	}
 
 	unlockErr := migrator.Unlock(runtimeInstance.Context())
 	if nil != unlockErr {
-		instance.base.printErrorLine(commandContext, option, unlockErr)
-		return nil
+		outputInstance.printError(unlockErr)
+		return unlockErr
 	}
 
-	if output.FormatTable == option.Format {
-		builder := output.NewTableBuilder()
-		builder.AddSummaryLine("MIGRATIONS UNLOCKED")
-		block := builder.AddBlock("DETAILS", []string{"key", "value"})
-		block.AddRow("manager", managerName)
-		envelope.Table = builder.Build()
-	} else {
-		envelope.Data = map[string]any{
+	outputInstance.printSuccess("migrations table unlocked")
+
+	if option.Verbose {
+		outputInstance.newline()
+		outputInstance.printDetailsBlock(map[string]string{
 			"manager": managerName,
 			"status":  "unlocked",
-		}
-	}
-
-	renderErr := instance.base.render(commandContext, &envelope, option, startedAt)
-	if nil != renderErr {
-		instance.base.printErrorLine(commandContext, option, renderErr)
-		return nil
+		})
 	}
 
 	return nil

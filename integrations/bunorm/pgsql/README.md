@@ -1,8 +1,8 @@
-# bunorm/pgsql
+# Bun ORM PostgreSQL provider
 
 PostgreSQL provider module for Bun ORM integration with Melody.
 
-This module implements `bunorm.Provider` and produces a `*bun.DB` configured with the PostgreSQL dialect.
+This module implements [`bunorm.Provider`](../provider.go) and produces a Bun database handle configured with the PostgreSQL dialect.
 
 ## Import
 
@@ -11,7 +11,7 @@ This module implements `bunorm.Provider` and produces a `*bun.DB` configured wit
 
 ## Provider
 
-`pgsql.Provider` reads configuration values from Melody config using the parameter names passed to `NewProvider(...)`.
+[`pgsql.Provider`](./provider.go) reads configuration values from Melody config using the parameter names passed to [`NewProvider`](./provider.go).
 
 Common parameter names:
 
@@ -21,4 +21,4 @@ Common parameter names:
 - `DB_USER`
 - `DB_PASSWORD`
 
-Pool and timeout defaults can be overridden via `WithPoolConfig(...)` and `WithTimeoutConfig(...)`.
+Pool and timeout defaults can be overridden via [`WithPoolConfig`](./provider.go) and [`WithTimeoutConfig`](./provider.go) using [`PoolConfig`](./pool_config.go) and [`TimeoutConfig`](./timeout_config.go).
