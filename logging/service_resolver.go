@@ -46,3 +46,7 @@ func LoggerMustFromContainer(serviceContainer containercontract.Container) loggi
 func LoggerFromContainer(serviceContainer containercontract.Container) (loggingcontract.Logger, error) {
 	return container.FromResolver[loggingcontract.Logger](serviceContainer, ServiceLogger)
 }
+
+func LoggerFromResolver(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+	return container.FromResolver[loggingcontract.Logger](resolver, ServiceLogger)
+}

@@ -3,21 +3,22 @@ package pgsql
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
-
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
+	"net"
+	"strings"
+	"time"
 
 	"github.com/precision-soft/melody/config"
 	containercontract "github.com/precision-soft/melody/container/contract"
 	"github.com/precision-soft/melody/exception"
 	exceptioncontract "github.com/precision-soft/melody/exception/contract"
-
 	"github.com/precision-soft/melody/integrations/bunorm"
+	"github.com/precision-soft/melody/logging"
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"
+	"github.com/uptrace/bun/driver/pgdriver"
 )
-
-var _ bunorm.Provider = (*Provider)(nil)
 
 type dialectWithDefaultSchema struct {
 	*pgdialect.Dialect
@@ -25,6 +26,22 @@ type dialectWithDefaultSchema struct {
 
 func (instance dialectWithDefaultSchema) DefaultSchema() string {
 	return "public"
+}
+
+func DefaultRetryConfig() *RetryConfig {
+	return &RetryConfig{
+		MaxAttempts:       3,
+		InitialDelay:      500 * time.Millisecond,
+		MaxDelay:          5 * time.Second,
+		BackoffMultiplier: 2.0,
+	}
+}
+
+type RetryConfig struct {
+	MaxAttempts       uint32
+	InitialDelay      time.Duration
+	MaxDelay          time.Duration
+	BackoffMultiplier float64
 }
 
 type Provider struct {
@@ -36,6 +53,7 @@ type Provider struct {
 
 	poolConfig    *PoolConfig
 	timeoutConfig *TimeoutConfig
+	retryConfig   *RetryConfig
 }
 
 func NewProvider(
@@ -53,6 +71,7 @@ func NewProvider(
 		passwordParameterName: passwordParameterName,
 		poolConfig:            nil,
 		timeoutConfig:         nil,
+		retryConfig:           nil,
 	}
 }
 
@@ -64,6 +83,7 @@ func NewProviderWithConfig(
 	passwordParameterName string,
 	poolConfig *PoolConfig,
 	timeoutConfig *TimeoutConfig,
+	retryConfig *RetryConfig,
 ) *Provider {
 	return &Provider{
 		hostParameterName:     hostParameterName,
@@ -73,6 +93,7 @@ func NewProviderWithConfig(
 		passwordParameterName: passwordParameterName,
 		poolConfig:            poolConfig,
 		timeoutConfig:         timeoutConfig,
+		retryConfig:           retryConfig,
 	}
 }
 
@@ -88,7 +109,91 @@ func (instance *Provider) WithTimeoutConfig(timeoutConfig *TimeoutConfig) *Provi
 	return instance
 }
 
+func (instance *Provider) WithRetryConfig(retryConfig *RetryConfig) *Provider {
+	instance.retryConfig = retryConfig
+
+	return instance
+}
+
 func (instance *Provider) Open(resolver containercontract.Resolver) (*bun.DB, error) {
+	if nil == instance.retryConfig {
+		return instance.open(resolver)
+	}
+
+	return instance.openWithRetry(resolver)
+}
+
+func (instance *Provider) openWithRetry(resolver containercontract.Resolver) (*bun.DB, error) {
+	logger, loggerErr := logging.LoggerFromResolver(resolver)
+	if nil != loggerErr {
+		logger = logging.EmergencyLogger()
+	}
+
+	attempt := uint32(0)
+	maxAttempts := instance.retryConfig.MaxAttempts
+	if 0 == maxAttempts {
+		maxAttempts = 3
+	}
+
+	for {
+		attempt = attempt + 1
+
+		database, openErr := instance.open(resolver)
+		if nil == openErr {
+			if 1 < attempt {
+				logger.Info(
+					"database connection successful after retry",
+					map[string]interface{}{
+						"attempt": attempt,
+					},
+				)
+			}
+
+			return database, nil
+		}
+
+		if false == instance.isTransientError(openErr) {
+			logger.Error(
+				"database connection failed with non-transient error",
+				map[string]interface{}{
+					"attempt": attempt,
+					"error":   openErr.Error(),
+				},
+			)
+
+			return nil, openErr
+		}
+
+		if attempt >= maxAttempts {
+			logger.Error(
+				"database connection failed after max retry attempts",
+				map[string]interface{}{
+					"attempt":     attempt,
+					"maxAttempts": maxAttempts,
+					"error":       openErr.Error(),
+				},
+			)
+
+			return nil, openErr
+		}
+
+		delay := instance.computeBackoffDelay(attempt)
+
+		logger.Warning(
+			"database connection failed and retrying",
+			map[string]interface{}{
+				"attempt":     attempt,
+				"maxAttempts": maxAttempts,
+				"retryIn":     delay.String(),
+				"error":       openErr.Error(),
+			},
+		)
+
+		time.Sleep(delay)
+	}
+}
+
+func (instance *Provider) open(resolver containercontract.Resolver) (*bun.DB, error) {
 	configuration := config.ConfigMustFromResolver(resolver)
 
 	host := configuration.MustGet(instance.hostParameterName).MustString()
@@ -160,3 +265,81 @@ func (instance *Provider) toConnectionContext(
 		"timeoutConfig": timeoutConfig,
 	}
 }
+
+func (instance *Provider) computeBackoffDelay(attempt uint32) time.Duration {
+	initialDelay := instance.retryConfig.InitialDelay
+	if 0 == initialDelay {
+		initialDelay = 500 * time.Millisecond
+	}
+
+	maxDelay := instance.retryConfig.MaxDelay
+	if 0 == maxDelay {
+		maxDelay = 5 * time.Second
+	}
+
+	backoffMultiplier := instance.retryConfig.BackoffMultiplier
+	if 0.0 == backoffMultiplier {
+		backoffMultiplier = 2.0
+	}
+
+	multiplier := 1.0
+	exponent := attempt - 1
+
+	for i := uint32(0); i < exponent; i = i + 1 {
+		multiplier = multiplier * backoffMultiplier
+	}
+
+	delay := time.Duration(float64(initialDelay) * multiplier)
+	if delay > maxDelay {
+		delay = maxDelay
+	}
+
+	return delay
+}
+
+func (instance *Provider) isTransientError(inputErr error) bool {
+	if nil == inputErr {
+		return false
+	}
+
+	var netErr net.Error
+	if true == errors.As(inputErr, &netErr) {
+		if true == netErr.Timeout() {
+			return true
+		}
+
+		if temp, ok := netErr.(interface{ Temporary() bool }); true == ok && true == temp.Temporary() {
+			return true
+		}
+	}
+
+	message := strings.ToLower(inputErr.Error())
+
+	transientMarkers := []string{
+		"connection refused",
+		"i/o timeout",
+		"timeout",
+		"temporary failure",
+		"no such host",
+		"server closed the connection",
+		"bad connection",
+		"too many connections",
+		"network is unreachable",
+		"host is down",
+		"broken pipe",
+	}
+
+	for _, marker := range transientMarkers {
+		if "" == marker {
+			continue
+		}
+
+		if true == strings.Contains(message, marker) {
+			return true
+		}
+	}
+
+	return false
+}
+
+var _ bunorm.Provider = (*Provider)(nil)
