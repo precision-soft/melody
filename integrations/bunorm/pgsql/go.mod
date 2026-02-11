@@ -3,7 +3,7 @@ module github.com/precision-soft/melody/integrations/bunorm/pgsql
 go 1.24.0
 
 require (
-	github.com/precision-soft/melody v1.3.2
+	github.com/precision-soft/melody v0.0.0
 	github.com/precision-soft/melody/integrations/bunorm v0.0.0
 	github.com/uptrace/bun v1.2.16
 	github.com/uptrace/bun/dialect/pgdialect v1.2.16
@@ -24,6 +24,7 @@ require (
 	mellium.im/sasl v0.3.2 // indirect
 )
 
-replace github.com/precision-soft/melody => ../../..
-
-replace github.com/precision-soft/melody/integrations/bunorm => ..
+replace (
+	github.com/precision-soft/melody => ../../..
+	github.com/precision-soft/melody/integrations/bunorm => ..
+)

@@ -3,7 +3,7 @@ module github.com/precision-soft/melody/integrations/bunorm
 go 1.24.0
 
 require (
-	github.com/precision-soft/melody v1.3.2
+	github.com/precision-soft/melody v0.0.0
 	github.com/uptrace/bun v1.2.16
 )
 

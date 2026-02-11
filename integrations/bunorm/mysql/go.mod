@@ -4,7 +4,7 @@ go 1.24.0
 
 require (
 	github.com/go-sql-driver/mysql v1.8.1
-	github.com/precision-soft/melody v1.3.2
+	github.com/precision-soft/melody v0.0.0
 	github.com/precision-soft/melody/integrations/bunorm v0.0.0
 	github.com/uptrace/bun v1.2.16
 	github.com/uptrace/bun/dialect/mysqldialect v1.2.16
@@ -22,6 +22,7 @@ require (
 	golang.org/x/sys v0.38.0 // indirect
 )
 
-replace github.com/precision-soft/melody => ../../..
-
-replace github.com/precision-soft/melody/integrations/bunorm => ..
+replace (
+	github.com/precision-soft/melody => ../../..
+	github.com/precision-soft/melody/integrations/bunorm => ..
+)

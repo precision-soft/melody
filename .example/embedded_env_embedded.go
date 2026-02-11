@@ -7,7 +7,7 @@ import (
 	"io/fs"
 )
 
-//go:embed .env
+//go:embed .env*
 var embeddedEnv embed.FS
 
 var embeddedEnvFiles fs.FS = embeddedEnv
