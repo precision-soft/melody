@@ -45,8 +45,6 @@ MELODY_DOCKER_COMPOSE_FILE_PATH="${MELODY_DOCKER_DIRECTORY}/docker-compose.yml"
 MELODY_DOCKER_ENV_FILE_PATH="${MELODY_DOCKER_DIRECTORY}/.env"
 MELODY_DOCKER_ENV_LOCAL_FILE_PATH="${MELODY_DOCKER_DIRECTORY}/.env.local"
 
-# ── tags ──────────────────────────────────────────────────────────────────────
-
 TAG_DOCKER="docker"
 TAG_GIT="git"
 TAG_VALIDATE="validate"
@@ -54,8 +52,6 @@ TAG_VALIDATE="validate"
 readonly TAG_DOCKER
 readonly TAG_GIT
 readonly TAG_VALIDATE
-
-# ── colors ────────────────────────────────────────────────────────────────────
 
 if [[ "${TERM-}" == *color* || -t 1 ]]; then
     COLOR_RESET='\e[0m'
@@ -70,8 +66,6 @@ if [[ "${TERM-}" == *color* || -t 1 ]]; then
 else
     COLOR_RESET='' COLOR_DIM='' COLOR_RED='' COLOR_GREEN='' COLOR_YELLOW='' COLOR_BLUE='' COLOR_CYAN='' COLOR_WHITE=''
 fi
-
-# ── text helpers ──────────────────────────────────────────────────────────────
 
 UTILITY_LAST_LINE_WAS_BLANK="false"
 
@@ -94,8 +88,6 @@ println() {
     printf %b "${TEXT_STRING}\n"
     utility_mark_non_blank_line_printed
 }
-
-# ── bracket-line logging ─────────────────────────────────────────────────────
 
 print_level() {
     local LEVEL_INTEGER="${1:-1}"
@@ -180,8 +172,6 @@ fail() {
     error "${1:-}"
     exit 1
 }
-
-# ── section start / end (with automatic level tracking) ──────────────────────
 
 if [[ "" = "${UTILITY_SECTION_LEVEL_INTEGER:-}" ]]; then
     UTILITY_SECTION_LEVEL_INTEGER="1"
@@ -346,8 +336,6 @@ run_section() {
     return ${EXIT_CODE_INTEGER}
 }
 
-# ── docker prerequisites ─────────────────────────────────────────────────────
-
 require_command() {
     local COMMAND_NAME="${1:?}"
 
@@ -370,8 +358,6 @@ require_docker_daemon() {
     return 0
 }
 
-# ── docker env files ─────────────────────────────────────────────────────────
-
 ensure_docker_env_files() {
     if [[ -f "${MELODY_DOCKER_ENV_FILE_PATH}" ]]; then
         :
@@ -386,8 +372,6 @@ ensure_docker_env_files() {
         touch "${MELODY_DOCKER_ENV_LOCAL_FILE_PATH}"
     fi
 }
-
-# ── docker compose wrappers ──────────────────────────────────────────────────
 
 docker_print_command() {
     local COMMAND_PART_LIST=("$@")
@@ -470,13 +454,6 @@ ensure_service_running() {
     fi
 }
 
-# ── run inside a service ─────────────────────────────────────────────────────
-#
-# Uses "bash -c" (not "bash -lc"). On Alpine a login shell sources
-# /etc/profile which resets PATH and drops /usr/local/go/bin. Since the
-# container already inherits the correct PATH from the Docker image ENV,
-# a plain "bash -c" is both sufficient and safe.
-
 run_in_service_shell() {
     local SERVICE_NAME_STRING="${1:?}"
     local COMMAND_STRING="${2:?}"
@@ -494,8 +471,6 @@ run_in_service_shell_interactive() {
 
     docker_compose exec "${SERVICE_NAME_STRING}" bash -c "${COMMAND_STRING}"
 }
-
-# ── git helpers ──────────────────────────────────────────────────────────────
 
 staged_files() {
     local TITLE_STRING="${1:-staged files}"

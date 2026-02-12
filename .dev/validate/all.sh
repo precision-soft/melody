@@ -29,16 +29,12 @@ fi
 
 ensure_service_running "${SERVICE_NAME_STRING}"
 
-# ── tag combinations ─────────────────────────────────────────────────────────
-
 GO_TAG_LIST_STRING_LIST=(
     ""
     "melody_env_embedded"
     "melody_static_embedded"
     "melody_env_embedded melody_static_embedded"
 )
-
-# ── container path helpers ───────────────────────────────────────────────────
 
 CONTAINER_ROOT_PATH="/app"
 
@@ -53,8 +49,6 @@ container_path_for() {
 
     printf '%s%s' "${CONTAINER_ROOT_PATH}" "${RELATIVE_PATH_STRING}"
 }
-
-# ── go checks via container ──────────────────────────────────────────────────
 
 run_go_checks() {
     local COMPONENT_DIRECTORY_STRING="${1:?}"
@@ -85,8 +79,6 @@ run_go_checks() {
     section_end "${COMPONENT_TITLE_STRING}" "success" "${TAG_VALIDATE}" "go"
 }
 
-# ── module discovery ─────────────────────────────────────────────────────────
-
 get_integration_module_directory_list() {
     find "${REPOSITORY_ROOT_DIRECTORY_STRING}/integrations" \
         -maxdepth 5 \
@@ -101,8 +93,6 @@ get_integration_module_directory_list() {
         done \
         | sort -u
 }
-
-# ── staged-change detection ──────────────────────────────────────────────────
 
 has_staged_change_in_component() {
     local COMPONENT_DIRECTORY_STRING="${1:?}"
@@ -132,8 +122,6 @@ has_staged_change_in_component() {
 
     return 1
 }
-
-# ── main ─────────────────────────────────────────────────────────────────────
 
 main() {
     local ROOT_DIRECTORY_STRING

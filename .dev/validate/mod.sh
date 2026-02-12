@@ -31,8 +31,6 @@ fi
 
 ensure_service_running "${SERVICE_NAME_STRING}"
 
-# ── container path helpers ───────────────────────────────────────────────────
-
 CONTAINER_ROOT_PATH="/app"
 
 container_path_for() {
@@ -46,8 +44,6 @@ container_path_for() {
 
     printf '%s%s' "${CONTAINER_ROOT_PATH}" "${RELATIVE_PATH_STRING}"
 }
-
-# ── module discovery ─────────────────────────────────────────────────────────
 
 get_module_directory_list() {
     {
@@ -63,8 +59,6 @@ get_module_directory_list() {
         done
     } | sort -u
 }
-
-# ── mod operations via container ─────────────────────────────────────────────
 
 run_mod_for_directory() {
     local MODULE_DIRECTORY_STRING="${1:?}"
@@ -87,8 +81,6 @@ run_mod_for_directory() {
 
     section_end "${MODULE_LABEL_STRING}" "success" "${TAG_VALIDATE}" "go" "mod"
 }
-
-# ── main ─────────────────────────────────────────────────────────────────────
 
 main() {
     local ROOT_DIRECTORY_STRING
