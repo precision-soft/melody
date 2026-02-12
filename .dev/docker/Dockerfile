@@ -11,7 +11,11 @@ ENV ROOT_PATH=${ROOT_PATH}
 
 ENV HOME=/home/
 
+ENV GOCACHE=/go/cache/go-build
+
 RUN apk add --update --no-cache git shadow bash
+
+RUN mkdir -p /go/cache/go-build
 
 COPY ${DOCKER_PATH}/.profile* ${HOME}
 ENV ENV="${HOME}/.profile"

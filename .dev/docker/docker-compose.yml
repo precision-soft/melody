@@ -11,5 +11,8 @@ services:
         restart: unless-stopped
         volumes:
             - ${RELATIVE_PATH_TO_ROOT}:${CONTAINER_ROOT_PATH}
+            - ${RELATIVE_PATH_TO_ROOT}/.dev-data/go/pkg/mod:/go/pkg/mod
+            - ${RELATIVE_PATH_TO_ROOT}/.dev-data/go/cache:/go/cache
+            - ${RELATIVE_PATH_TO_ROOT}/.dev-data/bash/.bash_history:/home/.bash_history
         ports:
             - "8180:8080"

@@ -1,17 +1,18 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+set -euo pipefail
+IFS=$'\n\t'
 
 . "${PWD}/.dev/utility.sh"
 
-create_env() {
-    if [[ ! -e ${DOCKER_PATH}.env.local ]]; then
-        println "touch ${DOCKER_PATH}.env.local"
-
-        touch ${DOCKER_PATH}.env.local
+install_git_hooks() {
+    if [[ -d "${ROOT_DIR}/.git" ]]; then
+        rm -rf "${ROOT_DIR}/.git/hooks"
+        ln -s ../.dev/git-hooks "${ROOT_DIR}/.git/hooks"
+        chmod +x "${ROOT_DIR}/.dev/git-hooks"/* 2>/dev/null || true
     fi
-
-    rm -rf .git/hooks && ln -s ../.dev/git-hooks .git/hooks
 }
 
-create_env
+install_git_hooks
 
 docker_compose "$@"

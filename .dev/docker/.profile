@@ -1,30 +1,40 @@
 #!/bin/bash
 
-if [[ -f /app/.dev/utility.sh ]]; then
-    . /app/.dev/utility.sh
-fi
+# ── bash guard ────────────────────────────────────────────────────────────────
+# This file is also sourced by sh/ash (Alpine's ENV= mechanism). All bash-only
+# syntax must be inside this guard. POSIX-only aliases live outside.
 
-if [[ -f ~/.bashrc ]]; then
-    . ~/.bashrc
+if [ -n "${BASH_VERSION:-}" ]; then
+
+    if [[ -f /app/.dev/utility.sh ]]; then
+        . /app/.dev/utility.sh
+    fi
+
+    if [[ -f ~/.bashrc ]]; then
+        . ~/.bashrc
+    fi
+
 fi
 
 # generic
 alias ll="ls -al"
-alias nrd="clear && npm run dev"
-alias nrp="clear && npm run prod"
-alias nrw="clear && npm run watch"
+alias nrd="npm run dev"
+alias nrp="npm run prod"
+alias nrw="npm run watch"
 
 alias app="cd /app/"
 # end generic
 
+# ── bash-only functions and aliases ──────────────────────────────────────────
+
+if [ -n "${BASH_VERSION:-}" ]; then
+
 # go
 gv() {
-  clear
   go vet "$@" ./...
 }
 
 gt() {
-  clear
   go test "$@" ./...
 }
 
@@ -46,8 +56,6 @@ goa_env_and_static_embedded() {
 }
 
 go_build() {
-  clear
-
   local outputName="$1"
   shift
 
@@ -107,8 +115,26 @@ snpm() {
     fi
 }
 
-alias npmw="clear && snpm run watch"
+alias npmw="snpm run watch"
 # end npm
+
+# melody
+melody_validate_all() {
+  bash /app/.dev/validate/all.sh --all "$@"
+}
+
+melody_validate_staged() {
+  bash /app/.dev/validate/all.sh --staged "$@"
+}
+
+melody_install_git_hooks() {
+  bash /app/.dev/git-hook/install.sh
+}
+
+alias mva="melody_validate_all"
+alias mvs="melody_validate_staged"
+alias mhooks="melody_install_git_hooks"
+# end melody
 
 # git
 sgit() {
@@ -149,3 +175,6 @@ alias gdiffc="gdiff --cached"
 if [[ -f ~/.bash_aliases_local ]]; then
     . ~/.bash_aliases_local
 fi
+
+fi
+# ── end bash guard ───────────────────────────────────────────────────────────

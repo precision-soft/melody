@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+IFS=$'\n\t'
+
+REPOSITORY_ROOT_DIRECTORY_STRING="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [[ "" = "${REPOSITORY_ROOT_DIRECTORY_STRING}" ]]; then
+    exit 0
+fi
+
+cd "${REPOSITORY_ROOT_DIRECTORY_STRING}"
+
+. "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/utility.sh"
+
+section_start "pre-push" "${TAG_GIT}"
+
+cleanup() {
+    local EXIT_CODE_INTEGER=$?
+    if [[ 0 -ne ${EXIT_CODE_INTEGER} ]]; then
+        section_end "pre-push" "failure" "${TAG_GIT}"
+    else
+        section_end "pre-push" "success" "${TAG_GIT}"
+    fi
+    exit ${EXIT_CODE_INTEGER}
+}
+trap cleanup EXIT
+
+info "running full validations (unconditional)"
+bash "${ROOT_DIR}/.dev/validate/all.sh" --all
+
+success "pre-push validation passed"

@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+IFS=$'\n\t'
+
+REPOSITORY_ROOT_DIRECTORY_STRING="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [[ "" = "${REPOSITORY_ROOT_DIRECTORY_STRING}" ]]; then
+    exit 0
+fi
+
+cd "${REPOSITORY_ROOT_DIRECTORY_STRING}"
+
+. "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/utility.sh"
+
+section_start "pre-commit" "${TAG_GIT}"
+
+cleanup() {
+    local EXIT_CODE_INTEGER=$?
+    if [[ 0 -ne ${EXIT_CODE_INTEGER} ]]; then
+        section_end "pre-commit" "failure" "${TAG_GIT}"
+    else
+        section_end "pre-commit" "success" "${TAG_GIT}"
+    fi
+    exit ${EXIT_CODE_INTEGER}
+}
+trap cleanup EXIT
+
+STAGED_PATH_LIST_STRING="$(git --no-pager diff --cached --name-only | awk 'NF' || true)"
+if [[ "" = "${STAGED_PATH_LIST_STRING}" ]]; then
+    error "no files to commit"
+    exit 1
+fi
+
+FORBIDDEN_PATH_LIST_STRING="$(printf '%s\n' "${STAGED_PATH_LIST_STRING}" | awk '
+    /^\.dev-data\// && $0 != ".dev-data/.gitignore" { print; next }
+    $0 == ".dev/docker/.env.local" { print; next }
+')"
+
+if [[ "" = "${FORBIDDEN_PATH_LIST_STRING}" ]]; then
+    :
+else
+    error "forbidden artifacts staged"
+    while IFS= read -r FORBIDDEN_PATH_STRING; do
+        if [[ "" = "${FORBIDDEN_PATH_STRING}" ]]; then
+            continue
+        fi
+        print_bracket_line "${COLOR_RED}" "${TAG_GIT}" "forbidden" "${FORBIDDEN_PATH_STRING}"
+    done <<<"${FORBIDDEN_PATH_LIST_STRING}"
+    exit 1
+fi
+
+staged_files "staged files (start)"
+
+bash "${ROOT_DIR}/.dev/validate/all.sh" --staged
+
+staged_files "staged files (end)"

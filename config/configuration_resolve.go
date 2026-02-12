@@ -113,14 +113,14 @@ func (instance *Configuration) resolveSinglePass(
 			return match
 		}
 
-		envKey := submatches[1]
+		environmentKey := submatches[1]
 
-		envValue, exists := instance.environment.Get(envKey)
+		envValue, exists := instance.environment.Get(environmentKey)
 		if false == exists {
 			err = exception.NewError(
 				"undefined environment key in template",
 				map[string]any{
-					"environmentKey": envKey,
+					"environmentKey": environmentKey,
 					"value":          value,
 				},
 				nil,
