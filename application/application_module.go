@@ -20,14 +20,33 @@ func (instance *Application) RegisterModule(moduleInstance applicationcontract.M
 	instance.modules = append(instance.modules, moduleInstance)
 }
 
-func (instance *Application) bootModules() {
-	securityBuilder := securityconfig.NewBuilder()
+func (instance *Application) bootModulesPreConfigurationResolve() {
+	for _, moduleInstance := range instance.modules {
+		if parameterModule, ok := moduleInstance.(applicationcontract.ParameterModule); true == ok {
+			parameterModule.RegisterParameters(instance)
+		}
+	}
+}
 
+func (instance *Application) bootModulesPostConfigurationResolve() {
+	for _, moduleInstance := range instance.modules {
+		if serviceModule, ok := moduleInstance.(applicationcontract.ServiceModule); true == ok {
+			serviceModule.RegisterServices(instance.kernel, instance)
+		}
+	}
+
+	securityBuilder := securityconfig.NewBuilder()
 	for _, moduleInstance := range instance.modules {
 		if securityModule, ok := moduleInstance.(SecurityModule); true == ok {
 			securityModule.RegisterSecurity(securityBuilder)
 		}
+	}
+	compiledConfiguration := securityBuilder.BuildAndCompile()
+	if nil != compiledConfiguration {
+		instance.securityConfiguration = compiledConfiguration
+	}
 
+	for _, moduleInstance := range instance.modules {
 		if eventsModule, ok := moduleInstance.(applicationcontract.EventModule); true == ok {
 			eventsModule.RegisterEventSubscribers(instance.kernel)
 		}
@@ -43,10 +62,5 @@ func (instance *Application) bootModules() {
 				instance.RegisterCliCommand(command)
 			}
 		}
-	}
-
-	compiledConfiguration := securityBuilder.BuildAndCompile()
-	if nil != compiledConfiguration {
-		instance.securityConfiguration = compiledConfiguration
 	}
 }

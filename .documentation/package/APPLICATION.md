@@ -2,26 +2,37 @@
 
 The [`application`](../../application) package provides Melody’s high-level entrypoint for building and running a combined HTTP + CLI application.
 
-It coordinates configuration, container bootstrapping, module wiring (HTTP/CLI/events/security), and process lifecycle.
+It coordinates configuration resolution, container bootstrapping, module wiring (parameters/services/HTTP/CLI/events/security), and process lifecycle.
 
 ## Scope
 
-- Package: `application/`
-- Subpackage: `application/contract/`
+- Package: [`application/`](../../application)
+- Subpackage: [`application/contract/`](../../application/contract)
 
 ## Subpackages
 
 - [`application/contract`](../../application/contract)  
-  Public module contracts (`Module`, `HttpModule`, `CliModule`, `EventModule`, `ModuleProvider`).
+  Public module contracts (`Module`, `ModuleProvider`, `ParameterModule`, `ServiceModule`, `HttpModule`, `CliModule`, `EventModule`).
 
 ## Responsibilities
 
 - Provide the [`Application`](../../application/application.go) type that:
-    - boots the kernel, container, CLI, and HTTP route registration
-    - runs either CLI or HTTP mode based on runtime flags
-    - manages the service container lifecycle
-- Provide a small module system for application-level composition (`application/contract`).
-- Provide an HTTP middleware wiring helper (`HttpMiddleware`) for user-registered middleware and middleware factories.
+    - wires modules in a deterministic lifecycle
+    - resolves configuration before HTTP/CLI module wiring so modules can safely read config values during registration
+    - boots the container and runs either CLI or HTTP mode based on runtime flags
+- Provide a small module system for application-level composition ([`application/contract`](../../application/contract)).
+- Provide an HTTP middleware wiring helper ([`HttpMiddleware`](../../application/http_middleware.go)) for user-registered middleware and middleware factories.
+
+## Lifecycle overview
+
+The application boot is split around configuration resolve:
+
+1. **Pre-resolve**: modules may register parameters via [`ParameterModule`](../../application/contract/parameter_module.go).
+2. **Resolve**: application configuration is resolved.
+3. **Post-resolve**: modules may register services via [`ServiceModule`](../../application/contract/service_module.go), then register security/events/CLI/HTTP.
+
+This allows HTTP/CLI module code to read resolved configuration values during registration, e.g.
+`kernelInstance.Config().MustGet("my.param").String()`.
 
 ## Runtime mode
 
@@ -32,7 +43,11 @@ Runtime mode is determined by [`ParseRuntimeFlags`](../../application/cli.go):
 
 ## Usage
 
-The example below demonstrates creating an application, registering a module, a service, and a simple HTTP route.
+The example below demonstrates creating an application and registering a module that:
+
+- registers parameters (pre-resolve),
+- registers services (post-resolve),
+- registers HTTP routes (post-resolve) while reading from resolved configuration.
 
 ```go
 package example
@@ -43,10 +58,8 @@ import (
 
 	"github.com/precision-soft/melody/application"
 	applicationcontract "github.com/precision-soft/melody/application/contract"
-	"github.com/precision-soft/melody/http"
 	httpcontract "github.com/precision-soft/melody/http/contract"
 	kernelcontract "github.com/precision-soft/melody/kernel/contract"
-	runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
 type demoModule struct{}
@@ -59,26 +72,53 @@ func (instance *demoModule) Description() string {
 	return "demo module"
 }
 
-func (instance *demoModule) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel) {
-	kernelInstance.HttpRouter().Handle(
-		httpcontract.MethodGet,
-		"/health",
-		func(
-			runtimeInstance runtimecontract.Runtime,
-			writer httpcontract.ResponseWriter,
-			request httpcontract.Request,
-		) (httpcontract.Response, error) {
-			_ = writer
-			_ = request
+func (instance *demoModule) RegisterParameters(registrar applicationcontract.ParameterRegistrar) {
+	registrar.RegisterParameter(
+		"app.name",
+		"demo",
+	)
+}
 
-			return http.JsonResponse(
-				map[string]any{"ok": true},
-				200,
-			), nil
+func (instance *demoModule) RegisterServices(
+	kernelInstance kernelcontract.Kernel,
+	registrar applicationcontract.ServiceRegistrar,
+) {
+	_ = kernelInstance
+
+	registrar.RegisterService(
+		"service.demo.value",
+		func(serviceLocator any) (any, error) {
+			_ = serviceLocator
+			return "value", nil
 		},
 	)
 }
 
+func (instance *demoModule) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel) {
+	router := kernelInstance.HttpRouter()
+
+	router.HandleNamed(
+		"health",
+		httpcontract.MethodGet,
+		"/health",
+		func(kernelInstance kernelcontract.Kernel) httpcontract.Handler {
+			_ = kernelInstance
+
+			return func(writer httpcontract.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+				_ = writer
+				_ = request
+
+				return httpcontract.NewStaticResponse(
+					"ok",
+					200,
+				), nil
+			}
+		}(kernelInstance),
+	)
+}
+
+var _ applicationcontract.ParameterModule = (*demoModule)(nil)
+var _ applicationcontract.ServiceModule = (*demoModule)(nil)
 var _ applicationcontract.HttpModule = (*demoModule)(nil)
 
 func buildApplication(embeddedPublicFiles fs.FS, embeddedConfigFiles fs.FS) *application.Application {
@@ -89,23 +129,23 @@ func buildApplication(embeddedPublicFiles fs.FS, embeddedConfigFiles fs.FS) *app
 
 	app.RegisterModule(&demoModule{})
 
-	app.RegisterParameter(
-		"app.name",
-		"demo",
-	)
-
-	app.RegisterService(
-		"service.demo.value",
-		func(serviceLocator any) (any, error) {
-			_ = serviceLocator
-			return "value", nil
-		},
-	)
+	/**
+	 * Backwards compatible: direct registration is still available
+	 * (RegisterParameter/RegisterService/RegisterHttpRoute/etc.).
+	 */
 
 	app.RegisterHttpRoute(
 		httpcontract.MethodGet,
 		"/ping",
-		http.StaticResponse("pong", 200),
+		func(writer httpcontract.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+			_ = writer
+			_ = request
+
+			return httpcontract.NewStaticResponse(
+				"pong",
+				200,
+			), nil
+		},
 	)
 
 	return app
@@ -123,11 +163,15 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 
 #### Types
 
-- [`ModuleProvider`](../../application/contract/module.go)
 - [`Module`](../../application/contract/module.go)
-- [`HttpModule`](../../application/contract/module.go)
-- [`CliModule`](../../application/contract/module.go)
-- [`EventModule`](../../application/contract/module.go)
+- [`ModuleProvider`](../../application/contract/module.go)
+- [`ParameterModule`](../../application/contract/parameter_module.go)
+- [`ParameterRegistrar`](../../application/contract/parameter_module.go)
+- [`ServiceModule`](../../application/contract/service_module.go)
+- [`ServiceRegistrar`](../../application/contract/service_module.go)
+- [`HttpModule`](../../application/contract/http_module.go)
+- [`CliModule`](../../application/contract/cli_module.go)
+- [`EventModule`](../../application/contract/event_module.go)
 
 ### Types
 
@@ -165,4 +209,3 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 - [`(*HttpMiddleware).UseFactories(factories...)`](../../application/http_middleware.go)
 - [`(*HttpMiddleware).UseFactoriesWithPriority(priority, factories...)`](../../application/http_middleware.go)
 - [`(*HttpMiddleware).LastBuildReport()`](../../application/http_middleware.go)
-

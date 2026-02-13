@@ -41,7 +41,7 @@ func (instance *Application) Boot() kernelcontract.Kernel {
 
 	configuration := instance.configuration
 
-	instance.bootModules()
+	instance.bootModulesPreConfigurationResolve()
 
 	resolveErr := configuration.Resolve()
 	if nil != resolveErr {
@@ -51,6 +51,8 @@ func (instance *Application) Boot() kernelcontract.Kernel {
 	}
 
 	instance.ensureRuntimeDirectories()
+
+	instance.bootModulesPostConfigurationResolve()
 
 	instance.bootContainer()
 
@@ -159,3 +161,5 @@ func (instance *Application) logOnRecoverAndExit() {
 
 	logging.LogOnRecoverAndExit(logger, recovered, 1)
 }
+
+var _ applicationcontract.ParameterRegistrar = (*Application)(nil)

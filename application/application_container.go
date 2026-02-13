@@ -3,6 +3,7 @@ package application
 import (
 	"os"
 
+	applicationcontract "github.com/precision-soft/melody/application/contract"
 	"github.com/precision-soft/melody/cache"
 	cachecontract "github.com/precision-soft/melody/cache/contract"
 	"github.com/precision-soft/melody/clock"
@@ -242,3 +243,5 @@ func (instance *Application) registerHttpSecurity() error {
 
 	return nil
 }
+
+var _ applicationcontract.ServiceRegistrar = (*Application)(nil)
