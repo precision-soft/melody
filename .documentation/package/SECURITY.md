@@ -64,6 +64,22 @@ Resolution helpers:
 
 ## Match and authorization semantics
 
+### Security context resolution
+
+If a request matches a configured firewall, Melody always stores a security context in the runtime, even when token resolution fails.
+
+- Kernel listener: [`security.RegisterKernelSecurityResolutionListener`](../../security/security_resolution_listener.go)
+- Context type: [`security.SecurityContext`](../../security/security_context.go)
+- Token contract: [`securitycontract.Token`](../../security/contract/token.go)
+- Token source contract: [`securitycontract.TokenSource`](../../security/contract/token_source.go)
+
+Token resolution outcomes:
+
+- **Authenticated token** when the resolved token returns `true == token.IsAuthenticated()` (for example [`security.AuthenticatedToken`](../../security/authenticated_token.go)).
+- **Anonymous token** when resolution returns `nil`, returns an error, or panics (see [`security.AnonymousToken`](../../security/anonymous_token.go)).
+
+Userland code must treat `token.IsAuthenticated()` as the canonical guard for accessing user identity or enforcing roles (or use [`security.IsGranted`](../../security/is_granted.go)).
+
 ### Access control matching
 
 `AccessControl.Match(path)` selects attributes based on the following priority:

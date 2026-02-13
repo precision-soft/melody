@@ -1,11 +1,17 @@
 package security
 
 import (
+	"fmt"
+	"runtime/debug"
+
 	eventcontract "github.com/precision-soft/melody/event/contract"
 	"github.com/precision-soft/melody/exception"
+	exceptioncontract "github.com/precision-soft/melody/exception/contract"
 	"github.com/precision-soft/melody/http"
 	kernelcontract "github.com/precision-soft/melody/kernel/contract"
+	"github.com/precision-soft/melody/logging"
 	runtimecontract "github.com/precision-soft/melody/runtime/contract"
+	securitycontract "github.com/precision-soft/melody/security/contract"
 )
 
 func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kernel, registry *FirewallRegistry) {
@@ -39,13 +45,15 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
 			firewallRules := firewall.Rules()
 			if 0 != len(firewallRules) {
 				firewallInstance := NewFirewall(firewallRules...)
-				err := firewallInstance.Check(requestEvent.Request())
-				if nil != err {
-					exceptionEvent := http.NewKernelExceptionEvent(runtimeInstance, requestEvent.Request(), err)
+				checkErr := firewallInstance.Check(requestEvent.Request())
+				if nil != checkErr {
+					setSecurityContextOnRuntime(runtimeInstance, firewall, NewAnonymousToken())
 
-					_, err = eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
-					if nil != err {
-						return err
+					exceptionEvent := http.NewKernelExceptionEvent(runtimeInstance, requestEvent.Request(), checkErr)
+
+					_, dispatchErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+					if nil != dispatchErr {
+						return dispatchErr
 					}
 
 					requestEvent.SetResponse(exceptionEvent.Response())
@@ -53,25 +61,82 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
 				}
 			}
 
-			token, err := firewall.TokenSource().Resolve(runtimeInstance, requestEvent.Request())
-			if nil != err {
-				exceptionEvent := http.NewKernelExceptionEvent(runtimeInstance, requestEvent.Request(), err)
+			token, resolveErr := resolveTokenSourceSafely(firewall, runtimeInstance, requestEvent)
 
-				_, err = eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
-				if nil != err {
-					return err
+			if nil != resolveErr {
+				setSecurityContextOnRuntime(runtimeInstance, firewall, NewAnonymousToken())
+
+				logger := logging.LoggerFromRuntime(runtimeInstance)
+				if nil != logger {
+					logger.Error(
+						"security token source resolution failed",
+						exception.LogContext(resolveErr),
+					)
+				}
+
+				exceptionEvent := http.NewKernelExceptionEvent(runtimeInstance, requestEvent.Request(), resolveErr)
+
+				_, dispatchErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+				if nil != dispatchErr {
+					return dispatchErr
 				}
 
 				requestEvent.SetResponse(exceptionEvent.Response())
 				return nil
 			}
 
-			securityContext := NewSecurityContext(firewall, token)
+			if nil == token {
+				token = NewAnonymousToken()
+			}
 
-			SecurityContextSetOnRuntime(runtimeInstance, securityContext)
+			setSecurityContextOnRuntime(runtimeInstance, firewall, token)
 
 			return nil
 		},
 		KernelFirewallListenerPriority,
 	)
+}
+
+func setSecurityContextOnRuntime(
+	runtimeInstance runtimecontract.Runtime,
+	firewall *CompiledFirewall,
+	token securitycontract.Token,
+) {
+	securityContext := NewSecurityContext(firewall, token)
+
+	SecurityContextSetOnRuntime(runtimeInstance, securityContext)
+}
+
+func resolveTokenSourceSafely(
+	firewall *CompiledFirewall,
+	runtimeInstance runtimecontract.Runtime,
+	requestEvent *http.KernelRequestEvent,
+) (token securitycontract.Token, resolveErr error) {
+	defer func() {
+		recoveredValue := recover()
+		if nil == recoveredValue {
+			return
+		}
+
+		var recoveredErr error
+		if err, ok := recoveredValue.(error); true == ok {
+			recoveredErr = err
+		}
+
+		resolveErr = exception.NewError(
+			"security token source panicked during resolution",
+			exceptioncontract.Context{
+				"firewallName":    firewall.Name(),
+				"tokenSourceName": firewall.TokenSource().Name(),
+				"panicType":       fmt.Sprintf("%T", recoveredValue),
+				"panicValue":      fmt.Sprintf("%v", recoveredValue),
+				"panicStack":      string(debug.Stack()),
+			},
+			recoveredErr,
+		)
+	}()
+
+	token, resolveErr = firewall.TokenSource().Resolve(runtimeInstance, requestEvent.Request())
+
+	return token, resolveErr
 }

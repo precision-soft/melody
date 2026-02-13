@@ -60,8 +60,8 @@ func TestManager_Session_NormalizesNilValuesMap(t *testing.T) {
 
 	err := func() (returnedErr error) {
 		defer func() {
-			recovered := recover()
-			if nil != recovered {
+			recoveredValue := recover()
+			if nil != recoveredValue {
 				returnedErr = exception.NewError("unexpected panic", nil, nil)
 			}
 		}()

@@ -107,24 +107,24 @@ func (instance *container) serviceWithCreationGuardLocked(
 
 	createdValue, err, debugInfo := func() (createdValue any, err error, debugInfo *providerDebugInfo) {
 		defer func() {
-			recovered := recover()
-			if nil == recovered {
+			recoveredValue := recover()
+			if nil == recoveredValue {
 				return
 			}
 
-			recoveredTypeString := fmt.Sprintf("%T", recovered)
-			recoveredValueString := fmt.Sprintf("%v", recovered)
+			recoveredTypeString := fmt.Sprintf("%T", recoveredValue)
+			recoveredValueString := fmt.Sprintf("%v", recoveredValue)
 
 			var recoveredErr error
-			recoveredErr, _ = recovered.(error)
+			recoveredErr, _ = recoveredValue.(error)
 
 			context := exceptioncontract.Context{
-				"requestedKey":  requestedKey,
-				"creatingKey":   creatingKey,
-				"recoveredType": recoveredTypeString,
-				"recovered":     recoveredValueString,
-				"stack":         resolver.stackStringWithRepeat(creatingKey),
-				"panicStack":    string(debug.Stack()),
+				"requestedKey":   requestedKey,
+				"creatingKey":    creatingKey,
+				"recoveredType":  recoveredTypeString,
+				"recoveredValue": recoveredValueString,
+				"stack":          resolver.stackStringWithRepeat(creatingKey),
+				"panicStack":     string(debug.Stack()),
 			}
 
 			if nil != recoveredErr {

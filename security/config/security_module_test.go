@@ -112,8 +112,8 @@ func TestBuilder_AddFirewall_WithStatelessOverride_CompilesWithoutLoginLogout(t 
 
 func TestBuilder_AddFirewall_WithStatelessOverride_PanicsWhenLoginLogoutProvided(t *testing.T) {
 	defer func() {
-		recovered := recover()
-		if nil == recovered {
+		recoveredValue := recover()
+		if nil == recoveredValue {
 			t.Fatalf("expected panic")
 		}
 	}()

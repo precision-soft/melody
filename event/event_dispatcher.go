@@ -308,12 +308,12 @@ func (instance *EventDispatcher) DispatchName(runtimeInstance runtimecontract.Ru
 
 func (instance *EventDispatcher) dispatchSafely(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) (eventcontract.Event, error) {
 	defer func() {
-		recovered := recover()
-		if nil == recovered {
+		recoveredValue := recover()
+		if nil == recoveredValue {
 			return
 		}
 
-		exceptionValue, ok := recovered.(*exception.Error)
+		exceptionValue, ok := recoveredValue.(*exception.Error)
 		if true == ok && nil != exceptionValue {
 			exception.Panic(exceptionValue)
 		}
@@ -334,10 +334,10 @@ func (instance *EventDispatcher) dispatchSafely(runtimeInstance runtimecontract.
 			exception.NewError(
 				"event dispatch panicked",
 				exceptioncontract.Context{
-					"eventName":  eventName,
-					"eventType":  eventType,
-					"recovered":  recovered,
-					"panicStack": string(debug.Stack()),
+					"eventName":      eventName,
+					"eventType":      eventType,
+					"recoveredValue": recoveredValue,
+					"panicStack":     string(debug.Stack()),
 				},
 				nil,
 			),
@@ -453,8 +453,8 @@ func (instance *EventDispatcher) callListenerSafely(
 	listenerType := internal.StringifyType(listener)
 
 	defer func() {
-		recovered := recover()
-		if nil == recovered {
+		recoveredValue := recover()
+		if nil == recoveredValue {
 			return
 		}
 
@@ -471,8 +471,8 @@ func (instance *EventDispatcher) callListenerSafely(
 
 		exceptionContext := internal.NewEventListenerPanicContext(
 			baseContext,
-			recovered,
-			fmt.Sprintf("%T", recovered),
+			recoveredValue,
+			fmt.Sprintf("%T", recoveredValue),
 			string(debug.Stack()),
 		)
 

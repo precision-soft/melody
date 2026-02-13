@@ -11,12 +11,12 @@ func LogOnRecover(
 	logger loggingcontract.Logger,
 	panicAgain bool,
 ) {
-	recovered := recover()
-	if nil == recovered {
+	recoveredValue := recover()
+	if nil == recoveredValue {
 		return
 	}
 
-	exitError, ok := recovered.(*exception.ExitError)
+	exitError, ok := recoveredValue.(*exception.ExitError)
 	if true == ok {
 		err := exitError.ErrorValue()
 
@@ -30,7 +30,7 @@ func LogOnRecover(
 		os.Exit(exitError.ExitCode())
 	}
 
-	if err, ok := recovered.(*exception.Error); true == ok {
+	if err, ok := recoveredValue.(*exception.Error); true == ok {
 		if true == err.AlreadyLogged() {
 			if true == panicAgain {
 				exception.Panic(err)
@@ -42,7 +42,7 @@ func LogOnRecover(
 
 	var err *exception.Error
 
-	switch value := recovered.(type) {
+	switch value := recoveredValue.(type) {
 	case *exception.Error:
 		err = value
 

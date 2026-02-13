@@ -88,8 +88,8 @@ func TestError_AlreadyLoggedFlag(t *testing.T) {
 
 func TestPanic_WithNilErrorPanics(t *testing.T) {
 	defer func() {
-		recovered := recover()
-		if nil == recovered {
+		recoveredValue := recover()
+		if nil == recoveredValue {
 			t.Fatalf("expected panic")
 		}
 	}()
@@ -101,8 +101,8 @@ func TestPanic_WithErrorPanicsWithSamePointer(t *testing.T) {
 	expected := NewError("panic", nil, nil)
 
 	defer func() {
-		recovered := recover()
-		if expected != recovered {
+		recoveredValue := recover()
+		if expected != recoveredValue {
 			t.Fatalf("expected panic value to be the same *Error instance")
 		}
 	}()

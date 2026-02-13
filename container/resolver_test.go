@@ -139,8 +139,8 @@ func TestMustFromResolver_PanicsOnError(t *testing.T) {
 	}
 
 	defer func() {
-		recovered := recover()
-		if nil == recovered {
+		recoveredValue := recover()
+		if nil == recoveredValue {
 			t.Fatalf("expected panic")
 		}
 	}()

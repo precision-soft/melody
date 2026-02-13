@@ -145,8 +145,8 @@ func (instance *Application) ensureRuntimeDirectories() {
 }
 
 func (instance *Application) logOnRecoverAndExit() {
-	recovered := recover()
-	if nil == recovered {
+	recoveredValue := recover()
+	if nil == recoveredValue {
 		return
 	}
 
@@ -159,7 +159,7 @@ func (instance *Application) logOnRecoverAndExit() {
 		logger = containerLogger
 	}
 
-	logging.LogOnRecoverAndExit(logger, recovered, 1)
+	logging.LogOnRecoverAndExit(logger, recoveredValue, 1)
 }
 
 var _ applicationcontract.ParameterRegistrar = (*Application)(nil)

@@ -331,14 +331,14 @@ func assertPanicWithExceptionMessage(t *testing.T, fn func(), expectedMessage st
 	t.Helper()
 
 	defer func() {
-		recovered := recover()
-		if nil == recovered {
+		recoveredValue := recover()
+		if nil == recoveredValue {
 			t.Fatalf("expected panic")
 		}
 
-		panicErr, ok := recovered.(*exception.Error)
+		panicErr, ok := recoveredValue.(*exception.Error)
 		if false == ok {
-			t.Fatalf("expected panic to be *exception.Error, got %T", recovered)
+			t.Fatalf("expected panic to be *exception.Error, got %T", recoveredValue)
 		}
 
 		if panicErr.Message() != expectedMessage {
@@ -623,8 +623,8 @@ func TestWrapControllerWithContainer_PanicsWhenDependencyIsNilFromScope(t *testi
 	request := NewRequest(netRequest, nil, runtimeInstance, nil)
 
 	defer func() {
-		recovered := recover()
-		if nil == recovered {
+		recoveredValue := recover()
+		if nil == recoveredValue {
 			t.Fatalf("expected panic when dependency is nil")
 		}
 	}()

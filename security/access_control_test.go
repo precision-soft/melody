@@ -325,8 +325,8 @@ func TestRules_ReturnsCopy(t *testing.T) {
 
 func TestNewAccessControlRegexRule_EmptyPatternPanics(t *testing.T) {
 	defer func() {
-		recovered := recover()
-		if nil == recovered {
+		recoveredValue := recover()
+		if nil == recoveredValue {
 			t.Fatalf("expected panic")
 		}
 	}()
@@ -336,8 +336,8 @@ func TestNewAccessControlRegexRule_EmptyPatternPanics(t *testing.T) {
 
 func TestNewAccessControlRegexRule_InvalidPatternPanics(t *testing.T) {
 	defer func() {
-		recovered := recover()
-		if nil == recovered {
+		recoveredValue := recover()
+		if nil == recoveredValue {
 			t.Fatalf("expected panic")
 		}
 	}()
@@ -347,8 +347,8 @@ func TestNewAccessControlRegexRule_InvalidPatternPanics(t *testing.T) {
 
 func TestNewAccessControlExactRule_EmptyPathPanics(t *testing.T) {
 	defer func() {
-		recovered := recover()
-		if nil == recovered {
+		recoveredValue := recover()
+		if nil == recoveredValue {
 			t.Fatalf("expected panic")
 		}
 	}()

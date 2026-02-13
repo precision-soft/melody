@@ -24,6 +24,14 @@ func (instance *resolutionListenerTestTokenSource) Resolve(runtimeInstance runti
 	return instance.resolveToken, instance.resolveErr
 }
 
+type resolutionListenerTestPanickingTokenSource struct{}
+
+func (instance *resolutionListenerTestPanickingTokenSource) Name() string { return "panicking" }
+
+func (instance *resolutionListenerTestPanickingTokenSource) Resolve(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+	panic("database connection failed")
+}
+
 type resolutionListenerTestMatcher struct {
 	matches bool
 }
@@ -116,9 +124,12 @@ func TestSecurityResolutionListener_SetsSecurityContextOnRuntime_OnSuccess(t *te
 	if "matcher:main" != securityContext.MatchedFirewallMatcher() {
 		t.Fatalf("unexpected matcher description")
 	}
+	if false == securityContext.Token().IsAuthenticated() {
+		t.Fatalf("expected authenticated token")
+	}
 }
 
-func TestSecurityResolutionListener_WhenFirewallRuleFails_SetsExceptionResponse(t *testing.T) {
+func TestSecurityResolutionListener_WhenFirewallRuleFails_SetsSecurityContextWithAnonymousToken(t *testing.T) {
 	kernel := newTestKernel()
 	runtimeInstance := newTestRuntime()
 
@@ -171,9 +182,20 @@ func TestSecurityResolutionListener_WhenFirewallRuleFails_SetsExceptionResponse(
 	if nil == requestEvent.Response() {
 		t.Fatalf("expected response to be set on request event")
 	}
+
+	securityContext, exists := SecurityContextFromRuntime(runtimeInstance)
+	if false == exists {
+		t.Fatalf("expected security context to be set on runtime even when firewall rule fails")
+	}
+	if nil == securityContext {
+		t.Fatalf("expected security context")
+	}
+	if true == securityContext.Token().IsAuthenticated() {
+		t.Fatalf("expected anonymous token when firewall rule fails")
+	}
 }
 
-func TestSecurityResolutionListener_WhenTokenSourceErrors_SetsExceptionResponse(t *testing.T) {
+func TestSecurityResolutionListener_WhenTokenSourceErrors_SetsSecurityContextWithAnonymousToken(t *testing.T) {
 	kernel := newTestKernel()
 	runtimeInstance := newTestRuntime()
 
@@ -223,6 +245,141 @@ func TestSecurityResolutionListener_WhenTokenSourceErrors_SetsExceptionResponse(
 
 	if nil == requestEvent.Response() {
 		t.Fatalf("expected response to be set on request event")
+	}
+
+	securityContext, exists := SecurityContextFromRuntime(runtimeInstance)
+	if false == exists {
+		t.Fatalf("expected security context to be set on runtime even when token source errors")
+	}
+	if nil == securityContext {
+		t.Fatalf("expected security context")
+	}
+	if true == securityContext.Token().IsAuthenticated() {
+		t.Fatalf("expected anonymous token when token source errors")
+	}
+}
+
+func TestSecurityResolutionListener_WhenTokenSourcePanics_SetsSecurityContextWithAnonymousToken(t *testing.T) {
+	kernel := newTestKernel()
+	runtimeInstance := newTestRuntime()
+
+	firewall := NewCompiledFirewall(
+		"main",
+		&resolutionListenerTestMatcher{matches: true},
+		"matcher:main",
+		[]securitycontract.Rule{},
+		&resolutionListenerTestPanickingTokenSource{},
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		"/admin/login",
+		"/admin/logout",
+		nil,
+		nil,
+		SourceNone,
+		SourceNone,
+		SourceNone,
+		SourceNone,
+		SourceNone,
+	)
+
+	registry := NewFirewallRegistry(
+		NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil),
+	)
+
+	registerTestKernelExceptionListener(kernel)
+	RegisterKernelSecurityResolutionListener(kernel, registry)
+
+	request := newSecurityTestRequest("GET", "/admin", nil, runtimeInstance)
+	requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, request)
+
+	_, err := kernel.EventDispatcher().DispatchName(
+		runtimeInstance,
+		"kernel.request",
+		requestEvent,
+	)
+	if nil != err {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if nil == requestEvent.Response() {
+		t.Fatalf("expected response to be set on request event")
+	}
+
+	securityContext, exists := SecurityContextFromRuntime(runtimeInstance)
+	if false == exists {
+		t.Fatalf("expected security context to be set on runtime even when token source panics")
+	}
+	if nil == securityContext {
+		t.Fatalf("expected security context")
+	}
+	if true == securityContext.Token().IsAuthenticated() {
+		t.Fatalf("expected anonymous token when token source panics")
+	}
+}
+
+func TestSecurityResolutionListener_WhenTokenSourceReturnsNilToken_SetsAnonymousToken(t *testing.T) {
+	kernel := newTestKernel()
+	runtimeInstance := newTestRuntime()
+
+	firewall := NewCompiledFirewall(
+		"main",
+		&resolutionListenerTestMatcher{matches: true},
+		"matcher:main",
+		[]securitycontract.Rule{},
+		&resolutionListenerTestTokenSource{
+			resolveToken: nil,
+			resolveErr:   nil,
+		},
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		"/admin/login",
+		"/admin/logout",
+		nil,
+		nil,
+		SourceNone,
+		SourceNone,
+		SourceNone,
+		SourceNone,
+		SourceNone,
+	)
+
+	registry := NewFirewallRegistry(
+		NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil),
+	)
+
+	registerTestKernelExceptionListener(kernel)
+	RegisterKernelSecurityResolutionListener(kernel, registry)
+
+	request := newSecurityTestRequest("GET", "/admin", nil, runtimeInstance)
+	requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, request)
+
+	_, err := kernel.EventDispatcher().DispatchName(
+		runtimeInstance,
+		"kernel.request",
+		requestEvent,
+	)
+	if nil != err {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	securityContext, exists := SecurityContextFromRuntime(runtimeInstance)
+	if false == exists {
+		t.Fatalf("expected security context to be set on runtime")
+	}
+	if nil == securityContext {
+		t.Fatalf("expected security context")
+	}
+	if nil == securityContext.Token() {
+		t.Fatalf("expected token to not be nil")
+	}
+	if true == securityContext.Token().IsAuthenticated() {
+		t.Fatalf("expected anonymous token when token source returns nil")
 	}
 }
 

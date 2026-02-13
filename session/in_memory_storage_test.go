@@ -116,8 +116,8 @@ func TestNewInMemoryStorageWithCleanupInterval_SetsInterval(t *testing.T) {
 
 func TestNewInMemoryStorageWithCleanupInterval_PanicsWhenIntervalIsZeroOrNegative(t *testing.T) {
 	defer func() {
-		recovered := recover()
-		if nil == recovered {
+		recoveredValue := recover()
+		if nil == recoveredValue {
 			t.Fatalf("expected constructor to panic for invalid interval")
 		}
 	}()

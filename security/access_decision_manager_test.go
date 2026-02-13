@@ -29,8 +29,8 @@ func (instance *securityTestVoter) Vote(token securitycontract.Token, attribute 
 
 func TestAccessDecisionManager_InvalidStrategyPanics(t *testing.T) {
 	defer func() {
-		recovered := recover()
-		if nil == recovered {
+		recoveredValue := recover()
+		if nil == recoveredValue {
 			t.Fatalf("expected panic")
 		}
 	}()
