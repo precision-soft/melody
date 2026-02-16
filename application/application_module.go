@@ -51,6 +51,10 @@ func (instance *Application) bootModulesPostConfigurationResolve() {
 			eventsModule.RegisterEventSubscribers(instance.kernel)
 		}
 
+		if httpMiddlewareModule, ok := moduleInstance.(applicationcontract.HttpMiddlewareModule); true == ok {
+			httpMiddlewareModule.RegisterHttpMiddlewares(instance.kernel, instance.httpMiddlewares)
+		}
+
 		if httpModule, ok := moduleInstance.(applicationcontract.HttpModule); true == ok {
 			httpModule.RegisterHttpRoutes(instance.kernel)
 		}

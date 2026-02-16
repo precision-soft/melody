@@ -3,6 +3,7 @@ package application
 import (
 	"fmt"
 
+	applicationcontract "github.com/precision-soft/melody/application/contract"
 	configcontract "github.com/precision-soft/melody/config/contract"
 	"github.com/precision-soft/melody/exception"
 	httpcontract "github.com/precision-soft/melody/http/contract"
@@ -169,3 +170,5 @@ func (instance *HttpMiddleware) defaultDefinitions(kernelInstance kernelcontract
 
 	return definitions
 }
+
+var _ applicationcontract.HttpMiddlewareRegistrar = (*HttpMiddleware)(nil)
