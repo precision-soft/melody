@@ -84,14 +84,14 @@ get_integration_module_directory_list() {
         -maxdepth 5 \
         -name go.mod \
         -print \
-        2>/dev/null \
-        | while IFS= read -r GO_MOD_PATH_STRING; do
+        2>/dev/null |
+        while IFS= read -r GO_MOD_PATH_STRING; do
             if [[ "" = "${GO_MOD_PATH_STRING}" ]]; then
                 continue
             fi
             dirname "${GO_MOD_PATH_STRING}"
-        done \
-        | sort -u
+        done |
+        sort -u
 }
 
 has_staged_change_in_component() {

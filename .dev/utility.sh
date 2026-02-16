@@ -91,9 +91,9 @@ println() {
 
 print_level() {
     local LEVEL_INTEGER="${1:-1}"
-    local HASH_COUNT_INTEGER=$(( LEVEL_INTEGER * 2 - 1 ))
+    local HASH_COUNT_INTEGER=$((LEVEL_INTEGER * 2 - 1))
     local INDEX_INTEGER
-    for (( INDEX_INTEGER = 1; INDEX_INTEGER <= HASH_COUNT_INTEGER; INDEX_INTEGER++ )); do
+    for ((INDEX_INTEGER = 1; INDEX_INTEGER <= HASH_COUNT_INTEGER; INDEX_INTEGER++)); do
         printf '#'
     done
 }
@@ -394,11 +394,11 @@ docker_compose_no_log() {
 
     (
         cd "${MELODY_DOCKER_DIRECTORY}" &&
-        USER_ID="$(id -u)" GROUP_ID="$(id -g)" docker compose \
-            -f "${MELODY_DOCKER_COMPOSE_FILE_PATH}" \
-            --env-file "${MELODY_DOCKER_ENV_FILE_PATH}" \
-            --env-file "${MELODY_DOCKER_ENV_LOCAL_FILE_PATH}" \
-            "$@"
+            USER_ID="$(id -u)" GROUP_ID="$(id -g)" docker compose \
+                -f "${MELODY_DOCKER_COMPOSE_FILE_PATH}" \
+                --env-file "${MELODY_DOCKER_ENV_FILE_PATH}" \
+                --env-file "${MELODY_DOCKER_ENV_LOCAL_FILE_PATH}" \
+                "$@"
     )
 }
 
