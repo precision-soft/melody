@@ -60,8 +60,8 @@ import (
 	"github.com/precision-soft/melody/v2/container"
 	containercontract "github.com/precision-soft/melody/v2/container/contract"
 
-	"github.com/precision-soft/melody/integrations/bunorm/v2"
 	bunmysql "github.com/precision-soft/melody/integrations/bunorm/mysql/v2"
+	"github.com/precision-soft/melody/integrations/bunorm/v2"
 )
 
 const (

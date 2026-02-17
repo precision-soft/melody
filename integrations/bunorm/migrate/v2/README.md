@@ -46,9 +46,9 @@ import (
 	"your/module/database"
 	"your/module/database/migrations"
 
+	bunormmigrate "github.com/precision-soft/melody/integrations/bunorm/migrate/v2"
 	applicationcontract "github.com/precision-soft/melody/v2/application/contract"
 	clicontract "github.com/precision-soft/melody/v2/cli/contract"
-	bunormmigrate "github.com/precision-soft/melody/integrations/bunorm/migrate/v2"
 	kernelcontract "github.com/precision-soft/melody/v2/kernel/contract"
 )
 
