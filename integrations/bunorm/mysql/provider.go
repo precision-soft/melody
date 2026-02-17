@@ -304,6 +304,11 @@ func (instance *Provider) isTransientError(inputErr error) bool {
 		return false
 	}
 
+	var dnsErr *net.DNSError
+	if true == errors.As(inputErr, &dnsErr) {
+		return true
+	}
+
 	var netErr net.Error
 	if true == errors.As(inputErr, &netErr) {
 		if true == netErr.Timeout() {
@@ -314,8 +319,6 @@ func (instance *Provider) isTransientError(inputErr error) bool {
 			return true
 		}
 	}
-
-	message := strings.ToLower(inputErr.Error())
 
 	transientMarkers := []string{
 		"connection refused",
@@ -331,14 +334,21 @@ func (instance *Provider) isTransientError(inputErr error) bool {
 		"broken pipe",
 	}
 
-	for _, marker := range transientMarkers {
-		if "" == marker {
-			continue
+	currentErr := inputErr
+	for nil != currentErr {
+		message := strings.ToLower(currentErr.Error())
+
+		for _, marker := range transientMarkers {
+			if "" == marker {
+				continue
+			}
+
+			if true == strings.Contains(message, marker) {
+				return true
+			}
 		}
 
-		if true == strings.Contains(message, marker) {
-			return true
-		}
+		currentErr = errors.Unwrap(currentErr)
 	}
 
 	return false
