@@ -9,23 +9,63 @@ import (
 	"strings"
 	"time"
 
+	"github.com/precision-soft/melody/config"
+	containercontract "github.com/precision-soft/melody/container/contract"
 	"github.com/precision-soft/melody/exception"
 	exceptioncontract "github.com/precision-soft/melody/exception/contract"
 	"github.com/precision-soft/melody/integrations/bunorm"
-	loggingcontract "github.com/precision-soft/melody/logging/contract"
+	"github.com/precision-soft/melody/logging"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 func NewProvider(
+	hostParameterName string,
+	portParameterName string,
+	databaseParameterName string,
+	userParameterName string,
+	passwordParameterName string,
 	providerOptions ...ProviderOption,
 ) *Provider {
 	provider := &Provider{
-		poolConfig:    nil,
-		timeoutConfig: nil,
-		retryConfig:   nil,
-		postBuildHook: nil,
+		hostParameterName:     hostParameterName,
+		portParameterName:     portParameterName,
+		databaseParameterName: databaseParameterName,
+		userParameterName:     userParameterName,
+		passwordParameterName: passwordParameterName,
+		poolConfig:            nil,
+		timeoutConfig:         nil,
+		retryConfig:           nil,
+		postBuildHook:         nil,
+	}
+	for _, providerOption := range providerOptions {
+		providerOption(provider)
+	}
+	return provider
+}
+
+func NewProviderWithConfig(
+	hostParameterName string,
+	portParameterName string,
+	databaseParameterName string,
+	userParameterName string,
+	passwordParameterName string,
+	poolConfig *PoolConfig,
+	timeoutConfig *TimeoutConfig,
+	retryConfig *RetryConfig,
+	providerOptions ...ProviderOption,
+) *Provider {
+	provider := &Provider{
+		hostParameterName:     hostParameterName,
+		portParameterName:     portParameterName,
+		databaseParameterName: databaseParameterName,
+		userParameterName:     userParameterName,
+		passwordParameterName: passwordParameterName,
+		poolConfig:            poolConfig,
+		timeoutConfig:         timeoutConfig,
+		retryConfig:           retryConfig,
+		postBuildHook:         nil,
 	}
 	for _, providerOption := range providerOptions {
 		providerOption(provider)
@@ -34,6 +74,12 @@ func NewProvider(
 }
 
 type Provider struct {
+	hostParameterName     string
+	portParameterName     string
+	databaseParameterName string
+	userParameterName     string
+	passwordParameterName string
+
 	poolConfig    *PoolConfig
 	timeoutConfig *TimeoutConfig
 	retryConfig   *RetryConfig
@@ -58,15 +104,20 @@ func (instance *Provider) WithRetryConfig(retryConfig *RetryConfig) *Provider {
 	return instance
 }
 
-func (instance *Provider) Open(params bunorm.ConnectionParams, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *Provider) Open(resolver containercontract.Resolver) (*bun.DB, error) {
 	if nil == instance.retryConfig {
-		return instance.open(params)
+		return instance.open(resolver)
 	}
 
-	return instance.openWithRetry(params, logger)
+	return instance.openWithRetry(resolver)
 }
 
-func (instance *Provider) openWithRetry(params bunorm.ConnectionParams, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *Provider) openWithRetry(resolver containercontract.Resolver) (*bun.DB, error) {
+	logger, loggerErr := logging.LoggerFromResolver(resolver)
+	if nil != loggerErr {
+		logger = logging.EmergencyLogger()
+	}
+
 	attempt := uint32(0)
 	maxAttempts := instance.retryConfig.MaxAttempts
 	if 0 == maxAttempts {
@@ -76,7 +127,7 @@ func (instance *Provider) openWithRetry(params bunorm.ConnectionParams, logger l
 	for {
 		attempt = attempt + 1
 
-		database, openErr := instance.open(params)
+		database, openErr := instance.open(resolver)
 		if nil == openErr {
 			if 1 < attempt {
 				logger.Info(
@@ -131,8 +182,16 @@ func (instance *Provider) openWithRetry(params bunorm.ConnectionParams, logger l
 	}
 }
 
-func (instance *Provider) open(params bunorm.ConnectionParams) (*bun.DB, error) {
-	connectionConfig := NewConnectionConfig(params.Host, params.Port, params.Database, params.User, params.Password)
+func (instance *Provider) open(resolver containercontract.Resolver) (*bun.DB, error) {
+	configuration := config.ConfigMustFromResolver(resolver)
+
+	host := configuration.MustGet(instance.hostParameterName).MustString()
+	port := configuration.MustGet(instance.portParameterName).MustString()
+	databaseName := configuration.MustGet(instance.databaseParameterName).MustString()
+	user := configuration.MustGet(instance.userParameterName).MustString()
+	password := configuration.MustGet(instance.passwordParameterName).MustString()
+
+	connectionConfig := NewConnectionConfig(host, port, databaseName, user, password)
 
 	poolConfig := instance.poolConfig
 	if nil == poolConfig {
@@ -144,13 +203,13 @@ func (instance *Provider) open(params bunorm.ConnectionParams) (*bun.DB, error) 
 		timeoutConfig = DefaultTimeoutConfig()
 	}
 
-	address := fmt.Sprintf("%s:%s", params.Host, params.Port)
+	address := fmt.Sprintf("%s:%s", host, port)
 
 	connector := pgdriver.NewConnector(
 		pgdriver.WithAddr(address),
-		pgdriver.WithDatabase(params.Database),
-		pgdriver.WithUser(params.User),
-		pgdriver.WithPassword(params.Password),
+		pgdriver.WithDatabase(databaseName),
+		pgdriver.WithUser(user),
+		pgdriver.WithPassword(password),
 		pgdriver.WithInsecure(true),
 	)
 
@@ -162,7 +221,7 @@ func (instance *Provider) open(params bunorm.ConnectionParams) (*bun.DB, error) 
 		}
 		defer hookCancel()
 
-		hookErr := instance.postBuildHook(hookContext, connector)
+		hookErr := instance.postBuildHook(hookContext, resolver, connector)
 		if nil != hookErr {
 			return nil, exception.NewError(
 				"pgsql database connector configuration failed",
