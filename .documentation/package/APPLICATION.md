@@ -50,7 +50,7 @@ The example below demonstrates creating an application and registering a module 
 - registers HTTP routes (post-resolve) while reading from resolved configuration.
 
 ```go
-package example
+package main
 
 import (
 	"context"

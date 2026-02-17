@@ -40,111 +40,112 @@ The commands are intended for diagnostics and local debugging (container service
 package main
 
 import (
-    "context"
+	"context"
 
-    "github.com/precision-soft/melody/cli"
-    clicontract "github.com/precision-soft/melody/cli/contract"
-    "github.com/precision-soft/melody/container"
-    "github.com/precision-soft/melody/debug"
-    "github.com/precision-soft/melody/exception"
-    httpcontract "github.com/precision-soft/melody/http/contract"
-    "github.com/precision-soft/melody/runtime"
-    runtimecontract "github.com/precision-soft/melody/runtime/contract"
+	"github.com/precision-soft/melody/cli"
+	clicontract "github.com/precision-soft/melody/cli/contract"
+	"github.com/precision-soft/melody/container"
+	"github.com/precision-soft/melody/debug"
+	"github.com/precision-soft/melody/exception"
+	httpcontract "github.com/precision-soft/melody/http/contract"
+	"github.com/precision-soft/melody/runtime"
+	runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
 func main() {
-    ctx := context.Background()
+	ctx := context.Background()
 
-    serviceContainer := container.NewContainer()
-    scope := serviceContainer.NewScope()
+	serviceContainer := container.NewContainer()
+	scope := serviceContainer.NewScope()
 
-    runtimeInstance := runtime.New(
-        ctx,
-        scope,
-        runtime.WithDefaultLogger(),
-    )
+	runtimeInstance := runtime.New(
+		ctx,
+		scope,
+		runtime.WithDefaultLogger(),
+	)
 
-    commandContext := cli.NewCommandContext(
-        "example",
-        "example application",
-    )
+	commandContext := cli.NewCommandContext(
+		"example",
+		"example application",
+	)
 
-    registerErr := cli.Register(
-        commandContext,
-        &debug.ContainerCommand{},
-        runtimeInstance,
-    )
-    if nil != registerErr {
-        exception.Panic(registerErr)
-    }
+	registerErr := cli.Register(
+		commandContext,
+		&debug.ContainerCommand{},
+		runtimeInstance,
+	)
+	if nil != registerErr {
+		exception.Panic(registerErr)
+	}
 
-    registerErr = cli.Register(
-        commandContext,
-        &debug.EventCommand{},
-        runtimeInstance,
-    )
-    if nil != registerErr {
-        exception.Panic(registerErr)
-    }
+	registerErr = cli.Register(
+		commandContext,
+		&debug.EventCommand{},
+		runtimeInstance,
+	)
+	if nil != registerErr {
+		exception.Panic(registerErr)
+	}
 
-    registerErr = cli.Register(
-        commandContext,
-        &debug.ParameterCommand{},
-        runtimeInstance,
-    )
-    if nil != registerErr {
-        exception.Panic(registerErr)
-    }
+	registerErr = cli.Register(
+		commandContext,
+		&debug.ParameterCommand{},
+		runtimeInstance,
+	)
+	if nil != registerErr {
+		exception.Panic(registerErr)
+	}
 
-    registerErr = cli.Register(
-        commandContext,
-        &debug.RouterCommand{},
-        runtimeInstance,
-    )
-    if nil != registerErr {
-        exception.Panic(registerErr)
-    }
+	registerErr = cli.Register(
+		commandContext,
+		&debug.RouterCommand{},
+		runtimeInstance,
+	)
+	if nil != registerErr {
+		exception.Panic(registerErr)
+	}
 
-    registerErr = cli.Register(
-        commandContext,
-        debug.NewMiddlewareCommand(
-            func() []httpcontract.Middleware {
-                return []httpcontract.Middleware{}
-            },
-        ),
-        runtimeInstance,
-    )
-    if nil != registerErr {
-        exception.Panic(registerErr)
-    }
+	registerErr = cli.Register(
+		commandContext,
+		debug.NewMiddlewareCommand(
+			func() []httpcontract.Middleware {
+				return []httpcontract.Middleware{}
+			},
+		),
+		runtimeInstance,
+	)
+	if nil != registerErr {
+		exception.Panic(registerErr)
+	}
 
-    registerErr = cli.Register(
-        commandContext,
-        &debug.VersionCommand{ApplicationVersion: "v1.0.0"},
-        runtimeInstance,
-    )
-    if nil != registerErr {
-        exception.Panic(registerErr)
-    }
+	registerErr = cli.Register(
+		commandContext,
+		&debug.VersionCommand{ApplicationVersion: "v1.0.0"},
+		runtimeInstance,
+	)
+	if nil != registerErr {
+		exception.Panic(registerErr)
+	}
 
-    runErr := commandContext.Run(
-        ctx,
-        []string{"example", "debug:version"},
-    )
-    if nil != runErr {
-        exception.Panic(runErr)
-    }
+	runErr := commandContext.Run(
+		ctx,
+		[]string{"example", "debug:version"},
+	)
+	if nil != runErr {
+		exception.Panic(runErr)
+	}
 
-    shutdownErr := shutdownRuntime(runtimeInstance)
-    if nil != shutdownErr {
-        exception.Panic(shutdownErr)
-    }
+	shutdownErr := shutdownRuntime(runtimeInstance)
+	if nil != shutdownErr {
+		exception.Panic(shutdownErr)
+	}
 }
 
 func shutdownRuntime(runtimeInstance runtimecontract.Runtime) error {
-    return runtimeInstance.Shutdown(
-        context.Background(),
-    )
+	return runtimeInstance.Shutdown(
+		context.Background(),
+	)
 }
 
 var _ clicontract.Command = (*debug.ContainerCommand)(nil)
+```

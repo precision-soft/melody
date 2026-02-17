@@ -19,30 +19,15 @@ import (
 	"github.com/uptrace/bun/dialect/mysqldialect"
 )
 
-func DefaultRetryConfig() *RetryConfig {
-	return &RetryConfig{
-		MaxAttempts:       3,
-		InitialDelay:      500 * time.Millisecond,
-		MaxDelay:          5 * time.Second,
-		BackoffMultiplier: 2.0,
-	}
-}
-
-type RetryConfig struct {
-	MaxAttempts       uint32
-	InitialDelay      time.Duration
-	MaxDelay          time.Duration
-	BackoffMultiplier float64
-}
-
 func NewProvider(
 	hostParameterName string,
 	portParameterName string,
 	databaseParameterName string,
 	userParameterName string,
 	passwordParameterName string,
+	providerOptions ...ProviderOption,
 ) *Provider {
-	return &Provider{
+	provider := &Provider{
 		hostParameterName:     hostParameterName,
 		portParameterName:     portParameterName,
 		databaseParameterName: databaseParameterName,
@@ -51,7 +36,12 @@ func NewProvider(
 		poolConfig:            nil,
 		timeoutConfig:         nil,
 		retryConfig:           nil,
+		postBuildHook:         nil,
 	}
+	for _, providerOption := range providerOptions {
+		providerOption(provider)
+	}
+	return provider
 }
 
 func NewProviderWithConfig(
@@ -63,8 +53,9 @@ func NewProviderWithConfig(
 	poolConfig *PoolConfig,
 	timeoutConfig *TimeoutConfig,
 	retryConfig *RetryConfig,
+	providerOptions ...ProviderOption,
 ) *Provider {
-	return &Provider{
+	provider := &Provider{
 		hostParameterName:     hostParameterName,
 		portParameterName:     portParameterName,
 		databaseParameterName: databaseParameterName,
@@ -73,7 +64,12 @@ func NewProviderWithConfig(
 		poolConfig:            poolConfig,
 		timeoutConfig:         timeoutConfig,
 		retryConfig:           retryConfig,
+		postBuildHook:         nil,
 	}
+	for _, providerOption := range providerOptions {
+		providerOption(provider)
+	}
+	return provider
 }
 
 type Provider struct {
@@ -86,6 +82,7 @@ type Provider struct {
 	poolConfig    *PoolConfig
 	timeoutConfig *TimeoutConfig
 	retryConfig   *RetryConfig
+	postBuildHook PostBuildHook
 }
 
 func (instance *Provider) WithPoolConfig(poolConfig *PoolConfig) *Provider {
@@ -217,6 +214,24 @@ func (instance *Provider) open(resolver containercontract.Resolver) (*bun.DB, er
 	driverConfig.Timeout = timeoutConfig.ConnectTimeout
 	driverConfig.ReadTimeout = timeoutConfig.ReadTimeout
 	driverConfig.WriteTimeout = timeoutConfig.WriteTimeout
+
+	if nil != instance.postBuildHook {
+		hookContext := context.Background()
+		hookCancel := func() {}
+		if 0 < timeoutConfig.ConnectTimeout {
+			hookContext, hookCancel = context.WithTimeout(context.Background(), timeoutConfig.ConnectTimeout)
+		}
+		defer hookCancel()
+
+		hookErr := instance.postBuildHook(hookContext, resolver, driverConfig)
+		if nil != hookErr {
+			return nil, exception.NewError(
+				"mysql database connector configuration failed",
+				connectionConfig.SafeContext(),
+				hookErr,
+			)
+		}
+	}
 
 	connector, connectorErr := driver.NewConnector(driverConfig)
 	if nil != connectorErr {

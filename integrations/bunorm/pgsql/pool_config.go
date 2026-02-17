@@ -11,6 +11,20 @@ func DefaultPoolConfig() *PoolConfig {
 	}
 }
 
+func NewPoolConfig(
+	maxOpenConnections int,
+	maxIdleConnections int,
+	connectionMaxLifetime time.Duration,
+	connectionMaxIdleTime time.Duration,
+) *PoolConfig {
+	return &PoolConfig{
+		MaxOpenConnections:    maxOpenConnections,
+		MaxIdleConnections:    maxIdleConnections,
+		ConnectionMaxLifetime: connectionMaxLifetime,
+		ConnectionMaxIdleTime: connectionMaxIdleTime,
+	}
+}
+
 type PoolConfig struct {
 	MaxOpenConnections    int
 	MaxIdleConnections    int

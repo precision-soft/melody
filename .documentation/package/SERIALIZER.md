@@ -31,7 +31,7 @@ This package is responsible for transforming values to and from `[]byte` represe
 The example below demonstrates selecting a serializer from an `Accept` header and serializing a value.
 
 ```go
-package example
+package main
 
 import (
 	"github.com/precision-soft/melody/serializer"

@@ -45,7 +45,7 @@ Melody uses this package to:
 ### Fail-fast on missing configuration
 
 ```go
-package example
+package main
 
 import (
 	configcontract "github.com/precision-soft/melody/config/contract"
@@ -73,7 +73,7 @@ func requireHttpAddress(configuration configcontract.Configuration) string {
 ### Wrap an underlying error with context
 
 ```go
-package example
+package main
 
 import (
 	"os"

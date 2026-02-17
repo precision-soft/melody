@@ -31,7 +31,7 @@ A `runtimecontract.Runtime` is passed through framework boundaries (HTTP handler
 The example below demonstrates creating a runtime with a scope and resolving a service via `MustFromRuntime`.
 
 ```go
-package example
+package main
 
 import (
 	"context"

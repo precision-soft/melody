@@ -34,7 +34,7 @@ The package defines the service name:
 If you want your own services to resolve a clock from the container, register `ServiceClock` as a `clockcontract.Clock` provider.
 
 ```go
-package example
+package main
 
 import (
 	"time"

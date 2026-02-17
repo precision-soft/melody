@@ -4,8 +4,8 @@ The [`validation`](../../validation) package provides tag-driven struct validati
 
 ## Scope
 
-- Package: `validation/`
-- Subpackage: `validation/contract/`
+- Package: [`validation/`](../../validation)
+- Subpackage: [`validation/contract/`](../../validation/contract)
 
 ## Subpackages
 
@@ -35,7 +35,7 @@ Resolution helpers:
 The example below validates a struct using `validate` tags. Constraints are comma-separated. Constraints with parameters use `name(key=value)`.
 
 ```go
-package example
+package main
 
 import (
 	"fmt"

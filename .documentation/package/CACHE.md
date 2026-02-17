@@ -41,11 +41,22 @@ Defined in [`cache/service_resolver.go`](../../cache/service_resolver.go):
 Melody’s default wiring uses [`cache.NewInMemoryBackend`](../../cache/in_memory.go):
 
 ```go
-cachepackage.NewInMemoryBackend(
-	0,
-	0,
-	clockInstance,
+package main
+
+import (
+	"github.com/precision-soft/melody/cache"
+	"github.com/precision-soft/melody/clock"
 )
+
+func main() {
+	clockInstance := clock.NewSystemClock()
+
+	inMemoryBackend := cache.NewInMemoryBackend(
+		0,
+		0,
+		clockInstance,
+	)
+}
 ```
 
 The arguments mean:
@@ -86,15 +97,15 @@ The example below demonstrates a typical Melody flow:
 This example uses a `map[string]any` payload because the default JSON serializer deserializes into generic Go values (see [`cache/json_serializer.go`](../../cache/json_serializer.go)).
 
 ```go
-package example
+package main
 
 import (
 	"context"
 	"time"
 
-	cachepackage "github.com/precision-soft/melody/cache"
+	"github.com/precision-soft/melody/cache"
 	cachecontract "github.com/precision-soft/melody/cache/contract"
-	clockpackage "github.com/precision-soft/melody/clock"
+	"github.com/precision-soft/melody/clock"
 	containercontract "github.com/precision-soft/melody/container/contract"
 	"github.com/precision-soft/melody/exception"
 	runtimecontract "github.com/precision-soft/melody/runtime/contract"
@@ -112,13 +123,13 @@ func registerCacheOverrides(
 ),
 ) {
 	register(
-		cachepackage.ServiceCacheBackend,
+		cache.ServiceCacheBackend,
 		func(resolver containercontract.Resolver) (cachecontract.Backend, error) {
-			clockInstance := clockpackage.ClockMustFromResolver(
+			clockInstance := clock.ClockMustFromResolver(
 				resolver,
 			)
 
-			return cachepackage.NewInMemoryBackend(
+			return cache.NewInMemoryBackend(
 				10000,
 				10*time.Second,
 				clockInstance,
@@ -127,16 +138,16 @@ func registerCacheOverrides(
 	)
 
 	register(
-		cachepackage.ServiceCache,
+		cache.ServiceCache,
 		func(resolver containercontract.Resolver) (cachecontract.Cache, error) {
-			backend := cachepackage.CacheBackendMustFromResolver(
+			backend := cache.CacheBackendMustFromResolver(
 				resolver,
 			)
-			serializerInstance := cachepackage.CacheSerializerMustFromResolver(
+			serializerInstance := cache.CacheSerializerMustFromResolver(
 				resolver,
 			)
 
-			return cachepackage.NewManager(
+			return cache.NewManager(
 				backend,
 				serializerInstance,
 			), nil
@@ -147,11 +158,11 @@ func registerCacheOverrides(
 func loadUserProfile(
 	runtimeInstance runtimecontract.Runtime,
 ) (userProfileMap, error) {
-	cacheInstance := cachepackage.CacheMustFromContainer(
+	cacheInstance := cache.CacheMustFromContainer(
 		runtimeInstance.Container(),
 	)
 
-	value, rememberErr := cachepackage.Remember(
+	value, rememberErr := cache.Remember(
 		cacheInstance,
 		userProfileCacheKey,
 		30*time.Minute,
@@ -198,24 +209,26 @@ func loadUserProfile(
 
 - **Cache** ([`cache/contract/cache.go`](../../cache/contract/cache.go))
 
-  ```go
-  type Cache interface {
-      Get(key string) (any, bool, error)
-      Set(key string, value any, ttl time.Duration) error
-      Delete(key string) error
-      Has(key string) (bool, error)
-      Clear() error
+```go
+package main
 
-      Many(keys []string) (map[string]any, error)
-      SetMultiple(items map[string]any, ttl time.Duration) error
-      DeleteMultiple(keys []string) error
+type Cache interface {
+	Get(key string) (any, bool, error)
+	Set(key string, value any, ttl time.Duration) error
+	Delete(key string) error
+	Has(key string) (bool, error)
+	Clear() error
 
-      Increment(key string, delta int64) (int64, error)
-      Decrement(key string, delta int64) (int64, error)
+	Many(keys []string) (map[string]any, error)
+	SetMultiple(items map[string]any, ttl time.Duration) error
+	DeleteMultiple(keys []string) error
 
-      Close() error
-  }
-  ```
+	Increment(key string, delta int64) (int64, error)
+	Decrement(key string, delta int64) (int64, error)
+
+	Close() error
+}
+```
 
 - **Backend** ([`cache/contract/backend.go`](../../cache/contract/backend.go))
 - **Serializer** ([`cache/contract/serializer.go`](../../cache/contract/serializer.go))

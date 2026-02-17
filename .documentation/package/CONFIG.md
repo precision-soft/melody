@@ -52,7 +52,7 @@ If you want other services to resolve a configuration from the container, regist
 The example below demonstrates loading an environment from `.env` files, creating a configuration, resolving it, and registering it into the container.
 
 ```go
-package example
+package main
 
 import (
 	"context"

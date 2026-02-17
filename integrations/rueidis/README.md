@@ -46,12 +46,13 @@ It creates an internal `Backend` with `context.Background()` and delegates all
 Use `WithContext` to obtain a `*Backend` bound to a specific context:
 
 ```go
-package example
+package main
 
-backend := backendService.WithContext(runtimeInstance.Context())
-backend.Get("my-key")
-backend.ClearByPrefix("accessToken:")
-
+func main() {
+	backend := backendService.WithContext(runtimeInstance.Context())
+	backend.Get("my-key")
+	backend.ClearByPrefix("accessToken:")
+}
 ```
 
 ### BackendFromRuntime
@@ -62,10 +63,12 @@ Returns a `*Backend` with the runtime request context, following the same
 pattern as Melody's repository `FromRuntime` helpers:
 
 ```go
-package example
+package main
 
-backend := rueidiscache.BackendFromRuntime(runtimeInstance, ServiceCacheRueidis)
-backend.Get("my-key")
+func main() {
+	backend := rueidiscache.BackendFromRuntime(runtimeInstance, ServiceCacheRueidis)
+	backend.Get("my-key")
+}
 ```
 
 ## Usage example
@@ -76,7 +79,7 @@ Register the Redis client, cache backend service, and Melody's generic cache bac
 in your application bootstrap:
 
 ```go
-package example
+package main
 
 import (
 	"github.com/precision-soft/melody/application"
@@ -136,7 +139,7 @@ func RegisterCacheServices(app *application.Application) {
 Create a thin helper that binds the service name, then use it in handlers:
 
 ```go
-package example
+package main
 
 func BackendFromRuntime(runtimeInstance runtimecontract.Runtime) *rueidiscache.Backend {
 	return rueidiscache.BackendFromRuntime(runtimeInstance, ServiceCacheRueidis)
@@ -144,7 +147,7 @@ func BackendFromRuntime(runtimeInstance runtimecontract.Runtime) *rueidiscache.B
 ```
 
 ```go
-package example
+package main
 
 func (instance *MyController) Handle(
 	runtimeInstance runtimecontract.Runtime,

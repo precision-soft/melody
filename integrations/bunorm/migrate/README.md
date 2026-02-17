@@ -28,7 +28,7 @@ go get github.com/precision-soft/melody/integrations/bunorm/migrate@latest
 Create a migrations package in your app and expose a `*migrate.Migrations` collection:
 
 ```go
-package migrations
+package main
 
 import "github.com/uptrace/bun/migrate"
 
@@ -40,7 +40,7 @@ var Migrations = migrate.NewMigrations()
 Register the commands from a module that implements [`application/contract.CliModule`](../../../application/contract/module.go):
 
 ```go
-package config
+package main
 
 import (
 	"your/module/database"

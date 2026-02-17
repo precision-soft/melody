@@ -4,8 +4,8 @@ The [`session`](../../session) package provides a small session subsystem for Me
 
 ## Scope
 
-- Package: `session/`
-- Subpackage: `session/contract/`
+- Package: [`session/`](../../session)
+- Subpackage: [`session/contract/`](../../session/contract)
 
 ## Subpackages
 
@@ -37,7 +37,7 @@ Resolution helpers:
 The example below demonstrates resolving the session manager from the container and persisting a modified session.
 
 ```go
-package example
+package main
 
 import (
 	containercontract "github.com/precision-soft/melody/container/contract"

@@ -40,7 +40,7 @@ This package is intended for simple outbound HTTP calls from userland and framew
 The example below performs a GET request and decodes a JSON response.
 
 ```go
-package example
+package main
 
 import (
 	"time"

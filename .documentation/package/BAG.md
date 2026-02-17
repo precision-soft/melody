@@ -4,8 +4,8 @@ The [`bag`](../../bag) package provides typed key–value containers used throug
 
 ## Scope
 
-- Package: `bag/`
-- Subpackage: `bag/contract/`
+- Package: [`bag/`](../../bag)
+- Subpackage: [`bag/contract/`](../../bag/contract)
 
 ## Subpackages
 
@@ -52,7 +52,7 @@ Notes:
 The example below demonstrates a typical Melody flow: build a parameter bag from an untyped source (`url.Values` from an HTTP request) and read values using typed helpers.
 
 ```go
-package example
+package main
 
 import (
 	"net/url"
@@ -126,21 +126,23 @@ func readRequestParameters(
 - **ParameterBag**  
   A map-like bag used across Melody for key/value parameter storage.
 
-  ```go
-  type ParameterBag interface {
-      Set(name string, value any)
+```go
+package main
 
-      Get(name string) (any, bool)
+type ParameterBag interface {
+	Set(name string, value any)
 
-      Has(name string) bool
+	Get(name string) (any, bool)
 
-      Remove(name string)
+	Has(name string) bool
 
-      Count() int
+	Remove(name string)
 
-      All() map[string]any
-  }
-  ```
+	Count() int
+
+	All() map[string]any
+}
+```
 
 ### Types
 

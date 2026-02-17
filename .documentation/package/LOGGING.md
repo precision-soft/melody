@@ -4,8 +4,8 @@ The [`logging`](../../logging) package provides Melody’s structured logging pr
 
 ## Scope
 
-- Package: `logging/`
-- Subpackage: `logging/contract/`
+- Package: [`logging/`](../../logging)
+- Subpackage: [`logging/contract/`](../../logging/contract)
 
 ## Subpackages
 
@@ -42,7 +42,7 @@ The example below demonstrates a typical Melody flow:
 - override the protected logger service inside a request scope.
 
 ```go
-package example
+package main
 
 import (
 	"context"

@@ -4,10 +4,10 @@ The [`security`](../../security) package provides Melody’s HTTP security build
 
 ## Scope
 
-- Package: `security/`
+- Package: [`security/`](../../security)
 - Subpackages:
-    - `security/contract/`
-    - `security/config/`
+    - [`security/contract/`](../../security/contract)
+    - [`security/config/`](../../security/config)
 
 ## Subpackages
 
@@ -107,7 +107,7 @@ The example below demonstrates a typical Melody application flow:
 - access control requires `ROLE_ADMIN` for `/admin` and allows anonymous access to `/`.
 
 ```go
-package example
+package main
 
 import (
 	"errors"

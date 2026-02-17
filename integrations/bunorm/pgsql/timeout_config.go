@@ -8,6 +8,14 @@ func DefaultTimeoutConfig() *TimeoutConfig {
 	}
 }
 
+func NewTimeoutConfig(
+	connectTimeout time.Duration,
+) *TimeoutConfig {
+	return &TimeoutConfig{
+		ConnectTimeout: connectTimeout,
+	}
+}
+
 type TimeoutConfig struct {
 	ConnectTimeout time.Duration
 }

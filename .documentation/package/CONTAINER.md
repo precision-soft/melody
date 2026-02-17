@@ -59,7 +59,7 @@ The example below demonstrates:
 - creating a scope and overriding a service instance.
 
 ```go
-package example
+package main
 
 import (
 	"fmt"

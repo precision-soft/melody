@@ -20,28 +20,57 @@ import (
 	"github.com/uptrace/bun/driver/pgdriver"
 )
 
-type dialectWithDefaultSchema struct {
-	*pgdialect.Dialect
-}
-
-func (instance dialectWithDefaultSchema) DefaultSchema() string {
-	return "public"
-}
-
-func DefaultRetryConfig() *RetryConfig {
-	return &RetryConfig{
-		MaxAttempts:       3,
-		InitialDelay:      500 * time.Millisecond,
-		MaxDelay:          5 * time.Second,
-		BackoffMultiplier: 2.0,
+func NewProvider(
+	hostParameterName string,
+	portParameterName string,
+	databaseParameterName string,
+	userParameterName string,
+	passwordParameterName string,
+	providerOptions ...ProviderOption,
+) *Provider {
+	provider := &Provider{
+		hostParameterName:     hostParameterName,
+		portParameterName:     portParameterName,
+		databaseParameterName: databaseParameterName,
+		userParameterName:     userParameterName,
+		passwordParameterName: passwordParameterName,
+		poolConfig:            nil,
+		timeoutConfig:         nil,
+		retryConfig:           nil,
+		postBuildHook:         nil,
 	}
+	for _, providerOption := range providerOptions {
+		providerOption(provider)
+	}
+	return provider
 }
 
-type RetryConfig struct {
-	MaxAttempts       uint32
-	InitialDelay      time.Duration
-	MaxDelay          time.Duration
-	BackoffMultiplier float64
+func NewProviderWithConfig(
+	hostParameterName string,
+	portParameterName string,
+	databaseParameterName string,
+	userParameterName string,
+	passwordParameterName string,
+	poolConfig *PoolConfig,
+	timeoutConfig *TimeoutConfig,
+	retryConfig *RetryConfig,
+	providerOptions ...ProviderOption,
+) *Provider {
+	provider := &Provider{
+		hostParameterName:     hostParameterName,
+		portParameterName:     portParameterName,
+		databaseParameterName: databaseParameterName,
+		userParameterName:     userParameterName,
+		passwordParameterName: passwordParameterName,
+		poolConfig:            poolConfig,
+		timeoutConfig:         timeoutConfig,
+		retryConfig:           retryConfig,
+		postBuildHook:         nil,
+	}
+	for _, providerOption := range providerOptions {
+		providerOption(provider)
+	}
+	return provider
 }
 
 type Provider struct {
@@ -54,47 +83,7 @@ type Provider struct {
 	poolConfig    *PoolConfig
 	timeoutConfig *TimeoutConfig
 	retryConfig   *RetryConfig
-}
-
-func NewProvider(
-	hostParameterName string,
-	portParameterName string,
-	databaseParameterName string,
-	userParameterName string,
-	passwordParameterName string,
-) *Provider {
-	return &Provider{
-		hostParameterName:     hostParameterName,
-		portParameterName:     portParameterName,
-		databaseParameterName: databaseParameterName,
-		userParameterName:     userParameterName,
-		passwordParameterName: passwordParameterName,
-		poolConfig:            nil,
-		timeoutConfig:         nil,
-		retryConfig:           nil,
-	}
-}
-
-func NewProviderWithConfig(
-	hostParameterName string,
-	portParameterName string,
-	databaseParameterName string,
-	userParameterName string,
-	passwordParameterName string,
-	poolConfig *PoolConfig,
-	timeoutConfig *TimeoutConfig,
-	retryConfig *RetryConfig,
-) *Provider {
-	return &Provider{
-		hostParameterName:     hostParameterName,
-		portParameterName:     portParameterName,
-		databaseParameterName: databaseParameterName,
-		userParameterName:     userParameterName,
-		passwordParameterName: passwordParameterName,
-		poolConfig:            poolConfig,
-		timeoutConfig:         timeoutConfig,
-		retryConfig:           retryConfig,
-	}
+	postBuildHook PostBuildHook
 }
 
 func (instance *Provider) WithPoolConfig(poolConfig *PoolConfig) *Provider {
@@ -221,7 +210,26 @@ func (instance *Provider) open(resolver containercontract.Resolver) (*bun.DB, er
 		pgdriver.WithDatabase(databaseName),
 		pgdriver.WithUser(user),
 		pgdriver.WithPassword(password),
+		pgdriver.WithInsecure(true),
 	)
+
+	if nil != instance.postBuildHook {
+		hookContext := context.Background()
+		hookCancel := func() {}
+		if 0 < timeoutConfig.ConnectTimeout {
+			hookContext, hookCancel = context.WithTimeout(context.Background(), timeoutConfig.ConnectTimeout)
+		}
+		defer hookCancel()
+
+		hookErr := instance.postBuildHook(hookContext, resolver, connector)
+		if nil != hookErr {
+			return nil, exception.NewError(
+				"pgsql database connector configuration failed",
+				connectionConfig.SafeContext(),
+				hookErr,
+			)
+		}
+	}
 
 	sqlDatabase := sql.OpenDB(connector)
 

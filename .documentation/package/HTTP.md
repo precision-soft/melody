@@ -85,7 +85,7 @@ The example below demonstrates:
 * returning a redirect response using the URL generator.
 
 ```go
-package example
+package main
 
 import (
 	nethttp "net/http"

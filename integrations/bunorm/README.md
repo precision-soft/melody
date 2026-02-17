@@ -51,7 +51,7 @@ The pattern is:
 ### Service registration example
 
 ```go
-package database
+package main
 
 import (
 	"time"
@@ -139,7 +139,7 @@ func RegisterDatabaseServices(app *application.Application) {
 ### Consuming the default database
 
 ```go
-package service
+package main
 
 import (
 	"github.com/precision-soft/melody/integrations/bunorm"
@@ -164,10 +164,14 @@ func (instance *ApiService) Database() {
 ### Consuming a non-default database
 
 ```go
-registry := container.MustFromResolver[*bunorm.ManagerRegistry](resolver, ServiceManagerRegistryId)
-adminManager := registry.MustManager(ManagerAdminName)
-adminDatabase := adminManager.Database()
-_ = adminDatabase
+package main
+
+func main() {
+	registry := container.MustFromResolver[*bunorm.ManagerRegistry](resolver, ServiceManagerRegistryId)
+	adminManager := registry.MustManager(ManagerAdminName)
+	adminDatabase := adminManager.Database()
+	_ = adminDatabase
+}
 ```
 
 ## Dialect providers
@@ -181,3 +185,14 @@ Each dialect module implements [`bunorm.Provider`](./provider.go) and is respons
 * Building the driver connector.
 * Constructing a Bun database handle with the correct dialect.
 * Performing an initial `PingContext` and failing fast on errors.
+
+## Advanced connector customization
+
+The dialect providers expose an optional *post-build hook* that allows userland to alter driver configuration beyond what the provider exposes via typed config structs.
+
+The hook is configured via a provider option passed to the provider constructor:
+
+* MySQL: [`mysql.WithPostBuildHook`](./mysql/provider_option.go) using [`mysql.PostBuildHook`](./mysql/post_build_hook.go)
+* PostgreSQL: [`pgsql.WithPostBuildHook`](./pgsql/provider_option.go) using [`pgsql.PostBuildHook`](./pgsql/post_build_hook.go)
+
+The hook is executed during provider open, after Melody defaults and typed configs are applied, and before establishing the SQL connection.
