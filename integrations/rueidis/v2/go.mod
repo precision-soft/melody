@@ -1,6 +1,6 @@
 module github.com/precision-soft/melody/integrations/rueidis/v2
 
-go 1.24
+go 1.24.9
 
 require (
 	github.com/precision-soft/melody/v2 v2.0.0
