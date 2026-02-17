@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1" name="viewport"/>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet"/>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet"/>
+    <link href="/assets/app.css" rel="stylesheet"/>
+    <title>Users (admin)</title>
+</head>
+<body class="bg-light" data-page="users">
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h1 class="h3 mb-0"><i class="fa-solid fa-users me-2"></i>Users</h1>
+            <div class="text-muted small">Admin-only CRUD (server-side enforced)</div>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+            <a class="btn btn-outline-secondary btn-sm" data-route="example.products.list.page" href="#">
+                <i class="fa-solid fa-boxes-stacked me-1"></i>Products
+            </a>
+            <a class="btn btn-outline-secondary btn-sm" data-route="example.users.create.page" href="#">
+                <i class="fa-solid fa-circle-plus me-1"></i>New user
+            </a>
+            <a class="btn btn-outline-secondary btn-sm" data-route="example.users.api.read.all" href="#">
+                <i class="fa-solid fa-code me-1"></i>List API (JSON)
+            </a>
+            <a class="btn btn-outline-secondary btn-sm" data-route="example.routes" href="#">
+                <i class="fa-solid fa-route me-1"></i>Routes (JSON)
+            </a>
+            <a class="btn btn-outline-secondary btn-sm" data-route="example.logout" href="#">
+                <i class="fa-solid fa-right-from-bracket me-1"></i>Logout
+            </a>
+        </div>
+    </div>
+
+    <div class="alert alert-info py-2" id="status">Loading...</div>
+
+    <div class="card shadow-sm">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="text-muted small">Tip: click a username to edit.</div>
+                <button class="btn btn-outline-secondary btn-sm" id="refreshButton" type="button">
+                    <i class="fa-solid fa-rotate me-1"></i>Refresh
+                </button>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-sm align-middle" id="usersTable">
+                    <thead>
+                    <tr>
+                        <th style="width: 20%">Id</th>
+                        <th style="width: 30%">Username</th>
+                        <th style="width: 35%">Roles</th>
+                        <th class="text-end" style="width: 15%">Actions</th>
+                    </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js" type="text/javascript"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" type="text/javascript"></script>
+<script type="text/javascript">window.melodyRoutes = JSON.parse('{{routes_json}}');</script>
+<script src="/assets/app.js" type="text/javascript"></script>
+<script type="text/javascript">
+    $(document).ready(() => {
+        const tableBody = $('#usersTable tbody');
+
+        const render = (users) => {
+            tableBody.empty();
+
+            for (const user of users) {
+                const id = String(user?.id ?? '').trim();
+                const username = String(user?.username ?? '').trim();
+                const roles = Array.isArray(user?.roles) ? user.roles.map((r) => String(r)).join(', ') : '';
+
+                const editUrl = window.melodyExample.routing.route('example.users.update.page', {id: id});
+
+                const usernameLink = $('<a/>');
+                usernameLink.attr('href', editUrl);
+                usernameLink.text(username);
+
+                const rolesBadge = $('<span/>');
+                rolesBadge.addClass('badge text-bg-light border');
+                rolesBadge.text(roles);
+
+                const deleteButton = $('<button/>');
+                deleteButton.addClass('btn btn-outline-danger btn-sm');
+                deleteButton.attr('data-action', 'delete');
+                deleteButton.attr('data-id', id);
+                deleteButton.html('<i class="fa-solid fa-trash"></i>');
+
+                const row = $('<tr/>');
+                row.append($('<td class="text-muted"/>').text(id));
+                row.append($('<td/>').append(usernameLink));
+                row.append($('<td/>').append(rolesBadge));
+                row.append($('<td class="text-end"/>').append(deleteButton));
+
+                tableBody.append(row);
+            }
+        };
+
+        const load = async () => {
+            window.melodyExample.ui.setStatus('Loading users...');
+
+            try {
+                const result = await window.melodyExample.http.getJson(
+                    window.melodyExample.routing.route('example.users.api.read.all')
+                );
+
+                render(result?.payload ?? []);
+                window.melodyExample.ui.setStatus('Ready.');
+            } catch (err) {
+                window.melodyExample.ui.setStatus(String(err?.message ?? err), 'danger');
+            }
+        };
+
+        $('#refreshButton').on('click', async () => {
+            await load();
+        });
+
+        tableBody.on('click', 'button[data-action="delete"]', async (event) => {
+            const buttonElement = $(event.currentTarget);
+            const id = String(buttonElement.attr('data-id') ?? '').trim();
+            if ('' === id) {
+                return;
+            }
+
+            const confirmed = window.confirm('Delete this user?');
+            if (true !== confirmed) {
+                return;
+            }
+
+            window.melodyExample.ui.setStatus('Deleting user...');
+
+            try {
+                await window.melodyExample.http.requestJson(
+                    'DELETE',
+                    window.melodyExample.routing.route('example.users.api.delete', {id: id}),
+                    null
+                );
+
+                await load();
+                window.melodyExample.ui.setStatus('User deleted.');
+            } catch (err) {
+                window.melodyExample.ui.setStatus(String(err?.message ?? err), 'danger');
+            }
+        });
+
+        void load();
+    });
+</script>
+</body>
+</html>

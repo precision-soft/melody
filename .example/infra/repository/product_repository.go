@@ -111,7 +111,7 @@ func (instance *inMemoryProductRepository) Create(product *entity.Product) error
 	}
 
 	if "" == strings.TrimSpace(product.CategoryId) {
-		return fmt.Errorf("categoryId is required")
+		return fmt.Errorf("category id is required")
 	}
 
 	if "" == strings.TrimSpace(product.CurrencyId) {
@@ -166,7 +166,7 @@ func (instance *inMemoryProductRepository) Update(product *entity.Product) (bool
 	}
 
 	if "" == strings.TrimSpace(product.CategoryId) {
-		return false, fmt.Errorf("categoryId is required")
+		return false, fmt.Errorf("category id is required")
 	}
 
 	if "" == strings.TrimSpace(product.CurrencyId) {

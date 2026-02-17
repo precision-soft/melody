@@ -4,6 +4,10 @@ github.com/jinzhu/inflection v1.0.0 h1:K317FqzuhWc8YvSVlFMCCUb36O/S9MCKRDI7QkRKD
 github.com/jinzhu/inflection v1.0.0/go.mod h1:h+uFLlag+Qp1Va5pdKtLDYj+kHp5pxUVkryuEj+Srlc=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
+github.com/precision-soft/melody v1.6.3 h1:KcY9/p1pbGVRJMXcfrFeLPf77dY93Wb+TxEVxyzhAVw=
+github.com/precision-soft/melody v1.6.3/go.mod h1:Yx5qu2/oZN+up7lxPnHZq3cdv/n3PQ7L9N/My8I99E8=
+github.com/precision-soft/melody/integrations/bunorm v1.0.0 h1:TzRmn264Gvkv6FvMS0HcY5fAkdiKwC5KSgRBij86Buk=
+github.com/precision-soft/melody/integrations/bunorm v1.0.0/go.mod h1:C63jwkbCwdS5Px3Z8YnKt6knjKspaDMGJDSzFzjfKgQ=
 github.com/puzpuzpuz/xsync/v3 v3.5.1 h1:GJYJZwO6IdxN/IKbneznS6yPkVC+c3zyY/j19c++5Fg=
 github.com/puzpuzpuz/xsync/v3 v3.5.1/go.mod h1:VjzYrABPabuM4KyBh1Ftq6u8nhwY5tBPKP9jpmh0nnA=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=

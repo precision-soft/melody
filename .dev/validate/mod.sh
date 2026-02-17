@@ -48,15 +48,46 @@ container_path_for() {
 get_module_directory_list() {
     {
         printf '%s\n' "${REPOSITORY_ROOT_DIRECTORY_STRING}"
+
         if [[ -f "${REPOSITORY_ROOT_DIRECTORY_STRING}/.example/go.mod" ]]; then
             printf '%s\n' "${REPOSITORY_ROOT_DIRECTORY_STRING}/.example"
         fi
-        find "${REPOSITORY_ROOT_DIRECTORY_STRING}/integrations" -maxdepth 4 -name go.mod -print 2>/dev/null | while IFS= read -r GO_MOD_PATH_STRING; do
-            if [[ "" = "${GO_MOD_PATH_STRING}" ]]; then
-                continue
-            fi
-            dirname "${GO_MOD_PATH_STRING}"
-        done
+
+        if [[ -f "${REPOSITORY_ROOT_DIRECTORY_STRING}/v2/go.mod" ]]; then
+            printf '%s\n' "${REPOSITORY_ROOT_DIRECTORY_STRING}/v2"
+        fi
+
+        if [[ -f "${REPOSITORY_ROOT_DIRECTORY_STRING}/v2/.example/go.mod" ]]; then
+            printf '%s\n' "${REPOSITORY_ROOT_DIRECTORY_STRING}/v2/.example"
+        fi
+
+        if [[ -d "${REPOSITORY_ROOT_DIRECTORY_STRING}/integrations" ]]; then
+            find "${REPOSITORY_ROOT_DIRECTORY_STRING}/integrations" \
+                -maxdepth 4 \
+                -name go.mod \
+                -print \
+                2>/dev/null |
+                while IFS= read -r GO_MOD_PATH_STRING; do
+                    if [[ "" = "${GO_MOD_PATH_STRING}" ]]; then
+                        continue
+                    fi
+                    dirname "${GO_MOD_PATH_STRING}"
+                done
+        fi
+
+        if [[ -d "${REPOSITORY_ROOT_DIRECTORY_STRING}/v2/integrations" ]]; then
+            find "${REPOSITORY_ROOT_DIRECTORY_STRING}/v2/integrations" \
+                -maxdepth 4 \
+                -name go.mod \
+                -print \
+                2>/dev/null |
+                while IFS= read -r GO_MOD_PATH_STRING; do
+                    if [[ "" = "${GO_MOD_PATH_STRING}" ]]; then
+                        continue
+                    fi
+                    dirname "${GO_MOD_PATH_STRING}"
+                done
+        fi
     } | sort -u
 }
 

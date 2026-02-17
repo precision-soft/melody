@@ -80,18 +80,35 @@ run_go_checks() {
 }
 
 get_integration_module_directory_list() {
-    find "${REPOSITORY_ROOT_DIRECTORY_STRING}/integrations" \
-        -maxdepth 5 \
-        -name go.mod \
-        -print \
-        2>/dev/null |
-        while IFS= read -r GO_MOD_PATH_STRING; do
-            if [[ "" = "${GO_MOD_PATH_STRING}" ]]; then
-                continue
-            fi
-            dirname "${GO_MOD_PATH_STRING}"
-        done |
-        sort -u
+    {
+        if [[ -d "${REPOSITORY_ROOT_DIRECTORY_STRING}/integrations" ]]; then
+            find "${REPOSITORY_ROOT_DIRECTORY_STRING}/integrations" \
+                -maxdepth 5 \
+                -name go.mod \
+                -print \
+                2>/dev/null |
+                while IFS= read -r GO_MOD_PATH_STRING; do
+                    if [[ "" = "${GO_MOD_PATH_STRING}" ]]; then
+                        continue
+                    fi
+                    dirname "${GO_MOD_PATH_STRING}"
+                done
+        fi
+
+        if [[ -d "${REPOSITORY_ROOT_DIRECTORY_STRING}/v2/integrations" ]]; then
+            find "${REPOSITORY_ROOT_DIRECTORY_STRING}/v2/integrations" \
+                -maxdepth 5 \
+                -name go.mod \
+                -print \
+                2>/dev/null |
+                while IFS= read -r GO_MOD_PATH_STRING; do
+                    if [[ "" = "${GO_MOD_PATH_STRING}" ]]; then
+                        continue
+                    fi
+                    dirname "${GO_MOD_PATH_STRING}"
+                done
+        fi
+    } | sort -u
 }
 
 has_staged_change_in_component() {
@@ -134,6 +151,14 @@ main() {
             run_go_checks "${ROOT_DIRECTORY_STRING}/.example" "melody example app (.example)"
         fi
 
+        if [[ -f "${ROOT_DIRECTORY_STRING}/v2/go.mod" ]]; then
+            run_go_checks "${ROOT_DIRECTORY_STRING}/v2" "melody framework v2 (v2 module)"
+        fi
+
+        if [[ -f "${ROOT_DIRECTORY_STRING}/v2/.example/go.mod" ]]; then
+            run_go_checks "${ROOT_DIRECTORY_STRING}/v2/.example" "melody example app v2 (v2/.example)"
+        fi
+
         local INTEGRATION_MODULE_DIRECTORY_STRING
         while IFS= read -r INTEGRATION_MODULE_DIRECTORY_STRING; do
             if [[ "" = "${INTEGRATION_MODULE_DIRECTORY_STRING}" ]]; then
@@ -159,6 +184,22 @@ main() {
             run_go_checks "${ROOT_DIRECTORY_STRING}/.example" "melody example app (.example)"
         else
             info "skip .example (no staged changes)"
+        fi
+    fi
+
+    if [[ -f "${ROOT_DIRECTORY_STRING}/v2/go.mod" ]]; then
+        if has_staged_change_in_component "${ROOT_DIRECTORY_STRING}/v2"; then
+            run_go_checks "${ROOT_DIRECTORY_STRING}/v2" "melody framework v2 (v2 module)"
+        else
+            info "skip v2 module (no staged changes)"
+        fi
+    fi
+
+    if [[ -f "${ROOT_DIRECTORY_STRING}/v2/.example/go.mod" ]]; then
+        if has_staged_change_in_component "${ROOT_DIRECTORY_STRING}/v2/.example"; then
+            run_go_checks "${ROOT_DIRECTORY_STRING}/v2/.example" "melody example app v2 (v2/.example)"
+        else
+            info "skip v2/.example (no staged changes)"
         fi
     fi
 

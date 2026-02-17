@@ -1,0 +1,21 @@
+go 1.24.9
+
+use (
+	.
+	./v2
+
+	./integrations/bunorm
+	./integrations/bunorm/v2
+
+	./integrations/bunorm/mysql
+	./integrations/bunorm/mysql/v2
+
+	./integrations/bunorm/pgsql
+	./integrations/bunorm/pgsql/v2
+
+	./integrations/bunorm/migrate
+	./integrations/bunorm/migrate/v2
+
+	./integrations/rueidis
+	./integrations/rueidis/v2
+)

@@ -3,8 +3,8 @@ module github.com/precision-soft/melody/integrations/bunorm/pgsql
 go 1.24.0
 
 require (
-	github.com/precision-soft/melody v0.0.0
-	github.com/precision-soft/melody/integrations/bunorm v0.0.0
+	github.com/precision-soft/melody v1.6.3
+	github.com/precision-soft/melody/integrations/bunorm v1.0.0
 	github.com/uptrace/bun v1.2.16
 	github.com/uptrace/bun/dialect/pgdialect v1.2.16
 	github.com/uptrace/bun/driver/pgdriver v1.2.16
@@ -22,9 +22,4 @@ require (
 	golang.org/x/crypto v0.45.0 // indirect
 	golang.org/x/sys v0.38.0 // indirect
 	mellium.im/sasl v0.3.2 // indirect
-)
-
-replace (
-	github.com/precision-soft/melody => ../../..
-	github.com/precision-soft/melody/integrations/bunorm => ..
 )
