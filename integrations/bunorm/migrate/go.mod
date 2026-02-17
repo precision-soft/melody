@@ -3,8 +3,8 @@ module github.com/precision-soft/melody/integrations/bunorm/migrate
 go 1.24.0
 
 require (
-	github.com/precision-soft/melody v0.0.0
-	github.com/precision-soft/melody/integrations/bunorm v0.0.0
+	github.com/precision-soft/melody v1.6.3
+	github.com/precision-soft/melody/integrations/bunorm v1.0.0
 	github.com/uptrace/bun v1.2.16
 )
 
@@ -16,9 +16,4 @@ require (
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	golang.org/x/sys v0.38.0 // indirect
-)
-
-replace (
-	github.com/precision-soft/melody => ../../..
-	github.com/precision-soft/melody/integrations/bunorm => ..
 )
