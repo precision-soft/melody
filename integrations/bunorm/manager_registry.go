@@ -5,12 +5,12 @@ import (
 
 	"github.com/uptrace/bun"
 
-	containercontract "github.com/precision-soft/melody/container/contract"
 	"github.com/precision-soft/melody/exception"
+	loggingcontract "github.com/precision-soft/melody/logging/contract"
 )
 
 type ManagerRegistry struct {
-	resolver containercontract.Resolver
+	logger loggingcontract.Logger
 
 	providerDefinitionByName      map[string]ProviderDefinition
 	defaultProviderDefinitionName string
@@ -19,9 +19,9 @@ type ManagerRegistry struct {
 	managers map[string]*Manager
 }
 
-func NewManagerRegistry(resolver containercontract.Resolver, providerDefinitions ...ProviderDefinition) (*ManagerRegistry, error) {
-	if nil == resolver {
-		return nil, ErrResolverIsRequired
+func NewManagerRegistry(logger loggingcontract.Logger, providerDefinitions ...ProviderDefinition) (*ManagerRegistry, error) {
+	if nil == logger {
+		return nil, ErrLoggerIsRequired
 	}
 
 	if 0 == len(providerDefinitions) {
@@ -62,7 +62,7 @@ func NewManagerRegistry(resolver containercontract.Resolver, providerDefinitions
 	}
 
 	return &ManagerRegistry{
-		resolver:                      resolver,
+		logger:                        logger,
 		providerDefinitionByName:      providerDefinitionByName,
 		defaultProviderDefinitionName: defaultProviderDefinitionName,
 		managers:                      make(map[string]*Manager),
@@ -117,7 +117,7 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
 		return nil, ErrProviderDefinitionNotFound
 	}
 
-	database, openErr := providerDefinition.Provider.Open(instance.resolver)
+	database, openErr := providerDefinition.Provider.Open(providerDefinition.Params, instance.logger)
 	if nil != openErr {
 		return nil, openErr
 	}

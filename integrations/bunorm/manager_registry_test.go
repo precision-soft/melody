@@ -2,66 +2,61 @@ package bunorm
 
 import (
 	"errors"
-	"reflect"
 	"testing"
 
 	"github.com/uptrace/bun"
 
-	containercontract "github.com/precision-soft/melody/container/contract"
+	loggingcontract "github.com/precision-soft/melody/logging/contract"
 )
 
-type fakeResolver struct{}
+type fakeLogger struct{}
 
-func (instance *fakeResolver) Get(serviceName string) (any, error) {
-	return nil, errors.New("not implemented")
+func (instance *fakeLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
 }
 
-func (instance *fakeResolver) MustGet(serviceName string) any {
-	panic("not implemented")
+func (instance *fakeLogger) Debug(message string, context loggingcontract.Context) {
 }
 
-func (instance *fakeResolver) GetByType(targetType reflect.Type) (any, error) {
-	return nil, errors.New("not implemented")
+func (instance *fakeLogger) Info(message string, context loggingcontract.Context) {
 }
 
-func (instance *fakeResolver) MustGetByType(targetType reflect.Type) any {
-	panic("not implemented")
+func (instance *fakeLogger) Warning(message string, context loggingcontract.Context) {
 }
 
-func (instance *fakeResolver) Has(serviceName string) bool {
-	return false
+func (instance *fakeLogger) Error(message string, context loggingcontract.Context) {
 }
 
-func (instance *fakeResolver) HasType(targetType reflect.Type) bool {
-	return false
+func (instance *fakeLogger) Emergency(message string, context loggingcontract.Context) {
 }
 
-var _ containercontract.Resolver = (*fakeResolver)(nil)
+var _ loggingcontract.Logger = (*fakeLogger)(nil)
 
 type fakeProvider struct {
 	openCount int
 }
 
-func (instance *fakeProvider) Open(resolver containercontract.Resolver) (*bun.DB, error) {
+func (instance *fakeProvider) Open(params ConnectionParams, logger loggingcontract.Logger) (*bun.DB, error) {
 	instance.openCount = instance.openCount + 1
 	return nil, nil
 }
 
-func TestNewManagerRegistry_ErrorsWhenResolverIsNil(t *testing.T) {
+var _ Provider = (*fakeProvider)(nil)
+
+func TestNewManagerRegistry_ErrorsWhenLoggerIsNil(t *testing.T) {
 	_, registryErr := NewManagerRegistry(nil)
 	if nil == registryErr {
 		t.Fatalf("expected error")
 	}
 
-	if false == errors.Is(registryErr, ErrResolverIsRequired) {
-		t.Fatalf("expected ErrResolverIsRequired")
+	if false == errors.Is(registryErr, ErrLoggerIsRequired) {
+		t.Fatalf("expected ErrLoggerIsRequired")
 	}
 }
 
 func TestNewManagerRegistry_ErrorsWhenNoProviderDefinitions(t *testing.T) {
-	resolver := &fakeResolver{}
+	logger := &fakeLogger{}
 
-	_, registryErr := NewManagerRegistry(resolver)
+	_, registryErr := NewManagerRegistry(logger)
 	if nil == registryErr {
 		t.Fatalf("expected error")
 	}
@@ -72,13 +67,13 @@ func TestNewManagerRegistry_ErrorsWhenNoProviderDefinitions(t *testing.T) {
 }
 
 func TestNewManagerRegistry_ErrorsWhenMultipleDefaults(t *testing.T) {
-	resolver := &fakeResolver{}
+	logger := &fakeLogger{}
 
 	providerA := &fakeProvider{}
 	providerB := &fakeProvider{}
 
 	_, registryErr := NewManagerRegistry(
-		resolver,
+		logger,
 		ProviderDefinition{Name: "a", Provider: providerA, IsDefault: true},
 		ProviderDefinition{Name: "b", Provider: providerB, IsDefault: true},
 	)
@@ -92,13 +87,13 @@ func TestNewManagerRegistry_ErrorsWhenMultipleDefaults(t *testing.T) {
 }
 
 func TestNewManagerRegistry_DefaultIsFirstWhenNoneIsDefault(t *testing.T) {
-	resolver := &fakeResolver{}
+	logger := &fakeLogger{}
 
 	providerA := &fakeProvider{}
 	providerB := &fakeProvider{}
 
 	registry, registryErr := NewManagerRegistry(
-		resolver,
+		logger,
 		ProviderDefinition{Name: "a", Provider: providerA, IsDefault: false},
 		ProviderDefinition{Name: "b", Provider: providerB, IsDefault: false},
 	)
@@ -117,13 +112,13 @@ func TestNewManagerRegistry_DefaultIsFirstWhenNoneIsDefault(t *testing.T) {
 }
 
 func TestManagerRegistry_CachesManagersOneToOne(t *testing.T) {
-	resolver := &fakeResolver{}
+	logger := &fakeLogger{}
 
 	providerA := &fakeProvider{}
 	providerB := &fakeProvider{}
 
 	registry, registryErr := NewManagerRegistry(
-		resolver,
+		logger,
 		ProviderDefinition{Name: "a", Provider: providerA, IsDefault: true},
 		ProviderDefinition{Name: "b", Provider: providerB, IsDefault: false},
 	)

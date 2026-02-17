@@ -3,9 +3,9 @@ package bunorm
 import (
 	"github.com/uptrace/bun"
 
-	containercontract "github.com/precision-soft/melody/container/contract"
+	loggingcontract "github.com/precision-soft/melody/logging/contract"
 )
 
 type Provider interface {
-	Open(resolver containercontract.Resolver) (*bun.DB, error)
+	Open(params ConnectionParams, logger loggingcontract.Logger) (*bun.DB, error)
 }
