@@ -18,12 +18,14 @@ func NewValidator() *Validator {
 
 	validator.RegisterConstraint(ConstraintNotBlank, &NotBlank{})
 	validator.RegisterConstraint(ConstraintEmail, &Email{})
-	validator.RegisterConstraint(ConstraintMin, NewMinLength(1))
-	validator.RegisterConstraint(ConstraintMax, NewMaxLength(100))
+	validator.RegisterConstraint(ConstraintMinLength, NewMinLength(1))
+	validator.RegisterConstraint(ConstraintMaxLength, NewMaxLength(100))
 	validator.RegisterConstraint(ConstraintRegex, NewRegex(".*"))
 	validator.RegisterConstraint(ConstraintNumeric, &Numeric{})
 	validator.RegisterConstraint(ConstraintAlpha, &Alpha{})
 	validator.RegisterConstraint(ConstraintAlphanumeric, &Alphanumeric{})
+	validator.RegisterConstraint(ConstraintGreaterThan, NewGreaterThan(0))
+	validator.RegisterConstraint(ConstraintNotEmpty, NewNotEmpty())
 
 	return validator
 }
@@ -208,13 +210,13 @@ func (instance *Validator) validateRule(value any, fieldName string, rule valida
 
 func (instance *Validator) createConstraintWithParams(name string, params map[string]string) validationcontract.Constraint {
 	switch name {
-	case ConstraintMin:
+	case ConstraintMinLength:
 		if valueString, exists := params["value"]; true == exists {
 			return NewMinLength(parseInt(valueString, 0))
 		}
 		return NewMinLength(1)
 
-	case ConstraintMax:
+	case ConstraintMaxLength:
 		if valueString, exists := params["value"]; true == exists {
 			return NewMaxLength(parseInt(valueString, 100))
 		}

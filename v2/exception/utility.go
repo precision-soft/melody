@@ -114,6 +114,27 @@ func FromErrorWithLevel(err error, level loggingcontract.Level) *Error {
 	return newWithLevel(err.Error(), context, err, level)
 }
 
+func FromErrorWithLevelAndContext(err error, level loggingcontract.Level, context exceptioncontract.Context) *Error {
+	if nil == err {
+		return nil
+	}
+
+	mergedContext := make(exceptioncontract.Context)
+
+	var provider exceptioncontract.ContextProvider
+	if true == errors.As(err, &provider) {
+		for key, value := range provider.Context() {
+			mergedContext[key] = value
+		}
+	}
+
+	for key, value := range context {
+		mergedContext[key] = value
+	}
+
+	return newWithLevel(err.Error(), mergedContext, err, level)
+}
+
 func MarkLogged(err error) error {
 	if nil == err {
 		return nil

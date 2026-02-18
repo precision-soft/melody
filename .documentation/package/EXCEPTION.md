@@ -26,6 +26,7 @@ Melody uses this package to:
     - [`NewEmergency`](../../exception/error_new.go)
     - [`FromError`](../../exception/utility.go)
     - [`FromErrorWithLevel`](../../exception/utility.go)
+    - [`FromErrorWithLevelAndContext`](../../exception/utility.go)
     - [`LogContext`](../../exception/utility.go)
     - [`MarkLogged`](../../exception/utility.go)
 - Fail-fast helpers:
@@ -124,6 +125,7 @@ func readFile(path string) []byte {
     - [`LogContext`](../../exception/utility.go)
     - [`FromError`](../../exception/utility.go)
     - [`FromErrorWithLevel`](../../exception/utility.go)
+    - [`FromErrorWithLevelAndContext`](../../exception/utility.go)
     - [`MarkLogged`](../../exception/utility.go)
 - Fail-fast and exit:
     - [`Panic(err *Error)`](../../exception/panic.go)

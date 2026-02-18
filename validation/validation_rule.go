@@ -159,10 +159,6 @@ func parseInt(valueString string, defaultValue int) int {
 }
 
 func parseValidationTag(tag string) ([]validationRule, error) {
-	return parseValidationTagInternal(tag)
-}
-
-func parseValidationTagInternal(tag string) ([]validationRule, error) {
 	var rules []validationRule
 
 	parts := splitByTopLevelComma(tag)
