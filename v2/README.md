@@ -115,7 +115,7 @@ Key entry points:
 
 - Framework entry document: [`README.md`](./README.md)
 - Example application documentation: [`.example/README.md`](./.example/README.md)
-- Contribution and code style rules: [`CONTRIBUTING.md`](./CONTRIBUTING.md)
+- Contribution and code style rules: [`CONTRIBUTING.md`](../CONTRIBUTING.md)
 - Package documentation (API reference): [`.documentation/package/`](./.documentation/package/)
 - Roadmap (future plans): [`.documentation/ROADMAP.md`](./.documentation/ROADMAP.md)
 

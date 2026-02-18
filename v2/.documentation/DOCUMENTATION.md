@@ -44,7 +44,7 @@ Exclude:
 - Per-package API reference
 - Deep internal details
 
-### [`CONTRIBUTING.md`](../CONTRIBUTING.md)
+### [`CONTRIBUTING.md`](../../CONTRIBUTING.md)
 
 Purpose: contribution and process guidance.
 
