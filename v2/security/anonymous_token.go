@@ -1,26 +1,26 @@
 package security
 
 import (
-	securitycontract "github.com/precision-soft/melody/v2/security/contract"
+    securitycontract "github.com/precision-soft/melody/v2/security/contract"
 )
 
 func NewAnonymousToken() *AnonymousToken {
-	return &AnonymousToken{}
+    return &AnonymousToken{}
 }
 
 type AnonymousToken struct {
 }
 
 func (instance *AnonymousToken) IsAuthenticated() bool {
-	return false
+    return false
 }
 
 func (instance *AnonymousToken) UserIdentifier() string {
-	return ""
+    return ""
 }
 
 func (instance *AnonymousToken) Roles() []string {
-	return []string{}
+    return []string{}
 }
 
 var _ securitycontract.Token = (*AnonymousToken)(nil)

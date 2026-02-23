@@ -1,14 +1,14 @@
 package contract
 
 import (
-	httpcontract "github.com/precision-soft/melody/v2/http/contract"
+    httpcontract "github.com/precision-soft/melody/v2/http/contract"
 )
 
 type LoginInput struct {
-	Token Token
+    Token Token
 }
 
 type LoginResult struct {
-	Token    Token
-	Response httpcontract.Response
+    Token    Token
+    Response httpcontract.Response
 }

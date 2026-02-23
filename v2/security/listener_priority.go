@@ -1,7 +1,7 @@
 package security
 
 const (
-	KernelFirewallListenerPriority = 50
+    KernelFirewallListenerPriority = 50
 
-	KernelAccessControlListenerPriority = 20
+    KernelAccessControlListenerPriority = 20
 )

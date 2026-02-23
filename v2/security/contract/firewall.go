@@ -1,26 +1,26 @@
 package contract
 
 import (
-	httpcontract "github.com/precision-soft/melody/v2/http/contract"
-	runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
+    httpcontract "github.com/precision-soft/melody/v2/http/contract"
+    runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
 )
 
 type Firewall interface {
-	Name() string
+    Name() string
 
-	LoginPath() string
+    LoginPath() string
 
-	LogoutPath() string
+    LogoutPath() string
 
-	Login(
-		runtimeInstance runtimecontract.Runtime,
-		request httpcontract.Request,
-		input LoginInput,
-	) (*LoginResult, error)
+    Login(
+        runtimeInstance runtimecontract.Runtime,
+        request httpcontract.Request,
+        input LoginInput,
+    ) (*LoginResult, error)
 
-	Logout(
-		runtimeInstance runtimecontract.Runtime,
-		request httpcontract.Request,
-		input LogoutInput,
-	) (*LogoutResult, error)
+    Logout(
+        runtimeInstance runtimecontract.Runtime,
+        request httpcontract.Request,
+        input LogoutInput,
+    ) (*LogoutResult, error)
 }
