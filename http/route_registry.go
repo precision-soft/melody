@@ -1,80 +1,80 @@
 package http
 
 import (
-	"github.com/precision-soft/melody/exception"
-	httpcontract "github.com/precision-soft/melody/http/contract"
+    "github.com/precision-soft/melody/exception"
+    httpcontract "github.com/precision-soft/melody/http/contract"
 )
 
 func NewRouteRegistry() *RouteRegistry {
-	return &RouteRegistry{
-		routes:      make([]route, 0),
-		routeByName: make(map[string]route),
-	}
+    return &RouteRegistry{
+        routes:      make([]route, 0),
+        routeByName: make(map[string]route),
+    }
 }
 
 type RouteRegistry struct {
-	routes      []route
-	routeByName map[string]route
+    routes      []route
+    routeByName map[string]route
 }
 
 func (instance *RouteRegistry) RouteDefinitions() []httpcontract.RouteDefinition {
-	definitions := make([]httpcontract.RouteDefinition, 0, len(instance.routes))
+    definitions := make([]httpcontract.RouteDefinition, 0, len(instance.routes))
 
-	for _, routeValue := range instance.routes {
-		definition := mapRouteToDefinition(routeValue)
-		definitions = append(definitions, definition)
-	}
+    for _, routeValue := range instance.routes {
+        definition := mapRouteToDefinition(routeValue)
+        definitions = append(definitions, definition)
+    }
 
-	return definitions
+    return definitions
 }
 
 func (instance *RouteRegistry) RouteDefinition(routeName string) (httpcontract.RouteDefinition, bool) {
-	routeValue, exists := instance.routeByNameInternal(routeName)
-	if false == exists {
-		return &RouteDefinition{}, false
-	}
+    routeValue, exists := instance.routeByNameInternal(routeName)
+    if false == exists {
+        return &RouteDefinition{}, false
+    }
 
-	return mapRouteToDefinition(routeValue), true
+    return mapRouteToDefinition(routeValue), true
 }
 
 func (instance *RouteRegistry) RouteDefinitionForUrlGeneration(routeName string) (httpcontract.UrlGenerationRouteDefinition, bool) {
-	routeValue, exists := instance.routeByNameInternal(routeName)
-	if false == exists {
-		return nil, false
-	}
+    routeValue, exists := instance.routeByNameInternal(routeName)
+    if false == exists {
+        return nil, false
+    }
 
-	return NewUrlGenerationRouteDefinition(routeValue), true
+    return NewUrlGenerationRouteDefinition(routeValue), true
 }
 
 func (instance *RouteRegistry) registerRoute(routeValue route) {
-	instance.routes = append(instance.routes, routeValue)
+    instance.routes = append(instance.routes, routeValue)
 
-	if "" == routeValue.name {
-		return
-	}
+    if "" == routeValue.name {
+        return
+    }
 
-	if _, exists := instance.routeByName[routeValue.name]; true == exists {
-		exception.Panic(
-			exception.NewError(
-				"route name already exists",
-				map[string]any{
-					"routeName": routeValue.name,
-				},
-				nil,
-			),
-		)
-	}
+    if _, exists := instance.routeByName[routeValue.name]; true == exists {
+        exception.Panic(
+            exception.NewError(
+                "route name already exists",
+                map[string]any{
+                    "routeName": routeValue.name,
+                },
+                nil,
+            ),
+        )
+    }
 
-	instance.routeByName[routeValue.name] = routeValue
+    instance.routeByName[routeValue.name] = routeValue
 }
 
 func (instance *RouteRegistry) routeByNameInternal(routeName string) (route, bool) {
-	routeValue, exists := instance.routeByName[routeName]
-	return routeValue, exists
+    routeValue, exists := instance.routeByName[routeName]
+    return routeValue, exists
 }
 
 func (instance *RouteRegistry) routesInternal() []route {
-	return instance.routes
+    return instance.routes
 }
 
 var _ httpcontract.RouteRegistry = (*RouteRegistry)(nil)

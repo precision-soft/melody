@@ -1,12 +1,12 @@
 package mysql
 
 import (
-	"context"
+    "context"
 
-	driver "github.com/go-sql-driver/mysql"
+    driver "github.com/go-sql-driver/mysql"
 )
 
 type PostBuildHook func(
-	ctx context.Context,
-	driverConfig *driver.Config,
+    ctx context.Context,
+    driverConfig *driver.Config,
 ) error

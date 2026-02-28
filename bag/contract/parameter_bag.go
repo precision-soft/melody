@@ -1,15 +1,15 @@
 package contract
 
 type ParameterBag interface {
-	Set(name string, value any)
+    Set(name string, value any)
 
-	Get(name string) (any, bool)
+    Get(name string) (any, bool)
 
-	Has(name string) bool
+    Has(name string) bool
 
-	Remove(name string)
+    Remove(name string)
 
-	Count() int
+    Count() int
 
-	All() map[string]any
+    All() map[string]any
 }

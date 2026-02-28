@@ -1,13 +1,13 @@
 package entity
 
 func NewCategory(id string, name string) *Category {
-	return &Category{
-		Id:   id,
-		Name: name,
-	}
+    return &Category{
+        Id:   id,
+        Name: name,
+    }
 }
 
 type Category struct {
-	Id   string
-	Name string
+    Id   string
+    Name string
 }

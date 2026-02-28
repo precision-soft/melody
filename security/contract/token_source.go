@@ -1,12 +1,12 @@
 package contract
 
 import (
-	httpcontract "github.com/precision-soft/melody/http/contract"
-	runtimecontract "github.com/precision-soft/melody/runtime/contract"
+    httpcontract "github.com/precision-soft/melody/http/contract"
+    runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
 type TokenSource interface {
-	Name() string
+    Name() string
 
-	Resolve(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (Token, error)
+    Resolve(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (Token, error)
 }

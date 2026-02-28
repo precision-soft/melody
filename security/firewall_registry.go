@@ -1,40 +1,40 @@
 package security
 
 import (
-	"github.com/precision-soft/melody/exception"
-	httpcontract "github.com/precision-soft/melody/http/contract"
+    "github.com/precision-soft/melody/exception"
+    httpcontract "github.com/precision-soft/melody/http/contract"
 )
 
 type FirewallRegistry struct {
-	compiledConfiguration *CompiledConfiguration
+    compiledConfiguration *CompiledConfiguration
 }
 
 func NewFirewallRegistry(compiledConfiguration *CompiledConfiguration) *FirewallRegistry {
-	if nil == compiledConfiguration {
-		exception.Panic(exception.NewError("compiled security configuration is nil", nil, nil))
-	}
+    if nil == compiledConfiguration {
+        exception.Panic(exception.NewError("compiled security configuration is nil", nil, nil))
+    }
 
-	return &FirewallRegistry{compiledConfiguration: compiledConfiguration}
+    return &FirewallRegistry{compiledConfiguration: compiledConfiguration}
 }
 
 func (instance *FirewallRegistry) Match(request httpcontract.Request) (*CompiledFirewall, bool) {
-	if nil == request {
-		return nil, false
-	}
+    if nil == request {
+        return nil, false
+    }
 
-	for _, firewall := range instance.compiledConfiguration.Firewalls() {
-		if nil == firewall || nil == firewall.Matcher() {
-			continue
-		}
+    for _, firewall := range instance.compiledConfiguration.Firewalls() {
+        if nil == firewall || nil == firewall.Matcher() {
+            continue
+        }
 
-		if true == firewall.Matcher().Matches(request) {
-			return firewall, true
-		}
-	}
+        if true == firewall.Matcher().Matches(request) {
+            return firewall, true
+        }
+    }
 
-	return nil, false
+    return nil, false
 }
 
 func (instance *FirewallRegistry) GlobalAccessControl() *AccessControl {
-	return instance.compiledConfiguration.GlobalAccessControl()
+    return instance.compiledConfiguration.GlobalAccessControl()
 }

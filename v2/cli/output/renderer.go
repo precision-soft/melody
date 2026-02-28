@@ -3,16 +3,16 @@ package output
 import "io"
 
 func Render(
-	writer io.Writer,
-	envelope Envelope,
-	option Option,
+    writer io.Writer,
+    envelope Envelope,
+    option Option,
 ) error {
-	printer := SelectPrinter(option)
+    printer := SelectPrinter(option)
 
-	printErr := printer.Print(writer, envelope, option)
-	if nil != printErr {
-		return printErr
-	}
+    printErr := printer.Print(writer, envelope, option)
+    if nil != printErr {
+        return printErr
+    }
 
-	return nil
+    return nil
 }

@@ -1,7 +1,7 @@
 package contract
 
 type CliConfiguration interface {
-	Name() string
+    Name() string
 
-	Description() string
+    Description() string
 }

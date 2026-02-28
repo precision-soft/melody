@@ -3,31 +3,31 @@
 package application
 
 import (
-	"io/fs"
+    "io/fs"
 
-	configcontract "github.com/precision-soft/melody/v2/config/contract"
-	"github.com/precision-soft/melody/v2/http/static"
+    configcontract "github.com/precision-soft/melody/v2/config/contract"
+    "github.com/precision-soft/melody/v2/http/static"
 )
 
 func newStaticFileServerOptions(
-	embeddedPublicFiles fs.FS,
-	configuration configcontract.Configuration,
+    embeddedPublicFiles fs.FS,
+    configuration configcontract.Configuration,
 ) *static.Options {
-	_ = embeddedPublicFiles
+    _ = embeddedPublicFiles
 
-	fileServerConfig := static.NewFileServerConfig(
-		static.ModeFilesystem,
-		configuration.Http().PublicDir(),
-		configuration.Http().StaticIndexFile(),
-		"",
-		configuration.Http().StaticEnableCache(),
-		configuration.Http().StaticCacheMaxAge(),
-		false,
-	)
+    fileServerConfig := static.NewFileServerConfig(
+        static.ModeFilesystem,
+        configuration.Http().PublicDir(),
+        configuration.Http().StaticIndexFile(),
+        "",
+        configuration.Http().StaticEnableCache(),
+        configuration.Http().StaticCacheMaxAge(),
+        false,
+    )
 
-	return static.NewOptions(
-		fileServerConfig,
-		configuration.Kernel().ProjectDir(),
-		nil,
-	)
+    return static.NewOptions(
+        fileServerConfig,
+        configuration.Kernel().ProjectDir(),
+        nil,
+    )
 }

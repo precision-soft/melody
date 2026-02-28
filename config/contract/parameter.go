@@ -1,19 +1,19 @@
 package contract
 
 type Parameter interface {
-	EnvironmentKey() string
+    EnvironmentKey() string
 
-	EnvironmentValue() any
+    EnvironmentValue() any
 
-	Value() any
+    Value() any
 
-	IsDefault() bool
+    IsDefault() bool
 
-	String() string
+    String() string
 
-	MustString() string
+    MustString() string
 
-	Bool() (bool, error)
+    Bool() (bool, error)
 
-	Int() (int, error)
+    Int() (int, error)
 }

@@ -1,5 +1,5 @@
 package contract
 
 type EnvironmentSource interface {
-	Load() (map[string]string, error)
+    Load() (map[string]string, error)
 }

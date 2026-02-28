@@ -1,27 +1,27 @@
 package contract
 
 type RouteOptions interface {
-	Name() string
+    Name() string
 
-	SetName(name string)
+    SetName(name string)
 
-	Methods() []string
+    Methods() []string
 
-	Host() string
+    Host() string
 
-	Schemes() []string
+    Schemes() []string
 
-	Requirements() map[string]string
+    Requirements() map[string]string
 
-	SetRequirements(requirements map[string]string)
+    SetRequirements(requirements map[string]string)
 
-	Defaults() map[string]string
+    Defaults() map[string]string
 
-	SetDefaults(defaults map[string]string)
+    SetDefaults(defaults map[string]string)
 
-	Locales() []string
+    Locales() []string
 
-	Priority() int
+    Priority() int
 
-	Attributes() map[string]any
+    Attributes() map[string]any
 }

@@ -1,7 +1,7 @@
 package bunorm
 
 type ProviderDefinition struct {
-	Name      string
-	Provider  Provider
-	IsDefault bool
+    Name      string
+    Provider  Provider
+    IsDefault bool
 }

@@ -1,43 +1,43 @@
 package container
 
 import (
-	"reflect"
+    "reflect"
 )
 
 func canonicalServiceType(targetType reflect.Type) reflect.Type {
-	if nil == targetType {
-		return nil
-	}
+    if nil == targetType {
+        return nil
+    }
 
-	if reflect.Interface == targetType.Kind() {
-		return targetType
-	}
+    if reflect.Interface == targetType.Kind() {
+        return targetType
+    }
 
-	if reflect.Ptr != targetType.Kind() {
-		return reflect.PointerTo(targetType)
-	}
+    if reflect.Ptr != targetType.Kind() {
+        return reflect.PointerTo(targetType)
+    }
 
-	return targetType
+    return targetType
 }
 
 func defaultServiceNameForType(targetType reflect.Type) string {
-	canonicalType := canonicalServiceType(targetType)
+    canonicalType := canonicalServiceType(targetType)
 
-	if nil == canonicalType {
-		return ""
-	}
+    if nil == canonicalType {
+        return ""
+    }
 
-	return canonicalType.String()
+    return canonicalType.String()
 }
 
 func isAnyType(targetType reflect.Type) bool {
-	if nil == targetType {
-		return false
-	}
+    if nil == targetType {
+        return false
+    }
 
-	if reflect.Interface != targetType.Kind() {
-		return false
-	}
+    if reflect.Interface != targetType.Kind() {
+        return false
+    }
 
-	return 0 == targetType.NumMethod()
+    return 0 == targetType.NumMethod()
 }

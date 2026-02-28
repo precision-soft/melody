@@ -1,17 +1,17 @@
 package event
 
 const (
-	ProductDeletedEventName = "product.deleted"
+    ProductDeletedEventName = "product.deleted"
 )
 
 func NewProductDeletedEvent(productId string) *ProductDeletedEvent {
-	return &ProductDeletedEvent{productId: productId}
+    return &ProductDeletedEvent{productId: productId}
 }
 
 type ProductDeletedEvent struct {
-	productId string
+    productId string
 }
 
 func (instance *ProductDeletedEvent) ProductId() string {
-	return instance.productId
+    return instance.productId
 }

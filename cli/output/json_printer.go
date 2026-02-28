@@ -1,27 +1,27 @@
 package output
 
 import (
-	"encoding/json"
-	"io"
+    "encoding/json"
+    "io"
 )
 
 type JsonPrinter struct {
 }
 
 func (instance *JsonPrinter) Print(
-	writer io.Writer,
-	envelope Envelope,
-	option Option,
+    writer io.Writer,
+    envelope Envelope,
+    option Option,
 ) error {
-	encoder := json.NewEncoder(writer)
-	encoder.SetIndent("", "  ")
+    encoder := json.NewEncoder(writer)
+    encoder.SetIndent("", "  ")
 
-	encodeErr := encoder.Encode(envelope)
-	if nil != encodeErr {
-		return encodeErr
-	}
+    encodeErr := encoder.Encode(envelope)
+    if nil != encodeErr {
+        return encodeErr
+    }
 
-	return nil
+    return nil
 }
 
 var _ Printer = (*JsonPrinter)(nil)

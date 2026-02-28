@@ -1,7 +1,7 @@
 package contract
 
 import (
-	urfavecli "github.com/urfave/cli/v3"
+    urfavecli "github.com/urfave/cli/v3"
 )
 
 type CommandContext = urfavecli.Command

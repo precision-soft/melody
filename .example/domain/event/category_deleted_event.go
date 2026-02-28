@@ -1,17 +1,17 @@
 package event
 
 const (
-	CategoryDeletedEventName = "category.deleted"
+    CategoryDeletedEventName = "category.deleted"
 )
 
 func NewCategoryDeletedEvent(categoryId string) *CategoryDeletedEvent {
-	return &CategoryDeletedEvent{categoryId: categoryId}
+    return &CategoryDeletedEvent{categoryId: categoryId}
 }
 
 type CategoryDeletedEvent struct {
-	categoryId string
+    categoryId string
 }
 
 func (instance *CategoryDeletedEvent) CategoryId() string {
-	return instance.categoryId
+    return instance.categoryId
 }

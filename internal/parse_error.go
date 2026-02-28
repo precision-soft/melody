@@ -1,30 +1,30 @@
 package internal
 
 import (
-	"github.com/precision-soft/melody/exception"
+    "github.com/precision-soft/melody/exception"
 )
 
 func ParseError(
-	parameterName string,
-	expectedType string,
-	value any,
-	causeErr error,
+    parameterName string,
+    expectedType string,
+    value any,
+    causeErr error,
 ) *exception.Error {
-	message := "parameter is not a '" + expectedType + "'"
-	if nil != causeErr {
-		message = "parameter is not a valid '" + expectedType + "'"
-	}
+    message := "parameter is not a '" + expectedType + "'"
+    if nil != causeErr {
+        message = "parameter is not a valid '" + expectedType + "'"
+    }
 
-	context := map[string]any{
-		"parameterName": parameterName,
-		"expectedType":  expectedType,
-		"actualType":    StringifyType(value),
-	}
+    context := map[string]any{
+        "parameterName": parameterName,
+        "expectedType":  expectedType,
+        "actualType":    StringifyType(value),
+    }
 
-	stringValue, isString := value.(string)
-	if true == isString {
-		context["value"] = stringValue
-	}
+    stringValue, isString := value.(string)
+    if true == isString {
+        context["value"] = stringValue
+    }
 
-	return exception.NewError(message, context, causeErr)
+    return exception.NewError(message, context, causeErr)
 }

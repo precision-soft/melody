@@ -1,660 +1,660 @@
 package event
 
 import (
-	"fmt"
-	"reflect"
-	"runtime"
-	"runtime/debug"
-	"sort"
-	"sync"
-	"time"
+    "fmt"
+    "reflect"
+    "runtime"
+    "runtime/debug"
+    "sort"
+    "sync"
+    "time"
 
-	clockcontract "github.com/precision-soft/melody/v2/clock/contract"
-	eventcontract "github.com/precision-soft/melody/v2/event/contract"
-	"github.com/precision-soft/melody/v2/exception"
-	exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
-	"github.com/precision-soft/melody/v2/internal"
-	"github.com/precision-soft/melody/v2/logging"
-	loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
-	runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
+    clockcontract "github.com/precision-soft/melody/v2/clock/contract"
+    eventcontract "github.com/precision-soft/melody/v2/event/contract"
+    "github.com/precision-soft/melody/v2/exception"
+    exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
+    "github.com/precision-soft/melody/v2/internal"
+    "github.com/precision-soft/melody/v2/logging"
+    loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
+    runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
 )
 
 func NewEventDispatcher(clock clockcontract.Clock) *EventDispatcher {
-	if nil == clock {
-		exception.Panic(
-			exception.NewError("clock may not be nil", nil, nil),
-		)
-	}
+    if nil == clock {
+        exception.Panic(
+            exception.NewError("clock may not be nil", nil, nil),
+        )
+    }
 
-	return &EventDispatcher{
-		listeners:               make(map[string][]listenerWithPriority),
-		subscriberRegistrations: make(map[uintptr][]subscriberRegistration),
-		clock:                   clock,
-	}
+    return &EventDispatcher{
+        listeners:               make(map[string][]listenerWithPriority),
+        subscriberRegistrations: make(map[uintptr][]subscriberRegistration),
+        clock:                   clock,
+    }
 }
 
 type EventDispatcher struct {
-	mutex                   sync.RWMutex
-	listeners               map[string][]listenerWithPriority
-	subscriberRegistrations map[uintptr][]subscriberRegistration
-	clock                   clockcontract.Clock
-	nextListenerId          uint64
+    mutex                   sync.RWMutex
+    listeners               map[string][]listenerWithPriority
+    subscriberRegistrations map[uintptr][]subscriberRegistration
+    clock                   clockcontract.Clock
+    nextListenerId          uint64
 }
 
 func (instance *EventDispatcher) AddListener(
-	eventName string,
-	listener eventcontract.EventListener,
-	priority int,
+    eventName string,
+    listener eventcontract.EventListener,
+    priority int,
 ) eventcontract.ListenerRegistration {
-	if "" == eventName {
-		exception.Panic(
-			exception.NewError("event name is required to add a listener", nil, nil),
-		)
-	}
+    if "" == eventName {
+        exception.Panic(
+            exception.NewError("event name is required to add a listener", nil, nil),
+        )
+    }
 
-	if nil == listener {
-		exception.Panic(
-			exception.NewError(
-				"event listener is required to add a listener",
-				exceptioncontract.Context{
-					"eventName": eventName,
-				},
-				nil,
-			),
-		)
-	}
+    if nil == listener {
+        exception.Panic(
+            exception.NewError(
+                "event listener is required to add a listener",
+                exceptioncontract.Context{
+                    "eventName": eventName,
+                },
+                nil,
+            ),
+        )
+    }
 
-	instance.mutex.Lock()
-	instance.nextListenerId++
-	listenerId := instance.nextListenerId
+    instance.mutex.Lock()
+    instance.nextListenerId++
+    listenerId := instance.nextListenerId
 
-	instance.listeners[eventName] = append(
-		instance.listeners[eventName],
-		listenerWithPriority{
-			listener:   listener,
-			listenerId: listenerId,
-			priority:   priority,
-		},
-	)
+    instance.listeners[eventName] = append(
+        instance.listeners[eventName],
+        listenerWithPriority{
+            listener:   listener,
+            listenerId: listenerId,
+            priority:   priority,
+        },
+    )
 
-	sort.SliceStable(
-		instance.listeners[eventName],
-		func(i int, j int) bool {
-			if instance.listeners[eventName][i].priority == instance.listeners[eventName][j].priority {
-				return instance.listeners[eventName][i].listenerId < instance.listeners[eventName][j].listenerId
-			}
+    sort.SliceStable(
+        instance.listeners[eventName],
+        func(i int, j int) bool {
+            if instance.listeners[eventName][i].priority == instance.listeners[eventName][j].priority {
+                return instance.listeners[eventName][i].listenerId < instance.listeners[eventName][j].listenerId
+            }
 
-			return instance.listeners[eventName][i].priority > instance.listeners[eventName][j].priority
-		},
-	)
+            return instance.listeners[eventName][i].priority > instance.listeners[eventName][j].priority
+        },
+    )
 
-	instance.mutex.Unlock()
+    instance.mutex.Unlock()
 
-	return eventcontract.ListenerRegistration{
-		EventName:  eventName,
-		ListenerId: listenerId,
-	}
+    return eventcontract.ListenerRegistration{
+        EventName:  eventName,
+        ListenerId: listenerId,
+    }
 }
 
 func (instance *EventDispatcher) RemoveListener(registration eventcontract.ListenerRegistration) bool {
-	eventName := registration.EventName
-	if "" == eventName {
-		exception.Panic(
-			exception.NewError("event name is required to remove a listener", nil, nil),
-		)
-	}
+    eventName := registration.EventName
+    if "" == eventName {
+        exception.Panic(
+            exception.NewError("event name is required to remove a listener", nil, nil),
+        )
+    }
 
-	listenerId := registration.ListenerId
-	if 0 == listenerId {
-		exception.Panic(
-			exception.NewError(
-				"event listener id is required to remove a listener",
-				exceptioncontract.Context{
-					"eventName": eventName,
-				},
-				nil,
-			),
-		)
-	}
+    listenerId := registration.ListenerId
+    if 0 == listenerId {
+        exception.Panic(
+            exception.NewError(
+                "event listener id is required to remove a listener",
+                exceptioncontract.Context{
+                    "eventName": eventName,
+                },
+                nil,
+            ),
+        )
+    }
 
-	removedCount := instance.removeListenerById(
-		eventName,
-		listenerId,
-	)
-	if 0 == removedCount {
-		return false
-	}
+    removedCount := instance.removeListenerById(
+        eventName,
+        listenerId,
+    )
+    if 0 == removedCount {
+        return false
+    }
 
-	instance.mutex.Lock()
-	for subscriberPointer, registrationList := range instance.subscriberRegistrations {
-		filtered := make([]subscriberRegistration, 0, len(registrationList))
-		for _, registrationEntry := range registrationList {
-			if eventName == registrationEntry.eventName && listenerId == registrationEntry.listenerId {
-				continue
-			}
+    instance.mutex.Lock()
+    for subscriberPointer, registrationList := range instance.subscriberRegistrations {
+        filtered := make([]subscriberRegistration, 0, len(registrationList))
+        for _, registrationEntry := range registrationList {
+            if eventName == registrationEntry.eventName && listenerId == registrationEntry.listenerId {
+                continue
+            }
 
-			filtered = append(filtered, registrationEntry)
-		}
+            filtered = append(filtered, registrationEntry)
+        }
 
-		if 0 == len(filtered) {
-			delete(instance.subscriberRegistrations, subscriberPointer)
-			continue
-		}
+        if 0 == len(filtered) {
+            delete(instance.subscriberRegistrations, subscriberPointer)
+            continue
+        }
 
-		instance.subscriberRegistrations[subscriberPointer] = filtered
-	}
-	instance.mutex.Unlock()
+        instance.subscriberRegistrations[subscriberPointer] = filtered
+    }
+    instance.mutex.Unlock()
 
-	return true
+    return true
 }
 
 func (instance *EventDispatcher) AddSubscriber(subscriber eventcontract.EventSubscriber) {
-	if nil == subscriber {
-		exception.Panic(
-			exception.NewError("event subscriber may not be nil", nil, nil),
-		)
-	}
+    if nil == subscriber {
+        exception.Panic(
+            exception.NewError("event subscriber may not be nil", nil, nil),
+        )
+    }
 
-	subscribedEvents := subscriber.SubscribedEvents()
-	if nil == subscribedEvents {
-		exception.Panic(
-			exception.NewError("subscribed events may not be nil", nil, nil),
-		)
-	}
+    subscribedEvents := subscriber.SubscribedEvents()
+    if nil == subscribedEvents {
+        exception.Panic(
+            exception.NewError("subscribed events may not be nil", nil, nil),
+        )
+    }
 
-	subscriberPointer := eventSubscriberPointer(subscriber)
-	if 0 == subscriberPointer {
-		exception.Panic(
-			exception.NewError(
-				"event subscriber pointer is required to add a subscriber",
-				exceptioncontract.Context{
-					"subscriberType": reflect.TypeOf(subscriber).String(),
-				},
-				nil,
-			),
-		)
-	}
+    subscriberPointer := eventSubscriberPointer(subscriber)
+    if 0 == subscriberPointer {
+        exception.Panic(
+            exception.NewError(
+                "event subscriber pointer is required to add a subscriber",
+                exceptioncontract.Context{
+                    "subscriberType": reflect.TypeOf(subscriber).String(),
+                },
+                nil,
+            ),
+        )
+    }
 
-	eventNameList := make([]string, 0, len(subscribedEvents))
-	for eventName := range subscribedEvents {
-		if "" == eventName {
-			exception.Panic(
-				exception.NewError("event name may not be empty", nil, nil),
-			)
-		}
+    eventNameList := make([]string, 0, len(subscribedEvents))
+    for eventName := range subscribedEvents {
+        if "" == eventName {
+            exception.Panic(
+                exception.NewError("event name may not be empty", nil, nil),
+            )
+        }
 
-		eventNameList = append(eventNameList, eventName)
-	}
+        eventNameList = append(eventNameList, eventName)
+    }
 
-	sort.Strings(eventNameList)
+    sort.Strings(eventNameList)
 
-	for _, eventName := range eventNameList {
-		subscribedEventList := subscribedEvents[eventName]
-		if nil == subscribedEventList {
-			exception.Panic(
-				exception.NewError(
-					"subscribed event list may not be nil",
-					exceptioncontract.Context{"eventName": eventName},
-					nil,
-				),
-			)
-		}
+    for _, eventName := range eventNameList {
+        subscribedEventList := subscribedEvents[eventName]
+        if nil == subscribedEventList {
+            exception.Panic(
+                exception.NewError(
+                    "subscribed event list may not be nil",
+                    exceptioncontract.Context{"eventName": eventName},
+                    nil,
+                ),
+            )
+        }
 
-		for index, subscribedEvent := range subscribedEventList {
-			if nil == subscribedEvent {
-				exception.Panic(
-					exception.NewError(
-						"subscribed event may not be nil",
-						exceptioncontract.Context{
-							"eventName": eventName,
-							"index":     index,
-						},
-						nil,
-					),
-				)
-			}
+        for index, subscribedEvent := range subscribedEventList {
+            if nil == subscribedEvent {
+                exception.Panic(
+                    exception.NewError(
+                        "subscribed event may not be nil",
+                        exceptioncontract.Context{
+                            "eventName": eventName,
+                            "index":     index,
+                        },
+                        nil,
+                    ),
+                )
+            }
 
-			listener := subscribedEvent.Listener()
-			if nil == listener {
-				exception.Panic(
-					exception.NewError(
-						"subscribed event listener is required",
-						exceptioncontract.Context{
-							"eventName": eventName,
-							"index":     index,
-						},
-						nil,
-					),
-				)
-			}
+            listener := subscribedEvent.Listener()
+            if nil == listener {
+                exception.Panic(
+                    exception.NewError(
+                        "subscribed event listener is required",
+                        exceptioncontract.Context{
+                            "eventName": eventName,
+                            "index":     index,
+                        },
+                        nil,
+                    ),
+                )
+            }
 
-			registration := instance.AddListener(
-				eventName,
-				listener,
-				subscribedEvent.Priority(),
-			)
+            registration := instance.AddListener(
+                eventName,
+                listener,
+                subscribedEvent.Priority(),
+            )
 
-			subscriberType := reflect.TypeOf(subscriber).String()
+            subscriberType := reflect.TypeOf(subscriber).String()
 
-			instance.mutex.Lock()
-			instance.subscriberRegistrations[subscriberPointer] = append(
-				instance.subscriberRegistrations[subscriberPointer],
-				subscriberRegistration{
-					eventName:      eventName,
-					listenerId:     registration.ListenerId,
-					subscriberType: subscriberType,
-				},
-			)
-			instance.mutex.Unlock()
-		}
-	}
+            instance.mutex.Lock()
+            instance.subscriberRegistrations[subscriberPointer] = append(
+                instance.subscriberRegistrations[subscriberPointer],
+                subscriberRegistration{
+                    eventName:      eventName,
+                    listenerId:     registration.ListenerId,
+                    subscriberType: subscriberType,
+                },
+            )
+            instance.mutex.Unlock()
+        }
+    }
 }
 
 func (instance *EventDispatcher) RemoveSubscriber(subscriber eventcontract.EventSubscriber) int {
-	if nil == subscriber {
-		exception.Panic(
-			exception.NewError("event subscriber may not be nil", nil, nil),
-		)
-	}
+    if nil == subscriber {
+        exception.Panic(
+            exception.NewError("event subscriber may not be nil", nil, nil),
+        )
+    }
 
-	subscriberPointer := eventSubscriberPointer(subscriber)
-	if 0 == subscriberPointer {
-		exception.Panic(
-			exception.NewError(
-				"event subscriber pointer is required to remove a subscriber",
-				exceptioncontract.Context{
-					"subscriberType": reflect.TypeOf(subscriber).String(),
-				},
-				nil,
-			),
-		)
-	}
+    subscriberPointer := eventSubscriberPointer(subscriber)
+    if 0 == subscriberPointer {
+        exception.Panic(
+            exception.NewError(
+                "event subscriber pointer is required to remove a subscriber",
+                exceptioncontract.Context{
+                    "subscriberType": reflect.TypeOf(subscriber).String(),
+                },
+                nil,
+            ),
+        )
+    }
 
-	instance.mutex.Lock()
-	registrationList := instance.subscriberRegistrations[subscriberPointer]
-	delete(instance.subscriberRegistrations, subscriberPointer)
-	instance.mutex.Unlock()
+    instance.mutex.Lock()
+    registrationList := instance.subscriberRegistrations[subscriberPointer]
+    delete(instance.subscriberRegistrations, subscriberPointer)
+    instance.mutex.Unlock()
 
-	removedCount := 0
-	for _, registration := range registrationList {
-		removedCount = removedCount + instance.removeListenerById(
-			registration.eventName,
-			registration.listenerId,
-		)
-	}
+    removedCount := 0
+    for _, registration := range registrationList {
+        removedCount = removedCount + instance.removeListenerById(
+            registration.eventName,
+            registration.listenerId,
+        )
+    }
 
-	return removedCount
+    return removedCount
 }
 
 func (instance *EventDispatcher) Dispatch(runtimeInstance runtimecontract.Runtime, event eventcontract.Event) (eventcontract.Event, error) {
-	return instance.dispatchSafely(
-		runtimeInstance,
-		event,
-	)
+    return instance.dispatchSafely(
+        runtimeInstance,
+        event,
+    )
 }
 
 func (instance *EventDispatcher) DispatchName(runtimeInstance runtimecontract.Runtime, eventName string, payload any) (eventcontract.Event, error) {
-	event := NewEvent(
-		eventName,
-		payload,
-		instance.clock,
-	)
+    event := NewEvent(
+        eventName,
+        payload,
+        instance.clock,
+    )
 
-	return instance.Dispatch(
-		runtimeInstance,
-		event,
-	)
+    return instance.Dispatch(
+        runtimeInstance,
+        event,
+    )
 }
 
 func (instance *EventDispatcher) dispatchSafely(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) (eventcontract.Event, error) {
-	defer func() {
-		recoveredValue := recover()
-		if nil == recoveredValue {
-			return
-		}
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            return
+        }
 
-		exceptionValue, ok := recoveredValue.(*exception.Error)
-		if true == ok && nil != exceptionValue {
-			exception.Panic(exceptionValue)
-		}
+        exceptionValue, ok := recoveredValue.(*exception.Error)
+        if true == ok && nil != exceptionValue {
+            exception.Panic(exceptionValue)
+        }
 
-		eventName := "-"
-		eventType := "-"
+        eventName := "-"
+        eventType := "-"
 
-		if nil != eventValue {
-			eventName = eventValue.Name()
+        if nil != eventValue {
+            eventName = eventValue.Name()
 
-			eventTypeValue := reflect.TypeOf(eventValue)
-			if nil != eventTypeValue {
-				eventType = eventTypeValue.String()
-			}
-		}
+            eventTypeValue := reflect.TypeOf(eventValue)
+            if nil != eventTypeValue {
+                eventType = eventTypeValue.String()
+            }
+        }
 
-		exception.Panic(
-			exception.NewError(
-				"event dispatch panicked",
-				exceptioncontract.Context{
-					"eventName":      eventName,
-					"eventType":      eventType,
-					"recoveredValue": recoveredValue,
-					"panicStack":     string(debug.Stack()),
-				},
-				nil,
-			),
-		)
-	}()
+        exception.Panic(
+            exception.NewError(
+                "event dispatch panicked",
+                exceptioncontract.Context{
+                    "eventName":      eventName,
+                    "eventType":      eventType,
+                    "recoveredValue": recoveredValue,
+                    "panicStack":     string(debug.Stack()),
+                },
+                nil,
+            ),
+        )
+    }()
 
-	return instance.dispatch(
-		runtimeInstance,
-		eventValue,
-	)
+    return instance.dispatch(
+        runtimeInstance,
+        eventValue,
+    )
 }
 
 func (instance *EventDispatcher) dispatch(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) (eventcontract.Event, error) {
-	if nil == eventValue {
-		exception.Panic(
-			exception.NewError("event may not be nil", nil, nil),
-		)
-	}
+    if nil == eventValue {
+        exception.Panic(
+            exception.NewError("event may not be nil", nil, nil),
+        )
+    }
 
-	eventName := eventValue.Name()
-	if "" == eventName {
-		exception.Panic(
-			exception.NewError("event name may not be empty", nil, nil),
-		)
-	}
+    eventName := eventValue.Name()
+    if "" == eventName {
+        exception.Panic(
+            exception.NewError("event name may not be empty", nil, nil),
+        )
+    }
 
-	instance.mutex.RLock()
-	listenerList := instance.listeners[eventName]
-	listenerListSnapshot := append([]listenerWithPriority(nil), listenerList...)
-	instance.mutex.RUnlock()
+    instance.mutex.RLock()
+    listenerList := instance.listeners[eventName]
+    listenerListSnapshot := append([]listenerWithPriority(nil), listenerList...)
+    instance.mutex.RUnlock()
 
-	listenerList = listenerListSnapshot
+    listenerList = listenerListSnapshot
 
-	logger := logging.LoggerMustFromRuntime(runtimeInstance)
+    logger := logging.LoggerMustFromRuntime(runtimeInstance)
 
-	dispatchStartedAt := time.Now()
+    dispatchStartedAt := time.Now()
 
-	logger.Debug(
-		"event dispatch started",
-		loggingcontract.Context{
-			"eventName":      eventName,
-			"listenersCount": len(listenerList),
-		},
-	)
+    logger.Debug(
+        "event dispatch started",
+        loggingcontract.Context{
+            "eventName":      eventName,
+            "listenersCount": len(listenerList),
+        },
+    )
 
-	for _, entry := range listenerList {
-		listenerStartedAt := time.Now()
+    for _, entry := range listenerList {
+        listenerStartedAt := time.Now()
 
-		listenerName := "-"
-		listenerProgramCounter := reflect.ValueOf(entry.listener).Pointer()
-		function := runtime.FuncForPC(listenerProgramCounter)
-		if nil != function {
-			listenerName = function.Name()
-		}
+        listenerName := "-"
+        listenerProgramCounter := reflect.ValueOf(entry.listener).Pointer()
+        function := runtime.FuncForPC(listenerProgramCounter)
+        if nil != function {
+            listenerName = function.Name()
+        }
 
-		logger.Debug(
-			"event listener started",
-			loggingcontract.Context{
-				"eventName":        eventName,
-				"listenerName":     listenerName,
-				"listenerPriority": entry.priority,
-			},
-		)
+        logger.Debug(
+            "event listener started",
+            loggingcontract.Context{
+                "eventName":        eventName,
+                "listenerName":     listenerName,
+                "listenerPriority": entry.priority,
+            },
+        )
 
-		err := instance.callListenerSafely(
-			runtimeInstance,
-			eventName,
-			eventValue,
-			entry.listener,
-			listenerName,
-			entry.priority,
-			listenerStartedAt,
-			logger,
-		)
-		if nil != err {
-			return eventValue, err
-		}
+        err := instance.callListenerSafely(
+            runtimeInstance,
+            eventName,
+            eventValue,
+            entry.listener,
+            listenerName,
+            entry.priority,
+            listenerStartedAt,
+            logger,
+        )
+        if nil != err {
+            return eventValue, err
+        }
 
-		if true == eventValue.IsPropagationStopped() {
-			logger.Debug(
-				"event dispatch propagation stopped",
-				loggingcontract.Context{
-					"eventName": eventName,
-				},
-			)
+        if true == eventValue.IsPropagationStopped() {
+            logger.Debug(
+                "event dispatch propagation stopped",
+                loggingcontract.Context{
+                    "eventName": eventName,
+                },
+            )
 
-			break
-		}
-	}
+            break
+        }
+    }
 
-	logger.Debug(
-		"event dispatch finished",
-		loggingcontract.Context{
-			"eventName":  eventName,
-			"durationMs": time.Since(dispatchStartedAt).Milliseconds(),
-		},
-	)
+    logger.Debug(
+        "event dispatch finished",
+        loggingcontract.Context{
+            "eventName":  eventName,
+            "durationMs": time.Since(dispatchStartedAt).Milliseconds(),
+        },
+    )
 
-	return eventValue, nil
+    return eventValue, nil
 }
 
 func (instance *EventDispatcher) callListenerSafely(
-	runtimeInstance runtimecontract.Runtime,
-	eventName string,
-	eventValue eventcontract.Event,
-	listener eventcontract.EventListener,
-	listenerName string,
-	priority int,
-	listenerStartedAt time.Time,
-	logger loggingcontract.Logger,
+    runtimeInstance runtimecontract.Runtime,
+    eventName string,
+    eventValue eventcontract.Event,
+    listener eventcontract.EventListener,
+    listenerName string,
+    priority int,
+    listenerStartedAt time.Time,
+    logger loggingcontract.Logger,
 ) (returnedErr error) {
-	eventType := reflect.TypeOf(eventValue).String()
-	listenerType := internal.StringifyType(listener)
+    eventType := reflect.TypeOf(eventValue).String()
+    listenerType := internal.StringifyType(listener)
 
-	defer func() {
-		recoveredValue := recover()
-		if nil == recoveredValue {
-			return
-		}
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            return
+        }
 
-		durationMs := time.Since(listenerStartedAt).Milliseconds()
+        durationMs := time.Since(listenerStartedAt).Milliseconds()
 
-		baseContext := internal.NewEventListenerContext(
-			eventName,
-			eventType,
-			listenerName,
-			listenerType,
-			priority,
-			durationMs,
-		)
+        baseContext := internal.NewEventListenerContext(
+            eventName,
+            eventType,
+            listenerName,
+            listenerType,
+            priority,
+            durationMs,
+        )
 
-		exceptionContext := internal.NewEventListenerPanicContext(
-			baseContext,
-			recoveredValue,
-			fmt.Sprintf("%T", recoveredValue),
-			string(debug.Stack()),
-		)
+        exceptionContext := internal.NewEventListenerPanicContext(
+            baseContext,
+            recoveredValue,
+            fmt.Sprintf("%T", recoveredValue),
+            string(debug.Stack()),
+        )
 
-		exceptionErr := exception.NewError(
-			"event listener panicked",
-			exceptionContext,
-			nil,
-		)
-		_ = exception.MarkLogged(exceptionErr)
+        exceptionErr := exception.NewError(
+            "event listener panicked",
+            exceptionContext,
+            nil,
+        )
+        _ = exception.MarkLogged(exceptionErr)
 
-		logger.Error(
-			"event listener panicked",
-			exceptionContext,
-		)
+        logger.Error(
+            "event listener panicked",
+            exceptionContext,
+        )
 
-		returnedErr = exceptionErr
-	}()
+        returnedErr = exceptionErr
+    }()
 
-	listenerErr := listener(runtimeInstance, eventValue)
-	if nil == listenerErr {
-		return nil
-	}
+    listenerErr := listener(runtimeInstance, eventValue)
+    if nil == listenerErr {
+        return nil
+    }
 
-	durationMs := time.Since(listenerStartedAt).Milliseconds()
+    durationMs := time.Since(listenerStartedAt).Milliseconds()
 
-	exceptionContext := internal.NewEventListenerContext(
-		eventName,
-		eventType,
-		listenerName,
-		listenerType,
-		priority,
-		durationMs,
-	)
+    exceptionContext := internal.NewEventListenerContext(
+        eventName,
+        eventType,
+        listenerName,
+        listenerType,
+        priority,
+        durationMs,
+    )
 
-	exceptionErr := exception.NewError(
-		"event listener returned error",
-		exceptionContext,
-		listenerErr,
-	)
-	_ = exception.MarkLogged(exceptionErr)
+    exceptionErr := exception.NewError(
+        "event listener returned error",
+        exceptionContext,
+        listenerErr,
+    )
+    _ = exception.MarkLogged(exceptionErr)
 
-	logger.Error(
-		"event listener error",
-		exceptionContext,
-	)
+    logger.Error(
+        "event listener error",
+        exceptionContext,
+    )
 
-	return exceptionErr
+    return exceptionErr
 }
 
 func (instance *EventDispatcher) RegisteredEvents() []eventcontract.RegisteredEvent {
-	instance.mutex.RLock()
-	defer instance.mutex.RUnlock()
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
 
-	ownerByEventNameAndId := make(map[string]map[uint64]string)
+    ownerByEventNameAndId := make(map[string]map[uint64]string)
 
-	for _, registrationList := range instance.subscriberRegistrations {
-		for _, registration := range registrationList {
-			byId, exists := ownerByEventNameAndId[registration.eventName]
-			if false == exists {
-				byId = make(map[uint64]string)
-				ownerByEventNameAndId[registration.eventName] = byId
-			}
+    for _, registrationList := range instance.subscriberRegistrations {
+        for _, registration := range registrationList {
+            byId, exists := ownerByEventNameAndId[registration.eventName]
+            if false == exists {
+                byId = make(map[uint64]string)
+                ownerByEventNameAndId[registration.eventName] = byId
+            }
 
-			byId[registration.listenerId] = registration.subscriberType
-		}
-	}
+            byId[registration.listenerId] = registration.subscriberType
+        }
+    }
 
-	eventNameList := make([]string, 0, len(instance.listeners))
-	for eventName := range instance.listeners {
-		eventNameList = append(eventNameList, eventName)
-	}
+    eventNameList := make([]string, 0, len(instance.listeners))
+    for eventName := range instance.listeners {
+        eventNameList = append(eventNameList, eventName)
+    }
 
-	sort.Strings(eventNameList)
+    sort.Strings(eventNameList)
 
-	registeredEvents := make([]eventcontract.RegisteredEvent, 0, len(eventNameList))
+    registeredEvents := make([]eventcontract.RegisteredEvent, 0, len(eventNameList))
 
-	for _, eventName := range eventNameList {
-		listenerList := instance.listeners[eventName]
+    for _, eventName := range eventNameList {
+        listenerList := instance.listeners[eventName]
 
-		registeredListenerList := make([]eventcontract.RegisteredListener, 0, len(listenerList))
+        registeredListenerList := make([]eventcontract.RegisteredListener, 0, len(listenerList))
 
-		for _, entry := range listenerList {
-			source := eventcontract.RegisteredListenerSourceListener
-			owner := "-"
+        for _, entry := range listenerList {
+            source := eventcontract.RegisteredListenerSourceListener
+            owner := "-"
 
-			byId, exists := ownerByEventNameAndId[eventName]
-			if true == exists {
-				ownerValue, exists := byId[entry.listenerId]
-				if true == exists {
-					source = eventcontract.RegisteredListenerSourceSubscriber
-					owner = ownerValue
-				}
-			}
+            byId, exists := ownerByEventNameAndId[eventName]
+            if true == exists {
+                ownerValue, exists := byId[entry.listenerId]
+                if true == exists {
+                    source = eventcontract.RegisteredListenerSourceSubscriber
+                    owner = ownerValue
+                }
+            }
 
-			listenerId := fmt.Sprintf("%d", entry.listenerId)
+            listenerId := fmt.Sprintf("%d", entry.listenerId)
 
-			listenerName := "-"
-			listenerProgramCounter := reflect.ValueOf(entry.listener).Pointer()
-			function := runtime.FuncForPC(listenerProgramCounter)
-			if nil != function {
-				listenerName = function.Name()
-			}
+            listenerName := "-"
+            listenerProgramCounter := reflect.ValueOf(entry.listener).Pointer()
+            function := runtime.FuncForPC(listenerProgramCounter)
+            if nil != function {
+                listenerName = function.Name()
+            }
 
-			registeredListenerList = append(
-				registeredListenerList,
-				eventcontract.RegisteredListener{
-					Priority:     entry.priority,
-					Source:       source,
-					Owner:        owner,
-					ListenerId:   listenerId,
-					ListenerName: listenerName,
-				},
-			)
-		}
+            registeredListenerList = append(
+                registeredListenerList,
+                eventcontract.RegisteredListener{
+                    Priority:     entry.priority,
+                    Source:       source,
+                    Owner:        owner,
+                    ListenerId:   listenerId,
+                    ListenerName: listenerName,
+                },
+            )
+        }
 
-		registeredEvents = append(
-			registeredEvents,
-			eventcontract.RegisteredEvent{
-				EventName: eventName,
-				Listeners: registeredListenerList,
-			},
-		)
-	}
+        registeredEvents = append(
+            registeredEvents,
+            eventcontract.RegisteredEvent{
+                EventName: eventName,
+                Listeners: registeredListenerList,
+            },
+        )
+    }
 
-	return registeredEvents
+    return registeredEvents
 }
 
 func (instance *EventDispatcher) removeListenerById(eventName string, listenerId uint64) int {
-	instance.mutex.Lock()
-	defer instance.mutex.Unlock()
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
 
-	listenerList, exists := instance.listeners[eventName]
-	if false == exists {
-		return 0
-	}
+    listenerList, exists := instance.listeners[eventName]
+    if false == exists {
+        return 0
+    }
 
-	filtered := make([]listenerWithPriority, 0, len(listenerList))
-	removedCount := 0
+    filtered := make([]listenerWithPriority, 0, len(listenerList))
+    removedCount := 0
 
-	for _, entry := range listenerList {
-		if listenerId == entry.listenerId {
-			removedCount++
-			continue
-		}
+    for _, entry := range listenerList {
+        if listenerId == entry.listenerId {
+            removedCount++
+            continue
+        }
 
-		filtered = append(filtered, entry)
-	}
+        filtered = append(filtered, entry)
+    }
 
-	if 0 == len(filtered) {
-		delete(instance.listeners, eventName)
-		return removedCount
-	}
+    if 0 == len(filtered) {
+        delete(instance.listeners, eventName)
+        return removedCount
+    }
 
-	instance.listeners[eventName] = filtered
+    instance.listeners[eventName] = filtered
 
-	return removedCount
+    return removedCount
 }
 
 type listenerWithPriority struct {
-	listener   eventcontract.EventListener
-	listenerId uint64
-	priority   int
+    listener   eventcontract.EventListener
+    listenerId uint64
+    priority   int
 }
 
 type subscriberRegistration struct {
-	eventName      string
-	listenerId     uint64
-	subscriberType string
+    eventName      string
+    listenerId     uint64
+    subscriberType string
 }
 
 var _ eventcontract.EventDispatcher = (*EventDispatcher)(nil)
 var _ eventcontract.EventDispatcherInspector = (*EventDispatcher)(nil)
 
 func eventSubscriberPointer(subscriber eventcontract.EventSubscriber) uintptr {
-	if nil == subscriber {
-		return 0
-	}
+    if nil == subscriber {
+        return 0
+    }
 
-	subscriberValue := reflect.ValueOf(subscriber)
-	if reflect.Ptr != subscriberValue.Kind() {
-		return 0
-	}
+    subscriberValue := reflect.ValueOf(subscriber)
+    if reflect.Ptr != subscriberValue.Kind() {
+        return 0
+    }
 
-	return subscriberValue.Pointer()
+    return subscriberValue.Pointer()
 }

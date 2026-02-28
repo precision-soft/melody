@@ -3,28 +3,28 @@
 package application
 
 import (
-	"io/fs"
+    "io/fs"
 
-	"github.com/precision-soft/melody/config"
-	configcontract "github.com/precision-soft/melody/config/contract"
-	"github.com/precision-soft/melody/exception"
+    "github.com/precision-soft/melody/config"
+    configcontract "github.com/precision-soft/melody/config/contract"
+    "github.com/precision-soft/melody/exception"
 )
 
 func newEnvironmentSource(
-	projectDirectory string,
-	embeddedEnvFiles fs.FS,
+    projectDirectory string,
+    embeddedEnvFiles fs.FS,
 ) configcontract.EnvironmentSource {
-	_ = projectDirectory
+    _ = projectDirectory
 
-	if nil == embeddedEnvFiles {
-		exception.Panic(
-			exception.NewError(
-				"embedded environment files are not provided",
-				map[string]any{"buildTag": "melody_env_embedded", "projectDirectory": projectDirectory},
-				nil,
-			),
-		)
-	}
+    if nil == embeddedEnvFiles {
+        exception.Panic(
+            exception.NewError(
+                "embedded environment files are not provided",
+                map[string]any{"buildTag": "melody_env_embedded", "projectDirectory": projectDirectory},
+                nil,
+            ),
+        )
+    }
 
-	return config.NewEnvironmentSource(embeddedEnvFiles, ".")
+    return config.NewEnvironmentSource(embeddedEnvFiles, ".")
 }

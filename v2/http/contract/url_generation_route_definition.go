@@ -1,13 +1,13 @@
 package contract
 
 import (
-	"regexp"
+    "regexp"
 )
 
 type UrlGenerationRouteDefinition interface {
-	Pattern() string
+    Pattern() string
 
-	Defaults() map[string]string
+    Defaults() map[string]string
 
-	Requirements() map[string]*regexp.Regexp
+    Requirements() map[string]*regexp.Regexp
 }

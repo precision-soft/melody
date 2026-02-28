@@ -1,15 +1,15 @@
 package bootstrap
 
 import (
-	melodyapplication "github.com/precision-soft/melody/v2/application"
+    melodyapplication "github.com/precision-soft/melody/v2/application"
 )
 
 func Configure(app *melodyapplication.Application) {
-	registerServices(app)
+    registerServices(app)
 
-	app.RegisterModule(NewExampleModule())
+    app.RegisterModule(NewExampleModule())
 
-	app.RegisterHttpMiddlewares(
-		NewTimingMiddleware(),
-	)
+    app.RegisterHttpMiddlewares(
+        NewTimingMiddleware(),
+    )
 }

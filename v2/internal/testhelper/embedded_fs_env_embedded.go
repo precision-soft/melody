@@ -3,14 +3,14 @@
 package testhelper
 
 import (
-	"io/fs"
-	"testing/fstest"
+    "io/fs"
+    "testing/fstest"
 )
 
 func NewEmbeddedEnvFs() fs.FS {
-	return fstest.MapFS{}
+    return fstest.MapFS{}
 }
 
 func NewEmbeddedStaticFs() fs.FS {
-	return nil
+    return nil
 }

@@ -1,16 +1,16 @@
 package contract
 
 import (
-	"io"
-	nethttp "net/http"
+    "io"
+    nethttp "net/http"
 )
 
 type StreamResponse interface {
-	StatusCode() int
+    StatusCode() int
 
-	Headers() nethttp.Header
+    Headers() nethttp.Header
 
-	Body() io.ReadCloser
+    Body() io.ReadCloser
 
-	Close() error
+    Close() error
 }

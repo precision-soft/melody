@@ -1,32 +1,32 @@
 package contract
 
 import (
-	nethttp "net/http"
+    nethttp "net/http"
 
-	bagcontract "github.com/precision-soft/melody/bag/contract"
-	runtimecontract "github.com/precision-soft/melody/runtime/contract"
+    bagcontract "github.com/precision-soft/melody/bag/contract"
+    runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
 type Request interface {
-	HttpRequest() *nethttp.Request
+    HttpRequest() *nethttp.Request
 
-	Param(name string) (string, bool)
+    Param(name string) (string, bool)
 
-	Params() map[string]string
+    Params() map[string]string
 
-	Query() bagcontract.ParameterBag
+    Query() bagcontract.ParameterBag
 
-	Post() bagcontract.ParameterBag
+    Post() bagcontract.ParameterBag
 
-	Attributes() bagcontract.ParameterBag
+    Attributes() bagcontract.ParameterBag
 
-	Header(name string) string
+    Header(name string) string
 
-	RouteName() string
+    RouteName() string
 
-	RoutePattern() string
+    RoutePattern() string
 
-	RuntimeInstance() runtimecontract.Runtime
+    RuntimeInstance() runtimecontract.Runtime
 
-	RequestContext() RequestContext
+    RequestContext() RequestContext
 }

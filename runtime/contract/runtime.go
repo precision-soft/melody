@@ -1,15 +1,15 @@
 package contract
 
 import (
-	"context"
+    "context"
 
-	containercontract "github.com/precision-soft/melody/container/contract"
+    containercontract "github.com/precision-soft/melody/container/contract"
 )
 
 type Runtime interface {
-	Context() context.Context
+    Context() context.Context
 
-	Scope() containercontract.Scope
+    Scope() containercontract.Scope
 
-	Container() containercontract.Container
+    Container() containercontract.Container
 }

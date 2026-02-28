@@ -4,5 +4,5 @@ package version
 var buildVersion = "dev"
 
 func BuildVersion() string {
-	return buildVersion
+    return buildVersion
 }

@@ -1,11 +1,11 @@
 package contract
 
 import (
-	"time"
+    "time"
 )
 
 type RequestContext interface {
-	RequestId() string
+    RequestId() string
 
-	StartedAt() time.Time
+    StartedAt() time.Time
 }

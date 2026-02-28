@@ -3,20 +3,20 @@
 package application
 
 import (
-	"io/fs"
-	"os"
+    "io/fs"
+    "os"
 
-	"github.com/precision-soft/melody/v2/config"
-	configcontract "github.com/precision-soft/melody/v2/config/contract"
+    "github.com/precision-soft/melody/v2/config"
+    configcontract "github.com/precision-soft/melody/v2/config/contract"
 )
 
 func newEnvironmentSource(
-	projectDirectory string,
-	embeddedEnvFiles fs.FS,
+    projectDirectory string,
+    embeddedEnvFiles fs.FS,
 ) configcontract.EnvironmentSource {
-	_ = embeddedEnvFiles
+    _ = embeddedEnvFiles
 
-	fileSystem := os.DirFS(projectDirectory)
+    fileSystem := os.DirFS(projectDirectory)
 
-	return config.NewEnvironmentSource(fileSystem, ".")
+    return config.NewEnvironmentSource(fileSystem, ".")
 }

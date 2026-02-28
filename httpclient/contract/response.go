@@ -3,23 +3,23 @@ package contract
 import nethttp "net/http"
 
 type Response interface {
-	StatusCode() int
+    StatusCode() int
 
-	Status() string
+    Status() string
 
-	Headers() nethttp.Header
+    Headers() nethttp.Header
 
-	Body() []byte
+    Body() []byte
 
-	Request() *nethttp.Request
+    Request() *nethttp.Request
 
-	Json(target any) error
+    Json(target any) error
 
-	String() string
+    String() string
 
-	IsSuccess() bool
+    IsSuccess() bool
 
-	IsClientError() bool
+    IsClientError() bool
 
-	IsServerError() bool
+    IsServerError() bool
 }

@@ -1,21 +1,21 @@
 package contract
 
 import (
-	loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
+    loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
 )
 
 type KernelConfiguration interface {
-	DefaultMode() string
+    DefaultMode() string
 
-	Env() string
+    Env() string
 
-	ProjectDir() string
+    ProjectDir() string
 
-	LogsDir() string
+    LogsDir() string
 
-	CacheDir() string
+    CacheDir() string
 
-	LogPath() string
+    LogPath() string
 
-	LogLevel() loggingcontract.Level
+    LogLevel() loggingcontract.Level
 }

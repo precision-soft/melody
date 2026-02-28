@@ -1,11 +1,11 @@
 package contract
 
 type SubscribedEvent interface {
-	Listener() EventListener
+    Listener() EventListener
 
-	Priority() int
+    Priority() int
 }
 
 type EventSubscriber interface {
-	SubscribedEvents() map[string][]SubscribedEvent
+    SubscribedEvents() map[string][]SubscribedEvent
 }

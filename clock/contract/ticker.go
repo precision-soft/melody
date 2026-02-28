@@ -1,11 +1,11 @@
 package contract
 
 import (
-	"time"
+    "time"
 )
 
 type Ticker interface {
-	Channel() <-chan time.Time
+    Channel() <-chan time.Time
 
-	Stop()
+    Stop()
 }

@@ -1,85 +1,85 @@
 package route
 
 const (
-	LoginPageName    = "example.login.page"
-	LoginPagePattern = "/login/"
+    LoginPageName    = "example.login.page"
+    LoginPagePattern = "/login/"
 
-	LoginSubmitName    = "example.login.submit"
-	LoginSubmitPattern = "/login/"
+    LoginSubmitName    = "example.login.submit"
+    LoginSubmitPattern = "/login/"
 
-	LogoutName    = "example.logout"
-	LogoutPattern = "/logout/"
+    LogoutName    = "example.logout"
+    LogoutPattern = "/logout/"
 
-	RoutesName    = "example.routes"
-	RoutesPattern = "/routes/"
+    RoutesName    = "example.routes"
+    RoutesPattern = "/routes/"
 
-	/** @info products start */
+    /** @info products start */
 
-	ProductsPrefix = "/products"
+    ProductsPrefix = "/products"
 
-	ProductsListPageName    = "example.products.list.page"
-	ProductsListPagePattern = ProductsPrefix + "/"
+    ProductsListPageName    = "example.products.list.page"
+    ProductsListPagePattern = ProductsPrefix + "/"
 
-	ProductsUpdatePageName    = "example.products.update.page"
-	ProductsUpdatePagePattern = ProductsPrefix + "/update/:id/"
+    ProductsUpdatePageName    = "example.products.update.page"
+    ProductsUpdatePagePattern = ProductsPrefix + "/update/:id/"
 
-	ProductsCreatePageName    = "example.products.create.page"
-	ProductsCreatePagePattern = ProductsPrefix + "/create/"
+    ProductsCreatePageName    = "example.products.create.page"
+    ProductsCreatePagePattern = ProductsPrefix + "/create/"
 
-	ProductsApiCreateName    = "example.products.api.create"
-	ProductsApiCreatePattern = ProductsPrefix + "/api/create/"
+    ProductsApiCreateName    = "example.products.api.create"
+    ProductsApiCreatePattern = ProductsPrefix + "/api/create/"
 
-	ProductsApiReadAllName    = "example.products.api.read.all"
-	ProductsApiReadAllPattern = ProductsPrefix + "/api/read/"
+    ProductsApiReadAllName    = "example.products.api.read.all"
+    ProductsApiReadAllPattern = ProductsPrefix + "/api/read/"
 
-	ProductsApiReadName    = "example.products.api.read"
-	ProductsApiReadPattern = ProductsPrefix + "/api/read/:id/"
+    ProductsApiReadName    = "example.products.api.read"
+    ProductsApiReadPattern = ProductsPrefix + "/api/read/:id/"
 
-	ProductsApiUpdateName    = "example.products.api.update"
-	ProductsApiUpdatePattern = ProductsPrefix + "/api/update/:id/"
+    ProductsApiUpdateName    = "example.products.api.update"
+    ProductsApiUpdatePattern = ProductsPrefix + "/api/update/:id/"
 
-	ProductsApiDeleteName    = "example.products.api.delete"
-	ProductsApiDeletePattern = ProductsPrefix + "/api/delete/:id/"
+    ProductsApiDeleteName    = "example.products.api.delete"
+    ProductsApiDeletePattern = ProductsPrefix + "/api/delete/:id/"
 
-	/** @info categories start */
+    /** @info categories start */
 
-	CategoriesPrefix = "/categories"
+    CategoriesPrefix = "/categories"
 
-	CategoriesApiReadAllName    = "example.categories.api.read.all"
-	CategoriesApiReadAllPattern = CategoriesPrefix + "/api/read/"
+    CategoriesApiReadAllName    = "example.categories.api.read.all"
+    CategoriesApiReadAllPattern = CategoriesPrefix + "/api/read/"
 
-	/** @info currencies start */
+    /** @info currencies start */
 
-	CurrenciesPrefix = "/currencies"
+    CurrenciesPrefix = "/currencies"
 
-	CurrenciesApiReadAllName    = "example.currencies.api.read.all"
-	CurrenciesApiReadAllPattern = CurrenciesPrefix + "/api/read/"
+    CurrenciesApiReadAllName    = "example.currencies.api.read.all"
+    CurrenciesApiReadAllPattern = CurrenciesPrefix + "/api/read/"
 
-	/** @info users start */
+    /** @info users start */
 
-	UsersPrefix = "/users"
+    UsersPrefix = "/users"
 
-	UsersListPageName    = "example.users.list.page"
-	UsersListPagePattern = UsersPrefix + "/"
+    UsersListPageName    = "example.users.list.page"
+    UsersListPagePattern = UsersPrefix + "/"
 
-	UsersUpdatePageName    = "example.users.update.page"
-	UsersUpdatePagePattern = UsersPrefix + "/update/:id/"
+    UsersUpdatePageName    = "example.users.update.page"
+    UsersUpdatePagePattern = UsersPrefix + "/update/:id/"
 
-	UsersCreatePageName    = "example.users.create.page"
-	UsersCreatePagePattern = UsersPrefix + "/create/"
+    UsersCreatePageName    = "example.users.create.page"
+    UsersCreatePagePattern = UsersPrefix + "/create/"
 
-	UsersApiCreateName    = "example.users.api.create"
-	UsersApiCreatePattern = UsersPrefix + "/api/create/"
+    UsersApiCreateName    = "example.users.api.create"
+    UsersApiCreatePattern = UsersPrefix + "/api/create/"
 
-	UsersApiReadAllName    = "example.users.api.read.all"
-	UsersApiReadAllPattern = UsersPrefix + "/api/read/"
+    UsersApiReadAllName    = "example.users.api.read.all"
+    UsersApiReadAllPattern = UsersPrefix + "/api/read/"
 
-	UsersApiReadName    = "example.users.api.read"
-	UsersApiReadPattern = UsersPrefix + "/api/read/:id/"
+    UsersApiReadName    = "example.users.api.read"
+    UsersApiReadPattern = UsersPrefix + "/api/read/:id/"
 
-	UsersApiUpdateName    = "example.users.api.update"
-	UsersApiUpdatePattern = UsersPrefix + "/api/update/:id/"
+    UsersApiUpdateName    = "example.users.api.update"
+    UsersApiUpdatePattern = UsersPrefix + "/api/update/:id/"
 
-	UsersApiDeleteName    = "example.users.api.delete"
-	UsersApiDeletePattern = UsersPrefix + "/api/delete/:id/"
+    UsersApiDeleteName    = "example.users.api.delete"
+    UsersApiDeletePattern = UsersPrefix + "/api/delete/:id/"
 )

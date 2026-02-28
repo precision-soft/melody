@@ -1,13 +1,13 @@
 package contract
 
 type ScopeManager interface {
-	NewScope() Scope
+    NewScope() Scope
 }
 
 type Scope interface {
-	Resolver
+    Resolver
 
-	OverrideService
+    OverrideService
 
-	Close() error
+    Close() error
 }

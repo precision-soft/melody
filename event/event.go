@@ -1,89 +1,89 @@
 package event
 
 import (
-	"time"
+    "time"
 
-	clockcontract "github.com/precision-soft/melody/clock/contract"
-	eventcontract "github.com/precision-soft/melody/event/contract"
-	"github.com/precision-soft/melody/exception"
-	"github.com/precision-soft/melody/internal"
+    clockcontract "github.com/precision-soft/melody/clock/contract"
+    eventcontract "github.com/precision-soft/melody/event/contract"
+    "github.com/precision-soft/melody/exception"
+    "github.com/precision-soft/melody/internal"
 )
 
 func NewEvent(
-	name string,
-	payload any,
-	clockInstance clockcontract.Clock,
+    name string,
+    payload any,
+    clockInstance clockcontract.Clock,
 ) *Event {
-	if true == internal.IsNilInterface(clockInstance) {
-		exception.Panic(
-			exception.NewError(
-				"clock is nil",
-				nil,
-				nil,
-			),
-		)
-	}
+    if true == internal.IsNilInterface(clockInstance) {
+        exception.Panic(
+            exception.NewError(
+                "clock is nil",
+                nil,
+                nil,
+            ),
+        )
+    }
 
-	return NewEventWithTimestamp(
-		name,
-		payload,
-		clockInstance.Now(),
-	)
+    return NewEventWithTimestamp(
+        name,
+        payload,
+        clockInstance.Now(),
+    )
 }
 
 func NewEventFromEvent(event eventcontract.Event) *Event {
-	if nil == event {
-		exception.Panic(
-			exception.NewError("event value may not be nil", nil, nil),
-		)
-	}
+    if nil == event {
+        exception.Panic(
+            exception.NewError("event value may not be nil", nil, nil),
+        )
+    }
 
-	return NewEventWithTimestamp(
-		event.Name(),
-		event.Payload(),
-		event.Timestamp(),
-	)
+    return NewEventWithTimestamp(
+        event.Name(),
+        event.Payload(),
+        event.Timestamp(),
+    )
 }
 
 func NewEventWithTimestamp(name string, payload any, timestamp time.Time) *Event {
-	if "" == name {
-		exception.Panic(
-			exception.NewError("event name may not be empty", nil, nil),
-		)
-	}
+    if "" == name {
+        exception.Panic(
+            exception.NewError("event name may not be empty", nil, nil),
+        )
+    }
 
-	return &Event{
-		name:      name,
-		payload:   payload,
-		timestamp: timestamp,
-	}
+    return &Event{
+        name:      name,
+        payload:   payload,
+        timestamp: timestamp,
+    }
 }
 
 type Event struct {
-	name               string
-	payload            any
-	timestamp          time.Time
-	propagationStopped bool
+    name               string
+    payload            any
+    timestamp          time.Time
+    propagationStopped bool
 }
 
 func (instance *Event) Name() string {
-	return instance.name
+    return instance.name
 }
 
 func (instance *Event) Payload() any {
-	return instance.payload
+    return instance.payload
 }
 
 func (instance *Event) Timestamp() time.Time {
-	return instance.timestamp
+    return instance.timestamp
 }
 
 func (instance *Event) StopPropagation() {
-	instance.propagationStopped = true
+    instance.propagationStopped = true
 }
 
 func (instance *Event) IsPropagationStopped() bool {
-	return true == instance.propagationStopped
+    return true == instance.propagationStopped
 }
 
 var _ eventcontract.Event = (*Event)(nil)

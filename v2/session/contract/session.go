@@ -1,23 +1,23 @@
 package contract
 
 type Session interface {
-	Id() string
+    Id() string
 
-	Get(key string) any
+    Get(key string) any
 
-	String(key string) string
+    String(key string) string
 
-	Set(key string, value any)
+    Set(key string, value any)
 
-	Has(key string) bool
+    Has(key string) bool
 
-	Delete(key string)
+    Delete(key string)
 
-	Clear()
+    Clear()
 
-	All() map[string]any
+    All() map[string]any
 
-	IsModified() bool
+    IsModified() bool
 
-	IsCleared() bool
+    IsCleared() bool
 }

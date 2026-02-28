@@ -1,23 +1,23 @@
 package event
 
 import (
-	"github.com/precision-soft/melody/.example/domain/entity"
+    "github.com/precision-soft/melody/.example/domain/entity"
 )
 
 const (
-	ProductUpdatedEventName = "product.updated"
+    ProductUpdatedEventName = "product.updated"
 )
 
 func NewProductUpdatedEvent(product *entity.Product) *ProductUpdatedEvent {
-	return &ProductUpdatedEvent{
-		product: product,
-	}
+    return &ProductUpdatedEvent{
+        product: product,
+    }
 }
 
 type ProductUpdatedEvent struct {
-	product *entity.Product
+    product *entity.Product
 }
 
 func (instance *ProductUpdatedEvent) Product() *entity.Product {
-	return instance.product
+    return instance.product
 }

@@ -1,5 +1,5 @@
 package session
 
 const (
-	SessionCookieName = "MELODYSESSID"
+    SessionCookieName = "MELODYSESSID"
 )

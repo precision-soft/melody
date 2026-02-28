@@ -1,12 +1,12 @@
 package pgsql
 
 import (
-	"context"
+    "context"
 
-	"github.com/uptrace/bun/driver/pgdriver"
+    "github.com/uptrace/bun/driver/pgdriver"
 )
 
 type PostBuildHook func(
-	ctx context.Context,
-	connector *pgdriver.Connector,
+    ctx context.Context,
+    connector *pgdriver.Connector,
 ) error

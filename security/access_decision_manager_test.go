@@ -1,13 +1,13 @@
 package security
 
 import (
-	"testing"
+    "testing"
 
-	securitycontract "github.com/precision-soft/melody/security/contract"
+    securitycontract "github.com/precision-soft/melody/security/contract"
 )
 
 type securityTestToken struct {
-	roles []string
+    roles []string
 }
 
 func (instance *securityTestToken) UserIdentifier() string { return "u" }
@@ -15,57 +15,57 @@ func (instance *securityTestToken) Roles() []string        { return instance.rol
 func (instance *securityTestToken) IsAuthenticated() bool  { return true }
 
 type securityTestVoter struct {
-	attribute string
-	result    securitycontract.VoteResult
+    attribute string
+    result    securitycontract.VoteResult
 }
 
 func (instance *securityTestVoter) Supports(attribute string, subject any) bool {
-	return instance.attribute == attribute
+    return instance.attribute == attribute
 }
 
 func (instance *securityTestVoter) Vote(token securitycontract.Token, attribute string, subject any) securitycontract.VoteResult {
-	return instance.result
+    return instance.result
 }
 
 func TestAccessDecisionManager_InvalidStrategyPanics(t *testing.T) {
-	defer func() {
-		recoveredValue := recover()
-		if nil == recoveredValue {
-			t.Fatalf("expected panic")
-		}
-	}()
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected panic")
+        }
+    }()
 
-	_ = NewAccessDecisionManager(
-		securitycontract.DecisionStrategy(999),
-	)
+    _ = NewAccessDecisionManager(
+        securitycontract.DecisionStrategy(999),
+    )
 }
 
 func TestAccessDecisionManager_Affirmative_GrantsIfAnyGranted(t *testing.T) {
-	manager := NewAccessDecisionManager(
-		securitycontract.DecisionStrategyAffirmative,
-		&securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteDenied},
-		&securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted},
-	)
+    manager := NewAccessDecisionManager(
+        securitycontract.DecisionStrategyAffirmative,
+        &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteDenied},
+        &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted},
+    )
 
-	token := &securityTestToken{roles: []string{"ROLE_ADMIN"}}
+    token := &securityTestToken{roles: []string{"ROLE_ADMIN"}}
 
-	err := manager.DecideAny(token, []string{"ROLE_ADMIN"}, nil)
-	if nil != err {
-		t.Fatalf("expected granted: %v", err)
-	}
+    err := manager.DecideAny(token, []string{"ROLE_ADMIN"}, nil)
+    if nil != err {
+        t.Fatalf("expected granted: %v", err)
+    }
 }
 
 func TestAccessDecisionManager_Unanimous_DeniesIfAnyDenied(t *testing.T) {
-	manager := NewAccessDecisionManager(
-		securitycontract.DecisionStrategyUnanimous,
-		&securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted},
-		&securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteDenied},
-	)
+    manager := NewAccessDecisionManager(
+        securitycontract.DecisionStrategyUnanimous,
+        &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted},
+        &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteDenied},
+    )
 
-	token := &securityTestToken{roles: []string{"ROLE_ADMIN"}}
+    token := &securityTestToken{roles: []string{"ROLE_ADMIN"}}
 
-	err := manager.DecideAny(token, []string{"ROLE_ADMIN"}, nil)
-	if nil == err {
-		t.Fatalf("expected denied")
-	}
+    err := manager.DecideAny(token, []string{"ROLE_ADMIN"}, nil)
+    if nil == err {
+        t.Fatalf("expected denied")
+    }
 }

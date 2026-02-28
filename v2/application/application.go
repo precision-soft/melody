@@ -1,165 +1,165 @@
 package application
 
 import (
-	"context"
-	"io/fs"
+    "context"
+    "io/fs"
 
-	applicationcontract "github.com/precision-soft/melody/v2/application/contract"
-	clicontract "github.com/precision-soft/melody/v2/cli/contract"
-	"github.com/precision-soft/melody/v2/config"
-	configcontract "github.com/precision-soft/melody/v2/config/contract"
-	"github.com/precision-soft/melody/v2/exception"
-	exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
-	httpcontract "github.com/precision-soft/melody/v2/http/contract"
-	kernelcontract "github.com/precision-soft/melody/v2/kernel/contract"
-	"github.com/precision-soft/melody/v2/logging"
-	"github.com/precision-soft/melody/v2/security"
+    applicationcontract "github.com/precision-soft/melody/v2/application/contract"
+    clicontract "github.com/precision-soft/melody/v2/cli/contract"
+    "github.com/precision-soft/melody/v2/config"
+    configcontract "github.com/precision-soft/melody/v2/config/contract"
+    "github.com/precision-soft/melody/v2/exception"
+    exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
+    httpcontract "github.com/precision-soft/melody/v2/http/contract"
+    kernelcontract "github.com/precision-soft/melody/v2/kernel/contract"
+    "github.com/precision-soft/melody/v2/logging"
+    "github.com/precision-soft/melody/v2/security"
 )
 
 type RouteRegistrar func(kernelInstance kernelcontract.Kernel)
 
 type Application struct {
-	booted                bool
-	configuration         configcontract.Configuration
-	runtimeFlags          *RuntimeFlags
-	kernel                kernelcontract.Kernel
-	embeddedPublicFiles   fs.FS
-	modules               []applicationcontract.Module
-	cliCommands           []clicontract.Command
-	httpRouteRegistrars   []RouteRegistrar
-	httpMiddlewares       *HttpMiddleware
-	securityConfiguration *security.CompiledConfiguration
-	routeRegistry         httpcontract.RouteRegistry
+    booted                bool
+    configuration         configcontract.Configuration
+    runtimeFlags          *RuntimeFlags
+    kernel                kernelcontract.Kernel
+    embeddedPublicFiles   fs.FS
+    modules               []applicationcontract.Module
+    cliCommands           []clicontract.Command
+    httpRouteRegistrars   []RouteRegistrar
+    httpMiddlewares       *HttpMiddleware
+    securityConfiguration *security.CompiledConfiguration
+    routeRegistry         httpcontract.RouteRegistry
 }
 
 func (instance *Application) Boot() kernelcontract.Kernel {
-	if true == instance.booted {
-		return instance.kernel
-	}
+    if true == instance.booted {
+        return instance.kernel
+    }
 
-	defer instance.logOnRecoverAndExit()
+    defer instance.logOnRecoverAndExit()
 
-	configuration := instance.configuration
+    configuration := instance.configuration
 
-	instance.bootModulesPreConfigurationResolve()
+    instance.bootModulesPreConfigurationResolve()
 
-	resolveErr := configuration.Resolve()
-	if nil != resolveErr {
-		exception.Panic(
-			exception.NewError("could not resolve the config parameters on boot", nil, resolveErr),
-		)
-	}
+    resolveErr := configuration.Resolve()
+    if nil != resolveErr {
+        exception.Panic(
+            exception.NewError("could not resolve the config parameters on boot", nil, resolveErr),
+        )
+    }
 
-	instance.ensureRuntimeDirectories()
+    instance.ensureRuntimeDirectories()
 
-	instance.bootModulesPostConfigurationResolve()
+    instance.bootModulesPostConfigurationResolve()
 
-	instance.bootContainer()
+    instance.bootContainer()
 
-	instance.bootCli()
+    instance.bootCli()
 
-	instance.bootHttp()
+    instance.bootHttp()
 
-	instance.booted = true
+    instance.booted = true
 
-	return instance.kernel
+    return instance.kernel
 }
 
 func (instance *Application) RegisterParameter(
-	name string,
-	value any,
+    name string,
+    value any,
 ) {
-	if true == instance.booted {
-		exception.Panic(
-			exception.NewError(
-				"cannot register parameter after application boot",
-				exceptioncontract.Context{
-					"parameterName": name,
-				},
-				nil,
-			),
-		)
-	}
+    if true == instance.booted {
+        exception.Panic(
+            exception.NewError(
+                "cannot register parameter after application boot",
+                exceptioncontract.Context{
+                    "parameterName": name,
+                },
+                nil,
+            ),
+        )
+    }
 
-	instance.configuration.RegisterRuntime(name, value)
+    instance.configuration.RegisterRuntime(name, value)
 }
 
 func (instance *Application) Run(ctx context.Context) {
-	_ = instance.Boot()
+    _ = instance.Boot()
 
-	defer instance.logOnRecoverAndExit()
+    defer instance.logOnRecoverAndExit()
 
-	defer instance.Close()
+    defer instance.Close()
 
-	if config.ModeCli == instance.runtimeFlags.Mode() {
-		stripRuntimeFlagsFromOsArgs()
+    if config.ModeCli == instance.runtimeFlags.Mode() {
+        stripRuntimeFlagsFromOsArgs()
 
-		runCliErr := instance.runCli(ctx)
-		if nil != runCliErr {
-			exitError, ok := runCliErr.(*exception.ExitError)
-			if true == ok {
-				exception.Exit(exitError)
-			}
+        runCliErr := instance.runCli(ctx)
+        if nil != runCliErr {
+            exitError, ok := runCliErr.(*exception.ExitError)
+            if true == ok {
+                exception.Exit(exitError)
+            }
 
-			exception.Panic(
-				exception.FromError(runCliErr),
-			)
-		}
+            exception.Panic(
+                exception.FromError(runCliErr),
+            )
+        }
 
-		return
-	}
+        return
+    }
 
-	runHttpErr := instance.runHttp(ctx)
-	if nil != runHttpErr {
-		exception.Panic(
-			exception.FromError(runHttpErr),
-		)
-	}
+    runHttpErr := instance.runHttp(ctx)
+    if nil != runHttpErr {
+        exception.Panic(
+            exception.FromError(runHttpErr),
+        )
+    }
 }
 
 func (instance *Application) ensureRuntimeDirectories() {
-	configuration := instance.configuration
+    configuration := instance.configuration
 
-	projectDirectory := configuration.Kernel().ProjectDir()
-	logsDirectory := configuration.Kernel().LogsDir()
-	cacheDirectory := configuration.Kernel().CacheDir()
+    projectDirectory := configuration.Kernel().ProjectDir()
+    logsDirectory := configuration.Kernel().LogsDir()
+    cacheDirectory := configuration.Kernel().CacheDir()
 
-	ensureRuntimeDirectoriesErr := ensureRuntimeDirectories(
-		projectDirectory,
-		logsDirectory,
-		cacheDirectory,
-	)
-	if nil != ensureRuntimeDirectoriesErr {
-		exception.Panic(
-			exception.NewError(
-				"failed to create runtime directories",
-				exceptioncontract.Context{
-					"projectDirectory": projectDirectory,
-					"logsDirectory":    logsDirectory,
-					"cacheDirectory":   cacheDirectory,
-				},
-				ensureRuntimeDirectoriesErr,
-			),
-		)
-	}
+    ensureRuntimeDirectoriesErr := ensureRuntimeDirectories(
+        projectDirectory,
+        logsDirectory,
+        cacheDirectory,
+    )
+    if nil != ensureRuntimeDirectoriesErr {
+        exception.Panic(
+            exception.NewError(
+                "failed to create runtime directories",
+                exceptioncontract.Context{
+                    "projectDirectory": projectDirectory,
+                    "logsDirectory":    logsDirectory,
+                    "cacheDirectory":   cacheDirectory,
+                },
+                ensureRuntimeDirectoriesErr,
+            ),
+        )
+    }
 }
 
 func (instance *Application) logOnRecoverAndExit() {
-	recoveredValue := recover()
-	if nil == recoveredValue {
-		return
-	}
+    recoveredValue := recover()
+    if nil == recoveredValue {
+        return
+    }
 
-	logger := logging.EmergencyLogger()
+    logger := logging.EmergencyLogger()
 
-	serviceContainer := instance.kernel.ServiceContainer()
+    serviceContainer := instance.kernel.ServiceContainer()
 
-	containerLogger, loggerErr := logging.LoggerFromContainer(serviceContainer)
-	if nil == loggerErr && nil != containerLogger {
-		logger = containerLogger
-	}
+    containerLogger, loggerErr := logging.LoggerFromContainer(serviceContainer)
+    if nil == loggerErr && nil != containerLogger {
+        logger = containerLogger
+    }
 
-	logging.LogOnRecoverAndExit(logger, recoveredValue, 1)
+    logging.LogOnRecoverAndExit(logger, recoveredValue, 1)
 }
 
 var _ applicationcontract.ParameterRegistrar = (*Application)(nil)

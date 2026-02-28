@@ -1,32 +1,32 @@
 package contract
 
 import (
-	nethttp "net/http"
+    nethttp "net/http"
 
-	containercontract "github.com/precision-soft/melody/v2/container/contract"
+    containercontract "github.com/precision-soft/melody/v2/container/contract"
 )
 
 type ForwardedHeadersPolicy struct {
-	TrustForwardedHeaders bool
-	TrustedProxyList      []string
+    TrustForwardedHeaders bool
+    TrustedProxyList      []string
 }
 
 type SessionCookiePolicy struct {
-	Path     string
-	Domain   string
-	SameSite nethttp.SameSite
+    Path     string
+    Domain   string
+    SameSite nethttp.SameSite
 }
 
 type Kernel interface {
-	Use(middlewares ...Middleware)
+    Use(middlewares ...Middleware)
 
-	SetNotFoundHandler(handler Handler)
+    SetNotFoundHandler(handler Handler)
 
-	SetErrorHandler(handler ErrorHandler)
+    SetErrorHandler(handler ErrorHandler)
 
-	SetForwardedHeadersPolicy(policy ForwardedHeadersPolicy)
+    SetForwardedHeadersPolicy(policy ForwardedHeadersPolicy)
 
-	SetSessionCookiePolicy(policy SessionCookiePolicy)
+    SetSessionCookiePolicy(policy SessionCookiePolicy)
 
-	ServeHttp(serviceContainer containercontract.Container) nethttp.Handler
+    ServeHttp(serviceContainer containercontract.Container) nethttp.Handler
 }

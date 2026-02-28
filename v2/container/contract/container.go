@@ -1,15 +1,15 @@
 package contract
 
 type Container interface {
-	Registrar
+    Registrar
 
-	Resolver
+    Resolver
 
-	OverrideService
+    OverrideService
 
-	ScopeManager
+    ScopeManager
 
-	Names() []string
+    Names() []string
 
-	Close() error
+    Close() error
 }

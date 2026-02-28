@@ -1,46 +1,46 @@
 package security
 
 import (
-	"github.com/precision-soft/melody/exception"
-	httpcontract "github.com/precision-soft/melody/http/contract"
-	securitycontract "github.com/precision-soft/melody/security/contract"
+    "github.com/precision-soft/melody/exception"
+    httpcontract "github.com/precision-soft/melody/http/contract"
+    securitycontract "github.com/precision-soft/melody/security/contract"
 )
 
 func NewApiKeyHeaderAuthenticator(headerName string, expectedValue string, userId string, roles []string) *ApiKeyHeaderAuthenticator {
-	if "" == headerName {
-		exception.Panic(
-			exception.NewError("the header name is empty in api key header authenticator", nil, nil),
-		)
-	}
+    if "" == headerName {
+        exception.Panic(
+            exception.NewError("the header name is empty in api key header authenticator", nil, nil),
+        )
+    }
 
-	return &ApiKeyHeaderAuthenticator{
-		headerName:    headerName,
-		expectedValue: expectedValue,
-		userId:        userId,
-		roles:         append([]string{}, roles...),
-	}
+    return &ApiKeyHeaderAuthenticator{
+        headerName:    headerName,
+        expectedValue: expectedValue,
+        userId:        userId,
+        roles:         append([]string{}, roles...),
+    }
 }
 
 type ApiKeyHeaderAuthenticator struct {
-	headerName    string
-	expectedValue string
-	userId        string
-	roles         []string
+    headerName    string
+    expectedValue string
+    userId        string
+    roles         []string
 }
 
 func (instance *ApiKeyHeaderAuthenticator) Supports(request httpcontract.Request) bool {
-	headerValue := request.Header(instance.headerName)
+    headerValue := request.Header(instance.headerName)
 
-	return "" != headerValue
+    return "" != headerValue
 }
 
 func (instance *ApiKeyHeaderAuthenticator) Authenticate(request httpcontract.Request) (securitycontract.Token, error) {
-	headerValue := request.Header(instance.headerName)
-	if instance.expectedValue != headerValue {
-		return NewAnonymousToken(), nil
-	}
+    headerValue := request.Header(instance.headerName)
+    if instance.expectedValue != headerValue {
+        return NewAnonymousToken(), nil
+    }
 
-	return NewAuthenticatedToken(instance.userId, instance.roles), nil
+    return NewAuthenticatedToken(instance.userId, instance.roles), nil
 }
 
 var _ securitycontract.Authenticator = (*ApiKeyHeaderAuthenticator)(nil)

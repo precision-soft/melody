@@ -1,13 +1,13 @@
 package pgsql
 
 import (
-	"github.com/uptrace/bun/dialect/pgdialect"
+    "github.com/uptrace/bun/dialect/pgdialect"
 )
 
 type dialectWithDefaultSchema struct {
-	*pgdialect.Dialect
+    *pgdialect.Dialect
 }
 
 func (instance dialectWithDefaultSchema) DefaultSchema() string {
-	return "public"
+    return "public"
 }

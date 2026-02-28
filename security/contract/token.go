@@ -1,15 +1,15 @@
 package contract
 
 import (
-	httpcontract "github.com/precision-soft/melody/http/contract"
+    httpcontract "github.com/precision-soft/melody/http/contract"
 )
 
 type Token interface {
-	IsAuthenticated() bool
+    IsAuthenticated() bool
 
-	UserIdentifier() string
+    UserIdentifier() string
 
-	Roles() []string
+    Roles() []string
 }
 
 type TokenResolver func(request httpcontract.Request) Token

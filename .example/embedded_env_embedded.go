@@ -3,8 +3,8 @@
 package main
 
 import (
-	"embed"
-	"io/fs"
+    "embed"
+    "io/fs"
 )
 
 //go:embed .env*

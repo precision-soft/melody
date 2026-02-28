@@ -1,47 +1,47 @@
 package httpclient
 
 import (
-	"io"
-	nethttp "net/http"
+    "io"
+    nethttp "net/http"
 
-	httpclientcontract "github.com/precision-soft/melody/httpclient/contract"
+    httpclientcontract "github.com/precision-soft/melody/httpclient/contract"
 )
 
 func NewStreamResponse(statusCode int, headers nethttp.Header, body io.ReadCloser) *StreamResponse {
-	return &StreamResponse{
-		statusCode: statusCode,
-		headers:    headers,
-		body:       body,
-	}
+    return &StreamResponse{
+        statusCode: statusCode,
+        headers:    headers,
+        body:       body,
+    }
 }
 
 type StreamResponse struct {
-	statusCode int
-	headers    nethttp.Header
-	body       io.ReadCloser
+    statusCode int
+    headers    nethttp.Header
+    body       io.ReadCloser
 }
 
 func (instance *StreamResponse) StatusCode() int {
-	return instance.statusCode
+    return instance.statusCode
 }
 
 func (instance *StreamResponse) Headers() nethttp.Header {
-	return instance.headers
+    return instance.headers
 }
 
 func (instance *StreamResponse) Body() io.ReadCloser {
-	return instance.body
+    return instance.body
 }
 
 func (instance *StreamResponse) Close() error {
-	if nil == instance.body {
-		return nil
-	}
+    if nil == instance.body {
+        return nil
+    }
 
-	body := instance.body
-	instance.body = nil
+    body := instance.body
+    instance.body = nil
 
-	return body.Close()
+    return body.Close()
 }
 
 var _ httpclientcontract.StreamResponse = (*StreamResponse)(nil)

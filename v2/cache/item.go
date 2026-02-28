@@ -1,83 +1,83 @@
 package cache
 
 import (
-	"sync/atomic"
-	"time"
+    "sync/atomic"
+    "time"
 )
 
 func NewItem(
-	key string,
-	payload []byte,
-	createdAt time.Time,
-	expiresAt *time.Time,
+    key string,
+    payload []byte,
+    createdAt time.Time,
+    expiresAt *time.Time,
 ) *Item {
-	var expiresAtCopy *time.Time
-	if nil != expiresAt {
-		value := *expiresAt
-		expiresAtCopy = &value
-	}
+    var expiresAtCopy *time.Time
+    if nil != expiresAt {
+        value := *expiresAt
+        expiresAtCopy = &value
+    }
 
-	var payloadCopy []byte
-	if nil != payload {
-		payloadCopy = append([]byte{}, payload...)
-	}
+    var payloadCopy []byte
+    if nil != payload {
+        payloadCopy = append([]byte{}, payload...)
+    }
 
-	item := &Item{
-		key:       key,
-		payload:   payloadCopy,
-		createdAt: createdAt,
-		expiresAt: expiresAtCopy,
-	}
+    item := &Item{
+        key:       key,
+        payload:   payloadCopy,
+        createdAt: createdAt,
+        expiresAt: expiresAtCopy,
+    }
 
-	item.lastAccessedAtNano.Store(createdAt.UnixNano())
+    item.lastAccessedAtNano.Store(createdAt.UnixNano())
 
-	return item
+    return item
 }
 
 type Item struct {
-	key                string
-	payload            []byte
-	createdAt          time.Time
-	expiresAt          *time.Time
-	lastAccessedAtNano atomic.Int64
-	hitCount           atomic.Uint64
+    key                string
+    payload            []byte
+    createdAt          time.Time
+    expiresAt          *time.Time
+    lastAccessedAtNano atomic.Int64
+    hitCount           atomic.Uint64
 }
 
 func (instance *Item) Key() string {
-	return instance.key
+    return instance.key
 }
 
 func (instance *Item) Payload() []byte {
-	if nil == instance.payload {
-		return nil
-	}
+    if nil == instance.payload {
+        return nil
+    }
 
-	return append([]byte{}, instance.payload...)
+    return append([]byte{}, instance.payload...)
 }
 
 func (instance *Item) CreatedAt() time.Time {
-	return instance.createdAt
+    return instance.createdAt
 }
 
 func (instance *Item) ExpiresAt() *time.Time {
-	if nil == instance.expiresAt {
-		return nil
-	}
+    if nil == instance.expiresAt {
+        return nil
+    }
 
-	value := *instance.expiresAt
+    value := *instance.expiresAt
 
-	return &value
+    return &value
 }
 
 func (instance *Item) Touch(accessTime time.Time) {
-	instance.lastAccessedAtNano.Store(accessTime.UnixNano())
-	instance.hitCount.Add(1)
+    instance.lastAccessedAtNano.Store(accessTime.UnixNano())
+    instance.hitCount.Add(1)
 }
 
 func (instance *Item) LastAccessedAt() time.Time {
-	return time.Unix(0, instance.lastAccessedAtNano.Load())
+    return time.Unix(0, instance.lastAccessedAtNano.Load())
 }
 
 func (instance *Item) HitCount() uint64 {
-	return instance.hitCount.Load()
+    return instance.hitCount.Load()
 }

@@ -1,21 +1,21 @@
 package main
 
 import (
-	"context"
+    "context"
 
-	"github.com/precision-soft/melody/v2/.example/bootstrap"
-	"github.com/precision-soft/melody/v2/application"
+    "github.com/precision-soft/melody/v2/.example/bootstrap"
+    "github.com/precision-soft/melody/v2/application"
 )
 
 func main() {
-	ctx := context.Background()
+    ctx := context.Background()
 
-	app := application.NewApplication(
-		embeddedEnvFiles,
-		embeddedPublicFiles,
-	)
+    app := application.NewApplication(
+        embeddedEnvFiles,
+        embeddedPublicFiles,
+    )
 
-	bootstrap.Configure(app)
+    bootstrap.Configure(app)
 
-	app.Run(ctx)
+    app.Run(ctx)
 }

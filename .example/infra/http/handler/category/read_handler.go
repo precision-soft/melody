@@ -1,45 +1,45 @@
 package category
 
 import (
-	nethttp "net/http"
+    nethttp "net/http"
 
-	"github.com/precision-soft/melody/.example/domain/entity"
-	"github.com/precision-soft/melody/.example/domain/repository"
-	"github.com/precision-soft/melody/.example/infra/http/presenter"
-	melodyhttpcontract "github.com/precision-soft/melody/http/contract"
-	melodyruntimecontract "github.com/precision-soft/melody/runtime/contract"
+    "github.com/precision-soft/melody/.example/domain/entity"
+    "github.com/precision-soft/melody/.example/domain/repository"
+    "github.com/precision-soft/melody/.example/infra/http/presenter"
+    melodyhttpcontract "github.com/precision-soft/melody/http/contract"
+    melodyruntimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
 type CategoryResponse struct {
-	Id   string `json:"id"`
-	Name string `json:"name"`
+    Id   string `json:"id"`
+    Name string `json:"name"`
 }
 
 func ApiReadAllHandler() melodyhttpcontract.Handler {
-	return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-		categoryRepository := repository.MustGetCategoryRepository(runtimeInstance.Container())
+    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        categoryRepository := repository.MustGetCategoryRepository(runtimeInstance.Container())
 
-		categories := categoryRepository.All()
+        categories := categoryRepository.All()
 
-		payload := MapCategories(categories)
+        payload := MapCategories(categories)
 
-		return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, payload), nil
-	}
+        return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, payload), nil
+    }
 }
 
 func MapCategories(categories []*entity.Category) []CategoryResponse {
-	payload := make([]CategoryResponse, 0, len(categories))
+    payload := make([]CategoryResponse, 0, len(categories))
 
-	for _, category := range categories {
-		if nil == category {
-			continue
-		}
+    for _, category := range categories {
+        if nil == category {
+            continue
+        }
 
-		payload = append(payload, CategoryResponse{
-			Id:   category.Id,
-			Name: category.Name,
-		})
-	}
+        payload = append(payload, CategoryResponse{
+            Id:   category.Id,
+            Name: category.Name,
+        })
+    }
 
-	return payload
+    return payload
 }

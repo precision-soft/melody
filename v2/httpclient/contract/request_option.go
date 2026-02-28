@@ -1,63 +1,63 @@
 package contract
 
 import (
-	"time"
+    "time"
 )
 
 type RequestOption func(RequestOptions)
 
 type RequestOptions interface {
-	Headers() map[string]string
+    Headers() map[string]string
 
-	Query() map[string]string
+    Query() map[string]string
 
-	Body() any
+    Body() any
 
-	ContentType() string
+    ContentType() string
 
-	Timeout() time.Duration
+    Timeout() time.Duration
 
-	Authorization() AuthorizationOptions
+    Authorization() AuthorizationOptions
 
-	MaxResponseBodyBytes() int
+    MaxResponseBodyBytes() int
 
-	SetMaxResponseBodyBytes(maxResponseBodyBytes int)
+    SetMaxResponseBodyBytes(maxResponseBodyBytes int)
 
-	SetHeader(key string, value string)
+    SetHeader(key string, value string)
 
-	SetHeaders(headers map[string]string)
+    SetHeaders(headers map[string]string)
 
-	SetQuery(key string, value string)
+    SetQuery(key string, value string)
 
-	SetQueryParams(parameters map[string]string)
+    SetQueryParams(parameters map[string]string)
 
-	SetBody(body any)
+    SetBody(body any)
 
-	SetJson(data any)
+    SetJson(data any)
 
-	SetTimeout(timeout time.Duration)
+    SetTimeout(timeout time.Duration)
 
-	SetBearerToken(token string)
+    SetBearerToken(token string)
 
-	SetBasicAuth(username string, password string)
+    SetBasicAuth(username string, password string)
 }
 
 type AuthorizationOptions interface {
-	Bearer() string
+    Bearer() string
 
-	SetBearer(bearer string)
+    SetBearer(bearer string)
 
-	Basic() BasicAuthorizationOptions
+    Basic() BasicAuthorizationOptions
 
-	SetBasic(basic BasicAuthorizationOptions)
+    SetBasic(basic BasicAuthorizationOptions)
 }
 
 type BasicAuthorizationOptions interface {
-	Username() string
+    Username() string
 
-	SetUsername(username string)
+    SetUsername(username string)
 
-	Password() string
+    Password() string
 
-	SetPassword(password string)
+    SetPassword(password string)
 }

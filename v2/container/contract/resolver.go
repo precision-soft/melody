@@ -3,15 +3,15 @@ package contract
 import "reflect"
 
 type Resolver interface {
-	Get(serviceName string) (any, error)
+    Get(serviceName string) (any, error)
 
-	MustGet(serviceName string) any
+    MustGet(serviceName string) any
 
-	GetByType(targetType reflect.Type) (any, error)
+    GetByType(targetType reflect.Type) (any, error)
 
-	MustGetByType(targetType reflect.Type) any
+    MustGetByType(targetType reflect.Type) any
 
-	Has(serviceName string) bool
+    Has(serviceName string) bool
 
-	HasType(targetType reflect.Type) bool
+    HasType(targetType reflect.Type) bool
 }

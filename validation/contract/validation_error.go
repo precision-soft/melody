@@ -1,13 +1,13 @@
 package contract
 
 type ValidationError interface {
-	Field() string
+    Field() string
 
-	Message() string
+    Message() string
 
-	Code() string
+    Code() string
 
-	Context() map[string]any
+    Context() map[string]any
 
-	Error() string
+    Error() string
 }

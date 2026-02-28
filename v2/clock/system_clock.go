@@ -1,50 +1,50 @@
 package clock
 
 import (
-	"time"
+    "time"
 
-	clockcontract "github.com/precision-soft/melody/v2/clock/contract"
-	"github.com/precision-soft/melody/v2/exception"
+    clockcontract "github.com/precision-soft/melody/v2/clock/contract"
+    "github.com/precision-soft/melody/v2/exception"
 )
 
 func NewSystemClock() *SystemClock {
-	return &SystemClock{}
+    return &SystemClock{}
 }
 
 type SystemClock struct{}
 
 func (instance *SystemClock) Now() time.Time {
-	return time.Now()
+    return time.Now()
 }
 
 func (instance *SystemClock) NewTicker(interval time.Duration) clockcontract.Ticker {
-	if 0 >= interval {
-		exception.Panic(
-			exception.NewError("invalid ticker interval", map[string]any{"interval": interval}, nil),
-		)
-	}
+    if 0 >= interval {
+        exception.Panic(
+            exception.NewError("invalid ticker interval", map[string]any{"interval": interval}, nil),
+        )
+    }
 
-	return newSystemTicker(time.NewTicker(interval))
+    return newSystemTicker(time.NewTicker(interval))
 }
 
 var _ clockcontract.Clock = (*SystemClock)(nil)
 
 func newSystemTicker(ticker *time.Ticker) *systemTicker {
-	return &systemTicker{
-		ticker: ticker,
-	}
+    return &systemTicker{
+        ticker: ticker,
+    }
 }
 
 type systemTicker struct {
-	ticker *time.Ticker
+    ticker *time.Ticker
 }
 
 func (instance *systemTicker) Channel() <-chan time.Time {
-	return instance.ticker.C
+    return instance.ticker.C
 }
 
 func (instance *systemTicker) Stop() {
-	instance.ticker.Stop()
+    instance.ticker.Stop()
 }
 
 var _ clockcontract.Ticker = (*systemTicker)(nil)

@@ -1,13 +1,13 @@
 package internal
 
 import (
-	"reflect"
+    "reflect"
 )
 
 func StringifyType(value any) string {
-	if nil == value {
-		return "nil"
-	}
+    if nil == value {
+        return "nil"
+    }
 
-	return reflect.TypeOf(value).String()
+    return reflect.TypeOf(value).String()
 }

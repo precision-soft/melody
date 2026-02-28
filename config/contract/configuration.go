@@ -1,19 +1,19 @@
 package contract
 
 type Configuration interface {
-	Get(name string) Parameter
+    Get(name string) Parameter
 
-	MustGet(name string) Parameter
+    MustGet(name string) Parameter
 
-	RegisterRuntime(name string, value any)
+    RegisterRuntime(name string, value any)
 
-	Resolve() error
+    Resolve() error
 
-	Cli() CliConfiguration
+    Cli() CliConfiguration
 
-	Kernel() KernelConfiguration
+    Kernel() KernelConfiguration
 
-	Http() HttpConfiguration
+    Http() HttpConfiguration
 
-	Names() []string
+    Names() []string
 }

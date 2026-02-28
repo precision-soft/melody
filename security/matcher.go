@@ -1,38 +1,38 @@
 package security
 
 import (
-	"strings"
+    "strings"
 
-	httpcontract "github.com/precision-soft/melody/http/contract"
-	securitycontract "github.com/precision-soft/melody/security/contract"
+    httpcontract "github.com/precision-soft/melody/http/contract"
+    securitycontract "github.com/precision-soft/melody/security/contract"
 )
 
 func NewPathPrefixMatcher(prefix string) *PathPrefixMatcher {
-	return &PathPrefixMatcher{
-		prefix: prefix,
-	}
+    return &PathPrefixMatcher{
+        prefix: prefix,
+    }
 }
 
 type PathPrefixMatcher struct {
-	prefix string
+    prefix string
 }
 
 func (instance *PathPrefixMatcher) Matches(request httpcontract.Request) bool {
-	if nil == request.HttpRequest() {
-		return false
-	}
+    if nil == request.HttpRequest() {
+        return false
+    }
 
-	if nil == request.HttpRequest().URL {
-		return false
-	}
+    if nil == request.HttpRequest().URL {
+        return false
+    }
 
-	path := request.HttpRequest().URL.Path
+    path := request.HttpRequest().URL.Path
 
-	if "" == instance.prefix {
-		return true
-	}
+    if "" == instance.prefix {
+        return true
+    }
 
-	return true == strings.HasPrefix(path, instance.prefix)
+    return true == strings.HasPrefix(path, instance.prefix)
 }
 
 var _ securitycontract.Matcher = (*PathPrefixMatcher)(nil)

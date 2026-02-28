@@ -1,34 +1,34 @@
 package logging
 
 import (
-	"bytes"
-	"log"
-	"strings"
-	"testing"
+    "bytes"
+    "log"
+    "strings"
+    "testing"
 
-	"github.com/precision-soft/melody/v2/exception"
+    "github.com/precision-soft/melody/v2/exception"
 )
 
 func TestLogError_NilLogger_DoesNotPrintEmptyContext(t *testing.T) {
-	var buffer bytes.Buffer
+    var buffer bytes.Buffer
 
-	originalWriter := log.Writer()
-	log.SetOutput(&buffer)
-	defer func() {
-		log.SetOutput(originalWriter)
-	}()
+    originalWriter := log.Writer()
+    log.SetOutput(&buffer)
+    defer func() {
+        log.SetOutput(originalWriter)
+    }()
 
-	err := exception.NewError("message", nil, nil)
+    err := exception.NewError("message", nil, nil)
 
-	LogError(nil, err)
+    LogError(nil, err)
 
-	output := buffer.String()
+    output := buffer.String()
 
-	if false == strings.Contains(output, "message") {
-		t.Fatalf("expected message in output")
-	}
+    if false == strings.Contains(output, "message") {
+        t.Fatalf("expected message in output")
+    }
 
-	if true == strings.Contains(output, "context=") {
-		t.Fatalf("did not expect context output for empty context")
-	}
+    if true == strings.Contains(output, "context=") {
+        t.Fatalf("did not expect context output for empty context")
+    }
 }

@@ -1,11 +1,11 @@
 package bunorm
 
 import (
-	"github.com/uptrace/bun"
+    "github.com/uptrace/bun"
 
-	containercontract "github.com/precision-soft/melody/container/contract"
+    containercontract "github.com/precision-soft/melody/container/contract"
 )
 
 type Provider interface {
-	Open(resolver containercontract.Resolver) (*bun.DB, error)
+    Open(resolver containercontract.Resolver) (*bun.DB, error)
 }

@@ -1,62 +1,62 @@
 package http
 
 const (
-	ConstraintAlphaLowercase = "^[a-z]+$"
-	ConstraintAlpha          = "^[a-zA-Z]+$"
-	ConstraintNumeric        = "^[0-9]+$"
-	ConstraintAlphaNumeric   = "^[a-zA-Z0-9]+$"
+    ConstraintAlphaLowercase = "^[a-z]+$"
+    ConstraintAlpha          = "^[a-zA-Z]+$"
+    ConstraintNumeric        = "^[0-9]+$"
+    ConstraintAlphaNumeric   = "^[a-zA-Z0-9]+$"
 )
 
 type Requirement struct {
-	parameterName string
-	pattern       string
+    parameterName string
+    pattern       string
 }
 
 func NewRequirement(parameterName string, pattern string) *Requirement {
-	return &Requirement{
-		parameterName: parameterName,
-		pattern:       pattern,
-	}
+    return &Requirement{
+        parameterName: parameterName,
+        pattern:       pattern,
+    }
 }
 
 func (instance *Requirement) ParameterName() string {
-	return instance.parameterName
+    return instance.parameterName
 }
 
 func (instance *Requirement) Pattern() string {
-	return instance.pattern
+    return instance.pattern
 }
 
 func NewRequirements(requirements ...Requirement) map[string]string {
-	result := map[string]string{}
+    result := map[string]string{}
 
-	for _, requirement := range requirements {
-		if "" == requirement.parameterName {
-			continue
-		}
+    for _, requirement := range requirements {
+        if "" == requirement.parameterName {
+            continue
+        }
 
-		if "" == requirement.pattern {
-			continue
-		}
+        if "" == requirement.pattern {
+            continue
+        }
 
-		result[requirement.parameterName] = requirement.pattern
-	}
+        result[requirement.parameterName] = requirement.pattern
+    }
 
-	return result
+    return result
 }
 
 func RequireAlphaLowercase(parameterName string) *Requirement {
-	return NewRequirement(parameterName, ConstraintAlphaLowercase)
+    return NewRequirement(parameterName, ConstraintAlphaLowercase)
 }
 
 func RequireAlpha(parameterName string) *Requirement {
-	return NewRequirement(parameterName, ConstraintAlpha)
+    return NewRequirement(parameterName, ConstraintAlpha)
 }
 
 func RequireNumeric(parameterName string) *Requirement {
-	return NewRequirement(parameterName, ConstraintNumeric)
+    return NewRequirement(parameterName, ConstraintNumeric)
 }
 
 func RequireAlphaNumeric(parameterName string) *Requirement {
-	return NewRequirement(parameterName, ConstraintAlphaNumeric)
+    return NewRequirement(parameterName, ConstraintAlphaNumeric)
 }

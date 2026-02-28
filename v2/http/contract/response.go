@@ -1,20 +1,20 @@
 package contract
 
 import (
-	"io"
-	nethttp "net/http"
+    "io"
+    nethttp "net/http"
 )
 
 type Response interface {
-	StatusCode() int
+    StatusCode() int
 
-	SetStatusCode(statusCode int)
+    SetStatusCode(statusCode int)
 
-	Headers() nethttp.Header
+    Headers() nethttp.Header
 
-	SetHeaders(headers nethttp.Header)
+    SetHeaders(headers nethttp.Header)
 
-	BodyReader() io.Reader
+    BodyReader() io.Reader
 
-	SetBodyReader(reader io.Reader)
+    SetBodyReader(reader io.Reader)
 }

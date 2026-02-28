@@ -1,11 +1,11 @@
 package contract
 
 type Module interface {
-	Name() string
+    Name() string
 
-	Description() string
+    Description() string
 }
 
 type ModuleProvider interface {
-	Modules() []Module
+    Modules() []Module
 }

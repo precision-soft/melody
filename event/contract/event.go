@@ -3,13 +3,13 @@ package contract
 import "time"
 
 type Event interface {
-	Name() string
+    Name() string
 
-	Payload() any
+    Payload() any
 
-	Timestamp() time.Time
+    Timestamp() time.Time
 
-	StopPropagation()
+    StopPropagation()
 
-	IsPropagationStopped() bool
+    IsPropagationStopped() bool
 }

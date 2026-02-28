@@ -1,56 +1,56 @@
 package logging
 
 import (
-	"github.com/precision-soft/melody/v2/container"
-	containercontract "github.com/precision-soft/melody/v2/container/contract"
-	"github.com/precision-soft/melody/v2/exception"
-	exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
-	loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
-	"github.com/precision-soft/melody/v2/runtime"
-	runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
+    "github.com/precision-soft/melody/v2/container"
+    containercontract "github.com/precision-soft/melody/v2/container/contract"
+    "github.com/precision-soft/melody/v2/exception"
+    exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
+    loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
+    "github.com/precision-soft/melody/v2/runtime"
+    runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
 )
 
 const (
-	ServiceLogger = "service.logger"
+    ServiceLogger = "service.logger"
 )
 
 func LoggerMustFromRuntime(runtimeInstance runtimecontract.Runtime) loggingcontract.Logger {
-	return runtime.MustFromRuntime[loggingcontract.Logger](runtimeInstance, ServiceLogger)
+    return runtime.MustFromRuntime[loggingcontract.Logger](runtimeInstance, ServiceLogger)
 }
 
 func LoggerFromRuntime(runtimeInstance runtimecontract.Runtime) loggingcontract.Logger {
-	loggerInstance, err := runtime.FromRuntime[loggingcontract.Logger](runtimeInstance, ServiceLogger)
-	if nil == loggerInstance || nil != err {
-		if nil != err {
-			EmergencyLogger().Emergency(
-				"could not get the logger from runtime",
-				exception.LogContext(
-					err,
-					exceptioncontract.Context{
-						"service": ServiceLogger,
-					},
-				),
-			)
-		}
+    loggerInstance, err := runtime.FromRuntime[loggingcontract.Logger](runtimeInstance, ServiceLogger)
+    if nil == loggerInstance || nil != err {
+        if nil != err {
+            EmergencyLogger().Emergency(
+                "could not get the logger from runtime",
+                exception.LogContext(
+                    err,
+                    exceptioncontract.Context{
+                        "service": ServiceLogger,
+                    },
+                ),
+            )
+        }
 
-		return nil
-	}
+        return nil
+    }
 
-	return loggerInstance
+    return loggerInstance
 }
 
 func LoggerMustFromContainer(serviceContainer containercontract.Container) loggingcontract.Logger {
-	return container.MustFromResolver[loggingcontract.Logger](serviceContainer, ServiceLogger)
+    return container.MustFromResolver[loggingcontract.Logger](serviceContainer, ServiceLogger)
 }
 
 func LoggerFromContainer(serviceContainer containercontract.Container) (loggingcontract.Logger, error) {
-	return container.FromResolver[loggingcontract.Logger](serviceContainer, ServiceLogger)
+    return container.FromResolver[loggingcontract.Logger](serviceContainer, ServiceLogger)
 }
 
 func LoggerMustFromResolver(resolver containercontract.Resolver) loggingcontract.Logger {
-	return container.MustFromResolver[loggingcontract.Logger](resolver, ServiceLogger)
+    return container.MustFromResolver[loggingcontract.Logger](resolver, ServiceLogger)
 }
 
 func LoggerFromResolver(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
-	return container.FromResolver[loggingcontract.Logger](resolver, ServiceLogger)
+    return container.FromResolver[loggingcontract.Logger](resolver, ServiceLogger)
 }

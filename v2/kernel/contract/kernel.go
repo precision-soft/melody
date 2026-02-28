@@ -1,27 +1,27 @@
 package contract
 
 import (
-	clockcontract "github.com/precision-soft/melody/v2/clock/contract"
-	configcontract "github.com/precision-soft/melody/v2/config/contract"
-	containercontract "github.com/precision-soft/melody/v2/container/contract"
-	eventcontract "github.com/precision-soft/melody/v2/event/contract"
-	httpcontract "github.com/precision-soft/melody/v2/http/contract"
+    clockcontract "github.com/precision-soft/melody/v2/clock/contract"
+    configcontract "github.com/precision-soft/melody/v2/config/contract"
+    containercontract "github.com/precision-soft/melody/v2/container/contract"
+    eventcontract "github.com/precision-soft/melody/v2/event/contract"
+    httpcontract "github.com/precision-soft/melody/v2/http/contract"
 )
 
 type Kernel interface {
-	Environment() string
+    Environment() string
 
-	DebugMode() bool
+    DebugMode() bool
 
-	ServiceContainer() containercontract.Container
+    ServiceContainer() containercontract.Container
 
-	EventDispatcher() eventcontract.EventDispatcher
+    EventDispatcher() eventcontract.EventDispatcher
 
-	Config() configcontract.Configuration
+    Config() configcontract.Configuration
 
-	HttpRouter() httpcontract.Router
+    HttpRouter() httpcontract.Router
 
-	HttpKernel() httpcontract.Kernel
+    HttpKernel() httpcontract.Kernel
 
-	Clock() clockcontract.Clock
+    Clock() clockcontract.Clock
 }

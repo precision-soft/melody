@@ -1,44 +1,44 @@
 package httpclient
 
 import (
-	"time"
+    "time"
 )
 
 func NewHttpClientConfig(
-	baseUrl string,
-	timeout time.Duration,
-	headers map[string]string,
+    baseUrl string,
+    timeout time.Duration,
+    headers map[string]string,
 ) *HttpClientConfig {
-	copiedHeaders := map[string]string{}
+    copiedHeaders := map[string]string{}
 
-	if nil != headers {
-		copiedHeaders = make(map[string]string, len(headers))
-		for key, value := range headers {
-			copiedHeaders[key] = value
-		}
-	}
+    if nil != headers {
+        copiedHeaders = make(map[string]string, len(headers))
+        for key, value := range headers {
+            copiedHeaders[key] = value
+        }
+    }
 
-	return &HttpClientConfig{
-		baseUrl: baseUrl,
-		timeout: timeout,
-		headers: copiedHeaders,
-	}
+    return &HttpClientConfig{
+        baseUrl: baseUrl,
+        timeout: timeout,
+        headers: copiedHeaders,
+    }
 }
 
 type HttpClientConfig struct {
-	baseUrl string
-	timeout time.Duration
-	headers map[string]string
+    baseUrl string
+    timeout time.Duration
+    headers map[string]string
 }
 
 func (instance *HttpClientConfig) BaseUrl() string {
-	return instance.baseUrl
+    return instance.baseUrl
 }
 
 func (instance *HttpClientConfig) Timeout() time.Duration {
-	return instance.timeout
+    return instance.timeout
 }
 
 func (instance *HttpClientConfig) Headers() map[string]string {
-	return instance.headers
+    return instance.headers
 }

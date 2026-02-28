@@ -1,17 +1,17 @@
 package contract
 
 type HttpConfiguration interface {
-	Address() string
+    Address() string
 
-	DefaultLocale() string
+    DefaultLocale() string
 
-	PublicDir() string
+    PublicDir() string
 
-	StaticIndexFile() string
+    StaticIndexFile() string
 
-	MaxRequestBodyBytes() int
+    MaxRequestBodyBytes() int
 
-	StaticEnableCache() bool
+    StaticEnableCache() bool
 
-	StaticCacheMaxAge() int
+    StaticCacheMaxAge() int
 }

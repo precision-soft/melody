@@ -1,62 +1,62 @@
 package security
 
 import (
-	"testing"
+    "testing"
 
-	securitycontract "github.com/precision-soft/melody/security/contract"
+    securitycontract "github.com/precision-soft/melody/security/contract"
 )
 
 func TestRoleVoter_AbstainsWhenAttributeEmpty(t *testing.T) {
-	voter := NewRoleVoter()
+    voter := NewRoleVoter()
 
-	result := voter.Vote(NewAuthenticatedToken("u1", []string{"ROLE_A"}), "", nil)
-	if securitycontract.VoteAbstain != result {
-		t.Fatalf("expected abstain")
-	}
+    result := voter.Vote(NewAuthenticatedToken("u1", []string{"ROLE_A"}), "", nil)
+    if securitycontract.VoteAbstain != result {
+        t.Fatalf("expected abstain")
+    }
 }
 
 func TestRoleVoter_DeniesWhenTokenNil(t *testing.T) {
-	voter := NewRoleVoter()
+    voter := NewRoleVoter()
 
-	result := voter.Vote(nil, "ROLE_A", nil)
-	if securitycontract.VoteDenied != result {
-		t.Fatalf("expected denied")
-	}
+    result := voter.Vote(nil, "ROLE_A", nil)
+    if securitycontract.VoteDenied != result {
+        t.Fatalf("expected denied")
+    }
 }
 
 func TestRoleVoter_GrantsWhenRolePresent(t *testing.T) {
-	voter := NewRoleVoter()
+    voter := NewRoleVoter()
 
-	result := voter.Vote(NewAuthenticatedToken("u1", []string{"ROLE_A"}), "ROLE_A", nil)
-	if securitycontract.VoteGranted != result {
-		t.Fatalf("expected granted")
-	}
+    result := voter.Vote(NewAuthenticatedToken("u1", []string{"ROLE_A"}), "ROLE_A", nil)
+    if securitycontract.VoteGranted != result {
+        t.Fatalf("expected granted")
+    }
 }
 
 func TestRoleHierarchyVoter_PanicsOnNilDependencies(t *testing.T) {
-	defer func() {
-		if nil == recover() {
-			t.Fatalf("expected panic")
-		}
-	}()
+    defer func() {
+        if nil == recover() {
+            t.Fatalf("expected panic")
+        }
+    }()
 
-	_ = NewRoleHierarchyVoter(nil, NewRoleVoter())
+    _ = NewRoleHierarchyVoter(nil, NewRoleVoter())
 }
 
 func TestRoleHierarchyVoter_ExpandsRolesBeforeVoting(t *testing.T) {
-	hierarchy := NewRoleHierarchy(
-		map[string][]string{
-			"ROLE_ADMIN": {"ROLE_USER"},
-		},
-	)
+    hierarchy := NewRoleHierarchy(
+        map[string][]string{
+            "ROLE_ADMIN": {"ROLE_USER"},
+        },
+    )
 
-	delegate := NewRoleVoter()
-	voter := NewRoleHierarchyVoter(hierarchy, delegate)
+    delegate := NewRoleVoter()
+    voter := NewRoleHierarchyVoter(hierarchy, delegate)
 
-	token := NewAuthenticatedToken("u1", []string{"ROLE_ADMIN"})
+    token := NewAuthenticatedToken("u1", []string{"ROLE_ADMIN"})
 
-	result := voter.Vote(token, "ROLE_USER", nil)
-	if securitycontract.VoteGranted != result {
-		t.Fatalf("expected granted")
-	}
+    result := voter.Vote(token, "ROLE_USER", nil)
+    if securitycontract.VoteGranted != result {
+        t.Fatalf("expected granted")
+    }
 }

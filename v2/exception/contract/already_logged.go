@@ -1,7 +1,7 @@
 package contract
 
 type AlreadyLogged interface {
-	AlreadyLogged() bool
+    AlreadyLogged() bool
 
-	MarkAsLogged()
+    MarkAsLogged()
 }

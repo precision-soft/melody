@@ -1,12 +1,12 @@
 package output
 
 type TableBlock struct {
-	Title   string
-	Columns []string
-	Rows    [][]string
+    Title   string
+    Columns []string
+    Rows    [][]string
 }
 
 type TableData struct {
-	SummaryLines []string
-	Blocks       []TableBlock
+    SummaryLines []string
+    Blocks       []TableBlock
 }

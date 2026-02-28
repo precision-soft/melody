@@ -1,11 +1,11 @@
 package contract
 
 type RouteGroup interface {
-	RouteHandler
+    RouteHandler
 
-	WithNamePrefix(namePrefix string)
+    WithNamePrefix(namePrefix string)
 
-	WithRequirements(requirements map[string]string)
+    WithRequirements(requirements map[string]string)
 
-	WithDefaults(defaults map[string]string)
+    WithDefaults(defaults map[string]string)
 }

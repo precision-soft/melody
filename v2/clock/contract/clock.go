@@ -3,7 +3,7 @@ package contract
 import "time"
 
 type Clock interface {
-	Now() time.Time
+    Now() time.Time
 
-	NewTicker(interval time.Duration) Ticker
+    NewTicker(interval time.Duration) Ticker
 }

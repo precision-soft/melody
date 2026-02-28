@@ -1,29 +1,29 @@
 package repository
 
 import (
-	"github.com/precision-soft/melody/v2/.example/domain/entity"
-	melodycontainer "github.com/precision-soft/melody/v2/container"
-	melodycontainercontract "github.com/precision-soft/melody/v2/container/contract"
+    "github.com/precision-soft/melody/v2/.example/domain/entity"
+    melodycontainer "github.com/precision-soft/melody/v2/container"
+    melodycontainercontract "github.com/precision-soft/melody/v2/container/contract"
 )
 
 const (
-	ServiceUserRepository = "service.example.user.repository"
+    ServiceUserRepository = "service.example.user.repository"
 )
 
 type UserRepository interface {
-	All() ([]*entity.User, error)
+    All() ([]*entity.User, error)
 
-	FindById(id string) (*entity.User, bool)
+    FindById(id string) (*entity.User, bool)
 
-	FindByUsername(username string) (*entity.User, bool)
+    FindByUsername(username string) (*entity.User, bool)
 
-	Create(user *entity.User) error
+    Create(user *entity.User) error
 
-	Update(user *entity.User) (bool, error)
+    Update(user *entity.User) (bool, error)
 
-	DeleteById(id string) (bool, error)
+    DeleteById(id string) (bool, error)
 }
 
 func MustUserRepository(resolver melodycontainercontract.Resolver) UserRepository {
-	return melodycontainer.MustFromResolver[UserRepository](resolver, ServiceUserRepository)
+    return melodycontainer.MustFromResolver[UserRepository](resolver, ServiceUserRepository)
 }

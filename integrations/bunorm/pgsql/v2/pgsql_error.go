@@ -1,15 +1,15 @@
 package pgsql
 
 import (
-	"strings"
+    "strings"
 )
 
 func IsDuplicateKey(err error) bool {
-	if nil == err {
-		return false
-	}
+    if nil == err {
+        return false
+    }
 
-	errMsg := err.Error()
+    errMsg := err.Error()
 
-	return strings.Contains(errMsg, "23505") || strings.Contains(errMsg, "duplicate key")
+    return strings.Contains(errMsg, "23505") || strings.Contains(errMsg, "duplicate key")
 }
