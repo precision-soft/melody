@@ -9,16 +9,29 @@ ENV WORKDIR=${WORKDIR}
 ENV CONFIG_PATH=${CONFIG_PATH}
 ENV ROOT_PATH=${ROOT_PATH}
 
-ENV HOME=/home/
+ENV HOME=/home
 
 ENV GOCACHE=/go/cache/go-build
 
 RUN apk add --update --no-cache git shadow bash
 
+RUN mkdir -p "${HOME}"
 RUN mkdir -p /go/cache/go-build
 
-COPY ${DOCKER_PATH}/.profile* ${HOME}
+COPY ${DOCKER_PATH}/.profile* ${HOME}/
+
 ENV ENV="${HOME}/.profile"
+
+RUN printf '%s\n' \
+  'if [ -f "$HOME/.profile" ]; then' \
+  '  . "$HOME/.profile"' \
+  'fi' \
+  > "${HOME}/.bashrc" \
+  && printf '%s\n' \
+  'if [ -f "$HOME/.bashrc" ]; then' \
+  '  . "$HOME/.bashrc"' \
+  'fi' \
+  > "${HOME}/.bash_profile"
 
 WORKDIR ${WORKDIR}
 
