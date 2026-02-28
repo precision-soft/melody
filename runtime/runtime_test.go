@@ -48,60 +48,60 @@ func TestNew_StoresReferences(t *testing.T) {
 
 type containerStub struct{}
 
-func (c containerStub) Register(serviceName string, provider any, options ...containercontract.RegisterOption) error {
+func (instance containerStub) Register(serviceName string, provider any, options ...containercontract.RegisterOption) error {
     return errors.New("not implemented")
 }
 
-func (c containerStub) MustRegister(serviceName string, provider any, options ...containercontract.RegisterOption) {
+func (instance containerStub) MustRegister(serviceName string, provider any, options ...containercontract.RegisterOption) {
 }
 
-func (c containerStub) Get(serviceName string) (any, error) {
+func (instance containerStub) Get(serviceName string) (any, error) {
     return nil, errors.New("not implemented")
 }
 
-func (c containerStub) MustGet(serviceName string) any {
+func (instance containerStub) MustGet(serviceName string) any {
     return nil
 }
 
-func (c containerStub) GetByType(targetType reflect.Type) (any, error) {
+func (instance containerStub) GetByType(targetType reflect.Type) (any, error) {
     return nil, errors.New("not implemented")
 }
 
-func (c containerStub) MustGetByType(targetType reflect.Type) any {
+func (instance containerStub) MustGetByType(targetType reflect.Type) any {
     return nil
 }
 
-func (c containerStub) Has(serviceName string) bool {
+func (instance containerStub) Has(serviceName string) bool {
     return false
 }
 
-func (c containerStub) HasType(targetType reflect.Type) bool {
+func (instance containerStub) HasType(targetType reflect.Type) bool {
     return false
 }
 
-func (c containerStub) OverrideInstance(serviceName string, value any) error {
+func (instance containerStub) OverrideInstance(serviceName string, value any) error {
     return errors.New("not implemented")
 }
 
-func (c containerStub) MustOverrideInstance(serviceName string, value any) {
+func (instance containerStub) MustOverrideInstance(serviceName string, value any) {
 }
 
-func (c containerStub) OverrideProtectedInstance(serviceName string, value any) error {
+func (instance containerStub) OverrideProtectedInstance(serviceName string, value any) error {
     return errors.New("not implemented")
 }
 
-func (c containerStub) MustOverrideProtectedInstance(serviceName string, value any) {
+func (instance containerStub) MustOverrideProtectedInstance(serviceName string, value any) {
 }
 
-func (c containerStub) NewScope() containercontract.Scope {
+func (instance containerStub) NewScope() containercontract.Scope {
     return nil
 }
 
-func (c containerStub) Names() []string {
+func (instance containerStub) Names() []string {
     return nil
 }
 
-func (c containerStub) Close() error {
+func (instance containerStub) Close() error {
     return errors.New("not implemented")
 }
 
@@ -127,45 +127,45 @@ func TestNew_PanicsOnNilScope(t *testing.T) {
 
 type scopeStub struct{}
 
-func (s scopeStub) Get(serviceName string) (any, error) {
+func (instance scopeStub) Get(serviceName string) (any, error) {
     return nil, errors.New("not implemented")
 }
 
-func (s scopeStub) MustGet(serviceName string) any {
+func (instance scopeStub) MustGet(serviceName string) any {
     return nil
 }
 
-func (s scopeStub) GetByType(targetType reflect.Type) (any, error) {
+func (instance scopeStub) GetByType(targetType reflect.Type) (any, error) {
     return nil, errors.New("not implemented")
 }
 
-func (s scopeStub) MustGetByType(targetType reflect.Type) any {
+func (instance scopeStub) MustGetByType(targetType reflect.Type) any {
     return nil
 }
 
-func (s scopeStub) Has(serviceName string) bool {
+func (instance scopeStub) Has(serviceName string) bool {
     return false
 }
 
-func (s scopeStub) HasType(targetType reflect.Type) bool {
+func (instance scopeStub) HasType(targetType reflect.Type) bool {
     return false
 }
 
-func (s scopeStub) OverrideInstance(serviceName string, value any) error {
+func (instance scopeStub) OverrideInstance(serviceName string, value any) error {
     return errors.New("not implemented")
 }
 
-func (s scopeStub) MustOverrideInstance(serviceName string, value any) {
+func (instance scopeStub) MustOverrideInstance(serviceName string, value any) {
 }
 
-func (s scopeStub) OverrideProtectedInstance(serviceName string, value any) error {
+func (instance scopeStub) OverrideProtectedInstance(serviceName string, value any) error {
     return errors.New("not implemented")
 }
 
-func (s scopeStub) MustOverrideProtectedInstance(serviceName string, value any) {
+func (instance scopeStub) MustOverrideProtectedInstance(serviceName string, value any) {
 }
 
-func (s scopeStub) Close() error {
+func (instance scopeStub) Close() error {
     return errors.New("not implemented")
 }
 
