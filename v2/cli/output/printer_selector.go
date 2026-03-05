@@ -7,5 +7,9 @@ func SelectPrinter(option Option) Printer {
         return &JsonPrinter{}
     }
 
+    if 0 < normalized.TableMaxWidth {
+        return NewTablePrinter(normalized.TableMaxWidth)
+    }
+
     return NewDefaultTablePrinter()
 }

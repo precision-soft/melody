@@ -1,6 +1,7 @@
 package output
 
 import (
+    "fmt"
     "strings"
 
     clicontract "github.com/precision-soft/melody/cli/contract"
@@ -56,6 +57,11 @@ func StandardFlags() []clicontract.Flag {
         &clicontract.IntFlag{
             Name:  FlagNameOffset,
             Usage: "offset for item list pagination",
+            Value: 0,
+        },
+        &clicontract.IntFlag{
+            Name:  FlagNameTableMaxWidth,
+            Usage: fmt.Sprintf("max table width in characters (0 = default %d)", defaultTableMaxWidth),
             Value: 0,
         },
     }

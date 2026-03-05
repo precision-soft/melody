@@ -42,6 +42,8 @@ func ParseOptionFromCommand(commandContext *clicontract.CommandContext) Option {
     option.Limit = commandContext.Int(FlagNameLimit)
     option.Offset = commandContext.Int(FlagNameOffset)
 
+    option.TableMaxWidth = commandContext.Int(FlagNameTableMaxWidth)
+
     return option
 }
 
@@ -70,6 +72,10 @@ func NormalizeOption(option Option) Option {
 
     if 0 > normalized.Offset {
         normalized.Offset = 0
+    }
+
+    if 0 > normalized.TableMaxWidth {
+        normalized.TableMaxWidth = 0
     }
 
     return normalized

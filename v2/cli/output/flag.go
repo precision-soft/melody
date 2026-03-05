@@ -5,16 +5,17 @@ import (
 )
 
 const (
-    FlagNameFormat    = "format"
-    FlagNameNoColor   = "no-color"
-    FlagNameVerbose   = "verbose"
-    FlagNameVerbosity = "verbosity"
-    FlagNameQuiet     = "quiet"
-    FlagNameFields    = "fields"
-    FlagNameSortKey   = "sort"
-    FlagNameOrder     = "order"
-    FlagNameLimit     = "limit"
-    FlagNameOffset    = "offset"
+    FlagNameFormat        = "format"
+    FlagNameNoColor       = "no-color"
+    FlagNameVerbose       = "verbose"
+    FlagNameVerbosity     = "verbosity"
+    FlagNameQuiet         = "quiet"
+    FlagNameFields        = "fields"
+    FlagNameSortKey       = "sort"
+    FlagNameOrder         = "order"
+    FlagNameLimit         = "limit"
+    FlagNameOffset        = "offset"
+    FlagNameTableMaxWidth = "table-width"
 )
 
 func MergeFlags(

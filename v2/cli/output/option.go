@@ -11,6 +11,7 @@ type Option struct {
     Order          SortOrder
     Limit          int
     Offset         int
+    TableMaxWidth  int
 }
 
 func DefaultOption() Option {
@@ -25,5 +26,6 @@ func DefaultOption() Option {
         Order:          SortOrderAscending,
         Limit:          0,
         Offset:         0,
+        TableMaxWidth:  0,
     }
 }
