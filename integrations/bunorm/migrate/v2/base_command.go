@@ -3,7 +3,6 @@ package migrate
 import (
     "errors"
 
-    "github.com/precision-soft/melody/integrations/bunorm/v2"
     clicontract "github.com/precision-soft/melody/v2/cli/contract"
     "github.com/precision-soft/melody/v2/cli/output"
     "github.com/precision-soft/melody/v2/container"

@@ -1,0 +1,7 @@
+/var/
+/.env.local
+
+/melody_default
+/melody_melody_env_embedded
+/melody_melody_env_embedded_melody_static_embedded
+/melody_melody_static_embedded

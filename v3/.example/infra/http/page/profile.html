@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1" name="viewport"/>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet"/>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet"/>
+    <link href="/assets/app.css" rel="stylesheet"/>
+    <title>User</title>
+</head>
+<body class="bg-light" data-page="user_detail">
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1 class="h3 mb-0" id="title"><i class="fa-solid fa-user me-2"></i>User</h1>
+        <a class="btn btn-outline-secondary btn-sm" data-route="example.users.list.page" href="#">
+            <i class="fa-solid fa-arrow-left me-1"></i>Back to list
+        </a>
+    </div>
+
+    <div class="alert alert-info py-2" id="status">Loading...</div>
+
+    <div class="row g-3">
+        <div class="col-lg-6">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <div class="mb-3" id="userIdRow">
+                        <label class="form-label" for="userId">Id</label>
+                        <input class="form-control" id="userId" readonly type="text"/>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label" for="username">Username</label>
+                        <input class="form-control" id="username" type="text"/>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label" for="password">Password</label>
+                        <input class="form-control" id="password" type="password"/>
+                        <div class="form-text">For update, leave empty to keep unchanged.</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label" for="roles">Roles</label>
+                        <select class="form-select" id="roles" multiple>
+                            <option value="ROLE_USER">ROLE_USER</option>
+                            <option value="ROLE_EDITOR">ROLE_EDITOR</option>
+                            <option value="ROLE_ADMIN">ROLE_ADMIN</option>
+                        </select>
+                        <div class="form-text">Hold Ctrl/Command to select multiple.</div>
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-primary" id="saveButton" type="button">
+                            <i class="fa-solid fa-floppy-disk me-1"></i><span id="saveLabel">Save</span>
+                        </button>
+                        <button class="btn btn-outline-danger d-none" id="deleteButton" type="button">
+                            <i class="fa-solid fa-trash me-1"></i>Delete
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-6">
+            <div class="card shadow-sm">
+                <div class="card-header"><i class="fa-solid fa-bug me-2"></i>Debug payload</div>
+                <div class="card-body">
+                    <pre class="mb-0" id="debug" style="white-space: pre-wrap"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js" type="text/javascript"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" type="text/javascript"></script>
+<script type="text/javascript">window.melodyRoutes = JSON.parse('{{routes_json}}');</script>
+<script src="/assets/app.js" type="text/javascript"></script>
+<script type="text/javascript">
+    $(document).ready(() => {
+        const usernameInput = $('#username');
+        if (0 === usernameInput.length) {
+            return;
+        }
+
+        const path = String(window.location.pathname ?? '').trim();
+        const isCreate = -1 !== path.indexOf('/create/');
+        const isUpdate = -1 !== path.indexOf('/update/');
+
+        const parts = path.split('/').filter((p) => '' !== String(p ?? '').trim());
+
+        let userId = '';
+        if (true === isUpdate) {
+            userId = String(parts?.[2] ?? '').trim();
+        }
+
+        const title = $('#title');
+        const saveLabel = $('#saveLabel');
+        const userIdRow = $('#userIdRow');
+        const userIdInput = $('#userId');
+        const passwordInput = $('#password');
+        const rolesSelect = $('#roles');
+        const deleteButton = $('#deleteButton');
+        const debug = $('#debug');
+
+        const setSelectedRoles = (roles) => {
+            const set = {};
+            for (const role of (roles ?? [])) {
+                set[String(role ?? '').trim()] = true;
+            }
+
+            rolesSelect.find('option').each((_, optionElement) => {
+                const node = $(optionElement);
+                const value = String(node.val() ?? '').trim();
+                if (true === (set[value] ?? false)) {
+                    node.prop('selected', true);
+                } else {
+                    node.prop('selected', false);
+                }
+            });
+        };
+
+        const getSelectedRoles = () => {
+            const selected = [];
+            rolesSelect.find('option:selected').each((_, optionElement) => {
+                selected.push(String($(optionElement).val() ?? '').trim());
+            });
+            return selected;
+        };
+
+        if (true === isCreate) {
+            title.text('Create user');
+            saveLabel.text('Create');
+            userIdRow.addClass('d-none');
+        } else {
+            title.text('Update user');
+            saveLabel.text('Save');
+            userIdRow.removeClass('d-none');
+        }
+
+        const load = async () => {
+            if (true === isCreate) {
+                window.melodyExample.ui.setStatus('Ready.');
+                return;
+            }
+
+            if ('' === userId) {
+                window.melodyExample.ui.setStatus('missing user id', 'danger');
+                return;
+            }
+
+            window.melodyExample.ui.setStatus('Loading user...');
+
+            try {
+                const result = await window.melodyExample.http.getJson(
+                    window.melodyExample.routing.route('example.users.api.read', {id: userId})
+                );
+
+                const user = result?.payload ?? null;
+                if (null === user) {
+                    window.melodyExample.ui.setStatus('missing user payload', 'danger');
+                    return;
+                }
+
+                userIdInput.val(user.id ?? '');
+                usernameInput.val(user.username ?? '');
+                setSelectedRoles(user.roles ?? []);
+
+                deleteButton.removeClass('d-none');
+                debug.text(JSON.stringify(result, null, 2));
+                window.melodyExample.ui.setStatus('OK');
+            } catch (err) {
+                window.melodyExample.ui.setStatus(String(err?.message ?? err), 'danger');
+            }
+        };
+
+        $('#saveButton').off('click').on('click', async () => {
+            const dto = {
+                username: String(usernameInput.val() ?? '').trim(),
+                password: String(passwordInput.val() ?? '').trim(),
+                roles: getSelectedRoles()
+            };
+
+            try {
+                if (true === isCreate) {
+                    const createResult = await window.melodyExample.http.postJson(
+                        window.melodyExample.routing.route('example.users.api.create'),
+                        dto
+                    );
+
+                    debug.text(JSON.stringify(createResult, null, 2));
+                    window.melodyExample.ui.setStatus('Created.');
+
+                    const createdId = String(createResult?.payload?.id ?? '').trim();
+                    if ('' !== createdId) {
+                        window.location.href = window.melodyExample.routing.route('example.users.update.page', {id: createdId});
+                    }
+
+                    return;
+                }
+
+                const updateResult = await window.melodyExample.http.putJson(
+                    window.melodyExample.routing.route('example.users.api.update', {id: userId}),
+                    dto
+                );
+
+                debug.text(JSON.stringify(updateResult, null, 2));
+                window.melodyExample.ui.setStatus('Saved.');
+            } catch (err) {
+                window.melodyExample.ui.setStatus(String(err?.message ?? err), 'danger');
+            }
+        });
+
+        deleteButton.off('click').on('click', async () => {
+            if ('' === userId) {
+                return;
+            }
+
+            const confirmed = window.confirm('Delete this user?');
+            if (true !== confirmed) {
+                return;
+            }
+
+            try {
+                const deleteResult = await window.melodyExample.http.deleteJson(
+                    window.melodyExample.routing.route('example.users.api.delete', {id: userId})
+                );
+
+                debug.text(JSON.stringify(deleteResult, null, 2));
+                window.melodyExample.ui.setStatus('Deleted.');
+                window.location.href = window.melodyExample.routing.route('example.users.list.page');
+            } catch (err) {
+                window.melodyExample.ui.setStatus(String(err?.message ?? err), 'danger');
+            }
+        });
+
+        void load();
+    });
+</script>
+</body>
+</html>

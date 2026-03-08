@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1" name="viewport"/>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet"/>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet"/>
+    <link href="/assets/app.css" rel="stylesheet"/>
+    <title>Product</title>
+</head>
+<body class="bg-light" data-page="product_detail">
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1 class="h3 mb-0" id="title"><i class="fa-solid fa-box me-2"></i>Product</h1>
+        <a class="btn btn-outline-secondary btn-sm" data-route="example.products.list.page" href="#">
+            <i class="fa-solid fa-arrow-left me-1"></i>Back to list
+        </a>
+    </div>
+
+    <div class="alert alert-info py-2" id="status">Loading...</div>
+
+    <div class="row g-3">
+        <div class="col-lg-6">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <div class="mb-3" id="productIdRow">
+                        <label class="form-label" for="productId">Id</label>
+                        <input class="form-control" id="productId" readonly type="text"/>
+                        <div class="form-text">For create, you can leave empty to auto-generate.</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label" for="productName">Name</label>
+                        <input class="form-control" id="productName" type="text"/>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label" for="productDescription">Description</label>
+                        <input class="form-control" id="productDescription" type="text"/>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label" for="productCategoryId">Category</label>
+                        <select class="form-select" id="productCategoryId"></select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label" for="productPrice">Price</label>
+                        <input class="form-control" id="productPrice" min="0" step="0.01" type="number"/>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label" for="productCurrencyId">Currency</label>
+                        <select class="form-select" id="productCurrencyId"></select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label" for="productStock">Stock</label>
+                        <input class="form-control" id="productStock" min="0" step="1" type="number"/>
+                    </div>
+
+                    <div class="row g-2" id="timestampsRow">
+                        <div class="col-md-6">
+                            <label class="form-label" for="productCreatedAt">Created at</label>
+                            <input class="form-control" id="productCreatedAt" readonly type="text"/>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="productUpdatedAt">Updated at</label>
+                            <input class="form-control" id="productUpdatedAt" readonly type="text"/>
+                        </div>
+                    </div>
+
+                    <div class="d-flex gap-2 mt-3">
+                        <button class="btn btn-primary" id="saveButton" type="button">
+                            <i class="fa-solid fa-floppy-disk me-1"></i><span id="saveLabel">Save</span>
+                        </button>
+                        <button class="btn btn-outline-danger d-none" id="deleteButton" type="button">
+                            <i class="fa-solid fa-trash me-1"></i>Delete
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-6">
+            <div class="card shadow-sm">
+                <div class="card-header"><i class="fa-solid fa-bug me-2"></i>Debug payload</div>
+                <div class="card-body">
+                    <pre class="mb-0" id="debug" style="white-space: pre-wrap"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
+<script type="text/javascript">window.melodyRoutes = JSON.parse('{{routes_json}}');</script>
+<script src="/assets/app.js"></script>
+
+<script type="text/javascript">
+    $(document).ready(() => {
+
+        const initPage = async () => {
+            const nameInput = $('#productName');
+            if (0 === nameInput.length) {
+                return;
+            }
+
+            const path = String(window.location.pathname ?? '').trim();
+            const isCreate = -1 !== path.indexOf('/create/');
+            const isUpdate = -1 !== path.indexOf('/update/');
+
+            const parts = path.split('/').filter((p) => '' !== String(p ?? '').trim());
+
+            let productId = '';
+            if (true === isUpdate) {
+                productId = String(parts?.[2] ?? '').trim();
+            }
+
+            const title = $('#title');
+            const saveLabel = $('#saveLabel');
+            const productIdRow = $('#productIdRow');
+            const productIdInput = $('#productId');
+            const timestampsRow = $('#timestampsRow');
+            const deleteButton = $('#deleteButton');
+
+            const descriptionInput = $('#productDescription');
+            const categoryIdInput = $('#productCategoryId');
+            const priceInput = $('#productPrice');
+            const currencyIdInput = $('#productCurrencyId');
+            const stockInput = $('#productStock');
+            const createdAtInput = $('#productCreatedAt');
+            const updatedAtInput = $('#productUpdatedAt');
+            const debug = $('#debug');
+
+            const populateSelectOptions = (selectElement, options, valueKey, labelKey) => {
+                const element = $(selectElement);
+                element.empty();
+
+                for (const option of (Array.isArray(options) ? options : [])) {
+                    const value = String(option?.[valueKey] ?? '').trim();
+                    const label = String(option?.[labelKey] ?? '').trim();
+                    if ('' === value) {
+                        continue;
+                    }
+
+                    $('<option/>')
+                        .attr('value', value)
+                        .text(label)
+                        .appendTo(element);
+                }
+            };
+
+            const renderProduct = (product) => {
+                productIdInput.val(product?.id ?? '');
+                nameInput.val(product?.name ?? '');
+                descriptionInput.val(product?.description ?? '');
+                categoryIdInput.val(product?.categoryId ?? '');
+                priceInput.val(Number(product?.price ?? 0).toFixed(2));
+                currencyIdInput.val(product?.currencyId ?? '');
+                stockInput.val(product?.stock ?? 0);
+                createdAtInput.val(product?.createdAt ?? '');
+                updatedAtInput.val(product?.updatedAt ?? '');
+            };
+
+            if (true === isCreate) {
+                title.text('Create product');
+                saveLabel.text('Create');
+                productIdRow.addClass('d-none');
+                timestampsRow.addClass('d-none');
+                deleteButton.addClass('d-none');
+
+                const categoriesResult = await window.melodyExample.http.getJson(
+                    window.melodyExample.routing.route('example.categories.api.read.all')
+                );
+                const currenciesResult = await window.melodyExample.http.getJson(
+                    window.melodyExample.routing.route('example.currencies.api.read.all')
+                );
+
+                populateSelectOptions(categoryIdInput, categoriesResult?.payload ?? [], 'id', 'name');
+                populateSelectOptions(currencyIdInput, currenciesResult?.payload ?? [], 'id', 'code');
+
+                window.melodyExample.ui.setStatus('Ready.');
+            } else {
+                title.text('Update product');
+                saveLabel.text('Save');
+
+                const detailResult = await window.melodyExample.http.getJson(
+                    window.melodyExample.routing.route('example.products.api.read', {id: productId})
+                );
+
+                const detail = detailResult?.payload ?? {};
+                populateSelectOptions(categoryIdInput, detail?.categories ?? [], 'id', 'name');
+                populateSelectOptions(currencyIdInput, detail?.currencies ?? [], 'id', 'code');
+
+                renderProduct(detail?.product ?? null);
+                deleteButton.removeClass('d-none');
+                debug.text(JSON.stringify(detailResult, null, 2));
+                window.melodyExample.ui.setStatus('OK');
+            }
+
+            $('#saveButton').on('click', async () => {
+                const dto = {
+                    name: String(nameInput.val() ?? '').trim(),
+                    description: String(descriptionInput.val() ?? '').trim(),
+                    categoryId: String(categoryIdInput.val() ?? '').trim(),
+                    price: Number(priceInput.val() ?? 0),
+                    currencyId: String(currencyIdInput.val() ?? '').trim(),
+                    stock: Number(stockInput.val() ?? 0)
+                };
+
+                if (true === isCreate) {
+                    const createResult = await window.melodyExample.http.postJson(
+                        window.melodyExample.routing.route('example.products.api.create'),
+                        dto
+                    );
+
+                    const createdId = String(createResult?.payload?.id ?? '').trim();
+                    if ('' !== createdId) {
+                        window.location.href = window.melodyExample.routing.route(
+                            'example.products.update.page',
+                            {id: createdId}
+                        );
+                    }
+                    return;
+                }
+
+                const updateResult = await window.melodyExample.http.putJson(
+                    window.melodyExample.routing.route('example.products.api.update', {id: productId}),
+                    dto
+                );
+
+                updatedAtInput.val(updateResult?.payload?.updatedAt ?? '');
+                debug.text(JSON.stringify(updateResult, null, 2));
+                window.melodyExample.ui.setStatus('Saved.');
+            });
+
+            deleteButton.on('click', async () => {
+                const confirmed = window.confirm('Delete this product?');
+                if (true !== confirmed) {
+                    return;
+                }
+
+                await window.melodyExample.http.deleteJson(
+                    window.melodyExample.routing.route('example.products.api.delete', {id: productId})
+                );
+
+                window.location.href = window.melodyExample.routing.route('example.products.list.page');
+            });
+        };
+
+        void initPage();
+    });
+</script>
+</body>
+</html>

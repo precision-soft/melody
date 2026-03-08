@@ -12,6 +12,8 @@ ENV ROOT_PATH=${ROOT_PATH}
 ENV HOME=/home
 
 ENV GOCACHE=/go/cache/go-build
+ENV GOPRIVATE=github.com/precision-soft
+ENV GONOSUMDB=github.com/precision-soft
 
 RUN apk add --update --no-cache git shadow bash
 

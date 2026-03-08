@@ -3,19 +3,25 @@ go 1.24.9
 use (
 	.
 	./v2
+	./v3
 
 	./integrations/bunorm
 	./integrations/bunorm/v2
+	./integrations/bunorm/v3
 
 	./integrations/bunorm/mysql
 	./integrations/bunorm/mysql/v2
+	./integrations/bunorm/mysql/v3
 
 	./integrations/bunorm/pgsql
 	./integrations/bunorm/pgsql/v2
+	./integrations/bunorm/pgsql/v3
 
 	./integrations/bunorm/migrate
 	./integrations/bunorm/migrate/v2
+	./integrations/bunorm/migrate/v3
 
 	./integrations/rueidis
 	./integrations/rueidis/v2
+	./integrations/rueidis/v3
 )

@@ -154,8 +154,14 @@ func (instance *Module) RegisterEventSubscribers(kernelInstance melodykernelcont
     )
 }
 
+func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.ParameterRegistrar) {
+    registrar.RegisterParameter("app.max_items_per_page", "%APP_MAX_ITEMS_PER_PAGE%")
+    registrar.RegisterParameter("app.catalog_title", "%APP_CATALOG_TITLE%")
+}
+
 var _ melodyapplicationcontract.Module = (*Module)(nil)
 var _ melodyapplicationcontract.HttpModule = (*Module)(nil)
 var _ melodyapplicationcontract.CliModule = (*Module)(nil)
 var _ melodyapplicationcontract.EventModule = (*Module)(nil)
+var _ melodyapplicationcontract.ParameterModule = (*Module)(nil)
 var _ melodyapplication.SecurityModule = (*Module)(nil)

@@ -27,7 +27,7 @@ Entry point: [`cache.NewBackend`](./cache/backend.go)
 
 `Backend` holds a `rueidis.Client` and a `context.Context` passed at construction time.
 All Redis operations use this internal context.
-It implements [`cache/contract.Backend`](../../cache/contract/backend.go) and supports:
+It implements [`cache/contract.Backend`](../../../cache/contract/backend.go) and supports:
 
 * single get/set/delete/has
 * many/get multiple

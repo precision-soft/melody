@@ -5,8 +5,8 @@ This directory contains **optional Bun ORM integrations** for Melody.
 The integration is split into independent Go modules so consumers can depend only on what they need:
 
 * Core (dialect-agnostic): [`./`](./)
-* MySQL provider: [`./mysql/`](./mysql/)
-* PostgreSQL provider: [`./pgsql/`](./pgsql/)
+* MySQL provider: [`../mysql/v2/`](../mysql/v2/)
+* PostgreSQL provider: [`../pgsql/v2/`](../pgsql/v2/)
 
 ## What you get
 
@@ -176,8 +176,8 @@ func main() {
 
 ## Dialect providers
 
-* MySQL provider: [`./mysql/`](./mysql/)
-* PostgreSQL provider: [`./pgsql/`](./pgsql/)
+* MySQL provider: [`../mysql/v2/`](../mysql/v2/)
+* PostgreSQL provider: [`../pgsql/v2/`](../pgsql/v2/)
 
 Each dialect module implements [`bunorm.Provider`](./provider.go) and is responsible for:
 
@@ -192,7 +192,7 @@ The dialect providers expose an optional *post-build hook* that allows userland 
 
 The hook is configured via a provider option passed to the provider constructor:
 
-* MySQL: [`mysql.WithPostBuildHook`](./mysql/provider_option.go) using [`mysql.PostBuildHook`](./mysql/post_build_hook.go)
-* PostgreSQL: [`pgsql.WithPostBuildHook`](./pgsql/provider_option.go) using [`pgsql.PostBuildHook`](./pgsql/post_build_hook.go)
+* MySQL: [`mysql.WithPostBuildHook`](../mysql/v2/provider_option.go) using [`mysql.PostBuildHook`](../mysql/v2/post_build_hook.go)
+* PostgreSQL: [`pgsql.WithPostBuildHook`](../pgsql/v2/provider_option.go) using [`pgsql.PostBuildHook`](../pgsql/v2/post_build_hook.go)
 
 The hook is executed during provider open, after Melody defaults and typed configs are applied, and before establishing the SQL connection.
