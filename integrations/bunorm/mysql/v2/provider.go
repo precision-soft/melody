@@ -10,6 +10,7 @@ import (
     "time"
 
     driver "github.com/go-sql-driver/mysql"
+    "github.com/precision-soft/melody/integrations/bunorm/v2"
     "github.com/precision-soft/melody/v2/exception"
     loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
     "github.com/uptrace/bun"

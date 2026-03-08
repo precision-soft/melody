@@ -7,7 +7,4 @@ require (
 	github.com/redis/rueidis v1.0.71
 )
 
-require (
-	github.com/joho/godotenv v1.5.1 // indirect
-	golang.org/x/sys v0.39.0 // indirect
-)
+require golang.org/x/sys v0.39.0 // indirect

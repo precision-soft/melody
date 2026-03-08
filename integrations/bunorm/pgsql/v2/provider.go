@@ -9,6 +9,7 @@ import (
     "strings"
     "time"
 
+    "github.com/precision-soft/melody/integrations/bunorm/v2"
     "github.com/precision-soft/melody/v2/exception"
     exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
     loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
