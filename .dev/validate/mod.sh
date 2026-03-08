@@ -45,6 +45,16 @@ container_path_for() {
     printf '%s%s' "${CONTAINER_ROOT_PATH}" "${RELATIVE_PATH_STRING}"
 }
 
+get_versioned_module_directory_list() {
+    local CANDIDATE_DIR_STRING
+    for CANDIDATE_DIR_STRING in "${REPOSITORY_ROOT_DIRECTORY_STRING}"/v[0-9]*/; do
+        CANDIDATE_DIR_STRING="${CANDIDATE_DIR_STRING%/}"
+        if [[ -f "${CANDIDATE_DIR_STRING}/go.mod" ]]; then
+            printf '%s\n' "${CANDIDATE_DIR_STRING}"
+        fi
+    done | sort -V
+}
+
 get_module_directory_list() {
     {
         printf '%s\n' "${REPOSITORY_ROOT_DIRECTORY_STRING}"
@@ -53,30 +63,35 @@ get_module_directory_list() {
             printf '%s\n' "${REPOSITORY_ROOT_DIRECTORY_STRING}/.example"
         fi
 
-        if [[ -f "${REPOSITORY_ROOT_DIRECTORY_STRING}/v2/go.mod" ]]; then
-            printf '%s\n' "${REPOSITORY_ROOT_DIRECTORY_STRING}/v2"
-        fi
+        local VERSIONED_DIR_STRING
+        while IFS= read -r VERSIONED_DIR_STRING; do
+            if [[ "" = "${VERSIONED_DIR_STRING}" ]]; then
+                continue
+            fi
 
-        if [[ -f "${REPOSITORY_ROOT_DIRECTORY_STRING}/v2/.example/go.mod" ]]; then
-            printf '%s\n' "${REPOSITORY_ROOT_DIRECTORY_STRING}/v2/.example"
-        fi
+            printf '%s\n' "${VERSIONED_DIR_STRING}"
+
+            if [[ -f "${VERSIONED_DIR_STRING}/.example/go.mod" ]]; then
+                printf '%s\n' "${VERSIONED_DIR_STRING}/.example"
+            fi
+
+            if [[ -d "${VERSIONED_DIR_STRING}/integrations" ]]; then
+                find "${VERSIONED_DIR_STRING}/integrations" \
+                    -maxdepth 4 \
+                    -name go.mod \
+                    -print \
+                    2>/dev/null |
+                    while IFS= read -r GO_MOD_PATH_STRING; do
+                        if [[ "" = "${GO_MOD_PATH_STRING}" ]]; then
+                            continue
+                        fi
+                        dirname "${GO_MOD_PATH_STRING}"
+                    done
+            fi
+        done < <(get_versioned_module_directory_list)
 
         if [[ -d "${REPOSITORY_ROOT_DIRECTORY_STRING}/integrations" ]]; then
             find "${REPOSITORY_ROOT_DIRECTORY_STRING}/integrations" \
-                -maxdepth 4 \
-                -name go.mod \
-                -print \
-                2>/dev/null |
-                while IFS= read -r GO_MOD_PATH_STRING; do
-                    if [[ "" = "${GO_MOD_PATH_STRING}" ]]; then
-                        continue
-                    fi
-                    dirname "${GO_MOD_PATH_STRING}"
-                done
-        fi
-
-        if [[ -d "${REPOSITORY_ROOT_DIRECTORY_STRING}/v2/integrations" ]]; then
-            find "${REPOSITORY_ROOT_DIRECTORY_STRING}/v2/integrations" \
                 -maxdepth 4 \
                 -name go.mod \
                 -print \
