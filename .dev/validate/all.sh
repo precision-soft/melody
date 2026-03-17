@@ -57,26 +57,21 @@ run_go_checks() {
     local CONTAINER_DIRECTORY_STRING
     CONTAINER_DIRECTORY_STRING="$(container_path_for "${COMPONENT_DIRECTORY_STRING}")"
 
-    section_start "${COMPONENT_TITLE_STRING}" "${TAG_VALIDATE}" "go"
+    local BATCH_COMMAND_LIST=()
 
     local TAGS_STRING
     for TAGS_STRING in "${GO_TAG_LIST_STRING_LIST[@]}"; do
         if [[ "" = "${TAGS_STRING}" ]]; then
-            run_section "go vet" "${TAG_VALIDATE}" "go" "vet" -- \
-                run_in_service_shell "${SERVICE_NAME_STRING}" "cd ${CONTAINER_DIRECTORY_STRING} && go vet ./..."
-
-            run_section "go test" "${TAG_VALIDATE}" "go" "test" -- \
-                run_in_service_shell "${SERVICE_NAME_STRING}" "cd ${CONTAINER_DIRECTORY_STRING} && go test ./..."
+            BATCH_COMMAND_LIST+=("cd ${CONTAINER_DIRECTORY_STRING} && go vet ./...")
+            BATCH_COMMAND_LIST+=("cd ${CONTAINER_DIRECTORY_STRING} && go test ./...")
         else
-            run_section "go vet" "${TAG_VALIDATE}" "go" "vet" "tags" "${TAGS_STRING}" -- \
-                run_in_service_shell "${SERVICE_NAME_STRING}" "cd ${CONTAINER_DIRECTORY_STRING} && go vet -tags '${TAGS_STRING}' ./..."
-
-            run_section "go test" "${TAG_VALIDATE}" "go" "test" "tags" "${TAGS_STRING}" -- \
-                run_in_service_shell "${SERVICE_NAME_STRING}" "cd ${CONTAINER_DIRECTORY_STRING} && go test -tags '${TAGS_STRING}' ./..."
+            BATCH_COMMAND_LIST+=("cd ${CONTAINER_DIRECTORY_STRING} && go vet -tags '${TAGS_STRING}' ./...")
+            BATCH_COMMAND_LIST+=("cd ${CONTAINER_DIRECTORY_STRING} && go test -tags '${TAGS_STRING}' ./...")
         fi
     done
 
-    section_end "${COMPONENT_TITLE_STRING}" "success" "${TAG_VALIDATE}" "go"
+    run_section "${COMPONENT_TITLE_STRING}" "${TAG_VALIDATE}" "go" -- \
+        run_batch_in_service_shell "${SERVICE_NAME_STRING}" "${BATCH_COMMAND_LIST[@]}"
 }
 
 get_versioned_module_directory_list() {

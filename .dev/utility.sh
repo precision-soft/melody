@@ -472,6 +472,15 @@ run_in_service_shell_interactive() {
     docker_compose exec "${SERVICE_NAME_STRING}" bash -c "${COMMAND_STRING}"
 }
 
+run_batch_in_service_shell() {
+    local SERVICE_NAME_STRING="${1:?}"
+    shift
+
+    ensure_service_running "${SERVICE_NAME_STRING}"
+
+    docker_compose exec -T "${SERVICE_NAME_STRING}" bash /app/.dev/run-batch.sh "$@" </dev/null
+}
+
 staged_files() {
     local TITLE_STRING="${1:-staged files}"
 
