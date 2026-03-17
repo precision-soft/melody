@@ -106,31 +106,8 @@ get_module_directory_list() {
     } | sort -u
 }
 
-run_mod_for_directory() {
-    local MODULE_DIRECTORY_STRING="${1:?}"
-    local MODULE_LABEL_STRING="${2:?}"
-
-    local CONTAINER_DIRECTORY_STRING
-    CONTAINER_DIRECTORY_STRING="$(container_path_for "${MODULE_DIRECTORY_STRING}")"
-
-    section_start "${MODULE_LABEL_STRING}" "${TAG_VALIDATE}" "go" "mod"
-
-    if [[ "download" = "${MODE_STRING}" || "download-and-tidy" = "${MODE_STRING}" ]]; then
-        run_section "go mod download" "${TAG_VALIDATE}" "go" "mod" "download" -- \
-            run_in_service_shell "${SERVICE_NAME_STRING}" "cd ${CONTAINER_DIRECTORY_STRING} && go mod download"
-    fi
-
-    if [[ "tidy" = "${MODE_STRING}" || "download-and-tidy" = "${MODE_STRING}" ]]; then
-        run_section "go mod tidy" "${TAG_VALIDATE}" "go" "mod" "tidy" -- \
-            run_in_service_shell "${SERVICE_NAME_STRING}" "cd ${CONTAINER_DIRECTORY_STRING} && go mod tidy"
-    fi
-
-    section_end "${MODULE_LABEL_STRING}" "success" "${TAG_VALIDATE}" "go" "mod"
-}
-
 main() {
-    local ROOT_DIRECTORY_STRING
-    ROOT_DIRECTORY_STRING="${REPOSITORY_ROOT_DIRECTORY_STRING}"
+    local BATCH_COMMAND_LIST=()
 
     local MODULE_DIRECTORY_STRING
     while IFS= read -r MODULE_DIRECTORY_STRING; do
@@ -138,15 +115,20 @@ main() {
             continue
         fi
 
-        local LABEL_STRING
-        if [[ "${MODULE_DIRECTORY_STRING}" = "${ROOT_DIRECTORY_STRING}" ]]; then
-            LABEL_STRING="melody framework (root module)"
-        else
-            LABEL_STRING="go module: ${MODULE_DIRECTORY_STRING#${ROOT_DIRECTORY_STRING}/}"
+        local CONTAINER_DIRECTORY_STRING
+        CONTAINER_DIRECTORY_STRING="$(container_path_for "${MODULE_DIRECTORY_STRING}")"
+
+        if [[ "download" = "${MODE_STRING}" || "download-and-tidy" = "${MODE_STRING}" ]]; then
+            BATCH_COMMAND_LIST+=("cd ${CONTAINER_DIRECTORY_STRING} && go mod download")
         fi
 
-        run_mod_for_directory "${MODULE_DIRECTORY_STRING}" "${LABEL_STRING}"
+        if [[ "tidy" = "${MODE_STRING}" || "download-and-tidy" = "${MODE_STRING}" ]]; then
+            BATCH_COMMAND_LIST+=("cd ${CONTAINER_DIRECTORY_STRING} && go mod tidy")
+        fi
     done < <(get_module_directory_list)
+
+    run_section "go mod ${MODE_STRING}" "${TAG_VALIDATE}" "go" "mod" -- \
+        run_batch_in_service_shell "${SERVICE_NAME_STRING}" "${BATCH_COMMAND_LIST[@]}"
 
     success "go mod ${MODE_STRING} completed"
 }

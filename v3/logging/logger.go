@@ -13,10 +13,10 @@ import (
 const causeChainMaxDepth = 8
 
 type logEntry struct {
-    Message string         `json:"message"`
-    Level   string         `json:"level"`
-    Time    string         `json:"time"`
-    Context map[string]any `json:"context"`
+    Message string                     `json:"message"`
+    Level   loggingcontract.LevelLabel `json:"level"`
+    Time    string                     `json:"time"`
+    Context map[string]any             `json:"context"`
 }
 
 func LogError(logger loggingcontract.Logger, err error) {

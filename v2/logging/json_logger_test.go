@@ -256,11 +256,15 @@ func TestJsonLogger_CustomLevelLabels(t *testing.T) {
         t.Fatalf("expected 5 log lines, got %d", len(lines))
     }
 
-    expected := []string{"100", "200", "300", "400", "500"}
+    expected := []float64{100, 200, 300, 400, 500}
     for i, line := range lines {
         data := decodeJsonLine(t, line)
-        if expected[i] != data["level"] {
-            t.Fatalf("line %d: expected level %q, got %q", i, expected[i], data["level"])
+        level, ok := data["level"].(float64)
+        if false == ok {
+            t.Fatalf("line %d: level is not a number: %v", i, data["level"])
+        }
+        if expected[i] != level {
+            t.Fatalf("line %d: expected level %v, got %v", i, expected[i], level)
         }
     }
 }

@@ -1,6 +1,10 @@
 package contract
 
-import "strconv"
+import (
+    "encoding/json"
+    "fmt"
+    "strconv"
+)
 
 type Level string
 
@@ -20,15 +24,26 @@ func LevelLabelFromString(s string) LevelLabel {
 }
 
 func LevelLabelFromInt(i int) LevelLabel {
-    return LevelLabel{value: strconv.Itoa(i)}
+    return LevelLabel{value: i}
 }
 
 type LevelLabel struct {
-    value string
+    value any
 }
 
 func (instance LevelLabel) String() string {
-    return instance.value
+    switch v := instance.value.(type) {
+    case int:
+        return strconv.Itoa(v)
+    case string:
+        return v
+    default:
+        return fmt.Sprintf("%v", v)
+    }
+}
+
+func (instance LevelLabel) MarshalJSON() ([]byte, error) {
+    return json.Marshal(instance.value)
 }
 
 func DefaultLevelLabels() LevelLabels {
@@ -43,10 +58,18 @@ func DefaultLevelLabels() LevelLabels {
 
 type LevelLabels map[Level]LevelLabel
 
-func (instance LevelLabels) LabelFor(level Level) string {
-    if label, exists := instance[level]; true == exists && "" != label.value {
-        return label.String()
+func (instance LevelLabels) LabelFor(level Level) LevelLabel {
+    label, exists := instance[level]
+    if false == exists {
+        return LevelLabelFromString(string(level))
     }
 
-    return string(level)
+    switch label.value.(type) {
+    case int:
+        return label
+    case string:
+        return label
+    }
+
+    return LevelLabelFromString(string(level))
 }
