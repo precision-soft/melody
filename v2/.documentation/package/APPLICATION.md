@@ -11,8 +11,8 @@ It coordinates configuration resolution, container bootstrapping, module wiring 
 
 ## Subpackages
 
-- [`application/contract`](../../application/contract)  
-  Public module contracts (`Module`, `ModuleProvider`, `ParameterModule`, `ServiceModule`, `HttpModule`, `CliModule`, `EventModule`).
+- [`application/contract`](../../application/contract)
+  Public module contracts (`Module`, `ModuleProvider`, `ParameterModule`, `ServiceModule`, `HttpModule`, `CliModule`, `EventModule`, `ConfigModule`).
 
 ## Responsibilities
 
@@ -27,7 +27,7 @@ It coordinates configuration resolution, container bootstrapping, module wiring 
 
 The application boot is split around configuration resolve:
 
-1. **Pre-resolve**: modules may register parameters via [`ParameterModule`](../../application/contract/parameter_module.go).
+1. **Pre-resolve**: modules may register module-level configurations via [`ConfigModule`](../../application/contract/config_module.go), then register parameters via [`ParameterModule`](../../application/contract/parameter_module.go).
 2. **Resolve**: application configuration is resolved.
 3. **Post-resolve**: modules may register services via [`ServiceModule`](../../application/contract/service_module.go), then register security/events/CLI/HTTP.
 
@@ -45,6 +45,7 @@ Runtime mode is determined by [`ParseRuntimeFlags`](../../application/cli.go):
 
 The example below demonstrates creating an application and registering a module that:
 
+- registers module-level configurations (pre-resolve),
 - registers parameters (pre-resolve),
 - registers services (post-resolve),
 - registers HTTP routes (post-resolve) while reading from resolved configuration.
@@ -60,6 +61,8 @@ import (
 	applicationcontract "github.com/precision-soft/melody/v2/application/contract"
 	httpcontract "github.com/precision-soft/melody/v2/http/contract"
 	kernelcontract "github.com/precision-soft/melody/v2/kernel/contract"
+	"github.com/precision-soft/melody/v2/logging"
+	loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
 )
 
 type demoModule struct{}
@@ -70,6 +73,19 @@ func (instance *demoModule) Name() string {
 
 func (instance *demoModule) Description() string {
 	return "demo module"
+}
+
+func (instance *demoModule) RegisterConfigurations(registrar applicationcontract.ConfigRegistrar) {
+	registrar.RegisterConfiguration(
+		loggingcontract.LoggingConfigurationName,
+		logging.NewLoggingConfiguration(loggingcontract.LevelLabels{
+			loggingcontract.LevelDebug:     "100",
+			loggingcontract.LevelInfo:      "200",
+			loggingcontract.LevelWarning:   "300",
+			loggingcontract.LevelError:     "400",
+			loggingcontract.LevelEmergency: "500",
+		}),
+	)
 }
 
 func (instance *demoModule) RegisterParameters(registrar applicationcontract.ParameterRegistrar) {
@@ -117,6 +133,7 @@ func (instance *demoModule) RegisterHttpRoutes(kernelInstance kernelcontract.Ker
 	)
 }
 
+var _ applicationcontract.ConfigModule = (*demoModule)(nil)
 var _ applicationcontract.ParameterModule = (*demoModule)(nil)
 var _ applicationcontract.ServiceModule = (*demoModule)(nil)
 var _ applicationcontract.HttpModule = (*demoModule)(nil)
@@ -165,6 +182,8 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 
 - [`Module`](../../application/contract/module.go)
 - [`ModuleProvider`](../../application/contract/module.go)
+- [`ConfigModule`](../../application/contract/config_module.go)
+- [`ConfigRegistrar`](../../application/contract/config_module.go)
 - [`ParameterModule`](../../application/contract/parameter_module.go)
 - [`ParameterRegistrar`](../../application/contract/parameter_module.go)
 - [`ServiceModule`](../../application/contract/service_module.go)
@@ -194,6 +213,7 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 
 ### Registration APIs
 
+- [`(*Application).RegisterConfiguration(name, configuration)`](../../application/application.go)
 - [`(*Application).RegisterParameter(name, value)`](../../application/application.go)
 - [`(*Application).RegisterService(name, factory)`](../../application/application_container.go)
 - [`(*Application).RegisterModule(module)`](../../application/application_module.go)

@@ -232,6 +232,39 @@ func TestJsonLogger_NormalizesErrorToString(t *testing.T) {
     }
 }
 
+func TestJsonLogger_CustomLevelLabels(t *testing.T) {
+    buffer := &bytes.Buffer{}
+
+    customLabels := loggingcontract.LevelLabels{
+        loggingcontract.LevelDebug:     loggingcontract.LevelLabelFromInt(100),
+        loggingcontract.LevelInfo:      loggingcontract.LevelLabelFromInt(200),
+        loggingcontract.LevelWarning:   loggingcontract.LevelLabelFromInt(300),
+        loggingcontract.LevelError:     loggingcontract.LevelLabelFromInt(400),
+        loggingcontract.LevelEmergency: loggingcontract.LevelLabelFromInt(500),
+    }
+
+    logger := NewJsonLoggerWithLabels(buffer, loggingcontract.LevelDebug, customLabels)
+
+    logger.Debug("d", nil)
+    logger.Info("i", nil)
+    logger.Warning("w", nil)
+    logger.Error("e", nil)
+    logger.Emergency("em", nil)
+
+    lines := strings.Split(strings.TrimSpace(buffer.String()), "\n")
+    if 5 != len(lines) {
+        t.Fatalf("expected 5 log lines, got %d", len(lines))
+    }
+
+    expected := []string{"100", "200", "300", "400", "500"}
+    for i, line := range lines {
+        data := decodeJsonLine(t, line)
+        if expected[i] != data["level"] {
+            t.Fatalf("line %d: expected level %q, got %q", i, expected[i], data["level"])
+        }
+    }
+}
+
 func TestJsonLogger_FallbackOnMarshalError(t *testing.T) {
     logger, buffer := testNewJsonLoggerWithMinLevel(loggingcontract.LevelInfo)
 

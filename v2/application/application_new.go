@@ -68,15 +68,16 @@ func NewApplication(
     )
 
     application := &Application{
-        configuration:       configuration,
-        runtimeFlags:        ParseRuntimeFlags(configuration.Kernel().DefaultMode()),
-        kernel:              kernelInstance,
-        embeddedPublicFiles: embeddedPublicFiles,
-        modules:             make([]applicationcontract.Module, 0),
-        cliCommands:         make([]clicontract.Command, 0),
-        httpRouteRegistrars: make([]RouteRegistrar, 0),
-        httpMiddlewares:     httpMiddleware,
-        routeRegistry:       routeRegistry,
+        configuration:        configuration,
+        runtimeFlags:         ParseRuntimeFlags(configuration.Kernel().DefaultMode()),
+        kernel:               kernelInstance,
+        embeddedPublicFiles:  embeddedPublicFiles,
+        modules:              make([]applicationcontract.Module, 0),
+        cliCommands:          make([]clicontract.Command, 0),
+        httpRouteRegistrars:  make([]RouteRegistrar, 0),
+        httpMiddlewares:      httpMiddleware,
+        routeRegistry:        routeRegistry,
+        moduleConfigurations: make(map[string]any),
     }
 
     return application

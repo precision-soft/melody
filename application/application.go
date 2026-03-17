@@ -30,6 +30,7 @@ type Application struct {
     httpMiddlewares       *HttpMiddleware
     securityConfiguration *security.CompiledConfiguration
     routeRegistry         httpcontract.RouteRegistry
+    moduleConfigurations  map[string]any
 }
 
 func (instance *Application) Boot() kernelcontract.Kernel {
@@ -162,4 +163,40 @@ func (instance *Application) logOnRecoverAndExit() {
     logging.LogOnRecoverAndExit(logger, recoveredValue, 1)
 }
 
+func (instance *Application) RegisterConfiguration(name string, configuration any) {
+    if true == instance.booted {
+        exception.Panic(
+            exception.NewError(
+                "cannot register configuration after application boot",
+                exceptioncontract.Context{
+                    "configurationName": name,
+                },
+                nil,
+            ),
+        )
+    }
+
+    if "" == name {
+        exception.Panic(
+            exception.NewError("cannot register configuration with empty name", nil, nil),
+        )
+    }
+
+    _, exists := instance.moduleConfigurations[name]
+    if true == exists {
+        exception.Panic(
+            exception.NewError(
+                "duplicate configuration name when registering module configuration",
+                exceptioncontract.Context{
+                    "configurationName": name,
+                },
+                nil,
+            ),
+        )
+    }
+
+    instance.moduleConfigurations[name] = configuration
+}
+
 var _ applicationcontract.ParameterRegistrar = (*Application)(nil)
+var _ applicationcontract.ConfigRegistrar = (*Application)(nil)

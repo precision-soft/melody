@@ -72,7 +72,9 @@ func (instance *Application) bootContainer() {
                 writer = file
             }
 
-            return logging.NewJsonLogger(writer, configuration.Kernel().LogLevel()), nil
+            loggingConfigurationInstance := logging.LoggingConfigurationFromModules(instance.moduleConfigurations)
+
+            return logging.NewJsonLoggerWithLabels(writer, configuration.Kernel().LogLevel(), loggingConfigurationInstance.LevelLabels()), nil
         },
     )
 

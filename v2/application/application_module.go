@@ -22,6 +22,12 @@ func (instance *Application) RegisterModule(moduleInstance applicationcontract.M
 
 func (instance *Application) bootModulesPreConfigurationResolve() {
     for _, moduleInstance := range instance.modules {
+        if configModule, ok := moduleInstance.(applicationcontract.ConfigModule); true == ok {
+            configModule.RegisterConfigurations(instance)
+        }
+    }
+
+    for _, moduleInstance := range instance.modules {
         if parameterModule, ok := moduleInstance.(applicationcontract.ParameterModule); true == ok {
             parameterModule.RegisterParameters(instance)
         }

@@ -9,17 +9,23 @@ import (
 )
 
 func NewDefaultLogger() loggingcontract.Logger {
-    return &defaultLogger{}
+    return NewDefaultLoggerWithLabels(loggingcontract.DefaultLevelLabels())
 }
 
-type defaultLogger struct{}
+func NewDefaultLoggerWithLabels(labels loggingcontract.LevelLabels) loggingcontract.Logger {
+    return &defaultLogger{levelLabels: labels}
+}
+
+type defaultLogger struct {
+    levelLabels loggingcontract.LevelLabels
+}
 
 func (instance *defaultLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
     if nil == context {
         context = loggingcontract.Context{}
     }
 
-    log.Printf("[%s] %s %s", level, message, instance.formatContext(context))
+    log.Printf("[%s] %s %s", instance.levelLabels.LabelFor(level), message, instance.formatContext(context))
 }
 
 func (instance *defaultLogger) Debug(message string, context loggingcontract.Context) {

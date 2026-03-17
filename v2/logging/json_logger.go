@@ -11,12 +11,11 @@ import (
     loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
 )
 
-type jsonLogger struct {
-    output   io.Writer
-    minLevel loggingcontract.Level
+func NewJsonLogger(output io.Writer, minLevel loggingcontract.Level) loggingcontract.Logger {
+    return NewJsonLoggerWithLabels(output, minLevel, loggingcontract.DefaultLevelLabels())
 }
 
-func NewJsonLogger(output io.Writer, minLevel loggingcontract.Level) loggingcontract.Logger {
+func NewJsonLoggerWithLabels(output io.Writer, minLevel loggingcontract.Level, labels loggingcontract.LevelLabels) loggingcontract.Logger {
     if true == internal.IsNilInterface(output) {
         exception.Panic(
             exception.NewError("json logger output is not provided", nil, nil),
@@ -36,9 +35,16 @@ func NewJsonLogger(output io.Writer, minLevel loggingcontract.Level) loggingcont
     }
 
     return &jsonLogger{
-        output:   output,
-        minLevel: minLevel,
+        output:      output,
+        minLevel:    minLevel,
+        levelLabels: labels,
     }
+}
+
+type jsonLogger struct {
+    output      io.Writer
+    minLevel    loggingcontract.Level
+    levelLabels loggingcontract.LevelLabels
 }
 
 func (instance *jsonLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
@@ -46,11 +52,12 @@ func (instance *jsonLogger) Log(level loggingcontract.Level, message string, con
         return
     }
 
+    label := instance.levelLabels.LabelFor(level)
     normalizedContext := normalizeJsonContext(context)
 
     entry := logEntry{
         Message: message,
-        Level:   level,
+        Level:   label,
         Time:    time.Now().Format(time.RFC3339),
         Context: normalizedContext,
     }
@@ -59,7 +66,7 @@ func (instance *jsonLogger) Log(level loggingcontract.Level, message string, con
     if nil != err {
         fallback := map[string]any{
             "message":      message,
-            "level":        string(level),
+            "level":        label,
             "time":         time.Now().Format(time.RFC3339),
             "marshalError": err.Error(),
         }
