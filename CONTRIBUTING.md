@@ -156,7 +156,7 @@ If the issue is security-sensitive, do not file it publicly; follow the security
 
 ## Submitting pull requests
 
-- Use a topic branch based on `master`.
+- Use a topic branch based on `main`.
 - Keep the PR focused: one logical change-set per PR.
 - Add or update tests for behavioral changes.
 - If the change affects userland behavior, update the relevant documentation under [`./.documentation/`](./.documentation/) and, when applicable, the example app docs under [`./.example/`](./.example/).

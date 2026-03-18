@@ -10,6 +10,7 @@ import (
     "github.com/precision-soft/melody/exception"
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
     httpcontract "github.com/precision-soft/melody/http/contract"
+    "github.com/precision-soft/melody/internal"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
     "github.com/precision-soft/melody/session"
     sessioncontract "github.com/precision-soft/melody/session/contract"
@@ -139,9 +140,13 @@ func wrapControllerWithContainer(
         responseValue := results[0]
         errorInterface := results[1].Interface()
 
-        var response *Response
-        if false == responseValue.IsNil() {
-            response = responseValue.Interface().(*Response)
+        var response httpcontract.Response
+        if true == internal.CanReflectValueBeNil(responseValue) {
+            if false == responseValue.IsNil() {
+                response = responseValue.Interface().(httpcontract.Response)
+            }
+        } else {
+            response = responseValue.Interface().(httpcontract.Response)
         }
 
         var err error
@@ -356,8 +361,16 @@ func matchesMethod(methods []string, method string) bool {
         return true
     }
 
+    normalizedMethod := strings.ToUpper(strings.TrimSpace(method))
+
     for _, allowedMethod := range methods {
-        if allowedMethod == method {
+        normalizedAllowedMethod := strings.ToUpper(strings.TrimSpace(allowedMethod))
+
+        if normalizedAllowedMethod == normalizedMethod {
+            return true
+        }
+
+        if nethttp.MethodHead == normalizedMethod && nethttp.MethodGet == normalizedAllowedMethod {
             return true
         }
     }
