@@ -12,10 +12,21 @@ fi
 . "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/utility.sh"
 
 MODE_STRING="all"
-if [[ "${1-}" = "--staged" ]]; then
+if [[ "" = "${1-}" ]]; then
+    :
+elif [[ "-h" = "${1-}" ]]; then
+    println "usage: all.sh [-h] [--all | --staged]"
+    println ""
+    println "  -h         show this help and exit"
+    println "  --all      validate all modules (default)"
+    println "  --staged   validate only modules with staged changes"
+    exit 0
+elif [[ "--staged" = "${1-}" ]]; then
     MODE_STRING="staged"
-elif [[ "${1-}" = "--all" ]]; then
+elif [[ "--all" = "${1-}" ]]; then
     MODE_STRING="all"
+else
+    fail "unknown flag: ${1}"
 fi
 
 SERVICE_NAME_STRING="dev"

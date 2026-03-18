@@ -12,12 +12,24 @@ fi
 . "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/utility.sh"
 
 MODE_STRING="tidy"
-if [[ "${1-}" = "--download" ]]; then
+if [[ "" = "${1-}" ]]; then
+    :
+elif [[ "-h" = "${1-}" ]]; then
+    println "usage: mod.sh [-h] [--tidy | --download | --download-and-tidy]"
+    println ""
+    println "  -h                   show this help and exit"
+    println "  --tidy               run go mod tidy on all modules (default)"
+    println "  --download           run go mod download on all modules"
+    println "  --download-and-tidy  run go mod download then tidy on all modules"
+    exit 0
+elif [[ "--download" = "${1-}" ]]; then
     MODE_STRING="download"
-elif [[ "${1-}" = "--tidy" ]]; then
+elif [[ "--tidy" = "${1-}" ]]; then
     MODE_STRING="tidy"
-elif [[ "${1-}" = "--download-and-tidy" ]]; then
+elif [[ "--download-and-tidy" = "${1-}" ]]; then
     MODE_STRING="download-and-tidy"
+else
+    fail "unknown flag: ${1}"
 fi
 
 SERVICE_NAME_STRING="dev"
