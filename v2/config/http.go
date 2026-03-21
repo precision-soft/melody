@@ -24,7 +24,7 @@ func newHttpConfiguration(
     staticEnableCache bool,
     staticCacheMaxAge int,
 ) (*httpConfiguration, error) {
-    if -1 == strings.Index(address, ":") {
+    if false == strings.Contains(address, ":") {
         address = ":" + address
     }
 
