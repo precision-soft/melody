@@ -8,6 +8,7 @@ import (
     bagcontract "github.com/precision-soft/melody/bag/contract"
     "github.com/precision-soft/melody/exception"
     httpcontract "github.com/precision-soft/melody/http/contract"
+    "github.com/precision-soft/melody/logging"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
@@ -39,18 +40,26 @@ func NewRequest(
         routeParams = map[string]string{}
     }
 
-    queryBag := bag.NewParameterBag()
+    queryBag := bag.NewParameterBagFromValues(httpRequest.URL.Query())
     postBag := bag.NewParameterBag()
 
-    if nil != httpRequest {
-        queryBag = bag.NewParameterBagFromValues(httpRequest.URL.Query())
-
-        if nethttp.MethodPost == httpRequest.Method ||
-            nethttp.MethodPut == httpRequest.Method ||
-            nethttp.MethodPatch == httpRequest.Method {
-            parseFormErr := httpRequest.ParseForm()
-            if nil == parseFormErr {
-                postBag = bag.NewParameterBagFromValues(httpRequest.PostForm)
+    if nethttp.MethodPost == httpRequest.Method ||
+        nethttp.MethodPut == httpRequest.Method ||
+        nethttp.MethodPatch == httpRequest.Method {
+        parseFormErr := httpRequest.ParseForm()
+        if nil == parseFormErr {
+            postBag = bag.NewParameterBagFromValues(httpRequest.PostForm)
+        } else if nil != runtimeInstance {
+            loggerInstance := logging.LoggerFromRuntime(runtimeInstance)
+            if nil != loggerInstance {
+                loggerInstance.Warning(
+                    "failed to parse form data",
+                    map[string]any{
+                        "error":  parseFormErr.Error(),
+                        "method": httpRequest.Method,
+                        "path":   httpRequest.URL.Path,
+                    },
+                )
             }
         }
     }

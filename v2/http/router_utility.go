@@ -434,7 +434,7 @@ func matchPath(
 
                 if "" != wildcardName {
                     params[wildcardName] = rest
-                    if RouteAttributeName == wildcardName {
+                    if RouteAttributeLocale == wildcardName {
                         params[RouteAttributeLocale] = rest
                     }
                 }

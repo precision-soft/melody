@@ -7,6 +7,7 @@ import (
     nethttp "net/http"
     "net/http/httptest"
     "reflect"
+    "regexp"
     "testing"
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
@@ -630,4 +631,90 @@ func TestWrapControllerWithContainer_PanicsWhenDependencyIsNilFromScope(t *testi
     }()
 
     _, _ = handler(runtimeInstance, httptest.NewRecorder(), request)
+}
+
+func TestMatchPath_WildcardLocale_SetsLocaleParam(t *testing.T) {
+    routeDefinition := route{
+        pattern:      "/*_locale...",
+        parts:        splitPath("/*_locale..."),
+        requirements: map[string]*regexp.Regexp{},
+    }
+
+    pathSegments := splitPath("/en")
+    params, matched := matchPath(routeDefinition, pathSegments)
+
+    if false == matched {
+        t.Fatalf("expected path to match")
+    }
+
+    value, exists := params[RouteAttributeLocale]
+    if false == exists {
+        t.Fatalf("expected _locale param to exist")
+    }
+
+    if "en" != value {
+        t.Fatalf("expected _locale param to be 'en', got: %s", value)
+    }
+}
+
+func TestMatchPath_WildcardLocale_CatchAll_SetsLocaleParam(t *testing.T) {
+    routeDefinition := route{
+        pattern:      "/prefix/*_locale...",
+        parts:        splitPath("/prefix/*_locale..."),
+        requirements: map[string]*regexp.Regexp{},
+    }
+
+    pathSegments := splitPath("/prefix/en/extra")
+    params, matched := matchPath(routeDefinition, pathSegments)
+
+    if false == matched {
+        t.Fatalf("expected path to match")
+    }
+
+    if "en/extra" != params[RouteAttributeLocale] {
+        t.Fatalf("expected _locale catch-all to be 'en/extra', got: %s", params[RouteAttributeLocale])
+    }
+}
+
+func TestMatchPath_WildcardNonLocale_DoesNotSetLocaleParam(t *testing.T) {
+    routeDefinition := route{
+        pattern:      "/*path...",
+        parts:        splitPath("/*path..."),
+        requirements: map[string]*regexp.Regexp{},
+    }
+
+    pathSegments := splitPath("/some/path")
+    params, matched := matchPath(routeDefinition, pathSegments)
+
+    if false == matched {
+        t.Fatalf("expected path to match")
+    }
+
+    _, exists := params[RouteAttributeLocale]
+    if true == exists {
+        t.Fatalf("expected _locale param not to be set for non-locale wildcard")
+    }
+
+    if "some/path" != params["path"] {
+        t.Fatalf("expected path param to be 'some/path', got: %s", params["path"])
+    }
+}
+
+func TestMatchPath_ParamLocale_SetsLocaleParam(t *testing.T) {
+    routeDefinition := route{
+        pattern:      "/page/:_locale",
+        parts:        splitPath("/page/:_locale"),
+        requirements: map[string]*regexp.Regexp{},
+    }
+
+    pathSegments := splitPath("/page/fr")
+    params, matched := matchPath(routeDefinition, pathSegments)
+
+    if false == matched {
+        t.Fatalf("expected path to match")
+    }
+
+    if "fr" != params[RouteAttributeLocale] {
+        t.Fatalf("expected _locale param to be 'fr', got: %s", params[RouteAttributeLocale])
+    }
 }

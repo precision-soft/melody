@@ -25,11 +25,21 @@ func (instance *UrlGenerationRouteDefinition) Pattern() string {
 }
 
 func (instance *UrlGenerationRouteDefinition) Defaults() map[string]string {
-    return instance.defaults
+    copied := make(map[string]string, len(instance.defaults))
+    for key, value := range instance.defaults {
+        copied[key] = value
+    }
+
+    return copied
 }
 
 func (instance *UrlGenerationRouteDefinition) Requirements() map[string]*regexp.Regexp {
-    return instance.requirements
+    copied := make(map[string]*regexp.Regexp, len(instance.requirements))
+    for key, value := range instance.requirements {
+        copied[key] = value
+    }
+
+    return copied
 }
 
 var _ httpcontract.UrlGenerationRouteDefinition = (*UrlGenerationRouteDefinition)(nil)

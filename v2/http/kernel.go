@@ -1,6 +1,7 @@
 package http
 
 import (
+    "html"
     nethttp "net/http"
     "sort"
     "strings"
@@ -146,20 +147,9 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             scheme,
         )
 
-        if nil == matchResult {
-            matchResult = &httpcontract.MatchResult{}
-        }
-
         handler := matchResult.Handler
         params := matchResult.Params
         routeAttributes := matchResult.RouteAttributes
-
-        if nil == params {
-            params = map[string]string{}
-        }
-        if nil == routeAttributes {
-            routeAttributes = map[string]any{}
-        }
 
         if true == instance.options.MethodPolicy.HeadFallbackToGet && nethttp.MethodHead == request.Method && nil == handler {
             allowedMethodsValue, exists := routeAttributes[RouteAttributeMethods]
@@ -342,7 +332,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 if true == PrefersHtml(melodyRequest) {
                     exceptionEvent.SetResponse(HtmlResponse(
                         statusCode,
-                        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Melody Error</title></head><body><h1>Error</h1><p>"+message+"</p></body></html>",
+                        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Melody Error</title></head><body><h1>Error</h1><p>"+html.EscapeString(message)+"</p></body></html>",
                     ))
                 } else {
                     exceptionEvent.SetResponse(JsonErrorResponse(statusCode, message))
@@ -570,7 +560,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 if true == PrefersHtml(melodyRequest) {
                     kernelExceptionEvent.SetResponse(HtmlResponse(
                         statusCode,
-                        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Melody Error</title></head><body><h1>Error</h1><p>"+message+"</p></body></html>",
+                        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Melody Error</title></head><body><h1>Error</h1><p>"+html.EscapeString(message)+"</p></body></html>",
                     ))
                 } else {
                     kernelExceptionEvent.SetResponse(JsonErrorResponse(statusCode, message))

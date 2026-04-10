@@ -3,6 +3,7 @@ package http
 import (
     "errors"
     "fmt"
+    "html"
     nethttp "net/http"
     "time"
 
@@ -100,14 +101,14 @@ func RegisterKernelExceptionListener(eventDispatcher eventcontract.EventDispatch
                     requestId = exceptionEvent.Request().RequestContext().RequestId()
                 }
 
-                html := "<!doctype html><html><head><meta charset=\"utf-8\"><title>Melody Error</title></head><body>" +
+                htmlBody := "<!doctype html><html><head><meta charset=\"utf-8\"><title>Melody Error</title></head><body>" +
                     "<h1>Error</h1>" +
                     "<p>Status: " + fmt.Sprintf("%d", statusCode) + "</p>" +
-                    "<p>Message: " + message + "</p>" +
-                    "<p>Request-Id: " + requestId + "</p>" +
+                    "<p>Message: " + html.EscapeString(message) + "</p>" +
+                    "<p>Request-Id: " + html.EscapeString(requestId) + "</p>" +
                     "</body></html>"
 
-                response = HtmlResponse(statusCode, html)
+                response = HtmlResponse(statusCode, htmlBody)
             } else {
                 payload := map[string]any{
                     "error": message,

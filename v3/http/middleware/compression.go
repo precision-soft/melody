@@ -163,6 +163,7 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
 
             data, readErr := io.ReadAll(originalReader)
             if nil != readErr {
+                response.SetBodyReader(bytes.NewReader(data))
                 return response, nil
             }
 

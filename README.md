@@ -62,10 +62,7 @@ These are intentionally independent so you can embed one family while keeping th
 #### Build examples
 
 ```bash
-# filesystem env (default)
 go build -o app ./...
-
-# embedded env
 go build -tags melody_env_embedded -o app ./...
 ```
 
@@ -88,10 +85,7 @@ go build -tags melody_env_embedded -o app ./...
 #### Build examples
 
 ```bash
-# filesystem static (default)
 go build -o app ./...
-
-# embedded static assets
 go build -tags melody_static_embedded -o app ./...
 ```
 

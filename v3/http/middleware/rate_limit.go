@@ -353,16 +353,6 @@ func ipKeyExtractor(request httpcontract.Request) string {
 }
 
 func getClientIp(request httpcontract.Request) string {
-    forwarded := request.HttpRequest().Header.Get("X-Forwarded-For")
-    if "" != forwarded {
-        return forwarded
-    }
-
-    realIp := request.HttpRequest().Header.Get("X-Real-IP")
-    if "" != realIp {
-        return realIp
-    }
-
     return request.HttpRequest().RemoteAddr
 }
 

@@ -8,4 +8,6 @@
 /var/
 /application/var/
 /diff*.txt
+/.claude/
 /CLAUDE.md
+/AUDIT_REPORT.md

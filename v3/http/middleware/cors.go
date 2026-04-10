@@ -262,7 +262,7 @@ func isOriginAllowed(origin string, config *CorsConfig) bool {
 
         normalizedAllowedOrigin = normalizeOrigin(normalizedAllowedOrigin)
 
-        if normalizedOrigin == normalizedAllowedOrigin {
+        if true == strings.EqualFold(normalizedOrigin, normalizedAllowedOrigin) {
             return true
         }
 

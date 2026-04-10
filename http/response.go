@@ -9,6 +9,7 @@ import (
     nethttp "net/http"
     "os"
     "path/filepath"
+    "strings"
     "time"
 
     httpcontract "github.com/precision-soft/melody/http/contract"
@@ -54,6 +55,16 @@ func (instance *Response) SetHeaders(headers nethttp.Header) {
 func (instance *Response) BodyReader() io.Reader { return instance.bodyReader }
 
 func (instance *Response) SetBodyReader(reader io.Reader) { instance.bodyReader = reader }
+
+func (instance *Response) Close() error {
+    if nil == instance.bodyReader {
+        return nil
+    }
+    if closer, ok := instance.bodyReader.(io.Closer); true == ok {
+        return closer.Close()
+    }
+    return nil
+}
 
 var _ httpcontract.Response = (*Response)(nil)
 
@@ -196,6 +207,7 @@ func AttachmentResponse(statusCode int, path string, filename string) (*Response
     }
 
     if "" != filename {
+        filename = strings.NewReplacer(`"`, `\"`, "\\", "", "\n", "", "\r", "").Replace(filename)
         response.headers.Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
     } else {
         response.headers.Set("Content-Disposition", "attachment")
