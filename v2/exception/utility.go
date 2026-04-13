@@ -45,7 +45,7 @@ func LogContext(err error, extra ...exceptioncontract.Context) exceptioncontract
             _, hasCauseChain := context["causeChain"]
 
             if false == hasCause || false == hasCauseChain {
-                causeChain := buildCauseChain(causeErr, 8)
+                causeChain := BuildCauseChain(causeErr, 8)
                 if 0 < len(causeChain) {
                     if false == hasCause {
                         context["cause"] = causeChain[0]
@@ -60,7 +60,7 @@ func LogContext(err error, extra ...exceptioncontract.Context) exceptioncontract
 
             _, hasCauseContextChain := context["causeContextChain"]
             if false == hasCauseContextChain {
-                causeContextChain := buildCauseContextChain(causeErr, 8)
+                causeContextChain := BuildCauseContextChain(causeErr, 8)
                 if 0 < len(causeContextChain) {
                     context["causeContextChain"] = causeContextChain
                 }
@@ -162,7 +162,7 @@ func copyStringMap[T any](input map[string]T) map[string]T {
     return copied
 }
 
-func buildCauseChain(causeErr error, maxDepth int) []string {
+func BuildCauseChain(causeErr error, maxDepth int) []string {
     if nil == causeErr {
         return nil
     }
@@ -182,7 +182,7 @@ func buildCauseChain(causeErr error, maxDepth int) []string {
     return chain
 }
 
-func buildCauseContextChain(causeErr error, maxDepth int) []map[string]any {
+func BuildCauseContextChain(causeErr error, maxDepth int) []map[string]any {
     if nil == causeErr {
         return nil
     }

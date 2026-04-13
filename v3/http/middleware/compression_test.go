@@ -171,6 +171,149 @@ func TestCompressionMiddleware_SuccessfulCompression(t *testing.T) {
     }
 }
 
+func TestCompressionMiddleware_Level0NoCompression_StillProcesses(t *testing.T) {
+	config := NewCompressionConfig(
+		0,
+		10,
+		nil,
+		nil,
+	)
+
+	middleware := CompressionMiddleware(config)
+
+	body := strings.Repeat("hello world ", 200)
+
+	handler := middleware(
+		func(
+			runtimeInstance runtimecontract.Runtime,
+			writer nethttp.ResponseWriter,
+			request httpcontract.Request,
+		) (httpcontract.Response, error) {
+			response := &http.Response{}
+			response.SetStatusCode(200)
+			responseHeaders := make(nethttp.Header)
+			responseHeaders.Set("Content-Type", "text/plain")
+			response.SetHeaders(responseHeaders)
+			response.SetBodyReader(bytes.NewReader([]byte(body)))
+
+			return response, nil
+		},
+	)
+
+	req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+
+	melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+
+	resultResponse, err := handler(nil, httptest.NewRecorder(), melodyRequest)
+
+	if nil != err {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+
+	if nil == resultResponse {
+		t.Fatalf("expected non-nil response")
+	}
+
+	if "gzip" != resultResponse.Headers().Get("Content-Encoding") {
+		t.Fatalf("expected gzip content-encoding even at level 0 (NoCompression), got: %s", resultResponse.Headers().Get("Content-Encoding"))
+	}
+}
+
+func TestCompressionMiddleware_InvalidLevelFallsBackToDefault(t *testing.T) {
+	config := NewCompressionConfig(
+		99,
+		10,
+		nil,
+		nil,
+	)
+
+	middleware := CompressionMiddleware(config)
+
+	body := strings.Repeat("hello world ", 200)
+
+	handler := middleware(
+		func(
+			runtimeInstance runtimecontract.Runtime,
+			writer nethttp.ResponseWriter,
+			request httpcontract.Request,
+		) (httpcontract.Response, error) {
+			response := &http.Response{}
+			response.SetStatusCode(200)
+			responseHeaders := make(nethttp.Header)
+			responseHeaders.Set("Content-Type", "text/plain")
+			response.SetHeaders(responseHeaders)
+			response.SetBodyReader(bytes.NewReader([]byte(body)))
+
+			return response, nil
+		},
+	)
+
+	req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+
+	melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+
+	resultResponse, err := handler(nil, httptest.NewRecorder(), melodyRequest)
+
+	if nil != err {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+
+	if nil == resultResponse {
+		t.Fatalf("expected non-nil response")
+	}
+
+	if "gzip" != resultResponse.Headers().Get("Content-Encoding") {
+		t.Fatalf("expected gzip content-encoding after invalid level reset, got: %s", resultResponse.Headers().Get("Content-Encoding"))
+	}
+}
+
+func TestCompressionMiddleware_ExcludedPath_SkipsCompression(t *testing.T) {
+	config := NewCompressionConfig(
+		6,
+		10,
+		nil,
+		[]string{"/api/"},
+	)
+
+	middleware := CompressionMiddleware(config)
+
+	body := strings.Repeat("hello world ", 200)
+
+	handler := middleware(
+		func(
+			runtimeInstance runtimecontract.Runtime,
+			writer nethttp.ResponseWriter,
+			request httpcontract.Request,
+		) (httpcontract.Response, error) {
+			response := &http.Response{}
+			response.SetStatusCode(200)
+			responseHeaders := make(nethttp.Header)
+			responseHeaders.Set("Content-Type", "text/plain")
+			response.SetHeaders(responseHeaders)
+			response.SetBodyReader(bytes.NewReader([]byte(body)))
+
+			return response, nil
+		},
+	)
+
+	req := httptest.NewRequest(nethttp.MethodGet, "/api/data", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+
+	melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+
+	resultResponse, err := handler(nil, httptest.NewRecorder(), melodyRequest)
+
+	if nil != err {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+
+	if "" != resultResponse.Headers().Get("Content-Encoding") {
+		t.Fatalf("expected no content-encoding for excluded path")
+	}
+}
+
 func TestCompressionMiddleware_SkipsWhenBelowMinSize(t *testing.T) {
     config := NewCompressionConfig(
         6,

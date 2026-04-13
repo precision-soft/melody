@@ -183,6 +183,52 @@ func TestGeneratePath_CatchAllSplitsSegmentsAndTrimsSlashes(t *testing.T) {
     }
 }
 
+func TestGeneratePath_ParamWithSpecialCharacters_IsPathEscaped(t *testing.T) {
+	routeRegistry := NewRouteRegistry()
+	router := NewRouterWithRouteRegistry(routeRegistry)
+	urlGenerator := NewUrlGenerator(routeRegistry)
+
+	router.HandleWithOptions(
+		"/article/:slug",
+		func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+			return EmptyResponse(200), nil
+		},
+		NewRouteOptions("article", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
+	)
+
+	pathValue, err := urlGenerator.GeneratePath("article", map[string]string{"slug": "hello world"})
+	if nil != err {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if "/article/hello%20world" != pathValue {
+		t.Fatalf("expected path-escaped param, got: %s", pathValue)
+	}
+}
+
+func TestGeneratePath_ParamWithSlash_IsPathEscaped(t *testing.T) {
+	routeRegistry := NewRouteRegistry()
+	router := NewRouterWithRouteRegistry(routeRegistry)
+	urlGenerator := NewUrlGenerator(routeRegistry)
+
+	router.HandleWithOptions(
+		"/page/:name",
+		func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+			return EmptyResponse(200), nil
+		},
+		NewRouteOptions("page", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
+	)
+
+	pathValue, err := urlGenerator.GeneratePath("page", map[string]string{"name": "a/b"})
+	if nil != err {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if "/page/a%2Fb" != pathValue {
+		t.Fatalf("expected slash to be escaped, got: %s", pathValue)
+	}
+}
+
 func TestGenerateUrl_AddsQueryParamsAndIgnoresEmptyKey(t *testing.T) {
     routeRegistry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(routeRegistry)

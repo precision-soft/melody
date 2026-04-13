@@ -98,6 +98,81 @@ func (instance *HttpClient) Request(method string, urlString string, options ...
         applyOption(requestConfig)
     }
 
+    request, err := instance.buildRequest(method, urlString, requestConfig)
+    if nil != err {
+        return nil, err
+    }
+
+    client := instance.clientForRequest(requestConfig.Timeout())
+
+    response, err := client.Do(request)
+    if nil != err {
+        return nil, exception.NewError("request failed", nil, err)
+    }
+    defer response.Body.Close()
+
+    maxResponseBodyBytes := requestConfig.MaxResponseBodyBytes()
+    if 0 >= maxResponseBodyBytes {
+        return nil, exception.NewError("invalid max response body bytes", nil, nil)
+    }
+
+    limitedReader := io.LimitReader(response.Body, int64(maxResponseBodyBytes)+1)
+
+    body, err := io.ReadAll(limitedReader)
+    if nil != err {
+        return nil, exception.NewError("failed to read response body", nil, err)
+    }
+
+    if maxResponseBodyBytes < len(body) {
+        return nil, exception.NewError(
+            "response body exceeded max size",
+            exceptioncontract.Context{
+                "maxResponseBodyBytes": maxResponseBodyBytes,
+            },
+            nil,
+        )
+    }
+
+    return NewResponse(
+        response.StatusCode,
+        response.Status,
+        response.Header,
+        body,
+        request,
+    ), nil
+}
+
+func (instance *HttpClient) RequestStream(
+    method string,
+    urlString string,
+    options ...httpclientcontract.RequestOption,
+) (httpclientcontract.StreamResponse, error) {
+    requestConfig := NewRequestOptions()
+
+    for _, applyOption := range options {
+        applyOption(requestConfig)
+    }
+
+    requestInstance, err := instance.buildRequest(method, urlString, requestConfig)
+    if nil != err {
+        return nil, err
+    }
+
+    clientInstance := instance.clientForRequest(requestConfig.Timeout())
+
+    response, err := clientInstance.Do(requestInstance)
+    if nil != err {
+        return nil, exception.NewError("request failed", nil, err)
+    }
+
+    return NewStreamResponse(
+        response.StatusCode,
+        response.Header.Clone(),
+        response.Body,
+    ), nil
+}
+
+func (instance *HttpClient) buildRequest(method string, urlString string, requestConfig *RequestOptions) (*nethttp.Request, error) {
     fullUrl, err := instance.buildUrl(urlString, requestConfig.Query())
     if nil != err {
         return nil, err
@@ -157,127 +232,7 @@ func (instance *HttpClient) Request(method string, urlString string, options ...
         }
     }
 
-    client := instance.clientForRequest(requestConfig.Timeout())
-
-    response, err := client.Do(request)
-    if nil != err {
-        return nil, exception.NewError("request failed", nil, err)
-    }
-    defer response.Body.Close()
-
-    maxResponseBodyBytes := requestConfig.MaxResponseBodyBytes()
-    if 0 >= maxResponseBodyBytes {
-        return nil, exception.NewError("invalid max response body bytes", nil, nil)
-    }
-
-    limitedReader := io.LimitReader(response.Body, int64(maxResponseBodyBytes)+1)
-
-    body, err := io.ReadAll(limitedReader)
-    if nil != err {
-        return nil, exception.NewError("failed to read response body", nil, err)
-    }
-
-    if maxResponseBodyBytes < len(body) {
-        return nil, exception.NewError(
-            "response body exceeded max size",
-            exceptioncontract.Context{
-                "maxResponseBodyBytes": maxResponseBodyBytes,
-            },
-            nil,
-        )
-    }
-
-    return NewResponse(
-        response.StatusCode,
-        response.Status,
-        response.Header,
-        body,
-        request,
-    ), nil
-}
-
-func (instance *HttpClient) RequestStream(
-    method string,
-    urlString string,
-    options ...httpclientcontract.RequestOption,
-) (httpclientcontract.StreamResponse, error) {
-    requestConfig := NewRequestOptions()
-
-    for _, applyOption := range options {
-        applyOption(requestConfig)
-    }
-
-    fullUrl, err := instance.buildUrl(urlString, requestConfig.Query())
-    if nil != err {
-        return nil, err
-    }
-
-    var bodyReader io.Reader
-    if nil != requestConfig.Body() {
-        if "application/json" == requestConfig.ContentType() {
-            jsonData, err := json.Marshal(requestConfig.Body())
-            if nil != err {
-                return nil, exception.NewError("failed to marshal json body", nil, err)
-            }
-
-            bodyReader = bytes.NewReader(jsonData)
-        } else if stringValue, ok := requestConfig.Body().(string); ok {
-            bodyReader = strings.NewReader(stringValue)
-        } else if data, ok := requestConfig.Body().([]byte); ok {
-            bodyReader = bytes.NewReader(data)
-        } else {
-            return nil, exception.NewError("unsupported body type", nil, nil)
-        }
-    }
-
-    requestInstance, err := nethttp.NewRequest(method, fullUrl, bodyReader)
-    if nil != err {
-        return nil, exception.NewError("failed to create request", nil, err)
-    }
-
-    for key, value := range instance.headers {
-        requestInstance.Header.Set(key, value)
-    }
-
-    for key, value := range requestConfig.Headers() {
-        requestInstance.Header.Set(key, value)
-    }
-
-    if "" != requestConfig.ContentType() {
-        requestInstance.Header.Set("Content-Type", requestConfig.ContentType())
-    }
-
-    authorization := requestConfig.Authorization()
-    if nil != authorization {
-        bearer := authorization.Bearer()
-        if "" != bearer {
-            requestInstance.Header.Set("Authorization", "Bearer "+bearer)
-        } else {
-            basicAuthorization := authorization.Basic()
-            if nil != basicAuthorization {
-                username := basicAuthorization.Username()
-                if "" != username {
-                    requestInstance.SetBasicAuth(
-                        username,
-                        basicAuthorization.Password(),
-                    )
-                }
-            }
-        }
-    }
-
-    clientInstance := instance.clientForRequest(requestConfig.Timeout())
-
-    response, err := clientInstance.Do(requestInstance)
-    if nil != err {
-        return nil, exception.NewError("request failed", nil, err)
-    }
-
-    return NewStreamResponse(
-        response.StatusCode,
-        response.Header.Clone(),
-        response.Body,
-    ), nil
+    return request, nil
 }
 
 func (instance *HttpClient) buildUrl(urlString string, query map[string]string) (string, error) {

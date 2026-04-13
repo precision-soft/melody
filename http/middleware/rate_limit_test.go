@@ -20,8 +20,8 @@ func TestGetClientIp_UsesRemoteAddr(t *testing.T) {
 	melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
 
 	ip := getClientIp(melodyRequest)
-	if "192.168.1.100:12345" != ip {
-		t.Fatalf("expected RemoteAddr, got: %s", ip)
+	if "192.168.1.100" != ip {
+		t.Fatalf("expected IP without port, got: %s", ip)
 	}
 }
 
@@ -33,8 +33,8 @@ func TestGetClientIp_IgnoresXForwardedFor(t *testing.T) {
 	melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
 
 	ip := getClientIp(melodyRequest)
-	if "10.0.0.1:5555" != ip {
-		t.Fatalf("expected RemoteAddr (ignoring X-Forwarded-For), got: %s", ip)
+	if "10.0.0.1" != ip {
+		t.Fatalf("expected IP without port (ignoring X-Forwarded-For), got: %s", ip)
 	}
 }
 
@@ -46,8 +46,8 @@ func TestGetClientIp_IgnoresXRealIp(t *testing.T) {
 	melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
 
 	ip := getClientIp(melodyRequest)
-	if "10.0.0.2:6666" != ip {
-		t.Fatalf("expected RemoteAddr (ignoring X-Real-IP), got: %s", ip)
+	if "10.0.0.2" != ip {
+		t.Fatalf("expected IP without port (ignoring X-Real-IP), got: %s", ip)
 	}
 }
 
@@ -60,8 +60,8 @@ func TestGetClientIp_IgnoresBothHeaders(t *testing.T) {
 	melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
 
 	ip := getClientIp(melodyRequest)
-	if "172.16.0.1:9999" != ip {
-		t.Fatalf("expected RemoteAddr (ignoring all proxy headers), got: %s", ip)
+	if "172.16.0.1" != ip {
+		t.Fatalf("expected IP without port (ignoring all proxy headers), got: %s", ip)
 	}
 }
 
@@ -249,7 +249,7 @@ func TestDefaultKeyExtractor_UsesRemoteAddr(t *testing.T) {
 
 	key := defaultKeyExtractor(melodyRequest)
 
-	if "10.20.30.40:1234:/api/data" != key {
+	if "10.20.30.40:/api/data" != key {
 		t.Fatalf("unexpected key: %s", key)
 	}
 }
@@ -264,8 +264,8 @@ func TestIpKeyExtractor_UsesRemoteAddr(t *testing.T) {
 
 	key := ipKeyExtractor(melodyRequest)
 
-	if "192.168.0.50:8080" != key {
-		t.Fatalf("expected RemoteAddr as key, got: %s", key)
+	if "192.168.0.50" != key {
+		t.Fatalf("expected IP without port as key, got: %s", key)
 	}
 }
 

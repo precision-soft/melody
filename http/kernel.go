@@ -549,6 +549,15 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             instance.dispatchEventKernelException(kernelExceptionEvent, runtimeInstance, requestLogger, eventDispatcher)
 
             if nil == kernelExceptionEvent.Response() {
+                if nil != instance.errorHandler {
+                    customResponse := instance.errorHandler(runtimeInstance, writer, melodyRequest, finalHandlerErr)
+                    if nil != customResponse {
+                        kernelExceptionEvent.SetResponse(customResponse)
+                    }
+                }
+            }
+
+            if nil == kernelExceptionEvent.Response() {
                 debugMode := config.EnvDevelopment == configuration.Kernel().Env()
 
                 statusCode := nethttp.StatusInternalServerError

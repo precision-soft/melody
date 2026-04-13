@@ -6,10 +6,10 @@ import (
     "strconv"
     "strings"
 
-    runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
-
+    "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
 type CorsConfig struct {
@@ -156,6 +156,20 @@ func RestrictiveCorsConfig(allowedOrigins []string) *CorsConfig {
 func CorsMiddleware(config *CorsConfig) httpcontract.Middleware {
     if 0 == len(config.AllowOrigins()) {
         config.SetAllowOrigins([]string{"*"})
+    }
+
+    if true == config.AllowCredentials() {
+        for _, origin := range config.AllowOrigins() {
+            if "*" == origin {
+                exception.Panic(
+                    exception.NewError(
+                        "cors configuration error: credentials cannot be used with wildcard origin",
+                        nil,
+                        nil,
+                    ),
+                )
+            }
+        }
     }
 
     if 0 == len(config.AllowMethods()) {

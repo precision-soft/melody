@@ -1,6 +1,7 @@
 package config
 
 import (
+    "fmt"
     "io"
     "log"
     "os"
@@ -163,6 +164,63 @@ func TestConfigurationRegisterRuntimeValidationPanics(t *testing.T) {
         configuration.RegisterRuntime("runtime.value", "1")
         configuration.RegisterRuntime("runtime.value", "2")
     }()
+}
+
+func TestConfigurationRegisterRuntime_SuccessfullyRegisters(t *testing.T) {
+    source := &testEnvironmentSource{values: map[string]string{}}
+
+    environment, err := NewEnvironment(source)
+    if nil != err {
+        t.Fatalf("new environment error: %v", err)
+    }
+
+    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    if nil != err {
+        t.Fatalf("new configuration error: %v", err)
+    }
+
+    configuration.RegisterRuntime("app.custom_value", "hello")
+
+    parameter := configuration.Get("app.custom_value")
+    if nil == parameter {
+        t.Fatalf("expected parameter to exist after RegisterRuntime")
+    }
+
+    if "hello" != parameter.String() {
+        t.Fatalf("expected parameter value 'hello', got: %s", parameter.String())
+    }
+}
+
+func TestConfigurationRegisterRuntime_ConcurrentCallsDoNotPanic(t *testing.T) {
+    source := &testEnvironmentSource{values: map[string]string{}}
+
+    environment, err := NewEnvironment(source)
+    if nil != err {
+        t.Fatalf("new environment error: %v", err)
+    }
+
+    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    if nil != err {
+        t.Fatalf("new configuration error: %v", err)
+    }
+
+    done := make(chan bool, 10)
+
+    for i := 0; i < 10; i++ {
+        go func(index int) {
+            defer func() {
+                _ = recover()
+                done <- true
+            }()
+
+            name := "app.concurrent_" + filepath.Base(fmt.Sprintf("%d", index))
+            configuration.RegisterRuntime(name, index)
+        }(i)
+    }
+
+    for i := 0; i < 10; i++ {
+        <-done
+    }
 }
 
 func TestConfiguration_AddAliasedParameterFromEnvironment_SharesSinglePointerAcrossAliases(t *testing.T) {

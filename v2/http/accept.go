@@ -23,9 +23,15 @@ func PrefersHtml(request httpcontract.Request) bool {
 
     acceptHeaderLower := strings.ToLower(acceptHeader)
 
-    if true == strings.Contains(acceptHeaderLower, "text/html") && false == strings.Contains(acceptHeaderLower, "application/json") {
+    htmlIndex := strings.Index(acceptHeaderLower, "text/html")
+    if -1 == htmlIndex {
+        return false
+    }
+
+    jsonIndex := strings.Index(acceptHeaderLower, "application/json")
+    if -1 == jsonIndex {
         return true
     }
 
-    return false
+    return htmlIndex < jsonIndex
 }

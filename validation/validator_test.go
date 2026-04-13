@@ -72,6 +72,18 @@ type payloadWithInvalidTag struct {
     Name string `validate:"min(1))"`
 }
 
+type payloadWithGreaterThanDefault struct {
+    Count int `json:"count" validate:"greaterThan"`
+}
+
+type payloadWithGreaterThanParam struct {
+    Count int `json:"count" validate:"greaterThan(value=5)"`
+}
+
+type payloadWithGreaterThanFloat struct {
+    Price float64 `json:"price" validate:"greaterThan(value=0)"`
+}
+
 func requireNoValidationErrors(t *testing.T, err error) {
     t.Helper()
 
@@ -323,4 +335,60 @@ func TestValidator_Validate_ReturnsInvalidRuleSyntaxErrorForInvalidTag(t *testin
     if ErrorInvalidRuleSyntax != validationError.Code() {
         t.Fatalf("expected code `%s`, got `%s`", ErrorInvalidRuleSyntax, validationError.Code())
     }
+}
+
+func TestValidator_GreaterThanDefault_RejectsZero(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    err := validatorInstance.Validate(payloadWithGreaterThanDefault{Count: 0})
+    _ = requireValidationErrors(t, err)
+}
+
+func TestValidator_GreaterThanDefault_AcceptsPositive(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    err := validatorInstance.Validate(payloadWithGreaterThanDefault{Count: 1})
+    requireNoValidationErrors(t, err)
+}
+
+func TestValidator_GreaterThanWithParam_RejectsValueEqualToThreshold(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    err := validatorInstance.Validate(payloadWithGreaterThanParam{Count: 5})
+    _ = requireValidationErrors(t, err)
+}
+
+func TestValidator_GreaterThanWithParam_RejectsValueBelowThreshold(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    err := validatorInstance.Validate(payloadWithGreaterThanParam{Count: 3})
+    _ = requireValidationErrors(t, err)
+}
+
+func TestValidator_GreaterThanWithParam_AcceptsValueAboveThreshold(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    err := validatorInstance.Validate(payloadWithGreaterThanParam{Count: 6})
+    requireNoValidationErrors(t, err)
+}
+
+func TestValidator_GreaterThanFloat_RejectsZero(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    err := validatorInstance.Validate(payloadWithGreaterThanFloat{Price: 0.0})
+    _ = requireValidationErrors(t, err)
+}
+
+func TestValidator_GreaterThanFloat_AcceptsPositive(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    err := validatorInstance.Validate(payloadWithGreaterThanFloat{Price: 0.01})
+    requireNoValidationErrors(t, err)
+}
+
+func TestValidator_GreaterThanFloat_RejectsNegative(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    err := validatorInstance.Validate(payloadWithGreaterThanFloat{Price: -1.5})
+    _ = requireValidationErrors(t, err)
 }

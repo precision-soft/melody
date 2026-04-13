@@ -131,6 +131,82 @@ func TestFileStorage_Save_PersistsAcrossInstances_ByPath(t *testing.T) {
     _ = os.Remove(path)
 }
 
+func TestCopyAnyMap_DeepCopiesNestedMaps(t *testing.T) {
+    original := map[string]any{
+        "key1": "value1",
+        "nested": map[string]any{
+            "innerKey": "innerValue",
+            "deep": map[string]any{
+                "deepKey": "deepValue",
+            },
+        },
+        "number": 42,
+    }
+
+    copied := copyAnyMap(original)
+
+    if "value1" != copied["key1"].(string) {
+        t.Fatalf("expected key1 to be copied")
+    }
+
+    nestedCopied, ok := copied["nested"].(map[string]any)
+    if false == ok {
+        t.Fatalf("expected nested to be map[string]any")
+    }
+
+    if "innerValue" != nestedCopied["innerKey"].(string) {
+        t.Fatalf("expected nested innerKey to be copied")
+    }
+
+    deepCopied, ok := nestedCopied["deep"].(map[string]any)
+    if false == ok {
+        t.Fatalf("expected deep to be map[string]any")
+    }
+
+    if "deepValue" != deepCopied["deepKey"].(string) {
+        t.Fatalf("expected deep key to be copied")
+    }
+
+    nestedOriginal := original["nested"].(map[string]any)
+    nestedOriginal["innerKey"] = "mutated"
+    deepOriginal := nestedOriginal["deep"].(map[string]any)
+    deepOriginal["deepKey"] = "mutated"
+
+    if "innerValue" != nestedCopied["innerKey"].(string) {
+        t.Fatalf("expected mutation of original nested map not to affect copy")
+    }
+
+    if "deepValue" != deepCopied["deepKey"].(string) {
+        t.Fatalf("expected mutation of original deep map not to affect copy")
+    }
+}
+
+func TestCopyAnyMap_ReturnsEmptyMapForNilInput(t *testing.T) {
+    copied := copyAnyMap(nil)
+
+    if nil == copied {
+        t.Fatalf("expected non-nil map for nil input")
+    }
+
+    if 0 != len(copied) {
+        t.Fatalf("expected empty map for nil input")
+    }
+}
+
+func TestCopyAnyMap_HandlesEmptyMap(t *testing.T) {
+    original := map[string]any{}
+
+    copied := copyAnyMap(original)
+
+    if nil == copied {
+        t.Fatalf("expected non-nil map")
+    }
+
+    if 0 != len(copied) {
+        t.Fatalf("expected empty map")
+    }
+}
+
 func TestFileStorage_Save_PersistsAcrossInstances_ByInjectedFile(t *testing.T) {
     fileInstance, err := os.CreateTemp("", "melody_session_persist_injected_*.json")
     if nil != err {

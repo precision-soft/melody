@@ -369,10 +369,6 @@ func matchesMethod(methods []string, method string) bool {
         if normalizedAllowedMethod == normalizedMethod {
             return true
         }
-
-        if nethttp.MethodHead == normalizedMethod && nethttp.MethodGet == normalizedAllowedMethod {
-            return true
-        }
     }
 
     return false

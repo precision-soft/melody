@@ -5,6 +5,27 @@ All notable changes to `precision-soft/melody/v2` will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.3.0] - 2026-04-12
+
+### Fixed
+
+- `validator.go` — `createConstraintWithParams` now handles `greaterThan` parameters; `validate:"greaterThan(value=5)"` was silently using `min=0`
+- `rate_limit.go` — `getClientIp` strips port via `net.SplitHostPort`; rate limiting was per-connection instead of per-IP
+- `url_generator.go` — path parameters now URL-encoded via `url.PathEscape`; special characters produced malformed URLs
+- `accept.go` — `PrefersHtml` uses position-based comparison; browsers sending both `text/html` and `application/json` now correctly get HTML
+- `compression.go` — `gzip.NoCompression` (level 0) is no longer overridden to default compression
+- `constraint_greater_than.go` — added `float32`/`float64` support; float values no longer return "value must be an integer"
+- `kernel.go` — `errorHandler` now called for controller errors (was only called on panic recovery path)
+- `cors.go` — panic at middleware initialization when `AllowCredentials=true` and origins contain `"*"` to prevent overly permissive CORS
+
+### Changed
+
+- `file_storage.go` — `copyAnyMap` performs recursive deep copy for nested `map[string]any` values
+- `exception/utility.go` — export `BuildCauseChain` and `BuildCauseContextChain`
+- `logging/logger.go` — remove duplicated cause chain functions; delegate to `exception.BuildCauseChain` / `exception.BuildCauseContextChain`
+- `router_utility.go` — remove implicit HEAD-to-GET match from `matchesMethod`; kernel `HeadFallbackToGet` policy is now the single control point
+- `httpclient/http_client.go` — extract shared request-building logic into `buildRequest` helper; `Request` and `RequestStream` both delegate to it
+
 ## [v2.2.4] - 2026-04-10
 
 ### Fixed

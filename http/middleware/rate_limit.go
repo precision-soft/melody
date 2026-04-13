@@ -2,6 +2,7 @@ package middleware
 
 import (
     "fmt"
+    "net"
     nethttp "net/http"
     "sync"
     "time"
@@ -353,7 +354,12 @@ func ipKeyExtractor(request httpcontract.Request) string {
 }
 
 func getClientIp(request httpcontract.Request) string {
-    return request.HttpRequest().RemoteAddr
+    host, _, splitErr := net.SplitHostPort(request.HttpRequest().RemoteAddr)
+    if nil != splitErr {
+        return request.HttpRequest().RemoteAddr
+    }
+
+    return host
 }
 
 func defaultOnLimitExceeded(request httpcontract.Request) (httpcontract.Response, error) {

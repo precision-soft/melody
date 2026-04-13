@@ -212,3 +212,53 @@ func TestGenerateUrl_AddsQueryParamsAndIgnoresEmptyKey(t *testing.T) {
         t.Fatalf("unexpected url")
     }
 }
+
+func TestGeneratePath_EscapesSpecialCharactersInParams(t *testing.T) {
+    routeRegistry := NewRouteRegistry()
+    router := NewRouterWithRouteRegistry(routeRegistry)
+    urlGenerator := NewUrlGenerator(routeRegistry)
+
+    router.HandleWithOptions(
+        "/article/:slug",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return EmptyResponse(200), nil
+        },
+        NewRouteOptions("article_slug", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
+    )
+
+    pathValue, err := urlGenerator.GeneratePath("article_slug", map[string]string{
+        "slug": "hello world",
+    })
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if "/article/hello%20world" != pathValue {
+        t.Fatalf("expected space to be escaped, got: %s", pathValue)
+    }
+}
+
+func TestGeneratePath_EscapesSlashInParam(t *testing.T) {
+    routeRegistry := NewRouteRegistry()
+    router := NewRouterWithRouteRegistry(routeRegistry)
+    urlGenerator := NewUrlGenerator(routeRegistry)
+
+    router.HandleWithOptions(
+        "/user/:name",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return EmptyResponse(200), nil
+        },
+        NewRouteOptions("user_name", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
+    )
+
+    pathValue, err := urlGenerator.GeneratePath("user_name", map[string]string{
+        "name": "a/b",
+    })
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if "/user/a%2Fb" != pathValue {
+        t.Fatalf("expected slash to be escaped in param value, got: %s", pathValue)
+    }
+}

@@ -309,6 +309,49 @@ func TestValidatorMustFromContainer_PanicsWhenMissing(t *testing.T) {
     _ = ValidatorMustFromContainer(serviceContainer)
 }
 
+type payloadWithGreaterThan struct {
+    Age int `json:"age" validate:"greaterThan=0"`
+}
+
+type payloadWithGreaterThanFloat struct {
+    Price float64 `json:"price" validate:"greaterThan=0"`
+}
+
+func TestValidator_GreaterThanConstraint_PassesForPositiveValue(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    err := validatorInstance.Validate(payloadWithGreaterThan{Age: 25})
+    requireNoValidationErrors(t, err)
+}
+
+func TestValidator_GreaterThanConstraint_FailsForZero(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    err := validatorInstance.Validate(payloadWithGreaterThan{Age: 0})
+    _ = requireValidationErrors(t, err)
+}
+
+func TestValidator_GreaterThanConstraint_FailsForNegativeValue(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    err := validatorInstance.Validate(payloadWithGreaterThan{Age: -5})
+    _ = requireValidationErrors(t, err)
+}
+
+func TestValidator_GreaterThanConstraint_Float64PassesForPositiveValue(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    err := validatorInstance.Validate(payloadWithGreaterThanFloat{Price: 0.01})
+    requireNoValidationErrors(t, err)
+}
+
+func TestValidator_GreaterThanConstraint_Float64FailsForZero(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    err := validatorInstance.Validate(payloadWithGreaterThanFloat{Price: 0.0})
+    _ = requireValidationErrors(t, err)
+}
+
 func TestValidator_Validate_ReturnsInvalidRuleSyntaxErrorForInvalidTag(t *testing.T) {
     validatorInstance := NewValidator()
 

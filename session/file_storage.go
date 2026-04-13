@@ -364,7 +364,12 @@ func copyAnyMap(data map[string]any) map[string]any {
 
     copied := make(map[string]any, len(data))
     for key, value := range data {
-        copied[key] = value
+        switch typedValue := value.(type) {
+        case map[string]any:
+            copied[key] = copyAnyMap(typedValue)
+        default:
+            copied[key] = value
+        }
     }
 
     return copied

@@ -228,6 +228,12 @@ func (instance *Validator) createConstraintWithParams(name string, params map[st
         }
         return NewRegex(".*")
 
+    case ConstraintGreaterThan:
+        if valueString, exists := params["value"]; true == exists {
+            return NewGreaterThan(parseInt(valueString, 0))
+        }
+        return NewGreaterThan(0)
+
     default:
         instance.mutex.RLock()
         constraint := instance.constraints[name]

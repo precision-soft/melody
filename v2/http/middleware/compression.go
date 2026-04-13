@@ -102,7 +102,9 @@ func DefaultCompressionConfig() *CompressionConfig {
 }
 
 func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
-    if 0 == config.Level() {
+    if gzip.BestSpeed > config.Level() && gzip.DefaultCompression != config.Level() {
+        config.SetLevel(gzip.DefaultCompression)
+    } else if gzip.BestCompression < config.Level() {
         config.SetLevel(gzip.DefaultCompression)
     }
 

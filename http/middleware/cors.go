@@ -6,6 +6,7 @@ import (
     "strconv"
     "strings"
 
+    "github.com/precision-soft/melody/exception"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 
     "github.com/precision-soft/melody/http"
@@ -154,6 +155,20 @@ func RestrictiveCorsConfig(allowedOrigins []string) *CorsConfig {
 }
 
 func CorsMiddleware(config *CorsConfig) httpcontract.Middleware {
+    if true == config.AllowCredentials() {
+        for _, origin := range config.AllowOrigins() {
+            if "*" == strings.TrimSpace(origin) {
+                exception.Panic(
+                    exception.NewError(
+                        "cors misconfiguration: allowCredentials cannot be true when allowOrigins contains wildcard '*'",
+                        nil,
+                        nil,
+                    ),
+                )
+            }
+        }
+    }
+
     if 0 == len(config.AllowOrigins()) {
         config.SetAllowOrigins([]string{"*"})
     }

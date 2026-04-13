@@ -90,8 +90,24 @@ func (instance *GreaterThan) Validate(value any, field string) validationcontrac
 
         return nil
 
+    case reflect.Float32, reflect.Float64:
+        actual := reflectedValue.Float()
+        if actual <= float64(instance.min) {
+            return NewValidationError(
+                field,
+                fmt.Sprintf("value must be greater than %d", instance.min),
+                ConstraintGreaterThanErrorSmallerThan,
+                map[string]any{
+                    "min":    instance.min,
+                    "actual": actual,
+                },
+            )
+        }
+
+        return nil
+
     default:
-        return NewValidationError(field, "value must be an integer", ConstraintGreaterThanErrorSmallerThan, nil)
+        return NewValidationError(field, "value must be numeric", ConstraintGreaterThanErrorSmallerThan, nil)
     }
 }
 

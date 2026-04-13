@@ -4,6 +4,7 @@ import (
     "regexp"
     "sort"
     "strings"
+    "sync"
 
     configcontract "github.com/precision-soft/melody/v3/config/contract"
     "github.com/precision-soft/melody/v3/exception"
@@ -79,6 +80,7 @@ func NewConfiguration(
 }
 
 type Configuration struct {
+    mutex       sync.Mutex
     environment *Environment
     parameters  ParameterMap
     logger      loggingcontract.Logger
@@ -149,6 +151,9 @@ func (instance *Configuration) RegisterRuntime(name string, value any) {
             ),
         )
     }
+
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
 
     existingParameter := instance.Get(name)
     if nil != existingParameter {

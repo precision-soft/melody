@@ -364,7 +364,11 @@ func copyAnyMap(data map[string]any) map[string]any {
 
     copied := make(map[string]any, len(data))
     for key, value := range data {
-        copied[key] = value
+        if nestedMap, ok := value.(map[string]any); true == ok {
+            copied[key] = copyAnyMap(nestedMap)
+        } else {
+            copied[key] = value
+        }
     }
 
     return copied

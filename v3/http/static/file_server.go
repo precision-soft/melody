@@ -126,6 +126,239 @@ func (instance *FileServer) ServeReader(
     return nethttp.StatusOK, headers, readCloser, true
 }
 
+type resolvedFile struct {
+    relativePath string
+    file         fs.File
+    fileInfo     fs.FileInfo
+    headers      nethttp.Header
+    notModified  bool
+}
+
+func (instance *FileServer) resolveAndOpen(
+    request httpcontract.Request,
+    logger loggingcontract.Logger,
+) (*resolvedFile, bool) {
+    requestPath := request.HttpRequest().URL.Path
+
+    if "" != instance.config.stripPrefix {
+        if true == strings.HasPrefix(requestPath, instance.config.stripPrefix) {
+            if nil != logger {
+                logger.Info(
+                    "static serve strip prefix match",
+                    loggingcontract.Context{
+                        "path":        requestPath,
+                        "stripPrefix": instance.config.stripPrefix,
+                    },
+                )
+            }
+
+            requestPath = strings.TrimPrefix(requestPath, instance.config.stripPrefix)
+            if "" == requestPath {
+                requestPath = "/"
+            }
+        } else {
+            if nil != logger {
+                logger.Info(
+                    "static serve strip prefix mismatch",
+                    loggingcontract.Context{
+                        "path":        requestPath,
+                        "stripPrefix": instance.config.stripPrefix,
+                    },
+                )
+            }
+
+            return nil, false
+        }
+    } else {
+        if nil != logger {
+            logger.Info(
+                "static serve without strip prefix",
+                loggingcontract.Context{
+                    "path": requestPath,
+                },
+            )
+        }
+    }
+
+    cleanedPath := path.Clean(requestPath)
+    if "." == cleanedPath || "" == cleanedPath {
+        cleanedPath = "/"
+    }
+
+    if "/" == cleanedPath {
+        cleanedPath = "/" + instance.config.indexFile
+    }
+
+    relativePath := strings.TrimPrefix(cleanedPath, "/")
+
+    if ModeEmbedded == instance.config.mode && "" != instance.config.publicDir {
+        relativePath = path.Join(instance.config.publicDir, relativePath)
+    }
+
+    if nil != logger {
+        logger.Info(
+            "static serve path resolved",
+            loggingcontract.Context{
+                "mode":         instance.config.mode,
+                "cleanedPath":  cleanedPath,
+                "relativePath": relativePath,
+                "publicDir":    instance.config.publicDir,
+            },
+        )
+    }
+
+    if false == fs.ValidPath(relativePath) {
+        if nil != logger {
+            logger.Warning(
+                "static serve invalid relative path",
+                loggingcontract.Context{
+                    "relativePath": relativePath,
+                },
+            )
+        }
+
+        return nil, false
+    }
+
+    file, openErr := instance.fileSystem.Open(relativePath)
+    if nil != openErr {
+        if nil != logger {
+            logger.Error(
+                "static serve open failed",
+                exception.LogContext(
+                    openErr,
+                    exceptioncontract.Context{
+                        "relativePath": relativePath,
+                    },
+                ),
+            )
+        }
+
+        return nil, false
+    }
+
+    fileInfo, statErr := file.Stat()
+    if nil != statErr {
+        _ = file.Close()
+
+        if nil != logger {
+            logger.Error(
+                "static serve stat failed",
+                exception.LogContext(
+                    statErr,
+                    exceptioncontract.Context{
+                        "relativePath": relativePath,
+                    },
+                ),
+            )
+        }
+
+        return nil, false
+    }
+
+    if true == fileInfo.IsDir() {
+        _ = file.Close()
+
+        if nil != logger {
+            logger.Info(
+                "static serve target is directory",
+                loggingcontract.Context{
+                    "relativePath": relativePath,
+                },
+            )
+        }
+
+        return nil, false
+    }
+
+    headers := nethttp.Header{}
+
+    extension := path.Ext(relativePath)
+    if "" != extension {
+        contentType := mime.TypeByExtension(extension)
+        if "" != contentType {
+            headers.Set("Content-Type", contentType)
+        }
+    }
+
+    notModified := false
+
+    if true == instance.config.enableCache {
+        etag := GenerateEtag(fileInfo, instance.config.weakEtag)
+        if "" != etag {
+            headers.Set("ETag", etag)
+        }
+
+        lastModified := fileInfo.ModTime().UTC().Format(nethttp.TimeFormat)
+        headers.Set("Last-Modified", lastModified)
+
+        cacheControl := buildCacheControlValue(instance.config.cacheMaxAge)
+        if "" != cacheControl {
+            headers.Set("Cache-Control", cacheControl)
+        }
+
+        ifNoneMatch := request.Header("If-None-Match")
+        if "" != ifNoneMatch && ifNoneMatch == etag {
+            if nil != logger {
+                logger.Info(
+                    "static serve 304 by etag",
+                    loggingcontract.Context{
+                        "relativePath": relativePath,
+                        "etag":         etag,
+                    },
+                )
+            }
+
+            _ = file.Close()
+
+            return &resolvedFile{
+                relativePath: relativePath,
+                file:         nil,
+                fileInfo:     fileInfo,
+                headers:      headers,
+                notModified:  true,
+            }, true
+        }
+
+        ifModifiedSince := request.Header("If-Modified-Since")
+        if "" != ifModifiedSince {
+            if clientTime, parseErr := time.Parse(nethttp.TimeFormat, ifModifiedSince); nil == parseErr {
+                modifiedAt := fileInfo.ModTime().UTC().Truncate(time.Second)
+
+                if false == modifiedAt.After(clientTime) {
+                    if nil != logger {
+                        logger.Info(
+                            "static serve 304 by last-modified",
+                            loggingcontract.Context{
+                                "relativePath":    relativePath,
+                                "ifModifiedSince": ifModifiedSince,
+                            },
+                        )
+                    }
+
+                    _ = file.Close()
+
+                    return &resolvedFile{
+                        relativePath: relativePath,
+                        file:         nil,
+                        fileInfo:     fileInfo,
+                        headers:      headers,
+                        notModified:  true,
+                    }, true
+                }
+            }
+        }
+    }
+
+    return &resolvedFile{
+        relativePath: relativePath,
+        file:         file,
+        fileInfo:     fileInfo,
+        headers:      headers,
+        notModified:  notModified,
+    }, true
+}
+
 func (instance *FileServer) Serve(
     request httpcontract.Request,
     logger loggingcontract.Logger,
@@ -138,203 +371,44 @@ func (instance *FileServer) Serve(
         return 0, nil, nil, false
     }
 
-    requestPath := request.HttpRequest().URL.Path
-
-    if "" != instance.config.stripPrefix {
-        if strings.HasPrefix(requestPath, instance.config.stripPrefix) {
-            logger.Info(
-                "static serve strip prefix match",
-                loggingcontract.Context{
-                    "path":        requestPath,
-                    "stripPrefix": instance.config.stripPrefix,
-                },
-            )
-
-            requestPath = strings.TrimPrefix(requestPath, instance.config.stripPrefix)
-            if "" == requestPath {
-                requestPath = "/"
-            }
-        } else {
-            logger.Info(
-                "static serve strip prefix mismatch",
-                loggingcontract.Context{
-                    "path":        requestPath,
-                    "stripPrefix": instance.config.stripPrefix,
-                },
-            )
-
-            return 0, nil, nil, false
-        }
-    } else {
-        logger.Info(
-            "static serve without strip prefix",
-            loggingcontract.Context{
-                "path": requestPath,
-            },
-        )
-    }
-
-    cleanedPath := path.Clean(requestPath)
-
-    if "." == cleanedPath || "" == cleanedPath {
-        cleanedPath = "/"
-    }
-
-    if "/" == cleanedPath {
-        cleanedPath = "/" + instance.config.indexFile
-    }
-
-    relativePath := strings.TrimPrefix(cleanedPath, "/")
-
-    if ModeEmbedded == instance.config.mode && "" != instance.config.publicDir {
-        relativePath = path.Join(instance.config.publicDir, relativePath)
-    }
-
-    logger.Info(
-        "static serve path resolved",
-        loggingcontract.Context{
-            "mode":         instance.config.mode,
-            "cleanedPath":  cleanedPath,
-            "relativePath": relativePath,
-            "publicDir":    instance.config.publicDir,
-        },
-    )
-
-    if false == fs.ValidPath(relativePath) {
-        logger.Warning(
-            "static serve invalid relative path",
-            loggingcontract.Context{
-                "relativePath": relativePath,
-            },
-        )
-
+    resolved, ok := instance.resolveAndOpen(request, logger)
+    if false == ok {
         return 0, nil, nil, false
     }
 
-    file, err := instance.fileSystem.Open(relativePath)
-    if nil != err {
-        logger.Error(
-            "static serve open failed",
-            exception.LogContext(
-                err,
-                exceptioncontract.Context{
-                    "relativePath": relativePath,
-                },
-            ),
-        )
-
-        return 0, nil, nil, false
+    if true == resolved.notModified {
+        return nethttp.StatusNotModified, resolved.headers, nil, true
     }
+
     defer func() {
-        _ = file.Close()
+        if nil != resolved.file {
+            _ = resolved.file.Close()
+        }
     }()
 
-    fileInfo, err := file.Stat()
-    if nil != err {
-        logger.Error(
-            "static serve stat failed",
-            exception.LogContext(
-                err,
-                exceptioncontract.Context{
-                    "relativePath": relativePath,
-                },
-            ),
-        )
-
-        return 0, nil, nil, false
-    }
-
-    if true == fileInfo.IsDir() {
-        logger.Info(
-            "static serve target is directory",
-            loggingcontract.Context{
-                "relativePath": relativePath,
-            },
-        )
-
-        return 0, nil, nil, false
-    }
-
-    headers := nethttp.Header{}
-
-    extension := path.Ext(relativePath)
-    if "" != extension {
-        contentType := mime.TypeByExtension(extension)
-        if "" != contentType {
-            headers.Set("Content-Type", contentType)
-        }
-    }
-
-    if true == instance.config.enableCache {
-        etag := GenerateEtag(fileInfo, instance.config.weakEtag)
-        if "" != etag {
-            headers.Set("ETag", etag)
-        }
-
-        lastModified := fileInfo.ModTime().UTC().Format(nethttp.TimeFormat)
-        headers.Set("Last-Modified", lastModified)
-
-        cacheControl := buildCacheControlValue(instance.config.cacheMaxAge)
-        if "" != cacheControl {
-            headers.Set("Cache-Control", cacheControl)
-        }
-
-        ifNoneMatch := request.Header("If-None-Match")
-        if "" != ifNoneMatch && ifNoneMatch == etag {
-            logger.Info(
-                "static serve 304 by etag",
-                loggingcontract.Context{
-                    "relativePath": relativePath,
-                    "etag":         etag,
-                },
-            )
-
-            return nethttp.StatusNotModified, headers, nil, true
-        }
-
-        ifModifiedSince := request.Header("If-Modified-Since")
-        if "" != ifModifiedSince {
-            if clientTime, err := time.Parse(nethttp.TimeFormat, ifModifiedSince); nil == err {
-                modifiedAt := fileInfo.ModTime().UTC().Truncate(time.Second)
-
-                if false == modifiedAt.After(clientTime) {
-                    logger.Info(
-                        "static serve 304 by last-modified",
-                        loggingcontract.Context{
-                            "relativePath":    relativePath,
-                            "ifModifiedSince": ifModifiedSince,
-                        },
-                    )
-
-                    return nethttp.StatusNotModified, headers, nil, true
-                }
-            }
-        }
-    }
-
     if nethttp.MethodHead == request.HttpRequest().Method {
-        headers.Set("Content-Length", formatContentLength(fileInfo.Size()))
+        resolved.headers.Set("Content-Length", formatContentLength(resolved.fileInfo.Size()))
 
         logger.Info(
             "static serve head success",
             loggingcontract.Context{
-                "relativePath": relativePath,
-                "size":         fileInfo.Size(),
-                "contentType":  headers.Get("Content-Type"),
+                "relativePath": resolved.relativePath,
+                "size":         resolved.fileInfo.Size(),
+                "contentType":  resolved.headers.Get("Content-Type"),
             },
         )
 
-        return nethttp.StatusOK, headers, nil, true
+        return nethttp.StatusOK, resolved.headers, nil, true
     }
 
-    content, err := io.ReadAll(file)
-    if nil != err {
+    content, readErr := io.ReadAll(resolved.file)
+    if nil != readErr {
         logger.Error(
             "static serve read failed",
             exception.LogContext(
-                err,
+                readErr,
                 exceptioncontract.Context{
-                    "relativePath": relativePath,
+                    "relativePath": resolved.relativePath,
                 },
             ),
         )
@@ -342,20 +416,20 @@ func (instance *FileServer) Serve(
         return nethttp.StatusInternalServerError, nil, nil, true
     }
 
-    if 0 < fileInfo.Size() {
-        headers.Set("Content-Length", formatContentLength(fileInfo.Size()))
+    if 0 < resolved.fileInfo.Size() {
+        resolved.headers.Set("Content-Length", formatContentLength(resolved.fileInfo.Size()))
     }
 
     logger.Info(
         "static serve success",
         loggingcontract.Context{
-            "relativePath": relativePath,
+            "relativePath": resolved.relativePath,
             "size":         len(content),
-            "contentType":  headers.Get("Content-Type"),
+            "contentType":  resolved.headers.Get("Content-Type"),
         },
     )
 
-    return nethttp.StatusOK, headers, content, true
+    return nethttp.StatusOK, resolved.headers, content, true
 }
 
 func (instance *FileServer) serveForStreaming(
@@ -365,96 +439,14 @@ func (instance *FileServer) serveForStreaming(
         return 0, nil, nil, nil, false
     }
 
-    requestPath := request.HttpRequest().URL.Path
-
-    if "" != instance.config.stripPrefix {
-        if strings.HasPrefix(requestPath, instance.config.stripPrefix) {
-            requestPath = strings.TrimPrefix(requestPath, instance.config.stripPrefix)
-            if "" == requestPath {
-                requestPath = "/"
-            }
-        } else {
-            return 0, nil, nil, nil, false
-        }
-    }
-
-    cleanedPath := path.Clean(requestPath)
-    if "." == cleanedPath || "" == cleanedPath {
-        cleanedPath = "/"
-    }
-
-    if "/" == cleanedPath {
-        cleanedPath = "/" + instance.config.indexFile
-    }
-
-    relativePath := strings.TrimPrefix(cleanedPath, "/")
-
-    if ModeEmbedded == instance.config.mode && "" != instance.config.publicDir {
-        relativePath = path.Join(instance.config.publicDir, relativePath)
-    }
-
-    if false == fs.ValidPath(relativePath) {
+    resolved, ok := instance.resolveAndOpen(request, nil)
+    if false == ok {
         return 0, nil, nil, nil, false
     }
 
-    file, err := instance.fileSystem.Open(relativePath)
-    if nil != err {
-        return 0, nil, nil, nil, false
+    if true == resolved.notModified {
+        return nethttp.StatusNotModified, resolved.headers, nil, nil, true
     }
 
-    fileInfo, err := file.Stat()
-    if nil != err {
-        _ = file.Close()
-        return 0, nil, nil, nil, false
-    }
-
-    if true == fileInfo.IsDir() {
-        _ = file.Close()
-        return 0, nil, nil, nil, false
-    }
-
-    headers := nethttp.Header{}
-
-    extension := path.Ext(relativePath)
-    if "" != extension {
-        contentType := mime.TypeByExtension(extension)
-        if "" != contentType {
-            headers.Set("Content-Type", contentType)
-        }
-    }
-
-    if true == instance.config.enableCache {
-        etag := GenerateEtag(fileInfo, instance.config.weakEtag)
-        if "" != etag {
-            headers.Set("ETag", etag)
-        }
-
-        lastModified := fileInfo.ModTime().UTC().Format(nethttp.TimeFormat)
-        headers.Set("Last-Modified", lastModified)
-
-        cacheControl := buildCacheControlValue(instance.config.cacheMaxAge)
-        if "" != cacheControl {
-            headers.Set("Cache-Control", cacheControl)
-        }
-
-        ifNoneMatch := request.Header("If-None-Match")
-        if "" != ifNoneMatch && ifNoneMatch == etag {
-            _ = file.Close()
-            return nethttp.StatusNotModified, headers, nil, nil, true
-        }
-
-        ifModifiedSince := request.Header("If-Modified-Since")
-        if "" != ifModifiedSince {
-            if clientTime, err := time.Parse(nethttp.TimeFormat, ifModifiedSince); nil == err {
-                modifiedAt := fileInfo.ModTime().UTC().Truncate(time.Second)
-
-                if false == modifiedAt.After(clientTime) {
-                    _ = file.Close()
-                    return nethttp.StatusNotModified, headers, nil, nil, true
-                }
-            }
-        }
-    }
-
-    return nethttp.StatusOK, headers, file, fileInfo, true
+    return nethttp.StatusOK, resolved.headers, resolved.file, resolved.fileInfo, true
 }

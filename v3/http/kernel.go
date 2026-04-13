@@ -96,9 +96,9 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
         requestLogger, requestId, requestIdLoggerErr := instance.requestIdLogger(serviceContainer, scope)
         if nil != requestIdLoggerErr {
-            exception.Panic(
-                exception.NewError("failed to create request logger", nil, requestIdLoggerErr),
-            )
+            writer.WriteHeader(nethttp.StatusInternalServerError)
+            _, _ = writer.Write([]byte("internal server error"))
+            return
         }
 
         defer func() {
@@ -547,6 +547,15 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
             kernelExceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, finalHandlerErr)
             instance.dispatchEventKernelException(kernelExceptionEvent, runtimeInstance, requestLogger, eventDispatcher)
+
+            if nil == kernelExceptionEvent.Response() {
+                if nil != instance.errorHandler {
+                    customResponse := instance.errorHandler(runtimeInstance, writer, melodyRequest, finalHandlerErr)
+                    if nil != customResponse {
+                        kernelExceptionEvent.SetResponse(customResponse)
+                    }
+                }
+            }
 
             if nil == kernelExceptionEvent.Response() {
                 debugMode := config.EnvDevelopment == configuration.Kernel().Env()

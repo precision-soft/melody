@@ -89,7 +89,7 @@ func (instance *UrlGenerator) GeneratePath(routeName string, parameters map[stri
                 }
             }
 
-            resultParts = append(resultParts, value)
+            resultParts = append(resultParts, url.PathEscape(value))
 
             continue
         }
@@ -169,7 +169,7 @@ func (instance *UrlGenerator) GeneratePath(routeName string, parameters map[stri
                     }
                 }
 
-                resultParts = append(resultParts, value)
+                resultParts = append(resultParts, url.PathEscape(value))
 
                 continue
             }
@@ -193,7 +193,7 @@ func (instance *UrlGenerator) GeneratePath(routeName string, parameters map[stri
                         continue
                     }
 
-                    resultParts = append(resultParts, segment)
+                    resultParts = append(resultParts, url.PathEscape(segment))
                 }
             }
 

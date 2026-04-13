@@ -306,6 +306,158 @@ func TestFileServer_IfNoneMatch_ReturnsNotModified(t *testing.T) {
     }
 }
 
+func TestFileServer_StripPrefix_ServesFileWhenPrefixMatches(t *testing.T) {
+    fs := fstest.MapFS{
+        "a.txt": &fstest.MapFile{
+            Data: []byte("a"),
+        },
+    }
+
+    config := NewFileServerConfig(
+        ModeEmbedded,
+        "",
+        "",
+        "/static/",
+        false,
+        0,
+        false,
+    )
+
+    server := NewFileServer(
+        NewOptions(
+            config,
+            "",
+            fs,
+        ),
+    )
+
+    statusCode, _, body, served := server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/static/a.txt"),
+        logging.NewNopLogger(),
+    )
+
+    if false == served {
+        t.Fatalf("expected served")
+    }
+
+    if 200 != statusCode {
+        t.Fatalf("unexpected status: %d", statusCode)
+    }
+
+    if "a" != string(body) {
+        t.Fatalf("unexpected body: %s", string(body))
+    }
+}
+
+func TestFileServer_StripPrefix_RejectsWhenPrefixMismatch(t *testing.T) {
+    fs := fstest.MapFS{
+        "a.txt": &fstest.MapFile{
+            Data: []byte("a"),
+        },
+    }
+
+    config := NewFileServerConfig(
+        ModeEmbedded,
+        "",
+        "",
+        "/other/",
+        false,
+        0,
+        false,
+    )
+
+    server := NewFileServer(
+        NewOptions(
+            config,
+            "",
+            fs,
+        ),
+    )
+
+    _, _, _, served := server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/static/a.txt"),
+        logging.NewNopLogger(),
+    )
+
+    if true == served {
+        t.Fatalf("expected not served when strip prefix mismatches")
+    }
+}
+
+func TestFileServer_ServesIndexFileForRootPath(t *testing.T) {
+    fs := fstest.MapFS{
+        "index.html": &fstest.MapFile{
+            Data: []byte("hello"),
+        },
+    }
+
+    config := NewFileServerConfig(
+        ModeEmbedded,
+        "",
+        "index.html",
+        "",
+        false,
+        0,
+        false,
+    )
+
+    server := NewFileServer(
+        NewOptions(
+            config,
+            "",
+            fs,
+        ),
+    )
+
+    statusCode, _, body, served := server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/"),
+        logging.NewNopLogger(),
+    )
+
+    if false == served {
+        t.Fatalf("expected served for root path")
+    }
+
+    if 200 != statusCode {
+        t.Fatalf("unexpected status: %d", statusCode)
+    }
+
+    if "hello" != string(body) {
+        t.Fatalf("expected index file content, got: %s", string(body))
+    }
+}
+
+func TestFileServer_ReturnsNotServedForMissingFile(t *testing.T) {
+    fs := fstest.MapFS{}
+
+    config := NewFileServerConfig(
+        ModeEmbedded,
+        "",
+        "",
+        "",
+        false,
+        0,
+        false,
+    )
+
+    server := NewFileServer(
+        NewOptions(
+            config,
+            "",
+            fs,
+        ),
+    )
+
+    _, _, _, served := server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/nonexistent.txt"),
+        logging.NewNopLogger(),
+    )
+
+    if true == served {
+        t.Fatalf("expected not served for missing file")
+    }
+}
+
 func osWriteFile(path string, data []byte) error {
     return os.WriteFile(path, data, 0o644)
 }

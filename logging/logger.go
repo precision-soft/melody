@@ -93,7 +93,7 @@ func enrichContextWithCause(exceptionValue *exception.Error) exceptioncontract.C
         return context
     }
 
-    causeChain := buildCauseChain(causeErr, causeChainMaxDepth)
+    causeChain := exception.BuildCauseChain(causeErr, causeChainMaxDepth)
     if 0 < len(causeChain) {
         context["cause"] = causeChain[0]
         context["causeChain"] = causeChain
@@ -101,7 +101,7 @@ func enrichContextWithCause(exceptionValue *exception.Error) exceptioncontract.C
         context["cause"] = causeErr.Error()
     }
 
-    causeContextChain := buildCauseContextChain(causeErr, causeChainMaxDepth)
+    causeContextChain := exception.BuildCauseContextChain(causeErr, causeChainMaxDepth)
     if 0 < len(causeContextChain) {
         context["causeContextChain"] = causeContextChain
     }
@@ -109,59 +109,3 @@ func enrichContextWithCause(exceptionValue *exception.Error) exceptioncontract.C
     return context
 }
 
-func buildCauseChain(causeErr error, maxDepth int) []string {
-    if nil == causeErr {
-        return nil
-    }
-
-    if 0 >= maxDepth {
-        return []string{causeErr.Error()}
-    }
-
-    chain := make([]string, 0, maxDepth)
-
-    current := causeErr
-    for depth := 0; depth < maxDepth && nil != current; depth++ {
-        chain = append(chain, current.Error())
-        current = errors.Unwrap(current)
-    }
-
-    return chain
-}
-
-func buildCauseContextChain(causeErr error, maxDepth int) []map[string]any {
-    if nil == causeErr {
-        return nil
-    }
-
-    if 0 >= maxDepth {
-        maxDepth = 1
-    }
-
-    chain := make([]map[string]any, 0, maxDepth)
-    hasAnyContext := false
-
-    current := causeErr
-    for depth := 0; depth < maxDepth && nil != current; depth++ {
-        var causeException *exception.Error
-        if true == errors.As(current, &causeException) {
-            causeContext := causeException.Context()
-            if nil != causeContext && 0 < len(causeContext) {
-                chain = append(chain, causeContext)
-                hasAnyContext = true
-            } else {
-                chain = append(chain, nil)
-            }
-        } else {
-            chain = append(chain, nil)
-        }
-
-        current = errors.Unwrap(current)
-    }
-
-    if false == hasAnyContext {
-        return nil
-    }
-
-    return chain
-}

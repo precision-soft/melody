@@ -184,6 +184,48 @@ func TestCorsMiddleware_PreflightOptions(t *testing.T) {
     }
 }
 
+func TestCorsMiddleware_PanicsWhenCredentialsWithWildcard(t *testing.T) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected panic when allowCredentials is true with wildcard origin")
+        }
+    }()
+
+    config := NewCorsConfig(
+        []string{"*"},
+        nil,
+        nil,
+        nil,
+        true,
+        0,
+        nil,
+    )
+
+    _ = CorsMiddleware(config)
+}
+
+func TestCorsMiddleware_DoesNotPanicWhenCredentialsWithSpecificOrigin(t *testing.T) {
+    defer func() {
+        recoveredValue := recover()
+        if nil != recoveredValue {
+            t.Fatalf("did not expect panic when allowCredentials is true with specific origin")
+        }
+    }()
+
+    config := NewCorsConfig(
+        []string{"http://example.com"},
+        nil,
+        nil,
+        nil,
+        true,
+        0,
+        nil,
+    )
+
+    _ = CorsMiddleware(config)
+}
+
 func TestCorsMiddleware_NonPreflightAddsHeaders(t *testing.T) {
     middleware := DefaultCorsMiddleware()
 
