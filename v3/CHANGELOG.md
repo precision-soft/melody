@@ -5,6 +5,17 @@ All notable changes to `precision-soft/melody/v3` will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.3.0] - 2026-04-14
+
+### Changed
+
+- `cache/in_memory.go` — `cleanupLoop` accepts `context.Context`; `NewInMemoryCache` creates a cancel context stored as `cleanupCancel`; `Close()` calls `cleanupCancel()` to stop the goroutine cooperatively
+- `session/in_memory_storage.go` — same goroutine lifecycle improvements as `cache/in_memory.go`
+- `http/request.go` — replace `log.Printf` fallback (when no runtime instance is available) with `logging.NewDefaultLogger().Warning(...)`; remove unused `"log"` import
+- `cli/command.go` — remove block comments and `//nolint:errcheck` directives from `printGreenFullLine`, `printGreenStatusLine`, `printRedStatusLine` closures
+- `logging/logger.go` — add GoDoc comment to `causeChainMaxDepth` constant
+- `security/compiled_configuration.go` — group string fields in `CompiledFirewall` struct (`name`, `matcherDescription`, `loginPath`, `logoutPath`)
+
 ## [v3.2.0] - 2026-04-12
 
 ### Fixed
@@ -88,6 +99,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Introduce Melody v3 module (`github.com/precision-soft/melody/v3`)
 - Application context in constructor
 - `ServiceModule` simplification
+
+[v3.3.0]: https://github.com/precision-soft/melody/compare/v3.2.0...v3.3.0
+
+[v3.2.0]: https://github.com/precision-soft/melody/compare/v3.1.4...v3.2.0
 
 [v3.1.4]: https://github.com/precision-soft/melody/compare/v3.1.3...v3.1.4
 

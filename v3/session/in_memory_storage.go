@@ -1,6 +1,7 @@
 package session
 
 import (
+    "context"
     "sync"
     "time"
 
@@ -18,14 +19,17 @@ func NewInMemoryStorageWithCleanupInterval(cleanupInterval time.Duration) *InMem
         )
     }
 
+    cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
+
     storage := &InMemoryStorage{
         sessions:        make(map[string]inMemorySessionEntry),
         cleanupInterval: cleanupInterval,
         stopCleanup:     make(chan struct{}),
         cleanupDone:     make(chan struct{}),
+        cleanupCancel:   cleanupCancel,
     }
 
-    go storage.cleanupLoop()
+    go storage.cleanupLoop(cleanupCtx)
 
     return storage
 }
@@ -37,6 +41,7 @@ type InMemoryStorage struct {
     stopCleanup     chan struct{}
     cleanupDone     chan struct{}
     stopCleanupOnce sync.Once
+    cleanupCancel   context.CancelFunc
 }
 
 type inMemorySessionEntry struct {
@@ -122,6 +127,10 @@ func (instance *InMemoryStorage) Clear() error {
 }
 
 func (instance *InMemoryStorage) Close() error {
+    if nil != instance.cleanupCancel {
+        instance.cleanupCancel()
+    }
+
     instance.stopCleanupOnce.Do(
         func() {
             close(instance.stopCleanup)
@@ -133,7 +142,7 @@ func (instance *InMemoryStorage) Close() error {
     return nil
 }
 
-func (instance *InMemoryStorage) cleanupLoop() {
+func (instance *InMemoryStorage) cleanupLoop(ctx context.Context) {
     defer close(instance.cleanupDone)
 
     ticker := time.NewTicker(instance.cleanupInterval)
@@ -144,6 +153,8 @@ func (instance *InMemoryStorage) cleanupLoop() {
         case <-ticker.C:
             instance.cleanupExpired()
         case <-instance.stopCleanup:
+            return
+        case <-ctx.Done():
             return
         }
     }

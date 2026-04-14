@@ -2,6 +2,7 @@ package cache
 
 import (
     "container/list"
+    "context"
     "runtime"
     "strconv"
     "strings"
@@ -13,6 +14,11 @@ import (
     "github.com/precision-soft/melody/v2/exception"
     exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
     "github.com/precision-soft/melody/v2/internal"
+)
+
+const (
+    maxInt64 = int64(^uint64(0) >> 1)
+    minInt64 = -maxInt64 - 1
 )
 
 type lruEntry struct {
@@ -41,6 +47,8 @@ func NewInMemoryBackend(
         )
     }
 
+    cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
+
     backend := &InMemoryBackend{
         entries:             make(map[string]*lruEntry),
         lruList:             list.New(),
@@ -49,6 +57,7 @@ func NewInMemoryBackend(
         stopCleanup:         make(chan struct{}),
         cleanupDone:         make(chan struct{}),
         clock:               clockInstance,
+        cleanupCancel:       cleanupCancel,
     }
 
     runtime.SetFinalizer(
@@ -62,7 +71,7 @@ func NewInMemoryBackend(
         },
     )
 
-    go backend.cleanupLoop()
+    go backend.cleanupLoop(cleanupCtx)
 
     return backend
 }
@@ -77,6 +86,7 @@ type InMemoryBackend struct {
     cleanupDone         chan struct{}
     stopCleanupOnce     sync.Once
     clock               clockcontract.Clock
+    cleanupCancel       context.CancelFunc
 }
 
 func (instance *InMemoryBackend) Get(key string) ([]byte, bool, error) {
@@ -264,11 +274,6 @@ func (instance *InMemoryBackend) Increment(key string, delta int64) (int64, erro
 }
 
 func (instance *InMemoryBackend) Decrement(key string, delta int64) (int64, error) {
-    const (
-        maxInt64 = int64(^uint64(0) >> 1)
-        minInt64 = -maxInt64 - 1
-    )
-
     if minInt64 == delta {
         return 0, exception.NewError(
             "delta overflows int64 when negated",
@@ -283,6 +288,10 @@ func (instance *InMemoryBackend) Decrement(key string, delta int64) (int64, erro
 }
 
 func (instance *InMemoryBackend) Close() error {
+    if nil != instance.cleanupCancel {
+        instance.cleanupCancel()
+    }
+
     instance.stopCleanupLoop()
 
     <-instance.cleanupDone
@@ -356,7 +365,7 @@ func (instance *InMemoryBackend) incrementWithTtl(
     return newValue, nil
 }
 
-func (instance *InMemoryBackend) cleanupLoop() {
+func (instance *InMemoryBackend) cleanupLoop(ctx context.Context) {
     defer close(instance.cleanupDone)
 
     ticker := instance.clock.NewTicker(instance.cleanupTickInterval)
@@ -367,6 +376,8 @@ func (instance *InMemoryBackend) cleanupLoop() {
         case <-ticker.Channel():
             instance.cleanupExpired()
         case <-instance.stopCleanup:
+            return
+        case <-ctx.Done():
             return
         }
     }
@@ -518,11 +529,6 @@ func (instance *InMemoryBackend) isExpiredAt(item *Item, now time.Time) bool {
 }
 
 func (instance *InMemoryBackend) addInt64WithOverflowCheck(left int64, right int64) (int64, error) {
-    const (
-        maxInt64 = int64(^uint64(0) >> 1)
-        minInt64 = -maxInt64 - 1
-    )
-
     if 0 < right && left > maxInt64-right {
         return 0, exception.NewError(
             "int64 addition overflow",

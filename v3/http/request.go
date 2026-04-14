@@ -61,6 +61,15 @@ func NewRequest(
                     },
                 )
             }
+        } else {
+            logging.NewDefaultLogger().Warning(
+                "failed to parse form data",
+                map[string]any{
+                    "error":  parseFormErr.Error(),
+                    "method": httpRequest.Method,
+                    "path":   httpRequest.URL.Path,
+                },
+            )
         }
     }
 

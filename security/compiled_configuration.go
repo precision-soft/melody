@@ -54,20 +54,22 @@ func NewCompiledFirewall(
 }
 
 type CompiledFirewall struct {
-    name                        string
-    matcher                     securitycontract.Matcher
+    name               string
+    matcherDescription string
+    loginPath          string
+    logoutPath         string
+
+    matcher               securitycontract.Matcher
+    accessDecisionManager securitycontract.AccessDecisionManager
+    tokenSource           securitycontract.TokenSource
+    entryPoint            securitycontract.EntryPoint
+    accessDeniedHandler   securitycontract.AccessDeniedHandler
+    loginHandler          securitycontract.LoginHandler
+    logoutHandler         securitycontract.LogoutHandler
+
     rules                       []securitycontract.Rule
-    tokenSource                 securitycontract.TokenSource
     accessControl               *AccessControl
-    accessDecisionManager       securitycontract.AccessDecisionManager
     roleHierarchy               *RoleHierarchy
-    entryPoint                  securitycontract.EntryPoint
-    accessDeniedHandler         securitycontract.AccessDeniedHandler
-    matcherDescription          string
-    loginPath                   string
-    logoutPath                  string
-    loginHandler                securitycontract.LoginHandler
-    logoutHandler               securitycontract.LogoutHandler
     roleHierarchySource         Source
     accessDecisionManagerSource Source
     accessControlSource         Source
