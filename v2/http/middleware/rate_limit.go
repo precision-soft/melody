@@ -236,10 +236,22 @@ type KeyExtractor = func(httpcontract.Request) string
 
 type OnLimitExceeded = func(httpcontract.Request) (httpcontract.Response, error)
 
+type ClientIpResolver = func(httpcontract.Request) string
+
+func DefaultClientIp(request httpcontract.Request) string {
+    host, _, splitErr := net.SplitHostPort(request.HttpRequest().RemoteAddr)
+    if nil != splitErr {
+        return request.HttpRequest().RemoteAddr
+    }
+
+    return host
+}
+
 type RateLimitConfig struct {
-    limiter         httpcontract.RateLimiter
-    keyExtractor    KeyExtractor
-    onLimitExceeded OnLimitExceeded
+    limiter          httpcontract.RateLimiter
+    keyExtractor     KeyExtractor
+    onLimitExceeded  OnLimitExceeded
+    clientIpResolver ClientIpResolver
 }
 
 func NewRateLimitConfig(
@@ -268,6 +280,22 @@ func (instance *RateLimitConfig) SetOnLimitExceeded(onLimitExceeded OnLimitExcee
     instance.onLimitExceeded = onLimitExceeded
 }
 
+func (instance *RateLimitConfig) ClientIpResolver() ClientIpResolver {
+    return instance.clientIpResolver
+}
+
+func (instance *RateLimitConfig) SetClientIpResolver(resolver ClientIpResolver) {
+    instance.clientIpResolver = resolver
+}
+
+func (instance *RateLimitConfig) clientIp(request httpcontract.Request) string {
+    if nil != instance.clientIpResolver {
+        return instance.clientIpResolver(request)
+    }
+
+    return DefaultClientIp(request)
+}
+
 func RateLimitMiddleware(config *RateLimitConfig) httpcontract.Middleware {
     if nil == config.Limiter() {
         exception.Panic(
@@ -276,7 +304,11 @@ func RateLimitMiddleware(config *RateLimitConfig) httpcontract.Middleware {
     }
 
     if nil == config.KeyExtractor() {
-        config.SetKeyExtractor(defaultKeyExtractor)
+        config.SetKeyExtractor(func(request httpcontract.Request) string {
+            ip := config.clientIp(request)
+
+            return fmt.Sprintf("%s:%s", ip, request.HttpRequest().URL.Path)
+        })
     }
 
     if nil == config.OnLimitExceeded() {
@@ -302,7 +334,7 @@ func SimpleRateLimit(requestsPerMinute int) httpcontract.Middleware {
     return RateLimitMiddleware(
         NewRateLimitConfig(
             limiter,
-            defaultKeyExtractor,
+            nil,
             nil,
         ),
     )
@@ -311,13 +343,17 @@ func SimpleRateLimit(requestsPerMinute int) httpcontract.Middleware {
 func IpRateLimit(requestsPerMinute int) httpcontract.Middleware {
     limiter := NewSlidingWindowLimiter(requestsPerMinute, time.Minute)
 
-    return RateLimitMiddleware(
-        NewRateLimitConfig(
-            limiter,
-            ipKeyExtractor,
-            nil,
-        ),
+    config := NewRateLimitConfig(
+        limiter,
+        nil,
+        nil,
     )
+
+    config.SetKeyExtractor(func(request httpcontract.Request) string {
+        return config.clientIp(request)
+    })
+
+    return RateLimitMiddleware(config)
 }
 
 func UserRateLimit(
@@ -326,42 +362,23 @@ func UserRateLimit(
 ) httpcontract.Middleware {
     limiter := NewSlidingWindowLimiter(requestsPerMinute, time.Minute)
 
-    return RateLimitMiddleware(
-        NewRateLimitConfig(
-            limiter,
-            func(request httpcontract.Request) string {
-                userId := getUserId(request)
-
-                if "" == userId {
-                    return ipKeyExtractor(request)
-                }
-
-                return fmt.Sprintf("user:%s", userId)
-            },
-            nil,
-        ),
+    config := NewRateLimitConfig(
+        limiter,
+        nil,
+        nil,
     )
-}
 
-func defaultKeyExtractor(request httpcontract.Request) string {
-    ip := getClientIp(request)
+    config.SetKeyExtractor(func(request httpcontract.Request) string {
+        userId := getUserId(request)
 
-    return fmt.Sprintf("%s:%s", ip, request.HttpRequest().URL.Path)
-}
+        if "" == userId {
+            return config.clientIp(request)
+        }
 
-func ipKeyExtractor(request httpcontract.Request) string {
-    return getClientIp(request)
-}
+        return fmt.Sprintf("user:%s", userId)
+    })
 
-func getClientIp(request httpcontract.Request) string {
-    remoteAddress := request.HttpRequest().RemoteAddr
-
-    host, _, splitErr := net.SplitHostPort(remoteAddress)
-    if nil == splitErr {
-        return host
-    }
-
-    return remoteAddress
+    return RateLimitMiddleware(config)
 }
 
 func defaultOnLimitExceeded(request httpcontract.Request) (httpcontract.Response, error) {

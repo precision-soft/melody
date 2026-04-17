@@ -2,6 +2,7 @@ package session
 
 import (
     "encoding/json"
+    "io"
     "os"
     "path/filepath"
     "sync"
@@ -36,28 +37,15 @@ func NewFileStorageFromPath(path string) (*FileStorage, error) {
         )
     }
 
-    fileInstance, err := os.OpenFile(trimmedPath, os.O_RDWR|os.O_CREATE, 0644)
+    decoded, err := readSessionFileAtPath(trimmedPath)
     if nil != err {
-        return nil, exception.NewError(
-            "failed to open session storage file",
-            exceptioncontract.Context{
-                "path": trimmedPath,
-            },
-            err,
-        )
+        return nil, err
     }
 
     storage := &FileStorage{
         path:        trimmedPath,
-        file:        fileInstance,
         ownsFile:    true,
-        sessionById: make(map[string]fileSessionEntry),
-    }
-
-    err = storage.loadFromFile()
-    if nil != err {
-        _ = fileInstance.Close()
-        return nil, err
+        sessionById: decoded,
     }
 
     return storage, nil
@@ -68,15 +56,15 @@ func NewFileStorageFromFile(fileInstance *os.File) (*FileStorage, error) {
         return nil, exception.NewError("session storage file is nil", nil, nil)
     }
 
+    decoded, err := readSessionFileFromHandle(fileInstance)
+    if nil != err {
+        return nil, err
+    }
+
     storage := &FileStorage{
         file:        fileInstance,
         ownsFile:    false,
-        sessionById: make(map[string]fileSessionEntry),
-    }
-
-    err := storage.loadFromFile()
-    if nil != err {
-        return nil, err
+        sessionById: decoded,
     }
 
     return storage, nil
@@ -84,10 +72,11 @@ func NewFileStorageFromFile(fileInstance *os.File) (*FileStorage, error) {
 
 /** @important recommended for dev only */
 type FileStorage struct {
-    mutex    sync.RWMutex
+    mutex    sync.Mutex
     path     string
     file     *os.File
     ownsFile bool
+    closed   bool
 
     sessionById map[string]fileSessionEntry
 }
@@ -102,27 +91,22 @@ func (instance *FileStorage) Load(sessionId string) (map[string]any, bool, error
         return nil, false, exception.NewError("session id is required in load session", nil, nil)
     }
 
-    now := time.Now().UnixNano()
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
 
-    instance.mutex.RLock()
+    if true == instance.closed {
+        return nil, false, exception.NewError("session storage is closed", nil, nil)
+    }
+
     entry, exists := instance.sessionById[sessionId]
-
     if false == exists {
-        instance.mutex.RUnlock()
         return nil, false, nil
     }
 
-    if 0 != entry.ExpiresAt && now >= entry.ExpiresAt {
-        instance.mutex.RUnlock()
+    if 0 != entry.ExpiresAt && time.Now().UnixNano() >= entry.ExpiresAt {
+        delete(instance.sessionById, sessionId)
 
-        instance.mutex.Lock()
-        _, stillExists := instance.sessionById[sessionId]
-        if true == stillExists {
-            delete(instance.sessionById, sessionId)
-        }
-        instance.mutex.Unlock()
-
-        flushErr := instance.flushToFile()
+        flushErr := instance.flushLocked()
         if nil != flushErr {
             return nil, false, flushErr
         }
@@ -130,10 +114,7 @@ func (instance *FileStorage) Load(sessionId string) (map[string]any, bool, error
         return nil, false, nil
     }
 
-    dataCopy := copyAnyMap(entry.Data)
-    instance.mutex.RUnlock()
-
-    return dataCopy, true, nil
+    return copyAnyMap(entry.Data), true, nil
 }
 
 func (instance *FileStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
@@ -152,10 +133,15 @@ func (instance *FileStorage) Save(sessionId string, data map[string]any, ttl tim
     }
 
     instance.mutex.Lock()
-    instance.sessionById[sessionId] = entry
-    instance.mutex.Unlock()
+    defer instance.mutex.Unlock()
 
-    return instance.flushToFile()
+    if true == instance.closed {
+        return exception.NewError("session storage is closed", nil, nil)
+    }
+
+    instance.sessionById[sessionId] = entry
+
+    return instance.flushLocked()
 }
 
 func (instance *FileStorage) Delete(sessionId string) error {
@@ -164,32 +150,42 @@ func (instance *FileStorage) Delete(sessionId string) error {
     }
 
     instance.mutex.Lock()
-    _, exists := instance.sessionById[sessionId]
-    if true == exists {
-        delete(instance.sessionById, sessionId)
-    }
-    instance.mutex.Unlock()
+    defer instance.mutex.Unlock()
 
-    return instance.flushToFile()
+    if true == instance.closed {
+        return exception.NewError("session storage is closed", nil, nil)
+    }
+
+    if _, exists := instance.sessionById[sessionId]; false == exists {
+        return nil
+    }
+
+    delete(instance.sessionById, sessionId)
+
+    return instance.flushLocked()
 }
 
 func (instance *FileStorage) Close() error {
     instance.mutex.Lock()
+    defer instance.mutex.Unlock()
 
-    if false == instance.ownsFile {
-        instance.mutex.Unlock()
+    if true == instance.closed {
         return nil
     }
 
-    if nil == instance.file {
-        instance.mutex.Unlock()
+    instance.closed = true
+
+    if false == instance.ownsFile {
+        instance.file = nil
         return nil
     }
 
     fileInstance := instance.file
     instance.file = nil
 
-    instance.mutex.Unlock()
+    if nil == fileInstance {
+        return nil
+    }
 
     err := fileInstance.Close()
     if nil != err {
@@ -199,142 +195,131 @@ func (instance *FileStorage) Close() error {
     return nil
 }
 
-func (instance *FileStorage) loadFromFile() error {
-    instance.mutex.RLock()
-    fileInstance := instance.file
-    instance.mutex.RUnlock()
+func (instance *FileStorage) flushLocked() error {
+    snapshot := instance.sessionById
 
-    if nil == fileInstance {
+    if true == instance.ownsFile && "" != instance.path {
+        return writeSessionFileAtomically(instance.path, snapshot)
+    }
+
+    if nil == instance.file {
         return exception.NewError("session storage file is nil", nil, nil)
     }
 
-    _, err := fileInstance.Seek(0, 0)
+    return writeSessionFileInPlace(instance.file, snapshot)
+}
+
+func readSessionFileAtPath(path string) (map[string]fileSessionEntry, error) {
+    fileInstance, err := os.Open(path)
     if nil != err {
-        return exception.NewError("failed to seek session storage file", nil, err)
+        if true == os.IsNotExist(err) {
+            return make(map[string]fileSessionEntry), nil
+        }
+
+        return nil, exception.NewError(
+            "failed to open session storage file",
+            exceptioncontract.Context{
+                "path": path,
+            },
+            err,
+        )
+    }
+
+    defer fileInstance.Close()
+
+    return readSessionFileFromHandle(fileInstance)
+}
+
+func readSessionFileFromHandle(fileInstance *os.File) (map[string]fileSessionEntry, error) {
+    _, err := fileInstance.Seek(0, io.SeekStart)
+    if nil != err {
+        return nil, exception.NewError("failed to seek session storage file", nil, err)
     }
 
     stat, err := fileInstance.Stat()
     if nil != err {
-        return exception.NewError("failed to stat session storage file", nil, err)
+        return nil, exception.NewError("failed to stat session storage file", nil, err)
     }
 
     decoded := make(map[string]fileSessionEntry)
 
-    if 0 != stat.Size() {
-        decoder := json.NewDecoder(fileInstance)
-
-        err = decoder.Decode(&decoded)
-        if nil != err {
-            return exception.NewError("failed to decode session storage file", nil, err)
-        }
+    if 0 == stat.Size() {
+        return decoded, nil
     }
 
-    instance.mutex.Lock()
-    instance.sessionById = decoded
-    instance.mutex.Unlock()
+    decoder := json.NewDecoder(fileInstance)
+
+    err = decoder.Decode(&decoded)
+    if nil != err {
+        return nil, exception.NewError("failed to decode session storage file", nil, err)
+    }
+
+    return decoded, nil
+}
+
+func writeSessionFileAtomically(path string, snapshot map[string]fileSessionEntry) error {
+    directoryPath := filepath.Dir(path)
+    err := os.MkdirAll(directoryPath, 0755)
+    if nil != err {
+        return exception.NewError(
+            "failed to create session storage directory",
+            exceptioncontract.Context{
+                "path": directoryPath,
+            },
+            err,
+        )
+    }
+
+    tempFile, err := os.CreateTemp(directoryPath, filepath.Base(path)+".*.tmp")
+    if nil != err {
+        return exception.NewError(
+            "failed to create session storage temp file",
+            exceptioncontract.Context{
+                "path": path,
+            },
+            err,
+        )
+    }
+
+    tempPath := tempFile.Name()
+
+    encoder := json.NewEncoder(tempFile)
+
+    err = encoder.Encode(snapshot)
+    if nil != err {
+        _ = tempFile.Close()
+        _ = os.Remove(tempPath)
+
+        return exception.NewError("failed to encode session storage file", nil, err)
+    }
+
+    err = tempFile.Sync()
+    if nil != err {
+        _ = tempFile.Close()
+        _ = os.Remove(tempPath)
+
+        return exception.NewError("failed to sync session storage file", nil, err)
+    }
+
+    err = tempFile.Close()
+    if nil != err {
+        _ = os.Remove(tempPath)
+
+        return exception.NewError("failed to close session storage temp file", nil, err)
+    }
+
+    err = os.Rename(tempPath, path)
+    if nil != err {
+        _ = os.Remove(tempPath)
+
+        return exception.NewError("failed to replace session storage file", nil, err)
+    }
 
     return nil
 }
 
-func (instance *FileStorage) flushToFile() error {
-    instance.mutex.RLock()
-    snapshot := make(map[string]fileSessionEntry, len(instance.sessionById))
-    for sessionId, entry := range instance.sessionById {
-        snapshot[sessionId] = entry
-    }
-    fileInstance := instance.file
-    path := instance.path
-    ownsFile := instance.ownsFile
-    instance.mutex.RUnlock()
-
-    if nil == fileInstance {
-        return exception.NewError("session storage file is nil", nil, nil)
-    }
-
-    if true == ownsFile && "" != path {
-        directoryPath := filepath.Dir(path)
-        err := os.MkdirAll(directoryPath, 0755)
-        if nil != err {
-            return exception.NewError(
-                "failed to create session storage directory",
-                exceptioncontract.Context{
-                    "path": directoryPath,
-                },
-                err,
-            )
-        }
-
-        tempPath := path + ".tmp"
-
-        tempFile, err := os.OpenFile(tempPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
-        if nil != err {
-            return exception.NewError(
-                "failed to open session storage temp file",
-                exceptioncontract.Context{
-                    "path": tempPath,
-                },
-                err,
-            )
-        }
-
-        encoder := json.NewEncoder(tempFile)
-        encoder.SetIndent("", "")
-
-        err = encoder.Encode(snapshot)
-        if nil != err {
-            _ = tempFile.Close()
-            _ = os.Remove(tempPath)
-
-            return exception.NewError("failed to encode session storage file", nil, err)
-        }
-
-        err = tempFile.Sync()
-        if nil != err {
-            _ = tempFile.Close()
-            _ = os.Remove(tempPath)
-
-            return exception.NewError("failed to sync session storage file", nil, err)
-        }
-
-        err = tempFile.Close()
-        if nil != err {
-            _ = os.Remove(tempPath)
-            return exception.NewError("failed to close session storage temp file", nil, err)
-        }
-
-        err = os.Rename(tempPath, path)
-        if nil != err {
-            _ = os.Remove(tempPath)
-            return exception.NewError("failed to replace session storage file", nil, err)
-        }
-
-        newFileInstance, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0644)
-        if nil != err {
-            return exception.NewError(
-                "failed to open session storage file",
-                map[string]any{
-                    "path": path,
-                },
-                err,
-            )
-        }
-
-        instance.mutex.Lock()
-        oldFileInstance := instance.file
-        instance.file = newFileInstance
-        instance.mutex.Unlock()
-
-        if nil != oldFileInstance {
-            closeErr := oldFileInstance.Close()
-            if nil != closeErr {
-                return exception.NewError("failed to close session storage file", nil, closeErr)
-            }
-        }
-
-        return nil
-    }
-
-    _, err := fileInstance.Seek(0, 0)
+func writeSessionFileInPlace(fileInstance *os.File, snapshot map[string]fileSessionEntry) error {
+    _, err := fileInstance.Seek(0, io.SeekStart)
     if nil != err {
         return exception.NewError("failed to seek session storage file", nil, err)
     }
@@ -345,7 +330,6 @@ func (instance *FileStorage) flushToFile() error {
     }
 
     encoder := json.NewEncoder(fileInstance)
-    encoder.SetIndent("", "")
 
     err = encoder.Encode(snapshot)
     if nil != err {
@@ -367,9 +351,10 @@ func copyAnyMap(data map[string]any) map[string]any {
 
     copied := make(map[string]any, len(data))
     for key, value := range data {
-        if nestedMap, ok := value.(map[string]any); true == ok {
-            copied[key] = copyAnyMap(nestedMap)
-        } else {
+        switch typedValue := value.(type) {
+        case map[string]any:
+            copied[key] = copyAnyMap(typedValue)
+        default:
             copied[key] = value
         }
     }

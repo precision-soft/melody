@@ -61,11 +61,20 @@ func updateSession(
 }
 ```
 
+## Session id validation
+
+Session ids are always 32-character lowercase hex strings. Incoming cookies that do not match this shape are rejected by [`Manager.Session`](../../session/manager.go) without touching storage, and [`DeleteSession`](../../session/manager.go) refuses malformed ids. New ids are generated from 16 bytes of `crypto/rand`.
+
+## File storage durability
+
+[`NewFileStorageFromPath`](../../session/file_storage.go) flushes modifications atomically via `os.CreateTemp` + `os.Rename` so a crash mid-write cannot leave a truncated session file on disk. File mode `0755` is used for the parent directory.
+
 ## Footguns & caveats
 
 - `Manager.SaveSession` only persists when `Session.IsModified()` is true; a read-only session is not written.
 - Clearing a session (`Session.Clear()`) marks it as cleared; saving a cleared session deletes it.
 - `Session.All()` returns a copy of the internal map.
+- [`FileStorage`](../../session/file_storage.go) is recommended for development only; production deployments should use a dedicated session backend.
 
 ## Userland API
 
@@ -87,6 +96,8 @@ func updateSession(
 - [`session.NewManager(storage, ttl)`](../../session/manager.go)
 - [`session.NewInMemoryStorage()`](../../session/in_memory_storage.go)
 - [`session.NewInMemoryStorageWithCleanupInterval(cleanupInterval)`](../../session/in_memory_storage.go)
+- [`session.NewFileStorageFromPath(path)`](../../session/file_storage.go)
+- [`session.NewFileStorageFromFile(file)`](../../session/file_storage.go)
 
 ### Container helpers
 

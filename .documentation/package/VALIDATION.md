@@ -25,10 +25,7 @@ The package defines the validator service id:
 
 - [`ServiceValidator`](../../validation/const.go) (`"service.validator"`)
 
-Resolution helpers:
-
-- [`ValidatorMustFromContainer`](../../validation/service_resolver.go)
-- [`ValidatorFromContainer`](../../validation/service_resolver.go)
+Resolution helpers are documented alongside the userland API in the [Container access](#container-access-validation) section.
 
 ## Usage
 
@@ -103,6 +100,12 @@ func validateInput(input CreateUserInput) error {
 
 - [`validation.NewValidator()`](../../validation/validator.go)
 - [`validation.NewValidationError(field, message, code string, context map[string]any)`](../../validation/error.go)
+
+### Container access (validation)
+
+- [`const ServiceValidator`](../../validation/const.go)
+- [`ValidatorMustFromContainer(serviceContainer containercontract.Container)`](../../validation/service_resolver.go)
+- [`ValidatorFromContainer(serviceContainer containercontract.Container) (*Validator, error)`](../../validation/service_resolver.go)
 
 ### Constants
 

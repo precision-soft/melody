@@ -12,7 +12,7 @@ It coordinates configuration resolution, container bootstrapping, module wiring 
 ## Subpackages
 
 - [`application/contract`](../../application/contract)
-  Public module contracts (`Module`, `ModuleProvider`, `ParameterModule`, `ServiceModule`, `HttpModule`, `CliModule`, `EventModule`, `ConfigModule`).
+  Public module contracts (`Module`, `ModuleProvider`, `ParameterModule`, `ServiceModule`, `HttpModule`, `HttpMiddlewareModule`, `HttpMiddlewareRegistrar`, `CliModule`, `EventModule`, `ConfigModule`).
 
 ## Responsibilities
 
@@ -189,6 +189,8 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 - [`ServiceModule`](../../application/contract/service_module.go)
 - [`ServiceRegistrar`](../../application/contract/service_module.go)
 - [`HttpModule`](../../application/contract/http_module.go)
+- [`HttpMiddlewareModule`](../../application/contract/http_middleware_module.go)
+- [`HttpMiddlewareRegistrar`](../../application/contract/http_middleware_module.go)
 - [`CliModule`](../../application/contract/cli_module.go)
 - [`EventModule`](../../application/contract/event_module.go)
 
@@ -196,7 +198,17 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 
 - [`Application`](../../application/application.go)
 - [`RuntimeFlags`](../../application/cli.go)
+- [`RouteRegistrar`](../../application/application.go) — `func(kernelInstance kernelcontract.Kernel)` function alias used for deferred HTTP route registration
 - [`HttpMiddleware`](../../application/http_middleware.go)
+- [`MiddlewareFactory`](../../application/http_middleware.go) — `func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware` function alias used by `UseFactories` / `UseFactoriesWithPriority`
+- [`SecurityModule`](../../application/security_module.go) — module contract for registering security configuration via `RegisterSecurity(builder *securityconfig.Builder)`
+
+### Constants
+
+- [`MiddlewareGroupHttp`](../../application/http_middleware.go)
+- [`MiddlewareNameStatic`](../../application/http_middleware.go)
+- [`MiddlewarePriorityStatic`](../../application/http_middleware.go)
+- [`MiddlewarePriorityDefault`](../../application/http_middleware.go)
 
 ### Constructors
 

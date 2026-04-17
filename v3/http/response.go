@@ -29,16 +29,6 @@ type Response struct {
 
 func (instance *Response) StatusCode() int { return instance.statusCode }
 
-func (instance *Response) Close() error {
-    if nil == instance.bodyReader {
-        return nil
-    }
-    if closer, ok := instance.bodyReader.(io.Closer); true == ok {
-        return closer.Close()
-    }
-    return nil
-}
-
 func (instance *Response) SetStatusCode(statusCode int) { instance.statusCode = statusCode }
 
 func (instance *Response) Headers() nethttp.Header { return instance.headers }
@@ -65,6 +55,16 @@ func (instance *Response) SetHeaders(headers nethttp.Header) {
 func (instance *Response) BodyReader() io.Reader { return instance.bodyReader }
 
 func (instance *Response) SetBodyReader(reader io.Reader) { instance.bodyReader = reader }
+
+func (instance *Response) Close() error {
+    if nil == instance.bodyReader {
+        return nil
+    }
+    if closer, ok := instance.bodyReader.(io.Closer); true == ok {
+        return closer.Close()
+    }
+    return nil
+}
 
 var _ httpcontract.Response = (*Response)(nil)
 
@@ -206,14 +206,78 @@ func AttachmentResponse(statusCode int, path string, filename string) (*Response
         return nil, err
     }
 
-    if "" != filename {
-        filename = strings.NewReplacer(`"`, `\"`, "\\", "", "\n", "", "\r", "").Replace(filename)
-        response.headers.Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
-    } else {
-        response.headers.Set("Content-Disposition", "attachment")
-    }
+    response.headers.Set("Content-Disposition", BuildContentDisposition("attachment", filename))
 
     return response, nil
+}
+
+func BuildContentDisposition(disposition string, filename string) string {
+    if "" == filename {
+        return disposition
+    }
+
+    asciiFallback := asciiFallbackFilename(filename)
+    encoded := rfc5987EncodeFilename(filename)
+
+    if encoded == asciiFallback {
+        return fmt.Sprintf(`%s; filename="%s"`, disposition, asciiFallback)
+    }
+
+    return fmt.Sprintf(`%s; filename="%s"; filename*=UTF-8''%s`, disposition, asciiFallback, encoded)
+}
+
+func asciiFallbackFilename(filename string) string {
+    builder := strings.Builder{}
+    builder.Grow(len(filename))
+
+    for _, r := range filename {
+        switch {
+        case '\\' == r, '"' == r, '\r' == r, '\n' == r:
+            continue
+        case 0x20 > r, 0x7E < r:
+            builder.WriteByte('_')
+        default:
+            builder.WriteRune(r)
+        }
+    }
+
+    result := builder.String()
+    if "" == result {
+        return "file"
+    }
+
+    return result
+}
+
+func rfc5987EncodeFilename(filename string) string {
+    builder := strings.Builder{}
+    builder.Grow(len(filename))
+
+    for _, b := range []byte(filename) {
+        if true == isRfc5987AttrChar(b) {
+            builder.WriteByte(b)
+            continue
+        }
+
+        builder.WriteString(fmt.Sprintf("%%%02X", b))
+    }
+
+    return builder.String()
+}
+
+func isRfc5987AttrChar(b byte) bool {
+    switch {
+    case 'A' <= b && 'Z' >= b:
+        return true
+    case 'a' <= b && 'z' >= b:
+        return true
+    case '0' <= b && '9' >= b:
+        return true
+    case '!' == b, '#' == b, '$' == b, '&' == b, '+' == b, '-' == b, '.' == b, '^' == b, '_' == b, '`' == b, '|' == b, '~' == b:
+        return true
+    }
+
+    return false
 }
 
 func RedirectResponse(location string, statusCode int) *Response {

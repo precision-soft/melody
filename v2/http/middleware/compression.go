@@ -8,6 +8,7 @@ import (
     "strconv"
     "strings"
 
+    "github.com/precision-soft/melody/v2/exception"
     httpcontract "github.com/precision-soft/melody/v2/http/contract"
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
 )
@@ -128,11 +129,6 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
                 }
             }
 
-            acceptEncoding := httpRequest.Header.Get("Accept-Encoding")
-            if false == strings.Contains(acceptEncoding, "gzip") {
-                return response, nil
-            }
-
             if nil == response.BodyReader() {
                 return response, nil
             }
@@ -148,6 +144,12 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
                 }
             }
 
+            addVaryAcceptEncoding(response.Headers())
+
+            if false == acceptsGzip(httpRequest.Header.Get("Accept-Encoding")) {
+                return response, nil
+            }
+
             contentLengthString := response.Headers().Get("Content-Length")
             if "" != contentLengthString {
                 value, parseErr := strconv.Atoi(contentLengthString)
@@ -157,47 +159,142 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
             }
 
             originalReader := response.BodyReader()
-            if closer, ok := originalReader.(io.Closer); true == ok {
-                defer func(closer io.Closer) { _ = closer.Close() }(closer)
+
+            peekSize := config.MinSize()
+            peekBuffer := make([]byte, peekSize)
+            peeked := 0
+            var peekErr error
+            for peeked < peekSize {
+                readCount, readErr := originalReader.Read(peekBuffer[peeked:])
+                peeked += readCount
+                if nil != readErr {
+                    peekErr = readErr
+                    break
+                }
             }
 
-            data, readErr := io.ReadAll(originalReader)
-            if nil != readErr {
-                return response, readErr
+            if nil != peekErr && io.EOF != peekErr {
+                closeBodyReaderQuiet(originalReader)
+                return response, peekErr
             }
 
-            if config.MinSize() > len(data) {
-                response.SetBodyReader(bytes.NewReader(data))
+            if peeked < peekSize {
+                closeBodyReaderQuiet(originalReader)
+                response.SetBodyReader(bytes.NewReader(peekBuffer[:peeked]))
                 return response, nil
             }
 
-            var buffer bytes.Buffer
-            gzipWriter, gzipErr := gzip.NewWriterLevel(&buffer, config.Level())
-            if nil != gzipErr {
-                response.SetBodyReader(bytes.NewReader(data))
-                return response, nil
-            }
+            source := io.MultiReader(bytes.NewReader(peekBuffer[:peeked]), originalReader)
 
-            _, writeErr := gzipWriter.Write(data)
-            if nil != writeErr {
-                _ = gzipWriter.Close()
-                response.SetBodyReader(bytes.NewReader(data))
-                return response, nil
-            }
+            pipeReader, pipeWriter := io.Pipe()
+            go streamGzipCompressInto(pipeWriter, source, originalReader, config.Level())
 
-            closeErr := gzipWriter.Close()
-            if nil != closeErr {
-                response.SetBodyReader(bytes.NewReader(data))
-                return response, nil
-            }
-
-            response.SetBodyReader(bytes.NewReader(buffer.Bytes()))
+            response.SetBodyReader(pipeReader)
             response.Headers().Set("Content-Encoding", "gzip")
             response.Headers().Del("Content-Length")
 
             return response, nil
         }
     }
+}
+
+func acceptsGzip(acceptEncoding string) bool {
+    if "" == acceptEncoding {
+        return false
+    }
+
+    gzipQuality := -1.0
+    starQuality := -1.0
+
+    for _, rawEntry := range strings.Split(acceptEncoding, ",") {
+        entry := strings.TrimSpace(rawEntry)
+        if "" == entry {
+            continue
+        }
+
+        parts := strings.Split(entry, ";")
+        codingName := strings.ToLower(strings.TrimSpace(parts[0]))
+        if "" == codingName {
+            continue
+        }
+
+        quality := 1.0
+        for _, rawParam := range parts[1:] {
+            param := strings.TrimSpace(rawParam)
+            if false == strings.HasPrefix(param, "q=") {
+                continue
+            }
+
+            parsedQuality, parseErr := strconv.ParseFloat(strings.TrimSpace(param[2:]), 64)
+            if nil == parseErr {
+                quality = parsedQuality
+            }
+        }
+
+        if "gzip" == codingName {
+            gzipQuality = quality
+        } else if "*" == codingName {
+            starQuality = quality
+        }
+    }
+
+    if 0 <= gzipQuality {
+        return 0 < gzipQuality
+    }
+
+    if 0 <= starQuality {
+        return 0 < starQuality
+    }
+
+    return false
+}
+
+func addVaryAcceptEncoding(headers nethttp.Header) {
+    for _, existing := range headers.Values("Vary") {
+        for _, token := range strings.Split(existing, ",") {
+            if "accept-encoding" == strings.ToLower(strings.TrimSpace(token)) {
+                return
+            }
+        }
+    }
+
+    headers.Add("Vary", "Accept-Encoding")
+}
+
+func closeBodyReaderQuiet(reader io.Reader) {
+    closer, ok := reader.(io.Closer)
+    if false == ok {
+        return
+    }
+
+    _ = closer.Close()
+}
+
+func streamGzipCompressInto(pipeWriter *io.PipeWriter, source io.Reader, sourceCloser io.Reader, level int) {
+    defer closeBodyReaderQuiet(sourceCloser)
+
+    gzipWriter, gzipErr := gzip.NewWriterLevel(pipeWriter, level)
+    if nil != gzipErr {
+        _ = pipeWriter.CloseWithError(
+            exception.NewError("failed to initialize gzip writer", nil, gzipErr),
+        )
+        return
+    }
+
+    _, copyErr := io.Copy(gzipWriter, source)
+    if nil != copyErr {
+        _ = gzipWriter.Close()
+        _ = pipeWriter.CloseWithError(copyErr)
+        return
+    }
+
+    closeErr := gzipWriter.Close()
+    if nil != closeErr {
+        _ = pipeWriter.CloseWithError(closeErr)
+        return
+    }
+
+    _ = pipeWriter.Close()
 }
 
 func DefaultCompressionMiddleware() httpcontract.Middleware {

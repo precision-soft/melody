@@ -2,8 +2,6 @@ package cache
 
 import (
     "container/list"
-    "context"
-    "runtime"
     "strconv"
     "strings"
     "sync"
@@ -47,8 +45,6 @@ func NewInMemoryBackend(
         )
     }
 
-    cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
-
     backend := &InMemoryBackend{
         entries:             make(map[string]*lruEntry),
         lruList:             list.New(),
@@ -57,21 +53,9 @@ func NewInMemoryBackend(
         stopCleanup:         make(chan struct{}),
         cleanupDone:         make(chan struct{}),
         clock:               clockInstance,
-        cleanupCancel:       cleanupCancel,
     }
 
-    runtime.SetFinalizer(
-        backend,
-        func(backendInstance *InMemoryBackend) {
-            if nil == backendInstance {
-                return
-            }
-
-            backendInstance.stopCleanupLoop()
-        },
-    )
-
-    go backend.cleanupLoop(cleanupCtx)
+    go backend.cleanupLoop()
 
     return backend
 }
@@ -86,7 +70,6 @@ type InMemoryBackend struct {
     cleanupDone         chan struct{}
     stopCleanupOnce     sync.Once
     clock               clockcontract.Clock
-    cleanupCancel       context.CancelFunc
 }
 
 func (instance *InMemoryBackend) Get(key string) ([]byte, bool, error) {
@@ -283,10 +266,6 @@ func (instance *InMemoryBackend) Decrement(key string, delta int64) (int64, erro
 }
 
 func (instance *InMemoryBackend) Close() error {
-    if nil != instance.cleanupCancel {
-        instance.cleanupCancel()
-    }
-
     instance.stopCleanupLoop()
 
     <-instance.cleanupDone
@@ -360,7 +339,7 @@ func (instance *InMemoryBackend) incrementWithTtl(
     return newValue, nil
 }
 
-func (instance *InMemoryBackend) cleanupLoop(ctx context.Context) {
+func (instance *InMemoryBackend) cleanupLoop() {
     defer close(instance.cleanupDone)
 
     ticker := instance.clock.NewTicker(instance.cleanupTickInterval)
@@ -371,8 +350,6 @@ func (instance *InMemoryBackend) cleanupLoop(ctx context.Context) {
         case <-ticker.Channel():
             instance.cleanupExpired()
         case <-instance.stopCleanup:
-            return
-        case <-ctx.Done():
             return
         }
     }

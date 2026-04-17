@@ -18,8 +18,10 @@ This package covers the HTTP runtime behavior inside Melody:
 
 * [`http/contract`](../../http/contract)
   Public contracts for handler, request, response, router, kernel, URL generator, route groups, and route options.
+* [`http/cors`](../../http/cors)
+  CORS policy service, preflight middleware, and `kernel.response` listener that applies CORS headers to error responses.
 * [`http/middleware`](../../http/middleware)
-  Built-in middlewares (CORS, compression, static, rate limiting) and middleware utilities.
+  Built-in middlewares (compression, static, rate limiting) and middleware utilities.
 * [`http/middleware/pipeline`](../../http/middleware/pipeline)
   Middleware pipeline builder and build reports.
 * [`http/static`](../../http/static)
@@ -36,7 +38,8 @@ This package covers the HTTP runtime behavior inside Melody:
 * Request and response primitives:
     * [`Request`](../../http/request.go) / [`NewRequest`](../../http/request.go)
     * [`Response`](../../http/response.go) / [`NewResponse`](../../http/response.go)
-    * Response helpers (`JsonResponse`, `HtmlResponse`, `RedirectFound`, …) in [`response.go`](../../http/response.go)
+    * Response helpers (`JsonResponse`, `HtmlResponse`, `RedirectFound`, `FileResponse`, `AttachmentResponse`, …) in [`response.go`](../../http/response.go)
+    * RFC 6266 Content-Disposition helper [`BuildContentDisposition`](../../http/response.go)
 
 * URL generation:
     * [`UrlGenerator`](../../http/url_generator.go) / [`NewUrlGenerator`](../../http/url_generator.go)
@@ -74,6 +77,22 @@ Melody injects the current `runtimeInstance` directly (it is **not** resolved fr
 This allows controllers to access request-scoped state via `runtimeInstance.Scope()` without registering `runtimecontract.Runtime` as a service.
 
 Implementation detail: see [`wrapControllerWithContainer`](../../http/router_utility.go).
+
+## Request body limits
+
+The HTTP kernel wraps `request.Body` with `http.MaxBytesReader` when `Http().MaxRequestBodyBytes()` is set to a positive value in the configuration. Oversized bodies short-circuit with `413 Request Entity Too Large` at the net/http layer before reaching controllers.
+
+## Form parsing
+
+[`NewRequest`](../../http/request.go) only auto-parses the request body as form data when the method is `POST`, `PUT`, or `PATCH` and the `Content-Type` media type is `application/x-www-form-urlencoded` or `multipart/form-data`. JSON, XML, and other content types are left intact so handlers can read the raw body. For explicit reparsing, use [`ParseFormBody`](../../http/request.go).
+
+## CORS
+
+The [`http/cors`](../../http/cors) subpackage provides a dedicated CORS layer:
+
+* [`Service`](../../http/cors/service.go) — policy holder built from a [`Config`](../../http/cors/service.go). Panics when `AllowCredentials` is paired with a wildcard origin.
+* [`Middleware`](../../http/cors/middleware.go) / [`DefaultMiddleware`](../../http/cors/middleware.go) / [`Restrictive`](../../http/cors/middleware.go) — short-circuits `OPTIONS` preflight and applies CORS headers on the happy path.
+* [`RegisterResponseListener`](../../http/cors/listener.go) — subscribes to `kernel.response` with priority `-100` so CORS headers reach browsers even when error handlers replace the controller response.
 
 ## HTTP method semantics
 
@@ -220,9 +239,22 @@ var _ applicationcontract.HttpModule = (*ExampleHttpModule)(nil)
 * URL generator:
     * [`NewUrlGenerator(httpcontract.RouteRegistry)`](../../http/url_generator.go)
 
+* Route parameter requirements:
+    * [`type Requirement`](../../http/constraint.go)
+    * [`NewRequirement(parameterName string, pattern string) *Requirement`](../../http/constraint.go)
+    * [`NewRequirements(requirements ...Requirement) map[string]string`](../../http/constraint.go)
+    * [`RequireAlphaLowercase`](../../http/constraint.go) / [`RequireAlpha`](../../http/constraint.go) / [`RequireNumeric`](../../http/constraint.go) / [`RequireAlphaNumeric`](../../http/constraint.go)
+    * Constants: [`ConstraintAlphaLowercase`, `ConstraintAlpha`, `ConstraintNumeric`, `ConstraintAlphaNumeric`](../../http/constraint.go)
+
 * Response helpers:
     * [`JsonResponse`](../../http/response.go)
+    * [`JsonErrorResponse`](../../http/response.go)
     * [`HtmlResponse`](../../http/response.go)
+    * [`TextResponse`](../../http/response.go)
+    * [`EmptyResponse`](../../http/response.go)
+    * [`FileResponse`](../../http/response.go)
+    * [`AttachmentResponse`](../../http/response.go)
+    * [`BuildContentDisposition`](../../http/response.go)
     * [`RedirectResponse`](../../http/response.go)
     * [`RedirectFound`](../../http/response.go)
     * [`RedirectMovedPermanently`](../../http/response.go)
@@ -236,21 +268,47 @@ var _ applicationcontract.HttpModule = (*ExampleHttpModule)(nil)
     * [`UrlGeneratorMustFromContainer(containercontract.Container)`](../../http/service_resolver.go)
     * [`RouterMustFromContainer(containercontract.Container)`](../../http/service_resolver.go)
 
-### Middleware (`http/middleware`)
+### CORS (`http/cors`)
 
-* CORS:
-    * [`type CorsConfig`](../../http/middleware/cors.go)
-    * [`CorsMiddleware`](../../http/middleware/cors.go)
-    * [`DefaultCorsMiddleware`](../../http/middleware/cors.go)
+* Policy:
+    * [`type Service`](../../http/cors/service.go)
+    * [`type Config`](../../http/cors/service.go)
+    * [`NewService`](../../http/cors/service.go)
+    * [`DefaultService`](../../http/cors/service.go)
+    * [`RestrictiveService`](../../http/cors/service.go)
+
+* Middleware:
+    * [`Middleware`](../../http/cors/middleware.go)
+    * [`DefaultMiddleware`](../../http/cors/middleware.go)
+    * [`Restrictive`](../../http/cors/middleware.go)
+
+* Listener:
+    * [`RegisterResponseListener`](../../http/cors/listener.go)
+
+### Middleware (`http/middleware`)
 
 * Compression:
     * [`type CompressionConfig`](../../http/middleware/compression.go)
+    * [`NewCompressionConfig`](../../http/middleware/compression.go)
+    * [`DefaultCompressionConfig`](../../http/middleware/compression.go)
     * [`CompressionMiddleware`](../../http/middleware/compression.go)
     * [`DefaultCompressionMiddleware`](../../http/middleware/compression.go)
+    * Honors `Accept-Encoding` q-values (RFC 7231), emits `Vary: Accept-Encoding`, and streams the gzip output through [`io.Pipe`](https://pkg.go.dev/io#Pipe) so response bodies never fully land in memory.
 
 * Rate limiting:
     * [`RateLimitMiddleware`](../../http/middleware/rate_limit.go)
-    * `TokenBucketLimiter` / `SlidingWindowLimiter` in [`rate_limit.go`](../../http/middleware/rate_limit.go)
+    * [`type RateLimitConfig`](../../http/middleware/rate_limit.go)
+    * [`NewRateLimitConfig`](../../http/middleware/rate_limit.go)
+    * [`type KeyExtractor`](../../http/middleware/rate_limit.go) (`func(httpcontract.Request) string`)
+    * [`type OnLimitExceeded`](../../http/middleware/rate_limit.go) (`func(httpcontract.Request) (httpcontract.Response, error)`)
+    * [`type ClientIpResolver`](../../http/middleware/rate_limit.go) (`func(httpcontract.Request) string`) — optional for trusted-proxy deployments
+    * [`DefaultClientIp`](../../http/middleware/rate_limit.go)
+    * [`SimpleRateLimit`](../../http/middleware/rate_limit.go) / [`IpRateLimit`](../../http/middleware/rate_limit.go) / [`UserRateLimit`](../../http/middleware/rate_limit.go)
+    * Limiters:
+        * [`type TokenBucketLimiter`](../../http/middleware/rate_limit.go)
+        * [`NewTokenBucketLimiter`](../../http/middleware/rate_limit.go) / [`NewTokenBucketLimiterWithClock`](../../http/middleware/rate_limit.go)
+        * [`type SlidingWindowLimiter`](../../http/middleware/rate_limit.go)
+        * [`NewSlidingWindowLimiter`](../../http/middleware/rate_limit.go) / [`NewSlidingWindowLimiterWithClock`](../../http/middleware/rate_limit.go)
 
 * Static:
     * [`StaticMiddleware`](../../http/middleware/static.go)

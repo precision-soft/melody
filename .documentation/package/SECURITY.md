@@ -245,6 +245,7 @@ var _ applicationcontract.HttpModule = (*adminSecurityModule)(nil)
 
 - `AccessControl` uses a deterministic match priority: exact match first, then longest prefix match (including segment-prefix rules), then regex rules in the order they were registered, then the empty-prefix fallback. See [`(*AccessControl).Match`](../../security/access_control.go).
 - `SecurityContextSetOnRuntime` stores the context in the runtime scope under `security/contract.ServiceSecurityContext`.
+- [`ApiKeyHeaderAuthenticator`](../../security/api_key_authenticator.go) compares the supplied header against the expected value with [`crypto/subtle.ConstantTimeCompare`](https://pkg.go.dev/crypto/subtle#ConstantTimeCompare) so timing differences do not leak the expected key.
 
 ## Userland API
 
@@ -278,10 +279,10 @@ var _ applicationcontract.HttpModule = (*adminSecurityModule)(nil)
 - [`AccessControlRule`](../../security/access_control.go)
 - [`RoleHierarchy`](../../security/role_hierarchy.go)
 - Tokens: [`AnonymousToken`](../../security/anonymous_token.go), [`AuthenticatedToken`](../../security/authenticated_token.go), [`Token`](../../security/token.go)
-- Auth: [`ApiKeyHeaderRule`](../../security/rule.go), [`ApiKeyHeaderAuthenticator`](../../security/api_key_authenticator.go), [`AuthenticatorManager`](../../security/authenticator_manager.go), [`AuthenticatorTokenSource`](../../security/token_source.go)
+- Auth: [`ApiKeyHeaderRule`](../../security/rule.go), [`ApiKeyHeaderAuthenticator`](../../security/api_key_authenticator.go), [`AuthenticatorManager`](../../security/authenticator_manager.go), [`AuthenticatorTokenSource`](../../security/token_source.go), [`ResolverTokenSource`](../../security/token_source.go)
 - Matchers: [`PathPrefixMatcher`](../../security/matcher.go)
-- Authorization: [`AccessDecisionManager`, `RoleVoter`](../../security/voter.go)
-- Configuration: [`CompiledConfiguration`, `CompiledFirewall`, `CompiledSource`](../../security/compiled_configuration.go)
+- Authorization: [`AccessDecisionManager`](../../security/access_decision_manager.go), [`RoleVoter`](../../security/voter.go), [`RoleHierarchyVoter`](../../security/role_hierarchy_voter.go)
+- Configuration: [`CompiledConfiguration`, `CompiledFirewall`, `CompiledSource`](../../security/compiled_configuration.go), [`FirewallRegistry`](../../security/firewall_registry.go), [`FirewallManager`](../../security/firewall_manager.go)
 - Context: [`SecurityContext`](../../security/security_context.go)
 
 ### Constructors
@@ -299,12 +300,18 @@ var _ applicationcontract.HttpModule = (*adminSecurityModule)(nil)
 - [`NewApiKeyHeaderRule(matcher securitycontract.Matcher, headerName string, expectedValue string)`](../../security/rule.go)
 - [`NewApiKeyHeaderAuthenticator(headerName string, expectedValue string, userId string, roles []string)`](../../security/api_key_authenticator.go)
 - [`NewAuthenticatorManager(authenticators ...securitycontract.Authenticator)`](../../security/authenticator_manager.go)
-- [`NewAuthenticatorTokenSource(authenticatorManager *AuthenticatorManager)`](../../security/token_source.go)
+- [`NewAuthenticatorTokenSource(manager *AuthenticatorManager)`](../../security/token_source.go)
+- [`NewResolverTokenSource(resolver securitycontract.TokenResolver)`](../../security/token_source.go)
 - [`NewAccessDecisionManager(strategy securitycontract.DecisionStrategy, voters ...securitycontract.Voter)`](../../security/access_decision_manager.go)
+- [`NewAccessDecisionManagerWithVoters(strategy securitycontract.DecisionStrategy, voters []securitycontract.Voter)`](../../security/access_decision_manager.go)
 - [`NewRoleVoter()`](../../security/voter.go)
+- [`NewRoleHierarchyVoter(roleHierarchy *RoleHierarchy, delegate *RoleVoter)`](../../security/role_hierarchy_voter.go)
 - [`NewSecurityContext(firewall *CompiledFirewall, token securitycontract.Token)`](../../security/security_context.go)
+- [`NewFirewall(rules ...securitycontract.Rule)`](../../security/firewall.go)
+- [`NewFirewallManager(compiledConfiguration *CompiledConfiguration)`](../../security/firewall_manager.go)
+- [`NewFirewallRegistry(compiledConfiguration *CompiledConfiguration)`](../../security/firewall_registry.go)
 - [`NewCompiledFirewall(...)`](../../security/compiled_configuration.go)
-- [`NewCompiledConfiguration(...)`](../../security/compiled_configuration.go)
+- [`NewCompiledConfiguration(firewalls []*CompiledFirewall, globalAccessControl *AccessControl)`](../../security/compiled_configuration.go)
 
 ### Kernel listeners
 
@@ -321,6 +328,23 @@ var _ applicationcontract.HttpModule = (*adminSecurityModule)(nil)
 
 ### Configuration (`security/config`)
 
-- Builder: [`NewBuilder()` / `(*Builder).SetGlobal(...)` / `(*Builder).AddFirewall(...)` / `(*Builder).BuildAndCompile()`](../../security/config/security_module.go)
-- Access control builder: [`NewAccessControlBuilder()` / `(*AccessControlBuilder).Require(...)` / `(*AccessControlBuilder).AllowAnonymous(...)` / `(*AccessControlBuilder).Build()`](../../security/config/access_control_builder.go)
-- Compile: [`Compile(configuration)`](../../security/config/compile.go)
+- Builder:
+    - [`NewBuilder()`](../../security/config/security_module.go)
+    - [`(*Builder).SetGlobal(accessControl, roleHierarchy, accessDecisionManager, entryPoint, accessDeniedHandler)`](../../security/config/security_module.go)
+    - [`(*Builder).AddFirewall(name, matcher, rules, tokenSource, loginPath, logoutPath, loginHandler, logoutHandler, override)`](../../security/config/security_module.go)
+    - [`(*Builder).AddStatefulFirewall(name, matcher, rules, tokenSource, loginPath, logoutPath, loginHandler, logoutHandler, override)`](../../security/config/security_module.go)
+    - [`(*Builder).AddStatelessFirewall(name, matcher, rules, tokenSource, override)`](../../security/config/security_module.go)
+    - [`(*Builder).BuildAndCompile() *security.CompiledConfiguration`](../../security/config/security_module.go)
+- Firewall overrides:
+    - [`type FirewallOverrideConfiguration`](../../security/config/security_module.go)
+    - [`NewFirewallOverrideConfiguration()`](../../security/config/security_module.go)
+    - [`(FirewallOverrideConfiguration).WithStateless(stateless bool) FirewallOverrideConfiguration`](../../security/config/security_module.go)
+- Access control builder:
+    - [`NewAccessControlBuilder()`](../../security/config/access_control_builder.go)
+    - [`(*AccessControlBuilder).Require(path string, attributes ...string)`](../../security/config/access_control_builder.go)
+    - [`(*AccessControlBuilder).AllowAnonymous(path string)`](../../security/config/access_control_builder.go)
+    - [`(*AccessControlBuilder).Build() *security.AccessControl`](../../security/config/access_control_builder.go)
+- Access control merge strategies:
+    - [`type AccessControlMergeStrategy`](../../security/config/security_module.go)
+- Compile:
+    - [`Compile(configuration Configuration) *security.CompiledConfiguration`](../../security/config/compile.go)

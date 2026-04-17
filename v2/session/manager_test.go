@@ -44,16 +44,37 @@ func TestManager_Session_ReturnsNilWhenIdEmpty(t *testing.T) {
 func TestManager_Session_ReturnsNilWhenNotFound(t *testing.T) {
     manager := NewManager(NewInMemoryStorage(), time.Minute)
 
-    value := manager.Session("missing")
+    value := manager.Session("0123456789abcdef0123456789abcdef")
     if nil != value {
         t.Fatalf("expected nil")
+    }
+}
+
+func TestManager_Session_ReturnsNilWhenIdIsMalformed(t *testing.T) {
+    manager := NewManager(&nilMapStorage{}, time.Minute)
+
+    if nil != manager.Session("abc") {
+        t.Fatalf("expected nil for too-short id")
+    }
+
+    if nil != manager.Session("0123456789ABCDEF0123456789ABCDEF") {
+        t.Fatalf("expected nil for uppercase hex id")
+    }
+
+    if nil != manager.Session("0123456789abcdef0123456789abcdeg") {
+        t.Fatalf("expected nil for non-hex id")
+    }
+
+    tooLong := "0123456789abcdef0123456789abcdef0"
+    if nil != manager.Session(tooLong) {
+        t.Fatalf("expected nil for too-long id")
     }
 }
 
 func TestManager_Session_NormalizesNilValuesMap(t *testing.T) {
     manager := NewManager(&nilMapStorage{}, time.Minute)
 
-    sessionInstance := manager.Session("abc")
+    sessionInstance := manager.Session("0123456789abcdef0123456789abcdef")
     if nil == sessionInstance {
         t.Fatalf("expected session")
     }
@@ -124,6 +145,34 @@ func TestManager_DeleteSession_ReturnsErrorWhenIdEmpty(t *testing.T) {
     err := manager.DeleteSession("")
     if nil == err {
         t.Fatalf("expected error")
+    }
+}
+
+func TestManager_DeleteSession_ReturnsErrorWhenIdIsMalformed(t *testing.T) {
+    manager := NewManager(NewInMemoryStorage(), time.Minute)
+
+    err := manager.DeleteSession("not-a-valid-hex-id")
+    if nil == err {
+        t.Fatalf("expected error for malformed id")
+    }
+}
+
+func TestIsValidSessionId(t *testing.T) {
+    cases := map[string]bool{
+        "":                                  false,
+        "abc":                               false,
+        "0123456789abcdef0123456789abcdef":  true,
+        "0123456789ABCDEF0123456789ABCDEF":  false,
+        "0123456789abcdef0123456789abcdeg":  false,
+        "0123456789abcdef0123456789abcde ":  false,
+        "0123456789abcdef0123456789abcde":   false,
+        "0123456789abcdef0123456789abcdef0": false,
+    }
+
+    for value, expected := range cases {
+        if expected != isValidSessionId(value) {
+            t.Fatalf("isValidSessionId(%q) = %v, want %v", value, !expected, expected)
+        }
     }
 }
 

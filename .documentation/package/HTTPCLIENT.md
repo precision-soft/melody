@@ -103,8 +103,16 @@ func callHealthEndpoint() (string, error) {
 - [`type HttpClient`](../../httpclient/http_client.go)
     - [`NewDefaultHttpClient()`](../../httpclient/http_client.go)
     - [`NewHttpClient(*HttpClientConfig)`](../../httpclient/http_client.go)
-    - `Get`, `Post`, `Put`, `Patch`, `Delete`, `Request`, `RequestStream`
-    - `SetBaseUrl`, `SetHeader`, `SetTimeout`
+    - [`(*HttpClient).Get(urlString string, options ...httpclientcontract.RequestOption) (httpclientcontract.Response, error)`](../../httpclient/http_client.go)
+    - [`(*HttpClient).Post(urlString string, body any, options ...httpclientcontract.RequestOption) (httpclientcontract.Response, error)`](../../httpclient/http_client.go)
+    - [`(*HttpClient).Put(urlString string, body any, options ...httpclientcontract.RequestOption) (httpclientcontract.Response, error)`](../../httpclient/http_client.go)
+    - [`(*HttpClient).Patch(urlString string, body any, options ...httpclientcontract.RequestOption) (httpclientcontract.Response, error)`](../../httpclient/http_client.go)
+    - [`(*HttpClient).Delete(urlString string, options ...httpclientcontract.RequestOption) (httpclientcontract.Response, error)`](../../httpclient/http_client.go)
+    - [`(*HttpClient).Request(method string, urlString string, options ...httpclientcontract.RequestOption) (httpclientcontract.Response, error)`](../../httpclient/http_client.go)
+    - [`(*HttpClient).RequestStream(method string, urlString string, options ...httpclientcontract.RequestOption) (httpclientcontract.StreamResponse, error)`](../../httpclient/http_client.go)
+    - [`(*HttpClient).SetBaseUrl(baseUrl string)`](../../httpclient/http_client.go)
+    - [`(*HttpClient).SetHeader(key string, value string)`](../../httpclient/http_client.go)
+    - [`(*HttpClient).SetTimeout(timeout time.Duration)`](../../httpclient/http_client.go)
 - [`type HttpClientConfig`](../../httpclient/http_client_config.go)
     - [`NewHttpClientConfig(baseUrl string, timeout time.Duration, headers map[string]string) *HttpClientConfig`](../../httpclient/http_client_config.go)
 - Request options:

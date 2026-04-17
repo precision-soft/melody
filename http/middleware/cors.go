@@ -1,18 +1,11 @@
 package middleware
 
 import (
-    nethttp "net/http"
-    "net/url"
-    "strconv"
-    "strings"
-
-    "github.com/precision-soft/melody/exception"
-    runtimecontract "github.com/precision-soft/melody/runtime/contract"
-
-    "github.com/precision-soft/melody/http"
     httpcontract "github.com/precision-soft/melody/http/contract"
+    "github.com/precision-soft/melody/http/cors"
 )
 
+// Deprecated: use github.com/precision-soft/melody/http/cors.Service instead.
 type CorsConfig struct {
     allowOrigins     []string
     allowMethods     []string
@@ -23,6 +16,7 @@ type CorsConfig struct {
     allowOriginFunc  func(origin string) bool
 }
 
+// Deprecated: use github.com/precision-soft/melody/http/cors.NewService instead.
 func NewCorsConfig(
     allowOrigins []string,
     allowMethods []string,
@@ -32,31 +26,11 @@ func NewCorsConfig(
     maxAge int,
     allowOriginFunc func(origin string) bool,
 ) *CorsConfig {
-    copiedAllowOrigins := []string{}
-    if nil != allowOrigins {
-        copiedAllowOrigins = append([]string{}, allowOrigins...)
-    }
-
-    copiedAllowMethods := []string{}
-    if nil != allowMethods {
-        copiedAllowMethods = append([]string{}, allowMethods...)
-    }
-
-    copiedAllowHeaders := []string{}
-    if nil != allowHeaders {
-        copiedAllowHeaders = append([]string{}, allowHeaders...)
-    }
-
-    copiedExposeHeaders := []string{}
-    if nil != exposeHeaders {
-        copiedExposeHeaders = append([]string{}, exposeHeaders...)
-    }
-
     return &CorsConfig{
-        allowOrigins:     copiedAllowOrigins,
-        allowMethods:     copiedAllowMethods,
-        allowHeaders:     copiedAllowHeaders,
-        exposeHeaders:    copiedExposeHeaders,
+        allowOrigins:     copyStringsForCors(allowOrigins),
+        allowMethods:     copyStringsForCors(allowMethods),
+        allowHeaders:     copyStringsForCors(allowHeaders),
+        exposeHeaders:    copyStringsForCors(exposeHeaders),
         allowCredentials: allowCredentials,
         maxAge:           maxAge,
         allowOriginFunc:  allowOriginFunc,
@@ -64,72 +38,46 @@ func NewCorsConfig(
 }
 
 func (instance *CorsConfig) AllowOrigins() []string {
-    if nil == instance.allowOrigins {
-        return nil
-    }
-
-    return append([]string{}, instance.allowOrigins...)
+    return copyStringsForCors(instance.allowOrigins)
 }
 
 func (instance *CorsConfig) SetAllowOrigins(allowOrigins []string) {
-    if nil == allowOrigins {
-        instance.allowOrigins = nil
-        return
-    }
-
-    instance.allowOrigins = append([]string{}, allowOrigins...)
+    instance.allowOrigins = copyStringsForCors(allowOrigins)
 }
 
 func (instance *CorsConfig) AllowMethods() []string {
-    if nil == instance.allowMethods {
-        return nil
-    }
-
-    return append([]string{}, instance.allowMethods...)
+    return copyStringsForCors(instance.allowMethods)
 }
 
 func (instance *CorsConfig) SetAllowMethods(allowMethods []string) {
-    if nil == allowMethods {
-        instance.allowMethods = nil
-        return
-    }
-
-    instance.allowMethods = append([]string{}, allowMethods...)
+    instance.allowMethods = copyStringsForCors(allowMethods)
 }
 
 func (instance *CorsConfig) AllowHeaders() []string {
-    if nil == instance.allowHeaders {
-        return nil
-    }
-
-    return append([]string{}, instance.allowHeaders...)
+    return copyStringsForCors(instance.allowHeaders)
 }
 
 func (instance *CorsConfig) SetAllowHeaders(allowHeaders []string) {
-    if nil == allowHeaders {
-        instance.allowHeaders = nil
-        return
-    }
-
-    instance.allowHeaders = append([]string{}, allowHeaders...)
+    instance.allowHeaders = copyStringsForCors(allowHeaders)
 }
 
 func (instance *CorsConfig) ExposeHeaders() []string {
-    if nil == instance.exposeHeaders {
-        return nil
-    }
-
-    return append([]string{}, instance.exposeHeaders...)
+    return copyStringsForCors(instance.exposeHeaders)
 }
 
-func (instance *CorsConfig) AllowCredentials() bool { return instance.allowCredentials }
+func (instance *CorsConfig) AllowCredentials() bool {
+    return instance.allowCredentials
+}
 
-func (instance *CorsConfig) MaxAge() int { return instance.maxAge }
+func (instance *CorsConfig) MaxAge() int {
+    return instance.maxAge
+}
 
 func (instance *CorsConfig) AllowOriginFunc() func(origin string) bool {
     return instance.allowOriginFunc
 }
 
+// Deprecated: use github.com/precision-soft/melody/http/cors.DefaultService instead.
 func DefaultCorsConfig() *CorsConfig {
     return NewCorsConfig(
         []string{"*"},
@@ -142,6 +90,7 @@ func DefaultCorsConfig() *CorsConfig {
     )
 }
 
+// Deprecated: use github.com/precision-soft/melody/http/cors.RestrictiveService instead.
 func RestrictiveCorsConfig(allowedOrigins []string) *CorsConfig {
     return NewCorsConfig(
         allowedOrigins,
@@ -154,187 +103,35 @@ func RestrictiveCorsConfig(allowedOrigins []string) *CorsConfig {
     )
 }
 
+// Deprecated: use github.com/precision-soft/melody/http/cors.Middleware instead.
 func CorsMiddleware(config *CorsConfig) httpcontract.Middleware {
-    if true == config.AllowCredentials() {
-        for _, origin := range config.AllowOrigins() {
-            if "*" == strings.TrimSpace(origin) {
-                exception.Panic(
-                    exception.NewError(
-                        "cors misconfiguration: allowCredentials cannot be true when allowOrigins contains wildcard '*'",
-                        nil,
-                        nil,
-                    ),
-                )
-            }
-        }
-    }
+    service := cors.NewService(cors.Config{
+        AllowOrigins:     config.allowOrigins,
+        AllowMethods:     config.allowMethods,
+        AllowHeaders:     config.allowHeaders,
+        ExposeHeaders:    config.exposeHeaders,
+        AllowCredentials: config.allowCredentials,
+        MaxAge:           config.maxAge,
+        AllowOriginFunc:  config.allowOriginFunc,
+    })
 
-    if 0 == len(config.AllowOrigins()) {
-        config.SetAllowOrigins([]string{"*"})
-    }
-
-    if 0 == len(config.AllowMethods()) {
-        config.SetAllowMethods([]string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"})
-    }
-
-    if 0 == len(config.AllowHeaders()) {
-        config.SetAllowHeaders([]string{"Origin", "Content-Type", "Accept"})
-    }
-
-    allowMethodsString := strings.Join(config.AllowMethods(), ", ")
-    allowHeadersString := strings.Join(config.AllowHeaders(), ", ")
-    exposeHeadersString := strings.Join(config.ExposeHeaders(), ", ")
-    maxAgeString := strconv.Itoa(config.MaxAge())
-
-    return func(next httpcontract.Handler) httpcontract.Handler {
-        return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            origin := request.HttpRequest().Header.Get("Origin")
-
-            if "" == origin {
-                return next(runtimeInstance, writer, request)
-            }
-
-            allowOrigin := isOriginAllowed(origin, config)
-            if false == allowOrigin {
-                return next(runtimeInstance, writer, request)
-            }
-
-            if nethttp.MethodOptions == request.HttpRequest().Method {
-                response := http.EmptyResponse(nethttp.StatusNoContent)
-
-                response.Headers().Set("Access-Control-Allow-Origin", origin)
-                response.Headers().Set("Access-Control-Allow-Methods", allowMethodsString)
-                response.Headers().Set("Access-Control-Allow-Headers", allowHeadersString)
-
-                if 0 < config.MaxAge() {
-                    response.Headers().Set("Access-Control-Max-Age", maxAgeString)
-                }
-
-                if config.AllowCredentials() {
-                    response.Headers().Set("Access-Control-Allow-Credentials", "true")
-                }
-
-                if "" != exposeHeadersString {
-                    response.Headers().Set("Access-Control-Expose-Headers", exposeHeadersString)
-                }
-
-                response.Headers().Set("Vary", "Origin")
-
-                return response, nil
-            }
-
-            response, nextMiddlewareErr := next(runtimeInstance, writer, request)
-            if nil != nextMiddlewareErr {
-                return response, nextMiddlewareErr
-            }
-
-            if nil == response {
-                response = http.EmptyResponse(nethttp.StatusOK)
-            }
-
-            response.Headers().Set("Access-Control-Allow-Origin", origin)
-
-            if config.AllowCredentials() {
-                response.Headers().Set("Access-Control-Allow-Credentials", "true")
-            }
-
-            if "" != exposeHeadersString {
-                response.Headers().Set("Access-Control-Expose-Headers", exposeHeadersString)
-            }
-
-            response.Headers().Set("Vary", "Origin")
-
-            return response, nil
-        }
-    }
+    return cors.Middleware(service)
 }
 
+// Deprecated: use github.com/precision-soft/melody/http/cors.DefaultMiddleware instead.
 func DefaultCorsMiddleware() httpcontract.Middleware {
-    return CorsMiddleware(DefaultCorsConfig())
+    return cors.DefaultMiddleware()
 }
 
+// Deprecated: use github.com/precision-soft/melody/http/cors.Restrictive instead.
 func RestrictiveCors(allowedOrigins ...string) httpcontract.Middleware {
-    return CorsMiddleware(RestrictiveCorsConfig(allowedOrigins))
+    return cors.Restrictive(allowedOrigins...)
 }
 
-func isOriginAllowed(origin string, config *CorsConfig) bool {
-    if nil != config.AllowOriginFunc() {
-        return config.AllowOriginFunc()(origin)
+func copyStringsForCors(values []string) []string {
+    if nil == values {
+        return nil
     }
 
-    normalizedOrigin := normalizeOrigin(origin)
-    originHost := extractOriginHost(normalizedOrigin)
-
-    for _, allowedOrigin := range config.AllowOrigins() {
-        normalizedAllowedOrigin := strings.TrimSpace(allowedOrigin)
-        if "" == normalizedAllowedOrigin {
-            continue
-        }
-
-        if "*" == normalizedAllowedOrigin {
-            return true
-        }
-
-        normalizedAllowedOrigin = normalizeOrigin(normalizedAllowedOrigin)
-
-        if true == strings.EqualFold(normalizedOrigin, normalizedAllowedOrigin) {
-            return true
-        }
-
-        if true == strings.HasPrefix(normalizedAllowedOrigin, "*.") {
-            if "" == originHost {
-                continue
-            }
-
-            allowedDomain := strings.ToLower(strings.TrimPrefix(normalizedAllowedOrigin, "*."))
-
-            if "" == allowedDomain {
-                continue
-            }
-
-            suffix := "." + allowedDomain
-            if true == strings.HasSuffix(originHost, suffix) {
-                return true
-            }
-
-            continue
-        }
-
-        if "" != originHost {
-            if strings.ToLower(normalizedAllowedOrigin) == originHost {
-                return true
-            }
-        }
-    }
-
-    return false
-}
-
-func normalizeOrigin(origin string) string {
-    value := strings.TrimSpace(origin)
-    if "" == value {
-        return ""
-    }
-
-    value = strings.TrimSuffix(value, "/")
-
-    return value
-}
-
-func extractOriginHost(origin string) string {
-    if "" == origin {
-        return ""
-    }
-
-    parsedUrl, parseErr := url.Parse(origin)
-    if nil != parseErr {
-        return ""
-    }
-
-    host := parsedUrl.Hostname()
-    if "" == host {
-        return ""
-    }
-
-    return strings.ToLower(host)
+    return append([]string{}, values...)
 }

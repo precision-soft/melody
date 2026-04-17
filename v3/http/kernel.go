@@ -96,9 +96,9 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
         requestLogger, requestId, requestIdLoggerErr := instance.requestIdLogger(serviceContainer, scope)
         if nil != requestIdLoggerErr {
-            writer.WriteHeader(nethttp.StatusInternalServerError)
-            _, _ = writer.Write([]byte("internal server error"))
-            return
+            exception.Panic(
+                exception.NewError("failed to create request logger", nil, requestIdLoggerErr),
+            )
         }
 
         defer func() {
@@ -127,6 +127,11 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         configuration := config.ConfigMustFromContainer(serviceContainer)
         defaultLocale := configuration.Http().DefaultLocale()
         debugMode := config.EnvDevelopment == configuration.Kernel().Env()
+
+        maxBodyBytes := configuration.Http().MaxRequestBodyBytes()
+        if 0 < maxBodyBytes && nil != request.Body {
+            request.Body = nethttp.MaxBytesReader(writer, request.Body, int64(maxBodyBytes))
+        }
 
         sessionManager := session.SessionMustFromContainer(serviceContainer)
         cookie, _ := request.Cookie(session.SessionCookieName)
@@ -483,6 +488,10 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                             kernelExceptionEvent.SetResponse(JsonErrorResponse(statusCode, message))
                         }
 
+                        if nil != response && response != kernelExceptionEvent.Response() {
+                            closeDiscardedResponseBody(response, requestLogger)
+                        }
+
                         return kernelExceptionEvent.Response(), nil
                     }
 
@@ -569,6 +578,10 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 } else {
                     kernelExceptionEvent.SetResponse(JsonErrorResponse(statusCode, message))
                 }
+            }
+
+            if nil != response && response != kernelExceptionEvent.Response() {
+                closeDiscardedResponseBody(response, requestLogger)
             }
 
             response = kernelExceptionEvent.Response()

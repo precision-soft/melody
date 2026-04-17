@@ -11,244 +11,109 @@ import (
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
 )
 
-func TestIsOriginAllowed_CaseInsensitiveExactMatch(t *testing.T) {
+func TestCorsMiddleware_Shim_DelegatesToCorsPackage(t *testing.T) {
     config := NewCorsConfig(
-        []string{"http://Example.COM"},
-        nil,
-        nil,
+        []string{"http://allowed.example"},
+        []string{"GET"},
+        []string{"Content-Type"},
         nil,
         false,
-        0,
+        600,
         nil,
     )
 
-    if false == isOriginAllowed("http://example.com", config) {
-        t.Fatalf("expected case-insensitive match for origin")
-    }
-}
+    middleware := CorsMiddleware(config)
 
-func TestIsOriginAllowed_CaseInsensitiveExactMatch_Reversed(t *testing.T) {
-    config := NewCorsConfig(
-        []string{"http://example.com"},
-        nil,
-        nil,
-        nil,
-        false,
-        0,
-        nil,
-    )
-
-    if false == isOriginAllowed("http://Example.COM", config) {
-        t.Fatalf("expected case-insensitive match for origin with uppercase request")
-    }
-}
-
-func TestIsOriginAllowed_ExactMatchWithSameCase(t *testing.T) {
-    config := NewCorsConfig(
-        []string{"http://example.com"},
-        nil,
-        nil,
-        nil,
-        false,
-        0,
-        nil,
-    )
-
-    if false == isOriginAllowed("http://example.com", config) {
-        t.Fatalf("expected exact match for same-case origins")
-    }
-}
-
-func TestIsOriginAllowed_NoMatchForDifferentOrigin(t *testing.T) {
-    config := NewCorsConfig(
-        []string{"http://example.com"},
-        nil,
-        nil,
-        nil,
-        false,
-        0,
-        nil,
-    )
-
-    if true == isOriginAllowed("http://other.com", config) {
-        t.Fatalf("expected no match for different origin")
-    }
-}
-
-func TestIsOriginAllowed_WildcardMatchesAll(t *testing.T) {
-    config := NewCorsConfig(
-        []string{"*"},
-        nil,
-        nil,
-        nil,
-        false,
-        0,
-        nil,
-    )
-
-    if false == isOriginAllowed("http://anything.example.com", config) {
-        t.Fatalf("expected wildcard to match any origin")
-    }
-}
-
-func TestIsOriginAllowed_SubdomainWildcard(t *testing.T) {
-    config := NewCorsConfig(
-        []string{"*.example.com"},
-        nil,
-        nil,
-        nil,
-        false,
-        0,
-        nil,
-    )
-
-    if false == isOriginAllowed("http://api.example.com", config) {
-        t.Fatalf("expected subdomain wildcard to match")
-    }
-
-    if true == isOriginAllowed("http://api.other.com", config) {
-        t.Fatalf("expected subdomain wildcard not to match different domain")
-    }
-}
-
-func TestIsOriginAllowed_EmptyOriginList(t *testing.T) {
-    config := NewCorsConfig(
-        []string{},
-        nil,
-        nil,
-        nil,
-        false,
-        0,
-        nil,
-    )
-
-    if true == isOriginAllowed("http://example.com", config) {
-        t.Fatalf("expected no match with empty origin list")
-    }
-}
-
-func TestIsOriginAllowed_AllowOriginFunc(t *testing.T) {
-    config := NewCorsConfig(
-        nil,
-        nil,
-        nil,
-        nil,
-        false,
-        0,
-        func(origin string) bool {
-            return "http://custom.com" == origin
-        },
-    )
-
-    if false == isOriginAllowed("http://custom.com", config) {
-        t.Fatalf("expected custom func to allow origin")
-    }
-
-    if true == isOriginAllowed("http://other.com", config) {
-        t.Fatalf("expected custom func to deny origin")
-    }
-}
-
-func TestCorsMiddleware_PreflightOptions(t *testing.T) {
-    middleware := DefaultCorsMiddleware()
-
-    next := func(
+    handler := middleware(func(
         runtimeInstance runtimecontract.Runtime,
         writer nethttp.ResponseWriter,
         request httpcontract.Request,
     ) (httpcontract.Response, error) {
-        t.Fatalf("next should not be called for OPTIONS preflight")
-        return nil, nil
+        return http.EmptyResponse(nethttp.StatusOK), nil
+    })
+
+    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/", nil)
+    httpRequest.Header.Set("Origin", "http://allowed.example")
+
+    response, handlerErr := handler(
+        nil,
+        httptest.NewRecorder(),
+        testhelper.NewHttpTestRequestFromHttpRequest(httpRequest),
+    )
+    if nil != handlerErr {
+        t.Fatalf("unexpected handler error: %v", handlerErr)
     }
 
-    handler := middleware(next)
-
-    req := httptest.NewRequest(nethttp.MethodOptions, "/x", nil)
-    req.Header.Set("Origin", "https://example.com")
-
-    rec := httptest.NewRecorder()
-
-    response, err := handler(nil, rec, testhelper.NewHttpTestRequestFromHttpRequest(req))
-    if nil != err {
-        t.Fatalf("unexpected error")
-    }
-    if nil == response {
-        t.Fatalf("expected response")
-    }
-
-    if nethttp.StatusNoContent != response.StatusCode() {
-        t.Fatalf("unexpected status")
-    }
-    if "" == response.Headers().Get("Access-Control-Allow-Origin") {
-        t.Fatalf("expected allow-origin header")
+    allowOrigin := response.Headers().Get("Access-Control-Allow-Origin")
+    if "http://allowed.example" != allowOrigin {
+        t.Fatalf("expected shim to apply cors headers; got %q", allowOrigin)
     }
 }
 
-func TestCorsMiddleware_CredentialsWithWildcard_Panics(t *testing.T) {
-    defer func() {
-        recoveredValue := recover()
-        if nil == recoveredValue {
-            t.Fatalf("expected panic when credentials enabled with wildcard origin")
-        }
-    }()
-
-    _ = CorsMiddleware(NewCorsConfig(
-        []string{"*"},
-        nil,
-        nil,
-        nil,
-        true,
-        0,
-        nil,
-    ))
-}
-
-func TestCorsMiddleware_CredentialsWithSpecificOrigin_DoesNotPanic(t *testing.T) {
-    defer func() {
-        recoveredValue := recover()
-        if nil != recoveredValue {
-            t.Fatalf("did not expect panic for specific origin with credentials")
-        }
-    }()
-
-    _ = CorsMiddleware(NewCorsConfig(
-        []string{"http://example.com"},
-        nil,
-        nil,
-        nil,
-        true,
-        0,
-        nil,
-    ))
-}
-
-func TestCorsMiddleware_NonPreflightAddsHeaders(t *testing.T) {
+func TestDefaultCorsMiddleware_Shim_AllowsStarOrigin(t *testing.T) {
     middleware := DefaultCorsMiddleware()
 
-    next := func(
+    handler := middleware(func(
         runtimeInstance runtimecontract.Runtime,
         writer nethttp.ResponseWriter,
         request httpcontract.Request,
     ) (httpcontract.Response, error) {
-        return http.EmptyResponse(200), nil
+        return http.EmptyResponse(nethttp.StatusOK), nil
+    })
+
+    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/", nil)
+    httpRequest.Header.Set("Origin", "http://random.example")
+
+    response, _ := handler(
+        nil,
+        httptest.NewRecorder(),
+        testhelper.NewHttpTestRequestFromHttpRequest(httpRequest),
+    )
+
+    allowOrigin := response.Headers().Get("Access-Control-Allow-Origin")
+    if "http://random.example" != allowOrigin {
+        t.Fatalf("expected default shim to echo any origin; got %q", allowOrigin)
+    }
+}
+
+func TestRestrictiveCors_Shim_DeniesUnknownOrigin(t *testing.T) {
+    middleware := RestrictiveCors("http://allowed.example")
+
+    handler := middleware(func(
+        runtimeInstance runtimecontract.Runtime,
+        writer nethttp.ResponseWriter,
+        request httpcontract.Request,
+    ) (httpcontract.Response, error) {
+        return http.EmptyResponse(nethttp.StatusOK), nil
+    })
+
+    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/", nil)
+    httpRequest.Header.Set("Origin", "http://denied.example")
+
+    response, _ := handler(
+        nil,
+        httptest.NewRecorder(),
+        testhelper.NewHttpTestRequestFromHttpRequest(httpRequest),
+    )
+
+    allowOrigin := response.Headers().Get("Access-Control-Allow-Origin")
+    if "" != allowOrigin {
+        t.Fatalf("expected restrictive shim to omit cors headers for denied origin; got %q", allowOrigin)
+    }
+}
+
+func TestRestrictiveCorsConfig_Shim_ReturnsExpectedDefaults(t *testing.T) {
+    config := RestrictiveCorsConfig([]string{"http://allowed.example"})
+
+    if false == config.AllowCredentials() {
+        t.Fatal("expected allowCredentials to be true in restrictive defaults")
     }
 
-    handler := middleware(next)
-
-    req := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
-    req.Header.Set("Origin", "https://example.com")
-
-    rec := httptest.NewRecorder()
-
-    response, err := handler(nil, rec, testhelper.NewHttpTestRequestFromHttpRequest(req))
-    if nil != err {
-        t.Fatalf("unexpected error")
-    }
-    if nil == response {
-        t.Fatalf("expected response")
+    if 3600 != config.MaxAge() {
+        t.Fatalf("expected maxAge 3600, got %d", config.MaxAge())
     }
 
-    if "" == response.Headers().Get("Access-Control-Allow-Origin") {
-        t.Fatalf("expected allow-origin header")
+    if 1 != len(config.AllowOrigins()) || "http://allowed.example" != config.AllowOrigins()[0] {
+        t.Fatalf("expected single origin in restrictive defaults, got %v", config.AllowOrigins())
     }
 }

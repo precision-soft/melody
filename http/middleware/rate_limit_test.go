@@ -13,45 +13,45 @@ import (
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
-func TestGetClientIp_UsesRemoteAddr(t *testing.T) {
+func TestDefaultClientIp_UsesRemoteAddr(t *testing.T) {
     req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
     req.RemoteAddr = "192.168.1.100:12345"
 
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
 
-    ip := getClientIp(melodyRequest)
+    ip := DefaultClientIp(melodyRequest)
     if "192.168.1.100" != ip {
         t.Fatalf("expected IP without port, got: %s", ip)
     }
 }
 
-func TestGetClientIp_IgnoresXForwardedFor(t *testing.T) {
+func TestDefaultClientIp_IgnoresXForwardedFor(t *testing.T) {
     req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
     req.RemoteAddr = "10.0.0.1:5555"
     req.Header.Set("X-Forwarded-For", "1.2.3.4")
 
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
 
-    ip := getClientIp(melodyRequest)
+    ip := DefaultClientIp(melodyRequest)
     if "10.0.0.1" != ip {
         t.Fatalf("expected IP without port (ignoring X-Forwarded-For), got: %s", ip)
     }
 }
 
-func TestGetClientIp_IgnoresXRealIp(t *testing.T) {
+func TestDefaultClientIp_IgnoresXRealIp(t *testing.T) {
     req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
     req.RemoteAddr = "10.0.0.2:6666"
     req.Header.Set("X-Real-IP", "5.6.7.8")
 
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
 
-    ip := getClientIp(melodyRequest)
+    ip := DefaultClientIp(melodyRequest)
     if "10.0.0.2" != ip {
         t.Fatalf("expected IP without port (ignoring X-Real-IP), got: %s", ip)
     }
 }
 
-func TestGetClientIp_IgnoresBothHeaders(t *testing.T) {
+func TestDefaultClientIp_IgnoresBothHeaders(t *testing.T) {
     req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
     req.RemoteAddr = "172.16.0.1:9999"
     req.Header.Set("X-Forwarded-For", "1.1.1.1, 2.2.2.2")
@@ -59,7 +59,7 @@ func TestGetClientIp_IgnoresBothHeaders(t *testing.T) {
 
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
 
-    ip := getClientIp(melodyRequest)
+    ip := DefaultClientIp(melodyRequest)
     if "172.16.0.1" != ip {
         t.Fatalf("expected IP without port (ignoring all proxy headers), got: %s", ip)
     }
@@ -240,21 +240,48 @@ func TestRateLimitMiddleware_RejectsWhenLimitExceeded(t *testing.T) {
     }
 }
 
-func TestDefaultKeyExtractor_UsesRemoteAddr(t *testing.T) {
+func TestDefaultKeyExtractor_UsesRemoteAddrByDefault(t *testing.T) {
     req := httptest.NewRequest(nethttp.MethodGet, "/api/data", nil)
     req.RemoteAddr = "10.20.30.40:1234"
     req.Header.Set("X-Forwarded-For", "spoofed-ip")
 
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
 
-    key := defaultKeyExtractor(melodyRequest)
+    limiter := NewTokenBucketLimiterWithClock(clock.NewFrozenClock(time.Now()), 10, time.Minute)
+    config := NewRateLimitConfig(limiter, nil, nil)
+    _ = RateLimitMiddleware(config)
+
+    key := config.KeyExtractor()(melodyRequest)
 
     if "10.20.30.40:/api/data" != key {
         t.Fatalf("unexpected key: %s", key)
     }
 }
 
-func TestIpKeyExtractor_UsesRemoteAddr(t *testing.T) {
+func TestRateLimitConfig_ClientIpResolver_OverridesDefault(t *testing.T) {
+    req := httptest.NewRequest(nethttp.MethodGet, "/api/data", nil)
+    req.RemoteAddr = "10.20.30.40:1234"
+    req.Header.Set("X-Forwarded-For", "1.1.1.1")
+
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+
+    limiter := NewTokenBucketLimiterWithClock(clock.NewFrozenClock(time.Now()), 10, time.Minute)
+    config := NewRateLimitConfig(limiter, nil, nil)
+
+    config.SetClientIpResolver(func(request httpcontract.Request) string {
+        return request.Header("X-Forwarded-For")
+    })
+
+    _ = RateLimitMiddleware(config)
+
+    key := config.KeyExtractor()(melodyRequest)
+
+    if "1.1.1.1:/api/data" != key {
+        t.Fatalf("expected resolver-provided IP, got: %s", key)
+    }
+}
+
+func TestIpRateLimit_UsesRemoteAddrByDefault(t *testing.T) {
     req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
     req.RemoteAddr = "192.168.0.50:8080"
     req.Header.Set("X-Forwarded-For", "evil-ip")
@@ -262,10 +289,10 @@ func TestIpKeyExtractor_UsesRemoteAddr(t *testing.T) {
 
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
 
-    key := ipKeyExtractor(melodyRequest)
+    ip := DefaultClientIp(melodyRequest)
 
-    if "192.168.0.50" != key {
-        t.Fatalf("expected IP without port as key, got: %s", key)
+    if "192.168.0.50" != ip {
+        t.Fatalf("expected IP without port as key, got: %s", ip)
     }
 }
 

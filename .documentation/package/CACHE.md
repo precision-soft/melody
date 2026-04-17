@@ -200,6 +200,7 @@ func loadUserProfile(
 - `Manager.Get` returns `exists == false` when deserialization fails (and returns the deserialization error). See [`cache/manager.go`](../../cache/manager.go).
 - `Remember` uses a single-flight mechanism when stampede protection is enabled (default). See [`cache/remember.go`](../../cache/remember.go).
 - `Remember` groups in-flight calls by cache instance, key, and cancelability (cancelable callers are isolated from non-cancelable callers). See [`cache/remember.go`](../../cache/remember.go).
+- [`InMemoryBackend`](../../cache/in_memory.go) owns a cleanup goroutine whose lifetime ends when [`Close`](../../cache/in_memory.go) is called; callers must `Close` the backend (or the composing `Manager`) to stop it — there is no finalizer fallback.
 
 ## Userland API
 
@@ -239,6 +240,7 @@ type Cache interface {
 - **cache.InMemoryBackend** ([`cache/in_memory.go`](../../cache/in_memory.go))
 - **cache.JsonSerializer** ([`cache/json_serializer.go`](../../cache/json_serializer.go))
 - **cache.RememberOption** ([`cache/remember.go`](../../cache/remember.go))
+- **cache.Item** ([`cache/item.go`](../../cache/item.go)) — the backend-level entry exposed via `cachecontract.Backend.Get`. Carries key, payload, creation/expiration timestamps, last-access time, and hit count.
 
 ### Constructors
 
@@ -246,6 +248,7 @@ type Cache interface {
 - `cache.NewInMemoryBackend(maxItems, cleanupInterval, clockInstance) *cache.InMemoryBackend` ([`cache/in_memory.go`](../../cache/in_memory.go))
 - `cache.NewJsonSerializer() cachecontract.Serializer` ([`cache/json_serializer.go`](../../cache/json_serializer.go))
 - `cache.NewDefaultRememberOption() *cache.RememberOption` ([`cache/remember.go`](../../cache/remember.go))
+- `cache.NewItem(key string, payload []byte, createdAt time.Time, expiresAt *time.Time) *cache.Item` ([`cache/item.go`](../../cache/item.go))
 
 ### Retrieval helpers
 

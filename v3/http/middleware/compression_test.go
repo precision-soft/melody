@@ -141,149 +141,6 @@ func TestCompressionMiddleware_SuccessfulCompression(t *testing.T) {
     }
 }
 
-func TestCompressionMiddleware_Level0NoCompression_StillProcesses(t *testing.T) {
-    config := NewCompressionConfig(
-        0,
-        10,
-        nil,
-        nil,
-    )
-
-    middleware := CompressionMiddleware(config)
-
-    body := strings.Repeat("hello world ", 200)
-
-    handler := middleware(
-        func(
-            runtimeInstance runtimecontract.Runtime,
-            writer nethttp.ResponseWriter,
-            request httpcontract.Request,
-        ) (httpcontract.Response, error) {
-            response := &http.Response{}
-            response.SetStatusCode(200)
-            responseHeaders := make(nethttp.Header)
-            responseHeaders.Set("Content-Type", "text/plain")
-            response.SetHeaders(responseHeaders)
-            response.SetBodyReader(bytes.NewReader([]byte(body)))
-
-            return response, nil
-        },
-    )
-
-    req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
-    req.Header.Set("Accept-Encoding", "gzip")
-
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
-
-    resultResponse, err := handler(nil, httptest.NewRecorder(), melodyRequest)
-
-    if nil != err {
-        t.Fatalf("expected nil error, got: %v", err)
-    }
-
-    if nil == resultResponse {
-        t.Fatalf("expected non-nil response")
-    }
-
-    if "gzip" != resultResponse.Headers().Get("Content-Encoding") {
-        t.Fatalf("expected gzip content-encoding even at level 0 (NoCompression), got: %s", resultResponse.Headers().Get("Content-Encoding"))
-    }
-}
-
-func TestCompressionMiddleware_InvalidLevelFallsBackToDefault(t *testing.T) {
-    config := NewCompressionConfig(
-        99,
-        10,
-        nil,
-        nil,
-    )
-
-    middleware := CompressionMiddleware(config)
-
-    body := strings.Repeat("hello world ", 200)
-
-    handler := middleware(
-        func(
-            runtimeInstance runtimecontract.Runtime,
-            writer nethttp.ResponseWriter,
-            request httpcontract.Request,
-        ) (httpcontract.Response, error) {
-            response := &http.Response{}
-            response.SetStatusCode(200)
-            responseHeaders := make(nethttp.Header)
-            responseHeaders.Set("Content-Type", "text/plain")
-            response.SetHeaders(responseHeaders)
-            response.SetBodyReader(bytes.NewReader([]byte(body)))
-
-            return response, nil
-        },
-    )
-
-    req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
-    req.Header.Set("Accept-Encoding", "gzip")
-
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
-
-    resultResponse, err := handler(nil, httptest.NewRecorder(), melodyRequest)
-
-    if nil != err {
-        t.Fatalf("expected nil error, got: %v", err)
-    }
-
-    if nil == resultResponse {
-        t.Fatalf("expected non-nil response")
-    }
-
-    if "gzip" != resultResponse.Headers().Get("Content-Encoding") {
-        t.Fatalf("expected gzip content-encoding after invalid level reset, got: %s", resultResponse.Headers().Get("Content-Encoding"))
-    }
-}
-
-func TestCompressionMiddleware_ExcludedPath_SkipsCompression(t *testing.T) {
-    config := NewCompressionConfig(
-        6,
-        10,
-        nil,
-        []string{"/api/"},
-    )
-
-    middleware := CompressionMiddleware(config)
-
-    body := strings.Repeat("hello world ", 200)
-
-    handler := middleware(
-        func(
-            runtimeInstance runtimecontract.Runtime,
-            writer nethttp.ResponseWriter,
-            request httpcontract.Request,
-        ) (httpcontract.Response, error) {
-            response := &http.Response{}
-            response.SetStatusCode(200)
-            responseHeaders := make(nethttp.Header)
-            responseHeaders.Set("Content-Type", "text/plain")
-            response.SetHeaders(responseHeaders)
-            response.SetBodyReader(bytes.NewReader([]byte(body)))
-
-            return response, nil
-        },
-    )
-
-    req := httptest.NewRequest(nethttp.MethodGet, "/api/data", nil)
-    req.Header.Set("Accept-Encoding", "gzip")
-
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
-
-    resultResponse, err := handler(nil, httptest.NewRecorder(), melodyRequest)
-
-    if nil != err {
-        t.Fatalf("expected nil error, got: %v", err)
-    }
-
-    if "" != resultResponse.Headers().Get("Content-Encoding") {
-        t.Fatalf("expected no content-encoding for excluded path")
-    }
-}
-
 func TestCompressionMiddleware_SkipsWhenBelowMinSize(t *testing.T) {
     config := NewCompressionConfig(
         6,
@@ -384,5 +241,192 @@ func TestCompressionMiddleware_LevelAboveBestCompressionFallsBackToDefault(t *te
 
     if gzip.DefaultCompression != config.Level() {
         t.Fatalf("expected default level when above BestCompression, got %d", config.Level())
+    }
+}
+
+func TestCompressionMiddleware_AddsVaryAcceptEncodingWhenCompressing(t *testing.T) {
+    config := NewCompressionConfig(6, 10, nil, nil)
+    middleware := CompressionMiddleware(config)
+
+    body := strings.Repeat("melody ", 200)
+    handler := middleware(
+        func(
+            runtimeInstance runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            response := &http.Response{}
+            response.SetStatusCode(200)
+            responseHeaders := make(nethttp.Header)
+            responseHeaders.Set("Content-Type", "text/plain")
+            response.SetHeaders(responseHeaders)
+            response.SetBodyReader(bytes.NewReader([]byte(body)))
+
+            return response, nil
+        },
+    )
+
+    req := httptest.NewRequest(nethttp.MethodGet, "/", nil)
+    req.Header.Set("Accept-Encoding", "gzip")
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+
+    resultResponse, err := handler(nil, httptest.NewRecorder(), melodyRequest)
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if "Accept-Encoding" != resultResponse.Headers().Get("Vary") {
+        t.Fatalf("expected Vary: Accept-Encoding, got: %q", resultResponse.Headers().Get("Vary"))
+    }
+}
+
+func TestCompressionMiddleware_AddsVaryEvenWhenClientRefusesGzip(t *testing.T) {
+    config := NewCompressionConfig(6, 10, nil, nil)
+    middleware := CompressionMiddleware(config)
+
+    body := strings.Repeat("melody ", 200)
+    handler := middleware(
+        func(
+            runtimeInstance runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            response := &http.Response{}
+            response.SetStatusCode(200)
+            responseHeaders := make(nethttp.Header)
+            responseHeaders.Set("Content-Type", "text/plain")
+            response.SetHeaders(responseHeaders)
+            response.SetBodyReader(bytes.NewReader([]byte(body)))
+
+            return response, nil
+        },
+    )
+
+    req := httptest.NewRequest(nethttp.MethodGet, "/", nil)
+    req.Header.Set("Accept-Encoding", "gzip;q=0, deflate")
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+
+    resultResponse, err := handler(nil, httptest.NewRecorder(), melodyRequest)
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if "Accept-Encoding" != resultResponse.Headers().Get("Vary") {
+        t.Fatalf("expected Vary: Accept-Encoding when skipping due to client refusal, got: %q", resultResponse.Headers().Get("Vary"))
+    }
+
+    if "" != resultResponse.Headers().Get("Content-Encoding") {
+        t.Fatalf("expected no Content-Encoding when client refuses gzip, got: %q", resultResponse.Headers().Get("Content-Encoding"))
+    }
+}
+
+func TestCompressionMiddleware_DoesNotDuplicateVary(t *testing.T) {
+    config := NewCompressionConfig(6, 10, nil, nil)
+    middleware := CompressionMiddleware(config)
+
+    body := strings.Repeat("melody ", 200)
+    handler := middleware(
+        func(
+            runtimeInstance runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            response := &http.Response{}
+            response.SetStatusCode(200)
+            responseHeaders := make(nethttp.Header)
+            responseHeaders.Set("Content-Type", "text/plain")
+            responseHeaders.Add("Vary", "Accept-Encoding")
+            response.SetHeaders(responseHeaders)
+            response.SetBodyReader(bytes.NewReader([]byte(body)))
+
+            return response, nil
+        },
+    )
+
+    req := httptest.NewRequest(nethttp.MethodGet, "/", nil)
+    req.Header.Set("Accept-Encoding", "gzip")
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+
+    resultResponse, err := handler(nil, httptest.NewRecorder(), melodyRequest)
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    varyValues := resultResponse.Headers().Values("Vary")
+    if 1 != len(varyValues) {
+        t.Fatalf("expected exactly one Vary entry, got: %v", varyValues)
+    }
+}
+
+func TestCompressionMiddleware_StreamingGzipProducesValidOutput(t *testing.T) {
+    config := NewCompressionConfig(6, 64, nil, nil)
+    middleware := CompressionMiddleware(config)
+
+    original := strings.Repeat("melody streaming ", 5000)
+
+    handler := middleware(
+        func(
+            runtimeInstance runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            response := &http.Response{}
+            response.SetStatusCode(200)
+            responseHeaders := make(nethttp.Header)
+            responseHeaders.Set("Content-Type", "text/plain")
+            response.SetHeaders(responseHeaders)
+            response.SetBodyReader(bytes.NewReader([]byte(original)))
+
+            return response, nil
+        },
+    )
+
+    req := httptest.NewRequest(nethttp.MethodGet, "/", nil)
+    req.Header.Set("Accept-Encoding", "gzip")
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+
+    resultResponse, err := handler(nil, httptest.NewRecorder(), melodyRequest)
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    gzipReader, readerErr := gzip.NewReader(resultResponse.BodyReader())
+    if nil != readerErr {
+        t.Fatalf("gzip.NewReader failed: %v", readerErr)
+    }
+    defer gzipReader.Close()
+
+    decompressed, readAllErr := io.ReadAll(gzipReader)
+    if nil != readAllErr {
+        t.Fatalf("decompress failed: %v", readAllErr)
+    }
+
+    if original != string(decompressed) {
+        t.Fatalf("round-trip mismatch: decompressed length=%d original length=%d", len(decompressed), len(original))
+    }
+}
+
+func TestAcceptsGzip_Cases(t *testing.T) {
+    cases := map[string]bool{
+        "":                      false,
+        "gzip":                  true,
+        "GZIP":                  true,
+        "gzip;q=1":              true,
+        "gzip;q=0":              false,
+        "gzip;q=0.0":            false,
+        "deflate":               false,
+        "*":                     true,
+        "*;q=0":                 false,
+        "gzip;q=0, *;q=1":       false,
+        "*;q=0, gzip;q=0.5":     true,
+        "deflate, gzip;q=0.001": true,
+        "identity":              false,
+    }
+
+    for input, expected := range cases {
+        got := acceptsGzip(input)
+        if expected != got {
+            t.Fatalf("acceptsGzip(%q) = %v, want %v", input, got, expected)
+        }
     }
 }

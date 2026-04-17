@@ -4,6 +4,7 @@ import (
     "encoding/json"
     "io"
     "os"
+    "sync"
     "time"
 
     "github.com/precision-soft/melody/exception"
@@ -42,6 +43,7 @@ func NewJsonLoggerWithLabels(output io.Writer, minLevel loggingcontract.Level, l
 }
 
 type jsonLogger struct {
+    writeMutex  sync.Mutex
     output      io.Writer
     minLevel    loggingcontract.Level
     levelLabels loggingcontract.LevelLabels
@@ -73,6 +75,9 @@ func (instance *jsonLogger) Log(level loggingcontract.Level, message string, con
 
         encoded, _ = json.Marshal(fallback)
     }
+
+    instance.writeMutex.Lock()
+    defer instance.writeMutex.Unlock()
 
     _, _ = instance.output.Write(append(encoded, '\n'))
 }

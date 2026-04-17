@@ -128,3 +128,22 @@ func generateSessionId() string {
 
     return hex.EncodeToString(bytes)
 }
+
+func isValidSessionId(sessionId string) bool {
+    if 32 != len(sessionId) {
+        return false
+    }
+
+    for index := 0; index < len(sessionId); index++ {
+        character := sessionId[index]
+
+        isLowerHex := 'a' <= character && 'f' >= character
+        isDigit := '0' <= character && '9' >= character
+
+        if false == isLowerHex && false == isDigit {
+            return false
+        }
+    }
+
+    return true
+}

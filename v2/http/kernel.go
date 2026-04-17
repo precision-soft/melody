@@ -128,6 +128,11 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         defaultLocale := configuration.Http().DefaultLocale()
         debugMode := config.EnvDevelopment == configuration.Kernel().Env()
 
+        maxBodyBytes := configuration.Http().MaxRequestBodyBytes()
+        if 0 < maxBodyBytes && nil != request.Body {
+            request.Body = nethttp.MaxBytesReader(writer, request.Body, int64(maxBodyBytes))
+        }
+
         sessionManager := session.SessionMustFromContainer(serviceContainer)
         cookie, _ := request.Cookie(session.SessionCookieName)
 
@@ -483,6 +488,10 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                             kernelExceptionEvent.SetResponse(JsonErrorResponse(statusCode, message))
                         }
 
+                        if nil != response && response != kernelExceptionEvent.Response() {
+                            closeDiscardedResponseBody(response, requestLogger)
+                        }
+
                         return kernelExceptionEvent.Response(), nil
                     }
 
@@ -569,6 +578,10 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 } else {
                     kernelExceptionEvent.SetResponse(JsonErrorResponse(statusCode, message))
                 }
+            }
+
+            if nil != response && response != kernelExceptionEvent.Response() {
+                closeDiscardedResponseBody(response, requestLogger)
             }
 
             response = kernelExceptionEvent.Response()

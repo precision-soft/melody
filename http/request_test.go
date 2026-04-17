@@ -222,6 +222,38 @@ func TestRequest_Header(t *testing.T) {
     }
 }
 
+func TestNewRequest_DoesNotParseFormForJsonContentType(t *testing.T) {
+    body := strings.NewReader(`{"name":"melody"}`)
+    httpRequest := httptest.NewRequest("POST", "/", body)
+    httpRequest.Header.Set("Content-Type", "application/json")
+
+    request := NewRequest(httpRequest, nil, nil, nil)
+
+    if true == request.Post().Has("name") {
+        t.Fatalf("JSON body must not be parsed as form")
+    }
+
+    remaining, readErr := io.ReadAll(httpRequest.Body)
+    if nil != readErr {
+        t.Fatalf("unexpected read error: %v", readErr)
+    }
+
+    if `{"name":"melody"}` != string(remaining) {
+        t.Fatalf("expected body intact after NewRequest, got: %s", string(remaining))
+    }
+}
+
+func TestNewRequest_DoesNotParseFormWhenContentTypeMissing(t *testing.T) {
+    body := strings.NewReader("username=alice")
+    httpRequest := httptest.NewRequest("POST", "/", body)
+
+    request := NewRequest(httpRequest, nil, nil, nil)
+
+    if true == request.Post().Has("username") {
+        t.Fatalf("body without Content-Type must not be parsed as form")
+    }
+}
+
 func TestRequest_ContentType(t *testing.T) {
     httpRequest := httptest.NewRequest("POST", "/test", nil)
     httpRequest.Header.Set("Content-Type", "application/json; charset=utf-8")

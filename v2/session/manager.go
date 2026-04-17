@@ -25,7 +25,7 @@ func NewManager(storage sessioncontract.Storage, ttl time.Duration) *Manager {
 }
 
 func (instance *Manager) Session(sessionId string) sessioncontract.Session {
-    if "" == sessionId {
+    if false == isValidSessionId(sessionId) {
         return nil
     }
 
@@ -108,8 +108,12 @@ func (instance *Manager) SaveSession(sessionInstance sessioncontract.Session) er
 }
 
 func (instance *Manager) DeleteSession(sessionId string) error {
-    if "" == sessionId {
-        return exception.NewError("session id is required in delete session", nil, nil)
+    if false == isValidSessionId(sessionId) {
+        return exception.NewError(
+            "session id is invalid in delete session",
+            nil,
+            nil,
+        )
     }
 
     return instance.storage.Delete(sessionId)

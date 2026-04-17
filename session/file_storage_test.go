@@ -254,6 +254,122 @@ func TestFileStorage_Save_PersistsAcrossInstances_ByInjectedFile(t *testing.T) {
     }
 }
 
+func TestFileStorage_Load_ExpiredEntryIsDeleted(t *testing.T) {
+    directory := t.TempDir()
+    path := filepath.Join(directory, "session.json")
+
+    storage, err := NewFileStorageFromPath(path)
+    if nil != err {
+        t.Fatalf("unexpected storage error: %s", err.Error())
+    }
+    defer storage.Close()
+
+    if saveErr := storage.Save("expired", map[string]any{"k": "v"}, time.Nanosecond); nil != saveErr {
+        t.Fatalf("unexpected save error: %s", saveErr.Error())
+    }
+
+    time.Sleep(10 * time.Millisecond)
+
+    data, exists, loadErr := storage.Load("expired")
+    if nil != loadErr {
+        t.Fatalf("unexpected load error: %s", loadErr.Error())
+    }
+
+    if true == exists {
+        t.Fatalf("expected expired entry to be removed")
+    }
+
+    if nil != data {
+        t.Fatalf("expected nil data for expired entry")
+    }
+
+    storage2, err := NewFileStorageFromPath(path)
+    if nil != err {
+        t.Fatalf("unexpected storage error: %s", err.Error())
+    }
+    defer storage2.Close()
+
+    _, existsAfterReload, loadAfterReloadErr := storage2.Load("expired")
+    if nil != loadAfterReloadErr {
+        t.Fatalf("unexpected reload error: %s", loadAfterReloadErr.Error())
+    }
+
+    if true == existsAfterReload {
+        t.Fatalf("expected expired entry to be persisted as removed")
+    }
+}
+
+func TestFileStorage_Close_IsIdempotent(t *testing.T) {
+    directory := t.TempDir()
+    path := filepath.Join(directory, "session.json")
+
+    storage, err := NewFileStorageFromPath(path)
+    if nil != err {
+        t.Fatalf("unexpected storage error: %s", err.Error())
+    }
+
+    if err := storage.Close(); nil != err {
+        t.Fatalf("unexpected first close error: %s", err.Error())
+    }
+
+    if err := storage.Close(); nil != err {
+        t.Fatalf("unexpected second close error: %s", err.Error())
+    }
+}
+
+func TestFileStorage_Save_AfterCloseReturnsError(t *testing.T) {
+    directory := t.TempDir()
+    path := filepath.Join(directory, "session.json")
+
+    storage, err := NewFileStorageFromPath(path)
+    if nil != err {
+        t.Fatalf("unexpected storage error: %s", err.Error())
+    }
+
+    _ = storage.Close()
+
+    saveErr := storage.Save("k", map[string]any{"v": 1}, time.Minute)
+    if nil == saveErr {
+        t.Fatalf("expected save after close to error")
+    }
+}
+
+func TestFileStorage_AtomicWrite_DoesNotLeaveTempFiles(t *testing.T) {
+    directory := t.TempDir()
+    path := filepath.Join(directory, "session.json")
+
+    storage, err := NewFileStorageFromPath(path)
+    if nil != err {
+        t.Fatalf("unexpected storage error: %s", err.Error())
+    }
+    defer storage.Close()
+
+    for iteration := 0; iteration < 5; iteration++ {
+        saveErr := storage.Save(
+            "s"+strconv.Itoa(iteration),
+            map[string]any{"iteration": iteration},
+            time.Minute,
+        )
+        if nil != saveErr {
+            t.Fatalf("unexpected save error: %s", saveErr.Error())
+        }
+    }
+
+    entries, err := os.ReadDir(directory)
+    if nil != err {
+        t.Fatalf("unexpected readdir error: %s", err.Error())
+    }
+
+    for _, entry := range entries {
+        name := entry.Name()
+        if name == "session.json" {
+            continue
+        }
+
+        t.Fatalf("unexpected leftover file in session directory: %s", name)
+    }
+}
+
 func TestFileStorage_ConcurrentLoadSaveIsRaceFree(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")

@@ -4,6 +4,7 @@ import (
     "reflect"
     "strings"
     "sync"
+    "sync/atomic"
 
     containercontract "github.com/precision-soft/melody/container/contract"
     "github.com/precision-soft/melody/exception"
@@ -11,16 +12,18 @@ import (
 )
 
 func newScope(containerInstance *container) containercontract.Scope {
-    return &scope{
-        container:     containerInstance,
+    scopeInstance := &scope{
         instances:     make(map[string]any),
         typeInstances: make(map[reflect.Type]any),
     }
+    scopeInstance.container.Store(containerInstance)
+
+    return scopeInstance
 }
 
 type scope struct {
     mutex         sync.RWMutex
-    container     *container
+    container     atomic.Pointer[container]
     instances     map[string]any
     typeInstances map[reflect.Type]any
 }
@@ -34,7 +37,8 @@ func (instance *scope) Get(serviceName string) (any, error) {
         )
     }
 
-    if nil == instance.container {
+    containerInstance := instance.container.Load()
+    if nil == containerInstance {
         exception.Panic(
             exception.NewError(
                 "scope is closed",
@@ -44,7 +48,7 @@ func (instance *scope) Get(serviceName string) (any, error) {
         )
     }
 
-    resolver := newScopeResolverContext(instance.container, instance)
+    resolver := newScopeResolverContext(containerInstance, instance)
 
     return resolver.Get(serviceName)
 }
@@ -75,7 +79,8 @@ func (instance *scope) GetByType(targetType reflect.Type) (any, error) {
         )
     }
 
-    if nil == instance.container {
+    containerInstance := instance.container.Load()
+    if nil == containerInstance {
         exception.Panic(
             exception.NewError(
                 "scope is closed",
@@ -85,7 +90,7 @@ func (instance *scope) GetByType(targetType reflect.Type) (any, error) {
         )
     }
 
-    resolver := newScopeResolverContext(instance.container, instance)
+    resolver := newScopeResolverContext(containerInstance, instance)
 
     return resolver.GetByType(targetType)
 }
@@ -112,7 +117,8 @@ func (instance *scope) Has(serviceName string) bool {
         return false
     }
 
-    if nil == instance.container {
+    containerInstance := instance.container.Load()
+    if nil == containerInstance {
         return false
     }
 
@@ -124,7 +130,7 @@ func (instance *scope) Has(serviceName string) bool {
         return true
     }
 
-    return instance.container.Has(serviceName)
+    return containerInstance.Has(serviceName)
 }
 
 func (instance *scope) HasType(targetType reflect.Type) bool {
@@ -132,7 +138,8 @@ func (instance *scope) HasType(targetType reflect.Type) bool {
         return false
     }
 
-    if nil == instance.container {
+    containerInstance := instance.container.Load()
+    if nil == containerInstance {
         return false
     }
 
@@ -144,7 +151,7 @@ func (instance *scope) HasType(targetType reflect.Type) bool {
         return true
     }
 
-    return instance.container.HasType(targetType)
+    return containerInstance.HasType(targetType)
 }
 
 func (instance *scope) OverrideInstance(serviceName string, value any) error {
@@ -213,7 +220,7 @@ func (instance *scope) OverrideProtectedInstance(serviceName string, value any) 
         )
     }
 
-    if nil == instance.container {
+    if nil == instance.container.Load() {
         exception.Panic(
             exception.NewError(
                 "scope is closed",
@@ -277,7 +284,7 @@ func (instance *scope) Close() error {
 
     instance.instances = nil
     instance.typeInstances = nil
-    instance.container = nil
+    instance.container.Store(nil)
 
     return nil
 }
@@ -294,7 +301,7 @@ func (instance *scope) lookupInstanceByName(serviceName string) (any, bool, erro
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
 
-    if nil == instance.container {
+    if nil == instance.container.Load() {
         return nil, false, exception.NewError(
             "scope is closed",
             nil,
@@ -319,7 +326,7 @@ func (instance *scope) lookupInstanceByType(canonicalType reflect.Type) (any, bo
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
 
-    if nil == instance.container {
+    if nil == instance.container.Load() {
         return nil, false, exception.NewError(
             "scope is closed",
             nil,

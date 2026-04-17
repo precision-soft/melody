@@ -1,7 +1,6 @@
 package middleware
 
 import (
-    "net"
     nethttp "net/http"
     "net/http/httptest"
     "testing"
@@ -14,42 +13,55 @@ import (
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-func TestGetClientIp_ExtractsHostFromHostPort(t *testing.T) {
-    req := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
-    req.RemoteAddr = "192.168.1.10:54321"
+func TestDefaultClientIp_UsesRemoteAddr(t *testing.T) {
+    req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    req.RemoteAddr = "192.168.1.100:12345"
 
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
 
-    ip := getClientIp(melodyRequest)
-
-    if "192.168.1.10" != ip {
-        t.Fatalf("expected 192.168.1.10, got: %s", ip)
+    ip := DefaultClientIp(melodyRequest)
+    if "192.168.1.100" != ip {
+        t.Fatalf("expected IP without port, got: %s", ip)
     }
 }
 
-func TestGetClientIp_ReturnsRawAddrWhenNoPort(t *testing.T) {
-    req := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
-    req.RemoteAddr = "192.168.1.10"
+func TestDefaultClientIp_IgnoresXForwardedFor(t *testing.T) {
+    req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    req.RemoteAddr = "10.0.0.1:5555"
+    req.Header.Set("X-Forwarded-For", "1.2.3.4")
 
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
 
-    ip := getClientIp(melodyRequest)
-
-    if "192.168.1.10" != ip {
-        t.Fatalf("expected 192.168.1.10, got: %s", ip)
+    ip := DefaultClientIp(melodyRequest)
+    if "10.0.0.1" != ip {
+        t.Fatalf("expected IP without port (ignoring X-Forwarded-For), got: %s", ip)
     }
 }
 
-func TestGetClientIp_HandlesIpv6WithPort(t *testing.T) {
-    req := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
-    req.RemoteAddr = net.JoinHostPort("::1", "54321")
+func TestDefaultClientIp_IgnoresXRealIp(t *testing.T) {
+    req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    req.RemoteAddr = "10.0.0.2:6666"
+    req.Header.Set("X-Real-IP", "5.6.7.8")
 
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
 
-    ip := getClientIp(melodyRequest)
+    ip := DefaultClientIp(melodyRequest)
+    if "10.0.0.2" != ip {
+        t.Fatalf("expected IP without port (ignoring X-Real-IP), got: %s", ip)
+    }
+}
 
-    if "::1" != ip {
-        t.Fatalf("expected ::1, got: %s", ip)
+func TestDefaultClientIp_IgnoresBothHeaders(t *testing.T) {
+    req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    req.RemoteAddr = "172.16.0.1:9999"
+    req.Header.Set("X-Forwarded-For", "1.1.1.1, 2.2.2.2")
+    req.Header.Set("X-Real-IP", "3.3.3.3")
+
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+
+    ip := DefaultClientIp(melodyRequest)
+    if "172.16.0.1" != ip {
+        t.Fatalf("expected IP without port (ignoring all proxy headers), got: %s", ip)
     }
 }
 
@@ -58,147 +70,341 @@ func TestTokenBucketLimiter_AllowsUpToRate(t *testing.T) {
     limiter := NewTokenBucketLimiterWithClock(frozenClock, 3, time.Minute)
 
     for i := 0; i < 3; i++ {
-        if false == limiter.Allow("key") {
-            t.Fatalf("expected allow on request %d", i+1)
+        if false == limiter.Allow("key1") {
+            t.Fatalf("expected request %d to be allowed", i+1)
         }
     }
 
-    if true == limiter.Allow("key") {
-        t.Fatalf("expected deny after exceeding rate")
+    if true == limiter.Allow("key1") {
+        t.Fatalf("expected request to be rejected after rate exceeded")
     }
 }
 
 func TestTokenBucketLimiter_RefillsAfterWindow(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
-    limiter := NewTokenBucketLimiterWithClock(frozenClock, 1, time.Minute)
+    limiter := NewTokenBucketLimiterWithClock(frozenClock, 2, time.Minute)
 
-    if false == limiter.Allow("key") {
-        t.Fatalf("expected allow on first request")
+    limiter.Allow("key1")
+    limiter.Allow("key1")
+
+    if true == limiter.Allow("key1") {
+        t.Fatalf("expected rejection before window expires")
     }
 
-    if true == limiter.Allow("key") {
-        t.Fatalf("expected deny after exceeding rate")
-    }
+    frozenClock.Advance(time.Minute + time.Second)
 
-    frozenClock.Advance(2 * time.Minute)
-
-    if false == limiter.Allow("key") {
-        t.Fatalf("expected allow after window expired")
+    if false == limiter.Allow("key1") {
+        t.Fatalf("expected allow after window elapsed")
     }
 }
 
-func TestTokenBucketLimiter_ResetClearsKey(t *testing.T) {
+func TestTokenBucketLimiter_Reset(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
     limiter := NewTokenBucketLimiterWithClock(frozenClock, 1, time.Minute)
 
-    if false == limiter.Allow("key") {
-        t.Fatalf("expected allow")
+    limiter.Allow("key1")
+
+    if true == limiter.Allow("key1") {
+        t.Fatalf("expected rejection")
     }
 
-    if true == limiter.Allow("key") {
-        t.Fatalf("expected deny")
-    }
+    limiter.Reset("key1")
 
-    limiter.Reset("key")
-
-    if false == limiter.Allow("key") {
+    if false == limiter.Allow("key1") {
         t.Fatalf("expected allow after reset")
+    }
+}
+
+func TestTokenBucketLimiter_Close(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewTokenBucketLimiterWithClock(frozenClock, 5, time.Minute)
+
+    err := limiter.Close()
+    if nil != err {
+        t.Fatalf("expected nil error from Close, got: %v", err)
     }
 }
 
 func TestSlidingWindowLimiter_AllowsUpToLimit(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
-    limiter := NewSlidingWindowLimiterWithClock(frozenClock, 2, time.Minute)
+    limiter := NewSlidingWindowLimiterWithClock(frozenClock, 3, time.Minute)
 
-    if false == limiter.Allow("key") {
-        t.Fatalf("expected allow on first request")
+    for i := 0; i < 3; i++ {
+        if false == limiter.Allow("key1") {
+            t.Fatalf("expected request %d to be allowed", i+1)
+        }
     }
 
-    if false == limiter.Allow("key") {
-        t.Fatalf("expected allow on second request")
-    }
-
-    if true == limiter.Allow("key") {
-        t.Fatalf("expected deny after exceeding limit")
+    if true == limiter.Allow("key1") {
+        t.Fatalf("expected rejection after limit exceeded")
     }
 }
 
-func TestSlidingWindowLimiter_SlidesWindow(t *testing.T) {
+func TestSlidingWindowLimiter_AllowsAfterWindowExpires(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
     limiter := NewSlidingWindowLimiterWithClock(frozenClock, 1, time.Minute)
 
-    if false == limiter.Allow("key") {
-        t.Fatalf("expected allow")
+    limiter.Allow("key1")
+
+    if true == limiter.Allow("key1") {
+        t.Fatalf("expected rejection")
     }
 
-    if true == limiter.Allow("key") {
-        t.Fatalf("expected deny")
-    }
+    frozenClock.Advance(time.Minute + time.Second)
 
-    frozenClock.Advance(2 * time.Minute)
-
-    if false == limiter.Allow("key") {
-        t.Fatalf("expected allow after window slides")
+    if false == limiter.Allow("key1") {
+        t.Fatalf("expected allow after window elapsed")
     }
 }
 
-func TestRateLimitMiddleware_ReturnsRateLimitResponse(t *testing.T) {
+func TestSlidingWindowLimiter_Reset(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
-    limiter := NewTokenBucketLimiterWithClock(frozenClock, 1, time.Minute)
+    limiter := NewSlidingWindowLimiterWithClock(frozenClock, 1, time.Minute)
 
-    middleware := RateLimitMiddleware(
-        NewRateLimitConfig(limiter, nil, nil),
-    )
+    limiter.Allow("key1")
 
-    next := func(
-        runtimeInstance runtimecontract.Runtime,
-        writer nethttp.ResponseWriter,
-        request httpcontract.Request,
-    ) (httpcontract.Response, error) {
-        return http.EmptyResponse(nethttp.StatusOK), nil
+    if true == limiter.Allow("key1") {
+        t.Fatalf("expected rejection")
+    }
+
+    limiter.Reset("key1")
+
+    if false == limiter.Allow("key1") {
+        t.Fatalf("expected allow after reset")
+    }
+}
+
+func TestSlidingWindowLimiter_Close(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewSlidingWindowLimiterWithClock(frozenClock, 5, time.Minute)
+
+    err := limiter.Close()
+    if nil != err {
+        t.Fatalf("expected nil error from Close, got: %v", err)
+    }
+}
+
+func TestRateLimitMiddleware_AllowsRequest(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewTokenBucketLimiterWithClock(frozenClock, 10, time.Minute)
+
+    config := NewRateLimitConfig(limiter, nil, nil)
+    middleware := RateLimitMiddleware(config)
+
+    nextCalled := false
+    next := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        nextCalled = true
+        return http.TextResponse(200, "ok"), nil
     }
 
     handler := middleware(next)
 
     req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
-    req.RemoteAddr = "10.0.0.1:1234"
+    rec := httptest.NewRecorder()
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
 
-    firstResponse, firstErr := handler(nil, httptest.NewRecorder(), melodyRequest)
-    if nil != firstErr {
-        t.Fatalf("expected nil error on first request, got: %v", firstErr)
+    response, err := handler(nil, rec, melodyRequest)
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
     }
-    if nethttp.StatusOK != firstResponse.StatusCode() {
-        t.Fatalf("expected 200 on first request, got: %d", firstResponse.StatusCode())
+    if nil == response {
+        t.Fatalf("expected response")
     }
-
-    _, secondErr := handler(nil, httptest.NewRecorder(), melodyRequest)
-    if nil == secondErr {
-        t.Fatalf("expected error on rate-limited request")
+    if false == nextCalled {
+        t.Fatalf("expected next handler to be called")
     }
 }
 
-func TestTokenBucketLimiter_CleanupRemovesExpiredBuckets(t *testing.T) {
+func TestRateLimitMiddleware_RejectsWhenLimitExceeded(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
-    limiter := NewTokenBucketLimiterWithClock(frozenClock, 10, time.Minute)
-    limiter.cleanupInterval = 1 * time.Second
+    limiter := NewTokenBucketLimiterWithClock(frozenClock, 1, time.Minute)
 
-    _ = limiter.Allow("old-key")
+    config := NewRateLimitConfig(limiter, nil, nil)
+    middleware := RateLimitMiddleware(config)
+
+    next := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return http.TextResponse(200, "ok"), nil
+    }
+
+    handler := middleware(next)
+
+    req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    rec := httptest.NewRecorder()
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+
+    _, _ = handler(nil, rec, melodyRequest)
+
+    _, err := handler(nil, rec, melodyRequest)
+    if nil == err {
+        t.Fatalf("expected error from rate limit exceeded")
+    }
+}
+
+func TestDefaultKeyExtractor_UsesRemoteAddrByDefault(t *testing.T) {
+    req := httptest.NewRequest(nethttp.MethodGet, "/api/data", nil)
+    req.RemoteAddr = "10.20.30.40:1234"
+    req.Header.Set("X-Forwarded-For", "spoofed-ip")
+
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+
+    limiter := NewTokenBucketLimiterWithClock(clock.NewFrozenClock(time.Now()), 10, time.Minute)
+    config := NewRateLimitConfig(limiter, nil, nil)
+    _ = RateLimitMiddleware(config)
+
+    key := config.KeyExtractor()(melodyRequest)
+
+    if "10.20.30.40:/api/data" != key {
+        t.Fatalf("unexpected key: %s", key)
+    }
+}
+
+func TestRateLimitConfig_ClientIpResolver_OverridesDefault(t *testing.T) {
+    req := httptest.NewRequest(nethttp.MethodGet, "/api/data", nil)
+    req.RemoteAddr = "10.20.30.40:1234"
+    req.Header.Set("X-Forwarded-For", "1.1.1.1")
+
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+
+    limiter := NewTokenBucketLimiterWithClock(clock.NewFrozenClock(time.Now()), 10, time.Minute)
+    config := NewRateLimitConfig(limiter, nil, nil)
+
+    config.SetClientIpResolver(func(request httpcontract.Request) string {
+        return request.Header("X-Forwarded-For")
+    })
+
+    _ = RateLimitMiddleware(config)
+
+    key := config.KeyExtractor()(melodyRequest)
+
+    if "1.1.1.1:/api/data" != key {
+        t.Fatalf("expected resolver-provided IP, got: %s", key)
+    }
+}
+
+func TestIpRateLimit_UsesRemoteAddrByDefault(t *testing.T) {
+    req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    req.RemoteAddr = "192.168.0.50:8080"
+    req.Header.Set("X-Forwarded-For", "evil-ip")
+    req.Header.Set("X-Real-IP", "also-evil")
+
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+
+    ip := DefaultClientIp(melodyRequest)
+
+    if "192.168.0.50" != ip {
+        t.Fatalf("expected IP without port as key, got: %s", ip)
+    }
+}
+
+func TestTokenBucketLimiter_Cleanup(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewTokenBucketLimiterWithClock(frozenClock, 5, time.Minute)
+    limiter.cleanupInterval = time.Second
+
+    limiter.Allow("key1")
+    limiter.Allow("key2")
 
     frozenClock.Advance(3 * time.Minute)
 
-    _ = limiter.Allow("new-key")
+    limiter.Allow("key3")
 
     limiter.mutex.RLock()
-    _, oldExists := limiter.buckets["old-key"]
-    _, newExists := limiter.buckets["new-key"]
+    _, key1Exists := limiter.buckets["key1"]
+    _, key2Exists := limiter.buckets["key2"]
+    _, key3Exists := limiter.buckets["key3"]
     limiter.mutex.RUnlock()
 
-    if true == oldExists {
-        t.Fatalf("expected old-key to be cleaned up")
+    if true == key1Exists {
+        t.Fatalf("expected key1 to be cleaned up")
+    }
+    if true == key2Exists {
+        t.Fatalf("expected key2 to be cleaned up")
+    }
+    if false == key3Exists {
+        t.Fatalf("expected key3 to exist")
+    }
+}
+
+func TestSlidingWindowLimiter_Cleanup(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewSlidingWindowLimiterWithClock(frozenClock, 5, time.Minute)
+    limiter.cleanupInterval = time.Second
+
+    limiter.Allow("key1")
+    limiter.Allow("key2")
+
+    frozenClock.Advance(3 * time.Minute)
+
+    limiter.Allow("key3")
+
+    limiter.mutex.RLock()
+    _, key1Exists := limiter.windows["key1"]
+    _, key2Exists := limiter.windows["key2"]
+    _, key3Exists := limiter.windows["key3"]
+    limiter.mutex.RUnlock()
+
+    if true == key1Exists {
+        t.Fatalf("expected key1 to be cleaned up")
+    }
+    if true == key2Exists {
+        t.Fatalf("expected key2 to be cleaned up")
+    }
+    if false == key3Exists {
+        t.Fatalf("expected key3 to exist")
+    }
+}
+
+func TestRateLimitConfig_Accessors(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewTokenBucketLimiterWithClock(frozenClock, 5, time.Minute)
+
+    extractor := func(request httpcontract.Request) string { return "custom" }
+    onExceeded := func(request httpcontract.Request) (httpcontract.Response, error) {
+        return http.TextResponse(429, "custom exceeded"), nil
     }
 
-    if false == newExists {
-        t.Fatalf("expected new-key to still exist")
+    config := NewRateLimitConfig(limiter, extractor, onExceeded)
+
+    if limiter != config.Limiter() {
+        t.Fatalf("expected limiter to match")
+    }
+
+    if nil == config.KeyExtractor() {
+        t.Fatalf("expected key extractor to be set")
+    }
+
+    if nil == config.OnLimitExceeded() {
+        t.Fatalf("expected on limit exceeded to be set")
+    }
+
+    newExtractor := func(request httpcontract.Request) string { return "new" }
+    config.SetKeyExtractor(newExtractor)
+    if nil == config.KeyExtractor() {
+        t.Fatalf("expected updated key extractor")
+    }
+
+    newOnExceeded := func(request httpcontract.Request) (httpcontract.Response, error) {
+        return http.TextResponse(503, "service unavailable"), nil
+    }
+    config.SetOnLimitExceeded(newOnExceeded)
+    if nil == config.OnLimitExceeded() {
+        t.Fatalf("expected updated on limit exceeded")
+    }
+}
+
+func TestTokenBucketLimiter_SeparateKeys(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewTokenBucketLimiterWithClock(frozenClock, 1, time.Minute)
+
+    if false == limiter.Allow("key1") {
+        t.Fatalf("expected key1 first request to be allowed")
+    }
+
+    if false == limiter.Allow("key2") {
+        t.Fatalf("expected key2 first request to be allowed (separate bucket)")
+    }
+
+    if true == limiter.Allow("key1") {
+        t.Fatalf("expected key1 second request to be rejected")
     }
 }

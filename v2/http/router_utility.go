@@ -1,6 +1,7 @@
 package http
 
 import (
+    "io"
     "net"
     nethttp "net/http"
     "net/netip"
@@ -11,6 +12,7 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
     httpcontract "github.com/precision-soft/melody/v2/http/contract"
     "github.com/precision-soft/melody/v2/internal"
+    loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
     "github.com/precision-soft/melody/v2/session"
     sessioncontract "github.com/precision-soft/melody/v2/session/contract"
@@ -264,6 +266,30 @@ func writeResponse(
     if nil != err {
         exception.Panic(
             exception.NewError("failed to write response", nil, err),
+        )
+    }
+}
+
+func closeDiscardedResponseBody(response httpcontract.Response, logger loggingcontract.Logger) {
+    if nil == response {
+        return
+    }
+
+    bodyReader := response.BodyReader()
+    if nil == bodyReader {
+        return
+    }
+
+    closer, ok := bodyReader.(io.Closer)
+    if false == ok {
+        return
+    }
+
+    closeErr := closer.Close()
+    if nil != closeErr && nil != logger {
+        logger.Error(
+            "failed to close discarded response body",
+            exception.LogContext(closeErr),
         )
     }
 }

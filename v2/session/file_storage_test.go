@@ -134,98 +134,79 @@ func TestFileStorage_Save_PersistsAcrossInstances_ByPath(t *testing.T) {
     _ = os.Remove(path)
 }
 
-func TestFileStorage_Save_NestedMap_DeepCopied(t *testing.T) {
-    fileInstance, err := os.CreateTemp("", "melody_session_nested_*.json")
-    if nil != err {
-        t.Fatalf("unexpected create temp error: %s", err.Error())
-    }
-
-    defer func() {
-        _ = fileInstance.Close()
-        _ = os.Remove(fileInstance.Name())
-    }()
-
-    storage, err := NewFileStorageFromFile(fileInstance)
-    if nil != err {
-        t.Fatalf("unexpected storage error: %s", err.Error())
-    }
-
-    nestedMap := map[string]any{
-        "inner": "original",
-    }
-    data := map[string]any{
-        "nested": nestedMap,
-    }
-
-    saveErr := storage.Save("nested_test", data, 0)
-    if nil != saveErr {
-        t.Fatalf("unexpected save error: %s", saveErr.Error())
-    }
-
-    nestedMap["inner"] = "mutated"
-
-    loadedData, exists, loadErr := storage.Load("nested_test")
-    if nil != loadErr {
-        t.Fatalf("unexpected load error: %s", loadErr.Error())
-    }
-
-    if false == exists {
-        t.Fatalf("expected session to exist")
-    }
-
-    loadedNested, ok := loadedData["nested"].(map[string]any)
-    if false == ok {
-        t.Fatalf("expected nested map in loaded data")
-    }
-
-    if "original" != loadedNested["inner"].(string) {
-        t.Fatalf("expected deep copy to protect stored data from external mutation, got: %v", loadedNested["inner"])
-    }
-
-    loadedNested["inner"] = "loaded_mutation"
-
-    loadedData2, _, _ := storage.Load("nested_test")
-    loadedNested2, _ := loadedData2["nested"].(map[string]any)
-
-    if "loaded_mutation" == loadedNested2["inner"].(string) {
-        t.Fatalf("expected Load to return independent copy, not shared reference")
-    }
-}
-
-func TestCopyAnyMap_NilInput_ReturnsEmptyMap(t *testing.T) {
-    result := copyAnyMap(nil)
-    if nil == result {
-        t.Fatalf("expected non-nil result for nil input")
-    }
-    if 0 != len(result) {
-        t.Fatalf("expected empty map")
-    }
-}
-
-func TestCopyAnyMap_NestedMap_IsDeepCopied(t *testing.T) {
+func TestCopyAnyMap_DeepCopiesNestedMaps(t *testing.T) {
     original := map[string]any{
-        "level1": map[string]any{
-            "level2": "value",
+        "key1": "value1",
+        "nested": map[string]any{
+            "innerKey": "innerValue",
+            "deep": map[string]any{
+                "deepKey": "deepValue",
+            },
         },
-        "simple": "text",
+        "number": 42,
     }
 
     copied := copyAnyMap(original)
 
-    level1, ok := copied["level1"].(map[string]any)
+    if "value1" != copied["key1"].(string) {
+        t.Fatalf("expected key1 to be copied")
+    }
+
+    nestedCopied, ok := copied["nested"].(map[string]any)
     if false == ok {
-        t.Fatalf("expected nested map to be preserved")
+        t.Fatalf("expected nested to be map[string]any")
     }
 
-    if "value" != level1["level2"].(string) {
-        t.Fatalf("expected nested value to be copied")
+    if "innerValue" != nestedCopied["innerKey"].(string) {
+        t.Fatalf("expected nested innerKey to be copied")
     }
 
-    originalLevel1 := original["level1"].(map[string]any)
-    originalLevel1["level2"] = "mutated"
+    deepCopied, ok := nestedCopied["deep"].(map[string]any)
+    if false == ok {
+        t.Fatalf("expected deep to be map[string]any")
+    }
 
-    if "mutated" == level1["level2"].(string) {
-        t.Fatalf("expected deep copy to isolate nested map")
+    if "deepValue" != deepCopied["deepKey"].(string) {
+        t.Fatalf("expected deep key to be copied")
+    }
+
+    nestedOriginal := original["nested"].(map[string]any)
+    nestedOriginal["innerKey"] = "mutated"
+    deepOriginal := nestedOriginal["deep"].(map[string]any)
+    deepOriginal["deepKey"] = "mutated"
+
+    if "innerValue" != nestedCopied["innerKey"].(string) {
+        t.Fatalf("expected mutation of original nested map not to affect copy")
+    }
+
+    if "deepValue" != deepCopied["deepKey"].(string) {
+        t.Fatalf("expected mutation of original deep map not to affect copy")
+    }
+}
+
+func TestCopyAnyMap_ReturnsEmptyMapForNilInput(t *testing.T) {
+    copied := copyAnyMap(nil)
+
+    if nil == copied {
+        t.Fatalf("expected non-nil map for nil input")
+    }
+
+    if 0 != len(copied) {
+        t.Fatalf("expected empty map for nil input")
+    }
+}
+
+func TestCopyAnyMap_HandlesEmptyMap(t *testing.T) {
+    original := map[string]any{}
+
+    copied := copyAnyMap(original)
+
+    if nil == copied {
+        t.Fatalf("expected non-nil map")
+    }
+
+    if 0 != len(copied) {
+        t.Fatalf("expected empty map")
     }
 }
 
@@ -270,6 +251,122 @@ func TestFileStorage_Save_PersistsAcrossInstances_ByInjectedFile(t *testing.T) {
 
     if "v" != data["k"].(string) {
         t.Fatalf("expected persisted value")
+    }
+}
+
+func TestFileStorage_Load_ExpiredEntryIsDeleted(t *testing.T) {
+    directory := t.TempDir()
+    path := filepath.Join(directory, "session.json")
+
+    storage, err := NewFileStorageFromPath(path)
+    if nil != err {
+        t.Fatalf("unexpected storage error: %s", err.Error())
+    }
+    defer storage.Close()
+
+    if saveErr := storage.Save("expired", map[string]any{"k": "v"}, time.Nanosecond); nil != saveErr {
+        t.Fatalf("unexpected save error: %s", saveErr.Error())
+    }
+
+    time.Sleep(10 * time.Millisecond)
+
+    data, exists, loadErr := storage.Load("expired")
+    if nil != loadErr {
+        t.Fatalf("unexpected load error: %s", loadErr.Error())
+    }
+
+    if true == exists {
+        t.Fatalf("expected expired entry to be removed")
+    }
+
+    if nil != data {
+        t.Fatalf("expected nil data for expired entry")
+    }
+
+    storage2, err := NewFileStorageFromPath(path)
+    if nil != err {
+        t.Fatalf("unexpected storage error: %s", err.Error())
+    }
+    defer storage2.Close()
+
+    _, existsAfterReload, loadAfterReloadErr := storage2.Load("expired")
+    if nil != loadAfterReloadErr {
+        t.Fatalf("unexpected reload error: %s", loadAfterReloadErr.Error())
+    }
+
+    if true == existsAfterReload {
+        t.Fatalf("expected expired entry to be persisted as removed")
+    }
+}
+
+func TestFileStorage_Close_IsIdempotent(t *testing.T) {
+    directory := t.TempDir()
+    path := filepath.Join(directory, "session.json")
+
+    storage, err := NewFileStorageFromPath(path)
+    if nil != err {
+        t.Fatalf("unexpected storage error: %s", err.Error())
+    }
+
+    if err := storage.Close(); nil != err {
+        t.Fatalf("unexpected first close error: %s", err.Error())
+    }
+
+    if err := storage.Close(); nil != err {
+        t.Fatalf("unexpected second close error: %s", err.Error())
+    }
+}
+
+func TestFileStorage_Save_AfterCloseReturnsError(t *testing.T) {
+    directory := t.TempDir()
+    path := filepath.Join(directory, "session.json")
+
+    storage, err := NewFileStorageFromPath(path)
+    if nil != err {
+        t.Fatalf("unexpected storage error: %s", err.Error())
+    }
+
+    _ = storage.Close()
+
+    saveErr := storage.Save("k", map[string]any{"v": 1}, time.Minute)
+    if nil == saveErr {
+        t.Fatalf("expected save after close to error")
+    }
+}
+
+func TestFileStorage_AtomicWrite_DoesNotLeaveTempFiles(t *testing.T) {
+    directory := t.TempDir()
+    path := filepath.Join(directory, "session.json")
+
+    storage, err := NewFileStorageFromPath(path)
+    if nil != err {
+        t.Fatalf("unexpected storage error: %s", err.Error())
+    }
+    defer storage.Close()
+
+    for iteration := 0; iteration < 5; iteration++ {
+        saveErr := storage.Save(
+            "s"+strconv.Itoa(iteration),
+            map[string]any{"iteration": iteration},
+            time.Minute,
+        )
+        if nil != saveErr {
+            t.Fatalf("unexpected save error: %s", saveErr.Error())
+        }
+    }
+
+    entries, err := os.ReadDir(directory)
+    if nil != err {
+        t.Fatalf("unexpected readdir error: %s", err.Error())
+    }
+
+    for _, entry := range entries {
+        name := entry.Name()
+        if name == "session.json" {
+            continue
+        }
+
+        t.Fatalf("unexpected leftover file in session directory: %s", name)
     }
 }
 

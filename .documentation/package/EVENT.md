@@ -18,10 +18,13 @@ The event dispatcher is used by framework components (for example, the HTTP kern
     - [`NewEvent`](../../event/event.go)
     - [`NewEventWithTimestamp`](../../event/event.go)
     - [`NewEventFromEvent`](../../event/event.go)
-- Provide a deterministic dispatcher:
+- Provide a deterministic dispatcher with listener/subscriber management and an inspector:
     - [`EventDispatcher`](../../event/event_dispatcher.go)
     - [`NewEventDispatcher`](../../event/event_dispatcher.go)
-- Provide a dispatcher adapter:
+    - [`AddListener` / `RemoveListener`](../../event/event_dispatcher.go)
+    - [`AddSubscriber` / `RemoveSubscriber`](../../event/event_dispatcher.go)
+    - [`RegisteredEvents`](../../event/event_dispatcher.go) (implements [`EventDispatcherInspector`](../../event/contract/event_dispatcher_inspector.go))
+- Provide a dispatcher adapter that wraps an [`eventcontract.EventDispatcher`](../../event/contract/event_dispatcher.go):
     - [`EventDispatcherAdapter`](../../event/event_dispatcher_adapter.go)
     - [`NewEventDispatcherAdapter`](../../event/event_dispatcher_adapter.go)
 - Provide container resolver helpers:
@@ -96,6 +99,8 @@ func dispatchProductCreated(
 - [`type EventDispatcherInspector`](../../event/contract/event_dispatcher_inspector.go)
 - [`type RegisteredEvent`](../../event/contract/event_dispatcher_inspector.go)
 - [`type RegisteredListener`](../../event/contract/event_dispatcher_inspector.go)
+- [`const RegisteredListenerSourceListener`](../../event/contract/event_dispatcher_inspector.go) (`"listener"`)
+- [`const RegisteredListenerSourceSubscriber`](../../event/contract/event_dispatcher_inspector.go) (`"subscriber"`)
 
 ### Implementations (`event`)
 
@@ -105,6 +110,13 @@ func dispatchProductCreated(
     - [`NewEventFromEvent(eventcontract.Event) *Event`](../../event/event.go)
 - [`type EventDispatcher`](../../event/event_dispatcher.go)
     - [`NewEventDispatcher(clockcontract.Clock) *EventDispatcher`](../../event/event_dispatcher.go)
+    - [`(*EventDispatcher).AddListener(eventName string, listener eventcontract.EventListener, priority int) eventcontract.ListenerRegistration`](../../event/event_dispatcher.go)
+    - [`(*EventDispatcher).RemoveListener(registration eventcontract.ListenerRegistration) bool`](../../event/event_dispatcher.go)
+    - [`(*EventDispatcher).AddSubscriber(subscriber eventcontract.EventSubscriber)`](../../event/event_dispatcher.go)
+    - [`(*EventDispatcher).RemoveSubscriber(subscriber eventcontract.EventSubscriber) int`](../../event/event_dispatcher.go)
+    - [`(*EventDispatcher).Dispatch(runtimeInstance runtimecontract.Runtime, event eventcontract.Event) (eventcontract.Event, error)`](../../event/event_dispatcher.go)
+    - [`(*EventDispatcher).DispatchName(runtimeInstance runtimecontract.Runtime, eventName string, payload any) (eventcontract.Event, error)`](../../event/event_dispatcher.go)
+    - [`(*EventDispatcher).RegisteredEvents() []eventcontract.RegisteredEvent`](../../event/event_dispatcher.go)
 - [`type EventDispatcherAdapter`](../../event/event_dispatcher_adapter.go)
     - [`NewEventDispatcherAdapter(eventcontract.EventDispatcher) *EventDispatcherAdapter`](../../event/event_dispatcher_adapter.go)
 

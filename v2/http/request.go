@@ -43,9 +43,7 @@ func NewRequest(
     queryBag := bag.NewParameterBagFromValues(httpRequest.URL.Query())
     postBag := bag.NewParameterBag()
 
-    if nethttp.MethodPost == httpRequest.Method ||
-        nethttp.MethodPut == httpRequest.Method ||
-        nethttp.MethodPatch == httpRequest.Method {
+    if true == shouldAutoParseForm(httpRequest) {
         parseFormErr := httpRequest.ParseForm()
         if nil == parseFormErr {
             postBag = bag.NewParameterBagFromValues(httpRequest.PostForm)
@@ -130,6 +128,26 @@ func (instance *Request) Attributes() bagcontract.ParameterBag {
 
 func (instance *Request) Header(name string) string {
     return instance.httpRequest.Header.Get(name)
+}
+
+func shouldAutoParseForm(httpRequest *nethttp.Request) bool {
+    if nethttp.MethodPost != httpRequest.Method &&
+        nethttp.MethodPut != httpRequest.Method &&
+        nethttp.MethodPatch != httpRequest.Method {
+        return false
+    }
+
+    contentType := httpRequest.Header.Get("Content-Type")
+    if "" == contentType {
+        return false
+    }
+
+    mediaType, _, parseErr := mime.ParseMediaType(contentType)
+    if nil != parseErr {
+        return false
+    }
+
+    return "application/x-www-form-urlencoded" == mediaType || "multipart/form-data" == mediaType
 }
 
 func (instance *Request) ContentType() string {

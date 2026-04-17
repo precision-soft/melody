@@ -55,6 +55,8 @@ Resolution helpers:
 
 - [`LoggerMustFromContainer`](../../logging/service_resolver.go)
 - [`LoggerFromContainer`](../../logging/service_resolver.go)
+- [`LoggerMustFromResolver`](../../logging/service_resolver.go)
+- [`LoggerFromResolver`](../../logging/service_resolver.go)
 - [`LoggerMustFromRuntime`](../../logging/service_resolver.go)
 - [`LoggerFromRuntime`](../../logging/service_resolver.go)
 
@@ -123,6 +125,7 @@ func runWithScopedLogger(
 - `LogOnRecover` / `LogOnRecoverAndExit` will treat Melody’s `exception.ExitError` specially and terminate the process via `os.Exit(...)`. See [`recover.go`](../../logging/recover.go).
 - `NewRequestLogger` will not modify context if `requestId` is empty; it returns the base logger unchanged. See [`request_logger.go`](../../logging/request_logger.go).
 - Context keys should be camelCase. This is relied on across Melody (for example `processId`, `requestId`).
+- [`NewJsonLogger`](../../logging/json_logger.go) serializes writes through an internal mutex so concurrent calls produce cleanly-separated JSON lines on the underlying writer.
 
 ## Userland API
 
@@ -194,3 +197,5 @@ Implemented in:
 - [`LoggerFromRuntime(runtimeInstance runtimecontract.Runtime) loggingcontract.Logger`](../../logging/service_resolver.go)
 - [`LoggerMustFromContainer(serviceContainer containercontract.Container)`](../../logging/service_resolver.go)
 - [`LoggerFromContainer(serviceContainer containercontract.Container) (loggingcontract.Logger, error)`](../../logging/service_resolver.go)
+- [`LoggerMustFromResolver(resolver containercontract.Resolver)`](../../logging/service_resolver.go)
+- [`LoggerFromResolver(resolver containercontract.Resolver) (loggingcontract.Logger, error)`](../../logging/service_resolver.go)

@@ -49,11 +49,20 @@ The [`cli`](../../cli) package provides core primitives for Melody's command-lin
 
 This subpackage provides shared helpers that commands can use for consistent output formatting.
 
+- Flag names (string constants):
+    - [`FlagNameFormat`, `FlagNameNoColor`, `FlagNameVerbose`, `FlagNameVerbosity`, `FlagNameQuiet`, `FlagNameFields`, `FlagNameSortKey`, `FlagNameOrder`, `FlagNameLimit`, `FlagNameOffset`, `FlagNameTableMaxWidth`](../../cli/output/flag.go)
+    - [`output.MergeFlags(flagSets ...[]clicontract.Flag) []clicontract.Flag`](../../cli/output/flag.go)
+
+- Output format and ordering:
+    - [`type Format`](../../cli/output/format.go) with constants [`FormatTable`, `FormatJson`](../../cli/output/format.go)
+    - [`type SortOrder`](../../cli/output/format.go) with constants [`SortOrderAscending`, `SortOrderDescending`](../../cli/output/format.go)
+
 - Flags and options:
     - [`output.StandardFlags()`](../../cli/output/standard_flag.go)
     - [`output.DebugFlags()`](../../cli/output/standard_flag.go)
     - [`output.ParseOptionFromCommand(...)`](../../cli/output/option_parser.go)
     - [`output.NormalizeOption(option output.Option) output.Option`](../../cli/output/option_parser.go)
+    - [`type Option`](../../cli/output/option.go)
 
 - Printing and rendering:
     - [`output.Printer`](../../cli/output/printer.go)
@@ -62,11 +71,20 @@ This subpackage provides shared helpers that commands can use for consistent out
 
 - Table output:
     - [`output.NewTableBuilder() *output.TableBuilder`](../../cli/output/table_builder.go)
+    - [`output.NewTablePrinter(tableMaxWidth int) *output.TablePrinter`](../../cli/output/table_printer.go)
     - [`output.NewDefaultTablePrinter() *output.TablePrinter`](../../cli/output/table_printer.go)
 
 - Structured envelopes:
     - [`output.NewEnvelope(...)`](../../cli/output/envelope_factory.go)
+    - [`output.NewMeta(...)`](../../cli/output/envelope_factory.go)
+    - [`output.NewWarning(code, message, details)`](../../cli/output/envelope_factory.go)
+    - [`output.NewError(code, message, details, cause)`](../../cli/output/envelope_factory.go)
+    - [`output.NewErrorCause(message, details)`](../../cli/output/envelope_factory.go)
+    - [`output.NewListPayload[T](...)`](../../cli/output/list_payload.go)
     - [`output.Envelope`](../../cli/output/envelope.go)
+
+- Application version:
+    - [`output.SetApplicationVersion(versionString string)`](../../cli/output/application_version.go)
 
 ## Usage
 
@@ -146,4 +164,3 @@ func main() {
 - `cli.Register(...)` fails fast via the [`exception`](../../exception) package if the root command context, command, or runtime instance is nil.
 - Command names are normalized using `strings.TrimSpace(...)`. Empty names and duplicates are rejected.
 - Registered command execution will close `runtimeInstance.Scope()` and `runtimeInstance.Container()` after `Run(...)` and may return aggregated shutdown errors.
-  EOF

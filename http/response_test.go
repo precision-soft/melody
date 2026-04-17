@@ -148,8 +148,11 @@ func TestAttachmentResponse_SanitizesQuotesInFilename(t *testing.T) {
     defer response.Close()
 
     disposition := response.Headers().Get("Content-Disposition")
-    if false == strings.Contains(disposition, `\"`) {
-        t.Fatalf("expected escaped quote in Content-Disposition, got: %s", disposition)
+    if true == strings.Contains(disposition, `"`+`file`+`"`) {
+        // fine: the wrapping quotes are expected
+    }
+    if true == strings.Contains(disposition, `name"`) {
+        t.Fatalf("raw quote must not appear inside filename, got: %s", disposition)
     }
     if false == strings.Contains(disposition, "attachment") {
         t.Fatalf("expected attachment in Content-Disposition, got: %s", disposition)
@@ -216,6 +219,55 @@ func TestAttachmentResponse_EmptyFilename(t *testing.T) {
     disposition := response.Headers().Get("Content-Disposition")
     if "attachment" != disposition {
         t.Fatalf("expected plain attachment disposition, got: %s", disposition)
+    }
+}
+
+func TestAttachmentResponse_EmitsRfc5987ForNonAsciiFilename(t *testing.T) {
+    tmpFile, tmpErr := os.CreateTemp("", "melody-test-attach-*.txt")
+    if nil != tmpErr {
+        t.Fatalf("failed to create temp file: %v", tmpErr)
+    }
+    tmpFile.Close()
+    defer os.Remove(tmpFile.Name())
+
+    response, err := AttachmentResponse(200, tmpFile.Name(), "raport-mărți.txt")
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+    defer response.Close()
+
+    disposition := response.Headers().Get("Content-Disposition")
+    if false == strings.Contains(disposition, `filename="`) {
+        t.Fatalf("expected ASCII fallback filename, got: %s", disposition)
+    }
+    if false == strings.Contains(disposition, `filename*=UTF-8''`) {
+        t.Fatalf("expected RFC 5987 filename* extension, got: %s", disposition)
+    }
+    if false == strings.Contains(disposition, "%C4%83") && false == strings.Contains(disposition, "%c4%83") {
+        t.Fatalf("expected percent-encoded UTF-8 bytes for ă, got: %s", disposition)
+    }
+}
+
+func TestAttachmentResponse_AsciiOnlyFilenameOmitsRfcExtension(t *testing.T) {
+    tmpFile, tmpErr := os.CreateTemp("", "melody-test-attach-*.txt")
+    if nil != tmpErr {
+        t.Fatalf("failed to create temp file: %v", tmpErr)
+    }
+    tmpFile.Close()
+    defer os.Remove(tmpFile.Name())
+
+    response, err := AttachmentResponse(200, tmpFile.Name(), "report.txt")
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+    defer response.Close()
+
+    disposition := response.Headers().Get("Content-Disposition")
+    if true == strings.Contains(disposition, "filename*=") {
+        t.Fatalf("ASCII-only filename must not emit filename*, got: %s", disposition)
+    }
+    if `attachment; filename="report.txt"` != disposition {
+        t.Fatalf("unexpected disposition: %s", disposition)
     }
 }
 

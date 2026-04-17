@@ -6,6 +6,7 @@ import (
     "encoding/json"
     "errors"
     "strings"
+    "sync"
     "testing"
 
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
@@ -265,6 +266,53 @@ func TestJsonLogger_CustomLevelLabels(t *testing.T) {
         }
         if expected[i] != level {
             t.Fatalf("line %d: expected level %v, got %v", i, expected[i], level)
+        }
+    }
+}
+
+func TestJsonLogger_ConcurrentWritesAreSerializedIntoCompleteLines(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    logger := NewJsonLogger(buffer, loggingcontract.LevelInfo)
+
+    var waitGroup sync.WaitGroup
+
+    writerCount := 16
+    messagesPerWriter := 100
+
+    for writerIndex := 0; writerIndex < writerCount; writerIndex++ {
+        waitGroup.Add(1)
+        go func(writerId int) {
+            defer waitGroup.Done()
+            for iteration := 0; iteration < messagesPerWriter; iteration++ {
+                logger.Info(
+                    "concurrent write",
+                    map[string]any{
+                        "writerId":  writerId,
+                        "iteration": iteration,
+                    },
+                )
+            }
+        }(writerIndex)
+    }
+
+    waitGroup.Wait()
+
+    lines := strings.Split(strings.TrimSpace(buffer.String()), "\n")
+    expectedLines := writerCount * messagesPerWriter
+
+    if expectedLines != len(lines) {
+        t.Fatalf("expected %d log lines, got %d", expectedLines, len(lines))
+    }
+
+    for index, line := range lines {
+        var payload map[string]any
+        err := json.Unmarshal([]byte(line), &payload)
+        if nil != err {
+            t.Fatalf("line %d is not valid json: %v", index, err)
+        }
+
+        if "concurrent write" != payload["message"] {
+            t.Fatalf("line %d: unexpected message: %v", index, payload["message"])
         }
     }
 }

@@ -39,6 +39,39 @@ The environment name is resolved from `MELODY_ENV` inside the loaded `.env` valu
 
 A present key with an empty string value is considered **present** (it is a valid value for string parameters). Typed conversions for non-string getters treat empty strings as invalid, by design.
 
+### Environment variable keys
+
+All recognised `.env` keys and their defaults live in [`config/environment.go`](../../config/environment.go) and [`config/configuration_default.go`](../../config/configuration_default.go):
+
+| Env key                              | Parameter name                       | Default                                      |
+|--------------------------------------|--------------------------------------|----------------------------------------------|
+| `MELODY_ENV`                         | `kernel.environment`                 | `"dev"`                                      |
+| `MELODY_DEFAULT_MODE`                | `kernel.default_mode`                | `"http"`                                     |
+| `MELODY_HTTP_ADDRESS`                | `kernel.http_address`                | `":8080"`                                    |
+| `MELODY_HTTP_MAX_REQUEST_BODY_BYTES` | `kernel.http.max_request_body_bytes` | `1048576`                                    |
+| `MELODY_CLI_NAME`                    | `kernel.cli_name`                    | `"melody"`                                   |
+| `MELODY_CLI_DESCRIPTION`             | `kernel.cli_description`             | `""`                                         |
+| `MELODY_LOG_PATH`                    | `kernel.log_path`                    | `%kernel.logs_dir%/%kernel.environment%.log` |
+| `MELODY_LOG_LEVEL`                   | `kernel.log_level`                   | `"debug"`                                    |
+| `MELODY_DEFAULT_LOCALE`              | `kernel.default_locale`              | `"en"`                                       |
+| `MELODY_PUBLIC_DIR`                  | `kernel.public_dir`                  | `"public"`                                   |
+| `MELODY_STATIC_INDEX_FILE`           | `kernel.static.index_file`           | `"index.html"`                               |
+| `MELODY_STATIC_ENABLE_CACHE`         | `kernel.static.enable_cache`         | `true`                                       |
+| `MELODY_STATIC_CACHE_MAX_AGE`        | `kernel.static.cache_max_age`        | `3600`                                       |
+
+Project layout defaults that are not env-overridable:
+
+| Parameter name       | Default                            |
+|----------------------|------------------------------------|
+| `kernel.project_dir` | set from the application bootstrap |
+| `kernel.logs_dir`    | `%kernel.project_dir%/var/log`     |
+| `kernel.cache_dir`   | `%kernel.project_dir%/var/cache`   |
+
+### Environment / mode constants
+
+- [`EnvDevelopment` (`"dev"`) / `EnvProduction` (`"prod"`)](../../config/environment.go)
+- [`ModeHttp` (`"http"`) / `ModeCli` (`"cli"`)](../../config/environment.go)
+
 ## Container integration
 
 The package defines the service name:
@@ -159,6 +192,19 @@ func example() configcontract.Configuration {
 
 - [`const ServiceConfig`](../../config/service_resolver.go)
 - [`ConfigMustFromContainer(containercontract.Container) configcontract.Configuration`](../../config/service_resolver.go)
+
+### Environment variable keys (`config`)
+
+- [`EnvKey`, `DefaultModeKey`, `HttpAddressKey`, `HttpMaxRequestBodyBytesKey`, `CliNameKey`, `CliDescriptionKey`, `LogPathKey`, `LogLevelKey`, `DefaultLocaleKey`, `PublicDirKey`, `StaticIndexFileKey`, `StaticEnableCacheKey`, `StaticCacheMaxAgeKey`](../../config/environment.go)
+
+### Kernel parameter names (`config`)
+
+- [`KernelDefaultMode`, `KernelEnv`, `KernelHttpAddress`, `KernelHttpMaxRequestBodyBytes`, `KernelCliName`, `KernelCliDescription`, `KernelLogPath`, `KernelLogLevel`, `KernelDefaultLocale`, `KernelPublicDir`, `KernelStaticIndexFile`, `KernelStaticEnableCache`, `KernelStaticCacheMaxAge`, `KernelProjectDir`, `KernelLogsDir`, `KernelCacheDir`](../../config/environment.go)
+
+### Environment / mode constants (`config`)
+
+- [`EnvDevelopment`, `EnvProduction`](../../config/environment.go)
+- [`ModeHttp`, `ModeCli`](../../config/environment.go)
 
 ### Contracts (`config/contract`)
 
