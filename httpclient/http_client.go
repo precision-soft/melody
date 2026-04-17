@@ -8,6 +8,7 @@ import (
     nethttp "net/http"
     "net/url"
     "strings"
+    "sync"
     "time"
 
     "github.com/precision-soft/melody/exception"
@@ -27,6 +28,7 @@ func NewDefaultHttpClient() *HttpClient {
 
 type HttpClient struct {
     client  *nethttp.Client
+    mutex   sync.RWMutex
     baseUrl string
     headers map[string]string
     timeout time.Duration
@@ -126,9 +128,11 @@ func (instance *HttpClient) Request(method string, urlString string, options ...
         return nil, exception.NewError("failed to create request", nil, err)
     }
 
+    instance.mutex.RLock()
     for key, value := range instance.headers {
         request.Header.Set(key, value)
     }
+    instance.mutex.RUnlock()
 
     for key, value := range requestConfig.Headers() {
         request.Header.Set(key, value)
@@ -235,9 +239,11 @@ func (instance *HttpClient) RequestStream(
         return nil, exception.NewError("failed to create request", nil, err)
     }
 
+    instance.mutex.RLock()
     for key, value := range instance.headers {
         requestInstance.Header.Set(key, value)
     }
+    instance.mutex.RUnlock()
 
     for key, value := range requestConfig.Headers() {
         requestInstance.Header.Set(key, value)
@@ -281,10 +287,14 @@ func (instance *HttpClient) RequestStream(
 }
 
 func (instance *HttpClient) buildUrl(urlString string, query map[string]string) (string, error) {
-    if "" != instance.baseUrl &&
+    instance.mutex.RLock()
+    baseUrl := instance.baseUrl
+    instance.mutex.RUnlock()
+
+    if "" != baseUrl &&
         false == strings.HasPrefix(urlString, "http://") &&
         false == strings.HasPrefix(urlString, "https://") {
-        urlString = strings.TrimSuffix(instance.baseUrl, "/") + "/" + strings.TrimPrefix(urlString, "/")
+        urlString = strings.TrimSuffix(baseUrl, "/") + "/" + strings.TrimPrefix(urlString, "/")
     }
 
     if 0 == len(query) {
@@ -312,20 +322,34 @@ func (instance *HttpClient) buildUrl(urlString string, query map[string]string) 
 }
 
 func (instance *HttpClient) SetBaseUrl(baseUrl string) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
     instance.baseUrl = baseUrl
 }
 
 func (instance *HttpClient) SetHeader(key string, value string) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
     instance.headers[key] = value
 }
 
 func (instance *HttpClient) SetTimeout(timeout time.Duration) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
     instance.timeout = timeout
-    instance.client.Timeout = timeout
 }
 
 func (instance *HttpClient) clientForRequest(timeout time.Duration) *nethttp.Client {
     if 0 >= timeout {
+        instance.mutex.RLock()
+        timeout = instance.timeout
+        instance.mutex.RUnlock()
+    }
+
+    if 0 >= timeout || instance.client.Timeout == timeout {
         return instance.client
     }
 

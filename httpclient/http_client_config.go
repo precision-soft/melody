@@ -40,5 +40,10 @@ func (instance *HttpClientConfig) Timeout() time.Duration {
 }
 
 func (instance *HttpClientConfig) Headers() map[string]string {
-    return instance.headers
+    copied := make(map[string]string, len(instance.headers))
+    for key, value := range instance.headers {
+        copied[key] = value
+    }
+
+    return copied
 }

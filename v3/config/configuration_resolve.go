@@ -180,7 +180,8 @@ func (instance *Configuration) resolveSinglePass(
             return match
         }
 
-        resolvedReferencedValue, err := instance.resolveWithTemplates(
+        var resolvedReferencedValue string
+        resolvedReferencedValue, err = instance.resolveWithTemplates(
             environmentValueString,
             parameterKey,
             resolving,

@@ -58,13 +58,15 @@ func (instance *InMemoryStorage) Load(sessionId string) (map[string]any, bool, e
 
     instance.mutex.RLock()
     entry, exists := instance.sessions[sessionId]
-    instance.mutex.RUnlock()
 
     if false == exists {
+        instance.mutex.RUnlock()
         return nil, false, nil
     }
 
     if nil != entry.expiresAt && true == entry.expiresAt.Before(now) {
+        instance.mutex.RUnlock()
+
         instance.mutex.Lock()
         delete(instance.sessions, sessionId)
         instance.mutex.Unlock()
@@ -76,6 +78,7 @@ func (instance *InMemoryStorage) Load(sessionId string) (map[string]any, bool, e
     for key, value := range entry.data {
         result[key] = value
     }
+    instance.mutex.RUnlock()
 
     return result, true, nil
 }

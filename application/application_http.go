@@ -13,6 +13,8 @@ import (
     "github.com/precision-soft/melody/logging"
 )
 
+const httpShutdownTimeout = 5 * time.Second
+
 func (instance *Application) RegisterHttpRoute(
     method string,
     pattern string,
@@ -98,7 +100,7 @@ func (instance *Application) runHttp(
 
     select {
     case <-ctx.Done():
-        shutdownContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+        shutdownContext, cancel := context.WithTimeout(context.Background(), httpShutdownTimeout)
         defer cancel()
 
         shutdownErr := httpServer.Shutdown(shutdownContext)

@@ -185,44 +185,44 @@ func TestCorsMiddleware_PreflightOptions(t *testing.T) {
 }
 
 func TestCorsMiddleware_CredentialsWithWildcardOriginPanics(t *testing.T) {
-	defer func() {
-		recoveredValue := recover()
-		if nil == recoveredValue {
-			t.Fatalf("expected panic when credentials used with wildcard origin")
-		}
-	}()
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected panic when credentials used with wildcard origin")
+        }
+    }()
 
-	config := NewCorsConfig(
-		[]string{"*"},
-		nil,
-		nil,
-		nil,
-		true,
-		0,
-		nil,
-	)
+    config := NewCorsConfig(
+        []string{"*"},
+        nil,
+        nil,
+        nil,
+        true,
+        0,
+        nil,
+    )
 
-	_ = CorsMiddleware(config)
+    _ = CorsMiddleware(config)
 }
 
 func TestCorsMiddleware_CredentialsWithSpecificOriginDoesNotPanic(t *testing.T) {
-	defer func() {
-		if nil != recover() {
-			t.Fatalf("did not expect panic when credentials used with specific origin")
-		}
-	}()
+    defer func() {
+        if nil != recover() {
+            t.Fatalf("did not expect panic when credentials used with specific origin")
+        }
+    }()
 
-	config := NewCorsConfig(
-		[]string{"https://example.com"},
-		nil,
-		nil,
-		nil,
-		true,
-		0,
-		nil,
-	)
+    config := NewCorsConfig(
+        []string{"https://example.com"},
+        nil,
+        nil,
+        nil,
+        true,
+        0,
+        nil,
+    )
 
-	_ = CorsMiddleware(config)
+    _ = CorsMiddleware(config)
 }
 
 func TestCorsMiddleware_NonPreflightAddsHeaders(t *testing.T) {

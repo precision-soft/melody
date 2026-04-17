@@ -15,8 +15,8 @@ import (
 )
 
 var (
-    envPlaceholderPattern       = regexp.MustCompile(`%env\(([A-Za-z0-9_]+)\)%`)
-    parameterPlaceholderPattern = regexp.MustCompile(`%([A-Za-z0-9_.]+)%`)
+    envPlaceholderPattern       = regexp.MustCompile(`%env\(([A-Za-z_][A-Za-z0-9_]*)\)%`)
+    parameterPlaceholderPattern = regexp.MustCompile(`%([A-Za-z_][A-Za-z0-9_.]+)%`)
 )
 
 const (

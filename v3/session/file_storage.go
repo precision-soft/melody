@@ -106,13 +106,15 @@ func (instance *FileStorage) Load(sessionId string) (map[string]any, bool, error
 
     instance.mutex.RLock()
     entry, exists := instance.sessionById[sessionId]
-    instance.mutex.RUnlock()
 
     if false == exists {
+        instance.mutex.RUnlock()
         return nil, false, nil
     }
 
     if 0 != entry.ExpiresAt && now >= entry.ExpiresAt {
+        instance.mutex.RUnlock()
+
         instance.mutex.Lock()
         _, stillExists := instance.sessionById[sessionId]
         if true == stillExists {
@@ -129,6 +131,7 @@ func (instance *FileStorage) Load(sessionId string) (map[string]any, bool, error
     }
 
     dataCopy := copyAnyMap(entry.Data)
+    instance.mutex.RUnlock()
 
     return dataCopy, true, nil
 }
@@ -328,7 +331,7 @@ func (instance *FileStorage) flushToFile() error {
             }
         }
 
-        return instance.loadFromFile()
+        return nil
     }
 
     _, err := fileInstance.Seek(0, 0)

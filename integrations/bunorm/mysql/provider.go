@@ -314,10 +314,6 @@ func (instance *Provider) isTransientError(inputErr error) bool {
         if true == netErr.Timeout() {
             return true
         }
-
-        if temp, ok := netErr.(interface{ Temporary() bool }); true == ok && true == temp.Temporary() {
-            return true
-        }
     }
 
     transientMarkers := []string{

@@ -1,5 +1,10 @@
 # Melody
 
+[![Go >= 1.22](https://img.shields.io/badge/go-%3E%3D1.22-00ADD8)](https://go.dev/)
+[![Go Report Card](https://goreportcard.com/badge/github.com/precision-soft/melody)](https://goreportcard.com/report/github.com/precision-soft/melody)
+[![Go Reference](https://pkg.go.dev/badge/github.com/precision-soft/melody.svg)](https://pkg.go.dev/github.com/precision-soft/melody)
+[![License MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 Melody is a Go framework focused on building **HTTP applications and CLI commands** on top of the same runtime, container, configuration, logging, and validation infrastructure.
 
 The repository also contains a complete userland showcase under [`./.example/`](./.example/).

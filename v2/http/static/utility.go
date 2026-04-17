@@ -43,6 +43,20 @@ func (instance *dirFileSystem) Open(name string) (fs.File, error) {
         fullPath = instance.basePath + string(os.PathSeparator) + cleaned
     }
 
+    realPath, evalErr := filepath.EvalSymlinks(fullPath)
+    if nil != evalErr {
+        return nil, evalErr
+    }
+
+    realBase, evalBaseErr := filepath.EvalSymlinks(instance.basePath)
+    if nil != evalBaseErr {
+        realBase = instance.basePath
+    }
+
+    if false == strings.HasPrefix(realPath, realBase+string(os.PathSeparator)) && realPath != realBase {
+        return nil, fs.ErrPermission
+    }
+
     return os.Open(fullPath)
 }
 

@@ -29,7 +29,7 @@ func TestUrlGenerationRouteDefinition_Requirements_ReturnsCopy(t *testing.T) {
     regex := regexp.MustCompile(`\d+`)
 
     routeValue := route{
-        pattern: "/test/:id",
+        pattern:  "/test/:id",
         defaults: map[string]string{},
         requirements: map[string]*regexp.Regexp{
             "id": regex,

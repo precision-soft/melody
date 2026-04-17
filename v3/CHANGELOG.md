@@ -5,6 +5,44 @@ All notable changes to `precision-soft/melody/v3` will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [v3.3.1] - 2026-04-16
+
+### Fixed
+
+- `http/middleware/compression.go` — compression middleware now propagates `io.ReadAll` errors instead of silently returning partial data to the client; simplified level validation to single `HuffmanOnly`/`BestCompression` bounds check
+- `http/static/utility.go` — static file server now validates resolved symlink targets via `filepath.EvalSymlinks()` and returns 403 for paths escaping the configured root directory; `EvalSymlinks` errors are now propagated directly instead of being mapped to `fs.ErrNotExist`
+- `config/configuration.go` — placeholder regex now requires identifiers to start with a letter or underscore, rejecting patterns like `%1invalid%`
+- `config/configuration_resolve.go` — fix shadowed `err` variable in `resolveSinglePass` that silently discarded template resolution errors
+- `session/file_storage.go` — `flushToFile` no longer redundantly reloads the file after a successful rename-based swap
+- `logging/logger.go` — `LogError()` nil-logger check moved after the fallback `log.Printf` path so `AlreadyLogged` is only evaluated when a logger is present
+- `session/in_memory_storage.go` — `Load()` now holds `RLock` during the data copy to prevent a race with concurrent `Save()` calls
+- `session/file_storage.go` — `Load()` now holds `RLock` during `copyAnyMap()` to prevent a race with concurrent `Save()` calls
+- `httpclient/http_client.go` — `SetTimeout()` no longer mutates `http.Client.Timeout` on the shared client (which races with in-flight `Do()` calls); `clientForRequest` now reads the instance timeout under `RLock` and builds a per-request client only when it differs from the shared client's construction timeout
+- `logging/emergency_logger.go` — `CloseEmergencyLogger()` now resets the singleton to `nil` so that subsequent `EmergencyLogger()` calls actually create a fresh instance (previously the closed instance was retained)
+
+### Changed
+
+- `httpclient/http_client.go` — added `sync.RWMutex` to protect concurrent access to `baseUrl`, `headers`, and `timeout` fields
+- `httpclient/http_client_config.go` — `Headers()` now returns a defensive copy of the map
+- `cli/output/application_version.go` — application version storage replaced with `sync/atomic.Value` for thread safety
+- `logging/emergency_logger.go` — replaced `sync.Once` with `sync.Mutex` so `CloseEmergencyLogger()` can reset the singleton and a subsequent `EmergencyLogger()` call creates a fresh instance
+- `http/kernel.go` — `debugMode` variable hoisted to single computation at request entry
+- `application/application_http.go` — extracted `httpShutdownTimeout` constant for the HTTP server shutdown deadline
+- `cache/in_memory.go` — removed redundant map copy in `SetMultiple`
+- Removed deprecated `net.Error.Temporary()` call from `integrations/bunorm/mysql` provider
+
+### Added
+
+- `http/static/utility_test.go` — symlink traversal rejection, absolute path rejection, parent traversal rejection, symlink within root allowed
+- `cli/output/application_version_test.go` — Set/Get coverage and concurrent access race test
+- `logging/emergency_logger_test.go` — singleton behavior, `Close`/recreate cycle, concurrent access
+- `httpclient/http_client_test.go` — concurrent `SetHeader`/`SetBaseUrl`/`SetTimeout` with in-flight requests, `HttpClientConfig.Headers()` defensive copy
+- `http/middleware/compression_test.go` — HuffmanOnly and BestCompression level boundary acceptance, out-of-range fallback to DefaultCompression
+- `config/configuration_test.go` — placeholder regex rejects identifiers starting with digits, accepts letter/underscore/dotted identifiers
+- `session/in_memory_storage_test.go`, `session/file_storage_test.go` — concurrent `Load`/`Save` race tests
+
 ## [v3.3.0] - 2026-04-14
 
 ### Changed
@@ -99,6 +137,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Introduce Melody v3 module (`github.com/precision-soft/melody/v3`)
 - Application context in constructor
 - `ServiceModule` simplification
+
+[Unreleased]: https://github.com/precision-soft/melody/compare/v3.3.1...HEAD
+
+[v3.3.1]: https://github.com/precision-soft/melody/compare/v3.3.0...v3.3.1
 
 [v3.3.0]: https://github.com/precision-soft/melody/compare/v3.2.0...v3.3.0
 

@@ -2,6 +2,9 @@ package session
 
 import (
     "os"
+    "path/filepath"
+    "strconv"
+    "sync"
     "testing"
     "time"
 )
@@ -173,4 +176,63 @@ func TestFileStorage_Save_PersistsAcrossInstances_ByInjectedFile(t *testing.T) {
     if "v" != data["k"].(string) {
         t.Fatalf("expected persisted value")
     }
+}
+
+func TestFileStorage_ConcurrentLoadSaveIsRaceFree(t *testing.T) {
+    directory := t.TempDir()
+    path := filepath.Join(directory, "session.json")
+
+    storage, err := NewFileStorageFromPath(path)
+    if nil != err {
+        t.Fatalf("unexpected storage error: %s", err.Error())
+    }
+    defer storage.Close()
+
+    sessionId := "concurrent-session"
+
+    if saveErr := storage.Save(sessionId, map[string]any{"counter": 0}, time.Minute); nil != saveErr {
+        t.Fatalf("unexpected save error: %s", saveErr.Error())
+    }
+
+    var waitGroup sync.WaitGroup
+    iterations := 20
+
+    for writerIndex := 0; writerIndex < 4; writerIndex++ {
+        waitGroup.Add(1)
+        go func(writerId int) {
+            defer waitGroup.Done()
+            for index := 0; index < iterations; index++ {
+                _ = storage.Save(
+                    sessionId,
+                    map[string]any{
+                        "counter": index,
+                        "worker":  strconv.Itoa(writerId),
+                        "nested": map[string]any{
+                            "value": index,
+                        },
+                    },
+                    time.Minute,
+                )
+            }
+        }(writerIndex)
+    }
+
+    for readerIndex := 0; readerIndex < 4; readerIndex++ {
+        waitGroup.Add(1)
+        go func() {
+            defer waitGroup.Done()
+            for index := 0; index < iterations; index++ {
+                loaded, _, loadErr := storage.Load(sessionId)
+                if nil != loadErr {
+                    t.Errorf("load error: %v", loadErr)
+                    return
+                }
+                for key := range loaded {
+                    _ = loaded[key]
+                }
+            }
+        }()
+    }
+
+    waitGroup.Wait()
 }

@@ -238,15 +238,10 @@ func (instance *InMemoryBackend) Many(keys []string) (map[string][]byte, error) 
 func (instance *InMemoryBackend) SetMultiple(items map[string][]byte, ttl time.Duration) error {
     now := instance.clock.Now()
 
-    normalizedItems := make(map[string][]byte, len(items))
-    for key, payload := range items {
-        normalizedItems[key] = payload
-    }
-
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    for key, payload := range normalizedItems {
+    for key, payload := range items {
         instance.upsertLocked(
             key,
             payload,

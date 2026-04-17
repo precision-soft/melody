@@ -8,19 +8,25 @@ import (
 )
 
 var (
-    emergencyLoggerOnce     sync.Once
+    emergencyLoggerMutex    sync.Mutex
     emergencyLoggerInstance loggingcontract.Logger
 )
 
 func EmergencyLogger() loggingcontract.Logger {
-    emergencyLoggerOnce.Do(func() {
+    emergencyLoggerMutex.Lock()
+    defer emergencyLoggerMutex.Unlock()
+
+    if nil == emergencyLoggerInstance {
         emergencyLoggerInstance = NewJsonLogger(os.Stderr, loggingcontract.LevelInfo)
-    })
+    }
 
     return emergencyLoggerInstance
 }
 
 func CloseEmergencyLogger() {
+    emergencyLoggerMutex.Lock()
+    defer emergencyLoggerMutex.Unlock()
+
     if nil == emergencyLoggerInstance {
         return
     }
@@ -28,4 +34,6 @@ func CloseEmergencyLogger() {
     if closer, isCloser := emergencyLoggerInstance.(interface{ Close() error }); true == isCloser {
         _ = closer.Close()
     }
+
+    emergencyLoggerInstance = nil
 }

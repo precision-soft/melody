@@ -126,6 +126,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
         configuration := config.ConfigMustFromContainer(serviceContainer)
         defaultLocale := configuration.Http().DefaultLocale()
+        debugMode := config.EnvDevelopment == configuration.Kernel().Env()
 
         sessionManager := session.SessionMustFromContainer(serviceContainer)
         cookie, _ := request.Cookie(session.SessionCookieName)
@@ -321,8 +322,6 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             }
 
             if nil == exceptionEvent.Response() {
-                debugMode := config.EnvDevelopment == configuration.Kernel().Env()
-
                 statusCode := nethttp.StatusInternalServerError
                 message := "internal server error"
                 if true == debugMode {
@@ -475,8 +474,6 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                         }
 
                         if nil == kernelExceptionEvent.Response() {
-                            debugMode := config.EnvDevelopment == configuration.Kernel().Env()
-
                             statusCode := nethttp.StatusInternalServerError
                             message := "internal server error"
                             if true == debugMode {
@@ -558,8 +555,6 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             }
 
             if nil == kernelExceptionEvent.Response() {
-                debugMode := config.EnvDevelopment == configuration.Kernel().Env()
-
                 statusCode := nethttp.StatusInternalServerError
                 message := "internal server error"
                 if true == debugMode {

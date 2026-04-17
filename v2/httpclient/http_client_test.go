@@ -6,6 +6,8 @@ import (
     "io"
     "net/http"
     "net/http/httptest"
+    "strconv"
+    "sync"
     "testing"
     "time"
 )
@@ -363,5 +365,61 @@ func TestHttpClientRequest_InvalidBaseUrlReturnsError(t *testing.T) {
     _, err := client.Get("/")
     if nil == err {
         t.Fatalf("expected error")
+    }
+}
+
+func TestHttpClientConcurrentSettersAndRequests(t *testing.T) {
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        writer.WriteHeader(200)
+    }))
+    defer server.Close()
+
+    client := NewHttpClient(NewHttpClientConfig(server.URL, 100*time.Millisecond, nil))
+
+    var waitGroup sync.WaitGroup
+    iterations := 50
+
+    for workerIndex := 0; workerIndex < 4; workerIndex++ {
+        waitGroup.Add(1)
+        go func(workerId int) {
+            defer waitGroup.Done()
+            for index := 0; index < iterations; index++ {
+                client.SetHeader("X-Worker-"+strconv.Itoa(workerId), strconv.Itoa(index))
+                client.SetBaseUrl(server.URL)
+                client.SetTimeout(100 * time.Millisecond)
+            }
+        }(workerIndex)
+    }
+
+    waitGroup.Add(1)
+    go func() {
+        defer waitGroup.Done()
+        for index := 0; index < iterations; index++ {
+            _, _ = client.Get("/")
+        }
+    }()
+
+    waitGroup.Wait()
+}
+
+func TestHttpClientConfigHeaders_ReturnsDefensiveCopy(t *testing.T) {
+    config := NewHttpClientConfig(
+        "",
+        0,
+        map[string]string{
+            "X-Test": "original",
+        },
+    )
+
+    first := config.Headers()
+    first["X-Test"] = "mutated"
+    first["X-New"] = "added"
+
+    second := config.Headers()
+    if "original" != second["X-Test"] {
+        t.Fatalf("expected defensive copy, got %q", second["X-Test"])
+    }
+    if _, exists := second["X-New"]; true == exists {
+        t.Fatalf("expected no new key leaked into config")
     }
 }

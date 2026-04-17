@@ -26,12 +26,6 @@ func LogError(logger loggingcontract.Logger, err error) {
 
     var exceptionValue *exception.Error
     if true == errors.As(err, &exceptionValue) {
-        if nil != logger {
-            if true == exceptionValue.AlreadyLogged() {
-                return
-            }
-        }
-
         levelUpper := strings.ToUpper(string(exceptionValue.Level()))
         enrichedContext := enrichContextWithCause(exceptionValue)
 
@@ -42,6 +36,10 @@ func LogError(logger loggingcontract.Logger, err error) {
                 log.Printf("[%s] %s", levelUpper, exceptionValue.Message())
             }
 
+            return
+        }
+
+        if true == exceptionValue.AlreadyLogged() {
             return
         }
 
@@ -108,4 +106,3 @@ func enrichContextWithCause(exceptionValue *exception.Error) exceptioncontract.C
 
     return context
 }
-

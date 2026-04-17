@@ -1,6 +1,8 @@
 package session
 
 import (
+    "strconv"
+    "sync"
     "testing"
     "time"
 )
@@ -123,4 +125,57 @@ func TestNewInMemoryStorageWithCleanupInterval_PanicsWhenIntervalIsZeroOrNegativ
     }()
 
     _ = NewInMemoryStorageWithCleanupInterval(0)
+}
+
+func TestInMemoryStorage_ConcurrentLoadSaveIsRaceFree(t *testing.T) {
+    storage := NewInMemoryStorage()
+    defer storage.Close()
+
+    sessionId := "concurrent-session"
+
+    initialData := map[string]any{
+        "counter": 0,
+    }
+    if saveErr := storage.Save(sessionId, initialData, time.Minute); nil != saveErr {
+        t.Fatalf("unexpected save error: %v", saveErr)
+    }
+
+    var waitGroup sync.WaitGroup
+    iterations := 50
+
+    for writerIndex := 0; writerIndex < 4; writerIndex++ {
+        waitGroup.Add(1)
+        go func(writerId int) {
+            defer waitGroup.Done()
+            for index := 0; index < iterations; index++ {
+                _ = storage.Save(
+                    sessionId,
+                    map[string]any{
+                        "counter": index,
+                        "worker":  strconv.Itoa(writerId),
+                    },
+                    time.Minute,
+                )
+            }
+        }(writerIndex)
+    }
+
+    for readerIndex := 0; readerIndex < 4; readerIndex++ {
+        waitGroup.Add(1)
+        go func() {
+            defer waitGroup.Done()
+            for index := 0; index < iterations; index++ {
+                loaded, _, loadErr := storage.Load(sessionId)
+                if nil != loadErr {
+                    t.Errorf("load error: %v", loadErr)
+                    return
+                }
+                for key := range loaded {
+                    _ = loaded[key]
+                }
+            }
+        }()
+    }
+
+    waitGroup.Wait()
 }

@@ -102,7 +102,7 @@ func DefaultCompressionConfig() *CompressionConfig {
 }
 
 func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
-    if gzip.DefaultCompression > config.Level() || gzip.BestCompression < config.Level() {
+    if gzip.HuffmanOnly > config.Level() || gzip.BestCompression < config.Level() {
         config.SetLevel(gzip.DefaultCompression)
     }
 
@@ -163,8 +163,7 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
 
             data, readErr := io.ReadAll(originalReader)
             if nil != readErr {
-                response.SetBodyReader(bytes.NewReader(data))
-                return response, nil
+                return response, readErr
             }
 
             if config.MinSize() > len(data) {
