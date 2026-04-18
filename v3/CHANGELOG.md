@@ -35,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `http/middleware.CorsConfig`, `http/middleware.NewCorsConfig`, `http/middleware.DefaultCorsConfig`, `http/middleware.RestrictiveCorsConfig`, `http/middleware.CorsMiddleware`, `http/middleware.DefaultCorsMiddleware`, `http/middleware.RestrictiveCors` — use the equivalents in `github.com/precision-soft/melody/v3/http/cors` instead. Deprecated symbols are kept for backwards compatibility; no removal scheduled.
 
-## [v3.3.1] - 2026-04-16
+## [v3.3.1] - 2026-04-17
 
 ### Fixed
 
@@ -82,7 +82,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `logging/logger.go` — add GoDoc comment to `causeChainMaxDepth` constant
 - `security/compiled_configuration.go` — group string fields in `CompiledFirewall` struct (`name`, `matcherDescription`, `loginPath`, `logoutPath`)
 
-## [v3.2.0] - 2026-04-12
+## [v3.2.0] - 2026-04-13
 
 ### Fixed
 
