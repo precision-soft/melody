@@ -7,16 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v2.5.0] - 2026-04-17
+## [v2.6.0] - 2026-04-20 - Harden HTTP Server Timeouts
 
 ### Added
 
-- `http/cors/` — new subpackage extracted from `http/middleware/cors.go`. Split into `cors.Service`, `cors.Middleware`, and `cors.RegisterResponseListener` so CORS headers are applied both on the happy path (middleware) and on error-path responses produced by the kernel (`kernel.response` listener, priority `-100`)
-- `http/response.go` — `BuildContentDisposition(disposition, filename)` emits RFC 6266 `Content-Disposition` with both `filename="..."` ASCII fallback and `filename*=UTF-8''...` RFC 5987 encoding for non-ASCII filenames; `AttachmentResponse` now routes through it
-- `http/middleware/rate_limit.go` — `ClientIpResolver` hook and `DefaultClientIp` for proxy-aware IP resolution; `RateLimitConfig.SetClientIpResolver(...)` lets userland install X-Forwarded-For / X-Real-IP strategies without rewriting key extractors
-- `http/request.go` — form auto-parsing now gated on `Content-Type` (`application/x-www-form-urlencoded` or `multipart/form-data`); JSON/XML/binary bodies are no longer consumed by `NewRequest`
-- `session/session.go` — `isValidSessionId` enforces 32-char lowercase-hex format; `Manager.Session`/`DeleteSession` reject malformed cookies before hitting storage
-- Test coverage: `http/cors/{listener,middleware,service}_test.go`, `http/request_test.go`, `http/response_test.go`, `container/scope_test.go` concurrent Close/resolve test, `logging/json_logger_test.go` concurrent writes, `session/file_storage_test.go` atomic write and reopen coverage
+- `application/application_http.go` — HTTP server now sets hardened timeout defaults (`ReadTimeout=15s`, `ReadHeaderTimeout=5s`, `WriteTimeout=30s`, `IdleTimeout=60s`, `MaxHeaderBytes=1MiB`) to defend against slowloris / slow-body attacks on exposed servers (MEL-148)
+- `application/application_http_timeouts.go` — new optional `HttpTimeoutConfiguration` interface; any `HttpConfiguration` that implements it can override the hardened defaults per timeout without breaking existing configurations (MEL-148)
+- `application/application_http_timeouts_test.go` — coverage for default application and interface-driven overrides
+
+## [v2.5.0] - 2026-04-17 - Extract HTTP CORS Subpackage and Harden Request Lifecycle
 
 ### Changed
 
@@ -31,11 +30,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `session/file_storage.go` — file writes are now atomic (`os.CreateTemp` + `os.Rename`) instead of truncate-in-place; load path decoupled from a long-lived `*os.File` handle; `ownsFile` retired in favor of path-based ownership
 - `.documentation/package/*.md` — full documentation overhaul across APPLICATION/CACHE/CLI/CONFIG/CONTAINER/EVENT/HTTP/HTTPCLIENT/LOGGING/SECURITY/SESSION/VALIDATION: added missing userland types, constructors, container-access helpers, environment key tables, constants, and footgun notes
 
+### Added
+
+- `http/cors/` — new subpackage extracted from `http/middleware/cors.go`. Split into `cors.Service`, `cors.Middleware`, and `cors.RegisterResponseListener` so CORS headers are applied both on the happy path (middleware) and on error-path responses produced by the kernel (`kernel.response` listener, priority `-100`)
+- `http/response.go` — `BuildContentDisposition(disposition, filename)` emits RFC 6266 `Content-Disposition` with both `filename="..."` ASCII fallback and `filename*=UTF-8''...` RFC 5987 encoding for non-ASCII filenames; `AttachmentResponse` now routes through it
+- `http/middleware/rate_limit.go` — `ClientIpResolver` hook and `DefaultClientIp` for proxy-aware IP resolution; `RateLimitConfig.SetClientIpResolver(...)` lets userland install X-Forwarded-For / X-Real-IP strategies without rewriting key extractors
+- `http/request.go` — form auto-parsing now gated on `Content-Type` (`application/x-www-form-urlencoded` or `multipart/form-data`); JSON/XML/binary bodies are no longer consumed by `NewRequest`
+- `session/session.go` — `isValidSessionId` enforces 32-char lowercase-hex format; `Manager.Session`/`DeleteSession` reject malformed cookies before hitting storage
+- Test coverage: `http/cors/{listener,middleware,service}_test.go`, `http/request_test.go`, `http/response_test.go`, `container/scope_test.go` concurrent Close/resolve test, `logging/json_logger_test.go` concurrent writes, `session/file_storage_test.go` atomic write and reopen coverage
+
 ### Deprecated
 
 - `http/middleware.CorsConfig`, `http/middleware.NewCorsConfig`, `http/middleware.DefaultCorsConfig`, `http/middleware.RestrictiveCorsConfig`, `http/middleware.CorsMiddleware`, `http/middleware.DefaultCorsMiddleware`, `http/middleware.RestrictiveCors` — use the equivalents in `github.com/precision-soft/melody/v2/http/cors` instead. Deprecated symbols are kept for backwards compatibility; no removal scheduled.
 
-## [v2.4.1] - 2026-04-17
+## [v2.4.1] - 2026-04-17 - Fix Compression Error Propagation and Concurrent Access Races
 
 ### Fixed
 
@@ -59,7 +67,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `http/kernel.go` — `debugMode` variable hoisted to single computation at request entry
 - `application/application_http.go` — extracted `httpShutdownTimeout` constant for the HTTP server shutdown deadline
 - `cache/in_memory.go` — removed redundant map copy in `SetMultiple`
-- Removed deprecated `net.Error.Temporary()` call from `integrations/bunorm/mysql` provider
 
 ### Added
 
@@ -71,7 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `config/configuration_test.go` — placeholder regex rejects identifiers starting with digits, accepts letter/underscore/dotted identifiers
 - `session/in_memory_storage_test.go`, `session/file_storage_test.go` — concurrent `Load`/`Save` race tests
 
-## [v2.4.0] - 2026-04-14
+## [v2.4.0] - 2026-04-14 - Improve Goroutine Lifecycle and Default Logger
 
 ### Changed
 
@@ -82,7 +89,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `logging/logger.go` — add GoDoc comment to `causeChainMaxDepth` constant
 - `security/compiled_configuration.go` — group string fields in `CompiledFirewall` struct (`name`, `matcherDescription`, `loginPath`, `logoutPath`)
 
-## [v2.3.0] - 2026-04-13
+## [v2.3.0] - 2026-04-13 - Fix Validators, Rate Limiter, and Router
 
 ### Fixed
 
@@ -103,7 +110,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `router_utility.go` — remove implicit HEAD-to-GET match from `matchesMethod`; kernel `HeadFallbackToGet` policy is now the single control point
 - `httpclient/http_client.go` — extract shared request-building logic into `buildRequest` helper; `Request` and `RequestStream` both delegate to it
 
-## [v2.2.4] - 2026-04-10
+## [v2.2.4] - 2026-04-10 - Fix XSS, Symlink Traversal, and Routing Edge Cases
 
 ### Fixed
 
@@ -126,70 +133,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `request_test.go`, `middleware/compression_test.go`, `middleware/cors_test.go`, `url_generation_route_definition_test.go` — new and expanded test coverage for all fixes
 
-## [v2.2.3] - 2026-03-21
+## [v2.2.3] - 2026-03-21 - Refactor Address Colon Check in Config
 
 ### Changed
 
-- Replace address colon check with `strings.Contains`
+- `config/http.go` — replaced colon-based address check with `strings.Contains` for correct host:port detection
 
-## [v2.2.2] - 2026-03-18
-
-### Fixed
-
-- Align HEAD handling and response contract validation
-
-## [v2.2.1] - 2026-03-17
+## [v2.2.2] - 2026-03-18 - Fix HTTP HEAD Handling and Update Dev Scripts
 
 ### Fixed
 
-- Preserve numeric logging level labels in JSON output
-
-## [v2.2.0] - 2026-03-17
-
-### Added
-
-- Module configuration registration and customizable logging level labels
-
-## [v2.1.3] - 2026-03-05
-
-### Added
-
-- CLI table width flag for table output
-
-## [v2.1.2] - 2026-02-28
-
-### Added
-
-- CLI wire `stdout`/`stderr` and print command errors with failed status
+- `http/router_utility.go` — aligned HEAD handling and response contract validation; prevents incorrect responses on HEAD requests
 
 ### Changed
 
-- Standardize method receivers to `instance`
+- `internal/reflect.go` — updated type-reflection utilities
 
-## [v2.1.1] - 2026-02-23
-
-### Fixed
-
-- Security: auto-upgrade `RoleVoter` to `RoleHierarchyVoter` when role hierarchy is configured
-
-## [v2.1.0] - 2026-02-18
-
-### Added
-
-- Validation: `greaterThan`/`notEmpty` constraints with per-constraint error codes
-- Exception: context-aware wrapping helper
+## [v2.2.1] - 2026-03-17 - Fix JSON Logging Level Label Preservation
 
 ### Fixed
 
-- Broken `CONTRIBUTING.md` links
+- `logging/contract/level.go`, `logging/logger.go` — preserved numeric logging level labels in JSON output; `logging/json_logger_test.go` — coverage
 
-## [v2.0.0] - 2026-02-17
+## [v2.2.0] - 2026-03-17 - Add Module Configuration Registration and Logging Labels
 
 ### Added
 
-- Introduce Melody v2 module (`github.com/precision-soft/melody/v2`)
+- `application/contract/config_module.go` — new `ConfigModule` interface allowing modules to register configuration during application boot
+- `logging/contract/config.go`, `logging/logging_config.go` — `LoggingConfig` struct and contract for customizable logging level labels
+- `logging/default_logger.go`, `logging/json_logger.go`, `logging/logger.go` — updated to apply level label customization from `LoggingConfig`
+- `application/application.go`, `application/application_module.go`, `application/application_new.go` — wired `ConfigModule` into the application boot sequence
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v2.4.1...HEAD
+## [v2.1.3] - 2026-03-05 - Add CLI Table Width Flag for Table Output
+
+### Added
+
+- `cli/output/flag.go`, `cli/output/printer_selector.go` — added `--table-width` flag for table output
+- `cli/output/option.go`, `cli/output/option_parser.go`, `cli/output/standard_flag.go` — parsed and propagated new width option
+
+## [v2.1.2] - 2026-02-28 - Add CLI Stdout/Stderr Wiring and Standardize Method Receivers
+
+### Changed
+
+- All `*.go` files in the module — standardized all method receivers to `instance` for consistent style
+
+### Added
+
+- `cli/command.go`, `cli/command_output.go` — wired `stdout`/`stderr` to CLI output; print command errors with failed exit status
+
+## [v2.1.1] - 2026-02-23 - Fix RoleVoter Auto-Upgrade to RoleHierarchyVoter
+
+### Fixed
+
+- `security/config/compile.go`, `security/access_decision_manager.go` — auto-upgrade `RoleVoter` to `RoleHierarchyVoter` when role hierarchy is configured
+
+## [v2.1.0] - 2026-02-18 - Add GreaterThan and NotEmpty Validation Constraints
+
+### Fixed
+
+- `CONTRIBUTING.md` — broken documentation links corrected
+
+### Added
+
+- `validation/constraint_greater_than.go` — new `greaterThan(value=N)` constraint with support for int, float32, float64; returns per-constraint error codes
+- `validation/constraint_not_empty.go` — new `notEmpty` constraint for slices and strings; returns per-constraint error codes
+- `validation/const.go`, `validation/validation_rule.go`, `validation/validator.go` — wired new constraints into the validation pipeline
+- `exception/utility.go` — context-aware error wrapping helper `Wrap(ctx, err)` for exception chaining
+
+## [v2.0.0] - 2026-02-17 - Introduce Melody v2 Module
+
+### Added
+
+- `go.mod` — introduce Melody v2 module (`github.com/precision-soft/melody/v2`)
+
+[Unreleased]: https://github.com/precision-soft/melody/compare/v2.6.0...HEAD
+
+[v2.6.0]: https://github.com/precision-soft/melody/compare/v2.5.0...v2.6.0
+
+[v2.5.0]: https://github.com/precision-soft/melody/compare/v2.4.1...v2.5.0
 
 [v2.4.1]: https://github.com/precision-soft/melody/compare/v2.4.0...v2.4.1
 
@@ -215,4 +236,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [v2.1.0]: https://github.com/precision-soft/melody/compare/v2.0.0...v2.1.0
 
-[v2.0.0]: https://github.com/precision-soft/melody/releases/tag/v2.0.0
+[v2.0.0]: https://github.com/precision-soft/melody/compare/v1.6.3...v2.0.0

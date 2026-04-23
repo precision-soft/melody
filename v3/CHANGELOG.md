@@ -7,16 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v3.4.0] - 2026-04-17
+## [v3.5.0] - 2026-04-20 - Harden HTTP Server Timeouts and Align RunHttp Signature
+
+### Changed
+
+- `application/application_http.go` — `runHttp` now accepts a caller-supplied `context.Context` first parameter and observes it for shutdown instead of reading the receiver's stored `ctx` field. Aligns v3 with the v1/v2 `runHttp(ctx)` signature (MEL-171)
 
 ### Added
 
-- `http/cors/` — new subpackage extracted from `http/middleware/cors.go`. Split into `cors.Service`, `cors.Middleware`, and `cors.RegisterResponseListener` so CORS headers are applied both on the happy path (middleware) and on error-path responses produced by the kernel (`kernel.response` listener, priority `-100`)
-- `http/response.go` — `BuildContentDisposition(disposition, filename)` emits RFC 6266 `Content-Disposition` with both `filename="..."` ASCII fallback and `filename*=UTF-8''...` RFC 5987 encoding for non-ASCII filenames; `AttachmentResponse` now routes through it
-- `http/middleware/rate_limit.go` — `ClientIpResolver` hook and `DefaultClientIp` for proxy-aware IP resolution; `RateLimitConfig.SetClientIpResolver(...)` lets userland install X-Forwarded-For / X-Real-IP strategies without rewriting key extractors
-- `http/request.go` — form auto-parsing now gated on `Content-Type` (`application/x-www-form-urlencoded` or `multipart/form-data`); JSON/XML/binary bodies are no longer consumed by `NewRequest`
-- `session/session.go` — `isValidSessionId` enforces 32-char lowercase-hex format; `Manager.Session`/`DeleteSession` reject malformed cookies before hitting storage
-- Test coverage: `http/cors/{listener,middleware,service}_test.go`, `http/request_test.go`, `http/response_test.go`, `container/scope_test.go` concurrent Close/resolve test, `logging/json_logger_test.go` concurrent writes, `session/file_storage_test.go` atomic write and reopen coverage
+- `application/application_http.go` — HTTP server now sets hardened timeout defaults (`ReadTimeout=15s`, `ReadHeaderTimeout=5s`, `WriteTimeout=30s`, `IdleTimeout=60s`, `MaxHeaderBytes=1MiB`) to defend against slowloris / slow-body attacks on exposed servers (MEL-148)
+- `application/application_http_timeouts.go` — new optional `HttpTimeoutConfiguration` interface; any `HttpConfiguration` that implements it can override the hardened defaults per timeout without breaking existing configurations (MEL-148)
+- `application/application_http_timeouts_test.go` — coverage for default application and interface-driven overrides
+
+## [v3.4.0] - 2026-04-17 - Extract HTTP CORS Subpackage and Harden Request Lifecycle
 
 ### Changed
 
@@ -31,11 +34,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `session/file_storage.go` — file writes are now atomic (`os.CreateTemp` + `os.Rename`) instead of truncate-in-place; load path decoupled from a long-lived `*os.File` handle; `ownsFile` retired in favor of path-based ownership
 - `.documentation/package/*.md` — full documentation overhaul across APPLICATION/CACHE/CLI/CONFIG/CONTAINER/EVENT/HTTP/HTTPCLIENT/LOGGING/SECURITY/SESSION/VALIDATION: added missing userland types, constructors, container-access helpers, environment key tables, constants, and footgun notes
 
+### Added
+
+- `http/cors/` — new subpackage extracted from `http/middleware/cors.go`. Split into `cors.Service`, `cors.Middleware`, and `cors.RegisterResponseListener` so CORS headers are applied both on the happy path (middleware) and on error-path responses produced by the kernel (`kernel.response` listener, priority `-100`)
+- `http/response.go` — `BuildContentDisposition(disposition, filename)` emits RFC 6266 `Content-Disposition` with both `filename="..."` ASCII fallback and `filename*=UTF-8''...` RFC 5987 encoding for non-ASCII filenames; `AttachmentResponse` now routes through it
+- `http/middleware/rate_limit.go` — `ClientIpResolver` hook and `DefaultClientIp` for proxy-aware IP resolution; `RateLimitConfig.SetClientIpResolver(...)` lets userland install X-Forwarded-For / X-Real-IP strategies without rewriting key extractors
+- `http/request.go` — form auto-parsing now gated on `Content-Type` (`application/x-www-form-urlencoded` or `multipart/form-data`); JSON/XML/binary bodies are no longer consumed by `NewRequest`
+- `session/session.go` — `isValidSessionId` enforces 32-char lowercase-hex format; `Manager.Session`/`DeleteSession` reject malformed cookies before hitting storage
+- Test coverage: `http/cors/{listener,middleware,service}_test.go`, `http/request_test.go`, `http/response_test.go`, `container/scope_test.go` concurrent Close/resolve test, `logging/json_logger_test.go` concurrent writes, `session/file_storage_test.go` atomic write and reopen coverage
+
 ### Deprecated
 
 - `http/middleware.CorsConfig`, `http/middleware.NewCorsConfig`, `http/middleware.DefaultCorsConfig`, `http/middleware.RestrictiveCorsConfig`, `http/middleware.CorsMiddleware`, `http/middleware.DefaultCorsMiddleware`, `http/middleware.RestrictiveCors` — use the equivalents in `github.com/precision-soft/melody/v3/http/cors` instead. Deprecated symbols are kept for backwards compatibility; no removal scheduled.
 
-## [v3.3.1] - 2026-04-17
+## [v3.3.1] - 2026-04-17 - Fix Compression Error Propagation and Concurrent Access Races
 
 ### Fixed
 
@@ -59,7 +71,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `http/kernel.go` — `debugMode` variable hoisted to single computation at request entry
 - `application/application_http.go` — extracted `httpShutdownTimeout` constant for the HTTP server shutdown deadline
 - `cache/in_memory.go` — removed redundant map copy in `SetMultiple`
-- Removed deprecated `net.Error.Temporary()` call from `integrations/bunorm/mysql` provider
 
 ### Added
 
@@ -71,7 +82,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `config/configuration_test.go` — placeholder regex rejects identifiers starting with digits, accepts letter/underscore/dotted identifiers
 - `session/in_memory_storage_test.go`, `session/file_storage_test.go` — concurrent `Load`/`Save` race tests
 
-## [v3.3.0] - 2026-04-14
+## [v3.3.0] - 2026-04-14 - Improve Goroutine Lifecycle and Default Logger
 
 ### Changed
 
@@ -82,7 +93,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `logging/logger.go` — add GoDoc comment to `causeChainMaxDepth` constant
 - `security/compiled_configuration.go` — group string fields in `CompiledFirewall` struct (`name`, `matcherDescription`, `loginPath`, `logoutPath`)
 
-## [v3.2.0] - 2026-04-13
+## [v3.2.0] - 2026-04-13 - Fix Validators, Rate Limiter, and Router
 
 ### Fixed
 
@@ -105,7 +116,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `config/configuration.go` — `RegisterRuntime` is now thread-safe via `sync.Mutex`
 - `http/static/file_server.go` — extract shared path-resolution and cache logic into `resolveAndOpen` helper; `Serve` and `serveForStreaming` both delegate to it
 
-## [v3.1.4] - 2026-04-10
+## [v3.1.4] - 2026-04-10 - Fix XSS, Symlink Traversal, and Routing Edge Cases
 
 ### Fixed
 
@@ -128,45 +139,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `request_test.go`, `middleware/compression_test.go`, `middleware/cors_test.go`, `url_generation_route_definition_test.go` — new and expanded test coverage for all fixes
 
-## [v3.1.3] - 2026-03-21
+## [v3.1.3] - 2026-03-21 - Refactor Address Colon Check in Config
 
 ### Changed
 
-- Replace address colon check with `strings.Contains`
+- `config/http.go` — replaced colon-based address check with `strings.Contains` for correct host:port detection
 
-## [v3.1.2] - 2026-03-18
-
-### Fixed
-
-- Align HEAD handling and response contract validation
-
-## [v3.1.1] - 2026-03-17
+## [v3.1.2] - 2026-03-18 - Fix HTTP HEAD Handling and Update Dev Scripts
 
 ### Fixed
 
-- Preserve numeric logging level labels in JSON output
+- `http/router_utility.go` — aligned HEAD handling and response contract validation; prevents incorrect responses on HEAD requests
 
-## [v3.1.0] - 2026-03-17
+### Changed
+
+- `internal/reflect.go` — updated type-reflection utilities
+
+## [v3.1.1] - 2026-03-17 - Fix JSON Logging Level Label Preservation
+
+### Fixed
+
+- `logging/contract/level.go`, `logging/logger.go` — preserved numeric logging level labels in JSON output; `logging/json_logger_test.go` — coverage
+
+## [v3.1.0] - 2026-03-17 - Add Module Configuration Registration and Logging Labels
 
 ### Added
 
-- Module configuration registration and customizable logging level labels
+- `application/contract/config_module.go` — new `ConfigModule` interface allowing modules to register configuration during application boot
+- `logging/contract/config.go`, `logging/logging_config.go` — `LoggingConfig` struct and contract for customizable logging level labels
+- `logging/default_logger.go`, `logging/json_logger.go`, `logging/logger.go` — updated to apply level label customization from `LoggingConfig`
+- `application/application.go`, `application/application_module.go`, `application/application_new.go` — wired `ConfigModule` into the application boot sequence
 
-## [v3.0.1] - 2026-03-08
+## [v3.0.1] - 2026-03-08 - Lock-Step Release — Align Integration Module Dependencies
 
-### Changed
+Lock-step release — no `v3/` changes this cycle. Tag SHA differs from `v3.0.0` only through integration-module-scoped files; the `v3/` tree is unchanged. See the integration CHANGELOGs for the actual content.
 
-- Go module tidy
-
-## [v3.0.0] - 2026-03-08
+## [v3.0.0] - 2026-03-08 - Introduce Melody v3 Module
 
 ### Added
 
 - Introduce Melody v3 module (`github.com/precision-soft/melody/v3`)
-- Application context in constructor
-- `ServiceModule` simplification
+- `application/application.go`, `application/application_new.go` — application context in constructor; `New(ctx context.Context, ...)` takes a caller-supplied context used for the full application lifecycle
+- `application/contract/service_module.go` — `ServiceModule` simplification; single `Register(container)` method replacing split register/configure lifecycle
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v3.3.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/v3.5.0...HEAD
+
+[v3.5.0]: https://github.com/precision-soft/melody/compare/v3.4.0...v3.5.0
+
+[v3.4.0]: https://github.com/precision-soft/melody/compare/v3.3.1...v3.4.0
 
 [v3.3.1]: https://github.com/precision-soft/melody/compare/v3.3.0...v3.3.1
 
@@ -186,4 +206,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [v3.0.1]: https://github.com/precision-soft/melody/compare/v3.0.0...v3.0.1
 
-[v3.0.0]: https://github.com/precision-soft/melody/releases/tag/v3.0.0
+[v3.0.0]: https://github.com/precision-soft/melody/compare/v2.1.3...v3.0.0

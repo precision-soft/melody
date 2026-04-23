@@ -59,6 +59,10 @@ func (instance *BackendService) WithContext(ctx context.Context) *Backend {
     return backend
 }
 
+func (instance *BackendService) Backend() *Backend {
+    return instance.backend
+}
+
 func (instance *BackendService) Get(key string) ([]byte, bool, error) {
     return instance.backend.Get(key)
 }

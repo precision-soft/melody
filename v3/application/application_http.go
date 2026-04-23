@@ -58,7 +58,9 @@ func (instance *Application) bootHttp() {
     }
 }
 
-func (instance *Application) runHttp() error {
+func (instance *Application) runHttp(
+    ctx context.Context,
+) error {
     eventDispatcher := instance.kernel.EventDispatcher()
 
     if true == instance.kernel.DebugMode() {
@@ -83,6 +85,8 @@ func (instance *Application) runHttp() error {
         Handler: httpHandler,
     }
 
+    applyHttpServerTimeouts(httpServer, configuration)
+
     logger := logging.LoggerMustFromContainer(instance.kernel.ServiceContainer())
     logger.Info(
         "starting http server on `"+configuration.Http().Address()+"` with env `"+configuration.Kernel().Env()+"`",
@@ -97,7 +101,7 @@ func (instance *Application) runHttp() error {
     }()
 
     select {
-    case <-instance.ctx.Done():
+    case <-ctx.Done():
         shutdownContext, cancel := context.WithTimeout(context.Background(), httpShutdownTimeout)
         defer cancel()
 

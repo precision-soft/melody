@@ -85,6 +85,8 @@ func (instance *Application) runHttp(
         Handler: httpHandler,
     }
 
+    applyHttpServerTimeouts(httpServer, configuration)
+
     logger := logging.LoggerMustFromContainer(instance.kernel.ServiceContainer())
     logger.Info(
         "starting http server on `"+configuration.Http().Address()+"` with env `"+configuration.Kernel().Env()+"`",

@@ -2,6 +2,7 @@ package pgsql
 
 import (
     "context"
+    "crypto/tls"
     "database/sql"
     "errors"
     "fmt"
@@ -26,6 +27,8 @@ func NewProvider(
         timeoutConfig: nil,
         retryConfig:   nil,
         postBuildHook: nil,
+        insecure:      false,
+        tlsConfig:     nil,
     }
     for _, providerOption := range providerOptions {
         providerOption(provider)
@@ -38,6 +41,8 @@ type Provider struct {
     timeoutConfig *TimeoutConfig
     retryConfig   *RetryConfig
     postBuildHook PostBuildHook
+    insecure      bool
+    tlsConfig     *tls.Config
 }
 
 func (instance *Provider) WithPoolConfig(poolConfig *PoolConfig) *Provider {
@@ -146,13 +151,20 @@ func (instance *Provider) open(params bunorm.ConnectionParams) (*bun.DB, error) 
 
     address := fmt.Sprintf("%s:%s", params.Host, params.Port)
 
-    connector := pgdriver.NewConnector(
+    connectorOptions := []pgdriver.Option{
         pgdriver.WithAddr(address),
         pgdriver.WithDatabase(params.Database),
         pgdriver.WithUser(params.User),
         pgdriver.WithPassword(params.Password),
-        pgdriver.WithInsecure(true),
-    )
+    }
+
+    if nil != instance.tlsConfig {
+        connectorOptions = append(connectorOptions, pgdriver.WithTLSConfig(instance.tlsConfig))
+    } else {
+        connectorOptions = append(connectorOptions, pgdriver.WithInsecure(instance.insecure))
+    }
+
+    connector := pgdriver.NewConnector(connectorOptions...)
 
     if nil != instance.postBuildHook {
         hookContext := context.Background()

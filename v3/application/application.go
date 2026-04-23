@@ -111,7 +111,7 @@ func (instance *Application) Run() {
         return
     }
 
-    runHttpErr := instance.runHttp()
+    runHttpErr := instance.runHttp(instance.ctx)
     if nil != runHttpErr {
         exception.Panic(
             exception.FromError(runHttpErr),

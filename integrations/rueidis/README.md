@@ -25,33 +25,56 @@ Package: [`cache`](./cache)
 
 Entry point: [`cache.NewBackend`](./cache/backend.go)
 
-`Backend` holds a `rueidis.Client` and a `context.Context` passed at construction time.
-All Redis operations use this internal context.
-It implements [`cache/contract.Backend`](../../../cache/contract/backend.go) and supports:
+`Backend` wraps a `rueidis.Client`. It exposes two parallel surfaces:
 
-* single get/set/delete/has
-* many/get multiple
-* set/delete multiple
-* increment/decrement
-* clear / clear-by-prefix
+* the classic methods — `Get(key)`, `Set(key, payload, ttl)`, `Delete(key)`, `Has(key)`, `Clear()`, `ClearByPrefix(prefix)`, `Many(keys)`, `SetMultiple(items, ttl)`, `DeleteMultiple(keys)`, `Increment(key, delta)`, `Decrement(key, delta)` — which reuse the `ctx` captured by `NewBackend`. These are supported but legacy; new code should prefer the ctx-first surface below.
+* the ctx-first methods — `GetCtx(ctx, key)`, `SetCtx(ctx, key, payload, ttl)`, `DeleteCtx(ctx, key)`, `HasCtx(ctx, key)`, `ClearCtx(ctx)`, `ClearByPrefixCtx(ctx, prefix)`, `ManyCtx(ctx, keys)`, `SetMultipleCtx(ctx, items, ttl)`, `DeleteMultipleCtx(ctx, keys)`, `IncrementCtx(ctx, key, delta)`, `DecrementCtx(ctx, key, delta)` — which take a caller-supplied context so deadlines and cancellation propagate end-to-end.
+
+Classic (supported, legacy) pattern:
+
+```go
+package main
+
+func main() {
+	backend, _ := rueidiscache.NewBackend(client, ctx, "my-prefix:", 0, 0)
+	backend.Get("my-key")
+	backend.ClearByPrefix("accessToken:")
+}
+```
+
+Ctx-first (preferred for new code) pattern:
+
+```go
+package main
+
+func main() {
+	backend, _ := rueidiscache.NewBackend(client, context.Background(), "my-prefix:", 0, 0)
+	backend.GetCtx(ctx, "my-key")
+	backend.ClearByPrefixCtx(ctx, "accessToken:")
+}
+```
 
 ### BackendService
 
 Entry point: [`cache.NewBackendService`](./cache/backend_service.go)
 
 `BackendService` is a singleton wrapper intended for service container registration.
-It creates an internal `Backend` with `context.Background()` and delegates all
-`cache/contract.Backend` methods to it.
+It holds a `Backend` (built with `context.Background()`) and implements [`cache/contract.Backend`](../../../cache/contract/backend.go) by forwarding each call to the underlying `Backend`.
 
-Use `WithContext` to obtain a `*Backend` bound to a specific context:
+Use `WithContext` to obtain a `*Backend` bound to a specific context. From there you can use either surface:
 
 ```go
 package main
 
 func main() {
-	backend := backendService.WithContext(runtimeInstance.Context())
-	backend.Get("my-key")
-	backend.ClearByPrefix("accessToken:")
+	// Classic (supported, legacy):
+	scopedBackend := backendService.WithContext(runtimeInstance.Context())
+	scopedBackend.Get("my-key")
+	scopedBackend.ClearByPrefix("accessToken:")
+
+	// Ctx-first (preferred) — no rebind needed:
+	backendService.Backend().GetCtx(runtimeInstance.Context(), "my-key")
+	backendService.Backend().ClearByPrefixCtx(runtimeInstance.Context(), "accessToken:")
 }
 ```
 
@@ -59,15 +82,15 @@ func main() {
 
 Helper: [`cache.BackendFromRuntime`](./cache/backend_service.go)
 
-Returns a `*Backend` with the runtime request context, following the same
+Returns a `*Backend` bound to the runtime request context, following the same
 pattern as Melody's repository `FromRuntime` helpers:
 
 ```go
 package main
 
 func main() {
-	backend := rueidiscache.BackendFromRuntime(runtimeInstance, ServiceCacheRueidis)
-	backend.Get("my-key")
+	scopedBackend := rueidiscache.BackendFromRuntime(runtimeInstance, ServiceCacheRueidis)
+	scopedBackend.Get("my-key")
 }
 ```
 
@@ -152,8 +175,12 @@ package main
 func (instance *MyController) Handle(
 	runtimeInstance runtimecontract.Runtime,
 ) (httpcontract.Response, error) {
-	backend := BackendFromRuntime(runtimeInstance)
+	scopedBackend := BackendFromRuntime(runtimeInstance)
 
-	payload, found, err := backend.Get("my-key")
+	// Classic (supported, legacy):
+	payload, found, err := scopedBackend.Get("my-key")
+
+	// Ctx-first (preferred):
+	payload, found, err = scopedBackend.GetCtx(runtimeInstance.Context(), "my-key")
 }
 ```

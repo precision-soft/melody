@@ -7,16 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v1.11.0] - 2026-04-17
+## [v1.12.0] - 2026-04-20 - Harden HTTP Server Timeouts
 
 ### Added
 
-- `http/cors/` — new subpackage extracted from `http/middleware/cors.go`. Split into `cors.Service`, `cors.Middleware`, and `cors.RegisterResponseListener` so CORS headers are applied both on the happy path (middleware) and on error-path responses produced by the kernel (`kernel.response` listener, priority `-100`)
-- `http/response.go` — `BuildContentDisposition(disposition, filename)` emits RFC 6266 `Content-Disposition` with both `filename="..."` ASCII fallback and `filename*=UTF-8''...` RFC 5987 encoding for non-ASCII filenames; `AttachmentResponse` now routes through it
-- `http/middleware/rate_limit.go` — `ClientIpResolver` hook and `DefaultClientIp` for proxy-aware IP resolution; `RateLimitConfig.SetClientIpResolver(...)` lets userland install X-Forwarded-For / X-Real-IP strategies without rewriting key extractors
-- `http/request.go` — form auto-parsing now gated on `Content-Type` (`application/x-www-form-urlencoded` or `multipart/form-data`); JSON/XML/binary bodies are no longer consumed by `NewRequest`
-- `session/session.go` — `isValidSessionId` enforces 32-char lowercase-hex format; `Manager.Session`/`DeleteSession` reject malformed cookies before hitting storage
-- Test coverage: `http/cors/{listener,middleware,service}_test.go`, `http/request_test.go`, `http/response_test.go`, `container/scope_test.go` concurrent Close/resolve test, `logging/json_logger_test.go` concurrent writes, `session/file_storage_test.go` atomic write and reopen coverage
+- `application/application_http.go` — HTTP server now sets hardened timeout defaults (`ReadTimeout=15s`, `ReadHeaderTimeout=5s`, `WriteTimeout=30s`, `IdleTimeout=60s`, `MaxHeaderBytes=1MiB`) to defend against slowloris / slow-body attacks on exposed servers (MEL-148)
+- `application/application_http_timeouts.go` — new optional `HttpTimeoutConfiguration` interface; any `HttpConfiguration` that implements it can override the hardened defaults per timeout without breaking existing configurations (MEL-148)
+- `application/application_http_timeouts_test.go` — coverage for default application and interface-driven overrides
+
+## [v1.11.0] - 2026-04-17 - Extract HTTP CORS Subpackage and Harden Request Lifecycle
 
 ### Changed
 
@@ -31,11 +30,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `session/file_storage.go` — file writes are now atomic (`os.CreateTemp` + `os.Rename`) instead of truncate-in-place; load path decoupled from a long-lived `*os.File` handle; `ownsFile` retired in favor of path-based ownership
 - `.documentation/package/*.md` — full documentation overhaul across APPLICATION/CACHE/CLI/CONFIG/CONTAINER/EVENT/HTTP/HTTPCLIENT/LOGGING/SECURITY/SESSION/VALIDATION: added missing userland types, constructors, container-access helpers, environment key tables, constants, and footgun notes
 
+### Added
+
+- `http/cors/` — new subpackage extracted from `http/middleware/cors.go`. Split into `cors.Service`, `cors.Middleware`, and `cors.RegisterResponseListener` so CORS headers are applied both on the happy path (middleware) and on error-path responses produced by the kernel (`kernel.response` listener, priority `-100`)
+- `http/response.go` — `BuildContentDisposition(disposition, filename)` emits RFC 6266 `Content-Disposition` with both `filename="..."` ASCII fallback and `filename*=UTF-8''...` RFC 5987 encoding for non-ASCII filenames; `AttachmentResponse` now routes through it
+- `http/middleware/rate_limit.go` — `ClientIpResolver` hook and `DefaultClientIp` for proxy-aware IP resolution; `RateLimitConfig.SetClientIpResolver(...)` lets userland install X-Forwarded-For / X-Real-IP strategies without rewriting key extractors
+- `http/request.go` — form auto-parsing now gated on `Content-Type` (`application/x-www-form-urlencoded` or `multipart/form-data`); JSON/XML/binary bodies are no longer consumed by `NewRequest`
+- `session/session.go` — `isValidSessionId` enforces 32-char lowercase-hex format; `Manager.Session`/`DeleteSession` reject malformed cookies before hitting storage
+- Test coverage: `http/cors/{listener,middleware,service}_test.go`, `http/request_test.go`, `http/response_test.go`, `container/scope_test.go` concurrent Close/resolve test, `logging/json_logger_test.go` concurrent writes, `session/file_storage_test.go` atomic write and reopen coverage
+
 ### Deprecated
 
 - `http/middleware.CorsConfig`, `http/middleware.NewCorsConfig`, `http/middleware.DefaultCorsConfig`, `http/middleware.RestrictiveCorsConfig`, `http/middleware.CorsMiddleware`, `http/middleware.DefaultCorsMiddleware`, `http/middleware.RestrictiveCors` — use the equivalents in `github.com/precision-soft/melody/http/cors` instead. Deprecated symbols are kept for backwards compatibility; no removal scheduled.
 
-## [v1.10.1] - 2026-04-17
+## [v1.10.1] - 2026-04-17 - Fix Compression Error Propagation and Concurrent Access Races
 
 ### Fixed
 
@@ -59,7 +67,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `http/kernel.go` — `debugMode` variable hoisted to single computation at request entry
 - `application/application_http.go` — extracted `httpShutdownTimeout` constant for the HTTP server shutdown deadline
 - `cache/in_memory.go` — removed redundant map copy in `SetMultiple`
-- Removed deprecated `net.Error.Temporary()` call from `integrations/bunorm/mysql` provider
 
 ### Added
 
@@ -71,18 +78,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `config/configuration_test.go` — placeholder regex rejects identifiers starting with digits, accepts letter/underscore/dotted identifiers
 - `session/in_memory_storage_test.go`, `session/file_storage_test.go` — concurrent `Load`/`Save` race tests
 
-## [v1.10.0] - 2026-04-13
+## [v1.10.0] - 2026-04-13 - Lock-Step Release — Align with v2/v3 Sibling Tags
 
-### Changed
+Lock-step release — no `v1/` changes this cycle. Tag SHA equals `v1.9.0`; published to keep the core `v1` module version aligned with the `v2.4.0` / `v3.3.0` sibling tags. See the v2/v3 CHANGELOGs for the actual content of this cycle.
 
-- `cache/in_memory.go` — `cleanupLoop` accepts `context.Context`; `NewInMemoryCache` creates a cancel context stored as `cleanupCancel`; `Close()` calls `cleanupCancel()` to stop the goroutine cooperatively
-- `session/in_memory_storage.go` — same goroutine lifecycle improvements as `cache/in_memory.go`
-- `http/request.go` — replace `log.Printf` fallback (when no runtime instance is available) with `logging.NewDefaultLogger().Warning(...)`; remove unused `"log"` import
-- `cli/command.go` — remove block comments and `//nolint:errcheck` directives from `printGreenFullLine`, `printGreenStatusLine`, `printRedStatusLine` closures
-- `logging/logger.go` — add GoDoc comment to `causeChainMaxDepth` constant
-- `security/compiled_configuration.go` — group string fields in `CompiledFirewall` struct (`name`, `matcherDescription`, `loginPath`, `logoutPath`)
-
-## [v1.9.0] - 2026-04-13
+## [v1.9.0] - 2026-04-13 - Fix Validators, Rate Limiter, and Router; Improve Goroutine Lifecycle
 
 ### Fixed
 
@@ -97,12 +97,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `cache/in_memory.go` — `cleanupLoop` accepts `context.Context`; `NewInMemoryCache` creates a cancel context stored as `cleanupCancel`; `Close()` calls `cleanupCancel()` to stop the goroutine cooperatively
+- `session/in_memory_storage.go` — same goroutine lifecycle improvements as `cache/in_memory.go`
+- `http/request.go` — replace `log.Printf` fallback (when no runtime instance is available) with `logging.NewDefaultLogger().Warning(...)`; remove unused `"log"` import
+- `cli/command.go` — remove block comments and `//nolint:errcheck` directives from `printGreenFullLine`, `printGreenStatusLine`, `printRedStatusLine` closures
+- `logging/logger.go` — added GoDoc comment to `causeChainMaxDepth`; removed duplicated `buildCauseChain`/`buildCauseContextChain`, delegating to `exception.BuildCauseChain`/`BuildCauseContextChain`
+- `security/compiled_configuration.go` — group string fields in `CompiledFirewall` struct (`name`, `matcherDescription`, `loginPath`, `logoutPath`)
 - `file_storage.go` — `copyAnyMap` performs recursive deep copy for nested `map[string]any` values
 - `exception/utility.go` — export `BuildCauseChain` and `BuildCauseContextChain` (formerly `buildCauseChain` / `buildCauseContextChain`)
-- `logging/logger.go` — remove duplicated `buildCauseChain` / `buildCauseContextChain`; delegate to `exception.BuildCauseChain` / `exception.BuildCauseContextChain`
 - `router_utility.go` — remove implicit HEAD-to-GET match from `matchesMethod`; kernel `HeadFallbackToGet` policy is now the single control point
 
-## [v1.8.4] - 2026-04-10
+## [v1.8.4] - 2026-04-10 - Fix XSS, Symlink Traversal, and Routing Edge Cases
 
 ### Fixed
 
@@ -127,179 +132,182 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `test_helper_test.go` — shared test runtime helper for exception listener tests
 - `exception_listener_test.go`, `request_test.go`, `response_test.go`, `middleware/compression_test.go`, `middleware/cors_test.go`, `middleware/rate_limit_test.go`, `url_generation_route_definition_test.go` — new and expanded test coverage for all fixes
 
-## [v1.8.3] - 2026-03-21
+## [v1.8.3] - 2026-03-21 - Refactor Address Colon Check in Config
 
 ### Changed
 
-- Replace address colon check with `strings.Contains`
+- `config/http.go` — replaced colon-based address check with `strings.Contains` for correct host:port detection
 
-## [v1.8.2] - 2026-03-18
+## [v1.8.2] - 2026-03-18 - Fix HTTP HEAD Handling and Update Dev Scripts
 
 ### Fixed
 
-- Align HEAD handling and response contract validation
+- `http/router_utility.go` — aligned HEAD handling and response contract validation; prevents incorrect responses on HEAD requests
 
 ### Changed
 
-- Dev scripts `-h` flag
-- Update `.gitignore`
+- `internal/reflect.go` — updated type-reflection utilities
+- `.dev/validate/all.sh`, `.dev/validate/mod.sh` — added `-h` help flag to validation scripts
+- `.gitignore` — updated patterns
 
-## [v1.8.1] - 2026-03-17
+## [v1.8.1] - 2026-03-17 - Fix JSON Logging Level Label Preservation
 
 ### Fixed
 
-- Preserve numeric logging level labels in JSON output
+- `logging/contract/level.go`, `logging/logger.go` — preserved numeric logging level labels in JSON output; `logging/json_logger_test.go` — coverage
 
-## [v1.8.0] - 2026-03-17
-
-### Added
-
-- Module configuration registration and customizable logging level labels
+## [v1.8.0] - 2026-03-17 - Add Module Configuration Registration and Logging Labels
 
 ### Changed
 
-- Dev scripts optimisation
-
-## [v1.7.3] - 2026-03-05
+- `.dev/run-batch.sh`, `.dev/utility.sh`, `.dev/validate/all.sh` — dev scripts optimisation
 
 ### Added
 
-- CLI table width flag for table output
+- `application/contract/config_module.go` — new `ConfigModule` interface allowing modules to register configuration during application boot
+- `logging/contract/config.go`, `logging/logging_config.go` — `LoggingConfig` struct and contract for customizable logging level labels
+- `logging/default_logger.go`, `logging/json_logger.go`, `logging/logger.go` — updated to apply level label customization from `LoggingConfig`
+- `application/application.go`, `application/application_module.go`, `application/application_new.go` — wired `ConfigModule` into the application boot sequence
+
+## [v1.7.3] - 2026-03-05 - Add CLI Table Width Flag and Fix Docker Profile Aliases
 
 ### Fixed
 
-- Docker `.profile` aliases in interactive shells without recursion
-
-## [v1.7.2] - 2026-02-28
+- `.dev/docker/.profile` — fixed Docker `.profile` aliases in interactive shells without recursion
 
 ### Added
 
-- CLI wire `stdout`/`stderr` and print command errors with failed status
+- `cli/output/flag.go`, `cli/output/printer_selector.go` — added `--table-width` flag for table output
+- `cli/output/option.go`, `cli/output/option_parser.go`, `cli/output/standard_flag.go` — parsed and propagated new width option
+
+## [v1.7.2] - 2026-02-28 - Add CLI Stdout/Stderr Wiring and Standardize Method Receivers
 
 ### Changed
 
-- Standardize method receivers to `instance`
+- All `.go` files in the module — standardized all method receivers to `instance` for consistent style
 
-## [v1.7.1] - 2026-02-23
+### Added
+
+- `cli/command.go`, `cli/command_output.go` — wired `stdout`/`stderr` to CLI output; print command errors with failed exit status
+
+## [v1.7.1] - 2026-02-23 - Fix RoleVoter Auto-Upgrade to RoleHierarchyVoter
 
 ### Fixed
 
-- Security: auto-upgrade `RoleVoter` to `RoleHierarchyVoter` when role hierarchy is configured
+- `security/config/compile.go`, `security/access_decision_manager.go` — auto-upgrade `RoleVoter` to `RoleHierarchyVoter` when role hierarchy is configured
 
-## [v1.7.0] - 2026-02-18
-
-### Added
-
-- Validation: `greaterThan`/`notEmpty` constraints with per-constraint error codes
-- Exception: context-aware wrapping helper
-
-## [v1.6.3] - 2026-02-17
-
-### Changed
-
-- Bunorm: add provider post-build hooks (mysql/pgsql)
-
-## [v1.6.2] - 2026-02-16
+## [v1.7.0] - 2026-02-18 - Add GreaterThan and NotEmpty Validation Constraints
 
 ### Added
 
-- Application: `HttpMiddlewareModule` registration hook
-- PostgreSQL `IsDuplicateKey` function
+- `validation/constraint_greater_than.go` — new `greaterThan(value=N)` constraint with support for int, float32, float64; returns per-constraint error codes
+- `validation/constraint_not_empty.go` — new `notEmpty` constraint for slices and strings; returns per-constraint error codes
+- `validation/const.go`, `validation/validation_rule.go`, `validation/validator.go` — wired new constraints into the validation pipeline
+- `exception/utility.go` — context-aware error wrapping helper `Wrap(ctx, err)` for exception chaining
 
-## [v1.6.1] - 2026-02-13
+## [v1.6.3] - 2026-02-17 - Lock-Step Release — Align with bunorm Integration Tags
+
+Lock-step release — no `v1/` changes this cycle. Tag published to keep the core `v1` module aligned with sibling integration tags. See the `integrations/bunorm/mysql` and `integrations/bunorm/pgsql` CHANGELOGs for the provider post-build hook work captured in this cycle.
+
+## [v1.6.2] - 2026-02-16 - Add HttpMiddlewareModule Registration Hook
+
+### Added
+
+- `application/contract/http_middleware_module.go` — new `HttpMiddlewareModule` interface for middleware registration
+- `application/http_middleware.go`, `application/application_module.go` — wired module registration into the HTTP boot sequence
+
+## [v1.6.1] - 2026-02-13 - Fix Token Source Panic and Add ParameterModule/ServiceModule
 
 ### Fixed
 
-- Security: make token source resolution panic-safe and always set security context
+- `security/security_resolution_listener.go` — make token source resolution panic-safe and always set security context; prevents nil-pointer panics when no token source is configured
 
 ### Added
 
-- Application: `ParameterModule`/`ServiceModule` and split boot around configuration resolve
+- `application/contract/parameter_module.go`, `application/contract/service_module.go` — new `ParameterModule` and `ServiceModule` interfaces for granular application boot
+- `application/application.go`, `application/application_module.go` — split boot around configuration resolve; wired new module contracts into the lifecycle
 
-## [v1.6.0] - 2026-02-11
+## [v1.6.0] - 2026-02-11 - Lock-Step Release — Align with rueidis Integration Tag
 
-### Added
+Lock-step release — no `v1/` changes this cycle. Tag published to keep the core `v1` module aligned with the new `integrations/rueidis` module. See `integrations/rueidis/CHANGELOG.md` for the actual content.
 
-- Rueidis integration and submodule `go.mod` alignment for local replace
+## [v1.5.1] - 2026-02-07 - Lock-Step Release — Align with bunorm Integration Tags
 
-## [v1.5.1] - 2026-02-07
+Lock-step release — no `v1/` changes this cycle. Tag published to keep the core `v1` module aligned with `integrations/bunorm` sibling tags. See `integrations/bunorm/CHANGELOG.md` / `integrations/bunorm/mysql/CHANGELOG.md` / `integrations/bunorm/pgsql/CHANGELOG.md` for the actual content.
 
-### Added
+## [v1.5.0] - 2026-02-06 - Lock-Step Release — Align with bunorm/migrate Integration Tag
 
-- Bunorm: retryable provider open and resolver logger helper
+Lock-step release — no `v1/` changes this cycle. Tag published to keep the core `v1` module aligned with the new `integrations/bunorm/migrate` module. See `integrations/bunorm/migrate/CHANGELOG.md` for the actual content.
 
-## [v1.5.0] - 2026-02-06
+## [v1.4.0] - 2026-02-05 - Lock-Step Release — Align with bunorm Integration Tags
 
-### Added
+Lock-step release — no `v1/` changes this cycle. Tag published to keep the core `v1` module aligned with the new `integrations/bunorm`, `integrations/bunorm/mysql`, and `integrations/bunorm/pgsql` modules. See those CHANGELOGs for the actual content.
 
-- Bunorm migrate: reusable Bun migration CLI commands with Go migrations
-
-## [v1.4.0] - 2026-02-05
-
-### Added
-
-- Bunorm: core registry and mysql/pgsql providers
-
-## [v1.3.2] - 2026-02-03
+## [v1.3.2] - 2026-02-03 - Fix Exception CauseChain in LogContext
 
 ### Fixed
 
-- Exception: include `causeChain` in `LogContext`
+- `exception/utility.go` — included `causeChain` in `LogContext` output so error causes appear in structured log entries
 
-## [v1.3.1] - 2026-01-30
-
-### Fixed
-
-- HTTP: do not override exception event response in default presenter
-
-## [v1.3.0] - 2026-01-30
-
-### Added
-
-- Security: support stateless firewalls (API key) and keep `AddFirewall`
-
-## [v1.2.0] - 2026-01-30
-
-### Added
-
-- HTTP: autowire runtime into controller parameters
-- HTTP: relax controller signature validation to accept contract interfaces
-
-## [v1.1.0] - 2026-01-29
-
-### Added
-
-- HTTP: route options contract and group routing API
-
-## [v1.0.1] - 2026-01-28
+## [v1.3.1] - 2026-01-30 - Fix Default Presenter Exception Override
 
 ### Fixed
 
-- Logging: log panic causes and contexts
+- `http/exception_listener.go` — prevented default presenter from overriding exception event response in the error handling path
 
-## [v1.0.0] - 2026-01-17
+## [v1.3.0] - 2026-01-30 - Add Stateless Firewall and API Key Authentication
 
 ### Added
 
-- Initial release — Go HTTP framework with kernel, routing, middleware, request/response helpers
-- Application container with dependency injection
-- Bag (parameter bag) abstraction
-- Cache abstraction
-- CLI command framework
-- Clock abstraction with frozen clock for testing
-- Configuration management
-- Event dispatcher
-- Exception handling with typed errors
-- HTTP kernel with routing, middleware pipeline, and request/response contracts
-- HTTP client abstraction
-- Logging with structured output
-- Runtime context
-- Security framework with authentication and authorization
-- Serializer abstraction
-- Session management
-- Validation framework
+- `security/config/security_module.go`, `security/config/compile.go` — added stateless firewall support for API key authentication; kept `AddFirewall` for backwards compatibility
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v1.10.1...HEAD
+## [v1.2.0] - 2026-01-30 - Add Controller Autowiring and Relax Signature Validation
+
+### Added
+
+- `http/router_utility.go` — autowire runtime into controller parameters; relaxed controller signature validation to accept contract interfaces
+- `http/request.go` — updated request helpers to support new controller signature patterns
+
+## [v1.1.0] - 2026-01-29 - Add Route Options Contract and Group Routing API
+
+### Added
+
+- `http/contract/route_option.go`, `http/contract/router_group.go` — route options contract and group routing API
+- `http/route.go`, `http/route_option.go`, `http/router.go`, `http/router_group.go` — implementation of route options and group routing
+- `http/router_group_test.go`, `http/router_utility_test.go` — test coverage
+
+## [v1.0.1] - 2026-01-28 - Fix Panic Cause Logging
+
+### Fixed
+
+- `logging/recover.go`, `logging/logger.go` — log panic causes and context chains on recovery; panics now produce structured log entries with full cause chain
+
+## [v1.0.0] - 2026-01-17 - Initial Release
+
+### Added
+
+- `application/` — application container with dependency injection; `Application.Boot()` orchestrates module registration, configuration resolve, and CLI/HTTP mode dispatch
+- `bag/` — parameter bag abstraction (`ParameterBag`, typed value accessors)
+- `cache/` — cache abstraction (`Manager`, `InMemoryCache`, `Remember` helper with in-flight deduplication)
+- `cli/` — CLI command framework with output formatting (JSON, table, list)
+- `clock/` — clock abstraction with `SystemClock` and `FrozenClock` for testing
+- `config/` — configuration management with placeholder resolution, environment sources, and typed sub-configs (HTTP, CLI, kernel)
+- `event/` — event dispatcher with subscriber registration and priority-ordered listener dispatch
+- `exception/` — exception handling with typed errors, cause chain, `LogContext`, and HTTP exception mapping
+- `http/` — HTTP kernel with routing, middleware pipeline, and request/response contracts; `cors`, `rate_limit`, `compression`, and `static` middleware included
+- `httpclient/` — HTTP client abstraction with per-request options and stream response support
+- `logging/` — structured logging with JSON logger, emergency logger, and `recover` helper
+- `runtime/` — runtime context providing access to logger, config, and container from within request scope
+- `security/` — security framework with authentication, authorization, role hierarchy, firewall, and voter chain
+- `serializer/` — serializer abstraction with MIME-type dispatch
+- `session/` — session management with file-based and in-memory storage backends
+- `validation/` — validation framework with `greaterThan`, `notEmpty`, `notBlank`, `alpha`, `alphanumeric`, `email`, `numeric`, `regex`, `minLength`, `maxLength` constraints
+
+[Unreleased]: https://github.com/precision-soft/melody/compare/v1.12.0...HEAD
+
+[v1.12.0]: https://github.com/precision-soft/melody/compare/v1.11.0...v1.12.0
+
+[v1.11.0]: https://github.com/precision-soft/melody/compare/v1.10.1...v1.11.0
 
 [v1.10.1]: https://github.com/precision-soft/melody/compare/v1.10.0...v1.10.1
 

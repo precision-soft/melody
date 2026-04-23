@@ -69,14 +69,14 @@ type Backend struct {
     deleteBatch int
 }
 
-func (instance *Backend) Get(key string) ([]byte, bool, error) {
+func (instance *Backend) GetCtx(ctx context.Context, key string) ([]byte, bool, error) {
     normalizedKey, normalizeErr := instance.normalizeKey(key)
     if nil != normalizeErr {
         return nil, false, normalizeErr
     }
 
     response := instance.client.Do(
-        instance.ctx,
+        ctx,
         instance.client.B().Get().Key(normalizedKey).Build(),
     )
     if err := response.Error(); nil != err {
@@ -95,7 +95,12 @@ func (instance *Backend) Get(key string) ([]byte, bool, error) {
     return payload, true, nil
 }
 
-func (instance *Backend) Set(key string, payload []byte, ttl time.Duration) error {
+// Deprecated: prefer GetCtx, which takes ctx per call.
+func (instance *Backend) Get(key string) ([]byte, bool, error) {
+    return instance.GetCtx(instance.ctx, key)
+}
+
+func (instance *Backend) SetCtx(ctx context.Context, key string, payload []byte, ttl time.Duration) error {
     normalizedKey, normalizeErr := instance.normalizeKey(key)
     if nil != normalizeErr {
         return normalizeErr
@@ -109,31 +114,41 @@ func (instance *Backend) Set(key string, payload []byte, ttl time.Duration) erro
     }
 
     return instance.client.Do(
-        instance.ctx,
+        ctx,
         command,
     ).Error()
 }
 
-func (instance *Backend) Delete(key string) error {
+// Deprecated: prefer SetCtx, which takes ctx per call.
+func (instance *Backend) Set(key string, payload []byte, ttl time.Duration) error {
+    return instance.SetCtx(instance.ctx, key, payload, ttl)
+}
+
+func (instance *Backend) DeleteCtx(ctx context.Context, key string) error {
     normalizedKey, normalizeErr := instance.normalizeKey(key)
     if nil != normalizeErr {
         return normalizeErr
     }
 
     return instance.client.Do(
-        instance.ctx,
+        ctx,
         instance.client.B().Del().Key(normalizedKey).Build(),
     ).Error()
 }
 
-func (instance *Backend) Has(key string) (bool, error) {
+// Deprecated: prefer DeleteCtx, which takes ctx per call.
+func (instance *Backend) Delete(key string) error {
+    return instance.DeleteCtx(instance.ctx, key)
+}
+
+func (instance *Backend) HasCtx(ctx context.Context, key string) (bool, error) {
     normalizedKey, normalizeErr := instance.normalizeKey(key)
     if nil != normalizeErr {
         return false, normalizeErr
     }
 
     response := instance.client.Do(
-        instance.ctx,
+        ctx,
         instance.client.B().Exists().Key(normalizedKey).Build(),
     )
     if err := response.Error(); nil != err {
@@ -148,9 +163,14 @@ func (instance *Backend) Has(key string) (bool, error) {
     return 0 != count, nil
 }
 
-func (instance *Backend) Clear() error {
+// Deprecated: prefer HasCtx, which takes ctx per call.
+func (instance *Backend) Has(key string) (bool, error) {
+    return instance.HasCtx(instance.ctx, key)
+}
+
+func (instance *Backend) ClearCtx(ctx context.Context) error {
     pattern := instance.prefix + "*"
-    keys, scanErr := instance.scanKeys(instance.ctx, pattern)
+    keys, scanErr := instance.scanKeys(ctx, pattern)
     if nil != scanErr {
         return scanErr
     }
@@ -159,12 +179,17 @@ func (instance *Backend) Clear() error {
         return nil
     }
 
-    return instance.deleteKeysInBatches(instance.ctx, keys)
+    return instance.deleteKeysInBatches(ctx, keys)
 }
 
-func (instance *Backend) ClearByPrefix(prefix string) error {
+// Deprecated: prefer ClearCtx, which takes ctx per call.
+func (instance *Backend) Clear() error {
+    return instance.ClearCtx(instance.ctx)
+}
+
+func (instance *Backend) ClearByPrefixCtx(ctx context.Context, prefix string) error {
     if "" == prefix {
-        return instance.Clear()
+        return instance.ClearCtx(ctx)
     }
 
     normalizedPrefix, normalizeErr := instance.normalizeKey(prefix)
@@ -173,7 +198,7 @@ func (instance *Backend) ClearByPrefix(prefix string) error {
     }
 
     pattern := normalizedPrefix + "*"
-    keys, scanErr := instance.scanKeys(instance.ctx, pattern)
+    keys, scanErr := instance.scanKeys(ctx, pattern)
     if nil != scanErr {
         return scanErr
     }
@@ -182,10 +207,15 @@ func (instance *Backend) ClearByPrefix(prefix string) error {
         return nil
     }
 
-    return instance.deleteKeysInBatches(instance.ctx, keys)
+    return instance.deleteKeysInBatches(ctx, keys)
 }
 
-func (instance *Backend) Many(keys []string) (map[string][]byte, error) {
+// Deprecated: prefer ClearByPrefixCtx, which takes ctx per call.
+func (instance *Backend) ClearByPrefix(prefix string) error {
+    return instance.ClearByPrefixCtx(instance.ctx, prefix)
+}
+
+func (instance *Backend) ManyCtx(ctx context.Context, keys []string) (map[string][]byte, error) {
     result := make(map[string][]byte, len(keys))
     if 0 == len(keys) {
         return result, nil
@@ -203,7 +233,7 @@ func (instance *Backend) Many(keys []string) (map[string][]byte, error) {
 
     values, err := rueidis.MGet(
         instance.client,
-        instance.ctx,
+        ctx,
         normalizedKeys,
     )
     if nil != err {
@@ -227,7 +257,12 @@ func (instance *Backend) Many(keys []string) (map[string][]byte, error) {
     return result, nil
 }
 
-func (instance *Backend) SetMultiple(items map[string][]byte, ttl time.Duration) error {
+// Deprecated: prefer ManyCtx, which takes ctx per call.
+func (instance *Backend) Many(keys []string) (map[string][]byte, error) {
+    return instance.ManyCtx(instance.ctx, keys)
+}
+
+func (instance *Backend) SetMultipleCtx(ctx context.Context, items map[string][]byte, ttl time.Duration) error {
     if 0 == len(items) {
         return nil
     }
@@ -249,7 +284,7 @@ func (instance *Backend) SetMultiple(items map[string][]byte, ttl time.Duration)
         cmds = append(cmds, command)
     }
 
-    for _, response := range instance.client.DoMulti(instance.ctx, cmds...) {
+    for _, response := range instance.client.DoMulti(ctx, cmds...) {
         if err := response.Error(); nil != err {
             return err
         }
@@ -258,7 +293,12 @@ func (instance *Backend) SetMultiple(items map[string][]byte, ttl time.Duration)
     return nil
 }
 
-func (instance *Backend) DeleteMultiple(keys []string) error {
+// Deprecated: prefer SetMultipleCtx, which takes ctx per call.
+func (instance *Backend) SetMultiple(items map[string][]byte, ttl time.Duration) error {
+    return instance.SetMultipleCtx(instance.ctx, items, ttl)
+}
+
+func (instance *Backend) DeleteMultipleCtx(ctx context.Context, keys []string) error {
     if 0 == len(keys) {
         return nil
     }
@@ -275,7 +315,7 @@ func (instance *Backend) DeleteMultiple(keys []string) error {
 
     deleteErrors := rueidis.MDel(
         instance.client,
-        instance.ctx,
+        ctx,
         normalizedKeys,
     )
     for _, deleteErr := range deleteErrors {
@@ -287,14 +327,19 @@ func (instance *Backend) DeleteMultiple(keys []string) error {
     return nil
 }
 
-func (instance *Backend) Increment(key string, delta int64) (int64, error) {
+// Deprecated: prefer DeleteMultipleCtx, which takes ctx per call.
+func (instance *Backend) DeleteMultiple(keys []string) error {
+    return instance.DeleteMultipleCtx(instance.ctx, keys)
+}
+
+func (instance *Backend) IncrementCtx(ctx context.Context, key string, delta int64) (int64, error) {
     normalizedKey, normalizeErr := instance.normalizeKey(key)
     if nil != normalizeErr {
         return 0, normalizeErr
     }
 
     response := instance.client.Do(
-        instance.ctx,
+        ctx,
         instance.client.B().Incrby().Key(normalizedKey).Increment(delta).Build(),
     )
     if err := response.Error(); nil != err {
@@ -309,14 +354,19 @@ func (instance *Backend) Increment(key string, delta int64) (int64, error) {
     return value, nil
 }
 
-func (instance *Backend) Decrement(key string, delta int64) (int64, error) {
+// Deprecated: prefer IncrementCtx, which takes ctx per call.
+func (instance *Backend) Increment(key string, delta int64) (int64, error) {
+    return instance.IncrementCtx(instance.ctx, key, delta)
+}
+
+func (instance *Backend) DecrementCtx(ctx context.Context, key string, delta int64) (int64, error) {
     normalizedKey, normalizeErr := instance.normalizeKey(key)
     if nil != normalizeErr {
         return 0, normalizeErr
     }
 
     response := instance.client.Do(
-        instance.ctx,
+        ctx,
         instance.client.B().Decrby().Key(normalizedKey).Decrement(delta).Build(),
     )
     if err := response.Error(); nil != err {
@@ -329,6 +379,11 @@ func (instance *Backend) Decrement(key string, delta int64) (int64, error) {
     }
 
     return value, nil
+}
+
+// Deprecated: prefer DecrementCtx, which takes ctx per call.
+func (instance *Backend) Decrement(key string, delta int64) (int64, error) {
+    return instance.DecrementCtx(instance.ctx, key, delta)
 }
 
 func (instance *Backend) Close() error {
