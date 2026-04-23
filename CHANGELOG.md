@@ -309,7 +309,9 @@ Lock-step release — no `v1/` changes this cycle. Tag published to keep the cor
 - `session/` — session management with file-based and in-memory storage backends
 - `validation/` — validation framework with `greaterThan`, `notEmpty`, `notBlank`, `alpha`, `alphanumeric`, `email`, `numeric`, `regex`, `minLength`, `maxLength` constraints
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v1.12.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/v1.12.1...HEAD
+
+[v1.12.1]: https://github.com/precision-soft/melody/compare/v1.12.0...v1.12.1
 
 [v1.12.0]: https://github.com/precision-soft/melody/compare/v1.11.0...v1.12.0
 
