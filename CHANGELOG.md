@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.12.1] - 2026-04-23 - Retract v1.10.0
+
+### Changed
+
+- `go.mod` — retract `v1.10.0`; the tag was placed on the wrong commit (identical to `v1.9.0`); use `v1.10.1` instead
+
 ## [v1.12.0] - 2026-04-20 - Harden HTTP Server Timeouts
 
 ### Added
