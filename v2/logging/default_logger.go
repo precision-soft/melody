@@ -69,11 +69,11 @@ func (instance *defaultLogger) formatContext(context loggingcontract.Context) st
 
 func (instance *defaultLogger) joinPairs(values []string) string {
     result := ""
-    for i, v := range values {
-        if 0 < i {
+    for index, value := range values {
+        if 0 < index {
             result += " "
         }
-        result += v
+        result += value
     }
     return result
 }

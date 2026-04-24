@@ -230,14 +230,14 @@ func asciiFallbackFilename(filename string) string {
     builder := strings.Builder{}
     builder.Grow(len(filename))
 
-    for _, r := range filename {
+    for _, runeChar := range filename {
         switch {
-        case '\\' == r, '"' == r, '\r' == r, '\n' == r:
+        case '\\' == runeChar, '"' == runeChar, '\r' == runeChar, '\n' == runeChar:
             continue
-        case 0x20 > r, 0x7E < r:
+        case 0x20 > runeChar, 0x7E < runeChar:
             builder.WriteByte('_')
         default:
-            builder.WriteRune(r)
+            builder.WriteRune(runeChar)
         }
     }
 
@@ -253,27 +253,27 @@ func rfc5987EncodeFilename(filename string) string {
     builder := strings.Builder{}
     builder.Grow(len(filename))
 
-    for _, b := range []byte(filename) {
-        if true == isRfc5987AttrChar(b) {
-            builder.WriteByte(b)
+    for _, byteChar := range []byte(filename) {
+        if true == isRfc5987AttrChar(byteChar) {
+            builder.WriteByte(byteChar)
             continue
         }
 
-        builder.WriteString(fmt.Sprintf("%%%02X", b))
+        builder.WriteString(fmt.Sprintf("%%%02X", byteChar))
     }
 
     return builder.String()
 }
 
-func isRfc5987AttrChar(b byte) bool {
+func isRfc5987AttrChar(byteChar byte) bool {
     switch {
-    case 'A' <= b && 'Z' >= b:
+    case 'A' <= byteChar && 'Z' >= byteChar:
         return true
-    case 'a' <= b && 'z' >= b:
+    case 'a' <= byteChar && 'z' >= byteChar:
         return true
-    case '0' <= b && '9' >= b:
+    case '0' <= byteChar && '9' >= byteChar:
         return true
-    case '!' == b, '#' == b, '$' == b, '&' == b, '+' == b, '-' == b, '.' == b, '^' == b, '_' == b, '`' == b, '|' == b, '~' == b:
+    case '!' == byteChar, '#' == byteChar, '$' == byteChar, '&' == byteChar, '+' == byteChar, '-' == byteChar, '.' == byteChar, '^' == byteChar, '_' == byteChar, '`' == byteChar, '|' == byteChar, '~' == byteChar:
         return true
     }
 
