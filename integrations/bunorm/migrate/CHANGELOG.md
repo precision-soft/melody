@@ -5,6 +5,8 @@ All notable changes to `precision-soft/melody/integrations/bunorm/migrate` will 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
 ## [v3.0.2] - 2026-03-08 - Fix Stale bunorm/v2 Import in v3
 
 ### Fixed
@@ -61,6 +63,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `migrate.go` — `migrate.RunQueries(ctx, db, direction, migrationName, queries)` — executes a batch of migration steps; `RunQueriesWithOption()` variant accepting `RunnerOption`
 - `migrate.go` — `migrate.Up()` / `UpWithOption()` — forward-migration convenience; `Down()` / `DownWithOption()` — rollback convenience
 - `README.md` — migration workflow documentation; CLI commands introduced in v2.0.0
+
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v3.0.2...HEAD
 
 [v3.0.2]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v3.0.1...integrations/bunorm/migrate/v3.0.2
 
