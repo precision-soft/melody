@@ -8,7 +8,7 @@ services:
                 WORKDIR: ${CONTAINER_ROOT_PATH}
                 CONFIG_PATH: ${DOCKER_PATH}
                 ROOT_PATH: ${CONTAINER_ROOT_PATH}
-        restart: unless-stopped
+        restart: 'no'
         volumes:
             - ${RELATIVE_PATH_TO_ROOT}:${CONTAINER_ROOT_PATH}
             - ${RELATIVE_PATH_TO_ROOT}/.dev-data/go/pkg/mod:/go/pkg/mod
