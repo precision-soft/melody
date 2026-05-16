@@ -174,6 +174,40 @@ func TestFindProjectRootStartingFrom_ReturnsErrorWhenNotFound(t *testing.T) {
     }
 }
 
+func TestWorkingDirectoryHasEnvironmentFile_DetectsDotEnv(t *testing.T) {
+    directory := t.TempDir()
+
+    err := os.WriteFile(filepath.Join(directory, ".env"), []byte{}, 0o644)
+    if nil != err {
+        t.Fatalf("failed to create .env: %v", err)
+    }
+
+    if false == workingDirectoryHasEnvironmentFile(directory) {
+        t.Fatalf("expected true when .env is present")
+    }
+}
+
+func TestWorkingDirectoryHasEnvironmentFile_DetectsDotEnvLocal(t *testing.T) {
+    directory := t.TempDir()
+
+    err := os.WriteFile(filepath.Join(directory, ".env.local"), []byte{}, 0o644)
+    if nil != err {
+        t.Fatalf("failed to create .env.local: %v", err)
+    }
+
+    if false == workingDirectoryHasEnvironmentFile(directory) {
+        t.Fatalf("expected true when .env.local is present")
+    }
+}
+
+func TestWorkingDirectoryHasEnvironmentFile_ReturnsFalseWhenAbsent(t *testing.T) {
+    directory := t.TempDir()
+
+    if true == workingDirectoryHasEnvironmentFile(directory) {
+        t.Fatalf("expected false when no .env files are present")
+    }
+}
+
 func TestParseModeFlagValue(t *testing.T) {
     value, matched, consumeNext := parseModeFlagValue("-mode")
     if false == matched || false == consumeNext || "" != value {

@@ -24,4 +24,12 @@ use (
 	./integrations/rueidis
 	./integrations/rueidis/v2
 	./integrations/rueidis/v3
+
+	./integrations/cron
+	./integrations/cron/v2
+	./integrations/cron/v3
+
+	./.example
+	./v2/.example
+	./v3/.example
 )

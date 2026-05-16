@@ -1,4 +1,5 @@
 /var/
+/generated_conf/
 /.env.local
 
 /melody_default

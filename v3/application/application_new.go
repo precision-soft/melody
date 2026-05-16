@@ -126,6 +126,22 @@ func computeProjectDirectory() (string, error) {
                 )
         }
 
+        if true == workingDirectoryHasEnvironmentFile(workingDirectory) {
+            absoluteWorkingDirectory, filepathAbsErr := filepath.Abs(workingDirectory)
+            if nil != filepathAbsErr {
+                return "",
+                    exception.NewError(
+                        "failed to determine absolute working directory",
+                        exceptioncontract.Context{
+                            "workingDirectory": workingDirectory,
+                        },
+                        filepathAbsErr,
+                    )
+            }
+
+            return absoluteWorkingDirectory, nil
+        }
+
         projectDirectory, findProjectRootStartingFromErr := findProjectRootStartingFrom(workingDirectory)
         if nil == findProjectRootStartingFromErr {
             return projectDirectory, nil
@@ -159,6 +175,19 @@ func computeProjectDirectory() (string, error) {
     }
 
     return absoluteExecutableDirectory, nil
+}
+
+func workingDirectoryHasEnvironmentFile(directoryPath string) bool {
+    candidates := []string{".env", ".env.local"}
+
+    for _, candidate := range candidates {
+        _, statErr := os.Stat(filepath.Join(directoryPath, candidate))
+        if nil == statErr {
+            return true
+        }
+    }
+
+    return false
 }
 
 func findProjectRootStartingFrom(startDirectory string) (string, error) {

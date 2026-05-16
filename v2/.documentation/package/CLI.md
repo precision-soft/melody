@@ -10,6 +10,8 @@ The [`cli`](../../cli) package provides core primitives for Melody's command-lin
 - [`cli/output`](../../cli/output)  
   Output helpers (flags/options, printers, table rendering, and structured envelopes) used by commands.
 
+> Looking for a crontab generator? The cron integration lives in its own module: see [`integrations/cron/`](../../../integrations/cron/) (use the [`v2`](../../../integrations/cron/v2/) binding).
+
 ## Responsibilities
 
 - Define the `clicontract.Command` interface used by Melody to integrate userland commands.
@@ -25,6 +27,7 @@ The [`cli`](../../cli) package provides core primitives for Melody's command-lin
 - [`clicontract.CommandContext`](../../cli/contract/type.go) (alias)
 - [`clicontract.Flag`](../../cli/contract/type.go) (alias)
 - [`clicontract.StringFlag`](../../cli/contract/type.go) (alias)
+- [`clicontract.StringSliceFlag`](../../cli/contract/type.go) (alias)
 - [`clicontract.BoolFlag`](../../cli/contract/type.go) (alias)
 - [`clicontract.IntFlag`](../../cli/contract/type.go) (alias)
 

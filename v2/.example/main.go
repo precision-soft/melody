@@ -3,7 +3,7 @@ package main
 import (
     "context"
 
-    "github.com/precision-soft/melody/v2/.example/bootstrap"
+    "github.com/precision-soft/melody/v2/.example/config"
     "github.com/precision-soft/melody/v2/application"
 )
 
@@ -15,7 +15,7 @@ func main() {
         embeddedPublicFiles,
     )
 
-    bootstrap.Configure(app)
+    config.Configure(app)
 
     app.Run(ctx)
 }

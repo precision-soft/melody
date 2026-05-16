@@ -30,143 +30,63 @@ For convenience, the example ships with a few predefined users:
 
 ## Structure overview
 
-The example lives entirely under the [`./.example/`](./) directory.  
-All paths below are **relative to `.example/`**.
+The example lives entirely under the [`./.example/`](./) directory and follows a **flat layout**: each concern lives in its own top-level package, with no `domain/` / `infra/` umbrella layers. All paths below are **relative to `.example/`**.
 
 ```
 .example/
-├── bootstrap/         # Application wiring and integration glue
-├── domain/            # Domain models and services (product, category, currency, user)
-├── infra/http/        # HTTP wiring: routes, handlers, middleware, security
-├── infra/command/     # CLI commands specific to the example application
-├── public/            # Static assets (CSS / JS) for filesystem static mode
-├── embedded_*         # Build-tag–controlled embedding for env and static assets
-└── main.go            # Application entry point
+├── cache/            # cache serializer for the example container
+├── cli/              # CLI commands (app:info, product:list)
+├── config/           # application wiring; one file per module hook
+├── entity/           # domain entities (Category, Currency, Product, User)
+├── event/            # domain event types
+├── handler/          # HTTP handlers (pages + JSON APIs), with category/, currency/, product/, user/ subpackages
+├── page/             # HTML page templates
+├── presenter/        # HTTP error / response presenters
+├── repository/       # repository interfaces + in-memory implementations
+├── route/            # named route constants and patterns
+├── security/         # session auth wiring (login/logout handlers, entry point, token resolver, password hasher)
+├── service/          # application services (CategoryService, CurrencyService, ProductService, UserService)
+├── subscriber/       # event subscribers
+├── url/              # URL generation + route registry adapters
+├── public/           # static assets (CSS / JS)
+├── embedded_*.go     # build-tag–controlled embedding for env and static assets
+├── main.go           # application entry point
+├── go.mod / go.sum   # standalone module manifest
+├── .env              # example env defaults
+└── .gitignore
 ```
 
-### High-level responsibilities
+### [`config/`](./config/) — application wiring
 
-- [`domain/`](./domain/)  
-  Contains pure domain logic:
-    - domain models
-    - in-memory repositories
-    - domain services
+The [`config/`](./config/) package keeps [`main.go`](./main.go) small by grouping all setup and integration logic in a single place, with each module hook in its own file:
 
-  This layer is framework-agnostic and is wired into the application via the Melody container.
+- [`configure.go`](./config/configure.go) — entry point invoked by `main.go`: registers services, the example module, and the HTTP middleware
+- [`module.go`](./config/module.go) — `Module` struct + `Name()` + `Description()` + interface assertions for the module hooks the example implements
+- [`security.go`](./config/security.go) — `RegisterSecurity`: access-control rules, role hierarchy, decision manager, firewall
+- [`http.go`](./config/http.go) — `RegisterHttpRoutes`: named-route registration for pages and JSON APIs
+- [`cli.go`](./config/cli.go) — `RegisterCliCommands`: example CLI commands and the `melody:cron:generate` command wired through the cron `Configuration` registry
+- [`event.go`](./config/event.go) — `RegisterEventSubscribers`: wires the example's domain event subscribers
+- [`parameter.go`](./config/parameter.go) — `RegisterParameters`: registers `melody.cron.*` parameters from `APP_CRON_*` env vars plus the example's own `app.*` parameters
+- [`service.go`](./config/service.go) — `registerServices`: container wiring for repositories, services, and the cache serializer
+- [`middleware.go`](./config/middleware.go) — example-specific HTTP middleware (`NewTimingMiddleware`)
 
-- [`infra/http/`](./infra/http/)  
-  Contains all HTTP-related infrastructure:
-    - route registration
-    - HTTP handlers (pages and JSON APIs)
-    - middleware
-    - security access control rules
-    - session and authentication wiring
+### Cron integration
 
-  This layer adapts HTTP requests to domain services.
+The example demonstrates Melody's [`integrations/cron`](../integrations/cron/v3/) package. Commands stay plain Melody CLI commands — there is no `cron.Metadata` interface to implement. Schedules are declared separately in [`config/cli.go`](./config/cli.go) through a `cron.Configuration` registry:
 
-- [`infra/command/`](./infra/command/)  
-  Contains CLI commands specific to the example application.
+```go
+cronConfiguration := cron.NewConfiguration().
+    Schedule(cron.CommandName(cli.NewProductListCommand), &cron.EntryConfig{
+        Schedule: &cron.Schedule{Minute: "0", Hour: "*/6"},
+    }).
+    Schedule(cron.CommandName(cli.NewAppInfoCommand), &cron.EntryConfig{
+        Schedule: &cron.Schedule{Minute: "0", Hour: "12"},
+    })
+```
 
-  Commands:
-    - run inside a Melody runtime
-    - have access to the container and services
-    - demonstrate Melody CLI conventions and patterns
+`cron.CommandName` is a generic helper that instantiates a constructor and returns the command name, so the schedule references commands by constructor instead of hardcoded strings.
 
-- [`public/`](./public/)  
-  Static assets (CSS / JS) served by Melody when **static embedding is disabled**.
-
-- [`embedded_*`](./)  
-  Build-tag–controlled files that decide whether:
-    - environment configuration (`.env`) is loaded from filesystem or embedded
-    - static assets (`public/`) are served from filesystem or embedded
-
----
-
-### [`bootstrap/`](./bootstrap/)
-
-The [`bootstrap/`](./bootstrap/) package contains the **example application wiring**.
-
-Its purpose is to keep [`main.go`](./main.go) small and declarative by grouping all setup and integration logic in a single place.
-
-[`main.go`](./main.go) creates the Melody application instance and delegates all configuration to this package.
-
-**Where it is used:**  
-[`main.go`](./main.go) calls `bootstrap.Configure(app)`.
-
-`bootstrap.Configure(...)` is implemented in [`./bootstrap/configure.go`](./bootstrap/configure.go).
-
-#### Responsibilities
-
-The [`bootstrap/`](./bootstrap/) package is responsible for:
-
-- registering domain services into the container
-- assembling the example’s dependency graph
-- registering the example module
-- wiring HTTP routes, security, and middleware
-- registering example CLI commands
-
-It contains **no business logic**.
-
-#### Files
-
-- [`configure.go`](./bootstrap/configure.go)  
-  Entry point for example wiring.
-
-  This is the single function invoked by [`main.go`](./main.go).  
-  It orchestrates the entire setup process by:
-    - registering services
-    - registering the example module
-    - registering example HTTP middleware
-
-- [`service.go`](./bootstrap/service.go)  
-  Container and service registration for the example domain.
-
-  Registers:
-    - cache serializer (example implementation)
-    - in-memory repositories (category, currency, product, user)
-    - domain services:
-        - `CategoryService`
-        - `CurrencyService`
-        - `UserService`
-        - `ProductService`
-
-  Services are wired with:
-    - repositories
-    - Melody cache
-    - Melody event dispatcher
-
-  This file defines the example’s full dependency injection graph.
-
-- [`module.go`](./bootstrap/module.go)  
-  Defines the example module (`NewExampleModule`) and integrates the example with Melody’s kernel extension points.
-
-  Responsibilities include:
-    - **Security**:
-        - access control rules
-        - role hierarchy
-        - access decision manager
-        - entry point and access denied handler
-        - firewall configuration
-    - **HTTP**:
-        - registration of named routes
-        - registration of page handlers and JSON API handlers
-    - **CLI**:
-        - registration of example CLI commands
-    - **Events**:
-        - registration of event subscribers for product, category, currency, user, and security events
-
-  This file is the primary integration point between the example application and the Melody framework.
-
-- [`middleware.go`](./bootstrap/middleware.go)  
-  Defines example-specific HTTP middleware.
-
-  Currently contains:
-    - `NewTimingMiddleware()`: measures request duration and sets the
-      `X-Example-Duration-Ms` response header when a response exists.
-
-  Middleware is registered via `bootstrap.Configure()`.
-
----
+Cron defaults (user, heartbeat path, logs directory, destination file, template) come from the parameter system in [`config/parameter.go`](./config/parameter.go), with user and heartbeat path sourced from `APP_CRON_USER` and `APP_CRON_HEARTBEAT_PATH` env vars in [`.env`](./.env). [`config/cron.go`](./config/cron.go) reads `app.cron.product_user` (backed by `APP_CRON_PRODUCT_USER`) at registration time and applies it as the per-command user on the `product:list` schedule, demonstrating how the parameter cascade feeds custom values into `cron.Configuration` entries.
 
 ### [`main.go`](./main.go) (why it stays small)
 
@@ -177,25 +97,52 @@ It only:
 - constructs the Melody application using:
     - `embeddedEnvFiles` (from `embedded_env_*`)
     - `embeddedPublicFiles` (from `embedded_static_*`)
-- calls `bootstrap.Configure(app)`
-- runs the application (`app.Run(ctx)`)
+- calls `config.Configure(app)`
+- runs the application
 
 All wiring and integration logic lives outside `main.go`.
 
 ---
 
-## Running locally (filesystem mode)
+## Running locally
 
-From the repository root:
+The example is a standalone Go module (`v3/.example/go.mod`) that depends on Melody and the cron integration. From the repository root:
 
 ```bash
-cd .example
+cd v3/.example
 go run .
 ```
+
+For a fully self-contained binary that embeds `.env` files and `public/` assets into the executable:
+
+```bash
+cd v3/.example
+go run -tags "melody_env_embedded melody_static_embedded" .
+```
+
+Tags can be combined independently — use only `melody_env_embedded` to embed env files, only `melody_static_embedded` to embed static assets, or both.
 
 Once started, open the application in your browser:
 
 - http://localhost:8080
+
+### CLI mode
+
+The example also wires CLI commands. List them:
+
+```bash
+cd v3/.example
+go run . -h
+```
+
+Among the commands you will find `melody:cron:generate` from the cron integration. To generate a crontab fragment from the `cron.Configuration` registered in [`config/cli.go`](./config/cli.go):
+
+```bash
+cd v3/.example
+go run . melody:cron:generate --out ./generated_conf/cron/crontab
+```
+
+The example registers two scheduled commands in [`config/cli.go`](./config/cli.go) (`product:list` every 6 hours, `app:info` daily at noon) plus a heartbeat configured via `APP_CRON_HEARTBEAT_PATH` in [`.env`](./.env), so the generated crontab is not empty.
 
 ---
 
