@@ -106,7 +106,7 @@ func (instance *GenerateCommand) Flags() []clicontract.Flag {
         },
         &clicontract.StringFlag{
             Name:  flagNameHeartbeatPath,
-            Usage: "if set, a 'touch <path>' entry runs every minute as the default user; overrides the melody.cron.heartbeat_path parameter",
+            Usage: "if set, a 'touch <path>' entry runs every minute as the default user; overrides the melody.cron.heartbeat_path parameter and the melody.cron.heartbeat.enabled opt-in (which auto-derives <logs-dir>/heartbeat.crontab when neither is set)",
         },
         &clicontract.StringSliceFlag{
             Name:  flagNameHeartbeatCommand,
@@ -214,6 +214,14 @@ func (instance *GenerateCommand) resolveRunOptions(
             )
         }
         logsDir = absoluteLogsDir
+
+        if mkdirErr := os.MkdirAll(logsDir, 0o755); nil != mkdirErr {
+            return nil, exception.NewError(
+                "cron: could not create the logs directory",
+                exceptioncontract.Context{"directory": logsDir},
+                mkdirErr,
+            )
+        }
     }
     options.logsDir = logsDir
 
@@ -221,6 +229,9 @@ func (instance *GenerateCommand) resolveRunOptions(
     options.defaultUserName = resolveDefault(commandContext, configuration, flagNameDefaultUser, ParameterUser)
 
     heartbeatPath := resolveDefault(commandContext, configuration, flagNameHeartbeatPath, ParameterHeartbeatPath)
+    if "" == heartbeatPath && "" != logsDir && true == isHeartbeatAutoEnabled(configuration) {
+        heartbeatPath = filepath.Join(logsDir, "heartbeat.crontab")
+    }
     if "" != heartbeatPath {
         absoluteHeartbeatPath, heartbeatPathAbsErr := filepath.Abs(heartbeatPath)
         if nil != heartbeatPathAbsErr {
@@ -776,6 +787,24 @@ func resolveDefault(
     }
 
     return ""
+}
+
+func isHeartbeatAutoEnabled(configuration configcontract.Configuration) bool {
+    if nil == configuration {
+        return false
+    }
+
+    parameter := configuration.Get(ParameterHeartbeatAutoEnabled)
+    if nil == parameter {
+        return false
+    }
+
+    enabled, parameterBoolErr := parameter.Bool()
+    if nil != parameterBoolErr {
+        return false
+    }
+
+    return enabled
 }
 
 var _ clicontract.Command = (*GenerateCommand)(nil)

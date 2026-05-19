@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.1.0] - 2026-05-19 - Auto-Derive Heartbeat Path and Auto-Create Logs Directory
+
+### Added
+
+- `ParameterHeartbeatAutoEnabled` (`melody.cron.heartbeat.enabled`) — opt-in parameter that auto-derives the heartbeat path from `--logs-dir` when neither `--heartbeat-path` nor `melody.cron.heartbeat_path` is set. Truthy parsing delegates to `Parameter.Bool()`, which trims and recognizes `true`/`false`, `1`/`0`, `yes`/`no`, `on`/`off` (case-insensitive). When enabled and a logs directory is configured, the resolved heartbeat path becomes `<logs-dir>/heartbeat.crontab`. Existing precedence is preserved — an explicit `--heartbeat-path` flag or `melody.cron.heartbeat_path` parameter always wins over auto-derive. Not registered by `RegisterDefaultParameters` (consistent with `ParameterHeartbeatPath` itself); userland opts in via `.env` or `RegisterParameter`. Mirrors the existing flag-cascade pattern: helper `isHeartbeatAutoEnabled` is `nil`-safe against both the configuration service and a missing parameter, and falls back to disabled when `Parameter.Bool()` returns an error so a malformed value cannot accidentally enable the heartbeat
+- `generate_command.go` — `melody:cron:generate` now creates the resolved logs directory automatically when it does not exist, via `os.MkdirAll(logsDir, 0o755)` right after the path is normalized in `resolveRunOptions`. Mirrors the PHP `precision-soft/symfony-console` `ConfFileWriter::initLogsDir()` pattern and removes the deploy-side requirement to `mkdir -p` the logs directory before crond runs the generated entries. The mkdir is skipped when `logsDir` is empty (heartbeat-only or fully `LogDisabled` schedules); failures (e.g. parent path is a file, or permission denied) are surfaced as `cron: could not create the logs directory` with the offending path in the exception context. Ownership/mode of the created directory are not adjusted — the deploy still owns chown/chgrp if the cron user (`apache`, `www-data`, …) differs from the user running `melody:cron:generate`
+- `generate_command_test.go` — `TestRunAutoDerivesHeartbeatFromLogsDirWhenOptInEnabled` (happy path: opt-in `"true"` + `--logs-dir` yields the derived heartbeat line), `TestRunDoesNotAutoDeriveHeartbeatWhenOptInDisabled` (default: no parameter set means no heartbeat is emitted), and `TestRunPrefersExplicitHeartbeatPathOverAutoDerive` (precedence: explicit `ParameterHeartbeatPath` wins, and the auto-derived path does **not** also appear). `TestRegisterDefaultParametersWiresExpectedDefaults` extended with a negative assertion locking in the "opt-in only" behavior — `ParameterHeartbeatAutoEnabled` must not be registered by `RegisterDefaultParameters`
+- `generate_command_test.go` — `TestRunCreatesLogsDirWhenItDoesNotExist` locks in that a multi-level `--logs-dir` path (`<tempDir>/var/log/cron`) is created end-to-end during `generate`; `TestRunErrorsWhenLogsDirCannotBeCreated` covers the failure path by pointing `--logs-dir` at a sub-path of an existing file so `os.MkdirAll` fails, then asserting on the `could not create the logs directory` message
+
+### Changed
+
+- `--heartbeat-path` flag help text now also mentions the `melody.cron.heartbeat.enabled` opt-in so `melody:cron:generate --help` surfaces the new behavior
+- `README.md` — parameter table extended with the `ParameterHeartbeatAutoEnabled` row; a new section under "Configuration parameters" documents the auto-derive opt-in, its precedence, and the accepted truthy values. Footguns section documents the new auto-mkdir behavior on `--logs-dir`
+
+## [v2.1.0] - 2026-05-19 - Auto-Derive Heartbeat Path and Auto-Create Logs Directory
+
+Identical to `v1.1.0` except: module path is `github.com/precision-soft/melody/integrations/cron/v2`; dependency pinned to `github.com/precision-soft/melody/v2`. See [`v1.1.0`](#v110---2026-05-19---auto-derive-heartbeat-path-and-auto-create-logs-directory) for the full change list.
+
+## [v3.1.0] - 2026-05-19 - Auto-Derive Heartbeat Path and Auto-Create Logs Directory
+
+Identical to `v1.1.0` except: module path is `github.com/precision-soft/melody/integrations/cron/v3`; dependency pinned to `github.com/precision-soft/melody/v3`. See [`v1.1.0`](#v110---2026-05-19---auto-derive-heartbeat-path-and-auto-create-logs-directory) for the full change list.
+
 ## [v1.0.0] - 2026-05-16 - Initial Release — Cron Integration
 
 ### Added
@@ -44,13 +66,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `syncDir` no longer silently drops the close error when fsync succeeds, and wraps every failure mode with the directory path; when both `Sync()` and `Close()` fail the underlying errors are joined via `errors.Join`
 - Package-level sentinel errors exported in `errors.go` — `ErrNoOutputPath`, `ErrNoLogsDir`, `ErrTemplateNotFound`, `ErrHeartbeatUserMissing`, `ErrHeartbeatDestinationUnmatched`, `ErrHeartbeatDestinationDefaultMissing`, `ErrDestinationEscape`, `ErrEntryEmptyUser`, `ErrEntryEmptyCommand`, `ErrForbiddenCharacter`, `ErrFieldContainsWhitespace`. Every configuration / validation error built by `generate_command.go`, `template_crontab.go`, and `validation.go` now wraps the matching sentinel as its `causeErr`, so callers can branch with `errors.Is(err, cron.ErrXxx)` without parsing the message. I/O failures (mkdir, rename, fsync, …) keep their original OS error as cause — those remain `errors.Is`-able against `os.Err*` sentinels as before
 
-### Changed
-
-- `cli/contract/type.go` (root + v2/ + v3/) gains `type StringSliceFlag = urfavecli.StringSliceFlag` so the cron command (which uses repeatable string-slice flags for `--heartbeat-command` and `--heartbeat-destination`) consumes `clicontract.StringSliceFlag` like every other flag in the integration, without an extra `urfavecli` import in `generate_command.go`
-- `README.md` — added a "Cron expression validation" section that documents which checks the generator runs at generation time and which it deliberately leaves to the cron daemon at install time, with `crontab -T` recommended as the post-generation gate. Clarified the `EntryConfig.DestinationFile`-absolute-path semantics, documented the hardcoded `0644`/`0755` file modes, and added a new "Package surface" section listing every exported identifier. `v2/README.md` and `v3/README.md` now reference that section uniformly so they no longer cross-reference each other asymmetrically.
-
-### Added (tests)
-
 - `template_test.go` — direct unit tests for `ValidateNoForbiddenChars` (forbidden char rejection, clean tokens, custom forbidden list, nil tokens), `BuiltinTemplates`, `shellQuoteIfNeeded` (empty, safe tokens, space, metachar), `singleQuote` (embedded single quote escaping), `joinShellTokens`, the new whitespace validation for `Schedule` fields, and a positive test that valid range/step/list cron expressions continue to render.
 - `template_test.go` — newline / carriage-return rejection tests for entry arg, log path, heartbeat path, heartbeat command, and `EntryConfig.Command`; plus `TestRenderRejectsScheduleCommandWithOnlyEmptyTokens`.
 - `generate_command_test.go` — `TestRunPreservesRegistrationOrderWithinSharedDestination` locks in registration-order preservation when multiple entries share a non-default `DestinationFile`. `TestRunAtomicWriteHandlesConcurrentRuns` exercises five concurrent `melody:cron:generate` invocations against the same `--out` and asserts that the destination file is well-formed and no orphan `.tmp` siblings remain. `TestRunAtomicWriteLeavesNoTempFileOnSuccess` now scans the output directory for any `*.tmp` leftovers rather than checking a single predictable path. `TestRunRejectsLogFileNameEscapingLogsDir` covers the new `EntryConfig.LogFileName` path-escape guard.
@@ -61,6 +76,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `log_filename_test.go` — `TestSplitLogFileExtensionAllDots` documents the all-dots input fallback (`splitLogFileExtension("...") == ("...", "")`).
 - `errors_test.go` — new dedicated test file with 14 `errors.Is`-based spot-checks, one per exported sentinel, covering both the generate-command surface and the lower-level `Render` / `ValidateNoForbiddenChars` / `validateUserField` / `validateScheduleFields` entry points.
 
+### Changed
+
+- `cli/contract/type.go` (root + v2/ + v3/) gains `type StringSliceFlag = urfavecli.StringSliceFlag` so the cron command (which uses repeatable string-slice flags for `--heartbeat-command` and `--heartbeat-destination`) consumes `clicontract.StringSliceFlag` like every other flag in the integration, without an extra `urfavecli` import in `generate_command.go`
+- `README.md` — added a "Cron expression validation" section that documents which checks the generator runs at generation time and which it deliberately leaves to the cron daemon at install time, with `crontab -T` recommended as the post-generation gate. Clarified the `EntryConfig.DestinationFile`-absolute-path semantics, documented the hardcoded `0644`/`0755` file modes, and added a new "Package surface" section listing every exported identifier. `v2/README.md` and `v3/README.md` now reference that section uniformly so they no longer cross-reference each other asymmetrically.
+
 ## [v2.0.0] - 2026-05-16 - Initial Release — Cron Integration
 
 Identical to `v1.0.0` except: module path is `github.com/precision-soft/melody/integrations/cron/v2`; dependency pinned to `github.com/precision-soft/melody/v2`. See [`v1.0.0`](#v100---2026-05-16---initial-release--cron-integration) for the full change list.
@@ -69,10 +89,16 @@ Identical to `v1.0.0` except: module path is `github.com/precision-soft/melody/i
 
 Identical to `v1.0.0` except: module path is `github.com/precision-soft/melody/integrations/cron/v3`; dependency pinned to `github.com/precision-soft/melody/v3`. See [`v1.0.0`](#v100---2026-05-16---initial-release--cron-integration) for the full change list.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.0.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.1.0...HEAD
 
-[v3.0.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.0.0...integrations/cron/v3.0.0
+[v3.1.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.0.0...integrations/cron/v3.1.0
 
-[v2.0.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.0.0...integrations/cron/v2.0.0
+[v3.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations/cron/v3.0.0
 
-[v1.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations%2Fcron%2Fv1.0.0
+[v2.1.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.0.0...integrations/cron/v2.1.0
+
+[v2.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations/cron/v2.0.0
+
+[v1.1.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.0.0...integrations/cron/v1.1.0
+
+[v1.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations/cron/v1.0.0

@@ -56,6 +56,7 @@ The parameter names are exposed as constants:
 | `cron.ParameterUser`            | `melody.cron.user`             | `--user`                  | _not registered_ — userland must supply a user via `--user`, `melody.cron.user`, or per-command `EntryConfig.User`, otherwise generation fails with `ErrEntryEmptyUser` (or `ErrHeartbeatUserMissing` when a heartbeat is configured) |
 | `cron.ParameterBinary`          | `melody.cron.binary`           | `--binary`                | _not registered_ — falls through to `os.Executable()` when both flag and parameter are empty                                                                                                                                          |
 | `cron.ParameterHeartbeatPath`   | `melody.cron.heartbeat_path`   | `--heartbeat-path`        | _not registered_ — heartbeat disabled by default                                                                                                                                                                                      |
+| `cron.ParameterHeartbeatAutoEnabled` | `melody.cron.heartbeat.enabled` | _no flag_           | _not registered_ — when truthy (parsed by `Parameter.Bool()`: `true`/`1`/`yes`/`on`, case-insensitive, trimmed) **and** neither `--heartbeat-path` nor `melody.cron.heartbeat_path` is set, the heartbeat path defaults to `<logs-dir>/heartbeat.crontab`. See [Auto-derive the heartbeat path](#auto-derive-the-heartbeat-path) |
 | `cron.ParameterTemplate`        | `melody.cron.template`         | `--template`              | `crontab` (set by `RegisterDefaultParameters`)                                                                                                                                                                                        |
 | _no parameter_                  | _no parameter_                 | `--heartbeat-command`     | repeatable; each value is one argv token of a custom heartbeat command. When set, overrides `--heartbeat-path`                                                                                                                        |
 | _no parameter_                  | _no parameter_                 | `--heartbeat-destination` | repeatable; restricts the heartbeat to the listed destinations. Values: `default` (the `--out` file), an absolute path, or a relative path matched against `dir(--out)`. When unset, the heartbeat goes to every destination          |
@@ -176,6 +177,36 @@ cronConfiguration.Schedule("billing:run", &melodycron.EntryConfig{
     LogFileName:     "billing.log",
 })
 ```
+
+## Auto-derive the heartbeat path
+
+Set `melody.cron.heartbeat.enabled` (constant: `cron.ParameterHeartbeatAutoEnabled`) to a truthy value to opt in to auto-deriving the heartbeat path from `--logs-dir` whenever neither `--heartbeat-path` nor `melody.cron.heartbeat_path` is set. The value is parsed by the framework's `Parameter.Bool()` helper, which trims whitespace and accepts `true`/`false`, `1`/`0`, `yes`/`no`, `on`/`off` (case-insensitive). Anything else — including the empty string or a malformed value — leaves the heartbeat disabled.
+
+The parameter only controls the auto-derive fallback; it does **not** gate the heartbeat when an explicit path is set. An explicit `--heartbeat-path` flag or `melody.cron.heartbeat_path` parameter always emits a heartbeat, regardless of `melody.cron.heartbeat.enabled`.
+
+```sh
+# .env
+APP_CRON_HEARTBEAT_AUTO_ENABLED=true
+```
+
+```go
+func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.ParameterRegistrar) {
+    registrar.RegisterParameter(melodycron.ParameterHeartbeatAutoEnabled, "%env(APP_CRON_HEARTBEAT_AUTO_ENABLED)%")
+}
+```
+
+With the opt-in active and `--logs-dir=/var/log/cron`, the heartbeat path resolves to `/var/log/cron/heartbeat.crontab` — the heartbeat line then renders as `* * * * * <user> /bin/touch /var/log/cron/heartbeat.crontab` and is appended to every destination file by default (restrict it with `--heartbeat-destination`).
+
+Precedence (highest → lowest):
+
+1. `--heartbeat-path=<path>` (explicit flag wins, even when `melody.cron.heartbeat.enabled=true`).
+2. `melody.cron.heartbeat_path` parameter (explicit container parameter).
+3. `melody.cron.heartbeat.enabled` opt-in + non-empty `--logs-dir` → `<logs-dir>/heartbeat.crontab`.
+4. Otherwise the heartbeat stays disabled (no parameter, no flag, no fallback).
+
+`RegisterDefaultParameters` does **not** register `melody.cron.heartbeat.enabled` — the helper only registers safe, environment-agnostic defaults, and "emit a heartbeat" is an environment decision. Userland opts in explicitly.
+
+`--heartbeat-command` (the custom heartbeat) is independent: it overrides `--heartbeat-path` (resolved or auto-derived) just like the documented heartbeat-path cascade, so setting `melody.cron.heartbeat.enabled=true` and `--heartbeat-command=/usr/bin/curl ...` together still produces the custom command line, not the auto-derived `touch`.
 
 ## Custom heartbeat command
 
@@ -421,6 +452,7 @@ When no command declares a schedule and `--heartbeat-path` (after the cascade) i
 - `EntryConfig.Instances` is intended for the default `<binary> <command-name>` shape — it appends `--max-instances` / `--instance-index` flags to your binary's arg list. When you set `EntryConfig.Command` with custom argv, those flags are **not** injected (the generator still emits N entries, each with the same argv and a per-instance log file); inject the flags yourself or build N distinct commands. Values `< 1` (zero or negative) are normalized to `1`.
 - `EntryConfig.DestinationFile` accepts absolute paths verbatim — the `dir(--out)` escape check applies only to relative values. An absolute `DestinationFile` of e.g. `/etc/cron.d/billing` is honored as-is, so the generator can write outside the default output directory when a command genuinely needs it. Relative paths are joined with `dir(--out)` and rejected if they escape that directory (e.g. `"../escape"`).
 - Generated crontab files are written with mode `0644` and their parent directories are created with mode `0755`. Both modes are intentionally non-configurable; if your target requires stricter permissions, run `chmod` from your deploy script after `melody:cron:generate` returns.
+- The resolved `--logs-dir` (or `melody.cron.logs_dir`) is auto-created with mode `0755` at generate time via `os.MkdirAll` — you do not need a separate `mkdir -p` step before `crond` runs the entries. The mkdir is skipped only when `logsDir` is empty (heartbeat-only or fully `LogDisabled` schedules); other failures (e.g. parent path is a file, permission denied) error out with `cron: could not create the logs directory`. The created directory's owner/group default to the user running `melody:cron:generate` — if your cron jobs run as a different system user (`apache`, `www-data`, …), run `chown`/`chgrp` from your deploy script so the entries can write their log files.
 - A blank `Schedule` value (every field empty) renders as `* * * * *`. That is intentional but rarely the right call — always set at least `Minute`.
 - The renderer applies POSIX shell quoting **per token** for `EntryConfig.Command`, `entry.Binary`, `entry.Args`, `RenderOptions.HeartbeatCommand`, `LogPath`, and `HeartbeatPath` — tokens containing spaces, quotes, or other shell metacharacters are single-quoted (with embedded `'` escaped as `'\''`). Tokens with only safe characters are emitted unchanged. **Never** pre-quote a token yourself or wrap a whole `binary arg1 arg2` string in quotes; the per-token quoting is enough, and pre-quoting turns the whole sequence into a single filename to `crond`. `%`, `\n`, and `\r` are rejected in any token because they have special meaning to the crontab daemon itself (line continuation / line termination) regardless of quoting; remove them at the source.
 - `User` fields (`EntryConfig.User`, the resolved `--user` cascade, `RenderOptions.HeartbeatUser`) are validated against embedded whitespace (space, tab, CR, LF) before rendering. A username with whitespace would split the crontab line apart; the generator rejects it with `cron: ... contains whitespace; user fields must be single tokens`. Usernames already come from trusted application code in practice — this is a defense-in-depth check.
@@ -432,6 +464,6 @@ The three bindings expose the same identifiers. From any of `github.com/precisio
 
 * Types: `Schedule`, `EntryConfig`, `Configuration`, `ScheduledCommand`, `Entry`, `RenderOptions`, `GenerateCommand`, `Template`, `CrontabTemplate`, `ParameterRegistrar`, `ForbiddenChar`.
 * Constructors / helpers: `NewConfiguration`, `NewGenerateCommand`, `CommandName`, `Render`, `BuiltinTemplates`, `ValidateNoForbiddenChars`, `RegisterDefaultParameters`.
-* Parameter-name constants: `ParameterUser`, `ParameterLogsDir`, `ParameterBinary`, `ParameterDestinationFile`, `ParameterHeartbeatPath`, `ParameterTemplate`.
+* Parameter-name constants: `ParameterUser`, `ParameterLogsDir`, `ParameterBinary`, `ParameterDestinationFile`, `ParameterHeartbeatPath`, `ParameterHeartbeatAutoEnabled`, `ParameterTemplate`.
 * Template-name constants: `TemplateNameCrontab`.
 * Globals: `CrontabForbiddenChars`.

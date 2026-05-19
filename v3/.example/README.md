@@ -86,7 +86,7 @@ cronConfiguration := cron.NewConfiguration().
 
 `cron.CommandName` is a generic helper that instantiates a constructor and returns the command name, so the schedule references commands by constructor instead of hardcoded strings.
 
-Cron defaults (user, heartbeat path, logs directory, destination file, template) come from the parameter system in [`config/parameter.go`](./config/parameter.go), with user and heartbeat path sourced from `APP_CRON_USER` and `APP_CRON_HEARTBEAT_PATH` env vars in [`.env`](./.env). [`config/cron.go`](./config/cron.go) reads `app.cron.product_user` (backed by `APP_CRON_PRODUCT_USER`) at registration time and applies it as the per-command user on the `product:list` schedule, demonstrating how the parameter cascade feeds custom values into `cron.Configuration` entries.
+Cron defaults (user, logs directory, destination file, template, heartbeat) come from the parameter system in [`config/parameter.go`](./config/parameter.go). The user is sourced from `APP_CRON_USER`, and the heartbeat is enabled via the `APP_CRON_HEARTBEAT_AUTO_ENABLED` opt-in (which auto-derives `<logs-dir>/heartbeat.crontab` from `melody.cron.logs_dir`) — both env vars live in [`.env`](./.env). [`config/cron.go`](./config/cron.go) reads `app.cron.product_user` (backed by `APP_CRON_PRODUCT_USER`) at registration time and applies it as the per-command user on the `product:list` schedule, demonstrating how the parameter cascade feeds custom values into `cron.Configuration` entries.
 
 ### [`main.go`](./main.go) (why it stays small)
 
@@ -142,7 +142,7 @@ cd v3/.example
 go run . melody:cron:generate --out ./generated_conf/cron/crontab
 ```
 
-The example registers two scheduled commands in [`config/cli.go`](./config/cli.go) (`product:list` every 6 hours, `app:info` daily at noon) plus a heartbeat configured via `APP_CRON_HEARTBEAT_PATH` in [`.env`](./.env), so the generated crontab is not empty.
+The example registers two scheduled commands in [`config/cli.go`](./config/cli.go) (`product:list` every 6 hours, `app:info` daily at noon) plus a heartbeat enabled via `APP_CRON_HEARTBEAT_AUTO_ENABLED=true` in [`.env`](./.env) (the path is auto-derived from `melody.cron.logs_dir`), so the generated crontab is not empty.
 
 ---
 

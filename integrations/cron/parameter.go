@@ -1,12 +1,13 @@
 package cron
 
 const (
-    ParameterUser            = "melody.cron.user"
-    ParameterLogsDir         = "melody.cron.logs_dir"
-    ParameterBinary          = "melody.cron.binary"
-    ParameterDestinationFile = "melody.cron.destination_file"
-    ParameterHeartbeatPath   = "melody.cron.heartbeat_path"
-    ParameterTemplate        = "melody.cron.template"
+    ParameterUser                 = "melody.cron.user"
+    ParameterLogsDir              = "melody.cron.logs_dir"
+    ParameterBinary               = "melody.cron.binary"
+    ParameterDestinationFile      = "melody.cron.destination_file"
+    ParameterHeartbeatPath        = "melody.cron.heartbeat_path"
+    ParameterHeartbeatAutoEnabled = "melody.cron.heartbeat.enabled"
+    ParameterTemplate             = "melody.cron.template"
 )
 
 type ParameterRegistrar interface {

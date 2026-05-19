@@ -70,8 +70,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [v3.0.1]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.0.0...integrations/rueidis/v3.0.1
 
-[v3.0.0]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v2.0.0...integrations/rueidis/v3.0.0
+[v3.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations/rueidis/v3.0.0
 
-[v2.0.0]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v1.0.0...integrations/rueidis/v2.0.0
+[v2.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations/rueidis/v2.0.0
 
-[v1.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations%2Frueidis%2Fv1.0.0
+[v1.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations/rueidis/v1.0.0

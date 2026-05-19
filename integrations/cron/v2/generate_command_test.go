@@ -742,6 +742,72 @@ func TestRunSucceedsWithoutLogsDirWhenAllSchedulesDisableLogging(t *testing.T) {
     }
 }
 
+func TestRunCreatesLogsDirWhenItDoesNotExist(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+    logsDir := filepath.Join(tempDir, "var", "log", "cron")
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("backup:run", &testSchedule{Minute: "0", Hour: "2"}),
+    }
+
+    _, err := runGenerateCommandWithConfiguration(
+        t,
+        commands,
+        []string{
+            "--out", outputPath,
+            "--logs-dir", logsDir,
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "apache",
+        },
+        newStubConfiguration(nil),
+    )
+    if nil != err {
+        t.Fatalf("Run returned unexpected error: %v", err)
+    }
+
+    info, statErr := os.Stat(logsDir)
+    if nil != statErr {
+        t.Fatalf("expected logs dir %q to exist after generate, got stat error: %v", logsDir, statErr)
+    }
+    if false == info.IsDir() {
+        t.Fatalf("expected %q to be a directory", logsDir)
+    }
+}
+
+func TestRunErrorsWhenLogsDirCannotBeCreated(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+
+    blockingFile := filepath.Join(tempDir, "blocking")
+    if writeErr := os.WriteFile(blockingFile, []byte("placeholder"), 0o644); nil != writeErr {
+        t.Fatalf("setup: could not create blocking file: %v", writeErr)
+    }
+    logsDir := filepath.Join(blockingFile, "logs")
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("backup:run", &testSchedule{Minute: "0", Hour: "2"}),
+    }
+
+    _, err := runGenerateCommandWithConfiguration(
+        t,
+        commands,
+        []string{
+            "--out", outputPath,
+            "--logs-dir", logsDir,
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "apache",
+        },
+        newStubConfiguration(nil),
+    )
+    if nil == err {
+        t.Fatalf("expected error when logs dir cannot be created, got nil")
+    }
+    if false == strings.Contains(err.Error(), "could not create the logs directory") {
+        t.Fatalf("expected error to mention logs directory creation failure, got: %v", err)
+    }
+}
+
 func TestRunUsesDestinationFileParameterWhenFlagNotProvided(t *testing.T) {
     tempDir := t.TempDir()
     parameterOutputPath := filepath.Join(tempDir, "from-param.crontab")
@@ -807,6 +873,121 @@ func TestRunUsesHeartbeatPathParameterWhenFlagNotProvided(t *testing.T) {
     expectedHeartbeat := "* * * * * deploy /bin/touch " + parameterHeartbeatPath
     if false == strings.Contains(content, expectedHeartbeat) {
         t.Fatalf("expected heartbeat line %q sourced from ParameterHeartbeatPath in:\n%s", expectedHeartbeat, content)
+    }
+}
+
+func TestRunAutoDerivesHeartbeatFromLogsDirWhenOptInEnabled(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+    logsDir := filepath.Join(tempDir, "logs")
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("backup:run", &testSchedule{Minute: "0", Hour: "2"}),
+    }
+
+    configuration := newStubConfiguration(map[string]string{
+        ParameterHeartbeatAutoEnabled: "true",
+    })
+
+    _, err := runGenerateCommandWithConfiguration(
+        t,
+        commands,
+        []string{
+            "--out", outputPath,
+            "--logs-dir", logsDir,
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "apache",
+        },
+        configuration,
+    )
+    if nil != err {
+        t.Fatalf("Run returned unexpected error: %v", err)
+    }
+
+    body, _ := os.ReadFile(outputPath)
+    content := string(body)
+
+    expectedHeartbeat := "* * * * * apache /bin/touch " + filepath.Join(logsDir, "heartbeat.crontab")
+    if false == strings.Contains(content, expectedHeartbeat) {
+        t.Fatalf("expected auto-derived heartbeat line %q in:\n%s", expectedHeartbeat, content)
+    }
+}
+
+func TestRunDoesNotAutoDeriveHeartbeatWhenOptInDisabled(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+    logsDir := filepath.Join(tempDir, "logs")
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("backup:run", &testSchedule{Minute: "0", Hour: "2"}),
+    }
+
+    configuration := newStubConfiguration(nil)
+
+    _, err := runGenerateCommandWithConfiguration(
+        t,
+        commands,
+        []string{
+            "--out", outputPath,
+            "--logs-dir", logsDir,
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "apache",
+        },
+        configuration,
+    )
+    if nil != err {
+        t.Fatalf("Run returned unexpected error: %v", err)
+    }
+
+    body, _ := os.ReadFile(outputPath)
+    content := string(body)
+
+    if true == strings.Contains(content, "/bin/touch ") {
+        t.Fatalf("expected no heartbeat line when ParameterHeartbeatAutoEnabled is not set, got:\n%s", content)
+    }
+}
+
+func TestRunPrefersExplicitHeartbeatPathOverAutoDerive(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+    logsDir := filepath.Join(tempDir, "logs")
+    explicitHeartbeatPath := filepath.Join(tempDir, "custom-heartbeat.crontab")
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("backup:run", &testSchedule{Minute: "0", Hour: "2"}),
+    }
+
+    configuration := newStubConfiguration(map[string]string{
+        ParameterHeartbeatAutoEnabled: "true",
+        ParameterHeartbeatPath:        explicitHeartbeatPath,
+    })
+
+    _, err := runGenerateCommandWithConfiguration(
+        t,
+        commands,
+        []string{
+            "--out", outputPath,
+            "--logs-dir", logsDir,
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "apache",
+        },
+        configuration,
+    )
+    if nil != err {
+        t.Fatalf("Run returned unexpected error: %v", err)
+    }
+
+    body, _ := os.ReadFile(outputPath)
+    content := string(body)
+
+    expectedHeartbeat := "* * * * * apache /bin/touch " + explicitHeartbeatPath
+    if false == strings.Contains(content, expectedHeartbeat) {
+        t.Fatalf("expected explicit heartbeat line %q to win over auto-derive in:\n%s", expectedHeartbeat, content)
+    }
+
+    autoDerivedPath := filepath.Join(logsDir, "heartbeat.crontab")
+    if true == strings.Contains(content, "/bin/touch "+autoDerivedPath) {
+        t.Fatalf("expected auto-derived heartbeat line at %q NOT to appear when explicit is set, got:\n%s", autoDerivedPath, content)
     }
 }
 
@@ -885,6 +1066,9 @@ func TestRegisterDefaultParametersWiresExpectedDefaults(t *testing.T) {
     }
     if _, registeredUser := captured.values[ParameterUser]; true == registeredUser {
         t.Fatalf("RegisterDefaultParameters must not register %s; got %v", ParameterUser, captured.values[ParameterUser])
+    }
+    if _, registeredAutoHeartbeat := captured.values[ParameterHeartbeatAutoEnabled]; true == registeredAutoHeartbeat {
+        t.Fatalf("RegisterDefaultParameters must not register %s; got %v", ParameterHeartbeatAutoEnabled, captured.values[ParameterHeartbeatAutoEnabled])
     }
 }
 

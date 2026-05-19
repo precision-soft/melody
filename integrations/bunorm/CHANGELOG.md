@@ -57,8 +57,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [v3.0.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.0.0...integrations/bunorm/v3.0.1
 
-[v3.0.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v2.0.0...integrations/bunorm/v3.0.0
+[v3.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations/bunorm/v3.0.0
 
-[v2.0.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v1.0.0...integrations/bunorm/v2.0.0
+[v2.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations/bunorm/v2.0.0
 
-[v1.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations%2Fbunorm%2Fv1.0.0
+[v1.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations/bunorm/v1.0.0
