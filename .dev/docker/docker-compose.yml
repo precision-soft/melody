@@ -16,3 +16,13 @@ services:
             - ${RELATIVE_PATH_TO_ROOT}/.dev-data/bash/.bash_history:/home/.bash_history
         ports:
             - "8180:8080"
+
+    rabbitmq:
+        image: rabbitmq:3.13-management
+        restart: 'no'
+        environment:
+            RABBITMQ_DEFAULT_USER: guest
+            RABBITMQ_DEFAULT_PASS: guest
+        ports:
+            - "5673:5672"
+            - "15673:15672"

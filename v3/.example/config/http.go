@@ -3,8 +3,11 @@ package config
 import (
     "github.com/precision-soft/melody/v3/.example/handler"
     handlercategory "github.com/precision-soft/melody/v3/.example/handler/category"
+    handlerevents "github.com/precision-soft/melody/v3/.example/handler/events"
     handlercurrency "github.com/precision-soft/melody/v3/.example/handler/currency"
+    handleri18n "github.com/precision-soft/melody/v3/.example/handler/i18n"
     handlerproduct "github.com/precision-soft/melody/v3/.example/handler/product"
+    handlersecure "github.com/precision-soft/melody/v3/.example/handler/secure"
     handleruser "github.com/precision-soft/melody/v3/.example/handler/user"
     "github.com/precision-soft/melody/v3/.example/route"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
@@ -23,6 +26,13 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     router.HandleNamed(route.LogoutName, "GET", route.LogoutPattern, handler.LogoutHandler())
 
     router.HandleNamed(route.RoutesName, "GET", route.RoutesPattern, handler.RoutesHandler())
+
+    router.HandleNamed(route.SecureMeName, "GET", route.SecureMePattern, handlersecure.MeHandler())
+
+    router.HandleNamed(route.I18nGreetingName, "GET", route.I18nGreetingPattern, handleri18n.GreetingHandler())
+
+    router.HandleNamed(route.EventsStreamName, "GET", route.EventsStreamPattern, handlerevents.StreamHandler(instance.sseHub))
+    router.HandleNamed(route.EventsPublishName, "GET", route.EventsPublishPattern, handlerevents.PublishHandler(instance.messageBusDispatch))
 
     router.HandleNamed(route.CategoriesApiReadAllName, "GET", route.CategoriesApiReadAllPattern, handlercategory.ApiReadAllHandler())
 

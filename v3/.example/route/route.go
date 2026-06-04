@@ -82,4 +82,28 @@ const (
 
     UsersApiDeleteName    = "example.users.api.delete"
     UsersApiDeletePattern = UsersPrefix + "/api/delete/:id/"
+
+    /** @info secure token-protected api start */
+
+    SecurePrefix = "/secure"
+
+    SecureMeName    = "example.secure.me"
+    SecureMePattern = SecurePrefix + "/me/"
+
+    /** @info i18n public api start */
+
+    I18nPrefix = "/i18n"
+
+    I18nGreetingName    = "example.i18n.greeting"
+    I18nGreetingPattern = I18nPrefix + "/greeting/"
+
+    /** @info sse real-time events start */
+
+    EventsPrefix = "/events"
+
+    EventsStreamName    = "example.events.stream"
+    EventsStreamPattern = EventsPrefix + "/stream/"
+
+    EventsPublishName    = "example.events.publish"
+    EventsPublishPattern = EventsPrefix + "/publish/"
 )

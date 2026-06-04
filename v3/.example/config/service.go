@@ -9,6 +9,12 @@ import (
     melodycachecontract "github.com/precision-soft/melody/v3/cache/contract"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     melodyevent "github.com/precision-soft/melody/v3/event"
+    melodymailer "github.com/precision-soft/melody/v3/mailer"
+    melodymailercontract "github.com/precision-soft/melody/v3/mailer/contract"
+    melodymessagebus "github.com/precision-soft/melody/v3/messagebus"
+    melodymessagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
+    melodytranslation "github.com/precision-soft/melody/v3/translation"
+    melodytranslationcontract "github.com/precision-soft/melody/v3/translation/contract"
 )
 
 func (instance *Module) RegisterServices(registrar melodyapplicationcontract.ServiceRegistrar) {
@@ -16,6 +22,27 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
         melodycache.ServiceCacheSerializer,
         func(resolver melodycontainercontract.Resolver) (melodycachecontract.Serializer, error) {
             return cache.NewGobSerializer(), nil
+        },
+    )
+
+    registrar.RegisterService(
+        melodymessagebus.ServiceBus,
+        func(resolver melodycontainercontract.Resolver) (melodymessagebuscontract.Bus, error) {
+            return instance.messageBusDispatch, nil
+        },
+    )
+
+    registrar.RegisterService(
+        melodytranslation.ServiceTranslator,
+        func(resolver melodycontainercontract.Resolver) (melodytranslationcontract.Translator, error) {
+            return instance.translator, nil
+        },
+    )
+
+    registrar.RegisterService(
+        melodymailer.ServiceMailer,
+        func(resolver melodycontainercontract.Resolver) (melodymailercontract.Mailer, error) {
+            return instance.mailer, nil
         },
     )
 

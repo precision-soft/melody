@@ -185,8 +185,47 @@ func handleRedirectToPing() httpcontract.Handler {
 var _ applicationcontract.HttpModule = (*ExampleHttpModule)(nil)
 ```
 
+## Server-Sent Events (SSE)
+
+Handlers receive the raw [`nethttp.ResponseWriter`](../../http/contract/handler.go), so they can stream a long-lived response instead of returning a buffered one. [`NewSseWriter`](../../http/sse.go) type-asserts the writer to `http.Flusher`, sets the `text/event-stream` headers, and flushes after every [`Send`](../../http/sse.go). A streaming handler returns `(nil, nil)` when the client disconnects (detected via `request.HttpRequest().Context().Done()`); the kernel writes nothing further because it only writes a response when one is returned.
+
+[`SseHub`](../../http/sse_hub.go) is an optional topic-keyed fan-out registry: [`Subscribe`](../../http/sse_hub.go) returns a buffered subscriber, [`Broadcast`](../../http/sse_hub.go) delivers an [`SseEvent`](../../http/sse.go) to every subscriber of a topic (non-blocking — a full subscriber buffer drops the event), and [`Unsubscribe`](../../http/sse_hub.go) removes and closes it. This pairs naturally with the message bus: a message handler can `hub.Broadcast(...)` so domain events become real-time pushes.
+
+```go
+func StreamHandler(hub *http.SseHub) httpcontract.Handler {
+	return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+		sseWriter, sseErr := http.NewSseWriter(writer)
+		if nil != sseErr {
+			return http.JsonErrorResponse(nethttp.StatusInternalServerError, "streaming is not supported"), nil
+		}
+
+		subscriber := hub.Subscribe("demo", 16)
+		defer hub.Unsubscribe(subscriber)
+
+		requestContext := request.HttpRequest().Context()
+		for {
+			select {
+			case <-requestContext.Done():
+				return nil, nil
+			case event, open := <-subscriber.Events():
+				if false == open {
+					return nil, nil
+				}
+				if sendErr := sseWriter.Send(event); nil != sendErr {
+					return nil, nil
+				}
+			}
+		}
+	}
+}
+```
+
+The example application wires an `SseHub`, an `/events/stream` SSE endpoint (`handler/events/stream_handler.go`), and an `/events/publish` endpoint (`handler/events/publish_handler.go`) that dispatches a message through the bus to a handler which broadcasts to the hub.
+
 ## Footguns & caveats
 
+* SSE handlers must return `(nil, nil)` after streaming; returning a non-nil response would make the kernel write a second header/body.
+* [`SseHub.Broadcast`](../../http/sse_hub.go) is non-blocking and drops events for subscribers whose buffer is full; size the subscribe buffer for the expected burst, or treat the stream as best-effort.
 * Route names must be unique. URL generation relies on a [`RouteRegistry`](../../http/contract/route_registry.go) entry for the route name.
 * [`UrlGeneratorMustFromContainer`](../../http/service_resolver.go) is a fail-fast helper and will panic if `ServiceUrlGenerator` is missing or has an invalid type.
 
@@ -219,6 +258,12 @@ var _ applicationcontract.HttpModule = (*ExampleHttpModule)(nil)
 
 * URL generator:
     * [`NewUrlGenerator(httpcontract.RouteRegistry)`](../../http/url_generator.go)
+
+* Server-Sent Events:
+    * [`type SseEvent`](../../http/sse.go)
+    * [`type SseWriter`](../../http/sse.go) with [`NewSseWriter(nethttp.ResponseWriter) (*SseWriter, error)`](../../http/sse.go), [`(*SseWriter).Send(SseEvent) error`](../../http/sse.go), [`(*SseWriter).Comment(string) error`](../../http/sse.go)
+    * [`type SseHub`](../../http/sse_hub.go) with [`NewSseHub()`](../../http/sse_hub.go), [`Subscribe(topic string, bufferSize int) *SseSubscriber`](../../http/sse_hub.go), [`Unsubscribe(*SseSubscriber)`](../../http/sse_hub.go), [`Broadcast(topic string, event SseEvent) int`](../../http/sse_hub.go), [`SubscriberCount(topic string) int`](../../http/sse_hub.go)
+    * [`type SseSubscriber`](../../http/sse_hub.go) with [`(*SseSubscriber).Events() <-chan SseEvent`](../../http/sse_hub.go)
 
 * Response helpers:
     * [`JsonResponse`](../../http/response.go)

@@ -1,0 +1,53 @@
+package config
+
+import (
+    "reflect"
+
+    "github.com/precision-soft/melody/v3/.example/message"
+    "github.com/precision-soft/melody/v3/.example/messagehandler"
+    melodyhttp "github.com/precision-soft/melody/v3/http"
+    melodymessagebus "github.com/precision-soft/melody/v3/messagebus"
+    melodymessagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
+    melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
+)
+
+const messageBusTransportAsync = "async"
+
+func (instance *Module) buildMessageBus() {
+    transport := melodymessagebus.NewInMemoryTransport(64)
+
+    locator := melodymessagebus.NewHandlerLocator()
+    melodymessagebus.RegisterHandler(locator, messagehandler.HandleWelcomeEmail)
+    melodymessagebus.RegisterHandler(locator, func(runtimeInstance melodyruntimecontract.Runtime, notification message.Notification) error {
+        instance.sseHub.Broadcast(notification.Topic, melodyhttp.SseEvent{
+            Event: "notification",
+            Data:  notification.Text,
+        })
+
+        return nil
+    })
+
+    routing := map[reflect.Type]melodymessagebus.TransportRouting{
+        reflect.TypeOf(message.WelcomeEmail{}): {
+            Name:      messageBusTransportAsync,
+            Transport: transport,
+        },
+    }
+
+    instance.messageBusTransport = transport
+    instance.messageBusDispatch = melodymessagebus.NewManager(
+        "default",
+        melodymessagebus.NewSendMessageMiddleware(routing),
+        melodymessagebus.NewHandleMessageMiddleware(locator),
+    )
+    instance.messageBusConsume = melodymessagebus.NewManager(
+        "default.consume",
+        melodymessagebus.NewHandleMessageMiddleware(locator),
+    )
+    instance.messageBusConsumeCommand = melodymessagebus.NewConsumeCommand(
+        instance.messageBusConsume,
+        map[string]melodymessagebuscontract.Transport{
+            messageBusTransportAsync: transport,
+        },
+    )
+}

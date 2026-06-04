@@ -16,11 +16,14 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         melodysecurity.NewAccessControlRegexRule("^/login", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/logout", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/routes", melodysecuritycontract.AttributePublicAccess),
+        melodysecurity.NewAccessControlRegexRule("^/i18n", melodysecuritycontract.AttributePublicAccess),
+        melodysecurity.NewAccessControlRegexRule("^/events", melodysecuritycontract.AttributePublicAccess),
 
         melodysecurity.NewAccessControlRule(route.ProductsPrefix, entity.RoleEditor),
         melodysecurity.NewAccessControlRule(route.CategoriesPrefix, entity.RoleUser),
         melodysecurity.NewAccessControlRule(route.CurrenciesPrefix, entity.RoleUser),
         melodysecurity.NewAccessControlRule(route.UsersPrefix, entity.RoleAdmin),
+        melodysecurity.NewAccessControlRule(route.SecurePrefix, entity.RoleUser),
 
         melodysecurity.NewAccessControlRegexRule("^/", entity.RoleUser),
     )
@@ -49,6 +52,14 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
     )
 
     override := melodysecurityconfig.NewFirewallOverrideConfiguration()
+
+    builder.AddStatelessFirewall(
+        "token",
+        melodysecurity.NewPathPrefixMatcher(route.SecurePrefix),
+        []melodysecuritycontract.Rule{},
+        melodysecurity.NewBearerTokenSource(instance.tokenValidator),
+        melodysecurityconfig.NewFirewallOverrideConfiguration(),
+    )
 
     builder.AddFirewall(
         "main",

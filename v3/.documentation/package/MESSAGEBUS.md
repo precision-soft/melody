@@ -1,0 +1,167 @@
+# MESSAGEBUS
+
+The [`messagebus`](../../messagebus) package provides Melody's transport-agnostic message bus: messages wrapped in envelopes with stamps, a configurable middleware stack, typed handler registration, pluggable transports, and a long-running consumer command. It is the asynchronous, durable counterpart to the in-process [`event`](EVENT.md) dispatcher.
+
+## Scope
+
+The message bus is opt-in. Unlike core services, it is not wired by the application container; userland builds the bus, registers handlers, and exposes it through its own module (see the example application). Dispatch and consumption both require a runtime instance for execution context and logging.
+
+## Subpackages
+
+- [`messagebus/contract`](../../messagebus/contract)  
+  Public contracts for envelopes, stamps, handlers, the bus, middleware, the handler locator, and transports.
+
+## Responsibilities
+
+- Wrap messages and carry metadata:
+    - [`Envelope`](../../messagebus/contract/envelope.go)
+    - [`Stamp`](../../messagebus/contract/envelope.go)
+    - [`NewEnvelope`](../../messagebus/envelope.go)
+    - [`EnsureEnvelope`](../../messagebus/envelope.go)
+    - built-in stamps [`BusNameStamp`](../../messagebus/stamp.go), [`SentStamp`](../../messagebus/stamp.go), [`ReceivedStamp`](../../messagebus/stamp.go), [`HandledStamp`](../../messagebus/stamp.go)
+    - [`LastStampOfType`](../../messagebus/stamp.go)
+- Dispatch through a middleware stack:
+    - [`Bus`](../../messagebus/contract/bus.go)
+    - [`Manager`](../../messagebus/manager.go)
+    - [`NewManager`](../../messagebus/manager.go)
+    - [`Middleware`](../../messagebus/contract/middleware.go) / [`StackNext`](../../messagebus/contract/middleware.go)
+- Locate and run handlers:
+    - [`MessageHandler`](../../messagebus/contract/handler.go)
+    - [`HandlerLocator`](../../messagebus/contract/locator.go)
+    - [`NewHandlerLocator`](../../messagebus/locator.go)
+    - [`RegisterHandler`](../../messagebus/locator.go)
+    - [`NewHandleMessageMiddleware`](../../messagebus/middleware_handle.go)
+- Route messages to transports:
+    - [`Transport`](../../messagebus/contract/transport.go)
+    - [`TransportRouting`](../../messagebus/middleware_send.go)
+    - [`NewSendMessageMiddleware`](../../messagebus/middleware_send.go)
+    - [`InMemoryTransport`](../../messagebus/transport_in_memory.go)
+- Consume asynchronously:
+    - [`ConsumeCommand`](../../messagebus/consume_command.go)
+    - [`NewConsumeCommand`](../../messagebus/consume_command.go)
+- Provide container resolver helpers:
+    - [`ServiceBus`](../../messagebus/service_resolver.go)
+    - [`ServiceHandlerLocator`](../../messagebus/service_resolver.go)
+    - [`BusMustFromContainer`](../../messagebus/service_resolver.go)
+    - [`BusMustFromResolver`](../../messagebus/service_resolver.go)
+
+## How dispatch flows
+
+A bus is a [`Manager`](../../messagebus/manager.go) holding an ordered middleware stack. `Dispatch` wraps the message in an envelope, stamps it with the bus name, and runs the stack. Each [`Middleware`](../../messagebus/contract/middleware.go) may inspect or replace the envelope and decides whether to call `next`.
+
+The two built-in middlewares compose the common pattern:
+
+- [`NewSendMessageMiddleware`](../../messagebus/middleware_send.go) routes a message to a transport by its Go type. If a route matches and the envelope was not already received from a transport, it sends and stops the stack (asynchronous handling). Otherwise it calls `next`.
+- [`NewHandleMessageMiddleware`](../../messagebus/middleware_handle.go) runs every handler registered for the message type and stamps the envelope as handled.
+
+A dispatch bus typically uses `send` then `handle`: routed messages go to the transport, unrouted messages are handled inline (synchronous). A consume bus uses `handle` only, because the consumer feeds it envelopes already received from a transport.
+
+## Container integration
+
+The package defines the service names:
+
+- [`ServiceBus`](../../messagebus/service_resolver.go) (`"service.messagebus.bus"`)
+- [`ServiceHandlerLocator`](../../messagebus/service_resolver.go) (`"service.messagebus.handler_locator"`)
+
+These are not registered by the framework. Userland registers `ServiceBus` to its dispatch bus so that HTTP handlers, services, or commands can resolve and dispatch.
+
+## Usage
+
+Building a bus, registering a typed handler, and dispatching:
+
+```go
+package main
+
+import (
+	"reflect"
+
+	melodymessagebus "github.com/precision-soft/melody/v3/messagebus"
+	runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
+)
+
+type WelcomeEmail struct {
+	UserId  int
+	Address string
+}
+
+func buildBus() (*melodymessagebus.Manager, *melodymessagebus.InMemoryTransport) {
+	transport := melodymessagebus.NewInMemoryTransport(64)
+
+	locator := melodymessagebus.NewHandlerLocator()
+	melodymessagebus.RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message WelcomeEmail) error {
+		return nil
+	})
+
+	routing := map[reflect.Type]melodymessagebus.TransportRouting{
+		reflect.TypeOf(WelcomeEmail{}): {Name: "async", Transport: transport},
+	}
+
+	bus := melodymessagebus.NewManager(
+		"default",
+		melodymessagebus.NewSendMessageMiddleware(routing),
+		melodymessagebus.NewHandleMessageMiddleware(locator),
+	)
+
+	return bus, transport
+}
+```
+
+Consuming asynchronously is done with the [`ConsumeCommand`](../../messagebus/consume_command.go), registered as a CLI command:
+
+```sh
+app melody:messagebus:consume --transport=async
+app melody:messagebus:consume --transport=async --limit=100
+```
+
+The consumer loops over the transport, dispatches each received envelope to a handle-only bus, and acknowledges on success or negatively acknowledges (with requeue) on failure. It shuts down cooperatively on `SIGINT`/`SIGTERM` or when the runtime context is cancelled.
+
+A runnable end-to-end demonstration lives in the example application: [`messagebus:demo`](../../.example/cli/messagebus_demo_command.go), wired in [`.example/config/messagebus.go`](../../.example/config/messagebus.go).
+
+## Footguns & caveats
+
+- The bus is opt-in and userland-wired. The framework does not register a default bus, transport, or handler locator.
+- [`InMemoryTransport`](../../messagebus/transport_in_memory.go) is process-local: a message dispatched in one process is not visible to a consumer in another process. Use it for tests and single-process demos; use a durable transport (for example AMQP) across processes.
+- [`RegisterHandler`](../../messagebus/locator.go) keys handlers by the exact Go type of the message, including pointer vs value. Dispatch the same type you registered.
+- [`NewSendMessageMiddleware`](../../messagebus/middleware_send.go) stops the stack after a successful send, so handle middleware placed after it does not run for routed messages. This is the intended synchronous/asynchronous split.
+- The consumer dispatches one message at a time per invocation; run multiple consumers for parallelism.
+
+## Userland API
+
+### Contracts (`messagebus/contract`)
+
+- [`type Stamp`](../../messagebus/contract/envelope.go)
+- [`type Envelope`](../../messagebus/contract/envelope.go)
+- [`type MessageHandler`](../../messagebus/contract/handler.go)
+- [`type HandlerLocator`](../../messagebus/contract/locator.go)
+- [`type StackNext`](../../messagebus/contract/middleware.go)
+- [`type Middleware`](../../messagebus/contract/middleware.go)
+- [`type Bus`](../../messagebus/contract/bus.go)
+- [`type Transport`](../../messagebus/contract/transport.go)
+
+### Implementations (`messagebus`)
+
+- [`NewEnvelope(message any, stamps ...messagebuscontract.Stamp) messagebuscontract.Envelope`](../../messagebus/envelope.go)
+- [`EnsureEnvelope(message any) messagebuscontract.Envelope`](../../messagebus/envelope.go)
+- [`type BusNameStamp`](../../messagebus/stamp.go), [`type SentStamp`](../../messagebus/stamp.go), [`type ReceivedStamp`](../../messagebus/stamp.go), [`type HandledStamp`](../../messagebus/stamp.go)
+- [`LastStampOfType[T messagebuscontract.Stamp](envelope) (T, bool)`](../../messagebus/stamp.go)
+- [`type HandlerLocator`](../../messagebus/locator.go)
+    - [`NewHandlerLocator() *HandlerLocator`](../../messagebus/locator.go)
+    - [`RegisterHandler[T any](locator *HandlerLocator, handle func(runtimecontract.Runtime, T) error)`](../../messagebus/locator.go)
+- [`type Manager`](../../messagebus/manager.go)
+    - [`NewManager(name string, middlewares ...messagebuscontract.Middleware) *Manager`](../../messagebus/manager.go)
+- [`NewHandleMessageMiddleware(locator messagebuscontract.HandlerLocator) messagebuscontract.Middleware`](../../messagebus/middleware_handle.go)
+- [`type TransportRouting`](../../messagebus/middleware_send.go)
+    - [`NewSendMessageMiddleware(routingByType map[reflect.Type]TransportRouting) messagebuscontract.Middleware`](../../messagebus/middleware_send.go)
+- [`type InMemoryTransport`](../../messagebus/transport_in_memory.go)
+    - [`NewInMemoryTransport(bufferSize int) *InMemoryTransport`](../../messagebus/transport_in_memory.go)
+- [`type ConsumeCommand`](../../messagebus/consume_command.go)
+    - [`NewConsumeCommand(bus messagebuscontract.Bus, transports map[string]messagebuscontract.Transport) *ConsumeCommand`](../../messagebus/consume_command.go)
+
+### Container helpers (`messagebus`)
+
+- [`const ServiceBus`](../../messagebus/service_resolver.go)
+- [`const ServiceHandlerLocator`](../../messagebus/service_resolver.go)
+- [`BusMustFromContainer(containercontract.Container) messagebuscontract.Bus`](../../messagebus/service_resolver.go)
+- [`BusMustFromResolver(containercontract.Resolver) messagebuscontract.Bus`](../../messagebus/service_resolver.go)
+- [`HandlerLocatorMustFromContainer(containercontract.Container) messagebuscontract.HandlerLocator`](../../messagebus/service_resolver.go)
+- [`HandlerLocatorMustFromResolver(containercontract.Resolver) messagebuscontract.HandlerLocator`](../../messagebus/service_resolver.go)

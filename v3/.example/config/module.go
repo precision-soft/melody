@@ -2,12 +2,44 @@ package config
 
 import (
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
+    melodyhttp "github.com/precision-soft/melody/v3/http"
+    melodymessagebus "github.com/precision-soft/melody/v3/messagebus"
+    melodymailercontract "github.com/precision-soft/melody/v3/mailer/contract"
+    melodymessagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
+    melodyopenapi "github.com/precision-soft/melody/v3/openapi"
+    melodysecuritycontract "github.com/precision-soft/melody/v3/security/contract"
+    melodytranslationcontract "github.com/precision-soft/melody/v3/translation/contract"
 )
 
-type Module struct{}
+type Module struct {
+    messageBusDispatch       melodymessagebuscontract.Bus
+    messageBusConsume        melodymessagebuscontract.Bus
+    messageBusTransport      melodymessagebuscontract.Transport
+    messageBusConsumeCommand *melodymessagebus.ConsumeCommand
+
+    jwtSecret      []byte
+    tokenValidator melodysecuritycontract.TokenValidator
+
+    translator melodytranslationcontract.Translator
+
+    sseHub *melodyhttp.SseHub
+
+    openApiInfo     melodyopenapi.Info
+    openApiRegistry *melodyopenapi.Registry
+
+    mailer melodymailercontract.Mailer
+}
 
 func NewExampleModule() *Module {
-    return &Module{}
+    moduleInstance := &Module{}
+    moduleInstance.buildSse()
+    moduleInstance.buildMessageBus()
+    moduleInstance.buildTokenAuth()
+    moduleInstance.buildTranslation()
+    moduleInstance.buildOpenApi()
+    moduleInstance.buildMailer()
+
+    return moduleInstance
 }
 
 func (instance *Module) Name() string {

@@ -1,0 +1,41 @@
+# Melody WebSocket integration (v3)
+
+Bidirectional WebSocket streaming for Melody, built on [`coder/websocket`](https://github.com/coder/websocket). It bridges the core [`http.SseHub`](https://github.com/precision-soft/melody) so the same topic-keyed fan-out powers both Server-Sent Events and WebSockets.
+
+## Installation
+
+```sh
+go get github.com/precision-soft/melody/integrations/websocket/v3
+```
+
+```go
+import melodywebsocket "github.com/precision-soft/melody/integrations/websocket/v3"
+```
+
+## Usage
+
+```go
+hub := melodyhttp.NewSseHub()
+
+handler := melodywebsocket.NewStreamHandler(hub, melodywebsocket.Options{
+	TopicResolver: func(request httpcontract.Request) string {
+		return request.Header("X-Device-Id")
+	},
+	OnMessage: func(runtimeInstance runtimecontract.Runtime, payload []byte) {
+		// handle inbound client messages
+	},
+})
+
+// register handler on a route, e.g. GET /ws
+// broadcast from anywhere (e.g. a message handler):
+hub.Broadcast("device-42", melodyhttp.SseEvent{Event: "task.cancelled", Data: payloadJson})
+```
+
+The handler upgrades the connection, subscribes to the resolved topic, writes each broadcast `SseEvent`'s data to the socket, and reads inbound frames (dispatched to `OnMessage`). It returns `(nil, nil)` once the client disconnects, so the kernel writes nothing further.
+
+## Footguns & caveats
+
+- The hub is shared with SSE: a single `hub.Broadcast(topic, event)` reaches both SSE and WebSocket subscribers of that topic.
+- Only the event `Data` is written to the socket (as a text frame). Encode structured payloads (for example JSON) into `Data` before broadcasting.
+- `OriginPatterns` is passed to `websocket.Accept`; set it for browser clients on other origins.
+- The integration test is in-process (httptest server + `websocket.Dial`); no external service is required.

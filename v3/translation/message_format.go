@@ -1,0 +1,234 @@
+package translation
+
+import (
+    "fmt"
+    "math"
+    "strconv"
+    "strings"
+)
+
+func formatMessage(pattern string, parameters map[string]any, locale string) string {
+    return interpolate([]rune(pattern), parameters, locale, "")
+}
+
+func interpolate(runes []rune, parameters map[string]any, locale string, pound string) string {
+    var builder strings.Builder
+
+    index := 0
+    for index < len(runes) {
+        current := runes[index]
+
+        if '#' == current && "" != pound {
+            builder.WriteString(pound)
+            index++
+            continue
+        }
+
+        if '{' != current {
+            builder.WriteRune(current)
+            index++
+            continue
+        }
+
+        closeIndex := matchingBrace(runes, index)
+        if -1 == closeIndex {
+            builder.WriteRune(current)
+            index++
+            continue
+        }
+
+        builder.WriteString(evaluateArgument(runes[index+1:closeIndex], parameters, locale))
+        index = closeIndex + 1
+    }
+
+    return builder.String()
+}
+
+func matchingBrace(runes []rune, openIndex int) int {
+    depth := 0
+    for index := openIndex; index < len(runes); index++ {
+        if '{' == runes[index] {
+            depth++
+        } else if '}' == runes[index] {
+            depth--
+            if 0 == depth {
+                return index
+            }
+        }
+    }
+
+    return -1
+}
+
+func evaluateArgument(inner []rune, parameters map[string]any, locale string) string {
+    name, remainder, hasType := splitFirstComma(inner)
+    trimmedName := strings.TrimSpace(string(name))
+
+    if false == hasType {
+        return stringifyParameter(parameters[trimmedName])
+    }
+
+    argType, style, hasStyle := splitFirstComma(remainder)
+    trimmedType := strings.TrimSpace(string(argType))
+
+    if false == hasStyle {
+        return stringifyParameter(parameters[trimmedName])
+    }
+
+    switch trimmedType {
+    case "plural":
+        return evaluatePlural(trimmedName, style, parameters, locale)
+    case "select":
+        return evaluateSelect(trimmedName, style, parameters, locale)
+    default:
+        return stringifyParameter(parameters[trimmedName])
+    }
+}
+
+func evaluateSelect(name string, style []rune, parameters map[string]any, locale string) string {
+    selectors := parseSelectors(style)
+
+    keyword := stringifyParameter(parameters[name])
+    block, found := selectors[keyword]
+    if false == found {
+        block, found = selectors["other"]
+    }
+
+    if false == found {
+        return ""
+    }
+
+    return interpolate(block, parameters, locale, "")
+}
+
+func evaluatePlural(name string, style []rune, parameters map[string]any, locale string) string {
+    selectors := parseSelectors(style)
+
+    number, _ := toFloat(parameters[name])
+    pound := formatNumber(number)
+
+    if block, found := selectors["="+pound]; true == found {
+        return interpolate(block, parameters, locale, pound)
+    }
+
+    category := pluralCategory(locale, number)
+    if block, found := selectors[category]; true == found {
+        return interpolate(block, parameters, locale, pound)
+    }
+
+    if block, found := selectors["other"]; true == found {
+        return interpolate(block, parameters, locale, pound)
+    }
+
+    return ""
+}
+
+func parseSelectors(style []rune) map[string][]rune {
+    selectors := make(map[string][]rune)
+
+    index := 0
+    for index < len(style) {
+        for index < len(style) && true == isSpace(style[index]) {
+            index++
+        }
+
+        if index >= len(style) {
+            break
+        }
+
+        keywordStart := index
+        for index < len(style) && false == isSpace(style[index]) && '{' != style[index] {
+            index++
+        }
+        keyword := string(style[keywordStart:index])
+
+        for index < len(style) && true == isSpace(style[index]) {
+            index++
+        }
+
+        if index >= len(style) || '{' != style[index] {
+            break
+        }
+
+        closeIndex := matchingBrace(style, index)
+        if -1 == closeIndex {
+            break
+        }
+
+        if "" != keyword {
+            selectors[keyword] = style[index+1 : closeIndex]
+        }
+
+        index = closeIndex + 1
+    }
+
+    return selectors
+}
+
+func splitFirstComma(value []rune) ([]rune, []rune, bool) {
+    for index := 0; index < len(value); index++ {
+        if ',' == value[index] {
+            return value[:index], value[index+1:], true
+        }
+    }
+
+    return value, nil, false
+}
+
+func isSpace(value rune) bool {
+    return ' ' == value || '\t' == value || '\n' == value || '\r' == value
+}
+
+func stringifyParameter(value any) string {
+    if nil == value {
+        return ""
+    }
+
+    switch typed := value.(type) {
+    case string:
+        return typed
+    case bool:
+        return strconv.FormatBool(typed)
+    case int:
+        return strconv.Itoa(typed)
+    case int64:
+        return strconv.FormatInt(typed, 10)
+    case float64:
+        return formatNumber(typed)
+    default:
+        return fmt.Sprintf("%v", typed)
+    }
+}
+
+func toFloat(value any) (float64, bool) {
+    switch typed := value.(type) {
+    case int:
+        return float64(typed), true
+    case int64:
+        return float64(typed), true
+    case float64:
+        return typed, true
+    case string:
+        parsed, parseErr := strconv.ParseFloat(typed, 64)
+        if nil != parseErr {
+            return 0, false
+        }
+        return parsed, true
+    default:
+        return 0, false
+    }
+}
+
+const maxExactInteger = 9007199254740992.0
+
+func formatNumber(value float64) string {
+    if true == math.IsNaN(value) || true == math.IsInf(value, 0) {
+        return strconv.FormatFloat(value, 'f', -1, 64)
+    }
+
+    if value == math.Trunc(value) && value >= -maxExactInteger && value <= maxExactInteger {
+        return strconv.FormatInt(int64(value), 10)
+    }
+
+    return strconv.FormatFloat(value, 'f', -1, 64)
+}
