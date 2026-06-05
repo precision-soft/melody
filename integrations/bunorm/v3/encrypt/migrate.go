@@ -13,35 +13,15 @@ import (
 
 const defaultMigrateBatchSize = 500
 
-/**
- * TableSpec describes a table whose string columns hold (or should hold) encrypted values.
- * PrimaryKey must be an orderable column; it drives keyset pagination so the migration streams
- * the table in bounded batches without holding a long transaction.
- */
 type TableSpec struct {
     Table      string
     PrimaryKey string
     Columns    []string
     BatchSize  int
 
-    /**
-     * Deterministic marks the columns as searchable (deterministic) encryption. It MUST be set for a
-     * column written with EncryptDeterministic / EncryptedDeterministicString: a re-encrypt then
-     * re-derives the plaintext-bound nonce under the target key so the column stays searchable.
-     * Leaving it false on a deterministic column would rewrite it with random nonces and silently
-     * break equality lookups.
-     */
     Deterministic bool
 }
 
-/**
- * Migrator performs bulk encrypt / re-encrypt / decrypt over a table's columns using the cipher
- * directly (not the process-wide EncryptedString cipher). All operations are idempotent: encrypting
- * an already-encrypted value is a no-op, decrypting plaintext passes through, and re-encrypting a row
- * already written under the target key is skipped. Rows are updated one at a time (no surrounding
- * transaction), so a run can be safely re-run after a failure to resume the remaining rows. SQL is
- * emitted for the MySQL dialect (backtick-quoted identifiers); other dialects are rejected.
- */
 type Migrator struct {
     db     *bun.DB
     cipher Cipher
@@ -67,14 +47,12 @@ func NewMigrator(db *bun.DB, cipher Cipher) *Migrator {
     return &Migrator{db: db, cipher: cipher}
 }
 
-/** MigrateEncrypt encrypts every plaintext value in the spec's columns; already-encrypted values are left as-is. */
 func (instance *Migrator) MigrateEncrypt(ctx context.Context, spec TableSpec) (int, error) {
     return instance.run(ctx, spec, func(value string) (string, error) {
         return instance.cipher.Encrypt(value)
     })
 }
 
-/** MigrateReencrypt decrypts each value with whichever key wrote it, then re-encrypts under targetKeyId (key rotation). Rows already written under targetKeyId are left untouched. Deterministic columns (spec.Deterministic) re-derive the searchable nonce under the target key so equality lookups keep working. */
 func (instance *Migrator) MigrateReencrypt(ctx context.Context, spec TableSpec, targetKeyId string) (int, error) {
     return instance.run(ctx, spec, func(value string) (string, error) {
         if currentKeyId, encrypted := keyIdOf(value); true == encrypted && currentKeyId == targetKeyId {
@@ -94,7 +72,6 @@ func (instance *Migrator) MigrateReencrypt(ctx context.Context, spec TableSpec, 
     })
 }
 
-/** MigrateDecrypt rewrites every value as plaintext; values that are already plaintext pass through. */
 func (instance *Migrator) MigrateDecrypt(ctx context.Context, spec TableSpec) (int, error) {
     return instance.run(ctx, spec, func(value string) (string, error) {
         return instance.cipher.Decrypt(value)

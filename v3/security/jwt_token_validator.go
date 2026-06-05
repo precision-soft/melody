@@ -53,7 +53,6 @@ type JwtConfig struct {
     Secret             []byte
     SubjectClaim       string
     RolesClaim         string
-    /** ScopeClaim, when set, copies that object claim into Claims.Scope for a TokenEnricher to consume. */
     ScopeClaim         string
     Leeway             time.Duration
     AllowWithoutExpiry bool

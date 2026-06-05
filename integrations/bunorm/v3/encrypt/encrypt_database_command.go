@@ -14,11 +14,6 @@ const (
     migrateModeDecrypt   = "decrypt"
 )
 
-/**
- * NewEncryptDatabaseCommand exposes the Migrator as the `melody:encrypt:database` CLI command so
- * operators can bulk encrypt a plaintext table, re-encrypt under a new key (rotation), or decrypt
- * a table. All modes are idempotent and stream the table in batches.
- */
 func NewEncryptDatabaseCommand(database *bun.DB, cipher Cipher) *EncryptDatabaseCommand {
     return &EncryptDatabaseCommand{
         migrator: NewMigrator(database, cipher),

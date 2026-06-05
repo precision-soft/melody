@@ -5,6 +5,12 @@ import (
     "sync/atomic"
 )
 
+type SseBackplane interface {
+    Publish(topic string, event SseEvent) error
+
+    Close() error
+}
+
 func NewSseHub() *SseHub {
     return &SseHub{
         subscribersByTopic: make(map[string]map[*SseSubscriber]struct{}),
@@ -15,8 +21,10 @@ type SseHub struct {
     mutex              sync.RWMutex
     subscribersByTopic map[string]map[*SseSubscriber]struct{}
     closed             bool
+    backplane          SseBackplane
 
-    dropped uint64
+    dropped           uint64
+    backplaneFailures uint64
 }
 
 type SseSubscriber struct {
@@ -84,7 +92,22 @@ func (instance *SseHub) Unsubscribe(subscriber *SseSubscriber) {
     }
 }
 
+func (instance *SseHub) SetBackplane(backplane SseBackplane) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.backplane = backplane
+}
+
 func (instance *SseHub) Broadcast(topic string, event SseEvent) int {
+    delivered := instance.DeliverLocal(topic, event)
+
+    instance.replicate(topic, event)
+
+    return delivered
+}
+
+func (instance *SseHub) DeliverLocal(topic string, event SseEvent) int {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
 
@@ -105,6 +128,24 @@ func (instance *SseHub) Broadcast(topic string, event SseEvent) int {
     }
 
     return delivered
+}
+
+func (instance *SseHub) replicate(topic string, event SseEvent) {
+    instance.mutex.RLock()
+    backplane := instance.backplane
+    instance.mutex.RUnlock()
+
+    if nil == backplane {
+        return
+    }
+
+    if publishErr := backplane.Publish(topic, event); nil != publishErr {
+        atomic.AddUint64(&instance.backplaneFailures, 1)
+    }
+}
+
+func (instance *SseHub) BackplaneFailures() uint64 {
+    return atomic.LoadUint64(&instance.backplaneFailures)
 }
 
 func (instance *SseHub) DroppedEventCount() uint64 {

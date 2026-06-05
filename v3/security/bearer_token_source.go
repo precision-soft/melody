@@ -23,11 +23,6 @@ func NewBearerTokenSource(validator securitycontract.TokenValidator) *BearerToke
     }
 }
 
-/**
- * NewBearerTokenSourceWithEnricher builds a bearer source that, after validating the token, runs
- * the enricher to resolve the final claims (e.g. roles from scope). Enrichment failures are treated
- * like a rejected token: the request continues anonymously and access control decides the outcome.
- */
 func NewBearerTokenSourceWithEnricher(
     validator securitycontract.TokenValidator,
     enricher securitycontract.TokenEnricher,

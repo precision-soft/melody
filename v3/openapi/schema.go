@@ -156,10 +156,6 @@ func withNullable(schema *Schema, nullable bool) *Schema {
         return schema
     }
 
-    /**
-     * A $ref carries no sibling keywords in OpenAPI 3.0 — a sibling `nullable` is ignored by
-     * spec-compliant tooling. Wrap the ref in allOf so the nullability is preserved.
-     */
     if "" != schema.Ref {
         return &Schema{
             AllOf:    []*Schema{{Ref: schema.Ref}},

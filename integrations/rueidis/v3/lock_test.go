@@ -88,7 +88,6 @@ func TestRedisLock_RefreshFailsWhenLostToAnotherClient(t *testing.T) {
         t.Fatalf("expected acquire to succeed: %v %v", acquired, acquireErr)
     }
 
-    /** another client drops the key out from under us */
     if delErr := client.Do(runtimeInstance.Context(), client.B().Del().Key(name).Build()).Error(); nil != delErr {
         t.Fatalf("del: %v", delErr)
     }

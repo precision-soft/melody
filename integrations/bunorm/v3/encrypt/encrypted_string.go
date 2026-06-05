@@ -11,7 +11,6 @@ const redactedPlaceholder = "<redacted>"
 
 var packageCipher Cipher
 
-/** UseCipher installs the process-wide cipher used by EncryptedString and EncryptedDeterministicString. */
 func UseCipher(cipherInstance Cipher) {
     packageCipher = cipherInstance
 }
@@ -54,7 +53,6 @@ func (instance *EncryptedString) Scan(source any) error {
         return errCipherNotConfigured()
     }
 
-    /** Decrypt passes unmarked legacy plaintext through unchanged, so existing rows read correctly. */
     plaintext, plaintextErr := packageCipher.Decrypt(raw)
     if nil != plaintextErr {
         return plaintextErr

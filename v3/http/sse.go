@@ -81,7 +81,6 @@ func (instance *SseWriter) Send(event SseEvent) error {
     return nil
 }
 
-/** sanitizeSseField strips CR and LF from a single-line SSE field (id/event) so a caller-supplied value cannot inject extra SSE lines or events. */
 func sanitizeSseField(value string) string {
     return strings.NewReplacer("\r", "", "\n", "").Replace(value)
 }

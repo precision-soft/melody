@@ -11,10 +11,6 @@ import (
 
 const DefaultTransactionTable = "melody_audit_transaction"
 
-/**
- * Transaction groups the audit entries produced by one logical unit of work (one flush), mirroring
- * the PHP reference's shared audit_transaction table. Entries reference it via Entry.TransactionId.
- */
 type Transaction struct {
     bun.BaseModel `bun:"table:melody_audit_transaction,alias:melody_audit_transaction"`
 
@@ -32,10 +28,6 @@ func transactionIdFromContext(ctx context.Context) int64 {
     return id
 }
 
-/**
- * BeginTransaction opens an audit transaction: it persists a Transaction row (actor + optional
- * extras) and returns a context carrying its id, so entries recorded with that context are grouped.
- */
 func BeginTransaction(ctx context.Context, database *bun.DB, actor string, extras map[string]any) (context.Context, int64, error) {
     encodedExtras := ""
     if 0 != len(extras) {

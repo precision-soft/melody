@@ -119,7 +119,6 @@ func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, 
         return exception.NewError("smtp payload flush failed", map[string]any{"address": instance.address}, closeErr)
     }
 
-    /** the server has accepted the message at this point; a failing QUIT must not fail the send */
     if quitErr := client.Quit(); nil != quitErr {
         if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
             logger.Warning("smtp quit failed after the message was accepted", map[string]any{"address": instance.address})

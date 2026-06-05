@@ -11,11 +11,6 @@ import (
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
-/**
- * NewRecorder builds a recorder that writes audit entries as rows to the given table via bun.
- * Pass an empty table to use DefaultTable. For per-entity tables, pluggable storage or dead-letter
- * logging, build the recorder with NewRecorderWithStorage and the With* options.
- */
 func NewRecorder(auditDatabase *bun.DB, table string) *Recorder {
     return NewRecorderWithStorage(NewBunStorage(auditDatabase), NewRegistry(table))
 }
@@ -41,7 +36,6 @@ type Recorder struct {
     logger   loggingcontract.Logger
 }
 
-/** WithLogger enables dead-letter logging: entries that fail to store are logged before the error is returned. */
 func (instance *Recorder) WithLogger(logger loggingcontract.Logger) *Recorder {
     instance.logger = logger
 
@@ -100,7 +94,6 @@ func (instance *Recorder) record(
     return nil
 }
 
-/** deadLetter logs an entry that could not be persisted so it is not lost silently. */
 func (instance *Recorder) deadLetter(entry Entry, saveErr error) {
     if nil == instance.logger {
         return

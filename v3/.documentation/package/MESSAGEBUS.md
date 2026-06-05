@@ -125,7 +125,7 @@ A runnable end-to-end demonstration lives in the example application: [`messageb
 ## Footguns & caveats
 
 - The bus is opt-in and userland-wired. The framework does not register a default bus, transport, or handler locator.
-- [`InMemoryTransport`](../../messagebus/transport_in_memory.go) is process-local: a message dispatched in one process is not visible to a consumer in another process. Use it for tests and single-process demos; use a durable transport (for example AMQP) across processes.
+- [`InMemoryTransport`](../../messagebus/transport_in_memory.go) is process-local: a message dispatched in one process is not visible to a consumer in another process. Use it for tests and single-process demos; use a durable transport (for example AMQP) across processes. Behind a load balancer this is mandatory — every instance must publish to and consume from the same broker. Multiple consumer instances on one queue are competing consumers (the broker delivers each message to one of them), which is the intended scale-out pattern; combined with at-least-once redelivery it means a message may be processed on a different instance than first received it, so handler idempotency must not rely on instance-local state.
 - [`RegisterHandler`](../../messagebus/locator.go) keys handlers by the exact Go type of the message, including pointer vs value. Dispatch the same type you registered.
 - [`NewSendMessageMiddleware`](../../messagebus/middleware_send.go) stops the stack after a successful send, so handle middleware placed after it does not run for routed messages. This is the intended synchronous/asynchronous split.
 - The consumer dispatches one message at a time per invocation; run multiple consumers for parallelism.

@@ -5,18 +5,12 @@ import (
 )
 
 type Claims struct {
-    UserIdentifier string
-    Roles          []string
+    UserIdentifier string   `json:"UserIdentifier"`
+    Roles          []string `json:"Roles"`
 
-    /**
-     * Scope carries generic, application-defined claim data extracted from the token (e.g. a JSON
-     * object claim). A TokenEnricher reads it to resolve the final roles/attributes after the
-     * signature has been validated. The library assigns no meaning to its keys.
-     */
-    Scope map[string]any
+    Scope map[string]any `json:"Scope,omitempty"`
 
-    /** Attributes holds generic extra data an enricher may attach for downstream use. */
-    Attributes map[string]any
+    Attributes map[string]any `json:"Attributes,omitempty"`
 }
 
 type TokenValidator interface {

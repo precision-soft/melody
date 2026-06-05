@@ -17,18 +17,12 @@ import (
 type Options struct {
     TopicResolver func(request httpcontract.Request) string
 
-    /**
-     * OnMessage is invoked for each inbound frame on the connection's read goroutine, in order. It
-     * must not block: a slow OnMessage stalls the read loop, delaying close/ping detection for that
-     * connection. Hand long work off to your own queue/worker and return promptly.
-     */
     OnMessage       func(runtimeInstance runtimecontract.Runtime, messageType coderwebsocket.MessageType, payload []byte)
     SubscribeBuffer int
     WriteTimeout    time.Duration
     OriginPatterns  []string
     BinaryWrites    bool
 
-    /** ReadLimit caps the byte size of a single inbound message; 0 keeps coder/websocket's default (32 KiB). */
     ReadLimit int64
 }
 

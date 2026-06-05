@@ -6,6 +6,7 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/integrations/bunorm/v3/audit"
+    "github.com/precision-soft/melody/v3/exception"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
@@ -121,6 +122,10 @@ func TestAsyncStorage_OverflowDeadLetters(t *testing.T) {
         t.Fatalf("expected one overflow dead-letter, got %d", logger.count())
     }
 
+    if 1 != storage.Dropped() {
+        t.Fatalf("expected the dropped counter to be 1, got %d", storage.Dropped())
+    }
+
     close(delegate.release)
 
     if closeErr := storage.Close(); nil != closeErr {
@@ -166,7 +171,46 @@ func TestAsyncStorage_SaveAfterCloseDeadLettersWithoutPanic(t *testing.T) {
         t.Fatalf("expected one closed-storage dead-letter, got %d", logger.count())
     }
 
+    if 1 != storage.Dropped() {
+        t.Fatalf("expected the dropped counter to be 1 after a save on a closed store, got %d", storage.Dropped())
+    }
+
     if 0 != delegate.count() {
         t.Fatalf("expected no entries reaching the delegate after close, got %d", delegate.count())
+    }
+}
+
+type failingStorage struct {
+    saveErr error
+}
+
+func (instance *failingStorage) Save(ctx context.Context, table string, entries ...audit.Entry) error {
+    return instance.saveErr
+}
+
+func TestAsyncStorage_FailedDelegateIncrementsCounter(t *testing.T) {
+    logger := &capturingLogger{}
+    storage := audit.
+        NewAsyncStorage(&failingStorage{saveErr: exception.NewError("backend down", nil, nil)}, 4).
+        WithLogger(logger)
+
+    if saveErr := storage.Save(context.Background(), audit.DefaultTable, audit.Entry{Entity: "user", EntityId: "1", Operation: "insert"}); nil != saveErr {
+        t.Fatalf("save: %v", saveErr)
+    }
+
+    if closeErr := storage.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    if 1 != storage.Failed() {
+        t.Fatalf("expected the failed counter to be 1, got %d", storage.Failed())
+    }
+
+    if 0 != storage.Dropped() {
+        t.Fatalf("expected no drops when the delegate fails, got %d", storage.Dropped())
+    }
+
+    if 1 != logger.count() {
+        t.Fatalf("expected one dead-letter log for the failed save, got %d", logger.count())
     }
 }

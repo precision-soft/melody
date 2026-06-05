@@ -61,7 +61,6 @@ type ConsumeCommand struct {
     shutdownGrace time.Duration
 }
 
-/** WithShutdownGrace bounds how long, after an interrupt, the consumer waits for in-flight handlers to drain before it stops waiting and returns. A non-positive value restores the default. */
 func (instance *ConsumeCommand) WithShutdownGrace(grace time.Duration) *ConsumeCommand {
     if 0 >= grace {
         grace = defaultShutdownGrace
@@ -139,11 +138,6 @@ func (instance *ConsumeCommand) consumeFrom(
         return receiveErr
     }
 
-    /**
-     * workerContext lets a worker (or the limit being reached) stop the whole pool independently of
-     * the interrupt context. Ack/Nack are serialized inside each transport, so N workers calling
-     * consume concurrently is safe; with concurrency 1 this is the original sequential behaviour.
-     */
     workerContext, cancelWorkers := context.WithCancel(consumeContext)
     defer cancelWorkers()
 
@@ -196,7 +190,6 @@ func (instance *ConsumeCommand) consumeFrom(
     case <-consumeContext.Done():
     }
 
-    /** interrupted: give in-flight handlers a bounded grace period to finish before returning. */
     select {
     case <-drained:
         return loopErr
@@ -241,8 +234,6 @@ func (instance *ConsumeCommand) consume(
         if sendErr := instance.retryPolicy.FailureTransport.Send(runtimeInstance, envelopeInstance); nil != sendErr {
             instance.logError(runtimeInstance, "could not route the exhausted message to the failure transport", sendErr)
 
-            /** the failure transport did not accept the message; requeue it with a backoff on the source
-                rather than ack-and-drop, so a persistently unreachable failure transport does not spin */
             requeued := envelopeInstance.WithStamp(DelayStamp{Delay: instance.failureRequeueDelay()})
             if nackErr := transport.Nack(runtimeInstance, requeued, true); nil != nackErr {
                 instance.logError(runtimeInstance, "message requeue failed after failure transport rejection", nackErr)

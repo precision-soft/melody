@@ -93,10 +93,27 @@ When `DeadLetter` is `true`, the transport declares a dead-letter exchange (`<qu
 - A handler failure negatively acknowledges it. To avoid poison-message loops, a message that was already redelivered is dead-lettered instead of being requeued again. This is a bounded single-retry policy; delayed/backoff retry is not yet implemented.
 - A delivery that cannot be decoded (missing or unknown `x-message-type`, bad body) is dead-lettered immediately.
 
+## SSE backplane
+
+`NewSseBackplane(SseBackplaneConfig{...})` makes the core `http.SseHub` fan its broadcasts out across every application instance behind a load balancer over a fanout exchange — without it, a `Broadcast` reaches only the clients connected to the instance that emitted it. Each instance binds its own exclusive, auto-deleted queue to the exchange (default `melody.sse`), so a published broadcast reaches every instance; the events of other instances are forwarded into the hub via `DeliverLocal`, and a tagged per-instance origin makes each instance skip the echo of its own broadcasts. Replication is best-effort (auto-ack, transient). With a `Dialer` the subscription and publisher re-establish after a broker restart.
+
+```go
+hub := melodyhttp.NewSseHub()
+backplane := amqp.NewSseBackplane(amqp.SseBackplaneConfig{
+    Connection: connection,
+    Dialer:     provider.Dialer(dsn),
+    Hub:        hub,
+})
+defer backplane.Close()
+```
+
+`NewSseBackplane` calls `hub.SetBackplane` itself, so after construction `hub.Broadcast(...)` replicates automatically. `Close` tears the subscription down and closes only a connection the backplane itself dialed (never the one you passed in). The same hub backs the WebSocket integration, so both transports fan out cluster-wide.
+
 ## Footguns & caveats
 
 - The transport uses one channel for publishing and one for consuming, created lazily. `Ack`/`Nack` operate on the consume channel, so they must be called from the process that received the message.
-- With auto-reconnect, a message received just before a reconnect carries a delivery tag from the old channel; acking it after the channel rotated fails benignly and the broker redelivers it. Combined with the at-least-once requeue, this means **handlers must be idempotent**.
+- With auto-reconnect, a message received just before a reconnect carries a delivery tag from the old channel. Each delivery is stamped with the consume-channel generation it arrived on; once the channel rotates, an `Ack`/`Nack` for an older generation is skipped as a no-op rather than acking the stale tag against the new channel — which would otherwise ack an unrelated delivery (silent loss) or trip a 406 channel close. The broker redelivers the still-unacked message. Combined with the at-least-once requeue, this means **handlers must be idempotent**.
+- Behind a load balancer the consumer runs on several instances as competing consumers on the same queue; this is the normal AMQP fan-out and is safe. Because redelivery can land a message on a different instance than first processed it, idempotency must be keyed on the message, not on local state.
 - Queue/exchange topology is declared on first use and assumed stable. Redeclaring with conflicting arguments will fail at the broker.
 - Stamps are process-local and are not serialized over the wire; only the message body and its type name cross the broker. The transport adds a `DeliveryStamp` and a `messagebus.ReceivedStamp` on receive.
 - The integration test (`transport_test.go`) is skipped unless `AMQP_DSN` is set. A RabbitMQ service is available in `.dev/docker/docker-compose.yml`.

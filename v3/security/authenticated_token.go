@@ -11,11 +11,6 @@ func NewAuthenticatedToken(userIdentifier string, roles []string) *Authenticated
     }
 }
 
-/**
- * NewAuthenticatedTokenFromClaims builds an authenticated token carrying the full enriched claims —
- * roles plus the generic Scope and Attributes a TokenEnricher resolved — so attribute/tenant-based
- * access control downstream can read more than just the roles.
- */
 func NewAuthenticatedTokenFromClaims(claims securitycontract.Claims) *AuthenticatedToken {
     return &AuthenticatedToken{
         userIdentifier: claims.UserIdentifier,
@@ -48,12 +43,10 @@ func (instance *AuthenticatedToken) Roles() []string {
     return append([]string{}, instance.roles...)
 }
 
-/** Scope returns a copy of the generic scope claims carried by the token (nil when none). */
 func (instance *AuthenticatedToken) Scope() map[string]any {
     return copyAnyMap(instance.scope)
 }
 
-/** Attributes returns a copy of the generic attributes an enricher attached (nil when none). */
 func (instance *AuthenticatedToken) Attributes() map[string]any {
     return copyAnyMap(instance.attributes)
 }

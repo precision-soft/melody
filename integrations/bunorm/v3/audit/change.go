@@ -32,11 +32,6 @@ func changeSetWithIgnore(before any, after any, ignore map[string]struct{}) []Ch
     return changes
 }
 
-/**
- * collectChanges appends the per-field diff of two struct values to changes. Anonymous (embedded)
- * struct fields other than bun.BaseModel are recursed into and flattened, matching how bun promotes
- * embedded columns into the table, so an audited embed's fields are captured rather than dropped.
- */
 func collectChanges(changes *[]Change, beforeValue reflect.Value, afterValue reflect.Value, ignore map[string]struct{}) {
     var structType reflect.Type
     if true == beforeValue.IsValid() {
@@ -124,7 +119,6 @@ func collectChanges(changes *[]Change, beforeValue reflect.Value, afterValue ref
     }
 }
 
-/** isAuditableEmbed reports whether an anonymous field is an embedded struct whose promoted columns should be audited (i.e. a real embed, not bun.BaseModel, time.Time, and not tagged bun:"-"). */
 func isAuditableEmbed(field reflect.StructField) bool {
     if "-" == field.Tag.Get("bun") {
         return false
@@ -142,7 +136,6 @@ func isAuditableEmbed(field reflect.StructField) bool {
     return baseModelType != embedded && encryptedStringType != embedded && reflect.TypeOf(time.Time{}) != embedded
 }
 
-/** structValueOf derefs a (possibly pointer) struct field value, returning an invalid Value for a nil pointer or non-struct. */
 func structValueOf(value reflect.Value) reflect.Value {
     for reflect.Ptr == value.Kind() {
         if true == value.IsNil() {

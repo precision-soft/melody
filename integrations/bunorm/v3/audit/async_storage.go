@@ -3,6 +3,7 @@ package audit
 import (
     "context"
     "sync"
+    "sync/atomic"
 
     "github.com/precision-soft/melody/v3/exception"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
@@ -10,16 +11,6 @@ import (
 
 const defaultAsyncBufferSize = 1024
 
-/**
- * AsyncStorage wraps a Storage and persists entries on a background worker, so an audited write does
- * not block the request path on the underlying store. Entries are queued on a bounded channel; when
- * the queue is full an entry is dead-lettered to the logger instead of blocking the caller, and Save
- * always returns nil so a slow/failing backend never rolls back the business transaction. Close
- * drains the queue and waits for the worker to finish — call it during shutdown.
- *
- * The wrapped store runs on a background context (the request context may already be cancelled), so
- * AsyncStorage must wrap a pool-backed store such as BunStorage or FileStorage, not a request-tx one.
- */
 type AsyncStorage struct {
     delegate Storage
     queue    chan asyncEntry
@@ -27,6 +18,9 @@ type AsyncStorage struct {
     wait     sync.WaitGroup
     mutex    sync.RWMutex
     closed   bool
+
+    dropped atomic.Uint64
+    failed  atomic.Uint64
 }
 
 type asyncEntry struct {
@@ -54,7 +48,6 @@ func NewAsyncStorage(delegate Storage, bufferSize int) *AsyncStorage {
     return instance
 }
 
-/** WithLogger enables dead-letter logging: entries dropped on overflow or failed by the delegate are logged. */
 func (instance *AsyncStorage) WithLogger(logger loggingcontract.Logger) *AsyncStorage {
     instance.logger = logger
 
@@ -67,6 +60,7 @@ func (instance *AsyncStorage) Save(ctx context.Context, table string, entries ..
 
     if true == instance.closed {
         for _, entry := range entries {
+            instance.dropped.Add(1)
             instance.deadLetter(entry, exception.NewError("async audit storage is closed, dropped the entry", map[string]any{"table": table}, nil))
         }
 
@@ -77,6 +71,7 @@ func (instance *AsyncStorage) Save(ctx context.Context, table string, entries ..
         select {
         case instance.queue <- asyncEntry{table: table, entry: entry}:
         default:
+            instance.dropped.Add(1)
             instance.deadLetter(entry, exception.NewError("async audit queue is full, dropped the entry", map[string]any{"table": table}, nil))
         }
     }
@@ -89,12 +84,20 @@ func (instance *AsyncStorage) run() {
 
     for item := range instance.queue {
         if saveErr := instance.delegate.Save(context.Background(), item.table, item.entry); nil != saveErr {
+            instance.failed.Add(1)
             instance.deadLetter(item.entry, saveErr)
         }
     }
 }
 
-/** Close stops accepting new entries, drains the queue and waits for the worker. It is safe to call more than once. */
+func (instance *AsyncStorage) Dropped() uint64 {
+    return instance.dropped.Load()
+}
+
+func (instance *AsyncStorage) Failed() uint64 {
+    return instance.failed.Load()
+}
+
 func (instance *AsyncStorage) Close() error {
     instance.mutex.Lock()
     if false == instance.closed {

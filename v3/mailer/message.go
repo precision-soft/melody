@@ -192,7 +192,6 @@ func hasHeader(headers map[string]string, name string) bool {
     return false
 }
 
-/** newMessageId builds a globally-unique RFC 5322 Message-ID using a random local part and the sender's domain (falling back to localhost). */
 func newMessageId(senderEmail string) string {
     buffer := make([]byte, 16)
     if _, readErr := rand.Read(buffer); nil != readErr {
@@ -207,13 +206,6 @@ func newMessageId(senderEmail string) string {
     return "<" + hex.EncodeToString(buffer) + "@" + headerSanitizer.Replace(domain) + ">"
 }
 
-/**
- * foldHeaderLine folds a header at existing whitespace so lines stay within maxHeaderLineLength.
- * It never breaks inside a single token: RFC 5322 unfolding keeps the folding whitespace, so a fold
- * inserted mid-token would corrupt the value (notably addresses). An over-long single token is
- * therefore emitted intact on its own line — for long unstructured text use Subject, which is
- * encoded-word chunked upstream.
- */
 func foldHeaderLine(name string, value string) string {
     var builder strings.Builder
 

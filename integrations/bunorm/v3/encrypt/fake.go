@@ -1,9 +1,5 @@
 package encrypt
 
-/**
- * NewFakeCipher returns an identity Cipher that stores and returns values unchanged. It is for
- * tests and local development only — it provides NO confidentiality. Never install it in production.
- */
 func NewFakeCipher() Cipher {
     return &fakeCipher{}
 }

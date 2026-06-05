@@ -51,7 +51,6 @@ func (instance *Provider) Open(dsn string) (*amqp091.Connection, error) {
     return connection, nil
 }
 
-/** Dialer returns a factory that re-opens a connection from the same dsn, suitable for TransportConfig.Dialer so the transport can reconnect after the broker drops the connection. */
 func (instance *Provider) Dialer(dsn string) func() (*amqp091.Connection, error) {
     return func() (*amqp091.Connection, error) {
         return instance.Open(dsn)

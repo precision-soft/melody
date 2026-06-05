@@ -17,12 +17,6 @@ const (
     tokenStoreScanCount     = 256
 )
 
-/**
- * tokenPutScript stores the claims at the token key and indexes the token under its user. When the
- * token already exists under a different user, the old user's set membership is removed first, so a
- * re-issued token never lingers in a stale user index. KEYS[1] is the token key; ARGV is
- * [claimsJson, pttlMilliseconds, userKeyPrefix, userIdentifier].
- */
 var tokenPutScript = rueidis.NewLuaScript(`
 local existing = redis.call("get", KEYS[1])
 if existing then
@@ -41,10 +35,6 @@ redis.call("sadd", ARGV[3] .. ARGV[4], KEYS[1])
 return 1
 `)
 
-/**
- * tokenDeleteScript removes the token key and its membership from the owning user's set. KEYS[1] is
- * the token key; ARGV[1] is the user key prefix. Returns 1 when a token was deleted, 0 otherwise.
- */
 var tokenDeleteScript = rueidis.NewLuaScript(`
 local existing = redis.call("get", KEYS[1])
 if not existing then
@@ -59,11 +49,6 @@ end
 return 1
 `)
 
-/**
- * tokenDeleteByUserScript deletes every live token key in the user's set, drops the set, and returns
- * the count of token keys that actually existed (members whose key already expired are not counted but
- * are still cleaned by dropping the set). KEYS[1] is the user set key.
- */
 var tokenDeleteByUserScript = rueidis.NewLuaScript(`
 local members = redis.call("smembers", KEYS[1])
 local removed = 0
@@ -76,11 +61,6 @@ redis.call("del", KEYS[1])
 return removed
 `)
 
-/**
- * tokenPurgeUserScript reconciles a single user set: members whose token key Redis has already expired
- * are removed, and the set itself is dropped when it becomes empty. KEYS[1] is the user set key.
- * Returns the number of stale members pruned.
- */
 var tokenPurgeUserScript = rueidis.NewLuaScript(`
 local members = redis.call("smembers", KEYS[1])
 local pruned = 0
@@ -124,20 +104,19 @@ func NewTokenStore(client rueidis.Client, options ...TokenStoreOption) *RedisTok
 
 type TokenStoreOption func(*RedisTokenStore)
 
-/** WithTokenStorePrefix overrides the key namespace (default "melody:token"). */
 func WithTokenStorePrefix(prefix string) TokenStoreOption {
     return func(store *RedisTokenStore) {
         store.prefix = prefix
     }
 }
 
-/**
- * WithTokenStoreContext binds the context used by the context-less mutators (Put/Delete/DeleteByUser/
- * PurgeExpired). Lookup always uses the per-request runtime context instead. Defaults to background.
- */
 func WithTokenStoreContext(ctx context.Context) TokenStoreOption {
     return func(store *RedisTokenStore) {
-        store.ctx = ctx
+        if nil == ctx {
+            return
+        }
+
+        store.ctx = context.WithoutCancel(ctx)
     }
 }
 

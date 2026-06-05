@@ -163,6 +163,10 @@ func (instance *LocalStorage) ensureNoSymlinkEscape(target string) error {
             return nil
         }
 
+        if existing == instance.cleanedBase {
+            return nil
+        }
+
         parent := filepath.Dir(existing)
         if parent == existing {
             return nil

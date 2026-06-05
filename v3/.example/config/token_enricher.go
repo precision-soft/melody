@@ -5,12 +5,6 @@ import (
     melodysecuritycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
-/**
- * scopeRoleEnricher demonstrates the generic security.TokenEnricher hook: after the token's
- * signature is validated, it grants any roles listed under the token's `scope.roles` claim. A
- * token without a scope is returned unchanged, so ordinary role-carrying JWTs keep working. A real
- * application would resolve roles from a database keyed by the scope instead of reading them inline.
- */
 type scopeRoleEnricher struct{}
 
 func newScopeRoleEnricher() scopeRoleEnricher {

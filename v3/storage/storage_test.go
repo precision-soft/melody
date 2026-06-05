@@ -58,6 +58,30 @@ func TestLocalStorage_PutGetExistsDelete(t *testing.T) {
     }
 }
 
+func TestLocalStorage_PutCreatesBaseDirectoryOnFirstWrite(t *testing.T) {
+    base := filepath.Join(t.TempDir(), "missing", "nested-base")
+    local := storage.NewLocalStorage(base)
+    runtimeInstance := testRuntime()
+
+    key := "labels/awb-1.txt"
+    content := "created lazily"
+
+    if putErr := local.Put(runtimeInstance, key, strings.NewReader(content), int64(len(content)), storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("put into a not-yet-existing base directory should succeed: %v", putErr)
+    }
+
+    reader, getErr := local.Get(runtimeInstance, key)
+    if nil != getErr {
+        t.Fatalf("get: %v", getErr)
+    }
+    loaded, _ := io.ReadAll(reader)
+    reader.Close()
+
+    if content != string(loaded) {
+        t.Fatalf("content mismatch: %q", string(loaded))
+    }
+}
+
 func TestLocalStorage_RejectsPathTraversal(t *testing.T) {
     local := storage.NewLocalStorage(t.TempDir())
     runtimeInstance := testRuntime()

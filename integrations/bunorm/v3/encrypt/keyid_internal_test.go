@@ -38,8 +38,6 @@ func TestReencryptSkipAvoidsNonceRewrite(t *testing.T) {
 
     underTarget, _ := cipher.EncryptWithKeyId("secret", "v2")
 
-    /** a naive decrypt+re-encrypt produces a different ciphertext (fresh random nonce), which is why
-        MigrateReencrypt skips rows whose key id already matches the target */
     plaintext, _ := cipher.Decrypt(underTarget)
     rewritten, _ := cipher.EncryptWithKeyId(plaintext, "v2")
     if underTarget == rewritten {

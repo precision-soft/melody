@@ -65,7 +65,6 @@ func (instance *InMemoryTokenStore) put(tokenString string, claims securitycontr
     instance.indexLocked(claims.UserIdentifier, tokenString)
 }
 
-/** indexLocked records the token under its user in the secondary index. Caller holds the write lock. */
 func (instance *InMemoryTokenStore) indexLocked(userIdentifier string, tokenString string) {
     tokens, exists := instance.tokensByUser[userIdentifier]
     if false == exists {
@@ -76,7 +75,6 @@ func (instance *InMemoryTokenStore) indexLocked(userIdentifier string, tokenStri
     tokens[tokenString] = struct{}{}
 }
 
-/** unindexLocked removes the token from its user's set, dropping the set when empty. Caller holds the write lock. */
 func (instance *InMemoryTokenStore) unindexLocked(userIdentifier string, tokenString string) {
     tokens, exists := instance.tokensByUser[userIdentifier]
     if false == exists {

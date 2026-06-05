@@ -7,11 +7,17 @@ import (
 
     "github.com/precision-soft/melody/v3/container"
     "github.com/precision-soft/melody/v3/exception"
+    melodymessagebus "github.com/precision-soft/melody/v3/messagebus"
+    messagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
-    messagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
+    melodyserializer "github.com/precision-soft/melody/v3/serializer"
     amqp091 "github.com/rabbitmq/amqp091-go"
 )
+
+type reconnectMessage struct {
+    Id int
+}
 
 func newReconnectRuntime(ctx context.Context) runtimecontract.Runtime {
     serviceContainer := container.NewContainer()
@@ -138,6 +144,65 @@ func TestConsumeLoop_NoDialerClosesOut(t *testing.T) {
         }
     case <-time.After(2 * time.Second):
         t.Fatalf("expected consumeLoop to close out after the channel was lost")
+    }
+}
+
+func TestDecode_StampsCurrentGeneration(t *testing.T) {
+    registry := NewMessageRegistry()
+    RegisterMessage[reconnectMessage](registry, "amqp.test.gen")
+
+    serializer := melodyserializer.NewJsonSerializer()
+    instance := &Transport{queue: "orders", registry: registry, serializer: serializer}
+
+    body, serializeErr := serializer.Serialize(reconnectMessage{Id: 1})
+    if nil != serializeErr {
+        t.Fatalf("serialize: %v", serializeErr)
+    }
+
+    delivery := amqp091.Delivery{
+        Headers:     amqp091.Table{headerMessageType: "amqp.test.gen"},
+        DeliveryTag: 5,
+        Body:        body,
+    }
+
+    envelopeInstance, decodeErr := instance.decode(delivery, 9)
+    if nil != decodeErr {
+        t.Fatalf("decode: %v", decodeErr)
+    }
+
+    stamp, exists := melodymessagebus.LastStampOfType[DeliveryStamp](envelopeInstance)
+    if false == exists {
+        t.Fatalf("expected a delivery stamp on the decoded envelope")
+    }
+
+    if 9 != stamp.Generation {
+        t.Fatalf("expected the delivery to carry generation 9, got %d", stamp.Generation)
+    }
+}
+
+func TestAckNack_StaleGenerationIsNoOp(t *testing.T) {
+    runtimeInstance := newReconnectRuntime(context.Background())
+
+    newInstance := func() *Transport {
+        return &Transport{
+            queue:             "orders",
+            consumeChannel:    &amqp091.Channel{},
+            consumeGeneration: 2,
+        }
+    }
+
+    staleEnvelope := melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}, DeliveryStamp{Tag: 5, Generation: 1})
+
+    if ackErr := newInstance().Ack(runtimeInstance, staleEnvelope); nil != ackErr {
+        t.Fatalf("expected a stale-generation ack to be a no-op, got %v", ackErr)
+    }
+
+    if nackErr := newInstance().Nack(runtimeInstance, staleEnvelope, false); nil != nackErr {
+        t.Fatalf("expected a stale-generation drop nack to be a no-op, got %v", nackErr)
+    }
+
+    if nackErr := newInstance().Nack(runtimeInstance, staleEnvelope, true); nil != nackErr {
+        t.Fatalf("expected a stale-generation requeue nack to be a no-op, got %v", nackErr)
     }
 }
 

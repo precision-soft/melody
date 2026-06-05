@@ -138,7 +138,6 @@ func TestBearerTokenSource_EnrichmentFailureFallsBackToAnonymous(t *testing.T) {
     validator := security.NewJwtTokenValidator(security.JwtConfig{Secret: secret, ScopeClaim: "scope"})
     source := security.NewBearerTokenSourceWithEnricher(validator, scopeRoleEnricher{})
 
-    /** no role in scope → enricher errors → request continues anonymously */
     tokenString := signJwtHs256(secret, map[string]any{
         "sub":   "user-1",
         "exp":   time.Now().Add(time.Hour).Unix(),
@@ -173,7 +172,6 @@ func TestNewAuthenticatedTokenFromClaims_CarriesScopeAndAttributes(t *testing.T)
         t.Fatalf("expected the attributes to be carried onto the token, got %+v", token.Attributes())
     }
 
-    /** the accessor must return a copy so callers cannot mutate the token's internal state */
     token.Attributes()["department"] = "tampered"
     if "wms" != token.Attributes()["department"] {
         t.Fatalf("expected Attributes() to return a defensive copy")

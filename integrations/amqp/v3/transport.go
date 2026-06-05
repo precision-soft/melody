@@ -73,11 +73,6 @@ func NewTransport(config TransportConfig) *Transport {
 
 type TransportConfig struct {
     Connection *amqp091.Connection
-    /**
-     * Dialer, when set, lets the transport re-establish the broker connection after it drops so the
-     * consumer survives a broker restart without an external supervisor. When nil the transport keeps
-     * the original behaviour: a dropped connection stops the consumer. Provider.Dialer(dsn) builds one.
-     */
     Dialer     func() (*amqp091.Connection, error)
     Queue      string
     Exchange   string
@@ -99,24 +94,18 @@ type Transport struct {
     serializer serializercontract.Serializer
     deadLetter bool
 
-    mutex          sync.Mutex
-    publishChannel *amqp091.Channel
-    consumeChannel *amqp091.Channel
-    closing        bool
-    reconnecting   bool
-    ownsConnection bool
+    mutex             sync.Mutex
+    publishChannel    *amqp091.Channel
+    consumeChannel    *amqp091.Channel
+    consumeGeneration uint64
+    closing           bool
+    reconnecting      bool
+    ownsConnection    bool
 
     publishMutex sync.Mutex
-    /** serializes ack/nack on the consume channel; amqp091 channels are not safe for concurrent use */
     consumeMutex sync.Mutex
 }
 
-/**
- * connect returns a live broker connection. It returns the current one when it is still open. When the
- * connection is closed (or absent) and a Dialer is configured it re-dials, installs the new connection
- * and discards the dead cached channels so they are reopened lazily. Only one dial runs at a time; a
- * concurrent caller gets errReconnectInProgress and should retry.
- */
 func (instance *Transport) connect() (*amqp091.Connection, error) {
     instance.mutex.Lock()
 
@@ -173,7 +162,6 @@ func (instance *Transport) connect() (*amqp091.Connection, error) {
     return connection, nil
 }
 
-/** ackChannel and nackChannel serialize consume-channel acknowledgements through consumeMutex. */
 func (instance *Transport) ackChannel(channel *amqp091.Channel, tag uint64) error {
     instance.consumeMutex.Lock()
     defer instance.consumeMutex.Unlock()
@@ -257,7 +245,6 @@ func (instance *Transport) publish(
         return publishErr
     }
 
-    /** the channel likely died with the connection; drop it and retry once so connect() re-dials. */
     instance.resetPublishChannel()
 
     return instance.publishOnce(ctx, exchange, routingKey, publishing)
@@ -333,13 +320,6 @@ func (instance *Transport) subscribe() (*amqp091.Channel, <-chan amqp091.Deliver
     return channel, deliveries, nil
 }
 
-/**
- * consumeLoop owns the lifetime of the out channel (closed exactly once on exit). It forwards
- * deliveries until the broker channel is lost, then — when a Dialer is configured and the transport is
- * neither closing nor cancelled — re-subscribes with bounded backoff and resumes on the same out
- * channel, so consumers never observe the reconnect. Without a Dialer it preserves the original
- * behaviour: log and stop.
- */
 func (instance *Transport) consumeLoop(
     runtimeInstance runtimecontract.Runtime,
     channel *amqp091.Channel,
@@ -388,11 +368,6 @@ func (instance *Transport) consumeLoop(
     }
 }
 
-/**
- * reopenConsume re-subscribes after a connection drop, sleeping with exponential backoff (capped) between
- * attempts. Each sleep and each attempt aborts promptly when the runtime context is cancelled or the
- * transport is closing.
- */
 func (instance *Transport) reopenConsume(
     runtimeInstance runtimecontract.Runtime,
     backoff *time.Duration,
@@ -437,9 +412,13 @@ func (instance *Transport) Ack(
         return exception.NewError("envelope has no amqp delivery stamp", nil, nil)
     }
 
-    channel := instance.consumeChannelForAck()
+    channel, generation := instance.consumeChannelForAck()
     if nil == channel {
         return exception.NewError("amqp consume channel is not open", nil, nil)
+    }
+
+    if stamp.Generation != generation {
+        return nil
     }
 
     return instance.ackChannel(channel, stamp.Tag)
@@ -455,9 +434,13 @@ func (instance *Transport) Nack(
         return exception.NewError("envelope has no amqp delivery stamp", nil, nil)
     }
 
-    channel := instance.consumeChannelForAck()
+    channel, generation := instance.consumeChannelForAck()
     if nil == channel {
         return exception.NewError("amqp consume channel is not open", nil, nil)
+    }
+
+    if stamp.Generation != generation {
+        return nil
     }
 
     if false == requeue {
@@ -467,12 +450,6 @@ func (instance *Transport) Nack(
     return instance.republish(runtimeInstance, channel, stamp, envelopeInstance)
 }
 
-/**
- * republish carries the redelivery count forward by re-publishing the message (broker requeue cannot
- * preserve a custom header) and then acking the original. This is at-least-once: a crash between the
- * publish and the ack leaves the original unacked AND the re-published copy in place, so the handler
- * may see the message twice. Handlers must therefore be idempotent.
- */
 func (instance *Transport) republish(
     runtimeInstance runtimecontract.Runtime,
     channel *amqp091.Channel,
@@ -504,11 +481,11 @@ func (instance *Transport) republish(
     return instance.ackChannel(channel, stamp.Tag)
 }
 
-func (instance *Transport) consumeChannelForAck() *amqp091.Channel {
+func (instance *Transport) consumeChannelForAck() (*amqp091.Channel, uint64) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    return instance.consumeChannel
+    return instance.consumeChannel, instance.consumeGeneration
 }
 
 func (instance *Transport) isClosing() bool {
@@ -516,6 +493,13 @@ func (instance *Transport) isClosing() bool {
     defer instance.mutex.Unlock()
 
     return instance.closing
+}
+
+func (instance *Transport) currentGeneration() uint64 {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return instance.consumeGeneration
 }
 
 func (instance *Transport) Close(runtimeInstance runtimecontract.Runtime) error {
@@ -548,6 +532,8 @@ func (instance *Transport) forwardDeliveries(
     deliveries <-chan amqp091.Delivery,
     out chan messagebuscontract.Envelope,
 ) forwardReason {
+    generation := instance.currentGeneration()
+
     for {
         select {
         case <-runtimeInstance.Context().Done():
@@ -557,7 +543,7 @@ func (instance *Transport) forwardDeliveries(
                 return forwardChannelLost
             }
 
-            envelopeInstance, decodeErr := instance.decode(delivery)
+            envelopeInstance, decodeErr := instance.decode(delivery, generation)
             if nil != decodeErr {
                 poisonMessage := "amqp message decode failed, dead-lettering"
                 if false == instance.deadLetter {
@@ -582,7 +568,7 @@ func (instance *Transport) forwardDeliveries(
     }
 }
 
-func (instance *Transport) decode(delivery amqp091.Delivery) (messagebuscontract.Envelope, error) {
+func (instance *Transport) decode(delivery amqp091.Delivery, generation uint64) (messagebuscontract.Envelope, error) {
     typeName, _ := delivery.Headers[headerMessageType].(string)
     if "" == typeName {
         return nil, exception.NewError("amqp delivery is missing the message type header", nil, nil)
@@ -605,7 +591,7 @@ func (instance *Transport) decode(delivery amqp091.Delivery) (messagebuscontract
     message := reflect.ValueOf(target).Elem().Interface()
 
     stamps := []messagebuscontract.Stamp{
-        DeliveryStamp{Tag: delivery.DeliveryTag, Redelivered: delivery.Redelivered},
+        DeliveryStamp{Tag: delivery.DeliveryTag, Redelivered: delivery.Redelivered, Generation: generation},
         melodymessagebus.ReceivedStamp{TransportName: instance.queue},
     }
 
@@ -747,6 +733,7 @@ func (instance *Transport) ensureConsumeChannel() (*amqp091.Channel, error) {
     }
 
     instance.consumeChannel = channel
+    instance.consumeGeneration++
 
     return channel, nil
 }

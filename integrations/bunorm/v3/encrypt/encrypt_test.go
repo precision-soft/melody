@@ -55,7 +55,6 @@ func TestCipher_DecryptFailsWithUnknownKeyId(t *testing.T) {
 }
 
 func TestCipher_EncryptDeterministicWithKeyIdStaysSearchableAcrossRotation(t *testing.T) {
-    /** two active keys: rotation target is v2 (current), v1 is the legacy key */
     provider := encrypt.NewStaticKeyProvider("v2", map[string][]byte{"v2": newKey(2), "v1": newKey(1)})
     cipher := encrypt.NewCipher(provider)
 
@@ -64,13 +63,11 @@ func TestCipher_EncryptDeterministicWithKeyIdStaysSearchableAcrossRotation(t *te
         t.Fatalf("deterministic encrypt with key id: %v", rotateErr)
     }
 
-    /** deterministic under an explicit key id must be stable (same key + plaintext -> same ciphertext) */
     again, _ := cipher.EncryptDeterministicWithKeyId("alice@example.com", "v2")
     if rotated != again {
         t.Fatalf("expected deterministic ciphertext to be stable, got %q vs %q", rotated, again)
     }
 
-    /** a lookup built from CiphertextCandidates must still match the rotated value */
     candidates, candidatesErr := cipher.CiphertextCandidates("alice@example.com")
     if nil != candidatesErr {
         t.Fatalf("candidates: %v", candidatesErr)
@@ -163,7 +160,6 @@ func TestCipher_DeterministicProducesStableCiphertext(t *testing.T) {
         t.Fatalf("deterministic round-trip failed: %q (%v)", decrypted, decryptErr)
     }
 
-    /** a random-nonce encryption of the same value must differ from the deterministic one */
     random, _ := cipher.Encrypt("lookup@example.com")
     if random == first {
         t.Fatalf("random and deterministic encodings should differ")
@@ -183,7 +179,6 @@ func TestCipher_CiphertextCandidatesCoverAllActiveKeys(t *testing.T) {
         t.Fatalf("expected one candidate per active key, got %d", len(candidates))
     }
 
-    /** the candidate written under the current key must equal a fresh deterministic encryption */
     current, _ := cipher.EncryptDeterministic("user@example.com")
     if candidates[0] != current {
         t.Fatalf("expected the current key candidate first")
@@ -226,18 +221,15 @@ func TestEncryptedString_FailsClosedWithoutCipher(t *testing.T) {
         t.Fatalf("expected Scan to fail when no cipher is configured")
     }
 
-    /** a NULL column is still accepted (no decryption needed) */
     if scanErr := loaded.Scan(nil); nil != scanErr {
         t.Fatalf("scan of NULL should succeed: %v", scanErr)
     }
 }
 
 func TestMigrator_EncryptThenReencryptRoundTripValues(t *testing.T) {
-    /** value-level check of the transforms the Migrator applies, without a database */
     provider := encrypt.NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2)})
     cipher := encrypt.NewCipher(provider)
 
-    /** encrypt plaintext, then re-encrypt under a new key and confirm it still decrypts */
     encrypted, _ := cipher.EncryptWithKeyId("secret", "v1")
     plaintext, _ := cipher.Decrypt(encrypted)
     rotated, _ := cipher.EncryptWithKeyId(plaintext, "v2")

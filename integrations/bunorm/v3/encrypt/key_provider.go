@@ -12,7 +12,6 @@ var keyIdPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,32}$`)
 type KeyProvider interface {
     CurrentKeyId() string
 
-    /** ActiveKeyIds returns every usable key id, the current one first, the rest in stable order. */
     ActiveKeyIds() []string
 
     Key(keyId string) ([]byte, error)

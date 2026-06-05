@@ -10,23 +10,16 @@ import (
     "github.com/uptrace/bun"
 )
 
-/**
- * Storage persists audit entries. Implementations must be safe for concurrent use. The table
- * argument is the resolved per-entity (or default) table name; file-based or custom backends that
- * do not have tables may fold it into their record.
- */
 type Storage interface {
     Save(ctx context.Context, table string, entries ...Entry) error
 }
 
 type databaseContextKey struct{}
 
-/** withDatabase binds a bun handle (typically a transaction) to the context so a BunStorage write joins the caller's unit of work instead of running on the raw pool. */
 func withDatabase(ctx context.Context, database bun.IDB) context.Context {
     return context.WithValue(ctx, databaseContextKey{}, database)
 }
 
-/** databaseFromContext returns the bun handle bound by withDatabase, or the fallback when none is present. */
 func databaseFromContext(ctx context.Context, fallback bun.IDB) bun.IDB {
     if database, bound := ctx.Value(databaseContextKey{}).(bun.IDB); true == bound && nil != database {
         return database
@@ -35,7 +28,6 @@ func databaseFromContext(ctx context.Context, fallback bun.IDB) bun.IDB {
     return fallback
 }
 
-/** NewBunStorage writes audit entries as rows via bun, routing each batch to the given table. */
 func NewBunStorage(database *bun.DB) *BunStorage {
     if nil == database {
         exception.Panic(exception.NewError("audit storage database is nil", nil, nil))
@@ -70,10 +62,6 @@ func (instance *BunStorage) Save(ctx context.Context, table string, entries ...E
     return nil
 }
 
-/**
- * NewFileStorage appends audit entries as JSON lines to a file. The resolved table name is included
- * in each record so a single file can hold entries routed to different per-entity tables.
- */
 func NewFileStorage(path string) *FileStorage {
     if "" == path {
         exception.Panic(exception.NewError("audit file storage path is empty", nil, nil))

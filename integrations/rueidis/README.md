@@ -197,6 +197,8 @@ Key schema:
 * `<prefix>:token:<token>` — JSON-encoded claims, with `PX` set to the ttl (`PutWithTtl`); `Put` stores it without expiry.
 * `<prefix>:user:<userIdentifier>` — a set of the user's token keys, so `DeleteByUser` revokes every token a user holds in one call.
 
+The token string and user identifier are used verbatim as the trailing key segment. Redis keys are a flat namespace, so a `:` inside either value cannot collide across the fixed `:token:`/`:user:` segments nor between two distinct identifiers, and the values are never parsed back out of the key.
+
 `Put`/`Delete`/`DeleteByUser` run Lua so the token key and the user index stay consistent in a single round trip (re-issuing a token to a different user re-indexes it). `DeleteByUser` returns the number of live tokens revoked and drops the set. Redis expires the token keys natively; `PurgeExpired` only reconciles the user index, pruning members whose token key has already expired and returning the count pruned — run it periodically (e.g. from a cron command), not on the hot path.
 
 Context: the context-less mutators (`Put`/`Delete`/`DeleteByUser`/`PurgeExpired`) use a constructor-bound context (`WithTokenStoreContext`, default background); `Lookup` uses the per-request `runtime.Context()`.
@@ -223,3 +225,15 @@ func registerTokenStore(builder containercontract.Builder, client redis.Client) 
 ```
 
 Wire the store into an `OpaqueTokenValidator` exactly as you would the in-memory one — the firewall configuration is identical because both satisfy `securitycontract.TokenStore`.
+
+## SSE backplane
+
+`NewSseBackplane(client, hub, ...options)` makes the core `http.SseHub` fan its broadcasts out across every application instance behind a load balancer over a Redis pub/sub channel — without it, a `Broadcast` reaches only the clients connected to the instance that emitted it. Each broadcast is published to a shared channel (`WithSseBackplaneChannel`, default `melody:sse`) tagged with a per-instance random origin; a dedicated subscription forwards the events of other instances into the hub via `DeliverLocal` and skips the echo of its own origin, so nothing is delivered twice. The subscription re-subscribes with bounded backoff after a connection drop. The same hub backs the WebSocket integration, so both transports fan out cluster-wide.
+
+```go
+hub := melodyhttp.NewSseHub()
+backplane := rueidis.NewSseBackplane(client, hub, rueidis.WithSseBackplaneChannel("myapp:sse"))
+defer backplane.Close()
+```
+
+`NewSseBackplane` calls `hub.SetBackplane` itself, so after construction `hub.Broadcast(...)` replicates automatically. The Redis client is caller-owned; `Close` stops the subscription but does not close the client. Delivery is best-effort like SSE itself; `hub.BackplaneFailures()` counts broadcasts that could not be published.

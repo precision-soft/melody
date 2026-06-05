@@ -24,7 +24,6 @@ type InMemoryTransport struct {
     logger    loggingcontract.Logger
 }
 
-/** WithLogger sets a logger so a delayed requeue dropped on a full/closed queue is reported instead of vanishing silently. */
 func (instance *InMemoryTransport) WithLogger(logger loggingcontract.Logger) *InMemoryTransport {
     instance.logger = logger
 

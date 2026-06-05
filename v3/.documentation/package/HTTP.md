@@ -222,6 +222,10 @@ func StreamHandler(hub *http.SseHub) httpcontract.Handler {
 
 The example application wires an `SseHub`, an `/events/stream` SSE endpoint (`handler/events/stream_handler.go`), and an `/events/publish` endpoint (`handler/events/publish_handler.go`) that dispatches a message through the bus to a handler which broadcasts to the hub.
 
+### Behind a load balancer
+
+`SseHub` keeps its subscribers in process, so a plain `Broadcast` only reaches clients connected to **this** instance. When the application runs on several instances behind a load balancer, attach an [`SseBackplane`](../../http/sse_hub.go) with [`SetBackplane`](../../http/sse_hub.go): `Broadcast` then also replicates the event to the other instances, each of which delivers it to its own subscribers via [`DeliverLocal`](../../http/sse_hub.go). The backplane tags every event with a per-instance origin and ignores the echo of its own broadcasts, so nothing is delivered twice. Concrete backplanes ship in [`integrations/rueidis`](../../../integrations/rueidis) (Redis pub/sub) and [`integrations/amqp`](../../../integrations/amqp) (fanout exchange); the WebSocket integration shares the same hub, so it fans out the same way. Without a backplane, pin clients to an instance with sticky sessions and accept that an event only reaches that instance. Replication is best-effort like local delivery; [`BackplaneFailures`](../../http/sse_hub.go) counts broadcasts that could not be replicated.
+
 ## Footguns & caveats
 
 * SSE handlers must return `(nil, nil)` after streaming; returning a non-nil response would make the kernel write a second header/body.

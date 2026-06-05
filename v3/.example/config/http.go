@@ -12,6 +12,7 @@ import (
     "github.com/precision-soft/melody/v3/.example/route"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodykernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
+    melodyopenapi "github.com/precision-soft/melody/v3/openapi"
 )
 
 func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.Kernel) {
@@ -20,6 +21,10 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     kernelInstance.HttpKernel().SetNotFoundHandler(handler.NotFoundHandler())
 
     router.HandleNamed("example.health", "GET", "/health", handler.HealthHandler())
+
+    router.HandleNamed("example.openapi", "GET", "/openapi.json", melodyopenapi.SpecHandler(instance.openApiInfo, instance.openApiRegistry))
+
+    router.HandleNamed("example.platform.demo", "GET", "/platform/demo", handler.PlatformDemoHandler())
 
     router.HandleNamed(route.LoginPageName, "GET", route.LoginPagePattern, handler.LoginPageHandler())
     router.HandleNamed(route.LoginSubmitName, "POST", route.LoginSubmitPattern, handler.LoginHandler())

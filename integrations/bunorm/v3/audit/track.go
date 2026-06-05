@@ -8,18 +8,6 @@ import (
     "github.com/uptrace/bun"
 )
 
-/**
- * Tracker is the automatic-capture entry point. It executes a bun write and records the matching
- * audit entry in one call, computing the before/after field diff itself. For updates it loads the
- * current row by primary key first, so the change-set has true before values. The write and the
- * audit entry run inside a single transaction (RunInTx), so a failure to persist the audit row rolls
- * the data change back — the data and its audit record are committed together or not at all.
- *
- * This is the Go-native equivalent of the PHP reference's unit-of-work listener: bun exposes no
- * structured changeset and a global QueryHook cannot recover old values for an arbitrary UPDATE,
- * so capture is driven through these helpers (writes must go through the model with WherePK).
- * The lower-level Recorder.Record* API remains available for callers that already hold before/after.
- */
 func NewTracker(database *bun.DB, recorder *Recorder) *Tracker {
     if nil == database {
         exception.Panic(exception.NewError("audit tracker database is nil", nil, nil))
@@ -76,7 +64,6 @@ func (instance *Tracker) Delete(ctx context.Context, entity string, entityId str
     })
 }
 
-/** cloneModel returns a new pointer to the same struct type as model, with model's fields copied in (so its primary key is set for WherePK before the row is re-loaded). */
 func cloneModel(model any) (any, error) {
     value := reflect.ValueOf(model)
     if reflect.Ptr != value.Kind() || true == value.IsNil() || reflect.Struct != value.Elem().Kind() {

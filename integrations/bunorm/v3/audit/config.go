@@ -8,7 +8,6 @@ import (
     "github.com/uptrace/bun"
 )
 
-/** auditTableNamePattern bounds table names to a plain SQL identifier so they are safe to interpolate via ModelTableExpr, which bun does not quote. */
 var auditTableNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 func validateAuditTableName(table string) {
@@ -17,20 +16,11 @@ func validateAuditTableName(table string) {
     }
 }
 
-/**
- * EntityOptions configures how one entity is audited. Table routes its entries to a dedicated
- * audit table (per-entity tables, like the PHP reference); empty means the recorder's default table.
- * IgnoredFields are dropped from the change-set in addition to the struct-tag rules in change.go.
- */
 type EntityOptions struct {
     Table         string
     IgnoredFields []string
 }
 
-/**
- * Registry maps audited entities to their options and global ignored fields. It resolves the
- * target table and the effective ignore-set per entity, and can materialise the per-entity tables.
- */
 type Registry struct {
     defaultTable        string
     globalIgnoredFields []string
@@ -84,7 +74,6 @@ func (instance *Registry) ignoredFieldsFor(entity string) map[string]struct{} {
     return ignored
 }
 
-/** distinctTables returns the default table plus every per-entity table, deduplicated. */
 func (instance *Registry) distinctTables() []string {
     seen := map[string]struct{}{instance.defaultTable: {}}
     tables := []string{instance.defaultTable}
@@ -103,10 +92,6 @@ func (instance *Registry) distinctTables() []string {
     return tables
 }
 
-/**
- * EnsureSchema creates the audit and audit-transaction tables (if absent) for every distinct table
- * the registry routes to. Run once at boot/migration time.
- */
 func (instance *Registry) EnsureSchema(ctx context.Context, database *bun.DB) error {
     if _, txErr := database.NewCreateTable().Model((*Transaction)(nil)).IfNotExists().Exec(ctx); nil != txErr {
         return txErr
