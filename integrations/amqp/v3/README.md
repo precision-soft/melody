@@ -66,6 +66,25 @@ Wire it into a dispatch bus with `messagebus.NewSendMessageMiddleware`, and into
 app melody:messagebus:consume --transport=async
 ```
 
+### Auto-reconnect
+
+By default a dropped broker connection stops the consumer (run it under a process supervisor). To let the transport recover on its own, also set a `Dialer` — `Provider.Dialer(dsn)` builds one from the same DSN:
+
+```go
+provider := amqp.NewProvider()
+connection, _ := provider.Open(dsn)
+
+transport := amqp.NewTransport(amqp.TransportConfig{
+	Connection: connection,
+	Dialer:     provider.Dialer(dsn),
+	Queue:      "welcome_email",
+	Prefetch:   10,
+	Registry:   registry,
+})
+```
+
+When the consume channel is lost, the delivery loop re-dials and re-subscribes with bounded exponential backoff (1s → 30s) and resumes on the **same** output channel, so the `melody:messagebus:consume` worker keeps running across a broker restart. The publish path drops a dead channel and retries once. `Close` stops the reconnect loop and closes only connections the transport itself dialed — never the one you passed in.
+
 ## Dead-lettering and retries
 
 When `DeadLetter` is `true`, the transport declares a dead-letter exchange (`<queue>.dlx`) and queue (`<queue>.dlq`), and points the main queue at it via `x-dead-letter-exchange`.
@@ -77,6 +96,7 @@ When `DeadLetter` is `true`, the transport declares a dead-letter exchange (`<qu
 ## Footguns & caveats
 
 - The transport uses one channel for publishing and one for consuming, created lazily. `Ack`/`Nack` operate on the consume channel, so they must be called from the process that received the message.
+- With auto-reconnect, a message received just before a reconnect carries a delivery tag from the old channel; acking it after the channel rotated fails benignly and the broker redelivers it. Combined with the at-least-once requeue, this means **handlers must be idempotent**.
 - Queue/exchange topology is declared on first use and assumed stable. Redeclaring with conflicting arguments will fail at the broker.
 - Stamps are process-local and are not serialized over the wire; only the message body and its type name cross the broker. The transport adds a `DeliveryStamp` and a `messagebus.ReceivedStamp` on receive.
 - The integration test (`transport_test.go`) is skipped unless `AMQP_DSN` is set. A RabbitMQ service is available in `.dev/docker/docker-compose.yml`.

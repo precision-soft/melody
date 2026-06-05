@@ -4,6 +4,7 @@ This integration provides:
 
 * A small `Provider` that opens a `rueidis.Client` from Melody config parameters.
 * A Redis-backed Melody cache backend implemented on top of Rueidis.
+* A Redis-backed revocable token store for the core `security` package.
 
 ## Provider
 
@@ -184,3 +185,41 @@ func (instance *MyController) Handle(
 	payload, found, err = scopedBackend.GetCtx(runtimeInstance.Context(), "my-key")
 }
 ```
+
+## Token store
+
+Entry point: [`NewTokenStore`](./token_store.go)
+
+A Redis-backed implementation of the core [`security/contract.RevocableTokenStore`](../../../v3/security/contract/token_store.go). It is a drop-in replacement for `security.NewInMemoryTokenStore` behind an `OpaqueTokenValidator`, so revocation survives restarts and is shared across instances.
+
+Key schema:
+
+* `<prefix>:token:<token>` — JSON-encoded claims, with `PX` set to the ttl (`PutWithTtl`); `Put` stores it without expiry.
+* `<prefix>:user:<userIdentifier>` — a set of the user's token keys, so `DeleteByUser` revokes every token a user holds in one call.
+
+`Put`/`Delete`/`DeleteByUser` run Lua so the token key and the user index stay consistent in a single round trip (re-issuing a token to a different user re-indexes it). `DeleteByUser` returns the number of live tokens revoked and drops the set. Redis expires the token keys natively; `PurgeExpired` only reconciles the user index, pruning members whose token key has already expired and returning the count pruned — run it periodically (e.g. from a cron command), not on the hot path.
+
+Context: the context-less mutators (`Put`/`Delete`/`DeleteByUser`/`PurgeExpired`) use a constructor-bound context (`WithTokenStoreContext`, default background); `Lookup` uses the per-request `runtime.Context()`.
+
+```go
+package main
+
+import (
+	rueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
+	"github.com/precision-soft/melody/v3/security"
+	securitycontract "github.com/precision-soft/melody/v3/security/contract"
+)
+
+const ServiceTokenStore = "security.token_store"
+
+func registerTokenStore(builder containercontract.Builder, client redis.Client) {
+	builder.Set(ServiceTokenStore, func(runtimeInstance runtimecontract.Runtime) any {
+		return rueidis.NewTokenStore(
+			client,
+			rueidis.WithTokenStorePrefix("myapp:token"),
+		)
+	})
+}
+```
+
+Wire the store into an `OpaqueTokenValidator` exactly as you would the in-memory one — the firewall configuration is identical because both satisfy `securitycontract.TokenStore`.

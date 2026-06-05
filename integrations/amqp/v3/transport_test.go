@@ -229,6 +229,81 @@ func TestTransport_DelayStampRoutesThroughDelayQueue(t *testing.T) {
     }
 }
 
+func TestTransport_ReconnectsAfterConnectionDrop(t *testing.T) {
+    dsn := os.Getenv("AMQP_DSN")
+    if "" == dsn {
+        t.Skip("AMQP_DSN not set; skipping amqp integration test")
+    }
+
+    provider := amqp.NewProvider()
+    connection, openErr := provider.Open(dsn)
+    if nil != openErr {
+        t.Fatalf("open connection: %v", openErr)
+    }
+
+    registry := amqp.NewMessageRegistry()
+    amqp.RegisterMessage[testMessage](registry, "amqp.test.reconnect")
+
+    queueName := "melody.amqp.reconnect"
+    transport := amqp.NewTransport(amqp.TransportConfig{
+        Connection: connection,
+        Dialer:     provider.Dialer(dsn),
+        Queue:      queueName,
+        Prefetch:   1,
+        Registry:   registry,
+    })
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+    defer transport.Close(runtimeInstance)
+
+    queue, receiveErr := transport.Receive(runtimeInstance)
+    if nil != receiveErr {
+        t.Fatalf("receive: %v", receiveErr)
+    }
+
+    if dropErr := connection.Close(); nil != dropErr {
+        t.Fatalf("drop connection: %v", dropErr)
+    }
+
+    publisherConnection, publisherErr := provider.Open(dsn)
+    if nil != publisherErr {
+        t.Fatalf("open publisher connection: %v", publisherErr)
+    }
+    defer provider.Close(publisherConnection)
+
+    publisher := amqp.NewTransport(amqp.TransportConfig{
+        Connection: publisherConnection,
+        Queue:      queueName,
+        Registry:   registry,
+    })
+    defer publisher.Close(runtimeInstance)
+
+    if sendErr := publisher.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 7, Name: "after-reconnect"})); nil != sendErr {
+        t.Fatalf("send after drop: %v", sendErr)
+    }
+
+    deadline := time.After(20 * time.Second)
+    for {
+        select {
+        case envelopeInstance := <-queue:
+            messageInstance, isType := envelopeInstance.Message().(testMessage)
+            if true == isType && 7 == messageInstance.Id {
+                if ackErr := transport.Ack(runtimeInstance, envelopeInstance); nil != ackErr {
+                    t.Logf("ack after reconnect (expected to occasionally fail on a rotated channel): %v", ackErr)
+                }
+
+                return
+            }
+        case <-deadline:
+            t.Fatalf("expected the consumer to reconnect and deliver the message")
+        }
+    }
+}
+
 func receiveWithin(t *testing.T, queue <-chan messagebuscontract.Envelope, timeout time.Duration) messagebuscontract.Envelope {
     t.Helper()
 

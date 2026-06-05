@@ -5,6 +5,7 @@ import (
     "reflect"
     "strconv"
     "sync"
+    "time"
 
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/logging"
@@ -19,11 +20,24 @@ import (
 const (
     headerMessageType     = "x-message-type"
     headerRedeliveryCount = "x-redelivery-count"
+
+    reconnectInitialBackoff = 1 * time.Second
+    reconnectMaxBackoff     = 30 * time.Second
+    reconnectBackoffFactor  = 2
 )
 
+type forwardReason int
+
+const (
+    forwardDone forwardReason = iota
+    forwardChannelLost
+)
+
+var errReconnectInProgress = exception.NewError("amqp reconnect already in progress", nil, nil)
+
 func NewTransport(config TransportConfig) *Transport {
-    if nil == config.Connection {
-        exception.Panic(exception.NewError("amqp transport connection is nil", nil, nil))
+    if nil == config.Connection && nil == config.Dialer {
+        exception.Panic(exception.NewError("amqp transport needs a connection or a dialer", nil, nil))
     }
 
     if "" == config.Queue {
@@ -46,6 +60,7 @@ func NewTransport(config TransportConfig) *Transport {
 
     return &Transport{
         connection: config.Connection,
+        dialer:     config.Dialer,
         queue:      config.Queue,
         exchange:   config.Exchange,
         routingKey: config.RoutingKey,
@@ -58,6 +73,12 @@ func NewTransport(config TransportConfig) *Transport {
 
 type TransportConfig struct {
     Connection *amqp091.Connection
+    /**
+     * Dialer, when set, lets the transport re-establish the broker connection after it drops so the
+     * consumer survives a broker restart without an external supervisor. When nil the transport keeps
+     * the original behaviour: a dropped connection stops the consumer. Provider.Dialer(dsn) builds one.
+     */
+    Dialer     func() (*amqp091.Connection, error)
     Queue      string
     Exchange   string
     RoutingKey string
@@ -69,6 +90,7 @@ type TransportConfig struct {
 
 type Transport struct {
     connection *amqp091.Connection
+    dialer     func() (*amqp091.Connection, error)
     queue      string
     exchange   string
     routingKey string
@@ -81,10 +103,74 @@ type Transport struct {
     publishChannel *amqp091.Channel
     consumeChannel *amqp091.Channel
     closing        bool
+    reconnecting   bool
+    ownsConnection bool
 
     publishMutex sync.Mutex
     /** serializes ack/nack on the consume channel; amqp091 channels are not safe for concurrent use */
     consumeMutex sync.Mutex
+}
+
+/**
+ * connect returns a live broker connection. It returns the current one when it is still open. When the
+ * connection is closed (or absent) and a Dialer is configured it re-dials, installs the new connection
+ * and discards the dead cached channels so they are reopened lazily. Only one dial runs at a time; a
+ * concurrent caller gets errReconnectInProgress and should retry.
+ */
+func (instance *Transport) connect() (*amqp091.Connection, error) {
+    instance.mutex.Lock()
+
+    if true == instance.closing {
+        instance.mutex.Unlock()
+
+        return nil, exception.NewError("amqp transport is closing", nil, nil)
+    }
+
+    existing := instance.connection
+    if nil != existing && false == existing.IsClosed() {
+        instance.mutex.Unlock()
+
+        return existing, nil
+    }
+
+    if nil == instance.dialer {
+        instance.mutex.Unlock()
+
+        return nil, exception.NewError("amqp connection is closed and no dialer is configured", map[string]any{"queue": instance.queue}, nil)
+    }
+
+    if true == instance.reconnecting {
+        instance.mutex.Unlock()
+
+        return nil, errReconnectInProgress
+    }
+
+    instance.reconnecting = true
+    instance.mutex.Unlock()
+
+    connection, dialErr := instance.dialer()
+
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.reconnecting = false
+
+    if nil != dialErr {
+        return nil, exception.NewError("amqp reconnect dial failed", map[string]any{"queue": instance.queue}, dialErr)
+    }
+
+    if true == instance.closing {
+        connection.Close()
+
+        return nil, exception.NewError("amqp transport is closing", nil, nil)
+    }
+
+    instance.connection = connection
+    instance.ownsConnection = true
+    instance.publishChannel = nil
+    instance.consumeChannel = nil
+
+    return connection, nil
 }
 
 /** ackChannel and nackChannel serialize consume-channel acknowledgements through consumeMutex. */
@@ -162,6 +248,27 @@ func (instance *Transport) publish(
     routingKey string,
     publishing amqp091.Publishing,
 ) error {
+    publishErr := instance.publishOnce(ctx, exchange, routingKey, publishing)
+    if nil == publishErr {
+        return nil
+    }
+
+    if nil == instance.dialer || true == instance.isClosing() {
+        return publishErr
+    }
+
+    /** the channel likely died with the connection; drop it and retry once so connect() re-dials. */
+    instance.resetPublishChannel()
+
+    return instance.publishOnce(ctx, exchange, routingKey, publishing)
+}
+
+func (instance *Transport) publishOnce(
+    ctx context.Context,
+    exchange string,
+    routingKey string,
+    publishing amqp091.Publishing,
+) error {
     channel, channelErr := instance.ensurePublishChannel()
     if nil != channelErr {
         return channelErr
@@ -177,24 +284,148 @@ func (instance *Transport) publish(
     return nil
 }
 
+func (instance *Transport) resetPublishChannel() {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if nil != instance.publishChannel {
+        instance.publishChannel.Close()
+        instance.publishChannel = nil
+    }
+}
+
+func (instance *Transport) resetConsumeChannel() {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if nil != instance.consumeChannel {
+        instance.consumeChannel.Close()
+        instance.consumeChannel = nil
+    }
+}
+
 func (instance *Transport) Receive(
     runtimeInstance runtimecontract.Runtime,
 ) (<-chan messagebuscontract.Envelope, error) {
-    channel, channelErr := instance.ensureConsumeChannel()
-    if nil != channelErr {
-        return nil, channelErr
-    }
-
-    deliveries, consumeErr := channel.Consume(instance.queue, "", false, false, false, false, nil)
-    if nil != consumeErr {
-        return nil, exception.NewError("amqp consume failed", map[string]any{"queue": instance.queue}, consumeErr)
+    channel, deliveries, subscribeErr := instance.subscribe()
+    if nil != subscribeErr {
+        return nil, subscribeErr
     }
 
     out := make(chan messagebuscontract.Envelope)
 
-    go instance.forwardDeliveries(runtimeInstance, channel, deliveries, out)
+    go instance.consumeLoop(runtimeInstance, channel, deliveries, out)
 
     return out, nil
+}
+
+func (instance *Transport) subscribe() (*amqp091.Channel, <-chan amqp091.Delivery, error) {
+    channel, channelErr := instance.ensureConsumeChannel()
+    if nil != channelErr {
+        return nil, nil, channelErr
+    }
+
+    deliveries, consumeErr := channel.Consume(instance.queue, "", false, false, false, false, nil)
+    if nil != consumeErr {
+        return nil, nil, exception.NewError("amqp consume failed", map[string]any{"queue": instance.queue}, consumeErr)
+    }
+
+    return channel, deliveries, nil
+}
+
+/**
+ * consumeLoop owns the lifetime of the out channel (closed exactly once on exit). It forwards
+ * deliveries until the broker channel is lost, then — when a Dialer is configured and the transport is
+ * neither closing nor cancelled — re-subscribes with bounded backoff and resumes on the same out
+ * channel, so consumers never observe the reconnect. Without a Dialer it preserves the original
+ * behaviour: log and stop.
+ */
+func (instance *Transport) consumeLoop(
+    runtimeInstance runtimecontract.Runtime,
+    channel *amqp091.Channel,
+    deliveries <-chan amqp091.Delivery,
+    out chan messagebuscontract.Envelope,
+) {
+    defer close(out)
+
+    backoff := reconnectInitialBackoff
+
+    for {
+        if forwardDone == instance.forwardDeliveries(runtimeInstance, channel, deliveries, out) {
+            return
+        }
+
+        if nil != runtimeInstance.Context().Err() || true == instance.isClosing() {
+            return
+        }
+
+        if nil == instance.dialer {
+            instance.logError(
+                runtimeInstance,
+                "amqp deliveries channel closed unexpectedly, consumer is stopping",
+                exception.NewError("amqp deliveries channel closed", map[string]any{"queue": instance.queue}, nil),
+            )
+
+            return
+        }
+
+        instance.logError(
+            runtimeInstance,
+            "amqp deliveries channel closed, reconnecting",
+            exception.NewError("amqp deliveries channel closed", map[string]any{"queue": instance.queue}, nil),
+        )
+
+        instance.resetConsumeChannel()
+
+        reopenedChannel, reopenedDeliveries, reopenErr := instance.reopenConsume(runtimeInstance, &backoff)
+        if nil != reopenErr {
+            return
+        }
+
+        channel = reopenedChannel
+        deliveries = reopenedDeliveries
+        backoff = reconnectInitialBackoff
+    }
+}
+
+/**
+ * reopenConsume re-subscribes after a connection drop, sleeping with exponential backoff (capped) between
+ * attempts. Each sleep and each attempt aborts promptly when the runtime context is cancelled or the
+ * transport is closing.
+ */
+func (instance *Transport) reopenConsume(
+    runtimeInstance runtimecontract.Runtime,
+    backoff *time.Duration,
+) (*amqp091.Channel, <-chan amqp091.Delivery, error) {
+    for {
+        if nil != runtimeInstance.Context().Err() || true == instance.isClosing() {
+            return nil, nil, exception.NewError("amqp transport is closing", nil, nil)
+        }
+
+        channel, deliveries, subscribeErr := instance.subscribe()
+        if nil == subscribeErr {
+            return channel, deliveries, nil
+        }
+
+        instance.logError(runtimeInstance, "amqp reconnect attempt failed, backing off", subscribeErr)
+
+        select {
+        case <-time.After(*backoff):
+        case <-runtimeInstance.Context().Done():
+            return nil, nil, exception.NewError("amqp transport is closing", nil, nil)
+        }
+
+        *backoff = nextBackoff(*backoff)
+    }
+}
+
+func nextBackoff(current time.Duration) time.Duration {
+    next := current * time.Duration(reconnectBackoffFactor)
+    if next > reconnectMaxBackoff {
+        return reconnectMaxBackoff
+    }
+
+    return next
 }
 
 func (instance *Transport) Ack(
@@ -303,6 +534,11 @@ func (instance *Transport) Close(runtimeInstance runtimecontract.Runtime) error 
         instance.publishChannel = nil
     }
 
+    if true == instance.ownsConnection && nil != instance.connection {
+        instance.connection.Close()
+        instance.connection = nil
+    }
+
     return nil
 }
 
@@ -311,24 +547,14 @@ func (instance *Transport) forwardDeliveries(
     channel *amqp091.Channel,
     deliveries <-chan amqp091.Delivery,
     out chan messagebuscontract.Envelope,
-) {
-    defer close(out)
-
+) forwardReason {
     for {
         select {
         case <-runtimeInstance.Context().Done():
-            return
+            return forwardDone
         case delivery, open := <-deliveries:
             if false == open {
-                if nil == runtimeInstance.Context().Err() && false == instance.isClosing() {
-                    instance.logError(
-                        runtimeInstance,
-                        "amqp deliveries channel closed unexpectedly, consumer is stopping",
-                        exception.NewError("amqp deliveries channel closed", map[string]any{"queue": instance.queue}, nil),
-                    )
-                }
-
-                return
+                return forwardChannelLost
             }
 
             envelopeInstance, decodeErr := instance.decode(delivery)
@@ -350,7 +576,7 @@ func (instance *Transport) forwardDeliveries(
             select {
             case out <- envelopeInstance:
             case <-runtimeInstance.Context().Done():
-                return
+                return forwardDone
             }
         }
     }
@@ -440,7 +666,12 @@ func (instance *Transport) ensurePublishChannel() (*amqp091.Channel, error) {
         return existing, nil
     }
 
-    channel, channelErr := instance.connection.Channel()
+    connection, connectErr := instance.connect()
+    if nil != connectErr {
+        return nil, connectErr
+    }
+
+    channel, channelErr := connection.Channel()
     if nil != channelErr {
         return nil, exception.NewError("amqp channel open failed", nil, channelErr)
     }
@@ -482,7 +713,12 @@ func (instance *Transport) ensureConsumeChannel() (*amqp091.Channel, error) {
         return existing, nil
     }
 
-    channel, channelErr := instance.connection.Channel()
+    connection, connectErr := instance.connect()
+    if nil != connectErr {
+        return nil, connectErr
+    }
+
+    channel, channelErr := connection.Channel()
     if nil != channelErr {
         return nil, exception.NewError("amqp channel open failed", nil, channelErr)
     }
