@@ -14,6 +14,7 @@ func NewSseHub() *SseHub {
 type SseHub struct {
     mutex              sync.RWMutex
     subscribersByTopic map[string]map[*SseSubscriber]struct{}
+    closed             bool
 
     /** dropped counts events discarded because a subscriber's buffer was full; delivery is
     at-most-once, so a slow consumer loses events rather than blocking the broadcaster. */
@@ -41,6 +42,14 @@ func (instance *SseHub) Subscribe(topic string, bufferSize int) *SseSubscriber {
 
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
+
+    /** Once the hub is shut down a new subscriber receives an already-closed channel so its handler
+    loop exits immediately instead of blocking forever on a stream that will never be served. */
+    if true == instance.closed {
+        close(subscriber.channel)
+
+        return subscriber
+    }
 
     subscribers, exists := instance.subscribersByTopic[topic]
     if false == exists {
@@ -107,4 +116,27 @@ func (instance *SseHub) SubscriberCount(topic string) int {
     defer instance.mutex.RUnlock()
 
     return len(instance.subscribersByTopic[topic])
+}
+
+/** Shutdown closes every subscriber channel across all topics and marks the hub closed so that
+in-flight handler loops observe the channel close and return, releasing their goroutines during a
+graceful server stop. It is idempotent and safe to call concurrently with Broadcast/Unsubscribe:
+the exclusive lock serialises it against the membership checks those methods make before closing. */
+func (instance *SseHub) Shutdown() {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if true == instance.closed {
+        return
+    }
+
+    instance.closed = true
+
+    for topic, subscribers := range instance.subscribersByTopic {
+        for subscriber := range subscribers {
+            close(subscriber.channel)
+        }
+
+        delete(instance.subscribersByTopic, topic)
+    }
 }

@@ -1,15 +1,34 @@
 package openapi
 
 type Document struct {
-    OpenApi    string              `json:"openapi"`
-    Info       Info                `json:"info"`
-    Paths      map[string]PathItem `json:"paths"`
-    Components *Components         `json:"components,omitempty"`
+    OpenApi      string                `json:"openapi"`
+    Info         Info                  `json:"info"`
+    Servers      []Server              `json:"servers,omitempty"`
+    Paths        map[string]PathItem   `json:"paths"`
+    Components   *Components           `json:"components,omitempty"`
+    Security     []map[string][]string `json:"security,omitempty"`
+    Tags         []Tag                 `json:"tags,omitempty"`
+    ExternalDocs *ExternalDocs         `json:"externalDocs,omitempty"`
 }
 
 type Info struct {
     Title       string `json:"title"`
     Version     string `json:"version"`
+    Description string `json:"description,omitempty"`
+}
+
+type Server struct {
+    Url         string `json:"url"`
+    Description string `json:"description,omitempty"`
+}
+
+type Tag struct {
+    Name        string `json:"name"`
+    Description string `json:"description,omitempty"`
+}
+
+type ExternalDocs struct {
+    Url         string `json:"url"`
     Description string `json:"description,omitempty"`
 }
 
@@ -57,14 +76,20 @@ type MediaType struct {
 }
 
 type Schema struct {
+    Ref                  string             `json:"$ref,omitempty"`
     Type                 string             `json:"type,omitempty"`
     Format               string             `json:"format,omitempty"`
+    Description          string             `json:"description,omitempty"`
+    Nullable             bool               `json:"nullable,omitempty"`
     Properties           map[string]*Schema `json:"properties,omitempty"`
     Required             []string           `json:"required,omitempty"`
     Items                *Schema            `json:"items,omitempty"`
     AdditionalProperties *Schema            `json:"additionalProperties,omitempty"`
+    Enum                 []any              `json:"enum,omitempty"`
     MinLength            *int               `json:"minLength,omitempty"`
     MaxLength            *int               `json:"maxLength,omitempty"`
     Minimum              *float64           `json:"minimum,omitempty"`
+    Maximum              *float64           `json:"maximum,omitempty"`
+    ExclusiveMinimum     *bool              `json:"exclusiveMinimum,omitempty"`
     Pattern              string             `json:"pattern,omitempty"`
 }

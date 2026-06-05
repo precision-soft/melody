@@ -91,3 +91,10 @@ func (instance *SseWriter) Comment(text string) error {
 
     return nil
 }
+
+/** Ping writes a bare SSE comment line as a keepalive. Long-lived idle streams are otherwise prone
+to being dropped by intermediary proxies; a handler can drive Ping from a ticker to hold the
+connection open, and its returned error signals that the client has gone away. */
+func (instance *SseWriter) Ping() error {
+    return instance.Comment("")
+}

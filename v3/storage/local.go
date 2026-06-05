@@ -38,11 +38,11 @@ func (instance *LocalStorage) Put(
         return pathErr
     }
 
-    if mkdirErr := os.MkdirAll(filepath.Dir(path), 0o755); nil != mkdirErr {
+    if mkdirErr := os.MkdirAll(filepath.Dir(path), 0o750); nil != mkdirErr {
         return exception.NewError("could not create the storage directory", map[string]any{"key": key}, mkdirErr)
     }
 
-    file, createErr := os.Create(path)
+    file, createErr := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o640)
     if nil != createErr {
         return exception.NewError("could not create the storage object", map[string]any{"key": key}, createErr)
     }
@@ -131,7 +131,41 @@ func (instance *LocalStorage) resolvePath(key string) (string, error) {
         return "", exception.NewError("storage key escapes the base directory", map[string]any{"key": key}, nil)
     }
 
+    if escapeErr := instance.ensureNoSymlinkEscape(base, target); nil != escapeErr {
+        return "", exception.NewError("storage key escapes the base directory via a symlink", map[string]any{"key": key}, escapeErr)
+    }
+
     return target, nil
+}
+
+/** ensureNoSymlinkEscape complements the textual containment check: the cleaned key cannot contain
+"..", but a symlink planted inside the base directory could still resolve outside it. The deepest
+existing ancestor of the target is resolved through symlinks and verified to stay within the
+resolved base, which covers both reads (target exists) and writes (only the parent exists yet). */
+func (instance *LocalStorage) ensureNoSymlinkEscape(base string, target string) error {
+    realBase, baseErr := filepath.EvalSymlinks(base)
+    if nil != baseErr {
+        realBase = base
+    }
+
+    existing := target
+    for {
+        resolved, resolveErr := filepath.EvalSymlinks(existing)
+        if nil == resolveErr {
+            if resolved != realBase && false == strings.HasPrefix(resolved, realBase+string(os.PathSeparator)) {
+                return exception.NewError("resolved path is outside the base directory", nil, nil)
+            }
+
+            return nil
+        }
+
+        parent := filepath.Dir(existing)
+        if parent == existing {
+            return nil
+        }
+
+        existing = parent
+    }
 }
 
 var _ storagecontract.Storage = (*LocalStorage)(nil)

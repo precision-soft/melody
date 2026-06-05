@@ -76,7 +76,17 @@ func TestGenerate_BuildsPathsParametersAndSchemas(t *testing.T) {
         t.Fatalf("expected a request body on the create operation")
     }
 
-    schema := createPath.Post.RequestBody.Content["application/json"].Schema
+    /** Named structs are emitted into components and referenced by $ref rather than inlined. */
+    bodySchema := createPath.Post.RequestBody.Content["application/json"].Schema
+    if nil == bodySchema || "#/components/schemas/createProductRequest" != bodySchema.Ref {
+        t.Fatalf("expected the request body to reference the component schema, got: %+v", bodySchema)
+    }
+
+    if nil == document.Components {
+        t.Fatalf("expected components to be populated")
+    }
+
+    schema := document.Components.Schemas["createProductRequest"]
     if nil == schema || nil == schema.Properties["name"] || "string" != schema.Properties["name"].Type {
         t.Fatalf("expected a string name property")
     }
@@ -95,6 +105,58 @@ func TestGenerate_BuildsPathsParametersAndSchemas(t *testing.T) {
 
     if _, hasResponse := createPath.Post.Responses["201"]; false == hasResponse {
         t.Fatalf("expected a 201 response")
+    }
+}
+
+type embeddedAudit struct {
+    CreatedBy string `json:"createdBy"`
+}
+
+type numericRequest struct {
+    embeddedAudit
+    Quantity int      `json:"quantity" validate:"min=1"`
+    Discount *float64 `json:"discount,omitempty"`
+    MinTotal float64  `json:"minTotal" validate:"greaterThan=0"`
+}
+
+func TestGenerate_NumericConstraintsEmbeddingAndNullability(t *testing.T) {
+    registry := openapi.NewRegistry()
+    registry.Describe("orders.create", openapi.Descriptor{
+        RequestType: openapi.TypeOf[numericRequest](),
+    })
+
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "orders.create", pattern: "/orders/", methods: []string{"POST"}},
+    }
+
+    document := openapi.Generate(openapi.Info{Title: "Example", Version: "1.0.0"}, routes, registry)
+
+    schema := document.Components.Schemas["numericRequest"]
+    if nil == schema {
+        t.Fatalf("expected the numericRequest component schema")
+    }
+
+    /** A length rule must NOT leak onto an integer field as minLength; min on a number is ignored. */
+    quantity := schema.Properties["quantity"]
+    if nil == quantity || "integer" != quantity.Type || nil != quantity.MinLength {
+        t.Fatalf("expected an integer quantity without minLength, got: %+v", quantity)
+    }
+
+    /** greaterThan is the numeric bound and maps to an exclusive minimum. */
+    minTotal := schema.Properties["minTotal"]
+    if nil == minTotal || nil == minTotal.Minimum || 0 != *minTotal.Minimum || nil == minTotal.ExclusiveMinimum || false == *minTotal.ExclusiveMinimum {
+        t.Fatalf("expected an exclusive minimum of 0 on minTotal, got: %+v", minTotal)
+    }
+
+    /** A pointer field is nullable. */
+    discount := schema.Properties["discount"]
+    if nil == discount || "number" != discount.Type || false == discount.Nullable {
+        t.Fatalf("expected a nullable number discount, got: %+v", discount)
+    }
+
+    /** The untagged embedded struct's field is promoted into the parent. */
+    if nil == schema.Properties["createdBy"] {
+        t.Fatalf("expected the embedded createdBy field to be promoted, properties: %v", schema.Properties)
     }
 }
 

@@ -47,6 +47,31 @@ func TestDispatch_RunsRegisteredHandler(t *testing.T) {
     }
 }
 
+func TestHandle_NoHandlerPassesThroughByDefault(t *testing.T) {
+    locator := messagebus.NewHandlerLocator()
+
+    bus := messagebus.NewManager("default", messagebus.NewHandleMessageMiddleware(locator))
+
+    /** With no handler registered for the type, the default middleware logs and lets the message
+    pass through without an error. */
+    if _, dispatchErr := bus.Dispatch(newTestRuntime(), taskCreated{TaskId: 1}); nil != dispatchErr {
+        t.Fatalf("expected the default middleware to pass an unhandled message through, got: %v", dispatchErr)
+    }
+}
+
+func TestHandle_RequireHandlerRejectsUnhandledMessage(t *testing.T) {
+    locator := messagebus.NewHandlerLocator()
+
+    bus := messagebus.NewManager(
+        "default",
+        messagebus.NewHandleMessageMiddlewareWithOptions(locator, messagebus.HandleOptions{RequireHandler: true}),
+    )
+
+    if _, dispatchErr := bus.Dispatch(newTestRuntime(), taskCreated{TaskId: 1}); nil == dispatchErr {
+        t.Fatalf("expected a missing-handler error in strict mode")
+    }
+}
+
 func TestHandlerLocator_ConcurrentRegisterAndLookup(t *testing.T) {
     locator := messagebus.NewHandlerLocator()
 

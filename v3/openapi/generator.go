@@ -19,6 +19,8 @@ func Generate(
         Paths:   make(map[string]PathItem),
     }
 
+    components := make(map[string]*Schema)
+
     for _, routeDefinition := range routeDefinitions {
         path, pathParameters := convertPattern(routeDefinition.Pattern())
 
@@ -28,7 +30,7 @@ func Generate(
             descriptor, hasDescriptor = registry.Get(routeDefinition.Name())
         }
 
-        operation := buildOperation(routeDefinition, pathParameters, descriptor, hasDescriptor)
+        operation := buildOperation(routeDefinition, pathParameters, descriptor, hasDescriptor, components)
 
         pathItem := document.Paths[path]
         for _, method := range routeDefinition.Methods() {
@@ -36,6 +38,10 @@ func Generate(
         }
 
         document.Paths[path] = pathItem
+    }
+
+    if 0 < len(components) {
+        document.Components = &Components{Schemas: components}
     }
 
     return document
@@ -46,6 +52,7 @@ func buildOperation(
     pathParameters []Parameter,
     descriptor Descriptor,
     hasDescriptor bool,
+    components map[string]*Schema,
 ) *Operation {
     operation := &Operation{
         OperationId: routeDefinition.Name(),
@@ -62,7 +69,7 @@ func buildOperation(
             operation.RequestBody = &RequestBody{
                 Required: true,
                 Content: map[string]MediaType{
-                    "application/json": {Schema: schemaFromType(descriptor.RequestType)},
+                    "application/json": {Schema: schemaFromType(descriptor.RequestType, components)},
                 },
             }
         }
@@ -71,7 +78,7 @@ func buildOperation(
             operation.Responses[strconv.Itoa(status)] = ResponseObject{
                 Description: nethttp.StatusText(status),
                 Content: map[string]MediaType{
-                    "application/json": {Schema: schemaFromType(responseType)},
+                    "application/json": {Schema: schemaFromType(responseType, components)},
                 },
             }
         }

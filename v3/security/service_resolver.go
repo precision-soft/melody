@@ -26,6 +26,19 @@ func FirewallManagerFromContainer(serviceContainer containercontract.Container) 
     return firewallManagerInstance
 }
 
+func FirewallManagerMustFromResolver(resolver containercontract.Resolver) securitycontract.FirewallManager {
+    return container.MustFromResolver[securitycontract.FirewallManager](resolver, ServiceFirewallManager)
+}
+
+func FirewallManagerFromResolver(resolver containercontract.Resolver) securitycontract.FirewallManager {
+    firewallManagerInstance, err := container.FromResolver[securitycontract.FirewallManager](resolver, ServiceFirewallManager)
+    if nil == firewallManagerInstance || nil != err {
+        return nil
+    }
+
+    return firewallManagerInstance
+}
+
 func SecurityContextSetOnRuntime(runtimeInstance runtimecontract.Runtime, securityContext *SecurityContext) {
     if nil == runtimeInstance {
         exception.Panic(exception.NewError("runtime is nil for security context", nil, nil))

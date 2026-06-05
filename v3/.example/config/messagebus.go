@@ -44,10 +44,17 @@ func (instance *Module) buildMessageBus() {
         "default.consume",
         melodymessagebus.NewHandleMessageMiddleware(locator),
     )
-    instance.messageBusConsumeCommand = melodymessagebus.NewConsumeCommand(
+    /** Messages whose handler keeps failing are retried with backoff and, once the attempts are
+    exhausted, routed to a dead-letter transport for later inspection instead of being dropped. */
+    deadLetterTransport := melodymessagebus.NewInMemoryTransport(64)
+    instance.messageBusConsumeCommand = melodymessagebus.NewConsumeCommandWithRetry(
         instance.messageBusConsume,
         map[string]melodymessagebuscontract.Transport{
             messageBusTransportAsync: transport,
+        },
+        melodymessagebus.RetryPolicy{
+            MaxRetries:       3,
+            FailureTransport: deadLetterTransport,
         },
     )
 }

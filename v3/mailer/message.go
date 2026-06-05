@@ -4,6 +4,7 @@ import (
     "crypto/rand"
     "encoding/base64"
     "encoding/hex"
+    "mime"
     "mime/quotedprintable"
     "strings"
     "time"
@@ -51,7 +52,7 @@ func RenderMessage(message mailercontract.Message) ([]byte, error) {
         writeHeader(&builder, "Reply-To", formatAddress(message.ReplyTo))
     }
 
-    writeHeader(&builder, "Subject", message.Subject)
+    writeHeader(&builder, "Subject", mime.QEncoding.Encode("utf-8", message.Subject))
     writeHeader(&builder, "Date", time.Now().Format(time.RFC1123Z))
     writeHeader(&builder, "MIME-Version", "1.0")
 
@@ -132,6 +133,10 @@ func appendEmails(target []string, addresses []mailercontract.Address) []string 
 
 var headerSanitizer = strings.NewReplacer("\r", "", "\n", "")
 
+/** phraseSanitizer drops CR, LF and the quoting characters so an ASCII display name cannot break out
+of its quoted-string (a non-ASCII name takes the encoded-word path instead and never needs quotes). */
+var phraseSanitizer = strings.NewReplacer("\r", "", "\n", "", "\"", "", "\\", "")
+
 /** filenameSanitizer also drops the double quote so a crafted attachment name cannot break out of the
 quoted filename parameter in the Content-Disposition header. */
 var filenameSanitizer = strings.NewReplacer("\r", "", "\n", "", "\"", "")
@@ -143,7 +148,19 @@ func formatAddress(address mailercontract.Address) string {
         return email
     }
 
-    return "\"" + headerSanitizer.Replace(address.Name) + "\" <" + email + ">"
+    return encodePhrase(address.Name) + " <" + email + ">"
+}
+
+/** encodePhrase renders a display name for an address header. A name needing encoding (non-ASCII or
+control characters) is emitted as an RFC 2047 encoded-word, which is pure ASCII and must NOT be
+quoted; a plain ASCII name keeps the familiar quoted-string form. */
+func encodePhrase(name string) string {
+    encoded := mime.QEncoding.Encode("utf-8", name)
+    if encoded != name {
+        return encoded
+    }
+
+    return "\"" + phraseSanitizer.Replace(name) + "\""
 }
 
 func formatAddressList(addresses []mailercontract.Address) string {
@@ -189,7 +206,7 @@ func writeAttachment(builder *strings.Builder, attachment mailercontract.Attachm
 
     builder.WriteString("Content-Type: " + headerSanitizer.Replace(contentType) + lineBreak)
     builder.WriteString("Content-Transfer-Encoding: base64" + lineBreak)
-    builder.WriteString("Content-Disposition: attachment; filename=\"" + filenameSanitizer.Replace(attachment.Filename) + "\"" + lineBreak)
+    builder.WriteString("Content-Disposition: attachment; " + filenameParameter(attachment.Filename) + lineBreak)
     builder.WriteString(lineBreak)
     builder.WriteString(encodeBase64Lines(attachment.Content))
     builder.WriteString(lineBreak)
@@ -218,6 +235,60 @@ func encodeBase64Lines(content []byte) string {
     wrapped.WriteString(encoded)
 
     return wrapped.String()
+}
+
+/** filenameParameter renders the Content-Disposition filename. A printable-ASCII name uses the
+classic quoted form; anything else is emitted with the RFC 2231 extended syntax (filename*) so
+non-ASCII attachment names survive transport instead of being written as raw 8-bit header text. */
+func filenameParameter(filename string) string {
+    if true == isPrintableAscii(filename) {
+        return "filename=\"" + filenameSanitizer.Replace(filename) + "\""
+    }
+
+    return "filename*=UTF-8''" + encodeRfc2231(filename)
+}
+
+func isPrintableAscii(value string) bool {
+    for index := 0; index < len(value); index++ {
+        if value[index] < 0x20 || value[index] > 0x7E {
+            return false
+        }
+    }
+
+    return true
+}
+
+func encodeRfc2231(value string) string {
+    var builder strings.Builder
+
+    for index := 0; index < len(value); index++ {
+        character := value[index]
+        if true == isAttributeChar(character) {
+            builder.WriteByte(character)
+
+            continue
+        }
+
+        builder.WriteByte('%')
+        builder.WriteString(strings.ToUpper(hex.EncodeToString([]byte{character})))
+    }
+
+    return builder.String()
+}
+
+/** isAttributeChar reports whether a byte may appear unescaped in an RFC 2231 extended value
+(the attr-char set of RFC 5987); everything else is percent-encoded. */
+func isAttributeChar(character byte) bool {
+    switch {
+    case character >= 'A' && character <= 'Z':
+        return true
+    case character >= 'a' && character <= 'z':
+        return true
+    case character >= '0' && character <= '9':
+        return true
+    default:
+        return strings.IndexByte("!#$&+-.^_`|~", character) >= 0
+    }
 }
 
 func newBoundary() string {

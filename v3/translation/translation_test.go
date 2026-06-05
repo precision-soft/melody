@@ -157,6 +157,17 @@ func TestTrans_PathologicallyNestedPluralDoesNotOverflow(t *testing.T) {
     }
 }
 
+func TestTrans_PluralWithMissingArgumentFallsBackToOther(t *testing.T) {
+    manager := newTestManager()
+
+    /** No "count" argument is supplied; the plural must resolve the "other" branch with an empty
+    # rather than treating the missing argument as the number zero. */
+    result := manager.Trans("inbox", map[string]any{}, "messages", "en")
+    if " messages" != result {
+        t.Fatalf("expected the other branch with an empty pound, got: %q", result)
+    }
+}
+
 func TestHasMessage(t *testing.T) {
     manager := newTestManager()
 

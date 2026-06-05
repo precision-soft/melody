@@ -5,6 +5,7 @@ import (
     "crypto/sha256"
     "encoding/base64"
     "encoding/json"
+    "math"
     "strings"
     "time"
 
@@ -17,6 +18,9 @@ const (
     jwtAlgorithmHs256 = "HS256"
     jwtDefaultSubject = "sub"
     jwtDefaultRoles   = "roles"
+    /** RFC 7519 defines a NumericDate as a non-negative number of seconds since the epoch; the upper
+    bound is the last representable second of year 9999, well beyond any legitimate token. */
+    jwtMaxNumericDate = 253402300799
 )
 
 func NewJwtTokenValidator(config JwtConfig) *JwtTokenValidator {
@@ -261,6 +265,16 @@ func numericClaim(rawClaims map[string]any, name string) (int64, bool, bool) {
 
     floatValue, isFloat := value.(float64)
     if false == isFloat {
+        return 0, true, false
+    }
+
+    /** A non-finite or out-of-range value is treated as malformed rather than converted: an int64
+    cast would otherwise saturate silently and turn a crafted claim into an arbitrary instant. */
+    if true == math.IsNaN(floatValue) || true == math.IsInf(floatValue, 0) {
+        return 0, true, false
+    }
+
+    if floatValue < 0 || floatValue > jwtMaxNumericDate {
         return 0, true, false
     }
 

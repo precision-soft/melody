@@ -133,6 +133,56 @@ func TestInMemoryTokenStore_TtlExpiresToken(t *testing.T) {
     }
 }
 
+func TestInMemoryTokenStore_DeleteByUserRevokesEveryToken(t *testing.T) {
+    store := security.NewInMemoryTokenStore()
+    store.Put("token-a", securitycontract.Claims{UserIdentifier: "user-1"})
+    store.Put("token-b", securitycontract.Claims{UserIdentifier: "user-1"})
+    store.Put("token-c", securitycontract.Claims{UserIdentifier: "user-2"})
+
+    runtimeInstance := testRuntime()
+
+    if removed := store.DeleteByUser("user-1"); 2 != removed {
+        t.Fatalf("expected two tokens revoked, got %d", removed)
+    }
+
+    if _, found, _ := store.Lookup(runtimeInstance, "token-a"); true == found {
+        t.Fatalf("expected token-a to be revoked")
+    }
+    if _, found, _ := store.Lookup(runtimeInstance, "token-c"); false == found {
+        t.Fatalf("expected the other user's token to survive")
+    }
+}
+
+func TestInMemoryTokenStore_PurgeExpiredDropsElapsedEntries(t *testing.T) {
+    frozen := clock.NewFrozenClock(time.Unix(1000, 0))
+    store := security.NewInMemoryTokenStoreWithClock(frozen)
+    store.PutWithTtl("short", securitycontract.Claims{UserIdentifier: "user-1"}, 30*time.Second)
+    store.Put("forever", securitycontract.Claims{UserIdentifier: "user-2"})
+
+    frozen.Advance(time.Minute)
+
+    if purged := store.PurgeExpired(); 1 != purged {
+        t.Fatalf("expected exactly one expired entry purged, got %d", purged)
+    }
+
+    if _, found, _ := store.Lookup(testRuntime(), "forever"); false == found {
+        t.Fatalf("expected the non-expiring token to survive the purge")
+    }
+}
+
+func TestJwtTokenValidator_RejectsOutOfRangeExp(t *testing.T) {
+    secret := []byte("super-secret")
+    validator := security.NewJwtTokenValidator(security.JwtConfig{Secret: secret})
+
+    /** An out-of-range exp must be rejected as malformed rather than silently saturating on the
+    int64 conversion (which would otherwise yield an arbitrary, misleading deadline). */
+    tokenString := signJwtHs256(secret, map[string]any{"sub": "user-1", "exp": 1e19})
+
+    if _, validateErr := validator.Validate(testRuntime(), tokenString); nil == validateErr {
+        t.Fatalf("expected an out-of-range exp to be rejected")
+    }
+}
+
 func TestJwtTokenValidator_AcceptsValidToken(t *testing.T) {
     secret := []byte("super-secret")
     validator := security.NewJwtTokenValidator(security.JwtConfig{Secret: secret})

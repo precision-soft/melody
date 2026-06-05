@@ -66,6 +66,44 @@ func (instance *InMemoryTokenStore) Delete(tokenString string) {
     delete(instance.entriesByToken, tokenString)
 }
 
+/** DeleteByUser revokes every token whose claims resolve to the given user identifier; it is the
+logout/"sign out everywhere" primitive that the per-token Delete cannot express. It returns the
+number of tokens removed. */
+func (instance *InMemoryTokenStore) DeleteByUser(userIdentifier string) int {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    removed := 0
+    for tokenString, entry := range instance.entriesByToken {
+        if entry.claims.UserIdentifier == userIdentifier {
+            delete(instance.entriesByToken, tokenString)
+            removed++
+        }
+    }
+
+    return removed
+}
+
+/** PurgeExpired drops every entry whose ttl has elapsed. Lookup already ignores expired entries,
+but it leaves them in place; a janitor calling PurgeExpired periodically keeps the map bounded when
+many short-lived tokens are issued and never explicitly deleted. It returns the number purged. */
+func (instance *InMemoryTokenStore) PurgeExpired() int {
+    now := instance.clock.Now()
+
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    purged := 0
+    for tokenString, entry := range instance.entriesByToken {
+        if false == entry.expiresAt.IsZero() && true == now.After(entry.expiresAt) {
+            delete(instance.entriesByToken, tokenString)
+            purged++
+        }
+    }
+
+    return purged
+}
+
 func (instance *InMemoryTokenStore) Lookup(
     runtimeInstance runtimecontract.Runtime,
     tokenString string,

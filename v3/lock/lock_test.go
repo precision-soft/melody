@@ -112,6 +112,33 @@ func TestInMemoryLocker_RefreshFailsAfterRelease(t *testing.T) {
     }
 }
 
+func TestInMemoryLocker_PurgeExpiredDropsElapsedHolders(t *testing.T) {
+    frozen := clock.NewFrozenClock(time.Unix(1000, 0))
+    locker := lock.NewInMemoryLocker(frozen)
+    runtimeInstance := testRuntime()
+
+    short := locker.CreateLock("picking:short", 5*time.Second)
+    long := locker.CreateLock("picking:long", time.Hour)
+
+    if acquired, _ := short.Acquire(runtimeInstance); false == acquired {
+        t.Fatalf("expected short acquire to succeed")
+    }
+    if acquired, _ := long.Acquire(runtimeInstance); false == acquired {
+        t.Fatalf("expected long acquire to succeed")
+    }
+
+    frozen.Advance(10 * time.Second)
+
+    /** Only the elapsed holder is reclaimed; the long-lived one is left untouched. */
+    if purged := locker.PurgeExpired(); 1 != purged {
+        t.Fatalf("expected exactly one expired holder to be purged, got %d", purged)
+    }
+
+    if refreshErr := long.Refresh(runtimeInstance, time.Hour); nil != refreshErr {
+        t.Fatalf("expected the unexpired lock to remain held: %v", refreshErr)
+    }
+}
+
 func TestInMemoryLocker_ReacquireIsReentrantForSameLock(t *testing.T) {
     locker := lock.NewInMemoryLocker(clock.NewSystemClock())
     runtimeInstance := testRuntime()

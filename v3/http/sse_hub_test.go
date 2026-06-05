@@ -52,6 +52,50 @@ func TestSseHub_BroadcastCountsDroppedEventsOnFullBuffer(t *testing.T) {
     }
 }
 
+func TestSseHub_ShutdownClosesSubscribersAndStopsDelivery(t *testing.T) {
+    hub := http.NewSseHub()
+
+    first := hub.Subscribe("demo", 4)
+    second := hub.Subscribe("other", 4)
+
+    hub.Shutdown()
+
+    /** Every subscriber channel must be closed so in-flight handler loops observe the close. */
+    for label, subscriber := range map[string]*http.SseSubscriber{"demo": first, "other": second} {
+        select {
+        case _, open := <-subscriber.Events():
+            if true == open {
+                t.Fatalf("expected the %s subscriber channel to be closed", label)
+            }
+        default:
+            t.Fatalf("expected a closed (non-blocking) read on the %s subscriber", label)
+        }
+    }
+
+    if delivered := hub.Broadcast("demo", http.SseEvent{Data: "x"}); 0 != delivered {
+        t.Fatalf("expected no deliveries after shutdown, got %d", delivered)
+    }
+
+    /** Shutdown is idempotent. */
+    hub.Shutdown()
+}
+
+func TestSseHub_SubscribeAfterShutdownReturnsClosedChannel(t *testing.T) {
+    hub := http.NewSseHub()
+    hub.Shutdown()
+
+    subscriber := hub.Subscribe("demo", 4)
+
+    select {
+    case _, open := <-subscriber.Events():
+        if true == open {
+            t.Fatalf("expected a post-shutdown subscriber to receive a closed channel")
+        }
+    default:
+        t.Fatalf("expected a closed (non-blocking) read on a post-shutdown subscriber")
+    }
+}
+
 func TestSseHub_UnsubscribeStopsDelivery(t *testing.T) {
     hub := http.NewSseHub()
 
