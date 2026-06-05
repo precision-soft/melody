@@ -78,3 +78,37 @@ func TestSseWriter_StripsCarriageReturnFromData(t *testing.T) {
         t.Fatalf("expected the carriage-return injection neutralized into a single data line, got event=%d data=%d: %q", eventLines, dataLines, body)
     }
 }
+
+func TestSseWriter_CommentStripsCarriageReturnAndNewline(t *testing.T) {
+    recorder := httptest.NewRecorder()
+
+    writer, writerErr := http.NewSseWriter(recorder)
+    if nil != writerErr {
+        t.Fatalf("new sse writer: %v", writerErr)
+    }
+
+    commentErr := writer.Comment("keep-alive\r\nevent: injected\ndata: hijacked")
+    if nil != commentErr {
+        t.Fatalf("comment: %v", commentErr)
+    }
+
+    body := recorder.Body.String()
+
+    if true == strings.Contains(body, "\r") {
+        t.Fatalf("expected no carriage return in the wire output, got %q", body)
+    }
+
+    commentLines, fieldLines := 0, 0
+    for _, line := range strings.Split(body, "\n") {
+        if true == strings.HasPrefix(line, ": ") {
+            commentLines++
+        }
+        if true == strings.HasPrefix(line, "event: ") || true == strings.HasPrefix(line, "data: ") {
+            fieldLines++
+        }
+    }
+
+    if 1 != commentLines || 0 != fieldLines {
+        t.Fatalf("expected a single comment line with no injected fields, got comment=%d field=%d: %q", commentLines, fieldLines, body)
+    }
+}

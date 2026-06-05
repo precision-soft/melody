@@ -91,24 +91,36 @@ func (instance *SseBackplane) Publish(topic string, event melodyhttp.SseEvent) e
         return exception.NewError("amqp sse backplane could not encode the event", map[string]any{"topic": topic}, marshalErr)
     }
 
+    if publishErr := instance.publishOnce(payload); nil != publishErr {
+        if true == instance.isClosing() {
+            return exception.NewError("amqp sse backplane publish failed", map[string]any{"topic": topic}, publishErr)
+        }
+
+        instance.resetPublishChannel()
+
+        if retryErr := instance.publishOnce(payload); nil != retryErr {
+            instance.resetPublishChannel()
+
+            return exception.NewError("amqp sse backplane publish failed", map[string]any{"topic": topic}, retryErr)
+        }
+    }
+
+    return nil
+}
+
+func (instance *SseBackplane) publishOnce(payload []byte) error {
     channel, channelErr := instance.ensurePublishChannel()
     if nil != channelErr {
         return channelErr
     }
 
     instance.publishMutex.Lock()
-    publishErr := channel.PublishWithContext(instance.ctx, instance.exchange, "", false, false, amqp091.Publishing{
+    defer instance.publishMutex.Unlock()
+
+    return channel.PublishWithContext(instance.ctx, instance.exchange, "", false, false, amqp091.Publishing{
         ContentType: "application/json",
         Body:        payload,
     })
-    instance.publishMutex.Unlock()
-    if nil != publishErr {
-        instance.resetPublishChannel()
-
-        return exception.NewError("amqp sse backplane publish failed", map[string]any{"topic": topic}, publishErr)
-    }
-
-    return nil
 }
 
 func (instance *SseBackplane) Close() error {

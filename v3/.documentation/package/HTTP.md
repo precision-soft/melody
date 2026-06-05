@@ -265,7 +265,7 @@ The example application wires an `SseHub`, an `/events/stream` SSE endpoint (`ha
 
 * Server-Sent Events:
     * [`type SseEvent`](../../http/sse.go)
-    * [`type SseWriter`](../../http/sse.go) with [`NewSseWriter(nethttp.ResponseWriter) (*SseWriter, error)`](../../http/sse.go), [`(*SseWriter).Send(SseEvent) error`](../../http/sse.go), [`(*SseWriter).Comment(string) error`](../../http/sse.go)
+    * [`type SseWriter`](../../http/sse.go) with [`NewSseWriter(nethttp.ResponseWriter) (*SseWriter, error)`](../../http/sse.go), [`(*SseWriter).Send(SseEvent) error`](../../http/sse.go), [`(*SseWriter).Comment(string) error`](../../http/sse.go). Both `Send` (`Id`/`Event`/`Data`) and `Comment` strip `CR`/`LF` from caller-supplied text so a dynamic value cannot inject extra SSE fields or events.
     * [`type SseHub`](../../http/sse_hub.go) with [`NewSseHub()`](../../http/sse_hub.go), [`Subscribe(topic string, bufferSize int) *SseSubscriber`](../../http/sse_hub.go), [`Unsubscribe(*SseSubscriber)`](../../http/sse_hub.go), [`Broadcast(topic string, event SseEvent) int`](../../http/sse_hub.go), [`SubscriberCount(topic string) int`](../../http/sse_hub.go), [`DroppedEventCount() uint64`](../../http/sse_hub.go)
     * [`type SseSubscriber`](../../http/sse_hub.go) with [`(*SseSubscriber).Events() <-chan SseEvent`](../../http/sse_hub.go)
 

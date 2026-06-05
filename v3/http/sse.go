@@ -86,7 +86,7 @@ func sanitizeSseField(value string) string {
 }
 
 func (instance *SseWriter) Comment(text string) error {
-    _, writeErr := io.WriteString(instance.writer, ": "+text+"\n\n")
+    _, writeErr := io.WriteString(instance.writer, ": "+sanitizeSseField(text)+"\n\n")
     if nil != writeErr {
         return writeErr
     }

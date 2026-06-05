@@ -1,13 +1,43 @@
 package amqp_test
 
 import (
+    "errors"
     "os"
     "testing"
     "time"
 
     amqp "github.com/precision-soft/melody/integrations/amqp/v3"
     melodyhttp "github.com/precision-soft/melody/v3/http"
+    amqp091 "github.com/rabbitmq/amqp091-go"
 )
+
+func TestSseBackplane_PublishAfterCloseDoesNotRetry(t *testing.T) {
+    hub := melodyhttp.NewSseHub()
+    backplane := amqp.NewSseBackplane(amqp.SseBackplaneConfig{
+        Dialer: func() (*amqp091.Connection, error) {
+            return nil, errors.New("no broker")
+        },
+        Hub: hub,
+    })
+
+    if closeErr := backplane.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    done := make(chan error, 1)
+    go func() {
+        done <- backplane.Publish("orders", melodyhttp.SseEvent{Data: "after-close"})
+    }()
+
+    select {
+    case publishErr := <-done:
+        if nil == publishErr {
+            t.Fatalf("expected publish on a closed backplane to fail")
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatalf("publish on a closed backplane hung instead of short-circuiting the retry")
+    }
+}
 
 func TestSseBackplane_ReplicatesBroadcastToAnotherInstance(t *testing.T) {
     dsn := os.Getenv("AMQP_DSN")
