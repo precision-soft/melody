@@ -14,11 +14,6 @@ import (
     melodystoragecontract "github.com/precision-soft/melody/v3/storage/contract"
 )
 
-/**
- * PlatformDemoHandler exercises the lock and storage modules end to end: it takes a named lock, writes,
- * reads back and deletes an object, then releases the lock. It exists so the example build matrix wires
- * and runs both modules. In a load-balanced deployment swap the in-memory locker for a Redis-backed one.
- */
 func PlatformDemoHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         storageInstance := melodystorage.StorageMustFromContainer(runtimeInstance.Container())

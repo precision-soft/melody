@@ -16,25 +16,12 @@ import (
 
 const defaultSseBackplaneExchange = "melody.sse"
 
-/**
- * sseWireEvent is the JSON envelope replicated over the fanout exchange. Origin identifies the
- * publishing instance so each instance ignores the echo of its own broadcast.
- */
 type sseWireEvent struct {
     Origin string              `json:"origin"`
     Topic  string              `json:"topic"`
     Event  melodyhttp.SseEvent `json:"event"`
 }
 
-/**
- * SseBackplane replicates SseHub broadcasts across application instances over a fanout exchange, so a
- * client connected to any instance behind a load balancer receives every broadcast. Each instance binds
- * its own exclusive, auto-deleted queue to the exchange; a published broadcast therefore reaches every
- * instance, which forwards the events of other instances into the hub via DeliverLocal. Replication is
- * best-effort (auto-ack, transient): a dropped event is not redelivered. When a Dialer is configured the
- * subscription and publisher re-establish themselves after a broker restart. Close tears the subscription
- * down and closes only a connection the backplane itself dialed.
- */
 type SseBackplane struct {
     connection *amqp091.Connection
     dialer     func() (*amqp091.Connection, error)
@@ -248,6 +235,9 @@ func (instance *SseBackplane) subscribe() (<-chan amqp091.Delivery, error) {
 
         return nil, exception.NewError("amqp sse backplane is closing", nil, nil)
     }
+    if nil != instance.consumeChannel {
+        instance.consumeChannel.Close()
+    }
     instance.consumeChannel = channel
     instance.mutex.Unlock()
 
@@ -338,6 +328,13 @@ func (instance *SseBackplane) liveConnection() (*amqp091.Connection, error) {
         connection.Close()
 
         return nil, exception.NewError("amqp sse backplane is closing", nil, nil)
+    }
+
+    if nil != instance.publishChannel {
+        instance.publishChannel.Close()
+    }
+    if nil != instance.consumeChannel {
+        instance.consumeChannel.Close()
     }
 
     instance.connection = connection

@@ -26,3 +26,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - The poison-message (decode-failure) log now states whether the message is being dead-lettered or dropped based on whether `DeadLetter` is configured — when no DLQ is declared a nacked-without-requeue delivery is discarded by the broker, so the log no longer misleadingly claims "dead-lettering". Enable `DeadLetter` in production so undecodable deliveries are retained.
+- `sse_backplane.go` — the reconnect paths now close the previous consume/publish channel before overwriting it (`subscribe` re-subscribing onto a fresh channel, and `liveConnection` redialing the connection), so a channel-only loss that leaves the connection alive no longer leaks the stale `*amqp091.Channel`.

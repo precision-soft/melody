@@ -65,7 +65,7 @@ func (instance *SseWriter) Send(event SseEvent) error {
 
     for _, line := range strings.Split(event.Data, "\n") {
         builder.WriteString("data: ")
-        builder.WriteString(line)
+        builder.WriteString(strings.ReplaceAll(line, "\r", ""))
         builder.WriteString("\n")
     }
 

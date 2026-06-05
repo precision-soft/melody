@@ -22,23 +22,12 @@ const (
     sseBackplaneBackoffFactor  = 2
 )
 
-/**
- * sseWireEvent is the JSON envelope replicated over the Redis channel. Origin identifies the publishing
- * instance so each instance ignores the echo of its own broadcast (it already delivered it locally).
- */
 type sseWireEvent struct {
     Origin string              `json:"origin"`
     Topic  string              `json:"topic"`
     Event  melodyhttp.SseEvent `json:"event"`
 }
 
-/**
- * SseBackplane replicates SseHub broadcasts across application instances over a Redis pub/sub channel,
- * so a client connected to any instance behind a load balancer receives every broadcast. It publishes
- * each local broadcast and, on a dedicated subscription, forwards events from other instances into the
- * hub via DeliverLocal. The subscription re-establishes itself with bounded backoff after a connection
- * drop. The Redis client is caller-owned and is not closed by Close.
- */
 type SseBackplane struct {
     client  rueidis.Client
     hub     *melodyhttp.SseHub
@@ -53,14 +42,12 @@ type SseBackplane struct {
 
 type SseBackplaneOption func(*SseBackplane)
 
-/** WithSseBackplaneChannel overrides the Redis pub/sub channel (default "melody:sse"). */
 func WithSseBackplaneChannel(channel string) SseBackplaneOption {
     return func(backplane *SseBackplane) {
         backplane.channel = channel
     }
 }
 
-/** WithSseBackplaneLogger logs subscription and decode failures; without it they are silent. */
 func WithSseBackplaneLogger(logger loggingcontract.Logger) SseBackplaneOption {
     return func(backplane *SseBackplane) {
         backplane.logger = logger
