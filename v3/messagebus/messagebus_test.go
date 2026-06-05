@@ -75,6 +75,41 @@ func TestHandlerLocator_ConcurrentRegisterAndLookup(t *testing.T) {
     waitGroup.Wait()
 }
 
+func TestInMemoryTransport_RequeueOnFullQueueDoesNotBlock(t *testing.T) {
+    transport := messagebus.NewInMemoryTransport(1)
+    runtimeInstance := newTestRuntime()
+
+    if sendErr := transport.Send(runtimeInstance, messagebus.NewEnvelope(taskCreated{TaskId: 1})); nil != sendErr {
+        t.Fatalf("unexpected send error: %v", sendErr)
+    }
+
+    /** The buffer is full; a blocking requeue would hang here forever since this goroutine is
+    the only reader. The non-blocking requeue must return an error instead. */
+    nackErr := transport.Nack(runtimeInstance, messagebus.NewEnvelope(taskCreated{TaskId: 2}), true)
+    if nil == nackErr {
+        t.Fatalf("expected nack to report a dropped message when the queue is full")
+    }
+}
+
+func TestInMemoryTransport_CloseRejectsFurtherSendsAndIsIdempotent(t *testing.T) {
+    transport := messagebus.NewInMemoryTransport(1)
+    runtimeInstance := newTestRuntime()
+
+    if closeErr := transport.Close(runtimeInstance); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    /** Close must be safe to call more than once. */
+    if closeErr := transport.Close(runtimeInstance); nil != closeErr {
+        t.Fatalf("unexpected second close error: %v", closeErr)
+    }
+
+    sendErr := transport.Send(runtimeInstance, messagebus.NewEnvelope(taskCreated{TaskId: 1}))
+    if nil == sendErr {
+        t.Fatalf("expected send to fail after close")
+    }
+}
+
 func TestSendMiddleware_RoutesToTransportAndWorkerHandles(t *testing.T) {
     transport := messagebus.NewInMemoryTransport(4)
 

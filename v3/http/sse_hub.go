@@ -2,6 +2,7 @@ package http
 
 import (
     "sync"
+    "sync/atomic"
 )
 
 func NewSseHub() *SseHub {
@@ -13,6 +14,10 @@ func NewSseHub() *SseHub {
 type SseHub struct {
     mutex              sync.RWMutex
     subscribersByTopic map[string]map[*SseSubscriber]struct{}
+
+    /** dropped counts events discarded because a subscriber's buffer was full; delivery is
+    at-most-once, so a slow consumer loses events rather than blocking the broadcaster. */
+    dropped uint64
 }
 
 type SseSubscriber struct {
@@ -84,10 +89,17 @@ func (instance *SseHub) Broadcast(topic string, event SseEvent) int {
         case subscriber.channel <- event:
             delivered++
         default:
+            atomic.AddUint64(&instance.dropped, 1)
         }
     }
 
     return delivered
+}
+
+/** DroppedEventCount returns the cumulative number of events discarded across all topics because a
+subscriber's buffer was full. It lets callers surface the at-most-once delivery loss as a metric. */
+func (instance *SseHub) DroppedEventCount() uint64 {
+    return atomic.LoadUint64(&instance.dropped)
 }
 
 func (instance *SseHub) SubscriberCount(topic string) int {

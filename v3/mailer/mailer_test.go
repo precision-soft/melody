@@ -2,6 +2,7 @@ package mailer_test
 
 import (
     "context"
+    "encoding/base64"
     "strings"
     "testing"
 
@@ -68,6 +69,85 @@ func TestRenderMessage_StripsHeaderInjection(t *testing.T) {
 
     if true == strings.Contains(rendered, "\nX-Injected") {
         t.Fatalf("address name header injection produced a new header line:\n%s", rendered)
+    }
+}
+
+func TestRenderMessage_FiltersReservedCallerHeaders(t *testing.T) {
+    payload, renderErr := mailer.RenderMessage(mailercontract.Message{
+        From:    mailercontract.Address{Email: "shop@example.com"},
+        To:      []mailercontract.Address{{Email: "ada@example.com"}},
+        Subject: "Hello",
+        Text:    "body",
+        Headers: map[string]string{
+            "Subject":      "Spoofed",
+            "Content-Type": "text/evil",
+            "X-Campaign":   "welcome",
+        },
+    })
+    if nil != renderErr {
+        t.Fatalf("render: %v", renderErr)
+    }
+
+    rendered := string(payload)
+
+    if true == strings.Contains(rendered, "Spoofed") {
+        t.Fatalf("expected a reserved Subject header to be dropped:\n%s", rendered)
+    }
+
+    if true == strings.Contains(rendered, "text/evil") {
+        t.Fatalf("expected a reserved Content-Type header to be dropped:\n%s", rendered)
+    }
+
+    if false == strings.Contains(rendered, "X-Campaign: welcome") {
+        t.Fatalf("expected a non-reserved custom header to pass through:\n%s", rendered)
+    }
+}
+
+func TestRenderMessage_AttachmentIsBase64InMixed(t *testing.T) {
+    content := []byte("attachment-bytes")
+
+    payload, renderErr := mailer.RenderMessage(mailercontract.Message{
+        From:    mailercontract.Address{Email: "shop@example.com"},
+        To:      []mailercontract.Address{{Email: "ada@example.com"}},
+        Subject: "With file",
+        Text:    "see attached",
+        Attachments: []mailercontract.Attachment{
+            {Filename: "report\".txt", ContentType: "text/plain", Content: content},
+        },
+    })
+    if nil != renderErr {
+        t.Fatalf("render: %v", renderErr)
+    }
+
+    rendered := string(payload)
+
+    for _, expected := range []string{
+        "Content-Type: multipart/mixed;",
+        "Content-Transfer-Encoding: base64",
+        "Content-Disposition: attachment; filename=\"report.txt\"",
+        base64.StdEncoding.EncodeToString(content),
+    } {
+        if false == strings.Contains(rendered, expected) {
+            t.Fatalf("rendered message missing %q\n---\n%s", expected, rendered)
+        }
+    }
+}
+
+func TestRenderMessage_QuotedPrintableKeepsLinesWithinSmtpLimit(t *testing.T) {
+    payload, renderErr := mailer.RenderMessage(mailercontract.Message{
+        From:    mailercontract.Address{Email: "shop@example.com"},
+        To:      []mailercontract.Address{{Email: "ada@example.com"}},
+        Subject: "Long",
+        Text:    strings.Repeat("a", 4000),
+    })
+    if nil != renderErr {
+        t.Fatalf("render: %v", renderErr)
+    }
+
+    for _, line := range strings.Split(string(payload), "\r\n") {
+        if 998 < len(line) {
+            t.Fatalf("rendered line exceeds the SMTP 998-character limit: %d", len(line))
+        }
     }
 }
 

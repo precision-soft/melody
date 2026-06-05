@@ -45,10 +45,10 @@ The example below demonstrates dispatching a named event with an arbitrary paylo
 package main
 
 import (
-	containercontract "github.com/precision-soft/melody/v2/container/contract"
-	"github.com/precision-soft/melody/v2/event"
-	"github.com/precision-soft/melody/v2/exception"
-	runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
+	containercontract "github.com/precision-soft/melody/v3/container/contract"
+	"github.com/precision-soft/melody/v3/event"
+	"github.com/precision-soft/melody/v3/exception"
+	runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
 type ProductCreatedPayload struct {

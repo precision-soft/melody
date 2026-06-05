@@ -100,11 +100,11 @@ package main
 import (
 	nethttp "net/http"
 
-	applicationcontract "github.com/precision-soft/melody/v2/application/contract"
-	"github.com/precision-soft/melody/v2/http"
-	httpcontract "github.com/precision-soft/melody/v2/http/contract"
-	kernelcontract "github.com/precision-soft/melody/v2/kernel/contract"
-	runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
+	applicationcontract "github.com/precision-soft/melody/v3/application/contract"
+	"github.com/precision-soft/melody/v3/http"
+	httpcontract "github.com/precision-soft/melody/v3/http/contract"
+	kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
+	runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
 const pingRouteName = "example.api.ping"
@@ -225,7 +225,7 @@ The example application wires an `SseHub`, an `/events/stream` SSE endpoint (`ha
 ## Footguns & caveats
 
 * SSE handlers must return `(nil, nil)` after streaming; returning a non-nil response would make the kernel write a second header/body.
-* [`SseHub.Broadcast`](../../http/sse_hub.go) is non-blocking and drops events for subscribers whose buffer is full; size the subscribe buffer for the expected burst, or treat the stream as best-effort.
+* [`SseHub.Broadcast`](../../http/sse_hub.go) is non-blocking and drops events for subscribers whose buffer is full; delivery is **at-most-once**. Size the subscribe buffer for the expected burst, or treat the stream as best-effort. [`SseHub.DroppedEventCount`](../../http/sse_hub.go) returns the cumulative number of dropped events so the loss can be surfaced as a metric.
 * Route names must be unique. URL generation relies on a [`RouteRegistry`](../../http/contract/route_registry.go) entry for the route name.
 * [`UrlGeneratorMustFromContainer`](../../http/service_resolver.go) is a fail-fast helper and will panic if `ServiceUrlGenerator` is missing or has an invalid type.
 
@@ -262,7 +262,7 @@ The example application wires an `SseHub`, an `/events/stream` SSE endpoint (`ha
 * Server-Sent Events:
     * [`type SseEvent`](../../http/sse.go)
     * [`type SseWriter`](../../http/sse.go) with [`NewSseWriter(nethttp.ResponseWriter) (*SseWriter, error)`](../../http/sse.go), [`(*SseWriter).Send(SseEvent) error`](../../http/sse.go), [`(*SseWriter).Comment(string) error`](../../http/sse.go)
-    * [`type SseHub`](../../http/sse_hub.go) with [`NewSseHub()`](../../http/sse_hub.go), [`Subscribe(topic string, bufferSize int) *SseSubscriber`](../../http/sse_hub.go), [`Unsubscribe(*SseSubscriber)`](../../http/sse_hub.go), [`Broadcast(topic string, event SseEvent) int`](../../http/sse_hub.go), [`SubscriberCount(topic string) int`](../../http/sse_hub.go)
+    * [`type SseHub`](../../http/sse_hub.go) with [`NewSseHub()`](../../http/sse_hub.go), [`Subscribe(topic string, bufferSize int) *SseSubscriber`](../../http/sse_hub.go), [`Unsubscribe(*SseSubscriber)`](../../http/sse_hub.go), [`Broadcast(topic string, event SseEvent) int`](../../http/sse_hub.go), [`SubscriberCount(topic string) int`](../../http/sse_hub.go), [`DroppedEventCount() uint64`](../../http/sse_hub.go)
     * [`type SseSubscriber`](../../http/sse_hub.go) with [`(*SseSubscriber).Events() <-chan SseEvent`](../../http/sse_hub.go)
 
 * Response helpers:

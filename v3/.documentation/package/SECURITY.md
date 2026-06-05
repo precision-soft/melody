@@ -55,7 +55,7 @@ When a firewall defines both global and local access control, `security/config` 
 
 The package defines the firewall manager service id:
 
-- [`security.ServiceFirewallManager`](../../security/service_resolver.go) (`"service.security.firewallManager"`)
+- [`security.ServiceFirewallManager`](../../security/service_resolver.go) (`"service.security.firewall_manager"`)
 
 Resolution helpers:
 
@@ -112,12 +112,12 @@ package main
 import (
 	"errors"
 
-	applicationcontract "github.com/precision-soft/melody/v2/application/contract"
-	httpcontract "github.com/precision-soft/melody/v2/http/contract"
-	kernelcontract "github.com/precision-soft/melody/v2/kernel/contract"
-	"github.com/precision-soft/melody/v2/security"
-	securityconfig "github.com/precision-soft/melody/v2/security/config"
-	securitycontract "github.com/precision-soft/melody/v2/security/contract"
+	applicationcontract "github.com/precision-soft/melody/v3/application/contract"
+	httpcontract "github.com/precision-soft/melody/v3/http/contract"
+	kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
+	"github.com/precision-soft/melody/v3/security"
+	securityconfig "github.com/precision-soft/melody/v3/security/config"
+	securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
 type apiKeyLoginHandler struct{}

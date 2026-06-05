@@ -75,6 +75,12 @@ type Transport struct {
     mutex          sync.Mutex
     publishChannel *amqp091.Channel
     consumeChannel *amqp091.Channel
+    closing        bool
+
+    /** publishMutex serializes the broker write in Send so concurrent publishers do not interleave
+    frames on the shared channel; it is intentionally separate from mutex so a publish never blocks
+    Ack, Close or channel setup. */
+    publishMutex sync.Mutex
 }
 
 func (instance *Transport) Send(
@@ -91,7 +97,7 @@ func (instance *Transport) Send(
     if false == registered {
         return exception.NewError(
             "message type is not registered with the amqp transport",
-            map[string]any{"messageType": reflect.TypeOf(message).String()},
+            map[string]any{"messageType": messageTypeName(message)},
             nil,
         )
     }
@@ -107,6 +113,7 @@ func (instance *Transport) Send(
         routingKey = instance.queue
     }
 
+    instance.publishMutex.Lock()
     publishErr := channel.PublishWithContext(
         runtimeInstance.Context(),
         exchange,
@@ -122,6 +129,7 @@ func (instance *Transport) Send(
             Body: body,
         },
     )
+    instance.publishMutex.Unlock()
     if nil != publishErr {
         return exception.NewError("amqp publish failed", map[string]any{"queue": instance.queue}, publishErr)
     }
@@ -193,9 +201,18 @@ func (instance *Transport) consumeChannelForAck() *amqp091.Channel {
     return instance.consumeChannel
 }
 
-func (instance *Transport) Close() error {
+func (instance *Transport) isClosing() bool {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
+
+    return instance.closing
+}
+
+func (instance *Transport) Close(runtimeInstance runtimecontract.Runtime) error {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.closing = true
 
     if nil != instance.consumeChannel {
         instance.consumeChannel.Close()
@@ -224,7 +241,7 @@ func (instance *Transport) forwardDeliveries(
             return
         case delivery, open := <-deliveries:
             if false == open {
-                if nil == runtimeInstance.Context().Err() {
+                if nil == runtimeInstance.Context().Err() && false == instance.isClosing() {
                     instance.logError(
                         runtimeInstance,
                         "amqp deliveries channel closed unexpectedly, consumer is stopping",
@@ -287,21 +304,31 @@ func (instance *Transport) decode(delivery amqp091.Delivery) (messagebuscontract
 
 func (instance *Transport) ensurePublishChannel() (*amqp091.Channel, error) {
     instance.mutex.Lock()
-    defer instance.mutex.Unlock()
+    existing := instance.publishChannel
+    instance.mutex.Unlock()
 
-    if nil != instance.publishChannel {
-        return instance.publishChannel, nil
+    if nil != existing {
+        return existing, nil
     }
 
+    /** The broker round-trips (open + topology declaration) happen outside the mutex so that Send,
+    Ack and Close are not serialized behind a slow or stalled channel setup. */
     channel, channelErr := instance.connection.Channel()
     if nil != channelErr {
         return nil, exception.NewError("amqp channel open failed", nil, channelErr)
     }
 
-    topologyErr := instance.declareTopology(channel)
-    if nil != topologyErr {
+    if topologyErr := instance.declareTopology(channel); nil != topologyErr {
         channel.Close()
         return nil, topologyErr
+    }
+
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if nil != instance.publishChannel {
+        channel.Close()
+        return instance.publishChannel, nil
     }
 
     instance.publishChannel = channel
@@ -311,10 +338,11 @@ func (instance *Transport) ensurePublishChannel() (*amqp091.Channel, error) {
 
 func (instance *Transport) ensureConsumeChannel() (*amqp091.Channel, error) {
     instance.mutex.Lock()
-    defer instance.mutex.Unlock()
+    existing := instance.consumeChannel
+    instance.mutex.Unlock()
 
-    if nil != instance.consumeChannel {
-        return instance.consumeChannel, nil
+    if nil != existing {
+        return existing, nil
     }
 
     channel, channelErr := instance.connection.Channel()
@@ -322,16 +350,22 @@ func (instance *Transport) ensureConsumeChannel() (*amqp091.Channel, error) {
         return nil, exception.NewError("amqp channel open failed", nil, channelErr)
     }
 
-    topologyErr := instance.declareTopology(channel)
-    if nil != topologyErr {
+    if topologyErr := instance.declareTopology(channel); nil != topologyErr {
         channel.Close()
         return nil, topologyErr
     }
 
-    qosErr := channel.Qos(instance.prefetch, 0, false)
-    if nil != qosErr {
+    if qosErr := channel.Qos(instance.prefetch, 0, false); nil != qosErr {
         channel.Close()
         return nil, exception.NewError("amqp qos failed", nil, qosErr)
+    }
+
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if nil != instance.consumeChannel {
+        channel.Close()
+        return instance.consumeChannel, nil
     }
 
     instance.consumeChannel = channel
@@ -384,6 +418,16 @@ func (instance *Transport) declareTopology(channel *amqp091.Channel) error {
     }
 
     return nil
+}
+
+/** messageTypeName resolves a printable type name without panicking on a nil message. */
+func messageTypeName(message any) string {
+    messageType := reflect.TypeOf(message)
+    if nil == messageType {
+        return "<nil>"
+    }
+
+    return messageType.String()
 }
 
 func (instance *Transport) logError(runtimeInstance runtimecontract.Runtime, message string, err error) {

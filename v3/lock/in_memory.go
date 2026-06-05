@@ -125,7 +125,10 @@ func (instance *inMemoryLock) Release(runtimeInstance runtimecontract.Runtime) e
 }
 
 func (instance *inMemoryLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl time.Duration) error {
-    instance.locker.refresh(instance.name, instance.token, ttl)
+    if false == instance.locker.refresh(instance.name, instance.token, ttl) {
+        return exception.NewError("in-memory lock is no longer held", map[string]any{"name": instance.name}, nil)
+    }
+
     return nil
 }
 

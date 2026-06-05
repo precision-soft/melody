@@ -1,6 +1,7 @@
 package encrypt_test
 
 import (
+    "fmt"
     "strings"
     "testing"
 
@@ -77,5 +78,27 @@ func TestEncryptedString_ValueScanRoundTrip(t *testing.T) {
 
     if "personal data" != string(loaded) {
         t.Fatalf("round-trip mismatch: %q", loaded)
+    }
+}
+
+func TestEncryptedString_MasksPlaintextWhenFormatted(t *testing.T) {
+    secret := encrypt.EncryptedString("personal data")
+
+    if "personal data" == secret.String() {
+        t.Fatalf("expected String to mask the plaintext")
+    }
+
+    for _, formatted := range []string{
+        fmt.Sprintf("%v", secret),
+        fmt.Sprintf("%s", secret),
+        fmt.Sprintf("the value is %v", secret),
+    } {
+        if true == strings.Contains(formatted, "personal data") {
+            t.Fatalf("expected formatted output to hide the plaintext, got %q", formatted)
+        }
+    }
+
+    if "personal data" != string(secret) {
+        t.Fatalf("explicit string conversion must still expose the value")
     }
 }

@@ -19,7 +19,7 @@ Mailing is opt-in. Userland builds a `Mailer` over a `Transport` and registers i
 - Orchestrate sending with validation:
     - [`Manager`](../../mailer/manager.go), [`NewManager`](../../mailer/manager.go)
 - Render and transport messages:
-    - [`RenderMessage`](../../mailer/message.go) (RFC 5322 headers; `multipart/alternative` when both text and HTML bodies are set)
+    - [`RenderMessage`](../../mailer/message.go) (RFC 5322 headers; quoted-printable bodies; `multipart/alternative` for text+HTML, `multipart/mixed` when attachments are present)
     - [`SmtpTransport`](../../mailer/smtp_transport.go), [`NewSmtpTransport`](../../mailer/smtp_transport.go)
     - [`InMemoryTransport`](../../mailer/in_memory_transport.go), [`NewInMemoryTransport`](../../mailer/in_memory_transport.go)
 - Provide container resolver helpers:
@@ -33,6 +33,10 @@ Mailing is opt-in. Userland builds a `Mailer` over a `Transport` and registers i
 - both `Text` and `Html` → `multipart/alternative` with a `text/plain` and a `text/html` part;
 - only `Html` → `text/html`;
 - otherwise → `text/plain`.
+
+Text bodies are `quoted-printable` encoded so every output line stays within the SMTP 998-character limit and 8-bit UTF-8 is transported safely. When `Attachments` are present the whole message is wrapped in `multipart/mixed`: the body entity above becomes the first part, and each attachment follows as a `base64`-encoded part with a `Content-Disposition: attachment` header.
+
+Custom `Headers` whose name collides with a header the renderer emits itself (`Content-Type`, `MIME-Version`, `Content-Transfer-Encoding`, `Content-Disposition`, `From`, `To`, `Cc`, `Bcc`, `Reply-To`, `Subject`, `Date`) are dropped so a caller cannot duplicate or override the structural headers.
 
 `Bcc` recipients are included in the SMTP envelope but never written to headers.
 
@@ -63,7 +67,7 @@ For tests, swap in [`InMemoryTransport`](../../mailer/in_memory_transport.go) an
 - Mailing is opt-in and userland-wired; the framework registers no default mailer.
 - [`NewSmtpTransport`](../../mailer/smtp_transport.go) uses `net/smtp.SendMail`, which issues `STARTTLS` when the server advertises it and authenticates only when a username is set. It does not support implicit TLS (SMTPS on port 465); use an integration transport for that.
 - [`Manager.Send`](../../mailer/manager.go) requires a sender and at least one recipient; bodies and subjects are otherwise unvalidated.
-- Header and address values are written verbatim — callers are responsible for not injecting CRLF into untrusted header content.
+- Header names/values and address fields have `CR`/`LF` stripped before they are written, and attachment filenames additionally have `"` stripped, so untrusted values cannot inject extra header lines or break out of the quoted `filename` parameter.
 
 ## Userland API
 
@@ -73,6 +77,7 @@ For tests, swap in [`InMemoryTransport`](../../mailer/in_memory_transport.go) an
 - [`Transport`](../../mailer/contract/mailer.go)
 - [`Message`](../../mailer/contract/mailer.go)
 - [`Address`](../../mailer/contract/mailer.go)
+- [`Attachment`](../../mailer/contract/mailer.go)
 
 ### Types and constructors (`mailer`)
 

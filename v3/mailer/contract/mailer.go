@@ -9,16 +9,23 @@ type Address struct {
     Email string
 }
 
+type Attachment struct {
+    Filename    string
+    ContentType string
+    Content     []byte
+}
+
 type Message struct {
-    From    Address
-    To      []Address
-    Cc      []Address
-    Bcc     []Address
-    ReplyTo Address
-    Subject string
-    Text    string
-    Html    string
-    Headers map[string]string
+    From        Address
+    To          []Address
+    Cc          []Address
+    Bcc         []Address
+    ReplyTo     Address
+    Subject     string
+    Text        string
+    Html        string
+    Headers     map[string]string
+    Attachments []Attachment
 }
 
 type Mailer interface {

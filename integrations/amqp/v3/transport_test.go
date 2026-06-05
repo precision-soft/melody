@@ -40,13 +40,13 @@ func TestTransport_SendReceiveAck(t *testing.T) {
         Registry:   registry,
         DeadLetter: true,
     })
-    defer transport.Close()
 
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
 
     serviceContainer := container.NewContainer()
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+    defer transport.Close(runtimeInstance)
 
     sent := []testMessage{
         {Id: 1, Name: "one"},

@@ -33,6 +33,25 @@ func TestSseHub_BroadcastDeliversToTopicSubscribers(t *testing.T) {
     }
 }
 
+func TestSseHub_BroadcastCountsDroppedEventsOnFullBuffer(t *testing.T) {
+    hub := http.NewSseHub()
+
+    /** A buffer of one fills after a single undrained event; the next broadcast must drop. */
+    hub.Subscribe("demo", 1)
+
+    if delivered := hub.Broadcast("demo", http.SseEvent{Data: "first"}); 1 != delivered {
+        t.Fatalf("expected the first event to be delivered, got %d", delivered)
+    }
+
+    if delivered := hub.Broadcast("demo", http.SseEvent{Data: "second"}); 0 != delivered {
+        t.Fatalf("expected the second event to be dropped, got %d delivered", delivered)
+    }
+
+    if dropped := hub.DroppedEventCount(); 1 != dropped {
+        t.Fatalf("expected exactly one dropped event, got %d", dropped)
+    }
+}
+
 func TestSseHub_UnsubscribeStopsDelivery(t *testing.T) {
     hub := http.NewSseHub()
 

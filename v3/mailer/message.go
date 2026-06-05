@@ -2,7 +2,9 @@ package mailer
 
 import (
     "crypto/rand"
+    "encoding/base64"
     "encoding/hex"
+    "mime/quotedprintable"
     "strings"
     "time"
 
@@ -11,6 +13,22 @@ import (
 )
 
 const lineBreak = "\r\n"
+
+/** reservedHeaders are emitted by the renderer itself; a caller-supplied header with the same name
+is dropped so it cannot duplicate or override the structural headers. */
+var reservedHeaders = map[string]struct{}{
+    "from":                      {},
+    "to":                        {},
+    "cc":                        {},
+    "bcc":                       {},
+    "reply-to":                  {},
+    "subject":                   {},
+    "date":                      {},
+    "mime-version":              {},
+    "content-type":              {},
+    "content-transfer-encoding": {},
+    "content-disposition":       {},
+}
 
 func RenderMessage(message mailercontract.Message) ([]byte, error) {
     if "" == message.From.Email {
@@ -38,38 +56,59 @@ func RenderMessage(message mailercontract.Message) ([]byte, error) {
     writeHeader(&builder, "MIME-Version", "1.0")
 
     for key, value := range message.Headers {
+        if _, reserved := reservedHeaders[strings.ToLower(strings.TrimSpace(key))]; true == reserved {
+            continue
+        }
         writeHeader(&builder, key, value)
     }
 
+    if 0 == len(message.Attachments) {
+        writeBodyEntity(&builder, message)
+
+        return []byte(builder.String()), nil
+    }
+
+    boundary := newBoundary()
+    writeHeader(&builder, "Content-Type", "multipart/mixed; boundary=\""+boundary+"\"")
+    builder.WriteString(lineBreak)
+
+    builder.WriteString("--" + boundary + lineBreak)
+    writeBodyEntity(&builder, message)
+
+    for _, attachment := range message.Attachments {
+        builder.WriteString("--" + boundary + lineBreak)
+        writeAttachment(&builder, attachment)
+    }
+
+    builder.WriteString("--" + boundary + "--" + lineBreak)
+
+    return []byte(builder.String()), nil
+}
+
+/** writeBodyEntity writes the text/html content as a single MIME entity (its own Content-Type plus
+encoded body); it is used both at the top level and as the first part of a multipart/mixed message. */
+func writeBodyEntity(builder *strings.Builder, message mailercontract.Message) {
     hasHtml := "" != message.Html
     hasText := "" != message.Text
 
     if true == hasHtml && true == hasText {
         boundary := newBoundary()
-        writeHeader(&builder, "Content-Type", "multipart/alternative; boundary=\""+boundary+"\"")
+        builder.WriteString("Content-Type: multipart/alternative; boundary=\"" + boundary + "\"" + lineBreak)
         builder.WriteString(lineBreak)
-        writePart(&builder, boundary, "text/plain; charset=utf-8", message.Text)
-        writePart(&builder, boundary, "text/html; charset=utf-8", message.Html)
+        writeTextPart(builder, boundary, "text/plain; charset=utf-8", message.Text)
+        writeTextPart(builder, boundary, "text/html; charset=utf-8", message.Html)
         builder.WriteString("--" + boundary + "--" + lineBreak)
 
-        return []byte(builder.String()), nil
+        return
     }
 
     if true == hasHtml {
-        writeHeader(&builder, "Content-Type", "text/html; charset=utf-8")
-        builder.WriteString(lineBreak)
-        builder.WriteString(message.Html)
-        builder.WriteString(lineBreak)
+        writeTextBody(builder, "text/html; charset=utf-8", message.Html)
 
-        return []byte(builder.String()), nil
+        return
     }
 
-    writeHeader(&builder, "Content-Type", "text/plain; charset=utf-8")
-    builder.WriteString(lineBreak)
-    builder.WriteString(message.Text)
-    builder.WriteString(lineBreak)
-
-    return []byte(builder.String()), nil
+    writeTextBody(builder, "text/plain; charset=utf-8", message.Text)
 }
 
 func recipients(message mailercontract.Message) []string {
@@ -92,6 +131,10 @@ func appendEmails(target []string, addresses []mailercontract.Address) []string 
 }
 
 var headerSanitizer = strings.NewReplacer("\r", "", "\n", "")
+
+/** filenameSanitizer also drops the double quote so a crafted attachment name cannot break out of the
+quoted filename parameter in the Content-Disposition header. */
+var filenameSanitizer = strings.NewReplacer("\r", "", "\n", "", "\"", "")
 
 func formatAddress(address mailercontract.Address) string {
     email := headerSanitizer.Replace(address.Email)
@@ -123,12 +166,58 @@ func writeHeader(builder *strings.Builder, name string, value string) {
     builder.WriteString(lineBreak)
 }
 
-func writePart(builder *strings.Builder, boundary string, contentType string, body string) {
+func writeTextPart(builder *strings.Builder, boundary string, contentType string, body string) {
     builder.WriteString("--" + boundary + lineBreak)
+    writeTextBody(builder, contentType, body)
+}
+
+/** writeTextBody emits a text entity quoted-printable encoded, which keeps every output line within
+the SMTP 998-character limit and safely transports 8-bit UTF-8 content. */
+func writeTextBody(builder *strings.Builder, contentType string, body string) {
     builder.WriteString("Content-Type: " + contentType + lineBreak)
+    builder.WriteString("Content-Transfer-Encoding: quoted-printable" + lineBreak)
     builder.WriteString(lineBreak)
-    builder.WriteString(body)
+    builder.WriteString(encodeQuotedPrintable(body))
     builder.WriteString(lineBreak)
+}
+
+func writeAttachment(builder *strings.Builder, attachment mailercontract.Attachment) {
+    contentType := attachment.ContentType
+    if "" == contentType {
+        contentType = "application/octet-stream"
+    }
+
+    builder.WriteString("Content-Type: " + headerSanitizer.Replace(contentType) + lineBreak)
+    builder.WriteString("Content-Transfer-Encoding: base64" + lineBreak)
+    builder.WriteString("Content-Disposition: attachment; filename=\"" + filenameSanitizer.Replace(attachment.Filename) + "\"" + lineBreak)
+    builder.WriteString(lineBreak)
+    builder.WriteString(encodeBase64Lines(attachment.Content))
+    builder.WriteString(lineBreak)
+}
+
+func encodeQuotedPrintable(body string) string {
+    var encoded strings.Builder
+
+    writer := quotedprintable.NewWriter(&encoded)
+    writer.Write([]byte(body))
+    writer.Close()
+
+    return encoded.String()
+}
+
+/** encodeBase64Lines wraps base64 output at 76 characters per line as required by MIME. */
+func encodeBase64Lines(content []byte) string {
+    encoded := base64.StdEncoding.EncodeToString(content)
+
+    var wrapped strings.Builder
+    for len(encoded) > 76 {
+        wrapped.WriteString(encoded[:76])
+        wrapped.WriteString(lineBreak)
+        encoded = encoded[76:]
+    }
+    wrapped.WriteString(encoded)
+
+    return wrapped.String()
 }
 
 func newBoundary() string {

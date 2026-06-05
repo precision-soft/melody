@@ -113,7 +113,7 @@ app melody:messagebus:consume --transport=async
 app melody:messagebus:consume --transport=async --limit=100
 ```
 
-The consumer loops over the transport, dispatches each received envelope to a handle-only bus, and acknowledges on success or negatively acknowledges (with requeue) on failure. It shuts down cooperatively on `SIGINT`/`SIGTERM` or when the runtime context is cancelled.
+The consumer loops over the transport, dispatches each received envelope to a handle-only bus, and acknowledges on success or negatively acknowledges (with requeue) on failure. It shuts down cooperatively on `SIGINT`/`SIGTERM` or when the runtime context is cancelled, and closes the transport on exit (releasing its consumption resources; `Close` is idempotent).
 
 A runnable end-to-end demonstration lives in the example application: [`messagebus:demo`](../../.example/cli/messagebus_demo_command.go), wired in [`.example/config/messagebus.go`](../../.example/config/messagebus.go).
 

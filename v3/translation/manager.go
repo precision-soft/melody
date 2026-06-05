@@ -38,20 +38,22 @@ func (instance *Manager) Trans(
     domain string,
     locale string,
 ) string {
-    pattern, found := instance.lookup(messageId, domain, locale)
+    pattern, resolvedLocale, found := instance.lookup(messageId, domain, locale)
     if false == found {
         return messageId
     }
 
-    return formatMessage(pattern, parameters, instance.resolveLocale(locale))
+    /** Format with the locale of the catalog that actually resolved the message, not the requested
+    locale, so plural and select rules match the language of the text being rendered. */
+    return formatMessage(pattern, parameters, resolvedLocale)
 }
 
 func (instance *Manager) HasMessage(messageId string, domain string, locale string) bool {
-    _, found := instance.lookup(messageId, domain, locale)
+    _, _, found := instance.lookup(messageId, domain, locale)
     return found
 }
 
-func (instance *Manager) lookup(messageId string, domain string, locale string) (string, bool) {
+func (instance *Manager) lookup(messageId string, domain string, locale string) (string, string, bool) {
     for _, candidate := range instance.localeChain(locale) {
         catalog, exists := instance.catalogsByLocale[candidate]
         if false == exists {
@@ -60,11 +62,11 @@ func (instance *Manager) lookup(messageId string, domain string, locale string) 
 
         message, found := catalog.Get(messageId, domain)
         if true == found {
-            return message, true
+            return message, candidate, true
         }
     }
 
-    return "", false
+    return "", "", false
 }
 
 func (instance *Manager) localeChain(locale string) []string {
@@ -94,14 +96,6 @@ func (instance *Manager) localeChain(locale string) []string {
     appendLocale(instance.defaultLocale)
 
     return chain
-}
-
-func (instance *Manager) resolveLocale(locale string) string {
-    if "" != locale {
-        return locale
-    }
-
-    return instance.defaultLocale
 }
 
 var _ translationcontract.Translator = (*Manager)(nil)

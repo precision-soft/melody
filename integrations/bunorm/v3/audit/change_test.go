@@ -4,6 +4,7 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/integrations/bunorm/v3/audit"
+    "github.com/precision-soft/melody/integrations/bunorm/v3/encrypt"
 )
 
 type product struct {
@@ -56,5 +57,40 @@ func TestChangeSet_DeleteHasOldOnly(t *testing.T) {
     nameChange, found := findChange(changes, "name")
     if false == found || "gone" != nameChange.Old || nil != nameChange.New {
         t.Fatalf("unexpected delete change: %+v", nameChange)
+    }
+}
+
+type account struct {
+    Id       int64                   `bun:"id,pk"`
+    Email    string                  `bun:"email"`
+    ApiKey   string                  `bun:"api_key" audit:"redact"`
+    Password encrypt.EncryptedString `bun:"password"`
+}
+
+func TestChangeSet_RedactsTaggedAndEncryptedFields(t *testing.T) {
+    before := account{Id: 1, Email: "a@example.com", ApiKey: "old-key", Password: "old-secret"}
+    after := account{Id: 1, Email: "b@example.com", ApiKey: "new-key", Password: "new-secret"}
+
+    changes := audit.ChangeSet(before, after)
+
+    emailChange, found := findChange(changes, "email")
+    if false == found || "a@example.com" != emailChange.Old || "b@example.com" != emailChange.New {
+        t.Fatalf("expected the plain email change to pass through: %+v", emailChange)
+    }
+
+    apiKeyChange, found := findChange(changes, "api_key")
+    if false == found {
+        t.Fatalf("expected the tagged field to still be recorded as changed")
+    }
+    if "old-key" == apiKeyChange.Old || "new-key" == apiKeyChange.New {
+        t.Fatalf("expected the tagged field value to be redacted: %+v", apiKeyChange)
+    }
+
+    passwordChange, found := findChange(changes, "password")
+    if false == found {
+        t.Fatalf("expected the encrypted field to still be recorded as changed")
+    }
+    if "old-secret" == passwordChange.Old || "new-secret" == passwordChange.New {
+        t.Fatalf("expected the encrypted field value to be redacted: %+v", passwordChange)
     }
 }

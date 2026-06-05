@@ -12,4 +12,7 @@ type Transport interface {
     Ack(runtimeInstance runtimecontract.Runtime, envelope Envelope) error
 
     Nack(runtimeInstance runtimecontract.Runtime, envelope Envelope, requeue bool) error
+
+    /** Close releases the transport's consumption resources; it must be safe to call more than once. */
+    Close(runtimeInstance runtimecontract.Runtime) error
 }

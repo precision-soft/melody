@@ -59,6 +59,7 @@ func NewStreamHandler(hub *melodyhttp.SseHub, options Options) httpcontract.Hand
                 writeErr := connection.Write(writeContext, coderwebsocket.MessageText, []byte(event.Data))
                 writeCancel()
                 if nil != writeErr {
+                    logDebug(runtimeInstance, "websocket write failed, closing connection", writeErr)
                     return nil, nil
                 }
             }
@@ -109,4 +110,15 @@ func logError(runtimeInstance runtimecontract.Runtime, message string, err error
     }
 
     logger.Error(message, exception.LogContext(err))
+}
+
+/** logDebug reports an expected, non-fatal condition such as a client disconnect, which would be
+noise at error level. */
+func logDebug(runtimeInstance runtimecontract.Runtime, message string, err error) {
+    logger := logging.LoggerFromRuntime(runtimeInstance)
+    if nil == logger {
+        return
+    }
+
+    logger.Debug(message, exception.LogContext(err))
 }

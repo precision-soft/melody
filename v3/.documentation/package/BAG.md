@@ -58,7 +58,7 @@ import (
 	"net/url"
 	"time"
 
-	bagpackage "github.com/precision-soft/melody/v2/bag"
+	bagpackage "github.com/precision-soft/melody/v3/bag"
 )
 
 func readRequestParameters(

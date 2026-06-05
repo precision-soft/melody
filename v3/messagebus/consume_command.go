@@ -85,6 +85,8 @@ func (instance *ConsumeCommand) consumeFrom(
         return receiveErr
     }
 
+    defer transport.Close(consumeRuntime)
+
     var processed int64
 
     for {

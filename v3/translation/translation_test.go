@@ -1,6 +1,7 @@
 package translation_test
 
 import (
+    "strings"
     "testing"
 
     "github.com/precision-soft/melody/v3/translation"
@@ -84,6 +85,75 @@ func TestTrans_ReturnsMessageIdWhenMissing(t *testing.T) {
     result := manager.Trans("does.not.exist", nil, "messages", "en")
     if "does.not.exist" != result {
         t.Fatalf("expected message id passthrough, got: %q", result)
+    }
+}
+
+func TestTrans_RomanianPluralCategories(t *testing.T) {
+    romanian := translation.NewMapCatalog("ro")
+    romanian.Add("messages", "files", "{count, plural, one {# fișier} few {# fișiere} other {# de fișiere}}")
+
+    manager := translation.NewManager("ro", nil, romanian)
+
+    cases := map[int]string{
+        1:  "1 fișier",
+        2:  "2 fișiere",
+        19: "19 fișiere",
+        20: "20 de fișiere",
+    }
+
+    for count, expected := range cases {
+        result := manager.Trans("files", map[string]any{"count": count}, "messages", "ro")
+        if expected != result {
+            t.Fatalf("ro count=%d: expected %q, got %q", count, expected, result)
+        }
+    }
+}
+
+func TestTrans_RussianPluralCategories(t *testing.T) {
+    russian := translation.NewMapCatalog("ru")
+    russian.Add("messages", "files", "{count, plural, one {# файл} few {# файла} many {# файлов} other {# файла}}")
+
+    manager := translation.NewManager("ru", nil, russian)
+
+    cases := map[int]string{
+        1:  "1 файл",
+        2:  "2 файла",
+        5:  "5 файлов",
+        11: "11 файлов",
+        21: "21 файл",
+        22: "22 файла",
+    }
+
+    for count, expected := range cases {
+        result := manager.Trans("files", map[string]any{"count": count}, "messages", "ru")
+        if expected != result {
+            t.Fatalf("ru count=%d: expected %q, got %q", count, expected, result)
+        }
+    }
+}
+
+func TestTrans_PathologicallyNestedPluralDoesNotOverflow(t *testing.T) {
+    /** Build a plural nested far beyond the interpolation depth cap; the guard must return rather
+    than recurse until the stack is exhausted. */
+    var builder strings.Builder
+    const nesting = 200
+    for index := 0; index < nesting; index++ {
+        builder.WriteString("{count, plural, other {")
+    }
+    builder.WriteString("deep")
+    for index := 0; index < nesting; index++ {
+        builder.WriteString("}}")
+    }
+
+    catalog := translation.NewMapCatalog("en")
+    catalog.Add("messages", "deep", builder.String())
+
+    manager := translation.NewManager("en", nil, catalog)
+
+    /** The assertion is simply that this returns without panicking on a stack overflow. */
+    result := manager.Trans("deep", map[string]any{"count": 1}, "messages", "en")
+    if "" == result {
+        t.Fatalf("expected a non-empty result from the depth-bounded interpolation")
     }
 }
 

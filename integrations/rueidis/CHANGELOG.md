@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `v3/lock.go` — Redis-backed implementation of the core `lock/contract.Locker`/`Lock`. `NewLocker(client)` creates named locks; `Acquire` uses an atomic `SET key token NX PX <ttl>`, `Release` runs a `GET`-and-`DEL` compare-and-delete Lua script (releases only when this instance still owns the key), and `Refresh` runs a `GET`-and-`PEXPIRE` compare-and-extend script that errors when the lock is no longer held. Each lock owns a 16-byte crypto-random token so it can never release or refresh another holder's lock.
+
 ## [v3.1.0] - 2026-04-20 - Additive Ctx-First Cache Backend API
 
 ### Added

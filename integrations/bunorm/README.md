@@ -226,7 +226,7 @@ type Customer struct {
 }
 ```
 
-The value is stored as `<keyId>:<base64(nonce||ciphertext)>` and is not searchable in encrypted form.
+The value is stored as `<keyId>:<base64(nonce||ciphertext)>` and is not searchable in encrypted form. `EncryptedString` masks its decrypted plaintext in `fmt`/`slog`/error output (its `String`/`LogValue` return `<redacted>`); use an explicit `string(value)` conversion when the real value is needed.
 
 ### Audit trail
 
@@ -243,3 +243,5 @@ recorder.RecordDelete(ctx, "order", order.Id, before)
 ```
 
 [`ChangeSet`](v3/audit/change.go) diffs two struct values field by field (using `bun` column names, skipping relations and the embedded base model): `INSERT` records new values, `DELETE` records old values, `UPDATE` records only the changed fields as `{field, old, new}`. Each [`audit.Entry`](v3/audit/entry.go) stores the entity name, entity id, operation, the change-set as JSON, the actor (from context), and a timestamp — in a distinct audit `*bun.DB`.
+
+Sensitive fields are recorded as changed but with their values masked to `<redacted>`: tag a field with `audit:"redact"`, or use an [`encrypt.EncryptedString`](v3/encrypt/encrypted_string.go) field (auto-redacted). A field tagged `bun:"-"` is excluded from the change-set entirely.

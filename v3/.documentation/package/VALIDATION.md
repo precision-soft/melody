@@ -40,7 +40,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/precision-soft/melody/v2/validation"
+	"github.com/precision-soft/melody/v3/validation"
 )
 
 type CreateUserInput struct {

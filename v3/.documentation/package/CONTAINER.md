@@ -64,9 +64,9 @@ package main
 import (
 	"fmt"
 
-	"github.com/precision-soft/melody/v2/container"
-	containercontract "github.com/precision-soft/melody/v2/container/contract"
-	"github.com/precision-soft/melody/v2/exception"
+	"github.com/precision-soft/melody/v3/container"
+	containercontract "github.com/precision-soft/melody/v3/container/contract"
+	"github.com/precision-soft/melody/v3/exception"
 )
 
 type Logger interface {

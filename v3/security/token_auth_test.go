@@ -10,6 +10,7 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v3/clock"
     "github.com/precision-soft/melody/v3/container"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/internal/testhelper"
@@ -69,6 +70,25 @@ func TestBearerTokenSource_OpaqueValidTokenAuthenticates(t *testing.T) {
     }
 }
 
+func TestBearerTokenSource_AcceptsCaseInsensitiveScheme(t *testing.T) {
+    store := security.NewInMemoryTokenStore()
+    store.Put("opaque-123", securitycontract.Claims{UserIdentifier: "user-9", Roles: []string{"ROLE_ADMIN"}})
+
+    source := security.NewBearerTokenSource(security.NewOpaqueTokenValidator(store))
+
+    request := httptest.NewRequest("GET", "/api/resource", nil)
+    request.Header.Set("Authorization", "bearer opaque-123")
+
+    token, resolveErr := source.Resolve(testRuntime(), testhelper.NewHttpTestRequestFromHttpRequest(request))
+    if nil != resolveErr {
+        t.Fatalf("unexpected resolve error: %v", resolveErr)
+    }
+
+    if false == token.IsAuthenticated() {
+        t.Fatalf("expected lowercase bearer scheme to authenticate")
+    }
+}
+
 func TestBearerTokenSource_MissingHeaderIsAnonymous(t *testing.T) {
     source := security.NewBearerTokenSource(security.NewOpaqueTokenValidator(security.NewInMemoryTokenStore()))
 
@@ -92,6 +112,24 @@ func TestBearerTokenSource_UnknownOpaqueTokenIsAnonymous(t *testing.T) {
 
     if true == token.IsAuthenticated() {
         t.Fatalf("expected anonymous token for unknown opaque token")
+    }
+}
+
+func TestInMemoryTokenStore_TtlExpiresToken(t *testing.T) {
+    frozen := clock.NewFrozenClock(time.Unix(1000, 0))
+    store := security.NewInMemoryTokenStoreWithClock(frozen)
+    store.PutWithTtl("short-lived", securitycontract.Claims{UserIdentifier: "user-1"}, 30*time.Second)
+
+    runtimeInstance := testRuntime()
+
+    if _, found, _ := store.Lookup(runtimeInstance, "short-lived"); false == found {
+        t.Fatalf("expected token to resolve before expiry")
+    }
+
+    frozen.Advance(time.Minute)
+
+    if _, found, _ := store.Lookup(runtimeInstance, "short-lived"); true == found {
+        t.Fatalf("expected token to stop resolving after the ttl elapses")
     }
 }
 
@@ -154,6 +192,101 @@ func TestJwtTokenValidator_RejectsMalformedExp(t *testing.T) {
     _, validateErr := validator.Validate(testRuntime(), tokenString)
     if nil == validateErr {
         t.Fatalf("expected rejection for a malformed exp claim")
+    }
+}
+
+func TestJwtTokenValidator_AcceptsMatchingAudienceAndIssuer(t *testing.T) {
+    secret := []byte("super-secret")
+    validator := security.NewJwtTokenValidator(security.JwtConfig{
+        Secret:   secret,
+        Issuer:   "wms",
+        Audience: "picking",
+    })
+
+    tokenString := signJwtHs256(secret, map[string]any{
+        "sub": "user-1",
+        "exp": time.Now().Add(time.Hour).Unix(),
+        "iss": "wms",
+        "aud": []string{"reporting", "picking"},
+    })
+
+    if _, validateErr := validator.Validate(testRuntime(), tokenString); nil != validateErr {
+        t.Fatalf("expected token with matching aud/iss to be accepted: %v", validateErr)
+    }
+}
+
+func TestJwtTokenValidator_RejectsWrongIssuer(t *testing.T) {
+    secret := []byte("super-secret")
+    validator := security.NewJwtTokenValidator(security.JwtConfig{Secret: secret, Issuer: "wms"})
+
+    tokenString := signJwtHs256(secret, map[string]any{
+        "sub": "user-1",
+        "exp": time.Now().Add(time.Hour).Unix(),
+        "iss": "other-service",
+    })
+
+    if _, validateErr := validator.Validate(testRuntime(), tokenString); nil == validateErr {
+        t.Fatalf("expected rejection for a mismatched issuer")
+    }
+}
+
+func TestJwtTokenValidator_RejectsMissingAudience(t *testing.T) {
+    secret := []byte("super-secret")
+    validator := security.NewJwtTokenValidator(security.JwtConfig{Secret: secret, Audience: "picking"})
+
+    tokenString := signJwtHs256(secret, map[string]any{
+        "sub": "user-1",
+        "exp": time.Now().Add(time.Hour).Unix(),
+        "aud": "reporting",
+    })
+
+    if _, validateErr := validator.Validate(testRuntime(), tokenString); nil == validateErr {
+        t.Fatalf("expected rejection when the required audience is absent")
+    }
+}
+
+func TestJwtTokenValidator_RejectsTokenIssuedInTheFuture(t *testing.T) {
+    secret := []byte("super-secret")
+    validator := security.NewJwtTokenValidator(security.JwtConfig{Secret: secret})
+
+    tokenString := signJwtHs256(secret, map[string]any{
+        "sub": "user-1",
+        "exp": time.Now().Add(time.Hour).Unix(),
+        "iat": time.Now().Add(time.Hour).Unix(),
+    })
+
+    if _, validateErr := validator.Validate(testRuntime(), tokenString); nil == validateErr {
+        t.Fatalf("expected rejection for a token issued in the future")
+    }
+}
+
+func TestJwtTokenValidator_AcceptsPastIssuedAt(t *testing.T) {
+    secret := []byte("super-secret")
+    validator := security.NewJwtTokenValidator(security.JwtConfig{Secret: secret})
+
+    tokenString := signJwtHs256(secret, map[string]any{
+        "sub": "user-1",
+        "exp": time.Now().Add(time.Hour).Unix(),
+        "iat": time.Now().Add(-time.Hour).Unix(),
+    })
+
+    if _, validateErr := validator.Validate(testRuntime(), tokenString); nil != validateErr {
+        t.Fatalf("expected a past iat to be accepted: %v", validateErr)
+    }
+}
+
+func TestJwtTokenValidator_RejectsMalformedIssuedAt(t *testing.T) {
+    secret := []byte("super-secret")
+    validator := security.NewJwtTokenValidator(security.JwtConfig{Secret: secret})
+
+    tokenString := signJwtHs256(secret, map[string]any{
+        "sub": "user-1",
+        "exp": time.Now().Add(time.Hour).Unix(),
+        "iat": "not-a-number",
+    })
+
+    if _, validateErr := validator.Validate(testRuntime(), tokenString); nil == validateErr {
+        t.Fatalf("expected rejection for a malformed iat claim")
     }
 }
 

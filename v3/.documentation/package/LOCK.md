@@ -28,7 +28,7 @@ Locking is opt-in. The core defines the contract and an in-memory `Locker` (sing
 
 - `Acquire` is a single, non-blocking attempt: it returns `(true, nil)` when the lock is taken and `(false, nil)` when it is already held by someone else.
 - A `Lock` value owns its acquisition via a per-instance token. `Release` and `Refresh` only affect the lock when this instance still holds it. Re-acquiring with the same `Lock` instance is reentrant.
-- `ttl` is the lease duration. [`InMemoryLocker`](../../lock/in_memory.go) expires the holder after `ttl` (a `ttl` of `0` never expires). The Redis backend sets the key TTL; the MySQL backend has no TTL (user locks are held until release or connection close), so `Refresh` is a no-op there.
+- `ttl` is the lease duration. [`InMemoryLocker`](../../lock/in_memory.go) expires the holder after `ttl` (a `ttl` of `0` never expires). The Redis backend sets the key TTL; the MySQL backend has no TTL (user locks are held until release or connection close), so its `Refresh` has nothing to extend — it instead verifies the lock is still held on its connection and returns an error if it has been lost, matching the lost-lock signal of the other backends.
 
 ## Usage
 

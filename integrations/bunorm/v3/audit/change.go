@@ -4,7 +4,15 @@ import (
     "reflect"
     "strings"
     "time"
+
+    "github.com/precision-soft/melody/integrations/bunorm/v3/encrypt"
 )
+
+/** redactedValue replaces the captured value of a field marked with the audit:"redact" tag or typed
+as encrypt.EncryptedString, so a secret never lands in the audit trail in clear text. */
+const redactedValue = "<redacted>"
+
+var encryptedStringType = reflect.TypeOf(encrypt.EncryptedString(""))
 
 type Change struct {
     Field string `json:"field"`
@@ -41,6 +49,8 @@ func ChangeSet(before any, after any) []Change {
             continue
         }
 
+        redact := isRedactedField(field)
+
         oldPresent := oldUsable
         newPresent := newUsable
 
@@ -57,12 +67,25 @@ func ChangeSet(before any, after any) []Change {
             if true == valuesEqual(oldValue, newValue) {
                 continue
             }
+            if true == redact {
+                changes = append(changes, Change{Field: name, Old: redactedValue, New: redactedValue})
+                continue
+            }
             changes = append(changes, Change{Field: name, Old: oldValue, New: newValue})
             continue
         }
 
         if true == newPresent {
+            if true == redact {
+                changes = append(changes, Change{Field: name, New: redactedValue})
+                continue
+            }
             changes = append(changes, Change{Field: name, New: newValue})
+            continue
+        }
+
+        if true == redact {
+            changes = append(changes, Change{Field: name, Old: redactedValue})
             continue
         }
 
@@ -114,6 +137,16 @@ func structValue(value any) reflect.Value {
     }
 
     return reflected
+}
+
+/** isRedactedField reports whether a field's value must be masked in the audit trail, either because
+it carries the audit:"redact" tag or because it is an encrypt.EncryptedString. */
+func isRedactedField(field reflect.StructField) bool {
+    if "redact" == field.Tag.Get("audit") {
+        return true
+    }
+
+    return field.Type == encryptedStringType
 }
 
 func auditFieldName(field reflect.StructField) (string, bool) {

@@ -69,6 +69,49 @@ func TestInMemoryLocker_ExpiryReleasesLock(t *testing.T) {
     }
 }
 
+func TestInMemoryLocker_RefreshFailsWhenLockIsNoLongerHeld(t *testing.T) {
+    frozen := clock.NewFrozenClock(time.Unix(1000, 0))
+    locker := lock.NewInMemoryLocker(frozen)
+    runtimeInstance := testRuntime()
+
+    held := locker.CreateLock("picking:4", 5*time.Second)
+
+    acquired, _ := held.Acquire(runtimeInstance)
+    if false == acquired {
+        t.Fatalf("expected initial acquire to succeed")
+    }
+
+    if refreshErr := held.Refresh(runtimeInstance, 5*time.Second); nil != refreshErr {
+        t.Fatalf("expected refresh while held to succeed: %v", refreshErr)
+    }
+
+    frozen.Advance(30 * time.Second)
+
+    if refreshErr := held.Refresh(runtimeInstance, 5*time.Second); nil == refreshErr {
+        t.Fatalf("expected refresh to fail once the lock has expired")
+    }
+}
+
+func TestInMemoryLocker_RefreshFailsAfterRelease(t *testing.T) {
+    locker := lock.NewInMemoryLocker(clock.NewSystemClock())
+    runtimeInstance := testRuntime()
+
+    held := locker.CreateLock("picking:5", time.Minute)
+
+    acquired, _ := held.Acquire(runtimeInstance)
+    if false == acquired {
+        t.Fatalf("expected initial acquire to succeed")
+    }
+
+    if releaseErr := held.Release(runtimeInstance); nil != releaseErr {
+        t.Fatalf("unexpected release error: %v", releaseErr)
+    }
+
+    if refreshErr := held.Refresh(runtimeInstance, time.Minute); nil == refreshErr {
+        t.Fatalf("expected refresh to fail after release")
+    }
+}
+
 func TestInMemoryLocker_ReacquireIsReentrantForSameLock(t *testing.T) {
     locker := lock.NewInMemoryLocker(clock.NewSystemClock())
     runtimeInstance := testRuntime()

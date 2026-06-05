@@ -7,11 +7,19 @@ import (
     "strings"
 )
 
+/** maxInterpolationDepth caps how deeply nested plural/select blocks may recurse, guarding against a
+malformed or pathological catalog string from exhausting the stack. */
+const maxInterpolationDepth = 32
+
 func formatMessage(pattern string, parameters map[string]any, locale string) string {
-    return interpolate([]rune(pattern), parameters, locale, "")
+    return interpolate([]rune(pattern), parameters, locale, "", 0)
 }
 
-func interpolate(runes []rune, parameters map[string]any, locale string, pound string) string {
+func interpolate(runes []rune, parameters map[string]any, locale string, pound string, depth int) string {
+    if depth > maxInterpolationDepth {
+        return string(runes)
+    }
+
     var builder strings.Builder
 
     index := 0
@@ -37,7 +45,7 @@ func interpolate(runes []rune, parameters map[string]any, locale string, pound s
             continue
         }
 
-        builder.WriteString(evaluateArgument(runes[index+1:closeIndex], parameters, locale))
+        builder.WriteString(evaluateArgument(runes[index+1:closeIndex], parameters, locale, depth))
         index = closeIndex + 1
     }
 
@@ -60,7 +68,7 @@ func matchingBrace(runes []rune, openIndex int) int {
     return -1
 }
 
-func evaluateArgument(inner []rune, parameters map[string]any, locale string) string {
+func evaluateArgument(inner []rune, parameters map[string]any, locale string, depth int) string {
     name, remainder, hasType := splitFirstComma(inner)
     trimmedName := strings.TrimSpace(string(name))
 
@@ -77,15 +85,15 @@ func evaluateArgument(inner []rune, parameters map[string]any, locale string) st
 
     switch trimmedType {
     case "plural":
-        return evaluatePlural(trimmedName, style, parameters, locale)
+        return evaluatePlural(trimmedName, style, parameters, locale, depth)
     case "select":
-        return evaluateSelect(trimmedName, style, parameters, locale)
+        return evaluateSelect(trimmedName, style, parameters, locale, depth)
     default:
         return stringifyParameter(parameters[trimmedName])
     }
 }
 
-func evaluateSelect(name string, style []rune, parameters map[string]any, locale string) string {
+func evaluateSelect(name string, style []rune, parameters map[string]any, locale string, depth int) string {
     selectors := parseSelectors(style)
 
     keyword := stringifyParameter(parameters[name])
@@ -98,26 +106,26 @@ func evaluateSelect(name string, style []rune, parameters map[string]any, locale
         return ""
     }
 
-    return interpolate(block, parameters, locale, "")
+    return interpolate(block, parameters, locale, "", depth+1)
 }
 
-func evaluatePlural(name string, style []rune, parameters map[string]any, locale string) string {
+func evaluatePlural(name string, style []rune, parameters map[string]any, locale string, depth int) string {
     selectors := parseSelectors(style)
 
     number, _ := toFloat(parameters[name])
     pound := formatNumber(number)
 
     if block, found := selectors["="+pound]; true == found {
-        return interpolate(block, parameters, locale, pound)
+        return interpolate(block, parameters, locale, pound, depth+1)
     }
 
     category := pluralCategory(locale, number)
     if block, found := selectors[category]; true == found {
-        return interpolate(block, parameters, locale, pound)
+        return interpolate(block, parameters, locale, pound, depth+1)
     }
 
     if block, found := selectors["other"]; true == found {
-        return interpolate(block, parameters, locale, pound)
+        return interpolate(block, parameters, locale, pound, depth+1)
     }
 
     return ""

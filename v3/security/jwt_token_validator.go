@@ -40,6 +40,8 @@ func NewJwtTokenValidator(config JwtConfig) *JwtTokenValidator {
         rolesClaim:    rolesClaim,
         leeway:        config.Leeway,
         requireExpiry: config.RequireExpiry,
+        audience:      config.Audience,
+        issuer:        config.Issuer,
     }
 }
 
@@ -49,6 +51,10 @@ type JwtConfig struct {
     RolesClaim    string
     Leeway        time.Duration
     RequireExpiry bool
+    /** When set, the token must carry a matching iss claim. */
+    Issuer string
+    /** When set, the token must list this value in its aud claim (string or array). */
+    Audience string
 }
 
 type JwtTokenValidator struct {
@@ -57,6 +63,8 @@ type JwtTokenValidator struct {
     rolesClaim    string
     leeway        time.Duration
     requireExpiry bool
+    audience      string
+    issuer        string
 }
 
 func (instance *JwtTokenValidator) Validate(
@@ -113,6 +121,11 @@ func (instance *JwtTokenValidator) Validate(
         return securitycontract.Claims{}, expiryErr
     }
 
+    registeredErr := instance.verifyRegisteredClaims(rawClaims)
+    if nil != registeredErr {
+        return securitycontract.Claims{}, registeredErr
+    }
+
     return securitycontract.Claims{
         UserIdentifier: stringClaim(rawClaims, instance.subjectClaim),
         Roles:          stringSliceClaim(rawClaims, instance.rolesClaim),
@@ -148,7 +161,53 @@ func (instance *JwtTokenValidator) verifyTimeClaims(rawClaims map[string]any, no
         }
     }
 
+    issuedAt, hasIssuedAt, issuedAtValid := numericClaim(rawClaims, "iat")
+    if true == hasIssuedAt && false == issuedAtValid {
+        return exception.NewError("jwt iat claim is malformed", nil, nil)
+    }
+
+    if true == issuedAtValid {
+        issued := time.Unix(issuedAt, 0).Add(-instance.leeway)
+        if true == now.Before(issued) {
+            return exception.NewError("jwt is issued in the future", nil, nil)
+        }
+    }
+
     return nil
+}
+
+func (instance *JwtTokenValidator) verifyRegisteredClaims(rawClaims map[string]any) error {
+    if "" != instance.issuer && instance.issuer != stringClaim(rawClaims, "iss") {
+        return exception.NewError("jwt issuer is not accepted", nil, nil)
+    }
+
+    if "" != instance.audience && false == audienceContains(rawClaims, instance.audience) {
+        return exception.NewError("jwt audience is not accepted", nil, nil)
+    }
+
+    return nil
+}
+
+func audienceContains(rawClaims map[string]any, expected string) bool {
+    value, exists := rawClaims["aud"]
+    if false == exists {
+        return false
+    }
+
+    switch typed := value.(type) {
+    case string:
+        return expected == typed
+    case []any:
+        for _, entry := range typed {
+            stringEntry, isString := entry.(string)
+            if true == isString && expected == stringEntry {
+                return true
+            }
+        }
+        return false
+    default:
+        return false
+    }
 }
 
 func signHmacSha256(signingInput string, secret []byte) []byte {

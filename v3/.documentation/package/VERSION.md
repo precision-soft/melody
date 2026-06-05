@@ -20,7 +20,7 @@ This package provides a single accessor that returns the version string embedded
 Example:
 
 ```bash
-go build -ldflags "-X github.com/precision-soft/melody/v2/version.buildVersion=v1.0.0" -o app ./...
+go build -ldflags "-X github.com/precision-soft/melody/v3/version.buildVersion=v1.0.0" -o app ./...
 ```
 
 ## Usage
@@ -31,7 +31,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/precision-soft/melody/v2/version"
+	"github.com/precision-soft/melody/v3/version"
 )
 
 func main() {

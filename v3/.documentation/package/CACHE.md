@@ -44,8 +44,8 @@ Melody’s default wiring uses [`cache.NewInMemoryBackend`](../../cache/in_memor
 package main
 
 import (
-	"github.com/precision-soft/melody/v2/cache"
-	"github.com/precision-soft/melody/v2/clock"
+	"github.com/precision-soft/melody/v3/cache"
+	"github.com/precision-soft/melody/v3/clock"
 )
 
 func main() {
@@ -103,12 +103,12 @@ import (
 	"context"
 	"time"
 
-	"github.com/precision-soft/melody/v2/cache"
-	cachecontract "github.com/precision-soft/melody/v2/cache/contract"
-	"github.com/precision-soft/melody/v2/clock"
-	containercontract "github.com/precision-soft/melody/v2/container/contract"
-	"github.com/precision-soft/melody/v2/exception"
-	runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
+	"github.com/precision-soft/melody/v3/cache"
+	cachecontract "github.com/precision-soft/melody/v3/cache/contract"
+	"github.com/precision-soft/melody/v3/clock"
+	containercontract "github.com/precision-soft/melody/v3/container/contract"
+	"github.com/precision-soft/melody/v3/exception"
+	runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
 const userProfileCacheKey = "example.userProfile:42"

@@ -2,9 +2,12 @@ package encrypt
 
 import (
     "database/sql/driver"
+    "log/slog"
 
     "github.com/precision-soft/melody/v3/exception"
 )
+
+const redactedPlaceholder = "<redacted>"
 
 var packageCipher *Cipher
 
@@ -13,6 +16,17 @@ func UseCipher(cipherInstance *Cipher) {
 }
 
 type EncryptedString string
+
+/** String masks the decrypted plaintext so it never leaks through fmt, error messages or stack
+traces; use an explicit string(value) conversion when the actual value is required. */
+func (instance EncryptedString) String() string {
+    return redactedPlaceholder
+}
+
+/** LogValue keeps the plaintext out of slog output for the same reason as String. */
+func (instance EncryptedString) LogValue() slog.Value {
+    return slog.StringValue(redactedPlaceholder)
+}
 
 func (instance EncryptedString) Value() (driver.Value, error) {
     if nil == packageCipher {

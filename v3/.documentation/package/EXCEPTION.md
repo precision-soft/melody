@@ -49,8 +49,8 @@ Melody uses this package to:
 package main
 
 import (
-	configcontract "github.com/precision-soft/melody/v2/config/contract"
-	"github.com/precision-soft/melody/v2/exception"
+	configcontract "github.com/precision-soft/melody/v3/config/contract"
+	"github.com/precision-soft/melody/v3/exception"
 )
 
 func requireHttpAddress(configuration configcontract.Configuration) string {
@@ -79,7 +79,7 @@ package main
 import (
 	"os"
 
-	"github.com/precision-soft/melody/v2/exception"
+	"github.com/precision-soft/melody/v3/exception"
 )
 
 func readFile(path string) []byte {

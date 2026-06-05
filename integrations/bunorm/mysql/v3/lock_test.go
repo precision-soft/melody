@@ -65,3 +65,44 @@ func TestMysqlLock_MutualExclusionAndRelease(t *testing.T) {
         t.Fatalf("second release: %v", releaseErr)
     }
 }
+
+func TestMysqlLock_RefreshReportsLostLock(t *testing.T) {
+    dsn := os.Getenv("MYSQL_DSN")
+    if "" == dsn {
+        t.Skip("MYSQL_DSN not set; skipping mysql lock integration test")
+    }
+
+    sqldb, openErr := sql.Open("mysql", dsn)
+    if nil != openErr {
+        t.Fatalf("open: %v", openErr)
+    }
+    defer sqldb.Close()
+
+    database := bun.NewDB(sqldb, mysqldialect.New())
+
+    locker := mysql.NewLocker(database)
+    runtimeInstance := newLockRuntime()
+
+    lock := locker.CreateLock("melody_lock_refresh_test", 0)
+
+    if refreshErr := lock.Refresh(runtimeInstance, 0); nil == refreshErr {
+        t.Fatalf("expected refresh to fail before the lock is acquired")
+    }
+
+    acquired, acquireErr := lock.Acquire(runtimeInstance)
+    if nil != acquireErr || false == acquired {
+        t.Fatalf("expected acquire to succeed: %v %v", acquired, acquireErr)
+    }
+
+    if refreshErr := lock.Refresh(runtimeInstance, 0); nil != refreshErr {
+        t.Fatalf("expected refresh to succeed while held: %v", refreshErr)
+    }
+
+    if releaseErr := lock.Release(runtimeInstance); nil != releaseErr {
+        t.Fatalf("release: %v", releaseErr)
+    }
+
+    if refreshErr := lock.Refresh(runtimeInstance, 0); nil == refreshErr {
+        t.Fatalf("expected refresh to fail after release")
+    }
+}

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `v3/encrypt/` — transparent column encryption at rest with AES-256-GCM. `NewCipher(KeyProvider)` plus a process-wide `UseCipher`; `EncryptedString` (a `driver.Valuer`/`sql.Scanner`) stores values as `<keyId>:<base64(nonce||ciphertext)>` and masks its decrypted plaintext in `fmt`/`slog`/error output (`String`/`LogValue` return `<redacted>`; use an explicit `string(value)` conversion for the real value). `NewStaticKeyProvider(currentKeyId, keysById)` resolves keys by id so ciphertext carries its key id for rotation.
+- `v3/audit/` — per-field before/after audit trail into a separate audit `*bun.DB`. `NewRecorder(auditDatabase, table)` with `RecordInsert`/`RecordUpdate`/`RecordDelete`; `ChangeSet` diffs two struct values by `bun` column name (skipping relations and the embedded base model) and records only the changed fields. Sensitive fields are recorded as changed but masked to `<redacted>` — tag a field with `audit:"redact"` or use an `encrypt.EncryptedString` field (auto-redacted); the actor is read from context via `WithActor`.
+- `v3/split.go` — `NewReadWriteSplitter(registry, primaryName, ...replicaNames)` over a `ManagerRegistry`: `Writer()` resolves the primary manager and `Reader()` distributes reads round-robin across the configured replica managers (an atomic counter; falls back to the primary when no replicas are configured or a replica is unavailable).
+
 ## [v3.0.1] - 2026-03-08 - Tidy v3 go.sum Dependencies
 
 ### Changed

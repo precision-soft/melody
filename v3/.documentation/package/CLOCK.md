@@ -39,10 +39,10 @@ package main
 import (
 	"time"
 
-	"github.com/precision-soft/melody/v2/clock"
-	clockcontract "github.com/precision-soft/melody/v2/clock/contract"
-	"github.com/precision-soft/melody/v2/container"
-	containercontract "github.com/precision-soft/melody/v2/container/contract"
+	"github.com/precision-soft/melody/v3/clock"
+	clockcontract "github.com/precision-soft/melody/v3/clock/contract"
+	"github.com/precision-soft/melody/v3/container"
+	containercontract "github.com/precision-soft/melody/v3/container/contract"
 )
 
 func registerFrozenClock(
