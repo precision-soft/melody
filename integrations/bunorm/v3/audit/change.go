@@ -19,6 +19,10 @@ type Change struct {
 }
 
 func ChangeSet(before any, after any) []Change {
+    return changeSetWithIgnore(before, after, nil)
+}
+
+func changeSetWithIgnore(before any, after any, ignore map[string]struct{}) []Change {
     beforeValue := structValue(before)
     afterValue := structValue(after)
 
@@ -44,6 +48,10 @@ func ChangeSet(before any, after any) []Change {
 
         name, skip := auditFieldName(field)
         if true == skip {
+            continue
+        }
+
+        if _, ignored := ignore[name]; true == ignored {
             continue
         }
 

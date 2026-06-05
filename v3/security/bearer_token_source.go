@@ -23,8 +23,32 @@ func NewBearerTokenSource(validator securitycontract.TokenValidator) *BearerToke
     }
 }
 
+/**
+ * NewBearerTokenSourceWithEnricher builds a bearer source that, after validating the token, runs
+ * the enricher to resolve the final claims (e.g. roles from scope). Enrichment failures are treated
+ * like a rejected token: the request continues anonymously and access control decides the outcome.
+ */
+func NewBearerTokenSourceWithEnricher(
+    validator securitycontract.TokenValidator,
+    enricher securitycontract.TokenEnricher,
+) *BearerTokenSource {
+    if true == internal.IsNilInterface(validator) {
+        exception.Panic(exception.NewError("token validator is nil", nil, nil))
+    }
+
+    if true == internal.IsNilInterface(enricher) {
+        exception.Panic(exception.NewError("token enricher is nil", nil, nil))
+    }
+
+    return &BearerTokenSource{
+        validator: validator,
+        enricher:  enricher,
+    }
+}
+
 type BearerTokenSource struct {
     validator securitycontract.TokenValidator
+    enricher  securitycontract.TokenEnricher
 }
 
 func (instance *BearerTokenSource) Name() string {
@@ -48,6 +72,20 @@ func (instance *BearerTokenSource) Resolve(
         }
 
         return NewAnonymousToken(), nil
+    }
+
+    if false == internal.IsNilInterface(instance.enricher) {
+        enrichedClaims, enrichErr := instance.enricher.Enrich(runtimeInstance, claims)
+        if nil != enrichErr {
+            logger := logging.LoggerFromRuntime(runtimeInstance)
+            if nil != logger {
+                logger.Info("bearer token enrichment failed", exception.LogContext(enrichErr))
+            }
+
+            return NewAnonymousToken(), nil
+        }
+
+        claims = enrichedClaims
     }
 
     return NewAuthenticatedToken(claims.UserIdentifier, claims.Roles), nil

@@ -276,6 +276,25 @@ func (instance *apiSecurityModule) RegisterSecurity(builder *securityconfig.Buil
 
 The example application wires a stateless `/secure` firewall (`config/security.go`), a protected handler (`handler/secure/me_handler.go`), and a demo JWT minting command (`cli/auth_token_command.go`, `auth:token`). A stateless firewall must be registered before a broader catch-all firewall, since the first matching firewall wins.
 
+#### Resolving roles after validation (enrichment hook)
+
+When the token only carries an opaque scope (e.g. a tenant/application identifier) and the real roles live in a database, implement the generic [`TokenEnricher`](../../security/contract/token_enricher.go) and wire it with [`NewBearerTokenSourceWithEnricher`](../../security/bearer_token_source.go). It runs **after** the signature is validated and turns the token's `Claims.Scope` into the final roles/attributes. The library ships only the interface and the wiring — any tenant- or product-specific resolution lives in your enricher, keeping the security package generic. An enrichment error falls back to an anonymous token (the firewall then decides the response).
+
+To feed the enricher, the JWT validator can copy an object claim into `Claims.Scope` via `JwtConfig.ScopeClaim`:
+
+```go
+validator := security.NewJwtTokenValidator(security.JwtConfig{
+	Secret:     []byte(jwtSecret),
+	ScopeClaim: "scope", // copies the `scope` object claim into Claims.Scope
+})
+
+// scopeRoleEnricher resolves roles from the token scope (here, a static map;
+// in a real app this would be a database lookup keyed by Claims.Scope).
+source := security.NewBearerTokenSourceWithEnricher(validator, scopeRoleEnricher{})
+```
+
+`Claims` exposes generic `Scope` and `Attributes` maps for this purpose; the library assigns no meaning to their keys.
+
 ## Footguns & caveats
 
 - `AccessControl` uses a deterministic match priority: exact match first, then longest prefix match (including segment-prefix rules), then regex rules in the order they were registered, then the empty-prefix fallback. See [`(*AccessControl).Match`](../../security/access_control.go).
@@ -293,6 +312,7 @@ The example application wires a stateless `/secure` firewall (`config/security.g
 - [`TokenSource`](../../security/contract/token_source.go)
 - [`Authenticator`](../../security/contract/authenticator.go)
 - [`TokenValidator`](../../security/contract/token_validator.go)
+- [`TokenEnricher`](../../security/contract/token_enricher.go)
 - [`Claims`](../../security/contract/token_validator.go)
 - [`TokenStore`](../../security/contract/token_store.go)
 - [`Firewall`](../../security/contract/firewall.go)
@@ -340,6 +360,7 @@ The example application wires a stateless `/secure` firewall (`config/security.g
 - [`NewAuthenticatorManager(authenticators ...securitycontract.Authenticator)`](../../security/authenticator_manager.go)
 - [`NewAuthenticatorTokenSource(authenticatorManager *AuthenticatorManager)`](../../security/token_source.go)
 - [`NewBearerTokenSource(validator securitycontract.TokenValidator)`](../../security/bearer_token_source.go)
+- [`NewBearerTokenSourceWithEnricher(validator securitycontract.TokenValidator, enricher securitycontract.TokenEnricher)`](../../security/bearer_token_source.go)
 - [`NewJwtTokenValidator(config JwtConfig)`](../../security/jwt_token_validator.go)
 - [`NewOpaqueTokenValidator(store securitycontract.TokenStore)`](../../security/opaque_token_validator.go)
 - [`NewInMemoryTokenStore()`](../../security/in_memory_token_store.go)

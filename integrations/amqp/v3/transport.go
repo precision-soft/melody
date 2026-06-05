@@ -83,6 +83,23 @@ type Transport struct {
     closing        bool
 
     publishMutex sync.Mutex
+    /** serializes ack/nack on the consume channel; amqp091 channels are not safe for concurrent use */
+    consumeMutex sync.Mutex
+}
+
+/** ackChannel and nackChannel serialize consume-channel acknowledgements through consumeMutex. */
+func (instance *Transport) ackChannel(channel *amqp091.Channel, tag uint64) error {
+    instance.consumeMutex.Lock()
+    defer instance.consumeMutex.Unlock()
+
+    return channel.Ack(tag, false)
+}
+
+func (instance *Transport) nackChannel(channel *amqp091.Channel, tag uint64, requeue bool) error {
+    instance.consumeMutex.Lock()
+    defer instance.consumeMutex.Unlock()
+
+    return channel.Nack(tag, false, requeue)
 }
 
 func (instance *Transport) Send(
@@ -194,7 +211,7 @@ func (instance *Transport) Ack(
         return exception.NewError("amqp consume channel is not open", nil, nil)
     }
 
-    return channel.Ack(stamp.Tag, false)
+    return instance.ackChannel(channel, stamp.Tag)
 }
 
 func (instance *Transport) Nack(
@@ -213,7 +230,7 @@ func (instance *Transport) Nack(
     }
 
     if false == requeue {
-        return channel.Nack(stamp.Tag, false, false)
+        return instance.nackChannel(channel, stamp.Tag, false)
     }
 
     return instance.republish(runtimeInstance, channel, stamp, envelopeInstance)
@@ -238,16 +255,16 @@ func (instance *Transport) republish(
     if nil != buildErr {
         instance.logError(runtimeInstance, "amqp requeue re-publish build failed, falling back to broker requeue", buildErr)
 
-        return channel.Nack(stamp.Tag, false, true)
+        return instance.nackChannel(channel, stamp.Tag, true)
     }
 
     if publishErr := instance.publish(runtimeInstance.Context(), exchange, routingKey, publishing); nil != publishErr {
         instance.logError(runtimeInstance, "amqp requeue re-publish failed, falling back to broker requeue", publishErr)
 
-        return channel.Nack(stamp.Tag, false, true)
+        return instance.nackChannel(channel, stamp.Tag, true)
     }
 
-    return channel.Ack(stamp.Tag, false)
+    return instance.ackChannel(channel, stamp.Tag)
 }
 
 func (instance *Transport) consumeChannelForAck() *amqp091.Channel {
@@ -312,7 +329,7 @@ func (instance *Transport) forwardDeliveries(
             if nil != decodeErr {
                 instance.logError(runtimeInstance, "amqp message decode failed, dead-lettering", decodeErr)
 
-                nackErr := channel.Nack(delivery.DeliveryTag, false, false)
+                nackErr := instance.nackChannel(channel, delivery.DeliveryTag, false)
                 if nil != nackErr {
                     instance.logError(runtimeInstance, "amqp nack failed", nackErr)
                 }

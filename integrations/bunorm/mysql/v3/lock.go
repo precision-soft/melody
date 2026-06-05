@@ -25,6 +25,15 @@ type Locker struct {
     database *bun.DB
 }
 
+/**
+ * CreateLock returns a MySQL advisory lock (GET_LOCK) for the given name.
+ *
+ * MySQL advisory locks are connection-lifetime: they have NO automatic expiry, so the
+ * ttl argument is accepted only for interface compatibility with the lock contract and is
+ * intentionally not honored as an auto-expiry. The lock is held until Release is called or
+ * the pinned connection is dropped (e.g. the process dies), at which point MySQL releases it.
+ * Use the Redis locker when time-based auto-expiry is required.
+ */
 func (instance *Locker) CreateLock(name string, ttl time.Duration) lockcontract.Lock {
     return &mysqlLock{
         database: instance.database,
@@ -40,6 +49,12 @@ type mysqlLock struct {
     connection *sql.Conn
 }
 
+/**
+ * Acquire attempts a non-blocking acquisition (GET_LOCK timeout 0), consistent with the
+ * try-acquire semantics of the in-memory and Redis lockers: it returns (false, nil) immediately
+ * when the lock is held elsewhere rather than waiting. On success it pins a dedicated connection
+ * for the lifetime of the lock so RELEASE_LOCK runs on the same session that holds it.
+ */
 func (instance *mysqlLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -93,6 +108,11 @@ func (instance *mysqlLock) Release(runtimeInstance runtimecontract.Runtime) erro
     return nil
 }
 
+/**
+ * Refresh verifies the lock is still held by this connection. Because MySQL advisory locks do
+ * not expire, there is no TTL to extend: the ttl argument is ignored and Refresh acts purely as
+ * a liveness/ownership check, returning an error if the lock was lost (e.g. the connection dropped).
+ */
 func (instance *mysqlLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl time.Duration) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()

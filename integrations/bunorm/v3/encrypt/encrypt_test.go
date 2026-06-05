@@ -29,8 +29,8 @@ func TestCipher_EncryptDecryptRoundTrip(t *testing.T) {
         t.Fatalf("expected ciphertext to differ from plaintext")
     }
 
-    if false == strings.HasPrefix(encoded, "v1:") {
-        t.Fatalf("expected key id prefix, got %q", encoded)
+    if false == strings.HasPrefix(encoded, "<ENC>\x00gcm1\x00v1:") {
+        t.Fatalf("expected marker + key id prefix, got %q", encoded)
     }
 
     decrypted, decryptErr := cipher.Decrypt(encoded)
@@ -78,6 +78,144 @@ func TestEncryptedString_ValueScanRoundTrip(t *testing.T) {
 
     if "personal data" != string(loaded) {
         t.Fatalf("round-trip mismatch: %q", loaded)
+    }
+}
+
+func TestCipher_DecryptPassesThroughLegacyPlaintext(t *testing.T) {
+    provider := encrypt.NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    cipher := encrypt.NewCipher(provider)
+
+    decrypted, decryptErr := cipher.Decrypt("legacy plaintext value")
+    if nil != decryptErr {
+        t.Fatalf("decrypt of unmarked plaintext should pass through: %v", decryptErr)
+    }
+
+    if "legacy plaintext value" != decrypted {
+        t.Fatalf("expected plaintext passthrough, got %q", decrypted)
+    }
+}
+
+func TestCipher_EncryptIsIdempotentOnAlreadyEncrypted(t *testing.T) {
+    provider := encrypt.NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    cipher := encrypt.NewCipher(provider)
+
+    once, _ := cipher.Encrypt("value")
+    twice, encryptErr := cipher.Encrypt(once)
+    if nil != encryptErr {
+        t.Fatalf("re-encrypt: %v", encryptErr)
+    }
+
+    if once != twice {
+        t.Fatalf("expected double-encryption guard to return the value unchanged")
+    }
+}
+
+func TestCipher_DeterministicProducesStableCiphertext(t *testing.T) {
+    provider := encrypt.NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    cipher := encrypt.NewCipher(provider)
+
+    first, _ := cipher.EncryptDeterministic("lookup@example.com")
+    second, _ := cipher.EncryptDeterministic("lookup@example.com")
+    if first != second {
+        t.Fatalf("deterministic encryption must yield equal ciphertext for equal plaintext")
+    }
+
+    other, _ := cipher.EncryptDeterministic("different@example.com")
+    if first == other {
+        t.Fatalf("different plaintext must yield different ciphertext")
+    }
+
+    decrypted, decryptErr := cipher.Decrypt(first)
+    if nil != decryptErr || "lookup@example.com" != decrypted {
+        t.Fatalf("deterministic round-trip failed: %q (%v)", decrypted, decryptErr)
+    }
+
+    /** a random-nonce encryption of the same value must differ from the deterministic one */
+    random, _ := cipher.Encrypt("lookup@example.com")
+    if random == first {
+        t.Fatalf("random and deterministic encodings should differ")
+    }
+}
+
+func TestCipher_CiphertextCandidatesCoverAllActiveKeys(t *testing.T) {
+    provider := encrypt.NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2)})
+    cipher := encrypt.NewCipher(provider)
+
+    candidates, candidatesErr := cipher.CiphertextCandidates("user@example.com")
+    if nil != candidatesErr {
+        t.Fatalf("candidates: %v", candidatesErr)
+    }
+
+    if 2 != len(candidates) {
+        t.Fatalf("expected one candidate per active key, got %d", len(candidates))
+    }
+
+    /** the candidate written under the current key must equal a fresh deterministic encryption */
+    current, _ := cipher.EncryptDeterministic("user@example.com")
+    if candidates[0] != current {
+        t.Fatalf("expected the current key candidate first")
+    }
+}
+
+func TestStaticKeyProvider_ActiveKeyIdsCurrentFirst(t *testing.T) {
+    provider := encrypt.NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2), "v3": newKey(3)})
+
+    active := provider.ActiveKeyIds()
+    if 3 != len(active) || "v2" != active[0] {
+        t.Fatalf("expected current key first, got %v", active)
+    }
+}
+
+func TestFakeCipher_IsIdentity(t *testing.T) {
+    cipher := encrypt.NewFakeCipher()
+
+    encoded, _ := cipher.Encrypt("value")
+    if "value" != encoded {
+        t.Fatalf("fake cipher must not transform the value")
+    }
+
+    decrypted, _ := cipher.Decrypt(encoded)
+    if "value" != decrypted {
+        t.Fatalf("fake cipher round-trip mismatch")
+    }
+}
+
+func TestEncryptedString_FailsClosedWithoutCipher(t *testing.T) {
+    encrypt.UseCipher(nil)
+
+    secret := encrypt.EncryptedString("personal data")
+    if _, valueErr := secret.Value(); nil == valueErr {
+        t.Fatalf("expected Value to fail when no cipher is configured")
+    }
+
+    var loaded encrypt.EncryptedString
+    if scanErr := loaded.Scan("anything"); nil == scanErr {
+        t.Fatalf("expected Scan to fail when no cipher is configured")
+    }
+
+    /** a NULL column is still accepted (no decryption needed) */
+    if scanErr := loaded.Scan(nil); nil != scanErr {
+        t.Fatalf("scan of NULL should succeed: %v", scanErr)
+    }
+}
+
+func TestMigrator_EncryptThenReencryptRoundTripValues(t *testing.T) {
+    /** value-level check of the transforms the Migrator applies, without a database */
+    provider := encrypt.NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2)})
+    cipher := encrypt.NewCipher(provider)
+
+    /** encrypt plaintext, then re-encrypt under a new key and confirm it still decrypts */
+    encrypted, _ := cipher.EncryptWithKeyId("secret", "v1")
+    plaintext, _ := cipher.Decrypt(encrypted)
+    rotated, _ := cipher.EncryptWithKeyId(plaintext, "v2")
+
+    if false == strings.HasPrefix(rotated, "<ENC>\x00gcm1\x00v2:") {
+        t.Fatalf("expected rotated value under v2, got %q", rotated)
+    }
+
+    final, decryptErr := cipher.Decrypt(rotated)
+    if nil != decryptErr || "secret" != final {
+        t.Fatalf("rotation round-trip failed: %q (%v)", final, decryptErr)
     }
 }
 

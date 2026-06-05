@@ -63,3 +63,37 @@ func TestRedisLock_MutualExclusionReleaseAndRefresh(t *testing.T) {
 
     _ = second.Release(runtimeInstance)
 }
+
+func TestRedisLock_RefreshFailsWhenLostToAnotherClient(t *testing.T) {
+    address := os.Getenv("REDIS_ADDRESS")
+    if "" == address {
+        t.Skip("REDIS_ADDRESS not set; skipping redis lock integration test")
+    }
+
+    provider := rueidis.NewProvider()
+    client, openErr := provider.Open(rueidis.NewConnectionParams(address, "", ""))
+    if nil != openErr {
+        t.Fatalf("open: %v", openErr)
+    }
+    defer provider.Close(client)
+
+    locker := rueidis.NewLocker(client)
+    runtimeInstance := newLockRuntime()
+
+    name := "melody:lock:lost"
+
+    lock := locker.CreateLock(name, 10*time.Second)
+    acquired, acquireErr := lock.Acquire(runtimeInstance)
+    if nil != acquireErr || false == acquired {
+        t.Fatalf("expected acquire to succeed: %v %v", acquired, acquireErr)
+    }
+
+    /** another client drops the key out from under us */
+    if delErr := client.Do(runtimeInstance.Context(), client.B().Del().Key(name).Build()).Error(); nil != delErr {
+        t.Fatalf("del: %v", delErr)
+    }
+
+    if refreshErr := lock.Refresh(runtimeInstance, 10*time.Second); nil == refreshErr {
+        t.Fatalf("expected refresh to fail once the lock was lost")
+    }
+}

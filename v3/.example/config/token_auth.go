@@ -16,6 +16,8 @@ func (instance *Module) buildTokenAuth() {
     instance.tokenValidator = melodysecurity.NewJwtTokenValidator(
         melodysecurity.JwtConfig{
             Secret: instance.jwtSecret,
+            /** copies the `scope` object claim into Claims.Scope so the enricher can resolve roles from it */
+            ScopeClaim: "scope",
         },
     )
 

@@ -166,6 +166,13 @@ func (instance *ConsumeCommand) consume(
     if nil != instance.retryPolicy.FailureTransport {
         if sendErr := instance.retryPolicy.FailureTransport.Send(runtimeInstance, envelopeInstance); nil != sendErr {
             instance.logError(runtimeInstance, "could not route the exhausted message to the failure transport", sendErr)
+
+            /** the failure transport did not accept the message; requeue it on the source rather than ack-and-drop */
+            if nackErr := transport.Nack(runtimeInstance, envelopeInstance, true); nil != nackErr {
+                instance.logError(runtimeInstance, "message requeue failed after failure transport rejection", nackErr)
+            }
+
+            return
         }
 
         if ackErr := transport.Ack(runtimeInstance, envelopeInstance); nil != ackErr {

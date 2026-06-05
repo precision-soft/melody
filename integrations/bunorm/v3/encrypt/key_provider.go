@@ -1,13 +1,19 @@
 package encrypt
 
 import (
-    "strings"
+    "regexp"
+    "sort"
 
     "github.com/precision-soft/melody/v3/exception"
 )
 
+var keyIdPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,32}$`)
+
 type KeyProvider interface {
     CurrentKeyId() string
+
+    /** ActiveKeyIds returns every usable key id, the current one first, the rest in stable order. */
+    ActiveKeyIds() []string
 
     Key(keyId string) ([]byte, error)
 }
@@ -23,8 +29,8 @@ func NewStaticKeyProvider(currentKeyId string, keysById map[string][]byte) *Stat
 
     copied := make(map[string][]byte, len(keysById))
     for keyId, key := range keysById {
-        if true == strings.ContainsRune(keyId, ':') {
-            exception.Panic(exception.NewError("key id may not contain a colon", map[string]any{"keyId": keyId}, nil))
+        if false == keyIdPattern.MatchString(keyId) {
+            exception.Panic(exception.NewError("key id must match "+keyIdPattern.String(), map[string]any{"keyId": keyId}, nil))
         }
 
         if 32 != len(key) {
@@ -47,6 +53,19 @@ type StaticKeyProvider struct {
 
 func (instance *StaticKeyProvider) CurrentKeyId() string {
     return instance.currentKeyId
+}
+
+func (instance *StaticKeyProvider) ActiveKeyIds() []string {
+    others := make([]string, 0, len(instance.keysById))
+    for keyId := range instance.keysById {
+        if keyId != instance.currentKeyId {
+            others = append(others, keyId)
+        }
+    }
+
+    sort.Strings(others)
+
+    return append([]string{instance.currentKeyId}, others...)
 }
 
 func (instance *StaticKeyProvider) Key(keyId string) ([]byte, error) {

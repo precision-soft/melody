@@ -57,7 +57,7 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         "token",
         melodysecurity.NewPathPrefixMatcher(route.SecurePrefix),
         []melodysecuritycontract.Rule{},
-        melodysecurity.NewBearerTokenSource(instance.tokenValidator),
+        melodysecurity.NewBearerTokenSourceWithEnricher(instance.tokenValidator, newScopeRoleEnricher()),
         melodysecurityconfig.NewFirewallOverrideConfiguration().
             WithEntryPoint(melodysecurity.NewJsonEntryPoint()).
             WithAccessDeniedHandler(melodysecurity.NewJsonAccessDeniedHandler()),

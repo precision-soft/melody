@@ -91,5 +91,6 @@ type Schema struct {
     Minimum              *float64           `json:"minimum,omitempty"`
     Maximum              *float64           `json:"maximum,omitempty"`
     ExclusiveMinimum     *bool              `json:"exclusiveMinimum,omitempty"`
+    ExclusiveMaximum     *bool              `json:"exclusiveMaximum,omitempty"`
     Pattern              string             `json:"pattern,omitempty"`
 }

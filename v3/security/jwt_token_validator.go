@@ -40,6 +40,7 @@ func NewJwtTokenValidator(config JwtConfig) *JwtTokenValidator {
         secret:             config.Secret,
         subjectClaim:       subjectClaim,
         rolesClaim:         rolesClaim,
+        scopeClaim:         config.ScopeClaim,
         leeway:             config.Leeway,
         allowWithoutExpiry: config.AllowWithoutExpiry,
         audience:           config.Audience,
@@ -51,6 +52,8 @@ type JwtConfig struct {
     Secret             []byte
     SubjectClaim       string
     RolesClaim         string
+    /** ScopeClaim, when set, copies that object claim into Claims.Scope for a TokenEnricher to consume. */
+    ScopeClaim         string
     Leeway             time.Duration
     AllowWithoutExpiry bool
     Issuer string
@@ -61,6 +64,7 @@ type JwtTokenValidator struct {
     secret             []byte
     subjectClaim       string
     rolesClaim         string
+    scopeClaim         string
     leeway             time.Duration
     allowWithoutExpiry bool
     audience           string
@@ -126,10 +130,30 @@ func (instance *JwtTokenValidator) Validate(
         return securitycontract.Claims{}, registeredErr
     }
 
-    return securitycontract.Claims{
+    claims := securitycontract.Claims{
         UserIdentifier: stringClaim(rawClaims, instance.subjectClaim),
         Roles:          stringSliceClaim(rawClaims, instance.rolesClaim),
-    }, nil
+    }
+
+    if "" != instance.scopeClaim {
+        claims.Scope = mapClaim(rawClaims, instance.scopeClaim)
+    }
+
+    return claims, nil
+}
+
+func mapClaim(rawClaims map[string]any, name string) map[string]any {
+    value, exists := rawClaims[name]
+    if false == exists {
+        return nil
+    }
+
+    mapValue, isMap := value.(map[string]any)
+    if false == isMap {
+        return nil
+    }
+
+    return mapValue
 }
 
 func (instance *JwtTokenValidator) verifyTimeClaims(rawClaims map[string]any, now time.Time) error {

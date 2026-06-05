@@ -3,6 +3,8 @@ package amqp
 import (
     "reflect"
     "sync"
+
+    "github.com/precision-soft/melody/v3/exception"
 )
 
 func NewMessageRegistry() *MessageRegistry {
@@ -23,6 +25,22 @@ func RegisterMessage[T any](registry *MessageRegistry, name string) {
 
     registry.mutex.Lock()
     defer registry.mutex.Unlock()
+
+    if existingType, exists := registry.typeByName[name]; true == exists && existingType != messageType {
+        exception.Panic(exception.NewError(
+            "amqp message name is already registered to a different type",
+            map[string]any{"name": name, "existingType": existingType.String(), "newType": messageType.String()},
+            nil,
+        ))
+    }
+
+    if existingName, exists := registry.nameByType[messageType]; true == exists && existingName != name {
+        exception.Panic(exception.NewError(
+            "amqp message type is already registered under a different name",
+            map[string]any{"type": messageType.String(), "existingName": existingName, "newName": name},
+            nil,
+        ))
+    }
 
     registry.typeByName[name] = messageType
     registry.nameByType[messageType] = name

@@ -9,9 +9,10 @@ import (
 
 const redactedPlaceholder = "<redacted>"
 
-var packageCipher *Cipher
+var packageCipher Cipher
 
-func UseCipher(cipherInstance *Cipher) {
+/** UseCipher installs the process-wide cipher used by EncryptedString and EncryptedDeterministicString. */
+func UseCipher(cipherInstance Cipher) {
     packageCipher = cipherInstance
 }
 
@@ -27,7 +28,7 @@ func (instance EncryptedString) LogValue() slog.Value {
 
 func (instance EncryptedString) Value() (driver.Value, error) {
     if nil == packageCipher {
-        return string(instance), nil
+        return nil, errCipherNotConfigured()
     }
 
     encoded, encryptErr := packageCipher.Encrypt(string(instance))
@@ -39,34 +40,48 @@ func (instance EncryptedString) Value() (driver.Value, error) {
 }
 
 func (instance *EncryptedString) Scan(source any) error {
-    if nil == source {
+    raw, isNull, decodeErr := scanRaw(source)
+    if nil != decodeErr {
+        return decodeErr
+    }
+
+    if true == isNull {
         *instance = ""
         return nil
     }
 
-    raw := ""
-    switch typed := source.(type) {
-    case string:
-        raw = typed
-    case []byte:
-        raw = string(typed)
-    default:
-        return exception.NewError("encrypted string scan received an unsupported type", nil, nil)
-    }
-
     if nil == packageCipher {
-        *instance = EncryptedString(raw)
-        return nil
+        return errCipherNotConfigured()
     }
 
-    plaintext, decryptErr := packageCipher.Decrypt(raw)
-    if nil != decryptErr {
-        return decryptErr
+    /** Decrypt passes unmarked legacy plaintext through unchanged, so existing rows read correctly. */
+    plaintext, plaintextErr := packageCipher.Decrypt(raw)
+    if nil != plaintextErr {
+        return plaintextErr
     }
 
     *instance = EncryptedString(plaintext)
 
     return nil
+}
+
+func scanRaw(source any) (string, bool, error) {
+    if nil == source {
+        return "", true, nil
+    }
+
+    switch typed := source.(type) {
+    case string:
+        return typed, false, nil
+    case []byte:
+        return string(typed), false, nil
+    default:
+        return "", false, exception.NewError("encrypted string scan received an unsupported type", nil, nil)
+    }
+}
+
+func errCipherNotConfigured() error {
+    return exception.NewError("encryption cipher is not configured; call encrypt.UseCipher(...) first", nil, nil)
 }
 
 var _ driver.Valuer = EncryptedString("")

@@ -204,12 +204,22 @@ func applyValidation(schema *Schema, validateTag string) {
         case "email":
             schema.Format = "email"
         case "min":
-            if value, parseErr := strconv.Atoi(param); nil == parseErr && "string" == schema.Type {
-                schema.MinLength = &value
+            if value, parseErr := strconv.Atoi(param); nil == parseErr {
+                if "string" == schema.Type {
+                    schema.MinLength = &value
+                } else if "integer" == schema.Type || "number" == schema.Type {
+                    minimum := float64(value)
+                    schema.Minimum = &minimum
+                }
             }
         case "max":
-            if value, parseErr := strconv.Atoi(param); nil == parseErr && "string" == schema.Type {
-                schema.MaxLength = &value
+            if value, parseErr := strconv.Atoi(param); nil == parseErr {
+                if "string" == schema.Type {
+                    schema.MaxLength = &value
+                } else if "integer" == schema.Type || "number" == schema.Type {
+                    maximum := float64(value)
+                    schema.Maximum = &maximum
+                }
             }
         case "regex", "pattern":
             schema.Pattern = param
@@ -218,6 +228,12 @@ func applyValidation(schema *Schema, validateTag string) {
                 exclusive := true
                 schema.Minimum = &value
                 schema.ExclusiveMinimum = &exclusive
+            }
+        case "lessThan":
+            if value, parseErr := strconv.ParseFloat(param, 64); nil == parseErr {
+                exclusive := true
+                schema.Maximum = &value
+                schema.ExclusiveMaximum = &exclusive
             }
         }
     }

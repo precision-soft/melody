@@ -6,6 +6,7 @@ import (
     "net/smtp"
 
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/logging"
     mailercontract "github.com/precision-soft/melody/v3/mailer/contract"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
@@ -61,10 +62,10 @@ func (instance *SmtpTransport) Send(runtimeInstance runtimecontract.Runtime, mes
         return exception.NewError("mailer message has no recipients", nil, nil)
     }
 
-    return instance.deliver(message.From.Email, recipientList, payload)
+    return instance.deliver(runtimeInstance, message.From.Email, recipientList, payload)
 }
 
-func (instance *SmtpTransport) deliver(from string, recipientList []string, payload []byte) error {
+func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, from string, recipientList []string, payload []byte) error {
     client, dialErr := instance.dial()
     if nil != dialErr {
         return exception.NewError("smtp dial failed", map[string]any{"address": instance.address}, dialErr)
@@ -118,7 +119,14 @@ func (instance *SmtpTransport) deliver(from string, recipientList []string, payl
         return exception.NewError("smtp payload flush failed", map[string]any{"address": instance.address}, closeErr)
     }
 
-    return client.Quit()
+    /** the server has accepted the message at this point; a failing QUIT must not fail the send */
+    if quitErr := client.Quit(); nil != quitErr {
+        if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
+            logger.Warning("smtp quit failed after the message was accepted", map[string]any{"address": instance.address})
+        }
+    }
+
+    return nil
 }
 
 func (instance *SmtpTransport) dial() (*smtp.Client, error) {

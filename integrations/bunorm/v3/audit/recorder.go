@@ -8,26 +8,48 @@ import (
     "github.com/uptrace/bun"
 
     "github.com/precision-soft/melody/v3/exception"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
+/**
+ * NewRecorder builds a recorder that writes audit entries as rows to the given table via bun.
+ * Pass an empty table to use DefaultTable. For per-entity tables, pluggable storage or dead-letter
+ * logging, build the recorder with NewRecorderWithStorage and the With* options.
+ */
 func NewRecorder(auditDatabase *bun.DB, table string) *Recorder {
-    if nil == auditDatabase {
-        exception.Panic(exception.NewError("audit database is nil", nil, nil))
+    return NewRecorderWithStorage(NewBunStorage(auditDatabase), NewRegistry(table))
+}
+
+func NewRecorderWithStorage(storage Storage, registry *Registry) *Recorder {
+    if nil == storage {
+        exception.Panic(exception.NewError("audit storage is nil", nil, nil))
     }
 
-    if "" == table {
-        table = DefaultTable
+    if nil == registry {
+        registry = NewRegistry(DefaultTable)
     }
 
     return &Recorder{
-        auditDatabase: auditDatabase,
-        table:         table,
+        storage:  storage,
+        registry: registry,
     }
 }
 
 type Recorder struct {
-    auditDatabase *bun.DB
-    table         string
+    storage  Storage
+    registry *Registry
+    logger   loggingcontract.Logger
+}
+
+/** WithLogger enables dead-letter logging: entries that fail to store are logged before the error is returned. */
+func (instance *Recorder) WithLogger(logger loggingcontract.Logger) *Recorder {
+    instance.logger = logger
+
+    return instance
+}
+
+func (instance *Recorder) Registry() *Registry {
+    return instance.registry
 }
 
 func (instance *Recorder) RecordInsert(ctx context.Context, entity string, entityId string, after any) error {
@@ -50,7 +72,7 @@ func (instance *Recorder) record(
     before any,
     after any,
 ) error {
-    changes := ChangeSet(before, after)
+    changes := changeSetWithIgnore(before, after, instance.registry.ignoredFieldsFor(entity))
 
     payload, marshalErr := json.Marshal(changes)
     if nil != marshalErr {
@@ -58,18 +80,37 @@ func (instance *Recorder) record(
     }
 
     entry := Entry{
-        Entity:    entity,
-        EntityId:  entityId,
-        Operation: operation,
-        Changes:   string(payload),
-        Actor:     ActorFromContext(ctx),
-        CreatedAt: time.Now(),
+        TransactionId: transactionIdFromContext(ctx),
+        Entity:        entity,
+        EntityId:      entityId,
+        Operation:     operation,
+        Changes:       string(payload),
+        Actor:         ActorFromContext(ctx),
+        CreatedAt:     time.Now(),
     }
 
-    _, insertErr := instance.auditDatabase.NewInsert().Model(&entry).ModelTableExpr(instance.table).Exec(ctx)
-    if nil != insertErr {
-        return exception.NewError("could not write the audit entry", map[string]any{"entity": entity}, insertErr)
+    table := instance.registry.tableFor(entity)
+
+    if saveErr := instance.storage.Save(ctx, table, entry); nil != saveErr {
+        instance.deadLetter(entry, saveErr)
+
+        return saveErr
     }
 
     return nil
+}
+
+/** deadLetter logs an entry that could not be persisted so it is not lost silently. */
+func (instance *Recorder) deadLetter(entry Entry, saveErr error) {
+    if nil == instance.logger {
+        return
+    }
+
+    instance.logger.Error("audit entry could not be stored; dead-lettering", loggingcontract.Context{
+        "entity":    entry.Entity,
+        "entityId":  entry.EntityId,
+        "operation": entry.Operation,
+        "changes":   entry.Changes,
+        "error":     saveErr.Error(),
+    })
 }
