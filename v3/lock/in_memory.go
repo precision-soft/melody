@@ -92,6 +92,24 @@ func (instance *InMemoryLocker) refresh(name string, token uint64, ttl time.Dura
     return true
 }
 
+/** PurgeExpired drops every holder whose ttl has elapsed. An acquire of a given name already
+reclaims that name's expired holder lazily, but names that are never acquired again would otherwise
+linger forever; a janitor calling PurgeExpired periodically keeps the holder map bounded under churn. */
+func (instance *InMemoryLocker) PurgeExpired() int {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    purged := 0
+    for name, holder := range instance.holders {
+        if false == instance.isActive(holder) {
+            delete(instance.holders, name)
+            purged++
+        }
+    }
+
+    return purged
+}
+
 func (instance *InMemoryLocker) isActive(holder inMemoryHolder) bool {
     if true == holder.expiresAt.IsZero() {
         return true

@@ -21,12 +21,6 @@ type InMemoryTransport struct {
     closeOnce sync.Once
 }
 
-type inMemoryRedeliveredStamp struct{}
-
-func (instance inMemoryRedeliveredStamp) StampName() string {
-    return "in_memory_redelivered"
-}
-
 func (instance *InMemoryTransport) Send(
     runtimeInstance runtimecontract.Runtime,
     envelopeInstance messagebuscontract.Envelope,
@@ -85,14 +79,12 @@ func (instance *InMemoryTransport) Nack(
         return nil
     }
 
-    if _, redelivered := LastStampOfType[inMemoryRedeliveredStamp](envelopeInstance); true == redelivered {
-        return nil
-    }
-
-    /** The requeue is non-blocking on purpose: Nack runs on the single consumer goroutine, so a
+    /** The envelope is re-enqueued exactly as handed over: the consumer owns the retry policy and
+    has already stamped the incremented redelivery count, so the transport caps nothing itself.
+    The requeue is non-blocking on purpose — Nack runs on the single consumer goroutine, so a
     blocking send on a full queue would deadlock the very reader that drains it. */
     select {
-    case instance.queue <- envelopeInstance.WithStamp(inMemoryRedeliveredStamp{}):
+    case instance.queue <- envelopeInstance:
         return nil
     default:
         return exception.NewError("in-memory transport queue is full, dropped the requeued message", nil, nil)

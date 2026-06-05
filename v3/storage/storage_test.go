@@ -3,6 +3,8 @@ package storage_test
 import (
     "context"
     "io"
+    "os"
+    "path/filepath"
     "strings"
     "testing"
 
@@ -63,5 +65,48 @@ func TestLocalStorage_RejectsPathTraversal(t *testing.T) {
     _, getErr := local.Get(runtimeInstance, "../../etc/passwd")
     if nil == getErr {
         t.Fatalf("expected path traversal to be rejected")
+    }
+}
+
+func TestLocalStorage_RejectsSymlinkEscape(t *testing.T) {
+    base := t.TempDir()
+    outside := t.TempDir()
+
+    secret := filepath.Join(outside, "secret.txt")
+    if writeErr := os.WriteFile(secret, []byte("top secret"), 0o600); nil != writeErr {
+        t.Fatalf("seed secret: %v", writeErr)
+    }
+
+    /** A symlink planted inside the base directory points outside it; the textual ".." guard would
+    not catch this, so the symlink-resolution check must reject the read. */
+    if linkErr := os.Symlink(secret, filepath.Join(base, "escape")); nil != linkErr {
+        t.Fatalf("create symlink: %v", linkErr)
+    }
+
+    local := storage.NewLocalStorage(base)
+    runtimeInstance := testRuntime()
+
+    if _, getErr := local.Get(runtimeInstance, "escape"); nil == getErr {
+        t.Fatalf("expected symlink escape to be rejected")
+    }
+}
+
+func TestLocalStorage_WritesObjectsWithRestrictivePermissions(t *testing.T) {
+    base := t.TempDir()
+    local := storage.NewLocalStorage(base)
+    runtimeInstance := testRuntime()
+
+    key := "private/data.bin"
+    if putErr := local.Put(runtimeInstance, key, strings.NewReader("x"), 1, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("put: %v", putErr)
+    }
+
+    info, statErr := os.Stat(filepath.Join(base, key))
+    if nil != statErr {
+        t.Fatalf("stat: %v", statErr)
+    }
+
+    if 0o640 != info.Mode().Perm() {
+        t.Fatalf("expected file mode 0640, got %o", info.Mode().Perm())
     }
 }

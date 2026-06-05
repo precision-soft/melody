@@ -12,10 +12,13 @@ malformed or pathological catalog string from exhausting the stack. */
 const maxInterpolationDepth = 32
 
 func formatMessage(pattern string, parameters map[string]any, locale string) string {
-    return interpolate([]rune(pattern), parameters, locale, "", 0)
+    return interpolate([]rune(pattern), parameters, locale, "", false, 0)
 }
 
-func interpolate(runes []rune, parameters map[string]any, locale string, pound string, depth int) string {
+/** interpolate renders a message body. inPlural marks that the body is the selected branch of a
+plural argument, in which case a bare # is replaced with pound (the formatted number, or the empty
+string when the argument was missing); outside a plural a # is always a literal. */
+func interpolate(runes []rune, parameters map[string]any, locale string, pound string, inPlural bool, depth int) string {
     if depth > maxInterpolationDepth {
         return string(runes)
     }
@@ -26,7 +29,7 @@ func interpolate(runes []rune, parameters map[string]any, locale string, pound s
     for index < len(runes) {
         current := runes[index]
 
-        if '#' == current && "" != pound {
+        if '#' == current && true == inPlural {
             builder.WriteString(pound)
             index++
             continue
@@ -106,26 +109,36 @@ func evaluateSelect(name string, style []rune, parameters map[string]any, locale
         return ""
     }
 
-    return interpolate(block, parameters, locale, "", depth+1)
+    return interpolate(block, parameters, locale, "", false, depth+1)
 }
 
 func evaluatePlural(name string, style []rune, parameters map[string]any, locale string, depth int) string {
     selectors := parseSelectors(style)
 
-    number, _ := toFloat(parameters[name])
+    number, hasNumber := toFloat(parameters[name])
+    if false == hasNumber {
+        /** With no resolvable number the plural category cannot be computed; fall back to the
+        locale-independent "other" branch and render # as empty rather than as a misleading 0. */
+        if block, found := selectors["other"]; true == found {
+            return interpolate(block, parameters, locale, "", true, depth+1)
+        }
+
+        return ""
+    }
+
     pound := formatNumber(number)
 
     if block, found := selectors["="+pound]; true == found {
-        return interpolate(block, parameters, locale, pound, depth+1)
+        return interpolate(block, parameters, locale, pound, true, depth+1)
     }
 
     category := pluralCategory(locale, number)
     if block, found := selectors[category]; true == found {
-        return interpolate(block, parameters, locale, pound, depth+1)
+        return interpolate(block, parameters, locale, pound, true, depth+1)
     }
 
     if block, found := selectors["other"]; true == found {
-        return interpolate(block, parameters, locale, pound, depth+1)
+        return interpolate(block, parameters, locale, pound, true, depth+1)
     }
 
     return ""

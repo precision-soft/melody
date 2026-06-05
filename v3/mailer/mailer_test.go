@@ -3,6 +3,7 @@ package mailer_test
 import (
     "context"
     "encoding/base64"
+    "mime"
     "strings"
     "testing"
 
@@ -69,6 +70,58 @@ func TestRenderMessage_StripsHeaderInjection(t *testing.T) {
 
     if true == strings.Contains(rendered, "\nX-Injected") {
         t.Fatalf("address name header injection produced a new header line:\n%s", rendered)
+    }
+}
+
+func TestRenderMessage_EncodesNonAsciiSubjectAndName(t *testing.T) {
+    payload, renderErr := mailer.RenderMessage(mailercontract.Message{
+        From:    mailercontract.Address{Name: "Ștefan Mureșan", Email: "stefan@example.com"},
+        To:      []mailercontract.Address{{Email: "ada@example.com"}},
+        Subject: "Comandă confirmată",
+        Text:    "body",
+    })
+    if nil != renderErr {
+        t.Fatalf("render: %v", renderErr)
+    }
+
+    rendered := string(payload)
+
+    /** The raw UTF-8 must never appear in a header; it has to be carried as an RFC 2047 encoded-word. */
+    if true == strings.Contains(rendered, "Comandă confirmată") {
+        t.Fatalf("subject was emitted as raw 8-bit text:\n%s", rendered)
+    }
+
+    expectedSubject := "Subject: " + mime.QEncoding.Encode("utf-8", "Comandă confirmată")
+    if false == strings.Contains(rendered, expectedSubject) {
+        t.Fatalf("expected an encoded-word subject %q in:\n%s", expectedSubject, rendered)
+    }
+
+    /** A non-ASCII display name must be an unquoted encoded-word, not a quoted raw-UTF-8 string. */
+    if true == strings.Contains(rendered, "\"Ștefan Mureșan\"") {
+        t.Fatalf("display name was emitted as a raw quoted string:\n%s", rendered)
+    }
+    if false == strings.Contains(rendered, mime.QEncoding.Encode("utf-8", "Ștefan Mureșan")+" <stefan@example.com>") {
+        t.Fatalf("expected an encoded-word display name in:\n%s", rendered)
+    }
+}
+
+func TestRenderMessage_EncodesNonAsciiAttachmentFilename(t *testing.T) {
+    payload, renderErr := mailer.RenderMessage(mailercontract.Message{
+        From: mailercontract.Address{Email: "shop@example.com"},
+        To:   []mailercontract.Address{{Email: "ada@example.com"}},
+        Text: "see attached",
+        Attachments: []mailercontract.Attachment{
+            {Filename: "factură.pdf", ContentType: "application/pdf", Content: []byte("pdf")},
+        },
+    })
+    if nil != renderErr {
+        t.Fatalf("render: %v", renderErr)
+    }
+
+    rendered := string(payload)
+
+    if false == strings.Contains(rendered, "filename*=UTF-8''factur%C4%83.pdf") {
+        t.Fatalf("expected an RFC 2231 extended filename in:\n%s", rendered)
     }
 }
 

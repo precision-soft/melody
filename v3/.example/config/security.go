@@ -53,12 +53,17 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
 
     override := melodysecurityconfig.NewFirewallOverrideConfiguration()
 
+    /** The stateless API firewall answers with JSON instead of redirecting to a login page, by
+    overriding just its own entry point and access-denied handler while the global (web) firewall
+    keeps the redirect behavior. */
     builder.AddStatelessFirewall(
         "token",
         melodysecurity.NewPathPrefixMatcher(route.SecurePrefix),
         []melodysecuritycontract.Rule{},
         melodysecurity.NewBearerTokenSource(instance.tokenValidator),
-        melodysecurityconfig.NewFirewallOverrideConfiguration(),
+        melodysecurityconfig.NewFirewallOverrideConfiguration().
+            WithEntryPoint(melodysecurity.NewJsonEntryPoint()).
+            WithAccessDeniedHandler(melodysecurity.NewJsonAccessDeniedHandler()),
     )
 
     builder.AddFirewall(

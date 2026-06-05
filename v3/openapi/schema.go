@@ -9,45 +9,69 @@ import (
 
 var timeType = reflect.TypeOf(time.Time{})
 
-func schemaFromType(targetType reflect.Type) *Schema {
-    return buildSchema(targetType, make(map[reflect.Type]bool))
+/** schemaFromType reflects a Go type into a JSON Schema. Named struct types are emitted once into
+the shared components map and referenced by $ref so a type reused across many operations is not
+duplicated; the returned schema for such a type is a lightweight $ref. */
+func schemaFromType(targetType reflect.Type, components map[string]*Schema) *Schema {
+    return buildSchema(targetType, components, make(map[reflect.Type]bool))
 }
 
-func buildSchema(targetType reflect.Type, visited map[reflect.Type]bool) *Schema {
+func buildSchema(targetType reflect.Type, components map[string]*Schema, visited map[reflect.Type]bool) *Schema {
     if nil == targetType {
         return &Schema{}
     }
 
+    nullable := false
     for reflect.Ptr == targetType.Kind() {
+        nullable = true
         targetType = targetType.Elem()
     }
 
     if targetType == timeType {
-        return &Schema{Type: "string", Format: "date-time"}
+        return withNullable(&Schema{Type: "string", Format: "date-time"}, nullable)
     }
 
     switch targetType.Kind() {
     case reflect.String:
-        return &Schema{Type: "string"}
+        return withNullable(&Schema{Type: "string"}, nullable)
     case reflect.Bool:
-        return &Schema{Type: "boolean"}
+        return withNullable(&Schema{Type: "boolean"}, nullable)
     case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
         reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-        return &Schema{Type: "integer"}
+        return withNullable(&Schema{Type: "integer"}, nullable)
     case reflect.Float32, reflect.Float64:
-        return &Schema{Type: "number"}
+        return withNullable(&Schema{Type: "number"}, nullable)
     case reflect.Slice, reflect.Array:
-        return &Schema{Type: "array", Items: buildSchema(targetType.Elem(), visited)}
+        return withNullable(&Schema{Type: "array", Items: buildSchema(targetType.Elem(), components, visited)}, nullable)
     case reflect.Map:
-        return &Schema{Type: "object", AdditionalProperties: buildSchema(targetType.Elem(), visited)}
+        return withNullable(&Schema{Type: "object", AdditionalProperties: buildSchema(targetType.Elem(), components, visited)}, nullable)
     case reflect.Struct:
-        return buildStructSchema(targetType, visited)
+        return structSchemaReference(targetType, components, visited, nullable)
     default:
-        return &Schema{}
+        return withNullable(&Schema{}, nullable)
     }
 }
 
-func buildStructSchema(structType reflect.Type, visited map[reflect.Type]bool) *Schema {
+/** structSchemaReference registers a named struct in the components map (building it at most once,
+which also breaks reference cycles) and returns a $ref to it. Anonymous structs have no name to
+reference, so they are inlined. */
+func structSchemaReference(structType reflect.Type, components map[string]*Schema, visited map[reflect.Type]bool, nullable bool) *Schema {
+    name := structType.Name()
+    if "" == name {
+        return withNullable(buildStructSchema(structType, components, visited), nullable)
+    }
+
+    if _, built := components[name]; false == built {
+        /** Insert a placeholder before recursing so a self-referential field resolves to this same
+        $ref instead of recursing forever. */
+        components[name] = &Schema{Type: "object"}
+        components[name] = buildStructSchema(structType, components, visited)
+    }
+
+    return withNullable(&Schema{Ref: "#/components/schemas/" + name}, nullable)
+}
+
+func buildStructSchema(structType reflect.Type, components map[string]*Schema, visited map[reflect.Type]bool) *Schema {
     if true == visited[structType] {
         return &Schema{Type: "object"}
     }
@@ -61,9 +85,45 @@ func buildStructSchema(structType reflect.Type, visited map[reflect.Type]bool) *
     }
 
     var required []string
+    collectStructFields(structType, components, visited, schema.Properties, &required)
 
+    if 0 == len(schema.Properties) {
+        schema.Properties = nil
+    }
+
+    if 0 < len(required) {
+        schema.Required = required
+    }
+
+    return schema
+}
+
+/** collectStructFields fills properties/required for a struct, promoting the fields of an untagged
+anonymous embedded struct into the parent exactly as encoding/json does. A shallower field wins a
+name conflict, so an already-present property is never overwritten by an embedded one. */
+func collectStructFields(
+    structType reflect.Type,
+    components map[string]*Schema,
+    visited map[reflect.Type]bool,
+    properties map[string]*Schema,
+    required *[]string,
+) {
     for index := 0; index < structType.NumField(); index++ {
         field := structType.Field(index)
+
+        /** Checked before the exported guard: an embedded struct named in lower case is itself an
+        unexported field, yet encoding/json still promotes its exported fields into the parent. */
+        if true == isPromotedEmbed(field) {
+            embedded := field.Type
+            for reflect.Ptr == embedded.Kind() {
+                embedded = embedded.Elem()
+            }
+
+            collectStructFields(embedded, components, visited, properties, required)
+
+            continue
+        }
+
         if false == field.IsExported() {
             continue
         }
@@ -73,22 +133,42 @@ func buildStructSchema(structType reflect.Type, visited map[reflect.Type]bool) *
             continue
         }
 
-        propertySchema := buildSchema(field.Type, visited)
-        applyValidation(propertySchema, field.Tag.Get("validate"))
+        if _, exists := properties[jsonName]; true == exists {
+            continue
+        }
 
-        schema.Properties[jsonName] = propertySchema
+        propertySchema := buildSchema(field.Type, components, visited)
+        applyValidation(propertySchema, field.Tag.Get("validate"))
+        properties[jsonName] = propertySchema
 
         if true == isRequired(field.Tag.Get("validate")) {
-            required = append(required, jsonName)
+            *required = append(*required, jsonName)
         }
     }
+}
 
-    if 0 == len(schema.Properties) {
-        schema.Properties = nil
+/** isPromotedEmbed reports whether a field is an embedded struct whose fields encoding/json would
+promote into the parent: it must be anonymous, a struct (or pointer to one), and carry no json tag. */
+func isPromotedEmbed(field reflect.StructField) bool {
+    if false == field.Anonymous {
+        return false
     }
 
-    if 0 < len(required) {
-        schema.Required = required
+    if "" != field.Tag.Get("json") {
+        return false
+    }
+
+    embedded := field.Type
+    for reflect.Ptr == embedded.Kind() {
+        embedded = embedded.Elem()
+    }
+
+    return reflect.Struct == embedded.Kind() && embedded != timeType
+}
+
+func withNullable(schema *Schema, nullable bool) *Schema {
+    if true == nullable {
+        schema.Nullable = true
     }
 
     return schema
@@ -127,7 +207,15 @@ func isRequired(validateTag string) bool {
     return false
 }
 
+/** applyValidation translates the framework's validate rules into JSON Schema facets. The length
+rules (min/max) only apply to strings — emitting minLength/maxLength on a number would be invalid
+schema — while greaterThan is the numeric bound and maps to an exclusive minimum. A $ref schema
+carries no facets of its own, so it is left untouched. */
 func applyValidation(schema *Schema, validateTag string) {
+    if "" != schema.Ref {
+        return
+    }
+
     for _, rule := range splitRules(validateTag) {
         name, param := splitRule(rule)
 
@@ -135,18 +223,20 @@ func applyValidation(schema *Schema, validateTag string) {
         case "email":
             schema.Format = "email"
         case "min":
-            if value, parseErr := strconv.Atoi(param); nil == parseErr {
+            if value, parseErr := strconv.Atoi(param); nil == parseErr && "string" == schema.Type {
                 schema.MinLength = &value
             }
         case "max":
-            if value, parseErr := strconv.Atoi(param); nil == parseErr {
+            if value, parseErr := strconv.Atoi(param); nil == parseErr && "string" == schema.Type {
                 schema.MaxLength = &value
             }
-        case "regex":
+        case "regex", "pattern":
             schema.Pattern = param
         case "greaterThan":
             if value, parseErr := strconv.ParseFloat(param, 64); nil == parseErr {
+                exclusive := true
                 schema.Minimum = &value
+                schema.ExclusiveMinimum = &exclusive
             }
         }
     }
