@@ -42,7 +42,6 @@ func (instance *InMemoryTokenStore) Put(tokenString string, claims securitycontr
     instance.put(tokenString, claims, time.Time{})
 }
 
-/** PutWithTtl stores claims that stop resolving once the ttl elapses; a non-positive ttl never expires. */
 func (instance *InMemoryTokenStore) PutWithTtl(tokenString string, claims securitycontract.Claims, ttl time.Duration) {
     expiresAt := time.Time{}
     if 0 < ttl {
@@ -66,9 +65,6 @@ func (instance *InMemoryTokenStore) Delete(tokenString string) {
     delete(instance.entriesByToken, tokenString)
 }
 
-/** DeleteByUser revokes every token whose claims resolve to the given user identifier; it is the
-logout/"sign out everywhere" primitive that the per-token Delete cannot express. It returns the
-number of tokens removed. */
 func (instance *InMemoryTokenStore) DeleteByUser(userIdentifier string) int {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -84,9 +80,6 @@ func (instance *InMemoryTokenStore) DeleteByUser(userIdentifier string) int {
     return removed
 }
 
-/** PurgeExpired drops every entry whose ttl has elapsed. Lookup already ignores expired entries,
-but it leaves them in place; a janitor calling PurgeExpired periodically keeps the map bounded when
-many short-lived tokens are issued and never explicitly deleted. It returns the number purged. */
 func (instance *InMemoryTokenStore) PurgeExpired() int {
     now := instance.clock.Now()
 

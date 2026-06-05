@@ -7,17 +7,12 @@ import (
     "strings"
 )
 
-/** maxInterpolationDepth caps how deeply nested plural/select blocks may recurse, guarding against a
-malformed or pathological catalog string from exhausting the stack. */
 const maxInterpolationDepth = 32
 
 func formatMessage(pattern string, parameters map[string]any, locale string) string {
     return interpolate([]rune(pattern), parameters, locale, "", false, 0)
 }
 
-/** interpolate renders a message body. inPlural marks that the body is the selected branch of a
-plural argument, in which case a bare # is replaced with pound (the formatted number, or the empty
-string when the argument was missing); outside a plural a # is always a literal. */
 func interpolate(runes []rune, parameters map[string]any, locale string, pound string, inPlural bool, depth int) string {
     if depth > maxInterpolationDepth {
         return string(runes)
@@ -117,8 +112,6 @@ func evaluatePlural(name string, style []rune, parameters map[string]any, locale
 
     number, hasNumber := toFloat(parameters[name])
     if false == hasNumber {
-        /** With no resolvable number the plural category cannot be computed; fall back to the
-        locale-independent "other" branch and render # as empty rather than as a misleading 0. */
         if block, found := selectors["other"]; true == found {
             return interpolate(block, parameters, locale, "", true, depth+1)
         }

@@ -19,10 +19,6 @@ func (instance *Module) buildTokenAuth() {
         },
     )
 
-    /** A revocable alternative to the stateless JWT validator: an in-memory store seeded with a
-    demo token resolves to fixed claims and can be revoked at runtime via store.Delete /
-    DeleteByUser. Swap instance.opaqueTokenValidator into RegisterSecurity's stateless firewall in
-    place of instance.tokenValidator to authenticate with opaque bearer tokens instead. */
     opaqueStore := melodysecurity.NewInMemoryTokenStore()
     opaqueStore.Put(demoOpaqueToken, melodysecuritycontract.Claims{
         UserIdentifier: "api-user",

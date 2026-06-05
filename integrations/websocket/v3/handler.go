@@ -112,8 +112,6 @@ func logError(runtimeInstance runtimecontract.Runtime, message string, err error
     logger.Error(message, exception.LogContext(err))
 }
 
-/** logDebug reports an expected, non-fatal condition such as a client disconnect, which would be
-noise at error level. */
 func logDebug(runtimeInstance runtimecontract.Runtime, message string, err error) {
     logger := logging.LoggerFromRuntime(runtimeInstance)
     if nil == logger {

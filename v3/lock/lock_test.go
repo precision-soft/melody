@@ -129,7 +129,6 @@ func TestInMemoryLocker_PurgeExpiredDropsElapsedHolders(t *testing.T) {
 
     frozen.Advance(10 * time.Second)
 
-    /** Only the elapsed holder is reclaimed; the long-lived one is left untouched. */
     if purged := locker.PurgeExpired(); 1 != purged {
         t.Fatalf("expected exactly one expired holder to be purged, got %d", purged)
     }

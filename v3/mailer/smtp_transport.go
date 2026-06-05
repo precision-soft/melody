@@ -22,6 +22,7 @@ func NewSmtpTransport(config SmtpConfig) *SmtpTransport {
         username:    config.Username,
         password:    config.Password,
         requireTls:  config.RequireTls,
+        requireAuth: config.RequireAuth,
         implicitTls: config.ImplicitTls,
         tlsConfig:   config.TlsConfig,
     }
@@ -32,15 +33,9 @@ type SmtpConfig struct {
     Host     string
     Username string
     Password string
-    /** RequireTls fails the send unless the connection is encrypted: an implicit-TLS dial or a
-    successful STARTTLS upgrade. It closes the silent-plaintext downgrade that opportunistic
-    STARTTLS leaves open when a man-in-the-middle strips the server's STARTTLS advertisement. */
     RequireTls bool
-    /** ImplicitTls dials straight into TLS (the smtps convention, typically port 465) instead of
-    connecting in clear text and upgrading with STARTTLS. */
+    RequireAuth bool
     ImplicitTls bool
-    /** TlsConfig overrides the TLS settings; when nil a config pinned to Host as the server name is
-    used. Set it to supply custom roots or, for testing only, to relax verification. */
     TlsConfig *tls.Config
 }
 
@@ -50,6 +45,7 @@ type SmtpTransport struct {
     username    string
     password    string
     requireTls  bool
+    requireAuth bool
     implicitTls bool
     tlsConfig   *tls.Config
 }
@@ -82,7 +78,16 @@ func (instance *SmtpTransport) deliver(from string, recipientList []string, payl
     }
 
     if "" != instance.username {
-        if supported, _ := client.Extension("AUTH"); true == supported {
+        supported, _ := client.Extension("AUTH")
+        if false == supported {
+            if true == instance.requireAuth {
+                return exception.NewError(
+                    "smtp server does not advertise AUTH but it is required",
+                    map[string]any{"address": instance.address},
+                    nil,
+                )
+            }
+        } else {
             auth := smtp.PlainAuth("", instance.username, instance.password, instance.host)
             if authErr := client.Auth(auth); nil != authErr {
                 return exception.NewError("smtp auth failed", map[string]any{"address": instance.address}, authErr)
@@ -129,9 +134,6 @@ func (instance *SmtpTransport) dial() (*smtp.Client, error) {
     return smtp.Dial(instance.address)
 }
 
-/** startTls upgrades a clear-text connection when the server advertises STARTTLS. When the server
-does not advertise it the send is allowed to proceed in plaintext only if RequireTls is false;
-otherwise it fails closed rather than leaking the message and credentials over an open connection. */
 func (instance *SmtpTransport) startTls(client *smtp.Client) error {
     supported, _ := client.Extension("STARTTLS")
     if false == supported {

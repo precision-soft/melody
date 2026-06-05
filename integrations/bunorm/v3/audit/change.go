@@ -8,8 +8,6 @@ import (
     "github.com/precision-soft/melody/integrations/bunorm/v3/encrypt"
 )
 
-/** redactedValue replaces the captured value of a field marked with the audit:"redact" tag or typed
-as encrypt.EncryptedString, so a secret never lands in the audit trail in clear text. */
 const redactedValue = "<redacted>"
 
 var encryptedStringType = reflect.TypeOf(encrypt.EncryptedString(""))
@@ -139,8 +137,6 @@ func structValue(value any) reflect.Value {
     return reflected
 }
 
-/** isRedactedField reports whether a field's value must be masked in the audit trail, either because
-it carries the audit:"redact" tag or because it is an encrypt.EncryptedString. */
 func isRedactedField(field reflect.StructField) bool {
     if "redact" == field.Tag.Get("audit") {
         return true

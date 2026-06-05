@@ -6,6 +6,7 @@ import (
     "crypto/sha256"
     "encoding/base64"
     "encoding/json"
+    nethttp "net/http"
     "net/http/httptest"
     "testing"
     "time"
@@ -174,8 +175,6 @@ func TestJwtTokenValidator_RejectsOutOfRangeExp(t *testing.T) {
     secret := []byte("super-secret")
     validator := security.NewJwtTokenValidator(security.JwtConfig{Secret: secret})
 
-    /** An out-of-range exp must be rejected as malformed rather than silently saturating on the
-    int64 conversion (which would otherwise yield an arbitrary, misleading deadline). */
     tokenString := signJwtHs256(secret, map[string]any{"sub": "user-1", "exp": 1e19})
 
     if _, validateErr := validator.Validate(testRuntime(), tokenString); nil == validateErr {
@@ -221,15 +220,26 @@ func TestJwtTokenValidator_RejectsBadSignature(t *testing.T) {
     }
 }
 
-func TestJwtTokenValidator_RequireExpiryRejectsTokenWithoutExp(t *testing.T) {
+func TestJwtTokenValidator_RejectsTokenWithoutExpByDefault(t *testing.T) {
     secret := []byte("super-secret")
-    validator := security.NewJwtTokenValidator(security.JwtConfig{Secret: secret, RequireExpiry: true})
+    validator := security.NewJwtTokenValidator(security.JwtConfig{Secret: secret})
 
     tokenString := signJwtHs256(secret, map[string]any{"sub": "user-1"})
 
     _, validateErr := validator.Validate(testRuntime(), tokenString)
     if nil == validateErr {
-        t.Fatalf("expected rejection when exp is required and missing")
+        t.Fatalf("expected an exp claim to be required by default")
+    }
+}
+
+func TestJwtTokenValidator_AllowWithoutExpiryAcceptsTokenWithoutExp(t *testing.T) {
+    secret := []byte("super-secret")
+    validator := security.NewJwtTokenValidator(security.JwtConfig{Secret: secret, AllowWithoutExpiry: true})
+
+    tokenString := signJwtHs256(secret, map[string]any{"sub": "user-1"})
+
+    if _, validateErr := validator.Validate(testRuntime(), tokenString); nil != validateErr {
+        t.Fatalf("expected a token without exp to be accepted when explicitly allowed: %v", validateErr)
     }
 }
 
@@ -337,6 +347,23 @@ func TestJwtTokenValidator_RejectsMalformedIssuedAt(t *testing.T) {
 
     if _, validateErr := validator.Validate(testRuntime(), tokenString); nil == validateErr {
         t.Fatalf("expected rejection for a malformed iat claim")
+    }
+}
+
+func TestJsonEntryPoint_SetsWwwAuthenticateHeader(t *testing.T) {
+    entryPoint := security.NewJsonEntryPoint()
+
+    response, startErr := entryPoint.Start(testRuntime(), bearerRequest(""))
+    if nil != startErr {
+        t.Fatalf("unexpected start error: %v", startErr)
+    }
+
+    if nethttp.StatusUnauthorized != response.StatusCode() {
+        t.Fatalf("expected a 401 status, got %d", response.StatusCode())
+    }
+
+    if "Bearer" != response.Headers().Get("WWW-Authenticate") {
+        t.Fatalf("expected a WWW-Authenticate: Bearer header, got %q", response.Headers().Get("WWW-Authenticate"))
     }
 }
 

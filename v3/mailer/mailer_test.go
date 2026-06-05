@@ -1,9 +1,11 @@
 package mailer_test
 
 import (
+    "bufio"
     "context"
     "encoding/base64"
     "mime"
+    "net"
     "strings"
     "testing"
 
@@ -86,7 +88,6 @@ func TestRenderMessage_EncodesNonAsciiSubjectAndName(t *testing.T) {
 
     rendered := string(payload)
 
-    /** The raw UTF-8 must never appear in a header; it has to be carried as an RFC 2047 encoded-word. */
     if true == strings.Contains(rendered, "Comandă confirmată") {
         t.Fatalf("subject was emitted as raw 8-bit text:\n%s", rendered)
     }
@@ -96,7 +97,6 @@ func TestRenderMessage_EncodesNonAsciiSubjectAndName(t *testing.T) {
         t.Fatalf("expected an encoded-word subject %q in:\n%s", expectedSubject, rendered)
     }
 
-    /** A non-ASCII display name must be an unquoted encoded-word, not a quoted raw-UTF-8 string. */
     if true == strings.Contains(rendered, "\"Ștefan Mureșan\"") {
         t.Fatalf("display name was emitted as a raw quoted string:\n%s", rendered)
     }
@@ -200,6 +200,71 @@ func TestRenderMessage_QuotedPrintableKeepsLinesWithinSmtpLimit(t *testing.T) {
     for _, line := range strings.Split(string(payload), "\r\n") {
         if 998 < len(line) {
             t.Fatalf("rendered line exceeds the SMTP 998-character limit: %d", len(line))
+        }
+    }
+}
+
+func TestSmtpTransport_RequireAuthFailsWhenServerHasNoAuthExtension(t *testing.T) {
+    listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+    if nil != listenErr {
+        t.Fatalf("listen: %v", listenErr)
+    }
+    defer listener.Close()
+
+    go serveAuthlessSmtp(listener)
+
+    transport := mailer.NewSmtpTransport(mailer.SmtpConfig{
+        Address:     listener.Addr().String(),
+        Username:    "user",
+        Password:    "pass",
+        RequireAuth: true,
+    })
+
+    sendErr := transport.Send(testRuntime(), mailercontract.Message{
+        From:    mailercontract.Address{Email: "shop@example.com"},
+        To:      []mailercontract.Address{{Email: "ada@example.com"}},
+        Subject: "Hello",
+        Text:    "body",
+    })
+    if nil == sendErr {
+        t.Fatalf("expected RequireAuth to fail when the server does not advertise AUTH")
+    }
+
+    if false == strings.Contains(sendErr.Error(), "AUTH") {
+        t.Fatalf("expected an AUTH-related error, got %v", sendErr)
+    }
+}
+
+func serveAuthlessSmtp(listener net.Listener) {
+    connection, acceptErr := listener.Accept()
+    if nil != acceptErr {
+        return
+    }
+    defer connection.Close()
+
+    reader := bufio.NewReader(connection)
+    writeLine := func(line string) {
+        connection.Write([]byte(line + "\r\n"))
+    }
+
+    writeLine("220 fake ESMTP")
+
+    for {
+        line, readErr := reader.ReadString('\n')
+        if nil != readErr {
+            return
+        }
+
+        command := strings.ToUpper(strings.TrimSpace(line))
+        switch {
+        case strings.HasPrefix(command, "EHLO") || strings.HasPrefix(command, "HELO"):
+            writeLine("250-fake greets you")
+            writeLine("250 SIZE 35882577")
+        case strings.HasPrefix(command, "QUIT"):
+            writeLine("221 bye")
+            return
+        default:
+            writeLine("250 ok")
         }
     }
 }

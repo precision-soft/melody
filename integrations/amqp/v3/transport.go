@@ -1,7 +1,9 @@
 package amqp
 
 import (
+    "context"
     "reflect"
+    "strconv"
     "sync"
 
     "github.com/precision-soft/melody/v3/exception"
@@ -14,7 +16,10 @@ import (
     amqp091 "github.com/rabbitmq/amqp091-go"
 )
 
-const headerMessageType = "x-message-type"
+const (
+    headerMessageType     = "x-message-type"
+    headerRedeliveryCount = "x-redelivery-count"
+)
 
 func NewTransport(config TransportConfig) *Transport {
     if nil == config.Connection {
@@ -77,9 +82,6 @@ type Transport struct {
     consumeChannel *amqp091.Channel
     closing        bool
 
-    /** publishMutex serializes the broker write in Send so concurrent publishers do not interleave
-    frames on the shared channel; it is intentionally separate from mutex so a publish never blocks
-    Ack, Close or channel setup. */
     publishMutex sync.Mutex
 }
 
@@ -87,15 +89,33 @@ func (instance *Transport) Send(
     runtimeInstance runtimecontract.Runtime,
     envelopeInstance messagebuscontract.Envelope,
 ) error {
-    channel, channelErr := instance.ensurePublishChannel()
-    if nil != channelErr {
-        return channelErr
+    publishing, buildErr := instance.buildPublishing(envelopeInstance, "")
+    if nil != buildErr {
+        return buildErr
     }
 
+    exchange, routingKey := instance.mainTarget()
+
+    return instance.publish(runtimeInstance.Context(), exchange, routingKey, publishing)
+}
+
+func (instance *Transport) mainTarget() (string, string) {
+    if "" == instance.exchange {
+        return "", instance.queue
+    }
+
+    return instance.exchange, instance.routingKey
+}
+
+func (instance *Transport) buildPublishing(
+    envelopeInstance messagebuscontract.Envelope,
+    expiration string,
+) (amqp091.Publishing, error) {
     message := envelopeInstance.Message()
+
     typeName, registered := instance.registry.NameFor(message)
     if false == registered {
-        return exception.NewError(
+        return amqp091.Publishing{}, exception.NewError(
             "message type is not registered with the amqp transport",
             map[string]any{"messageType": messageTypeName(message)},
             nil,
@@ -104,31 +124,34 @@ func (instance *Transport) Send(
 
     body, serializeErr := instance.serializer.Serialize(message)
     if nil != serializeErr {
-        return serializeErr
+        return amqp091.Publishing{}, serializeErr
     }
 
-    exchange := instance.exchange
-    routingKey := instance.routingKey
-    if "" == exchange {
-        routingKey = instance.queue
+    return amqp091.Publishing{
+        ContentType:  instance.serializer.ContentType(),
+        DeliveryMode: amqp091.Persistent,
+        Expiration:   expiration,
+        Headers: amqp091.Table{
+            headerMessageType:     typeName,
+            headerRedeliveryCount: int64(melodymessagebus.RedeliveryCount(envelopeInstance)),
+        },
+        Body: body,
+    }, nil
+}
+
+func (instance *Transport) publish(
+    ctx context.Context,
+    exchange string,
+    routingKey string,
+    publishing amqp091.Publishing,
+) error {
+    channel, channelErr := instance.ensurePublishChannel()
+    if nil != channelErr {
+        return channelErr
     }
 
     instance.publishMutex.Lock()
-    publishErr := channel.PublishWithContext(
-        runtimeInstance.Context(),
-        exchange,
-        routingKey,
-        false,
-        false,
-        amqp091.Publishing{
-            ContentType:  instance.serializer.ContentType(),
-            DeliveryMode: amqp091.Persistent,
-            Headers: amqp091.Table{
-                headerMessageType: typeName,
-            },
-            Body: body,
-        },
-    )
+    publishErr := channel.PublishWithContext(ctx, exchange, routingKey, false, false, publishing)
     instance.publishMutex.Unlock()
     if nil != publishErr {
         return exception.NewError("amqp publish failed", map[string]any{"queue": instance.queue}, publishErr)
@@ -189,9 +212,42 @@ func (instance *Transport) Nack(
         return exception.NewError("amqp consume channel is not open", nil, nil)
     }
 
-    effectiveRequeue := requeue && (false == stamp.Redelivered)
+    if false == requeue {
+        return channel.Nack(stamp.Tag, false, false)
+    }
 
-    return channel.Nack(stamp.Tag, false, effectiveRequeue)
+    return instance.republish(runtimeInstance, channel, stamp, envelopeInstance)
+}
+
+func (instance *Transport) republish(
+    runtimeInstance runtimecontract.Runtime,
+    channel *amqp091.Channel,
+    stamp DeliveryStamp,
+    envelopeInstance messagebuscontract.Envelope,
+) error {
+    expiration := ""
+    exchange, routingKey := instance.mainTarget()
+
+    if delayStamp, hasDelay := melodymessagebus.LastStampOfType[melodymessagebus.DelayStamp](envelopeInstance); true == hasDelay && 0 < delayStamp.Delay {
+        expiration = strconv.FormatInt(delayStamp.Delay.Milliseconds(), 10)
+        exchange = ""
+        routingKey = instance.queue + ".delay"
+    }
+
+    publishing, buildErr := instance.buildPublishing(envelopeInstance, expiration)
+    if nil != buildErr {
+        instance.logError(runtimeInstance, "amqp requeue re-publish build failed, falling back to broker requeue", buildErr)
+
+        return channel.Nack(stamp.Tag, false, true)
+    }
+
+    if publishErr := instance.publish(runtimeInstance.Context(), exchange, routingKey, publishing); nil != publishErr {
+        instance.logError(runtimeInstance, "amqp requeue re-publish failed, falling back to broker requeue", publishErr)
+
+        return channel.Nack(stamp.Tag, false, true)
+    }
+
+    return channel.Ack(stamp.Tag, false)
 }
 
 func (instance *Transport) consumeChannelForAck() *amqp091.Channel {
@@ -295,11 +351,38 @@ func (instance *Transport) decode(delivery amqp091.Delivery) (messagebuscontract
 
     message := reflect.ValueOf(target).Elem().Interface()
 
-    return melodymessagebus.NewEnvelope(
-        message,
+    stamps := []messagebuscontract.Stamp{
         DeliveryStamp{Tag: delivery.DeliveryTag, Redelivered: delivery.Redelivered},
         melodymessagebus.ReceivedStamp{TransportName: instance.queue},
-    ), nil
+    }
+
+    if count := redeliveryCountFromHeader(delivery.Headers); 0 < count {
+        stamps = append(stamps, melodymessagebus.RedeliveryStamp{Count: count})
+    }
+
+    return melodymessagebus.NewEnvelope(message, stamps...), nil
+}
+
+func redeliveryCountFromHeader(headers amqp091.Table) int {
+    raw, exists := headers[headerRedeliveryCount]
+    if false == exists {
+        return 0
+    }
+
+    switch typed := raw.(type) {
+    case int:
+        return typed
+    case int8:
+        return int(typed)
+    case int16:
+        return int(typed)
+    case int32:
+        return int(typed)
+    case int64:
+        return int(typed)
+    default:
+        return 0
+    }
 }
 
 func (instance *Transport) ensurePublishChannel() (*amqp091.Channel, error) {
@@ -311,8 +394,6 @@ func (instance *Transport) ensurePublishChannel() (*amqp091.Channel, error) {
         return existing, nil
     }
 
-    /** The broker round-trips (open + topology declaration) happen outside the mutex so that Send,
-    Ack and Close are not serialized behind a slow or stalled channel setup. */
     channel, channelErr := instance.connection.Channel()
     if nil != channelErr {
         return nil, exception.NewError("amqp channel open failed", nil, channelErr)
@@ -410,6 +491,15 @@ func (instance *Transport) declareTopology(channel *amqp091.Channel) error {
         return exception.NewError("amqp queue declare failed", map[string]any{"queue": instance.queue}, queueErr)
     }
 
+    delayQueue := instance.queue + ".delay"
+    _, delayQueueErr := channel.QueueDeclare(delayQueue, true, false, false, false, amqp091.Table{
+        "x-dead-letter-exchange":    "",
+        "x-dead-letter-routing-key": instance.queue,
+    })
+    if nil != delayQueueErr {
+        return exception.NewError("amqp delay queue declare failed", map[string]any{"queue": delayQueue}, delayQueueErr)
+    }
+
     if "" != instance.exchange {
         bindErr := channel.QueueBind(instance.queue, instance.routingKey, instance.exchange, false, nil)
         if nil != bindErr {
@@ -420,7 +510,6 @@ func (instance *Transport) declareTopology(channel *amqp091.Channel) error {
     return nil
 }
 
-/** messageTypeName resolves a printable type name without panicking on a nil message. */
 func messageTypeName(message any) string {
     messageType := reflect.TypeOf(message)
     if nil == messageType {

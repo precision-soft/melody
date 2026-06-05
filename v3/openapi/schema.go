@@ -9,9 +9,6 @@ import (
 
 var timeType = reflect.TypeOf(time.Time{})
 
-/** schemaFromType reflects a Go type into a JSON Schema. Named struct types are emitted once into
-the shared components map and referenced by $ref so a type reused across many operations is not
-duplicated; the returned schema for such a type is a lightweight $ref. */
 func schemaFromType(targetType reflect.Type, components map[string]*Schema) *Schema {
     return buildSchema(targetType, components, make(map[reflect.Type]bool))
 }
@@ -52,9 +49,6 @@ func buildSchema(targetType reflect.Type, components map[string]*Schema, visited
     }
 }
 
-/** structSchemaReference registers a named struct in the components map (building it at most once,
-which also breaks reference cycles) and returns a $ref to it. Anonymous structs have no name to
-reference, so they are inlined. */
 func structSchemaReference(structType reflect.Type, components map[string]*Schema, visited map[reflect.Type]bool, nullable bool) *Schema {
     name := structType.Name()
     if "" == name {
@@ -62,8 +56,6 @@ func structSchemaReference(structType reflect.Type, components map[string]*Schem
     }
 
     if _, built := components[name]; false == built {
-        /** Insert a placeholder before recursing so a self-referential field resolves to this same
-        $ref instead of recursing forever. */
         components[name] = &Schema{Type: "object"}
         components[name] = buildStructSchema(structType, components, visited)
     }
@@ -98,9 +90,6 @@ func buildStructSchema(structType reflect.Type, components map[string]*Schema, v
     return schema
 }
 
-/** collectStructFields fills properties/required for a struct, promoting the fields of an untagged
-anonymous embedded struct into the parent exactly as encoding/json does. A shallower field wins a
-name conflict, so an already-present property is never overwritten by an embedded one. */
 func collectStructFields(
     structType reflect.Type,
     components map[string]*Schema,
@@ -111,8 +100,6 @@ func collectStructFields(
     for index := 0; index < structType.NumField(); index++ {
         field := structType.Field(index)
 
-        /** Checked before the exported guard: an embedded struct named in lower case is itself an
-        unexported field, yet encoding/json still promotes its exported fields into the parent. */
         if true == isPromotedEmbed(field) {
             embedded := field.Type
             for reflect.Ptr == embedded.Kind() {
@@ -147,8 +134,6 @@ func collectStructFields(
     }
 }
 
-/** isPromotedEmbed reports whether a field is an embedded struct whose fields encoding/json would
-promote into the parent: it must be anonymous, a struct (or pointer to one), and carry no json tag. */
 func isPromotedEmbed(field reflect.StructField) bool {
     if false == field.Anonymous {
         return false
@@ -207,10 +192,6 @@ func isRequired(validateTag string) bool {
     return false
 }
 
-/** applyValidation translates the framework's validate rules into JSON Schema facets. The length
-rules (min/max) only apply to strings — emitting minLength/maxLength on a number would be invalid
-schema — while greaterThan is the numeric bound and maps to an exclusive minimum. A $ref schema
-carries no facets of its own, so it is left untouched. */
 func applyValidation(schema *Schema, validateTag string) {
     if "" != schema.Ref {
         return

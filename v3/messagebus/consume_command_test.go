@@ -67,8 +67,6 @@ func TestConsume_ExhaustsRetriesAndRoutesToFailureTransport(t *testing.T) {
     bus := NewManager("default", NewHandleMessageMiddleware(locator))
     command := NewConsumeCommandWithRetry(bus, nil, RetryPolicy{MaxRetries: 2, FailureTransport: failure})
 
-    /** Delivery (count 0) → requeue (count 1) → requeue (count 2) → exhausted: three handler calls
-    before the message is routed to the failure transport. */
     if consumeErr := command.consumeFrom(runtimeInstance, source, 3); nil != consumeErr {
         t.Fatalf("unexpected consume error: %v", consumeErr)
     }
@@ -85,5 +83,41 @@ func TestConsume_ExhaustsRetriesAndRoutesToFailureTransport(t *testing.T) {
         }
     default:
         t.Fatalf("expected the exhausted message to be routed to the failure transport")
+    }
+}
+
+func TestConsume_ExhaustedWithoutFailureTransportDropsMessage(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    source := NewInMemoryTransport(8)
+
+    if sendErr := source.Send(runtimeInstance, NewEnvelope(consumeTestMessage{Value: 9})); nil != sendErr {
+        t.Fatalf("unexpected send error: %v", sendErr)
+    }
+
+    var attempts int
+    locator := NewHandlerLocator()
+    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage) error {
+        attempts++
+        return exception.NewError("handler always fails", nil, nil)
+    })
+
+    bus := NewManager("default", NewHandleMessageMiddleware(locator))
+    command := NewConsumeCommandWithRetry(bus, nil, RetryPolicy{MaxRetries: 2})
+
+    if consumeErr := command.consumeFrom(runtimeInstance, source, 3); nil != consumeErr {
+        t.Fatalf("unexpected consume error: %v", consumeErr)
+    }
+
+    if 3 != attempts {
+        t.Fatalf("expected exactly three handling attempts, got %d", attempts)
+    }
+
+    sourceQueue, _ := source.Receive(runtimeInstance)
+    select {
+    case leftover := <-sourceQueue:
+        t.Fatalf("expected the exhausted message to be dropped, found %v still queued", leftover.Message())
+    default:
     }
 }

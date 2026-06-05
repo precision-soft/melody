@@ -44,8 +44,6 @@ func (instance *Module) buildMessageBus() {
         "default.consume",
         melodymessagebus.NewHandleMessageMiddleware(locator),
     )
-    /** Messages whose handler keeps failing are retried with backoff and, once the attempts are
-    exhausted, routed to a dead-letter transport for later inspection instead of being dropped. */
     deadLetterTransport := melodymessagebus.NewInMemoryTransport(64)
     instance.messageBusConsumeCommand = melodymessagebus.NewConsumeCommandWithRetry(
         instance.messageBusConsume,

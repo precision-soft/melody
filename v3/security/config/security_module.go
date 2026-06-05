@@ -40,17 +40,12 @@ func (instance FirewallOverrideConfiguration) WithStateless(stateless bool) Fire
     return instance
 }
 
-/** WithEntryPoint overrides the entry point for a single firewall, which is what lets a JSON-only
-API firewall answer 401 with JSON while the global (web) firewall keeps redirecting to a login page.
-The compiler falls back to the global entry point when this is left nil. */
 func (instance FirewallOverrideConfiguration) WithEntryPoint(entryPoint securitycontract.EntryPoint) FirewallOverrideConfiguration {
     instance.entryPoint = entryPoint
 
     return instance
 }
 
-/** WithAccessDeniedHandler overrides the access-denied handler for a single firewall (e.g. a JSON
-403 for an API firewall); the compiler falls back to the global handler when this is left nil. */
 func (instance FirewallOverrideConfiguration) WithAccessDeniedHandler(accessDeniedHandler securitycontract.AccessDeniedHandler) FirewallOverrideConfiguration {
     instance.accessDeniedHandler = accessDeniedHandler
 

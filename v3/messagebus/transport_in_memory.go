@@ -29,8 +29,6 @@ func (instance *InMemoryTransport) Send(
         envelopeInstance = envelopeInstance.WithStamp(ReceivedStamp{TransportName: "in_memory"})
     }
 
-    /** The closed state is checked first so a Send after Close fails deterministically; without this
-    a select would otherwise pick the still-writable buffer at random over the closed signal. */
     select {
     case <-instance.done:
         return exception.NewError("in-memory transport is closed", nil, nil)
@@ -53,8 +51,6 @@ func (instance *InMemoryTransport) Receive(
     return instance.queue, nil
 }
 
-/** Close signals that no further messages will be accepted; it is idempotent and never closes the
-underlying queue channel so a concurrent Send can never panic on a closed channel. */
 func (instance *InMemoryTransport) Close(runtimeInstance runtimecontract.Runtime) error {
     instance.closeOnce.Do(func() {
         close(instance.done)
@@ -79,10 +75,6 @@ func (instance *InMemoryTransport) Nack(
         return nil
     }
 
-    /** The envelope is re-enqueued exactly as handed over: the consumer owns the retry policy and
-    has already stamped the incremented redelivery count, so the transport caps nothing itself.
-    The requeue is non-blocking on purpose — Nack runs on the single consumer goroutine, so a
-    blocking send on a full queue would deadlock the very reader that drains it. */
     select {
     case instance.queue <- envelopeInstance:
         return nil

@@ -18,8 +18,6 @@ const (
     jwtAlgorithmHs256 = "HS256"
     jwtDefaultSubject = "sub"
     jwtDefaultRoles   = "roles"
-    /** RFC 7519 defines a NumericDate as a non-negative number of seconds since the epoch; the upper
-    bound is the last representable second of year 9999, well beyond any legitimate token. */
     jwtMaxNumericDate = 253402300799
 )
 
@@ -39,36 +37,34 @@ func NewJwtTokenValidator(config JwtConfig) *JwtTokenValidator {
     }
 
     return &JwtTokenValidator{
-        secret:        config.Secret,
-        subjectClaim:  subjectClaim,
-        rolesClaim:    rolesClaim,
-        leeway:        config.Leeway,
-        requireExpiry: config.RequireExpiry,
-        audience:      config.Audience,
-        issuer:        config.Issuer,
+        secret:             config.Secret,
+        subjectClaim:       subjectClaim,
+        rolesClaim:         rolesClaim,
+        leeway:             config.Leeway,
+        allowWithoutExpiry: config.AllowWithoutExpiry,
+        audience:           config.Audience,
+        issuer:             config.Issuer,
     }
 }
 
 type JwtConfig struct {
-    Secret        []byte
-    SubjectClaim  string
-    RolesClaim    string
-    Leeway        time.Duration
-    RequireExpiry bool
-    /** When set, the token must carry a matching iss claim. */
+    Secret             []byte
+    SubjectClaim       string
+    RolesClaim         string
+    Leeway             time.Duration
+    AllowWithoutExpiry bool
     Issuer string
-    /** When set, the token must list this value in its aud claim (string or array). */
     Audience string
 }
 
 type JwtTokenValidator struct {
-    secret        []byte
-    subjectClaim  string
-    rolesClaim    string
-    leeway        time.Duration
-    requireExpiry bool
-    audience      string
-    issuer        string
+    secret             []byte
+    subjectClaim       string
+    rolesClaim         string
+    leeway             time.Duration
+    allowWithoutExpiry bool
+    audience           string
+    issuer             string
 }
 
 func (instance *JwtTokenValidator) Validate(
@@ -142,7 +138,7 @@ func (instance *JwtTokenValidator) verifyTimeClaims(rawClaims map[string]any, no
         return exception.NewError("jwt exp claim is malformed", nil, nil)
     }
 
-    if false == hasExpiry && true == instance.requireExpiry {
+    if false == hasExpiry && false == instance.allowWithoutExpiry {
         return exception.NewError("jwt is missing the required exp claim", nil, nil)
     }
 
@@ -268,8 +264,6 @@ func numericClaim(rawClaims map[string]any, name string) (int64, bool, bool) {
         return 0, true, false
     }
 
-    /** A non-finite or out-of-range value is treated as malformed rather than converted: an int64
-    cast would otherwise saturate silently and turn a crafted claim into an arbitrary instant. */
     if true == math.IsNaN(floatValue) || true == math.IsInf(floatValue, 0) {
         return 0, true, false
     }

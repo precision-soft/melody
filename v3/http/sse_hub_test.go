@@ -36,7 +36,6 @@ func TestSseHub_BroadcastDeliversToTopicSubscribers(t *testing.T) {
 func TestSseHub_BroadcastCountsDroppedEventsOnFullBuffer(t *testing.T) {
     hub := http.NewSseHub()
 
-    /** A buffer of one fills after a single undrained event; the next broadcast must drop. */
     hub.Subscribe("demo", 1)
 
     if delivered := hub.Broadcast("demo", http.SseEvent{Data: "first"}); 1 != delivered {
@@ -60,7 +59,6 @@ func TestSseHub_ShutdownClosesSubscribersAndStopsDelivery(t *testing.T) {
 
     hub.Shutdown()
 
-    /** Every subscriber channel must be closed so in-flight handler loops observe the close. */
     for label, subscriber := range map[string]*http.SseSubscriber{"demo": first, "other": second} {
         select {
         case _, open := <-subscriber.Events():
@@ -76,7 +74,6 @@ func TestSseHub_ShutdownClosesSubscribersAndStopsDelivery(t *testing.T) {
         t.Fatalf("expected no deliveries after shutdown, got %d", delivered)
     }
 
-    /** Shutdown is idempotent. */
     hub.Shutdown()
 }
 

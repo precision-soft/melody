@@ -52,8 +52,6 @@ func TestHandle_NoHandlerPassesThroughByDefault(t *testing.T) {
 
     bus := messagebus.NewManager("default", messagebus.NewHandleMessageMiddleware(locator))
 
-    /** With no handler registered for the type, the default middleware logs and lets the message
-    pass through without an error. */
     if _, dispatchErr := bus.Dispatch(newTestRuntime(), taskCreated{TaskId: 1}); nil != dispatchErr {
         t.Fatalf("expected the default middleware to pass an unhandled message through, got: %v", dispatchErr)
     }
@@ -108,8 +106,6 @@ func TestInMemoryTransport_RequeueOnFullQueueDoesNotBlock(t *testing.T) {
         t.Fatalf("unexpected send error: %v", sendErr)
     }
 
-    /** The buffer is full; a blocking requeue would hang here forever since this goroutine is
-    the only reader. The non-blocking requeue must return an error instead. */
     nackErr := transport.Nack(runtimeInstance, messagebus.NewEnvelope(taskCreated{TaskId: 2}), true)
     if nil == nackErr {
         t.Fatalf("expected nack to report a dropped message when the queue is full")
@@ -124,7 +120,6 @@ func TestInMemoryTransport_CloseRejectsFurtherSendsAndIsIdempotent(t *testing.T)
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
-    /** Close must be safe to call more than once. */
     if closeErr := transport.Close(runtimeInstance); nil != closeErr {
         t.Fatalf("unexpected second close error: %v", closeErr)
     }

@@ -15,8 +15,6 @@ import (
 
 const lineBreak = "\r\n"
 
-/** reservedHeaders are emitted by the renderer itself; a caller-supplied header with the same name
-is dropped so it cannot duplicate or override the structural headers. */
 var reservedHeaders = map[string]struct{}{
     "from":                      {},
     "to":                        {},
@@ -86,8 +84,6 @@ func RenderMessage(message mailercontract.Message) ([]byte, error) {
     return []byte(builder.String()), nil
 }
 
-/** writeBodyEntity writes the text/html content as a single MIME entity (its own Content-Type plus
-encoded body); it is used both at the top level and as the first part of a multipart/mixed message. */
 func writeBodyEntity(builder *strings.Builder, message mailercontract.Message) {
     hasHtml := "" != message.Html
     hasText := "" != message.Text
@@ -133,12 +129,8 @@ func appendEmails(target []string, addresses []mailercontract.Address) []string 
 
 var headerSanitizer = strings.NewReplacer("\r", "", "\n", "")
 
-/** phraseSanitizer drops CR, LF and the quoting characters so an ASCII display name cannot break out
-of its quoted-string (a non-ASCII name takes the encoded-word path instead and never needs quotes). */
 var phraseSanitizer = strings.NewReplacer("\r", "", "\n", "", "\"", "", "\\", "")
 
-/** filenameSanitizer also drops the double quote so a crafted attachment name cannot break out of the
-quoted filename parameter in the Content-Disposition header. */
 var filenameSanitizer = strings.NewReplacer("\r", "", "\n", "", "\"", "")
 
 func formatAddress(address mailercontract.Address) string {
@@ -151,9 +143,6 @@ func formatAddress(address mailercontract.Address) string {
     return encodePhrase(address.Name) + " <" + email + ">"
 }
 
-/** encodePhrase renders a display name for an address header. A name needing encoding (non-ASCII or
-control characters) is emitted as an RFC 2047 encoded-word, which is pure ASCII and must NOT be
-quoted; a plain ASCII name keeps the familiar quoted-string form. */
 func encodePhrase(name string) string {
     encoded := mime.QEncoding.Encode("utf-8", name)
     if encoded != name {
@@ -188,8 +177,6 @@ func writeTextPart(builder *strings.Builder, boundary string, contentType string
     writeTextBody(builder, contentType, body)
 }
 
-/** writeTextBody emits a text entity quoted-printable encoded, which keeps every output line within
-the SMTP 998-character limit and safely transports 8-bit UTF-8 content. */
 func writeTextBody(builder *strings.Builder, contentType string, body string) {
     builder.WriteString("Content-Type: " + contentType + lineBreak)
     builder.WriteString("Content-Transfer-Encoding: quoted-printable" + lineBreak)
@@ -222,7 +209,6 @@ func encodeQuotedPrintable(body string) string {
     return encoded.String()
 }
 
-/** encodeBase64Lines wraps base64 output at 76 characters per line as required by MIME. */
 func encodeBase64Lines(content []byte) string {
     encoded := base64.StdEncoding.EncodeToString(content)
 
@@ -237,9 +223,6 @@ func encodeBase64Lines(content []byte) string {
     return wrapped.String()
 }
 
-/** filenameParameter renders the Content-Disposition filename. A printable-ASCII name uses the
-classic quoted form; anything else is emitted with the RFC 2231 extended syntax (filename*) so
-non-ASCII attachment names survive transport instead of being written as raw 8-bit header text. */
 func filenameParameter(filename string) string {
     if true == isPrintableAscii(filename) {
         return "filename=\"" + filenameSanitizer.Replace(filename) + "\""
@@ -276,8 +259,6 @@ func encodeRfc2231(value string) string {
     return builder.String()
 }
 
-/** isAttributeChar reports whether a byte may appear unescaped in an RFC 2231 extended value
-(the attr-char set of RFC 5987); everything else is percent-encoded. */
 func isAttributeChar(character byte) bool {
     switch {
     case character >= 'A' && character <= 'Z':

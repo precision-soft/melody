@@ -15,9 +15,6 @@ func baseLocale(locale string) string {
     return locale
 }
 
-/** pluralCategory maps a number to its CLDR cardinal category for the locale's language. Only the
-languages with rules that differ from the default one/other split are spelled out; everything else
-falls back to the English-style rule. */
 func pluralCategory(locale string, number float64) string {
     n := math.Abs(number)
     i := math.Trunc(n)

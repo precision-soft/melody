@@ -14,14 +14,8 @@ import (
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/** defaultMaxRetries bounds how many times a failing message is requeued before it is treated as
-poison; it replaces the old in-memory transport behavior that requeued exactly once. */
 const defaultMaxRetries = 3
 
-/** RetryPolicy configures how the consumer handles a message whose handler returns an error.
-A message is requeued (with an incremented redelivery count and an optional backoff DelayStamp)
-until MaxRetries is reached, after which it is routed to FailureTransport (a dead-letter queue) if
-one is configured, or logged and dropped otherwise — never silently lost on the first failure. */
 type RetryPolicy struct {
     MaxRetries       int
     BaseDelay        time.Duration
@@ -167,24 +161,25 @@ func (instance *ConsumeCommand) consume(
         return
     }
 
-    /** Retries are exhausted: route the poison message to the failure transport when one exists so
-    it can be inspected later, then ack it off the source transport. Without a dead-letter queue the
-    message is logged and dropped rather than requeued forever. */
     instance.logError(runtimeInstance, "message handling exhausted retries", dispatchErr)
 
     if nil != instance.retryPolicy.FailureTransport {
         if sendErr := instance.retryPolicy.FailureTransport.Send(runtimeInstance, envelopeInstance); nil != sendErr {
             instance.logError(runtimeInstance, "could not route the exhausted message to the failure transport", sendErr)
         }
+
+        if ackErr := transport.Ack(runtimeInstance, envelopeInstance); nil != ackErr {
+            instance.logError(runtimeInstance, "message ack failed", ackErr)
+        }
+
+        return
     }
 
-    if ackErr := transport.Ack(runtimeInstance, envelopeInstance); nil != ackErr {
-        instance.logError(runtimeInstance, "message ack failed", ackErr)
+    if nackErr := transport.Nack(runtimeInstance, envelopeInstance, false); nil != nackErr {
+        instance.logError(runtimeInstance, "message dead-letter failed", nackErr)
     }
 }
 
-/** retryDelay produces a linear backoff (BaseDelay × attempt) carried to delay-aware transports via
-a DelayStamp; a zero BaseDelay disables backoff. */
 func (instance *ConsumeCommand) retryDelay(attempt int) time.Duration {
     if 0 >= instance.retryPolicy.BaseDelay {
         return 0

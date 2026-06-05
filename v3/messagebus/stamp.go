@@ -47,9 +47,6 @@ func (instance HandledStamp) StampName() string {
     return StampNameHandled
 }
 
-/** RedeliveryStamp records how many times an envelope has been requeued for another handling
-attempt. The consumer owns the retry policy: it reads the count, decides whether to requeue or to
-route the message to the failure transport, and stamps the incremented count on each retry. */
 type RedeliveryStamp struct {
     Count int
 }
@@ -58,9 +55,6 @@ func (instance RedeliveryStamp) StampName() string {
     return StampNameRedelivery
 }
 
-/** DelayStamp asks a delay-aware transport to hold an envelope before delivering it, which the
-consumer attaches to a retry to space out attempts (backoff). The in-memory transport delivers
-immediately and ignores it; a durable transport such as AMQP can honor it. */
 type DelayStamp struct {
     Delay time.Duration
 }
@@ -69,8 +63,6 @@ func (instance DelayStamp) StampName() string {
     return StampNameDelay
 }
 
-/** RedeliveryCount returns how many times an envelope has already been redelivered, or zero when it
-has never been requeued. */
 func RedeliveryCount(envelopeInstance messagebuscontract.Envelope) int {
     stamp, found := LastStampOfType[RedeliveryStamp](envelopeInstance)
     if false == found {

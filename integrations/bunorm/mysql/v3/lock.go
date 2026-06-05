@@ -93,9 +93,6 @@ func (instance *mysqlLock) Release(runtimeInstance runtimecontract.Runtime) erro
     return nil
 }
 
-/** Refresh has nothing to extend because a MySQL GET_LOCK is a session lock with no TTL, but it
-still verifies the lock is held on this connection so callers get the same lost-lock signal as the
-Redis and in-memory lockers instead of a silent success. */
 func (instance *mysqlLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl time.Duration) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()

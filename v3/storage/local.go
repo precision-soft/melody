@@ -138,10 +138,6 @@ func (instance *LocalStorage) resolvePath(key string) (string, error) {
     return target, nil
 }
 
-/** ensureNoSymlinkEscape complements the textual containment check: the cleaned key cannot contain
-"..", but a symlink planted inside the base directory could still resolve outside it. The deepest
-existing ancestor of the target is resolved through symlinks and verified to stay within the
-resolved base, which covers both reads (target exists) and writes (only the parent exists yet). */
 func (instance *LocalStorage) ensureNoSymlinkEscape(base string, target string) error {
     realBase, baseErr := filepath.EvalSymlinks(base)
     if nil != baseErr {

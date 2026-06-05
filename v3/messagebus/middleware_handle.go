@@ -9,10 +9,6 @@ import (
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/** HandleOptions tunes how the handle middleware reacts when a message reaches it with no
-registered handler. By default that is logged as a warning and the message continues through the
-stack; with RequireHandler set it becomes an error, so a forgotten RegisterHandler fails loudly
-(and, on the consumer, is retried/dead-lettered) instead of being acked and discarded silently. */
 type HandleOptions struct {
     RequireHandler bool
 }
@@ -53,9 +49,6 @@ func NewHandleMessageMiddlewareWithOptions(
     }
 }
 
-/** noHandler decides what to do when no handler matched the message. A message already carrying a
-HandledStamp was handled by an earlier stage and is left alone; otherwise it is rejected when
-RequireHandler is set, or logged so the silent loss is at least observable. */
 func noHandler(
     runtimeInstance runtimecontract.Runtime,
     envelopeInstance messagebuscontract.Envelope,

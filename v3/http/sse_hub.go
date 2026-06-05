@@ -16,8 +16,6 @@ type SseHub struct {
     subscribersByTopic map[string]map[*SseSubscriber]struct{}
     closed             bool
 
-    /** dropped counts events discarded because a subscriber's buffer was full; delivery is
-    at-most-once, so a slow consumer loses events rather than blocking the broadcaster. */
     dropped uint64
 }
 
@@ -43,8 +41,6 @@ func (instance *SseHub) Subscribe(topic string, bufferSize int) *SseSubscriber {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    /** Once the hub is shut down a new subscriber receives an already-closed channel so its handler
-    loop exits immediately instead of blocking forever on a stream that will never be served. */
     if true == instance.closed {
         close(subscriber.channel)
 
@@ -105,8 +101,6 @@ func (instance *SseHub) Broadcast(topic string, event SseEvent) int {
     return delivered
 }
 
-/** DroppedEventCount returns the cumulative number of events discarded across all topics because a
-subscriber's buffer was full. It lets callers surface the at-most-once delivery loss as a metric. */
 func (instance *SseHub) DroppedEventCount() uint64 {
     return atomic.LoadUint64(&instance.dropped)
 }
@@ -118,10 +112,6 @@ func (instance *SseHub) SubscriberCount(topic string) int {
     return len(instance.subscribersByTopic[topic])
 }
 
-/** Shutdown closes every subscriber channel across all topics and marks the hub closed so that
-in-flight handler loops observe the channel close and return, releasing their goroutines during a
-graceful server stop. It is idempotent and safe to call concurrently with Broadcast/Unsubscribe:
-the exclusive lock serialises it against the membership checks those methods make before closing. */
 func (instance *SseHub) Shutdown() {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()

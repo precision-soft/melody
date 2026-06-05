@@ -133,8 +133,6 @@ func TestTrans_RussianPluralCategories(t *testing.T) {
 }
 
 func TestTrans_PathologicallyNestedPluralDoesNotOverflow(t *testing.T) {
-    /** Build a plural nested far beyond the interpolation depth cap; the guard must return rather
-    than recurse until the stack is exhausted. */
     var builder strings.Builder
     const nesting = 200
     for index := 0; index < nesting; index++ {
@@ -150,7 +148,6 @@ func TestTrans_PathologicallyNestedPluralDoesNotOverflow(t *testing.T) {
 
     manager := translation.NewManager("en", nil, catalog)
 
-    /** The assertion is simply that this returns without panicking on a stack overflow. */
     result := manager.Trans("deep", map[string]any{"count": 1}, "messages", "en")
     if "" == result {
         t.Fatalf("expected a non-empty result from the depth-bounded interpolation")
@@ -160,8 +157,6 @@ func TestTrans_PathologicallyNestedPluralDoesNotOverflow(t *testing.T) {
 func TestTrans_PluralWithMissingArgumentFallsBackToOther(t *testing.T) {
     manager := newTestManager()
 
-    /** No "count" argument is supplied; the plural must resolve the "other" branch with an empty
-    # rather than treating the missing argument as the number zero. */
     result := manager.Trans("inbox", map[string]any{}, "messages", "en")
     if " messages" != result {
         t.Fatalf("expected the other branch with an empty pound, got: %q", result)

@@ -20,7 +20,10 @@ func (instance *JsonEntryPoint) Start(
     runtimeInstance runtimecontract.Runtime,
     request httpcontract.Request,
 ) (httpcontract.Response, error) {
-    return http.JsonErrorResponse(nethttp.StatusUnauthorized, "unauthorized"), nil
+    response := http.JsonErrorResponse(nethttp.StatusUnauthorized, "unauthorized")
+    response.Headers().Set("WWW-Authenticate", "Bearer")
+
+    return response, nil
 }
 
 var _ securitycontract.EntryPoint = (*JsonEntryPoint)(nil)

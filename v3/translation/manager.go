@@ -43,8 +43,6 @@ func (instance *Manager) Trans(
         return messageId
     }
 
-    /** Format with the locale of the catalog that actually resolved the message, not the requested
-    locale, so plural and select rules match the language of the text being rendered. */
     return formatMessage(pattern, parameters, resolvedLocale)
 }
 

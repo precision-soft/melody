@@ -58,7 +58,6 @@ func extractBearerToken(headerValue string) (string, bool) {
         return "", false
     }
 
-    /** The RFC 7235 auth-scheme token is case-insensitive, so accept "bearer"/"BEARER" too. */
     if len(headerValue) < len(bearerPrefix) || false == strings.EqualFold(headerValue[:len(bearerPrefix)], bearerPrefix) {
         return "", false
     }

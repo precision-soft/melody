@@ -77,8 +77,6 @@ func TestLocalStorage_RejectsSymlinkEscape(t *testing.T) {
         t.Fatalf("seed secret: %v", writeErr)
     }
 
-    /** A symlink planted inside the base directory points outside it; the textual ".." guard would
-    not catch this, so the symlink-resolution check must reject the read. */
     if linkErr := os.Symlink(secret, filepath.Join(base, "escape")); nil != linkErr {
         t.Fatalf("create symlink: %v", linkErr)
     }
