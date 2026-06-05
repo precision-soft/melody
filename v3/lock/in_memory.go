@@ -23,11 +23,14 @@ func NewInMemoryLocker(clockInstance clockcontract.Clock) *InMemoryLocker {
     }
 }
 
+const inMemoryPurgeInterval = 512
+
 type InMemoryLocker struct {
-    clock   clockcontract.Clock
-    mutex   sync.Mutex
-    holders map[string]inMemoryHolder
-    counter uint64
+    clock     clockcontract.Clock
+    mutex     sync.Mutex
+    holders   map[string]inMemoryHolder
+    counter   uint64
+    purgeTicks int
 }
 
 type inMemoryHolder struct {
@@ -49,6 +52,8 @@ func (instance *InMemoryLocker) CreateLock(name string, ttl time.Duration) lockc
 func (instance *InMemoryLocker) acquire(name string, token uint64, ttl time.Duration) bool {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
+
+    instance.maybePurgeLocked()
 
     holder, exists := instance.holders[name]
     if true == exists && true == instance.isActive(holder) && holder.token != token {
@@ -107,6 +112,20 @@ func (instance *InMemoryLocker) PurgeExpired() int {
     return purged
 }
 
+func (instance *InMemoryLocker) maybePurgeLocked() {
+    instance.purgeTicks++
+    if instance.purgeTicks < inMemoryPurgeInterval {
+        return
+    }
+
+    instance.purgeTicks = 0
+    for name, holder := range instance.holders {
+        if false == instance.isActive(holder) {
+            delete(instance.holders, name)
+        }
+    }
+}
+
 func (instance *InMemoryLocker) isActive(holder inMemoryHolder) bool {
     if true == holder.expiresAt.IsZero() {
         return true
@@ -140,6 +159,10 @@ func (instance *inMemoryLock) Release(runtimeInstance runtimecontract.Runtime) e
 }
 
 func (instance *inMemoryLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl time.Duration) error {
+    if 0 >= ttl {
+        return exception.NewError("lock refresh ttl must be positive", map[string]any{"name": instance.name}, nil)
+    }
+
     if false == instance.locker.refresh(instance.name, instance.token, ttl) {
         return exception.NewError("in-memory lock is no longer held", map[string]any{"name": instance.name}, nil)
     }

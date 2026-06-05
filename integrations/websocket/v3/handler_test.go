@@ -44,10 +44,12 @@ func TestStreamHandler_BroadcastReachesClient(t *testing.T) {
     }
     defer connection.CloseNow()
 
-    for index := 0; index < 200000; index++ {
-        if 1 <= hub.SubscriberCount("demo") {
-            break
+    subscribeDeadline := time.Now().Add(2 * time.Second)
+    for hub.SubscriberCount("demo") < 1 {
+        if true == time.Now().After(subscribeDeadline) {
+            t.Fatalf("the websocket handler did not subscribe to the hub in time")
         }
+        time.Sleep(time.Millisecond)
     }
 
     delivered := hub.Broadcast("demo", melodyhttp.SseEvent{Event: "notification", Data: "hello-ws"})

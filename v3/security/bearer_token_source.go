@@ -88,7 +88,7 @@ func (instance *BearerTokenSource) Resolve(
         claims = enrichedClaims
     }
 
-    return NewAuthenticatedToken(claims.UserIdentifier, claims.Roles), nil
+    return NewAuthenticatedTokenFromClaims(claims), nil
 }
 
 func extractBearerToken(headerValue string) (string, bool) {

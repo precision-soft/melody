@@ -150,3 +150,19 @@ func TestInMemoryLocker_ReacquireIsReentrantForSameLock(t *testing.T) {
         t.Fatalf("expected same lock instance to re-acquire")
     }
 }
+
+func TestInMemoryLock_RefreshRejectsNonPositiveTtl(t *testing.T) {
+    locker := lock.NewInMemoryLocker(clock.NewSystemClock())
+    runtimeInstance := testRuntime()
+
+    handle := locker.CreateLock("job", time.Minute)
+
+    acquired, acquireErr := handle.Acquire(runtimeInstance)
+    if nil != acquireErr || false == acquired {
+        t.Fatalf("expected to acquire the lock, got %v / %v", acquired, acquireErr)
+    }
+
+    if refreshErr := handle.Refresh(runtimeInstance, 0); nil == refreshErr {
+        t.Fatalf("expected refresh with a non-positive ttl to be rejected")
+    }
+}

@@ -22,10 +22,15 @@ type SseHub struct {
 type SseSubscriber struct {
     topic   string
     channel chan SseEvent
+    dropped uint64
 }
 
 func (instance *SseSubscriber) Events() <-chan SseEvent {
     return instance.channel
+}
+
+func (instance *SseSubscriber) DroppedCount() uint64 {
+    return atomic.LoadUint64(&instance.dropped)
 }
 
 func (instance *SseHub) Subscribe(topic string, bufferSize int) *SseSubscriber {
@@ -95,6 +100,7 @@ func (instance *SseHub) Broadcast(topic string, event SseEvent) int {
             delivered++
         default:
             atomic.AddUint64(&instance.dropped, 1)
+            atomic.AddUint64(&subscriber.dropped, 1)
         }
     }
 

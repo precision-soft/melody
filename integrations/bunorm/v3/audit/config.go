@@ -2,9 +2,20 @@ package audit
 
 import (
     "context"
+    "regexp"
 
+    "github.com/precision-soft/melody/v3/exception"
     "github.com/uptrace/bun"
 )
+
+/** auditTableNamePattern bounds table names to a plain SQL identifier so they are safe to interpolate via ModelTableExpr, which bun does not quote. */
+var auditTableNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+func validateAuditTableName(table string) {
+    if false == auditTableNamePattern.MatchString(table) {
+        exception.Panic(exception.NewError("audit table name is not a valid identifier", map[string]any{"table": table}, nil))
+    }
+}
 
 /**
  * EntityOptions configures how one entity is audited. Table routes its entries to a dedicated
@@ -31,6 +42,8 @@ func NewRegistry(defaultTable string, globalIgnoredFields ...string) *Registry {
         defaultTable = DefaultTable
     }
 
+    validateAuditTableName(defaultTable)
+
     return &Registry{
         defaultTable:        defaultTable,
         globalIgnoredFields: globalIgnoredFields,
@@ -39,6 +52,10 @@ func NewRegistry(defaultTable string, globalIgnoredFields ...string) *Registry {
 }
 
 func (instance *Registry) Register(entity string, options EntityOptions) *Registry {
+    if "" != options.Table {
+        validateAuditTableName(options.Table)
+    }
+
     instance.optionsByEntity[entity] = options
 
     return instance

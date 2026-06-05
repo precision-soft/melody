@@ -66,8 +66,11 @@ candidates, _ := cipher.CiphertextCandidates("user@example.com")
 db.NewSelect().Model(&user).Where("email IN (?)", bun.In(candidates)).Scan(ctx)
 ```
 
-> ⚠️ Deterministic mode **reveals plaintext equality** (equal values produce identical ciphertext). Use it
-> only on low-entropy lookup fields, never on secrets. Use `EncryptedString` (random nonce) everywhere else.
+> ⚠️ Deterministic mode **reveals plaintext equality** (equal values produce identical ciphertext). The
+> nonce is keyed only by `(key, plaintext)`, so equal plaintext yields byte-identical ciphertext **across
+> every deterministic column and table under the same key** — an observer of the stored values can correlate
+> equal values across rows and tables, not just within one column. Use it only on low-entropy lookup fields,
+> never on secrets where cross-column equality must stay hidden. Use `EncryptedString` (random nonce) everywhere else.
 
 ## Bulk migration
 
@@ -83,6 +86,11 @@ db.NewSelect().Model(&user).Where("email IN (?)", bun.In(candidates)).Scan(ctx)
 melody melody:encrypt:database --table=users --primary-key=id --column=email --column=ssn --mode=encrypt
 melody melody:encrypt:database --table=users --column=email --mode=reencrypt --target-key=v2
 ```
+
+> ⚠️ For a **deterministic/searchable** column set `TableSpec.Deterministic = true` (the programmatic
+> `Migrator`) so `reencrypt` re-derives the plaintext-bound nonce under the target key and the column stays
+> searchable. Re-encrypting a deterministic column without the flag rewrites it with random nonces and
+> silently breaks `CiphertextCandidates` equality lookups.
 
 ## Testing / dev
 

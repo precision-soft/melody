@@ -307,7 +307,7 @@ func TestJwtTokenValidator_RejectsMissingAudience(t *testing.T) {
 
 func TestJwtTokenValidator_RejectsTokenIssuedInTheFuture(t *testing.T) {
     secret := []byte("super-secret")
-    validator := security.NewJwtTokenValidator(security.JwtConfig{Secret: secret})
+    validator := security.NewJwtTokenValidator(security.JwtConfig{Secret: secret, RejectFutureIssuedAt: true})
 
     tokenString := signJwtHs256(secret, map[string]any{
         "sub": "user-1",
@@ -379,5 +379,87 @@ func TestJwtTokenValidator_RejectsExpiredToken(t *testing.T) {
     _, validateErr := validator.Validate(testRuntime(), tokenString)
     if nil == validateErr {
         t.Fatalf("expected expired token error")
+    }
+}
+
+func TestJwtTokenValidator_RejectsEmptySubject(t *testing.T) {
+    secret := []byte("super-secret")
+    validator := security.NewJwtTokenValidator(security.JwtConfig{Secret: secret, AllowWithoutExpiry: true})
+
+    cases := map[string]map[string]any{
+        "absent subject":     {"roles": []any{"ROLE_USER"}},
+        "empty subject":      {"sub": "", "roles": []any{"ROLE_USER"}},
+        "non-string subject": {"sub": 12345},
+    }
+
+    for name, claims := range cases {
+        t.Run(name, func(t *testing.T) {
+            tokenString := signJwtHs256(secret, claims)
+
+            if _, validateErr := validator.Validate(testRuntime(), tokenString); nil == validateErr {
+                t.Fatalf("expected rejection for a token with no usable subject")
+            }
+        })
+    }
+}
+
+func TestBearerTokenSource_RejectsEmptySubjectOpaqueToken(t *testing.T) {
+    store := security.NewInMemoryTokenStore()
+    store.Put("opaque-empty", securitycontract.Claims{Roles: []string{"ROLE_USER"}})
+
+    source := security.NewBearerTokenSource(security.NewOpaqueTokenValidator(store))
+
+    token, resolveErr := source.Resolve(testRuntime(), bearerRequest("opaque-empty"))
+    if nil != resolveErr {
+        t.Fatalf("unexpected resolve error: %v", resolveErr)
+    }
+
+    if true == token.IsAuthenticated() {
+        t.Fatalf("expected a subjectless opaque token to fall back to anonymous")
+    }
+}
+
+func TestJwtTokenValidator_FutureIssuedAtAcceptedByDefault(t *testing.T) {
+    secret := []byte("super-secret")
+    validator := security.NewJwtTokenValidator(security.JwtConfig{Secret: secret})
+
+    future := time.Now().Add(1 * time.Hour).Unix()
+    tokenString := signJwtHs256(secret, map[string]any{"sub": "user-1", "exp": float64(future + 3600), "iat": float64(future)})
+
+    if _, validateErr := validator.Validate(testRuntime(), tokenString); nil != validateErr {
+        t.Fatalf("expected a future iat to be accepted by default: %v", validateErr)
+    }
+}
+
+func TestJwtTokenValidator_FutureIssuedAtRejectedWhenConfigured(t *testing.T) {
+    secret := []byte("super-secret")
+    validator := security.NewJwtTokenValidator(security.JwtConfig{Secret: secret, RejectFutureIssuedAt: true})
+
+    future := time.Now().Add(1 * time.Hour).Unix()
+    tokenString := signJwtHs256(secret, map[string]any{"sub": "user-1", "exp": float64(future + 3600), "iat": float64(future)})
+
+    if _, validateErr := validator.Validate(testRuntime(), tokenString); nil == validateErr {
+        t.Fatalf("expected a future iat to be rejected when RejectFutureIssuedAt is set")
+    }
+}
+
+func TestInMemoryTokenStore_LookupReturnsIsolatedClaims(t *testing.T) {
+    store := security.NewInMemoryTokenStore()
+    store.Put("opaque-iso", securitycontract.Claims{
+        UserIdentifier: "user-1",
+        Roles:          []string{"ROLE_USER"},
+        Scope:          map[string]any{"company": "acme"},
+    })
+
+    first, _, _ := store.Lookup(testRuntime(), "opaque-iso")
+    first.Roles[0] = "ROLE_ADMIN"
+    first.Scope["company"] = "evil"
+
+    second, _, _ := store.Lookup(testRuntime(), "opaque-iso")
+    if "ROLE_USER" != second.Roles[0] {
+        t.Fatalf("expected stored roles to be isolated from a returned copy, got %v", second.Roles)
+    }
+    if "acme" != second.Scope["company"] {
+        t.Fatalf("expected stored scope to be isolated from a returned copy, got %v", second.Scope)
     }
 }

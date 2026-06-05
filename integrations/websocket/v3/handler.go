@@ -15,11 +15,21 @@ import (
 )
 
 type Options struct {
-    TopicResolver   func(request httpcontract.Request) string
-    OnMessage       func(runtimeInstance runtimecontract.Runtime, payload []byte)
+    TopicResolver func(request httpcontract.Request) string
+
+    /**
+     * OnMessage is invoked for each inbound frame on the connection's read goroutine, in order. It
+     * must not block: a slow OnMessage stalls the read loop, delaying close/ping detection for that
+     * connection. Hand long work off to your own queue/worker and return promptly.
+     */
+    OnMessage       func(runtimeInstance runtimecontract.Runtime, messageType coderwebsocket.MessageType, payload []byte)
     SubscribeBuffer int
     WriteTimeout    time.Duration
     OriginPatterns  []string
+    BinaryWrites    bool
+
+    /** ReadLimit caps the byte size of a single inbound message; 0 keeps coder/websocket's default (32 KiB). */
+    ReadLimit int64
 }
 
 func NewStreamHandler(hub *melodyhttp.SseHub, options Options) httpcontract.Handler {
@@ -32,6 +42,10 @@ func NewStreamHandler(hub *melodyhttp.SseHub, options Options) httpcontract.Hand
             return nil, nil
         }
         defer connection.CloseNow()
+
+        if 0 < options.ReadLimit {
+            connection.SetReadLimit(options.ReadLimit)
+        }
 
         topic := "default"
         if nil != options.TopicResolver {
@@ -56,7 +70,7 @@ func NewStreamHandler(hub *melodyhttp.SseHub, options Options) httpcontract.Hand
                 }
 
                 writeContext, writeCancel := context.WithTimeout(connectionContext, writeTimeout(options))
-                writeErr := connection.Write(writeContext, coderwebsocket.MessageText, []byte(event.Data))
+                writeErr := connection.Write(writeContext, writeMessageType(options), []byte(event.Data))
                 writeCancel()
                 if nil != writeErr {
                     logDebug(runtimeInstance, "websocket write failed, closing connection", writeErr)
@@ -75,16 +89,24 @@ func readLoop(
     options Options,
 ) {
     for {
-        _, payload, readErr := connection.Read(ctx)
+        messageType, payload, readErr := connection.Read(ctx)
         if nil != readErr {
             cancel()
             return
         }
 
         if nil != options.OnMessage {
-            options.OnMessage(runtimeInstance, payload)
+            options.OnMessage(runtimeInstance, messageType, payload)
         }
     }
+}
+
+func writeMessageType(options Options) coderwebsocket.MessageType {
+    if true == options.BinaryWrites {
+        return coderwebsocket.MessageBinary
+    }
+
+    return coderwebsocket.MessageText
 }
 
 func subscribeBuffer(options Options) int {

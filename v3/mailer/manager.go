@@ -1,6 +1,8 @@
 package mailer
 
 import (
+    "net/mail"
+
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/internal"
     mailercontract "github.com/precision-soft/melody/v3/mailer/contract"
@@ -30,7 +32,34 @@ func (instance *Manager) Send(runtimeInstance runtimecontract.Runtime, message m
         return exception.NewError("mailer message has no recipients", nil, nil)
     }
 
+    if validationErr := validateAddresses(message); nil != validationErr {
+        return validationErr
+    }
+
     return instance.transport.Send(runtimeInstance, message)
+}
+
+func validateAddresses(message mailercontract.Message) error {
+    all := []mailercontract.Address{message.From, message.ReplyTo}
+    all = append(all, message.To...)
+    all = append(all, message.Cc...)
+    all = append(all, message.Bcc...)
+
+    for _, address := range all {
+        if "" == address.Email {
+            continue
+        }
+
+        if _, parseErr := mail.ParseAddress(address.Email); nil != parseErr {
+            return exception.NewError(
+                "mailer message has an invalid address",
+                map[string]any{"email": address.Email},
+                parseErr,
+            )
+        }
+    }
+
+    return nil
 }
 
 var _ mailercontract.Mailer = (*Manager)(nil)

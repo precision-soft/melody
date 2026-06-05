@@ -24,6 +24,7 @@ func NewInMemoryTokenStoreWithClock(clockInstance clockcontract.Clock) *InMemory
     return &InMemoryTokenStore{
         clock:          clockInstance,
         entriesByToken: make(map[string]tokenEntry),
+        tokensByUser:   make(map[string]map[string]struct{}),
     }
 }
 
@@ -31,6 +32,7 @@ type InMemoryTokenStore struct {
     clock          clockcontract.Clock
     mutex          sync.RWMutex
     entriesByToken map[string]tokenEntry
+    tokensByUser   map[string]map[string]struct{}
 }
 
 type tokenEntry struct {
@@ -55,27 +57,92 @@ func (instance *InMemoryTokenStore) put(tokenString string, claims securitycontr
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    instance.entriesByToken[tokenString] = tokenEntry{claims: claims, expiresAt: expiresAt}
+    if existing, found := instance.entriesByToken[tokenString]; true == found && existing.claims.UserIdentifier != claims.UserIdentifier {
+        instance.unindexLocked(existing.claims.UserIdentifier, tokenString)
+    }
+
+    instance.entriesByToken[tokenString] = tokenEntry{claims: cloneClaims(claims), expiresAt: expiresAt}
+    instance.indexLocked(claims.UserIdentifier, tokenString)
+}
+
+/** indexLocked records the token under its user in the secondary index. Caller holds the write lock. */
+func (instance *InMemoryTokenStore) indexLocked(userIdentifier string, tokenString string) {
+    tokens, exists := instance.tokensByUser[userIdentifier]
+    if false == exists {
+        tokens = make(map[string]struct{})
+        instance.tokensByUser[userIdentifier] = tokens
+    }
+
+    tokens[tokenString] = struct{}{}
+}
+
+/** unindexLocked removes the token from its user's set, dropping the set when empty. Caller holds the write lock. */
+func (instance *InMemoryTokenStore) unindexLocked(userIdentifier string, tokenString string) {
+    tokens, exists := instance.tokensByUser[userIdentifier]
+    if false == exists {
+        return
+    }
+
+    delete(tokens, tokenString)
+    if 0 == len(tokens) {
+        delete(instance.tokensByUser, userIdentifier)
+    }
+}
+
+func cloneClaims(claims securitycontract.Claims) securitycontract.Claims {
+    cloned := securitycontract.Claims{
+        UserIdentifier: claims.UserIdentifier,
+    }
+
+    if nil != claims.Roles {
+        cloned.Roles = append([]string{}, claims.Roles...)
+    }
+
+    if nil != claims.Scope {
+        scope := make(map[string]any, len(claims.Scope))
+        for key, value := range claims.Scope {
+            scope[key] = value
+        }
+        cloned.Scope = scope
+    }
+
+    if nil != claims.Attributes {
+        attributes := make(map[string]any, len(claims.Attributes))
+        for key, value := range claims.Attributes {
+            attributes[key] = value
+        }
+        cloned.Attributes = attributes
+    }
+
+    return cloned
 }
 
 func (instance *InMemoryTokenStore) Delete(tokenString string) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    delete(instance.entriesByToken, tokenString)
+    if entry, found := instance.entriesByToken[tokenString]; true == found {
+        instance.unindexLocked(entry.claims.UserIdentifier, tokenString)
+        delete(instance.entriesByToken, tokenString)
+    }
 }
 
 func (instance *InMemoryTokenStore) DeleteByUser(userIdentifier string) int {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    removed := 0
-    for tokenString, entry := range instance.entriesByToken {
-        if entry.claims.UserIdentifier == userIdentifier {
-            delete(instance.entriesByToken, tokenString)
-            removed++
-        }
+    tokens, exists := instance.tokensByUser[userIdentifier]
+    if false == exists {
+        return 0
     }
+
+    removed := 0
+    for tokenString := range tokens {
+        delete(instance.entriesByToken, tokenString)
+        removed++
+    }
+
+    delete(instance.tokensByUser, userIdentifier)
 
     return removed
 }
@@ -89,6 +156,7 @@ func (instance *InMemoryTokenStore) PurgeExpired() int {
     purged := 0
     for tokenString, entry := range instance.entriesByToken {
         if false == entry.expiresAt.IsZero() && true == now.After(entry.expiresAt) {
+            instance.unindexLocked(entry.claims.UserIdentifier, tokenString)
             delete(instance.entriesByToken, tokenString)
             purged++
         }
@@ -113,7 +181,7 @@ func (instance *InMemoryTokenStore) Lookup(
         return securitycontract.Claims{}, false, nil
     }
 
-    return entry.claims, true, nil
+    return cloneClaims(entry.claims), true, nil
 }
 
-var _ securitycontract.TokenStore = (*InMemoryTokenStore)(nil)
+var _ securitycontract.RevocableTokenStore = (*InMemoryTokenStore)(nil)

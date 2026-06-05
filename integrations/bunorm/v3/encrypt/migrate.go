@@ -8,6 +8,7 @@ import (
 
     "github.com/precision-soft/melody/v3/exception"
     "github.com/uptrace/bun"
+    "github.com/uptrace/bun/dialect"
 )
 
 const defaultMigrateBatchSize = 500
@@ -22,13 +23,24 @@ type TableSpec struct {
     PrimaryKey string
     Columns    []string
     BatchSize  int
+
+    /**
+     * Deterministic marks the columns as searchable (deterministic) encryption. It MUST be set for a
+     * column written with EncryptDeterministic / EncryptedDeterministicString: a re-encrypt then
+     * re-derives the plaintext-bound nonce under the target key so the column stays searchable.
+     * Leaving it false on a deterministic column would rewrite it with random nonces and silently
+     * break equality lookups.
+     */
+    Deterministic bool
 }
 
 /**
  * Migrator performs bulk encrypt / re-encrypt / decrypt over a table's columns using the cipher
- * directly (not the process-wide EncryptedString cipher). All operations are idempotent thanks to
- * the encryption marker: encrypting an already-encrypted value is a no-op, and decrypting plaintext
- * passes through. SQL is emitted for the MySQL dialect (backtick-quoted identifiers).
+ * directly (not the process-wide EncryptedString cipher). All operations are idempotent: encrypting
+ * an already-encrypted value is a no-op, decrypting plaintext passes through, and re-encrypting a row
+ * already written under the target key is skipped. Rows are updated one at a time (no surrounding
+ * transaction), so a run can be safely re-run after a failure to resume the remaining rows. SQL is
+ * emitted for the MySQL dialect (backtick-quoted identifiers); other dialects are rejected.
  */
 type Migrator struct {
     db     *bun.DB
@@ -44,6 +56,14 @@ func NewMigrator(db *bun.DB, cipher Cipher) *Migrator {
         exception.Panic(exception.NewError("migrator cipher is nil", nil, nil))
     }
 
+    if dialect.MySQL != db.Dialect().Name() {
+        exception.Panic(exception.NewError(
+            "migrator requires a mysql dialect",
+            map[string]any{"dialect": db.Dialect().Name().String()},
+            nil,
+        ))
+    }
+
     return &Migrator{db: db, cipher: cipher}
 }
 
@@ -54,12 +74,20 @@ func (instance *Migrator) MigrateEncrypt(ctx context.Context, spec TableSpec) (i
     })
 }
 
-/** MigrateReencrypt decrypts each value with whichever key wrote it, then re-encrypts under targetKeyId (key rotation). */
+/** MigrateReencrypt decrypts each value with whichever key wrote it, then re-encrypts under targetKeyId (key rotation). Rows already written under targetKeyId are left untouched. Deterministic columns (spec.Deterministic) re-derive the searchable nonce under the target key so equality lookups keep working. */
 func (instance *Migrator) MigrateReencrypt(ctx context.Context, spec TableSpec, targetKeyId string) (int, error) {
     return instance.run(ctx, spec, func(value string) (string, error) {
+        if currentKeyId, encrypted := keyIdOf(value); true == encrypted && currentKeyId == targetKeyId {
+            return value, nil
+        }
+
         plaintext, decryptErr := instance.cipher.Decrypt(value)
         if nil != decryptErr {
             return "", decryptErr
+        }
+
+        if true == spec.Deterministic {
+            return instance.cipher.EncryptDeterministicWithKeyId(plaintext, targetKeyId)
         }
 
         return instance.cipher.EncryptWithKeyId(plaintext, targetKeyId)

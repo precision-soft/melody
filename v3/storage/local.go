@@ -17,13 +17,24 @@ func NewLocalStorage(baseDirectory string) *LocalStorage {
         exception.Panic(exception.NewError("local storage base directory is empty", nil, nil))
     }
 
+    cleanedBase := filepath.Clean(baseDirectory)
+
+    resolvedBase, resolveErr := filepath.EvalSymlinks(cleanedBase)
+    if nil != resolveErr {
+        resolvedBase = cleanedBase
+    }
+
     return &LocalStorage{
         baseDirectory: baseDirectory,
+        cleanedBase:   cleanedBase,
+        resolvedBase:  resolvedBase,
     }
 }
 
 type LocalStorage struct {
     baseDirectory string
+    cleanedBase   string
+    resolvedBase  string
 }
 
 func (instance *LocalStorage) Put(
@@ -122,7 +133,7 @@ func (instance *LocalStorage) resolvePath(key string) (string, error) {
     cleaned := filepath.Clean("/" + strings.ReplaceAll(key, "\\", "/"))
     target := filepath.Join(instance.baseDirectory, cleaned)
 
-    base := filepath.Clean(instance.baseDirectory)
+    base := instance.cleanedBase
     if target == base {
         return "", exception.NewError("storage key is empty or invalid", map[string]any{"key": key}, nil)
     }
@@ -131,18 +142,15 @@ func (instance *LocalStorage) resolvePath(key string) (string, error) {
         return "", exception.NewError("storage key escapes the base directory", map[string]any{"key": key}, nil)
     }
 
-    if escapeErr := instance.ensureNoSymlinkEscape(base, target); nil != escapeErr {
+    if escapeErr := instance.ensureNoSymlinkEscape(target); nil != escapeErr {
         return "", exception.NewError("storage key escapes the base directory via a symlink", map[string]any{"key": key}, escapeErr)
     }
 
     return target, nil
 }
 
-func (instance *LocalStorage) ensureNoSymlinkEscape(base string, target string) error {
-    realBase, baseErr := filepath.EvalSymlinks(base)
-    if nil != baseErr {
-        realBase = base
-    }
+func (instance *LocalStorage) ensureNoSymlinkEscape(target string) error {
+    realBase := instance.resolvedBase
 
     existing := target
     for {

@@ -64,7 +64,12 @@ func (instance *Storage) Get(
 
     if _, statErr := object.Stat(); nil != statErr {
         object.Close()
-        return nil, exception.NewError("object storage object not found", map[string]any{"key": key}, statErr)
+
+        if "NoSuchKey" == minio.ToErrorResponse(statErr).Code {
+            return nil, exception.NewError("object storage object not found", map[string]any{"key": key}, statErr)
+        }
+
+        return nil, exception.NewError("object storage get failed", map[string]any{"key": key}, statErr)
     }
 
     return object, nil

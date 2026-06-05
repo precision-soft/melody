@@ -34,6 +34,10 @@ func (instance *OpaqueTokenValidator) Validate(
         return securitycontract.Claims{}, exception.NewError("opaque token was not found", nil, nil)
     }
 
+    if "" == claims.UserIdentifier {
+        return securitycontract.Claims{}, exception.NewError("opaque token has an empty subject", nil, nil)
+    }
+
     return claims, nil
 }
 

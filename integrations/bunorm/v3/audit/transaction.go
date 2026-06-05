@@ -52,7 +52,7 @@ func BeginTransaction(ctx context.Context, database *bun.DB, actor string, extra
         CreatedAt: time.Now(),
     }
 
-    if _, insertErr := database.NewInsert().Model(&transaction).Exec(ctx); nil != insertErr {
+    if _, insertErr := databaseFromContext(ctx, database).NewInsert().Model(&transaction).Exec(ctx); nil != insertErr {
         return ctx, 0, exception.NewError("could not open the audit transaction", nil, insertErr)
     }
 

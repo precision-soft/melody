@@ -3,6 +3,8 @@ package audit_test
 import (
     "testing"
 
+    "github.com/uptrace/bun"
+
     "github.com/precision-soft/melody/integrations/bunorm/v3/audit"
     "github.com/precision-soft/melody/integrations/bunorm/v3/encrypt"
 )
@@ -65,6 +67,58 @@ type account struct {
     Email    string                  `bun:"email"`
     ApiKey   string                  `bun:"api_key" audit:"redact"`
     Password encrypt.EncryptedString `bun:"password"`
+}
+
+type EmbeddedAuditFields struct {
+    Status    string `bun:"status"`
+    UpdatedBy string `bun:"updated_by"`
+}
+
+type orderRow struct {
+    bun.BaseModel `bun:"table:orders"`
+    EmbeddedAuditFields
+    Id    int64 `bun:"id,pk"`
+    Total int   `bun:"total"`
+}
+
+func TestRegistry_RejectsInvalidDefaultTableName(t *testing.T) {
+    defer func() {
+        if nil == recover() {
+            t.Fatalf("expected a panic for an invalid default table name")
+        }
+    }()
+
+    audit.NewRegistry("audit; DROP TABLE users")
+}
+
+func TestRegistry_RejectsInvalidEntityTableName(t *testing.T) {
+    defer func() {
+        if nil == recover() {
+            t.Fatalf("expected a panic for an invalid entity table name")
+        }
+    }()
+
+    audit.NewRegistry("melody_audit").Register("order", audit.EntityOptions{Table: "orders`; DROP"})
+}
+
+func TestChangeSet_CapturesPromotedEmbeddedStructFields(t *testing.T) {
+    before := orderRow{EmbeddedAuditFields: EmbeddedAuditFields{Status: "open", UpdatedBy: "alice"}, Id: 1, Total: 100}
+    after := orderRow{EmbeddedAuditFields: EmbeddedAuditFields{Status: "closed", UpdatedBy: "alice"}, Id: 1, Total: 150}
+
+    changes := audit.ChangeSet(before, after)
+
+    statusChange, found := findChange(changes, "status")
+    if false == found || "open" != statusChange.Old || "closed" != statusChange.New {
+        t.Fatalf("expected the embedded status field to be captured: %+v", changes)
+    }
+
+    if _, found := findChange(changes, "total"); false == found {
+        t.Fatalf("expected the top-level total field to be captured: %+v", changes)
+    }
+
+    if _, found := findChange(changes, "updated_by"); true == found {
+        t.Fatalf("did not expect the unchanged embedded updated_by field: %+v", changes)
+    }
 }
 
 func TestChangeSet_RedactsTaggedAndEncryptedFields(t *testing.T) {

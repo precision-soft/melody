@@ -155,6 +155,74 @@ func TestGenerate_NumericConstraintsEmbeddingAndNullability(t *testing.T) {
     }
 }
 
+type nullableRefRequest struct {
+    Audit *embeddedAudit `json:"audit,omitempty"`
+}
+
+func TestGenerate_NullablePointerToStructUsesAllOf(t *testing.T) {
+    registry := openapi.NewRegistry()
+    registry.Describe("nullable.create", openapi.Descriptor{
+        RequestType: openapi.TypeOf[nullableRefRequest](),
+    })
+
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "nullable.create", pattern: "/nullable/", methods: []string{"POST"}},
+    }
+
+    document := openapi.Generate(openapi.Info{Title: "Example", Version: "1.0.0"}, routes, registry)
+
+    auditField := document.Components.Schemas["nullableRefRequest"].Properties["audit"]
+    if nil == auditField {
+        t.Fatalf("expected the audit property")
+    }
+
+    if "" != auditField.Ref {
+        t.Fatalf("a nullable $ref must not set Ref directly (OAS 3.0 ignores $ref siblings): %+v", auditField)
+    }
+
+    if false == auditField.Nullable {
+        t.Fatalf("expected the audit property to be nullable: %+v", auditField)
+    }
+
+    if 1 != len(auditField.AllOf) || "#/components/schemas/embeddedAudit" != auditField.AllOf[0].Ref {
+        t.Fatalf("expected allOf wrapping the $ref, got: %+v", auditField)
+    }
+}
+
+type taggedRequest struct {
+    Tags []string `json:"tags" validate:"min=1,max=5"`
+}
+
+func TestGenerate_ArrayConstraintsBecomeItemBounds(t *testing.T) {
+    registry := openapi.NewRegistry()
+    registry.Describe("tags.create", openapi.Descriptor{
+        RequestType: openapi.TypeOf[taggedRequest](),
+    })
+
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "tags.create", pattern: "/tags/", methods: []string{"POST"}},
+    }
+
+    document := openapi.Generate(openapi.Info{Title: "Example", Version: "1.0.0"}, routes, registry)
+
+    tags := document.Components.Schemas["taggedRequest"].Properties["tags"]
+    if nil == tags || "array" != tags.Type {
+        t.Fatalf("expected an array tags property, got: %+v", tags)
+    }
+
+    if nil == tags.MinItems || 1 != *tags.MinItems {
+        t.Fatalf("expected minItems of 1, got: %+v", tags.MinItems)
+    }
+
+    if nil == tags.MaxItems || 5 != *tags.MaxItems {
+        t.Fatalf("expected maxItems of 5, got: %+v", tags.MaxItems)
+    }
+
+    if nil != tags.MinLength || nil != tags.Minimum {
+        t.Fatalf("expected array constraints not to leak into minLength/minimum, got: %+v", tags)
+    }
+}
+
 func keysOf(paths map[string]openapi.PathItem) []string {
     keys := make([]string, 0, len(paths))
     for key := range paths {

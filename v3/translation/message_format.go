@@ -43,7 +43,7 @@ func interpolate(runes []rune, parameters map[string]any, locale string, pound s
             continue
         }
 
-        builder.WriteString(evaluateArgument(runes[index+1:closeIndex], parameters, locale, depth))
+        builder.WriteString(evaluateArgument(runes[index+1:closeIndex], parameters, locale, pound, inPlural, depth))
         index = closeIndex + 1
     }
 
@@ -66,7 +66,7 @@ func matchingBrace(runes []rune, openIndex int) int {
     return -1
 }
 
-func evaluateArgument(inner []rune, parameters map[string]any, locale string, depth int) string {
+func evaluateArgument(inner []rune, parameters map[string]any, locale string, pound string, inPlural bool, depth int) string {
     name, remainder, hasType := splitFirstComma(inner)
     trimmedName := strings.TrimSpace(string(name))
 
@@ -85,13 +85,13 @@ func evaluateArgument(inner []rune, parameters map[string]any, locale string, de
     case "plural":
         return evaluatePlural(trimmedName, style, parameters, locale, depth)
     case "select":
-        return evaluateSelect(trimmedName, style, parameters, locale, depth)
+        return evaluateSelect(trimmedName, style, parameters, locale, pound, inPlural, depth)
     default:
         return stringifyParameter(parameters[trimmedName])
     }
 }
 
-func evaluateSelect(name string, style []rune, parameters map[string]any, locale string, depth int) string {
+func evaluateSelect(name string, style []rune, parameters map[string]any, locale string, pound string, inPlural bool, depth int) string {
     selectors := parseSelectors(style)
 
     keyword := stringifyParameter(parameters[name])
@@ -104,7 +104,7 @@ func evaluateSelect(name string, style []rune, parameters map[string]any, locale
         return ""
     }
 
-    return interpolate(block, parameters, locale, "", false, depth+1)
+    return interpolate(block, parameters, locale, pound, inPlural, depth+1)
 }
 
 func evaluatePlural(name string, style []rune, parameters map[string]any, locale string, depth int) string {

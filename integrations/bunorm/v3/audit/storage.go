@@ -19,6 +19,22 @@ type Storage interface {
     Save(ctx context.Context, table string, entries ...Entry) error
 }
 
+type databaseContextKey struct{}
+
+/** withDatabase binds a bun handle (typically a transaction) to the context so a BunStorage write joins the caller's unit of work instead of running on the raw pool. */
+func withDatabase(ctx context.Context, database bun.IDB) context.Context {
+    return context.WithValue(ctx, databaseContextKey{}, database)
+}
+
+/** databaseFromContext returns the bun handle bound by withDatabase, or the fallback when none is present. */
+func databaseFromContext(ctx context.Context, fallback bun.IDB) bun.IDB {
+    if database, bound := ctx.Value(databaseContextKey{}).(bun.IDB); true == bound && nil != database {
+        return database
+    }
+
+    return fallback
+}
+
 /** NewBunStorage writes audit entries as rows via bun, routing each batch to the given table. */
 func NewBunStorage(database *bun.DB) *BunStorage {
     if nil == database {
@@ -44,7 +60,9 @@ func (instance *BunStorage) Save(ctx context.Context, table string, entries ...E
     rows := make([]Entry, len(entries))
     copy(rows, entries)
 
-    _, insertErr := instance.database.NewInsert().Model(&rows).ModelTableExpr(table).Exec(ctx)
+    database := databaseFromContext(ctx, instance.database)
+
+    _, insertErr := database.NewInsert().Model(&rows).ModelTableExpr(table).Exec(ctx)
     if nil != insertErr {
         return exception.NewError("could not write the audit entries", map[string]any{"table": table}, insertErr)
     }
@@ -97,6 +115,10 @@ func (instance *FileStorage) Save(ctx context.Context, table string, entries ...
         if _, writeErr := file.Write(append(line, '\n')); nil != writeErr {
             return exception.NewError("could not append to the audit file", map[string]any{"path": instance.path}, writeErr)
         }
+    }
+
+    if syncErr := file.Sync(); nil != syncErr {
+        return exception.NewError("could not flush the audit file", map[string]any{"path": instance.path}, syncErr)
     }
 
     return nil

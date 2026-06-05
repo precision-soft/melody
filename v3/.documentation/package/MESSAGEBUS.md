@@ -111,9 +111,14 @@ Consuming asynchronously is done with the [`ConsumeCommand`](../../messagebus/co
 ```sh
 app melody:messagebus:consume --transport=async
 app melody:messagebus:consume --transport=async --limit=100
+app melody:messagebus:consume --transport=async --concurrency=8
 ```
 
-The consumer loops over the transport, dispatches each received envelope to a handle-only bus, and acknowledges on success or negatively acknowledges (with requeue) on failure. It shuts down cooperatively on `SIGINT`/`SIGTERM` or when the runtime context is cancelled, and closes the transport on exit (releasing its consumption resources; `Close` is idempotent).
+The consumer loops over the transport, dispatches each received envelope to a handle-only bus, and acknowledges on success or negatively acknowledges (with requeue) on failure. It shuts down cooperatively on `SIGINT`/`SIGTERM` or when the runtime context is cancelled. The transport's lifecycle is owned by the application, not the consumer — the consumer does **not** call `Close` on exit, so a transport shared between the dispatcher and the consumer in the same process keeps working after the consume command returns (the process exit releases a durable transport's connections). If the delivery channel closes without a cancelled context (for example a lost broker connection), the consumer returns an error rather than reporting a clean exit, so a supervisor can tell a crash from a graceful stop.
+
+By default the consumer handles one message at a time (so the broker's prefetch only buffers). Pass `--concurrency=N` to run N worker goroutines reading the same transport; per-transport `Ack`/`Nack` stay serialized, so this is safe. On shutdown the consumer waits a bounded grace period (default 30s, set with `ConsumeCommand.WithShutdownGrace`) for in-flight handlers to drain, then returns even if a handler is still running — handlers are not context-aware, so this stops a wedged handler from blocking shutdown forever. Messages already received but not yet acked are redelivered on the next run (at-least-once), so handlers must be idempotent.
+
+Poison messages (a delivery that can never decode) are nacked without requeue. With a durable transport this lands them in the configured dead-letter queue (enable `DeadLetter` on the AMQP transport); **without** a DLQ the broker discards them. Enable a DLQ in production so an undecodable message is retained for inspection rather than dropped.
 
 A runnable end-to-end demonstration lives in the example application: [`messagebus:demo`](../../.example/cli/messagebus_demo_command.go), wired in [`.example/config/messagebus.go`](../../.example/config/messagebus.go).
 
@@ -124,6 +129,8 @@ A runnable end-to-end demonstration lives in the example application: [`messageb
 - [`RegisterHandler`](../../messagebus/locator.go) keys handlers by the exact Go type of the message, including pointer vs value. Dispatch the same type you registered.
 - [`NewSendMessageMiddleware`](../../messagebus/middleware_send.go) stops the stack after a successful send, so handle middleware placed after it does not run for routed messages. This is the intended synchronous/asynchronous split.
 - The consumer dispatches one message at a time per invocation; run multiple consumers for parallelism.
+- Retries are **at-least-once**: a durable transport that carries the redelivery count by re-publishing (the AMQP binding) can, on a crash between the re-publish and the original's ack, redeliver the original alongside the re-published copy. Handlers must be idempotent. The redelivery count stamped on an exhausted/dead-lettered message is the number of *redeliveries*, which is one less than the number of handler *attempts*.
+- The retry backoff is capped and overflow-safe. [`InMemoryTransport`](../../messagebus/transport_in_memory.go) honors a `DelayStamp` by re-pushing after the delay (it no longer hot-retries), and drops a requeue if its buffer is full or the transport is closed — acceptable for a dev transport, but another reason to use a durable transport in production.
 
 ## Userland API
 

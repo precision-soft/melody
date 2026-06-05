@@ -25,7 +25,11 @@ const (
     /** label for the HMAC-based derivation of the per-key deterministic nonce sub-key */
     deterministicNonceLabel = "melody/encrypt/deterministic-nonce/v1"
 
-    /** lower bound on the decoded payload length used only for the structural looksEncrypted check */
+    /**
+     * minNonceSize is the GCM standard nonce size. It is the structural lower bound for the
+     * looksEncrypted payload check and is enforced as an invariant in gcmForKey, so the keyless
+     * structural check and the real decode can never disagree on the nonce length.
+     */
     minNonceSize = 12
 )
 
@@ -44,9 +48,21 @@ type Cipher interface {
     /**
      * EncryptDeterministic derives the nonce from the plaintext, so equal plaintext yields equal
      * ciphertext under the same key — enabling encrypted-column equality lookups. It reveals
-     * plaintext equality and must only be used on low-entropy lookup fields.
+     * plaintext equality and must only be used on low-entropy lookup fields. The nonce is keyed only
+     * by (key, plaintext), so equal plaintext produces byte-identical ciphertext ACROSS EVERY
+     * deterministic column and table under the same key, not just within one column — an observer of
+     * the ciphertext can therefore correlate equal values across rows and tables. Do not use it where
+     * cross-column equality must stay hidden.
      */
     EncryptDeterministic(plaintext string) (string, error)
+
+    /**
+     * EncryptDeterministicWithKeyId is EncryptDeterministic under an explicit key id. It exists so a
+     * key-rotation migration over a searchable column re-derives the deterministic nonce under the
+     * target key, keeping the column searchable — EncryptWithKeyId uses a random nonce and would
+     * silently break equality lookups on a deterministic column.
+     */
+    EncryptDeterministicWithKeyId(plaintext string, keyId string) (string, error)
 
     /**
      * CiphertextCandidates returns one deterministic ciphertext per active key id (current first),
@@ -93,6 +109,14 @@ func (instance *aes256Cipher) EncryptDeterministic(plaintext string) (string, er
     }
 
     return instance.seal(plaintext, instance.keys.CurrentKeyId(), true)
+}
+
+func (instance *aes256Cipher) EncryptDeterministicWithKeyId(plaintext string, keyId string) (string, error) {
+    if true == looksEncrypted(plaintext) {
+        return plaintext, nil
+    }
+
+    return instance.seal(plaintext, keyId, true)
 }
 
 func (instance *aes256Cipher) CiphertextCandidates(plaintext string) ([]string, error) {
@@ -193,7 +217,26 @@ func gcmForKey(key []byte, keyId string) (cipher.AEAD, error) {
         return nil, exception.NewError("could not create gcm", map[string]any{"keyId": keyId}, gcmErr)
     }
 
+    if minNonceSize != gcm.NonceSize() {
+        return nil, exception.NewError(
+            "unexpected gcm nonce size",
+            map[string]any{"keyId": keyId, "nonceSize": gcm.NonceSize()},
+            nil,
+        )
+    }
+
     return gcm, nil
+}
+
+func keyIdOf(encoded string) (string, bool) {
+    if false == looksEncrypted(encoded) {
+        return "", false
+    }
+
+    body := encoded[len(markerPrefix):]
+    separator := strings.IndexByte(body, ':')
+
+    return body[:separator], true
 }
 
 /**

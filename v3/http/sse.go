@@ -47,13 +47,13 @@ func (instance *SseWriter) Send(event SseEvent) error {
 
     if "" != event.Id {
         builder.WriteString("id: ")
-        builder.WriteString(event.Id)
+        builder.WriteString(sanitizeSseField(event.Id))
         builder.WriteString("\n")
     }
 
     if "" != event.Event {
         builder.WriteString("event: ")
-        builder.WriteString(event.Event)
+        builder.WriteString(sanitizeSseField(event.Event))
         builder.WriteString("\n")
     }
 
@@ -79,6 +79,11 @@ func (instance *SseWriter) Send(event SseEvent) error {
     instance.flusher.Flush()
 
     return nil
+}
+
+/** sanitizeSseField strips CR and LF from a single-line SSE field (id/event) so a caller-supplied value cannot inject extra SSE lines or events. */
+func sanitizeSseField(value string) string {
+    return strings.NewReplacer("\r", "", "\n", "").Replace(value)
 }
 
 func (instance *SseWriter) Comment(text string) error {

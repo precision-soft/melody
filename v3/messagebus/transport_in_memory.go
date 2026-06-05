@@ -2,8 +2,10 @@ package messagebus
 
 import (
     "sync"
+    "time"
 
     "github.com/precision-soft/melody/v3/exception"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     messagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
@@ -19,6 +21,14 @@ type InMemoryTransport struct {
     queue     chan messagebuscontract.Envelope
     done      chan struct{}
     closeOnce sync.Once
+    logger    loggingcontract.Logger
+}
+
+/** WithLogger sets a logger so a delayed requeue dropped on a full/closed queue is reported instead of vanishing silently. */
+func (instance *InMemoryTransport) WithLogger(logger loggingcontract.Logger) *InMemoryTransport {
+    instance.logger = logger
+
+    return instance
 }
 
 func (instance *InMemoryTransport) Send(
@@ -75,11 +85,36 @@ func (instance *InMemoryTransport) Nack(
         return nil
     }
 
+    if delayStamp, hasDelay := LastStampOfType[DelayStamp](envelopeInstance); true == hasDelay && 0 < delayStamp.Delay {
+        go instance.requeueAfter(envelopeInstance, delayStamp.Delay)
+
+        return nil
+    }
+
+    return instance.requeue(envelopeInstance)
+}
+
+func (instance *InMemoryTransport) requeue(envelopeInstance messagebuscontract.Envelope) error {
     select {
     case instance.queue <- envelopeInstance:
         return nil
+    case <-instance.done:
+        return exception.NewError("in-memory transport is closed", nil, nil)
     default:
         return exception.NewError("in-memory transport queue is full, dropped the requeued message", nil, nil)
+    }
+}
+
+func (instance *InMemoryTransport) requeueAfter(envelopeInstance messagebuscontract.Envelope, delay time.Duration) {
+    timer := time.NewTimer(delay)
+    defer timer.Stop()
+
+    select {
+    case <-timer.C:
+        if requeueErr := instance.requeue(envelopeInstance); nil != requeueErr && nil != instance.logger {
+            instance.logger.Error("in-memory transport dropped a delayed requeue", loggingcontract.Context{"error": requeueErr.Error()})
+        }
+    case <-instance.done:
     }
 }
 

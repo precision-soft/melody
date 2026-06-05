@@ -77,6 +77,7 @@ type MediaType struct {
 
 type Schema struct {
     Ref                  string             `json:"$ref,omitempty"`
+    AllOf                []*Schema          `json:"allOf,omitempty"`
     Type                 string             `json:"type,omitempty"`
     Format               string             `json:"format,omitempty"`
     Description          string             `json:"description,omitempty"`
@@ -85,9 +86,10 @@ type Schema struct {
     Required             []string           `json:"required,omitempty"`
     Items                *Schema            `json:"items,omitempty"`
     AdditionalProperties *Schema            `json:"additionalProperties,omitempty"`
-    Enum                 []any              `json:"enum,omitempty"`
     MinLength            *int               `json:"minLength,omitempty"`
     MaxLength            *int               `json:"maxLength,omitempty"`
+    MinItems             *int               `json:"minItems,omitempty"`
+    MaxItems             *int               `json:"maxItems,omitempty"`
     Minimum              *float64           `json:"minimum,omitempty"`
     Maximum              *float64           `json:"maximum,omitempty"`
     ExclusiveMinimum     *bool              `json:"exclusiveMinimum,omitempty"`

@@ -30,7 +30,7 @@ func NewTracingMiddleware(tracer trace.Tracer, propagator propagation.TextMapPro
                 trace.WithSpanKind(trace.SpanKindServer),
                 trace.WithAttributes(
                     attribute.String("http.request.method", httpRequest.Method),
-                    attribute.String("http.route", request.RoutePattern()),
+                    attribute.String("http.route", routeLabel(request)),
                 ),
             )
             defer span.End()
@@ -67,10 +67,5 @@ func NewTracingMiddleware(tracer trace.Tracer, propagator propagation.TextMapPro
 }
 
 func spanName(request httpcontract.Request) string {
-    route := request.RoutePattern()
-    if "" == route {
-        route = request.HttpRequest().URL.Path
-    }
-
-    return request.HttpRequest().Method + " " + route
+    return request.HttpRequest().Method + " " + routeLabel(request)
 }

@@ -245,8 +245,8 @@ var _ applicationcontract.HttpModule = (*adminSecurityModule)(nil)
 
 For stateless APIs, [`BearerTokenSource`](../../security/bearer_token_source.go) extracts an `Authorization: Bearer <token>` header and delegates validation to a pluggable [`TokenValidator`](../../security/contract/token_validator.go). Two validators ship in the package:
 
-- [`JwtTokenValidator`](../../security/jwt_token_validator.go) — verifies HS256 JWTs with a shared secret (stdlib only, no external dependency), checks `exp`/`nbf`, and maps the subject and roles claims to [`Claims`](../../security/contract/token_validator.go). Self-contained; no per-request lookup.
-- [`OpaqueTokenValidator`](../../security/opaque_token_validator.go) — looks the token up in a [`TokenStore`](../../security/contract/token_store.go), so tokens are revocable. [`InMemoryTokenStore`](../../security/in_memory_token_store.go) ships for tests/dev; a Redis-backed store can implement the same interface.
+- [`JwtTokenValidator`](../../security/jwt_token_validator.go) — verifies HS256 JWTs with a shared secret (stdlib only, no external dependency), checks `exp`/`nbf`, and maps the subject and roles claims to [`Claims`](../../security/contract/token_validator.go). A token with an empty, absent, or non-string subject is rejected (it must never authenticate as the empty principal `""`). A future `iat` is accepted by default (RFC 7519 treats `iat` as informational); set `JwtConfig.RejectFutureIssuedAt` to reject it instead. Self-contained; no per-request lookup.
+- [`OpaqueTokenValidator`](../../security/opaque_token_validator.go) — looks the token up in a [`TokenStore`](../../security/contract/token_store.go), so tokens are revocable (a stored token with an empty subject is rejected). [`InMemoryTokenStore`](../../security/in_memory_token_store.go) ships for tests/dev; a Redis-backed store can implement [`RevocableTokenStore`](../../security/contract/token_store.go) (the `TokenStore` lookup interface plus `Put`/`PutWithTtl`/`Delete`/`DeleteByUser`/`PurgeExpired`) to keep the full revocation surface behind the interface. Roles enrichment runs only via the bearer source's enricher, not the validator.
 
 A failed or missing token resolves to an anonymous token, so the firewall's entry point decides the response. [`JsonEntryPoint`](../../security/json_entry_point.go) (401) and [`JsonAccessDeniedHandler`](../../security/json_access_denied_handler.go) (403) return JSON instead of redirecting — set them globally for pure-API apps.
 
@@ -279,6 +279,8 @@ The example application wires a stateless `/secure` firewall (`config/security.g
 #### Resolving roles after validation (enrichment hook)
 
 When the token only carries an opaque scope (e.g. a tenant/application identifier) and the real roles live in a database, implement the generic [`TokenEnricher`](../../security/contract/token_enricher.go) and wire it with [`NewBearerTokenSourceWithEnricher`](../../security/bearer_token_source.go). It runs **after** the signature is validated and turns the token's `Claims.Scope` into the final roles/attributes. The library ships only the interface and the wiring — any tenant- or product-specific resolution lives in your enricher, keeping the security package generic. An enrichment error falls back to an anonymous token (the firewall then decides the response).
+
+The enriched [`AuthenticatedToken`](../../security/authenticated_token.go) carries the resolved `Scope()` and `Attributes()` alongside `Roles()` (both accessors return defensive copies), so attribute-based access control downstream can read the tenant/attribute data the enricher attached — not only the roles.
 
 To feed the enricher, the JWT validator can copy an object claim into `Claims.Scope` via `JwtConfig.ScopeClaim`:
 

@@ -297,3 +297,69 @@ func TestManager_SendValidatesAndDelegates(t *testing.T) {
         t.Fatalf("expected one recorded message, got %d", len(sent))
     }
 }
+
+func TestRenderMessage_FoldsLongAsciiSubject(t *testing.T) {
+    payload, renderErr := mailer.RenderMessage(mailercontract.Message{
+        From:    mailercontract.Address{Email: "shop@example.com"},
+        To:      []mailercontract.Address{{Email: "ada@example.com"}},
+        Subject: strings.TrimSpace(strings.Repeat("word ", 60)),
+        Text:    "body",
+    })
+    if nil != renderErr {
+        t.Fatalf("render: %v", renderErr)
+    }
+
+    sawFoldedSubject := false
+    for _, line := range strings.Split(string(payload), "\r\n") {
+        if 998 < len(line) {
+            t.Fatalf("rendered header line exceeds the RFC 5322 limit: %d", len(line))
+        }
+        if true == strings.HasPrefix(line, " word") {
+            sawFoldedSubject = true
+        }
+    }
+
+    if false == sawFoldedSubject {
+        t.Fatalf("expected the long subject to be folded onto continuation lines")
+    }
+}
+
+func TestManager_RejectsMalformedAddress(t *testing.T) {
+    transport := mailer.NewInMemoryTransport()
+    manager := mailer.NewManager(transport)
+
+    sendErr := manager.Send(testRuntime(), mailercontract.Message{
+        From: mailercontract.Address{Email: "shop@example.com"},
+        To:   []mailercontract.Address{{Email: "ada@example.com>, attacker@evil.com"}},
+        Text: "body",
+    })
+    if nil == sendErr {
+        t.Fatalf("expected a malformed recipient address to be rejected")
+    }
+
+    if 0 != len(transport.Sent()) {
+        t.Fatalf("expected nothing to be delivered when validation fails")
+    }
+}
+
+func TestRenderMessage_SkipsEmptyBodyPartWithAttachments(t *testing.T) {
+    payload, renderErr := mailer.RenderMessage(mailercontract.Message{
+        From: mailercontract.Address{Email: "shop@example.com"},
+        To:   []mailercontract.Address{{Email: "ada@example.com"}},
+        Attachments: []mailercontract.Attachment{
+            {Filename: "a.txt", Content: []byte("hello")},
+        },
+    })
+    if nil != renderErr {
+        t.Fatalf("render: %v", renderErr)
+    }
+
+    rendered := string(payload)
+    if true == strings.Contains(rendered, "text/plain; charset=utf-8") {
+        t.Fatalf("expected no empty text/plain body part when the body is empty, got:\n%s", rendered)
+    }
+
+    if false == strings.Contains(rendered, "Content-Disposition: attachment") {
+        t.Fatalf("expected the attachment part to be present")
+    }
+}

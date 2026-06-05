@@ -15,6 +15,8 @@ import (
 
 const lineBreak = "\r\n"
 
+const maxHeaderLineLength = 78
+
 var reservedHeaders = map[string]struct{}{
     "from":                      {},
     "to":                        {},
@@ -54,6 +56,10 @@ func RenderMessage(message mailercontract.Message) ([]byte, error) {
     writeHeader(&builder, "Date", time.Now().Format(time.RFC1123Z))
     writeHeader(&builder, "MIME-Version", "1.0")
 
+    if false == hasHeader(message.Headers, "message-id") {
+        writeHeader(&builder, "Message-ID", newMessageId(message.From.Email))
+    }
+
     for key, value := range message.Headers {
         if _, reserved := reservedHeaders[strings.ToLower(strings.TrimSpace(key))]; true == reserved {
             continue
@@ -71,8 +77,10 @@ func RenderMessage(message mailercontract.Message) ([]byte, error) {
     writeHeader(&builder, "Content-Type", "multipart/mixed; boundary=\""+boundary+"\"")
     builder.WriteString(lineBreak)
 
-    builder.WriteString("--" + boundary + lineBreak)
-    writeBodyEntity(&builder, message)
+    if true == hasBody(message) {
+        builder.WriteString("--" + boundary + lineBreak)
+        writeBodyEntity(&builder, message)
+    }
 
     for _, attachment := range message.Attachments {
         builder.WriteString("--" + boundary + lineBreak)
@@ -82,6 +90,10 @@ func RenderMessage(message mailercontract.Message) ([]byte, error) {
     builder.WriteString("--" + boundary + "--" + lineBreak)
 
     return []byte(builder.String()), nil
+}
+
+func hasBody(message mailercontract.Message) bool {
+    return "" != message.Text || "" != message.Html
 }
 
 func writeBodyEntity(builder *strings.Builder, message mailercontract.Message) {
@@ -166,10 +178,68 @@ func formatAddressList(addresses []mailercontract.Address) string {
 }
 
 func writeHeader(builder *strings.Builder, name string, value string) {
-    builder.WriteString(headerSanitizer.Replace(name))
-    builder.WriteString(": ")
-    builder.WriteString(headerSanitizer.Replace(value))
+    builder.WriteString(foldHeaderLine(headerSanitizer.Replace(name), headerSanitizer.Replace(value)))
     builder.WriteString(lineBreak)
+}
+
+func hasHeader(headers map[string]string, name string) bool {
+    for key := range headers {
+        if name == strings.ToLower(strings.TrimSpace(key)) {
+            return true
+        }
+    }
+
+    return false
+}
+
+/** newMessageId builds a globally-unique RFC 5322 Message-ID using a random local part and the sender's domain (falling back to localhost). */
+func newMessageId(senderEmail string) string {
+    buffer := make([]byte, 16)
+    if _, readErr := rand.Read(buffer); nil != readErr {
+        exception.Panic(exception.NewError("could not generate a message id", nil, readErr))
+    }
+
+    domain := "localhost"
+    if at := strings.LastIndexByte(senderEmail, '@'); -1 != at && at+1 < len(senderEmail) {
+        domain = senderEmail[at+1:]
+    }
+
+    return "<" + hex.EncodeToString(buffer) + "@" + headerSanitizer.Replace(domain) + ">"
+}
+
+/**
+ * foldHeaderLine folds a header at existing whitespace so lines stay within maxHeaderLineLength.
+ * It never breaks inside a single token: RFC 5322 unfolding keeps the folding whitespace, so a fold
+ * inserted mid-token would corrupt the value (notably addresses). An over-long single token is
+ * therefore emitted intact on its own line — for long unstructured text use Subject, which is
+ * encoded-word chunked upstream.
+ */
+func foldHeaderLine(name string, value string) string {
+    var builder strings.Builder
+
+    builder.WriteString(name)
+    builder.WriteString(":")
+
+    lineLength := len(name) + 1
+    started := false
+
+    for _, word := range strings.Split(value, " ") {
+        if true == started && lineLength+1+len(word) > maxHeaderLineLength {
+            builder.WriteString(lineBreak)
+            builder.WriteString(" ")
+            builder.WriteString(word)
+            lineLength = 1 + len(word)
+
+            continue
+        }
+
+        builder.WriteString(" ")
+        builder.WriteString(word)
+        lineLength += 1 + len(word)
+        started = true
+    }
+
+    return builder.String()
 }
 
 func writeTextPart(builder *strings.Builder, boundary string, contentType string, body string) {

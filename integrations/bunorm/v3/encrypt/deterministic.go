@@ -11,7 +11,9 @@ import (
  * the column can be queried with equality / `IN (...)` predicates. Build the right-hand values
  * with Cipher.CiphertextCandidates so lookups survive key rotation. Because it reveals plaintext
  * equality, use it only on low-entropy lookup fields (e.g. an email used solely to find a row),
- * never on secrets where equality must stay hidden — use EncryptedString there.
+ * never on secrets where equality must stay hidden — use EncryptedString there. Note the ciphertext
+ * is identical for equal plaintext across EVERY deterministic column and table under the same key
+ * (the nonce is keyed only by key+plaintext), so equal values can be correlated across tables.
  */
 type EncryptedDeterministicString string
 

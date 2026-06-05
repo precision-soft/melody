@@ -152,9 +152,22 @@ func isPromotedEmbed(field reflect.StructField) bool {
 }
 
 func withNullable(schema *Schema, nullable bool) *Schema {
-    if true == nullable {
-        schema.Nullable = true
+    if false == nullable {
+        return schema
     }
+
+    /**
+     * A $ref carries no sibling keywords in OpenAPI 3.0 — a sibling `nullable` is ignored by
+     * spec-compliant tooling. Wrap the ref in allOf so the nullability is preserved.
+     */
+    if "" != schema.Ref {
+        return &Schema{
+            AllOf:    []*Schema{{Ref: schema.Ref}},
+            Nullable: true,
+        }
+    }
+
+    schema.Nullable = true
 
     return schema
 }
@@ -207,6 +220,8 @@ func applyValidation(schema *Schema, validateTag string) {
             if value, parseErr := strconv.Atoi(param); nil == parseErr {
                 if "string" == schema.Type {
                     schema.MinLength = &value
+                } else if "array" == schema.Type {
+                    schema.MinItems = &value
                 } else if "integer" == schema.Type || "number" == schema.Type {
                     minimum := float64(value)
                     schema.Minimum = &minimum
@@ -216,6 +231,8 @@ func applyValidation(schema *Schema, validateTag string) {
             if value, parseErr := strconv.Atoi(param); nil == parseErr {
                 if "string" == schema.Type {
                     schema.MaxLength = &value
+                } else if "array" == schema.Type {
+                    schema.MaxItems = &value
                 } else if "integer" == schema.Type || "number" == schema.Type {
                     maximum := float64(value)
                     schema.Maximum = &maximum

@@ -236,6 +236,12 @@ func (instance *Transport) Nack(
     return instance.republish(runtimeInstance, channel, stamp, envelopeInstance)
 }
 
+/**
+ * republish carries the redelivery count forward by re-publishing the message (broker requeue cannot
+ * preserve a custom header) and then acking the original. This is at-least-once: a crash between the
+ * publish and the ack leaves the original unacked AND the re-published copy in place, so the handler
+ * may see the message twice. Handlers must therefore be idempotent.
+ */
 func (instance *Transport) republish(
     runtimeInstance runtimecontract.Runtime,
     channel *amqp091.Channel,
@@ -327,7 +333,11 @@ func (instance *Transport) forwardDeliveries(
 
             envelopeInstance, decodeErr := instance.decode(delivery)
             if nil != decodeErr {
-                instance.logError(runtimeInstance, "amqp message decode failed, dead-lettering", decodeErr)
+                poisonMessage := "amqp message decode failed, dead-lettering"
+                if false == instance.deadLetter {
+                    poisonMessage = "amqp message decode failed, dropping (no dead-letter queue configured)"
+                }
+                instance.logError(runtimeInstance, poisonMessage, decodeErr)
 
                 nackErr := instance.nackChannel(channel, delivery.DeliveryTag, false)
                 if nil != nackErr {
@@ -397,6 +407,20 @@ func redeliveryCountFromHeader(headers amqp091.Table) int {
         return int(typed)
     case int64:
         return int(typed)
+    case uint:
+        return int(typed)
+    case uint8:
+        return int(typed)
+    case uint16:
+        return int(typed)
+    case uint32:
+        return int(typed)
+    case uint64:
+        return int(typed)
+    case float32:
+        return int(typed)
+    case float64:
+        return int(typed)
     default:
         return 0
     }
@@ -404,8 +428,13 @@ func redeliveryCountFromHeader(headers amqp091.Table) int {
 
 func (instance *Transport) ensurePublishChannel() (*amqp091.Channel, error) {
     instance.mutex.Lock()
+    closing := instance.closing
     existing := instance.publishChannel
     instance.mutex.Unlock()
+
+    if true == closing {
+        return nil, exception.NewError("amqp transport is closing", nil, nil)
+    }
 
     if nil != existing {
         return existing, nil
@@ -424,6 +453,11 @@ func (instance *Transport) ensurePublishChannel() (*amqp091.Channel, error) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
+    if true == instance.closing {
+        channel.Close()
+        return nil, exception.NewError("amqp transport is closing", nil, nil)
+    }
+
     if nil != instance.publishChannel {
         channel.Close()
         return instance.publishChannel, nil
@@ -436,8 +470,13 @@ func (instance *Transport) ensurePublishChannel() (*amqp091.Channel, error) {
 
 func (instance *Transport) ensureConsumeChannel() (*amqp091.Channel, error) {
     instance.mutex.Lock()
+    closing := instance.closing
     existing := instance.consumeChannel
     instance.mutex.Unlock()
+
+    if true == closing {
+        return nil, exception.NewError("amqp transport is closing", nil, nil)
+    }
 
     if nil != existing {
         return existing, nil
@@ -460,6 +499,11 @@ func (instance *Transport) ensureConsumeChannel() (*amqp091.Channel, error) {
 
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
+
+    if true == instance.closing {
+        channel.Close()
+        return nil, exception.NewError("amqp transport is closing", nil, nil)
+    }
 
     if nil != instance.consumeChannel {
         channel.Close()

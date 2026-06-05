@@ -54,6 +54,39 @@ func TestCipher_DecryptFailsWithUnknownKeyId(t *testing.T) {
     }
 }
 
+func TestCipher_EncryptDeterministicWithKeyIdStaysSearchableAcrossRotation(t *testing.T) {
+    /** two active keys: rotation target is v2 (current), v1 is the legacy key */
+    provider := encrypt.NewStaticKeyProvider("v2", map[string][]byte{"v2": newKey(2), "v1": newKey(1)})
+    cipher := encrypt.NewCipher(provider)
+
+    rotated, rotateErr := cipher.EncryptDeterministicWithKeyId("alice@example.com", "v2")
+    if nil != rotateErr {
+        t.Fatalf("deterministic encrypt with key id: %v", rotateErr)
+    }
+
+    /** deterministic under an explicit key id must be stable (same key + plaintext -> same ciphertext) */
+    again, _ := cipher.EncryptDeterministicWithKeyId("alice@example.com", "v2")
+    if rotated != again {
+        t.Fatalf("expected deterministic ciphertext to be stable, got %q vs %q", rotated, again)
+    }
+
+    /** a lookup built from CiphertextCandidates must still match the rotated value */
+    candidates, candidatesErr := cipher.CiphertextCandidates("alice@example.com")
+    if nil != candidatesErr {
+        t.Fatalf("candidates: %v", candidatesErr)
+    }
+
+    matched := false
+    for _, candidate := range candidates {
+        if candidate == rotated {
+            matched = true
+        }
+    }
+    if false == matched {
+        t.Fatalf("rotated deterministic value %q not found among lookup candidates %v", rotated, candidates)
+    }
+}
+
 func TestEncryptedString_ValueScanRoundTrip(t *testing.T) {
     provider := encrypt.NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(7)})
     encrypt.UseCipher(encrypt.NewCipher(provider))

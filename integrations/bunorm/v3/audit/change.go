@@ -5,12 +5,15 @@ import (
     "strings"
     "time"
 
+    "github.com/uptrace/bun"
+
     "github.com/precision-soft/melody/integrations/bunorm/v3/encrypt"
 )
 
 const redactedValue = "<redacted>"
 
 var encryptedStringType = reflect.TypeOf(encrypt.EncryptedString(""))
+var baseModelType = reflect.TypeOf(bun.BaseModel{})
 
 type Change struct {
     Field string `json:"field"`
@@ -23,26 +26,51 @@ func ChangeSet(before any, after any) []Change {
 }
 
 func changeSetWithIgnore(before any, after any, ignore map[string]struct{}) []Change {
-    beforeValue := structValue(before)
-    afterValue := structValue(after)
+    var changes []Change
+    collectChanges(&changes, structValue(before), structValue(after), ignore)
 
+    return changes
+}
+
+/**
+ * collectChanges appends the per-field diff of two struct values to changes. Anonymous (embedded)
+ * struct fields other than bun.BaseModel are recursed into and flattened, matching how bun promotes
+ * embedded columns into the table, so an audited embed's fields are captured rather than dropped.
+ */
+func collectChanges(changes *[]Change, beforeValue reflect.Value, afterValue reflect.Value, ignore map[string]struct{}) {
     var structType reflect.Type
     if true == beforeValue.IsValid() {
         structType = beforeValue.Type()
     } else if true == afterValue.IsValid() {
         structType = afterValue.Type()
     } else {
-        return nil
+        return
     }
 
     oldUsable := beforeValue.IsValid() && beforeValue.Type() == structType
     newUsable := afterValue.IsValid() && afterValue.Type() == structType
 
-    var changes []Change
-
     for index := 0; index < structType.NumField(); index++ {
         field := structType.Field(index)
         if false == field.IsExported() {
+            continue
+        }
+
+        if true == field.Anonymous {
+            if false == isAuditableEmbed(field) {
+                continue
+            }
+
+            var embeddedBefore reflect.Value
+            var embeddedAfter reflect.Value
+            if true == oldUsable {
+                embeddedBefore = structValueOf(beforeValue.Field(index))
+            }
+            if true == newUsable {
+                embeddedAfter = structValueOf(afterValue.Field(index))
+            }
+
+            collectChanges(changes, embeddedBefore, embeddedAfter, ignore)
             continue
         }
 
@@ -57,48 +85,77 @@ func changeSetWithIgnore(before any, after any, ignore map[string]struct{}) []Ch
 
         redact := isRedactedField(field)
 
-        oldPresent := oldUsable
-        newPresent := newUsable
-
         var oldValue any
         var newValue any
-        if true == oldPresent {
+        if true == oldUsable {
             oldValue = beforeValue.Field(index).Interface()
         }
-        if true == newPresent {
+        if true == newUsable {
             newValue = afterValue.Field(index).Interface()
         }
 
-        if true == oldPresent && true == newPresent {
+        if true == oldUsable && true == newUsable {
             if true == valuesEqual(oldValue, newValue) {
                 continue
             }
             if true == redact {
-                changes = append(changes, Change{Field: name, Old: redactedValue, New: redactedValue})
+                *changes = append(*changes, Change{Field: name, Old: redactedValue, New: redactedValue})
                 continue
             }
-            changes = append(changes, Change{Field: name, Old: oldValue, New: newValue})
+            *changes = append(*changes, Change{Field: name, Old: oldValue, New: newValue})
             continue
         }
 
-        if true == newPresent {
+        if true == newUsable {
             if true == redact {
-                changes = append(changes, Change{Field: name, New: redactedValue})
+                *changes = append(*changes, Change{Field: name, New: redactedValue})
                 continue
             }
-            changes = append(changes, Change{Field: name, New: newValue})
+            *changes = append(*changes, Change{Field: name, New: newValue})
             continue
         }
 
         if true == redact {
-            changes = append(changes, Change{Field: name, Old: redactedValue})
+            *changes = append(*changes, Change{Field: name, Old: redactedValue})
             continue
         }
 
-        changes = append(changes, Change{Field: name, Old: oldValue})
+        *changes = append(*changes, Change{Field: name, Old: oldValue})
+    }
+}
+
+/** isAuditableEmbed reports whether an anonymous field is an embedded struct whose promoted columns should be audited (i.e. a real embed, not bun.BaseModel, time.Time, and not tagged bun:"-"). */
+func isAuditableEmbed(field reflect.StructField) bool {
+    if "-" == field.Tag.Get("bun") {
+        return false
     }
 
-    return changes
+    embedded := field.Type
+    for reflect.Ptr == embedded.Kind() {
+        embedded = embedded.Elem()
+    }
+
+    if reflect.Struct != embedded.Kind() {
+        return false
+    }
+
+    return baseModelType != embedded && encryptedStringType != embedded && reflect.TypeOf(time.Time{}) != embedded
+}
+
+/** structValueOf derefs a (possibly pointer) struct field value, returning an invalid Value for a nil pointer or non-struct. */
+func structValueOf(value reflect.Value) reflect.Value {
+    for reflect.Ptr == value.Kind() {
+        if true == value.IsNil() {
+            return reflect.Value{}
+        }
+        value = value.Elem()
+    }
+
+    if reflect.Struct != value.Kind() {
+        return reflect.Value{}
+    }
+
+    return value
 }
 
 func valuesEqual(left any, right any) bool {

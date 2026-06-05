@@ -43,6 +43,7 @@ func NewJwtTokenValidator(config JwtConfig) *JwtTokenValidator {
         scopeClaim:         config.ScopeClaim,
         leeway:             config.Leeway,
         allowWithoutExpiry: config.AllowWithoutExpiry,
+        rejectFutureIssuedAt: config.RejectFutureIssuedAt,
         audience:           config.Audience,
         issuer:             config.Issuer,
     }
@@ -56,6 +57,7 @@ type JwtConfig struct {
     ScopeClaim         string
     Leeway             time.Duration
     AllowWithoutExpiry bool
+    RejectFutureIssuedAt bool
     Issuer string
     Audience string
 }
@@ -67,6 +69,7 @@ type JwtTokenValidator struct {
     scopeClaim         string
     leeway             time.Duration
     allowWithoutExpiry bool
+    rejectFutureIssuedAt bool
     audience           string
     issuer             string
 }
@@ -130,8 +133,13 @@ func (instance *JwtTokenValidator) Validate(
         return securitycontract.Claims{}, registeredErr
     }
 
+    subject := stringClaim(rawClaims, instance.subjectClaim)
+    if "" == subject {
+        return securitycontract.Claims{}, exception.NewError("jwt subject is empty", nil, nil)
+    }
+
     claims := securitycontract.Claims{
-        UserIdentifier: stringClaim(rawClaims, instance.subjectClaim),
+        UserIdentifier: subject,
         Roles:          stringSliceClaim(rawClaims, instance.rolesClaim),
     }
 
@@ -190,7 +198,7 @@ func (instance *JwtTokenValidator) verifyTimeClaims(rawClaims map[string]any, no
         return exception.NewError("jwt iat claim is malformed", nil, nil)
     }
 
-    if true == issuedAtValid {
+    if true == issuedAtValid && true == instance.rejectFutureIssuedAt {
         issued := time.Unix(issuedAt, 0).Add(-instance.leeway)
         if true == now.Before(issued) {
             return exception.NewError("jwt is issued in the future", nil, nil)
