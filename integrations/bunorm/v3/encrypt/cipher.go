@@ -33,7 +33,7 @@ type Cipher interface {
 
     EncryptDeterministicWithKeyId(plaintext string, keyId string) (string, error)
 
-    CiphertextCandidates(plaintext string) ([]string, error)
+    CiphertextCandidates(plaintext string) ([][]byte, error)
 
     Decrypt(encoded string) (string, error)
 }
@@ -84,17 +84,17 @@ func (instance *aes256Cipher) EncryptDeterministicWithKeyId(plaintext string, ke
     return instance.seal(plaintext, keyId, true)
 }
 
-func (instance *aes256Cipher) CiphertextCandidates(plaintext string) ([]string, error) {
+func (instance *aes256Cipher) CiphertextCandidates(plaintext string) ([][]byte, error) {
     keyIds := instance.keys.ActiveKeyIds()
 
-    candidates := make([]string, 0, len(keyIds))
+    candidates := make([][]byte, 0, len(keyIds))
     for _, keyId := range keyIds {
         candidate, sealErr := instance.seal(plaintext, keyId, true)
         if nil != sealErr {
             return nil, sealErr
         }
 
-        candidates = append(candidates, candidate)
+        candidates = append(candidates, []byte(candidate))
     }
 
     return candidates, nil

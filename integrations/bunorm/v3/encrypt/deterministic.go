@@ -25,7 +25,7 @@ func (instance EncryptedDeterministicString) Value() (driver.Value, error) {
         return nil, encryptErr
     }
 
-    return encoded, nil
+    return []byte(encoded), nil
 }
 
 func (instance *EncryptedDeterministicString) Scan(source any) error {

@@ -63,10 +63,11 @@ func TestChangeSet_DeleteHasOldOnly(t *testing.T) {
 }
 
 type account struct {
-    Id       int64                   `bun:"id,pk"`
-    Email    string                  `bun:"email"`
-    ApiKey   string                  `bun:"api_key" audit:"redact"`
-    Password encrypt.EncryptedString `bun:"password"`
+    Id          int64                                `bun:"id,pk"`
+    Email       string                               `bun:"email"`
+    ApiKey      string                               `bun:"api_key" audit:"redact"`
+    Password    encrypt.EncryptedString              `bun:"password"`
+    LookupEmail encrypt.EncryptedDeterministicString `bun:"lookup_email"`
 }
 
 type EmbeddedAuditFields struct {
@@ -122,8 +123,8 @@ func TestChangeSet_CapturesPromotedEmbeddedStructFields(t *testing.T) {
 }
 
 func TestChangeSet_RedactsTaggedAndEncryptedFields(t *testing.T) {
-    before := account{Id: 1, Email: "a@example.com", ApiKey: "old-key", Password: "old-secret"}
-    after := account{Id: 1, Email: "b@example.com", ApiKey: "new-key", Password: "new-secret"}
+    before := account{Id: 1, Email: "a@example.com", ApiKey: "old-key", Password: "old-secret", LookupEmail: "old@example.com"}
+    after := account{Id: 1, Email: "b@example.com", ApiKey: "new-key", Password: "new-secret", LookupEmail: "new@example.com"}
 
     changes := audit.ChangeSet(before, after)
 
@@ -146,5 +147,13 @@ func TestChangeSet_RedactsTaggedAndEncryptedFields(t *testing.T) {
     }
     if "old-secret" == passwordChange.Old || "new-secret" == passwordChange.New {
         t.Fatalf("expected the encrypted field value to be redacted: %+v", passwordChange)
+    }
+
+    lookupChange, found := findChange(changes, "lookup_email")
+    if false == found {
+        t.Fatalf("expected the deterministic-encrypted field to still be recorded as changed")
+    }
+    if "old@example.com" == lookupChange.Old || "new@example.com" == lookupChange.New {
+        t.Fatalf("expected the deterministic-encrypted field value to be redacted: %+v", lookupChange)
     }
 }

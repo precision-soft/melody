@@ -158,8 +158,8 @@ When the consume channel is lost, the delivery loop re-dials and re-subscribes w
 When `DeadLetter` is `true`, the transport declares a dead-letter exchange (`<queue>.dlx`) and queue (`<queue>.dlq`), and points the main queue at it via `x-dead-letter-exchange`.
 
 - A handler success acknowledges the delivery (`Ack`).
-- A handler failure negatively acknowledges it. To avoid poison-message loops, a message that was already redelivered is dead-lettered instead of being requeued again. This is a bounded single-retry policy; delayed/backoff retry is not yet implemented.
-- A delivery that cannot be decoded (missing or unknown `x-message-type`, bad body) is dead-lettered immediately.
+- A handler failure is retried under the consumer's `RetryPolicy` (max retries, base delay, optional dead-letter transport). The transport re-publishes the message carrying an incremented `x-redelivery-count` header, so the retry count survives across deliveries instead of relying on the broker's one-shot `redelivered` flag; a `DelayStamp` re-publishes through the `<queue>.delay` queue (per-message TTL, dead-lettered back to the main queue) so retries are spaced out by the configured backoff. Once the retries are exhausted the message is `Nack`ed without requeue so the broker routes it to the dead-letter exchange.
+- A delivery that cannot be decoded (missing or unknown `x-message-type`, bad body) is `Nack`ed without requeue. It is dead-lettered only when `DeadLetter` is enabled; otherwise the broker discards it (enable `DeadLetter` in production so undecodable deliveries are retained).
 
 ## Server-Sent Events backplane
 

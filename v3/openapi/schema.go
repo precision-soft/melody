@@ -9,11 +9,11 @@ import (
 
 var timeType = reflect.TypeOf(time.Time{})
 
-func schemaFromType(targetType reflect.Type, components map[string]*Schema) *Schema {
-    return buildSchema(targetType, components, make(map[reflect.Type]bool))
+func schemaFromType(targetType reflect.Type, components map[string]*Schema, names map[reflect.Type]string) *Schema {
+    return buildSchema(targetType, components, names, make(map[reflect.Type]bool))
 }
 
-func buildSchema(targetType reflect.Type, components map[string]*Schema, visited map[reflect.Type]bool) *Schema {
+func buildSchema(targetType reflect.Type, components map[string]*Schema, names map[reflect.Type]string, visited map[reflect.Type]bool) *Schema {
     if nil == targetType {
         return &Schema{}
     }
@@ -39,31 +39,59 @@ func buildSchema(targetType reflect.Type, components map[string]*Schema, visited
     case reflect.Float32, reflect.Float64:
         return withNullable(&Schema{Type: "number"}, nullable)
     case reflect.Slice, reflect.Array:
-        return withNullable(&Schema{Type: "array", Items: buildSchema(targetType.Elem(), components, visited)}, nullable)
+        return withNullable(&Schema{Type: "array", Items: buildSchema(targetType.Elem(), components, names, visited)}, nullable)
     case reflect.Map:
-        return withNullable(&Schema{Type: "object", AdditionalProperties: buildSchema(targetType.Elem(), components, visited)}, nullable)
+        return withNullable(&Schema{Type: "object", AdditionalProperties: buildSchema(targetType.Elem(), components, names, visited)}, nullable)
     case reflect.Struct:
-        return structSchemaReference(targetType, components, visited, nullable)
+        return structSchemaReference(targetType, components, names, visited, nullable)
     default:
         return withNullable(&Schema{}, nullable)
     }
 }
 
-func structSchemaReference(structType reflect.Type, components map[string]*Schema, visited map[reflect.Type]bool, nullable bool) *Schema {
-    name := structType.Name()
-    if "" == name {
-        return withNullable(buildStructSchema(structType, components, visited), nullable)
+func structSchemaReference(structType reflect.Type, components map[string]*Schema, names map[reflect.Type]string, visited map[reflect.Type]bool, nullable bool) *Schema {
+    if "" == structType.Name() {
+        return withNullable(buildStructSchema(structType, components, names, visited), nullable)
     }
 
+    name := schemaComponentName(structType, names)
     if _, built := components[name]; false == built {
         components[name] = &Schema{Type: "object"}
-        components[name] = buildStructSchema(structType, components, visited)
+        components[name] = buildStructSchema(structType, components, names, visited)
     }
 
     return withNullable(&Schema{Ref: "#/components/schemas/" + name}, nullable)
 }
 
-func buildStructSchema(structType reflect.Type, components map[string]*Schema, visited map[reflect.Type]bool) *Schema {
+func schemaComponentName(structType reflect.Type, names map[reflect.Type]string) string {
+    if existing, assigned := names[structType]; true == assigned {
+        return existing
+    }
+
+    base := structType.Name()
+    candidate := base
+    suffix := 2
+    for true == componentNameInUse(candidate, names) {
+        candidate = base + strconv.Itoa(suffix)
+        suffix++
+    }
+
+    names[structType] = candidate
+
+    return candidate
+}
+
+func componentNameInUse(candidate string, names map[reflect.Type]string) bool {
+    for _, assigned := range names {
+        if assigned == candidate {
+            return true
+        }
+    }
+
+    return false
+}
+
+func buildStructSchema(structType reflect.Type, components map[string]*Schema, names map[reflect.Type]string, visited map[reflect.Type]bool) *Schema {
     if true == visited[structType] {
         return &Schema{Type: "object"}
     }
@@ -77,7 +105,7 @@ func buildStructSchema(structType reflect.Type, components map[string]*Schema, v
     }
 
     var required []string
-    collectStructFields(structType, components, visited, schema.Properties, &required)
+    collectStructFields(structType, components, names, visited, schema.Properties, &required)
 
     if 0 == len(schema.Properties) {
         schema.Properties = nil
@@ -93,6 +121,7 @@ func buildStructSchema(structType reflect.Type, components map[string]*Schema, v
 func collectStructFields(
     structType reflect.Type,
     components map[string]*Schema,
+    names map[reflect.Type]string,
     visited map[reflect.Type]bool,
     properties map[string]*Schema,
     required *[]string,
@@ -106,7 +135,7 @@ func collectStructFields(
                 embedded = embedded.Elem()
             }
 
-            collectStructFields(embedded, components, visited, properties, required)
+            collectStructFields(embedded, components, names, visited, properties, required)
 
             continue
         }
@@ -124,7 +153,7 @@ func collectStructFields(
             continue
         }
 
-        propertySchema := buildSchema(field.Type, components, visited)
+        propertySchema := buildSchema(field.Type, components, names, visited)
         applyValidation(propertySchema, field.Tag.Get("validate"))
         properties[jsonName] = propertySchema
 
@@ -216,22 +245,12 @@ func applyValidation(schema *Schema, validateTag string) {
             if value, parseErr := strconv.Atoi(param); nil == parseErr {
                 if "string" == schema.Type {
                     schema.MinLength = &value
-                } else if "array" == schema.Type {
-                    schema.MinItems = &value
-                } else if "integer" == schema.Type || "number" == schema.Type {
-                    minimum := float64(value)
-                    schema.Minimum = &minimum
                 }
             }
         case "max":
             if value, parseErr := strconv.Atoi(param); nil == parseErr {
                 if "string" == schema.Type {
                     schema.MaxLength = &value
-                } else if "array" == schema.Type {
-                    schema.MaxItems = &value
-                } else if "integer" == schema.Type || "number" == schema.Type {
-                    maximum := float64(value)
-                    schema.Maximum = &maximum
                 }
             }
         case "regex", "pattern":

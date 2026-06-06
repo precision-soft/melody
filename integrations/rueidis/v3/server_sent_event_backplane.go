@@ -108,6 +108,7 @@ func (instance *ServerSentEventBackplane) Publish(topic string, event melodyhttp
 }
 
 func (instance *ServerSentEventBackplane) Close() error {
+    instance.hub.SetBackplane(nil)
     instance.cancel()
     instance.wait.Wait()
 

@@ -13,14 +13,19 @@ OpenAPI generation is opt-in. The generator reads route metadata from the [`http
     - [`NewRegistry`](../../openapi/registry.go)
     - [`Descriptor`](../../openapi/registry.go)
     - [`TypeOf`](../../openapi/registry.go)
+    - [`DescribeTyped[Req, Resp]`](../../openapi/describe_typed.go) with [`WithSummary`, `WithDescription`, `WithTags`, `WithResponse[T]`](../../openapi/describe_typed.go)
 - Generate the document:
     - [`Generate`](../../openapi/generator.go)
-    - [`Document`](../../openapi/document.go) and the OpenAPI 3.0 object model
+    - [`Document`](../../openapi/document.go) and the OpenAPI 3.0 object model (`Document`/`Schema` carry `servers`/`security`/`tags`/`externalDocs` and `description`/`maximum`/`exclusiveMaximum`)
 - Build schemas from Go types:
     - [`schemaFromType`](../../openapi/schema.go) (internal; reads `json` and `validate` tags)
 - Emit the document from the CLI:
     - [`GenerateCommand`](../../openapi/generate_command.go)
     - [`NewGenerateCommand`](../../openapi/generate_command.go)
+- Serve the document from a live route (e.g. `GET /openapi.json`):
+    - [`SpecHandler`](../../openapi/spec_handler.go) (reuses `Generate` against the running router, so every load-balanced instance serves the same spec)
+- Resolve the registry as a container service:
+    - [`ServiceOpenApiRegistry`, `RegistryMustFromContainer`, `RegistryMustFromResolver`](../../openapi/service_resolver.go)
 
 ## How generation works
 
@@ -34,11 +39,11 @@ Schemas come from reflection over the DTO types in the descriptor. Struct fields
 
 - `notBlank` / `notEmpty` → the property is added to `required`;
 - `email` → `format: email`;
-- `min` / `max` → `minLength` / `maxLength`;
-- `greaterThan` → `minimum`;
+- `min` / `max` → `minLength` / `maxLength`, on string fields only. These mirror what the framework validator enforces (`min`/`max` are string-length checks), so the spec never advertises a numeric or collection bound the server does not enforce — `min`/`max` are deliberately not emitted as numeric `minimum`/`maximum` or array `minItems`/`maxItems`;
+- `greaterThan` / `lessThan` → exclusive `minimum` / `maximum` (these map to real numeric constraints);
 - `regex` → `pattern`.
 
-`time.Time` maps to `string` / `date-time`; slices to arrays; maps to objects with `additionalProperties`.
+`time.Time` maps to `string` / `date-time`; slices to arrays; maps to objects with `additionalProperties`. A named struct type is emitted once into `components/schemas` and referenced by `$ref`, so a type reused across operations is defined a single time; two distinct types that share a bare name (e.g. `product.Request` and `order.Request`) are disambiguated with a numeric suffix. A nullable pointer to a named struct is wrapped as `{"allOf":[{"$ref":…}],"nullable":true}` (OpenAPI 3.0 ignores `$ref` siblings, so the nullability would otherwise be lost). Self-referential types terminate through the `$ref`.
 
 ## Usage
 
@@ -87,7 +92,7 @@ The example application registers a registry (`config/openapi.go`) and the comma
 - Generation is opt-in and userland-wired; routes without a registered descriptor still appear (path, method, path parameters) but with a single `default` response and no body.
 - The router normalizes trailing slashes, so generated path keys have no trailing slash even when the route pattern does.
 - `validate` tag parsing splits on commas; a `regex` pattern containing a comma is not supported by the schema mapping.
-- Schemas are inlined (no `$ref`/`components` reuse). Recursive types are broken with a generic `object` schema to avoid infinite recursion.
+- Reused named struct types are emitted once into `components/schemas` and referenced by `$ref` (see "How generation works"); an unnamed (anonymous) cyclic struct falls back to a generic `object` to avoid infinite recursion.
 
 ## Userland API
 
@@ -103,5 +108,8 @@ The example application registers a registry (`config/openapi.go`) and the comma
 - [`NewRegistry() *Registry`](../../openapi/registry.go)
 - [`(*Registry).Describe(routeName string, descriptor Descriptor) *Registry`](../../openapi/registry.go)
 - [`TypeOf[T any]() reflect.Type`](../../openapi/registry.go)
+- [`DescribeTyped[Req, Resp any](registry *Registry, routeName string, status int, options ...DescribeOption)`](../../openapi/describe_typed.go) with `WithSummary`, `WithDescription`, `WithTags`, `WithResponse[T any](status int)`
 - [`Generate(info Info, routeDefinitions []httpcontract.RouteDefinition, registry *Registry) *Document`](../../openapi/generator.go)
 - [`NewGenerateCommand(info Info, registry *Registry) *GenerateCommand`](../../openapi/generate_command.go)
+- [`SpecHandler(info Info, registry *Registry) httpcontract.Handler`](../../openapi/spec_handler.go)
+- [`RegistryMustFromContainer(...)`, `RegistryMustFromResolver(...)`](../../openapi/service_resolver.go) — resolve the registry registered under `ServiceOpenApiRegistry`

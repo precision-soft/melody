@@ -124,6 +124,8 @@ func (instance *ServerSentEventBackplane) publishOnce(payload []byte) error {
 }
 
 func (instance *ServerSentEventBackplane) Close() error {
+    instance.hub.SetBackplane(nil)
+
     instance.mutex.Lock()
     instance.closing = true
     if nil != instance.consumeChannel {

@@ -1,6 +1,7 @@
 package mysql_test
 
 import (
+    "bytes"
     "context"
     "database/sql"
     "os"
@@ -20,6 +21,13 @@ type secretRecord struct {
 
     Id     int64                   `bun:"id,pk,autoincrement"`
     Secret encrypt.EncryptedString `bun:"secret,notnull,type:varchar(255)"`
+}
+
+type lookupRecord struct {
+    bun.BaseModel `bun:"table:lookup_record"`
+
+    Id    int64                                `bun:"id,pk,autoincrement"`
+    Email encrypt.EncryptedDeterministicString `bun:"email,notnull,type:varbinary(255)"`
 }
 
 type widget struct {
@@ -77,8 +85,75 @@ func TestBunormEncryption_CiphertextAtRest(t *testing.T) {
     if rawErr := sqlDb.QueryRowContext(ctx, "SELECT secret FROM secret_record WHERE id = ?", record.Id).Scan(&rawSecret); nil != rawErr {
         t.Fatalf("raw select: %v", rawErr)
     }
-    if "classified-data" == rawSecret || false == strings.HasPrefix(rawSecret, "v1:") {
-        t.Fatalf("expected ciphertext at rest, got %q", rawSecret)
+    if "classified-data" == rawSecret {
+        t.Fatalf("expected ciphertext at rest, got plaintext")
+    }
+    if false == strings.HasPrefix(rawSecret, "<ENC>\x00gcm1\x00") {
+        t.Fatalf("expected the encryption marker (with nul glue bytes intact) at rest, got %q", rawSecret)
+    }
+}
+
+func TestBunormDeterministicEncryption_SearchableAtRest(t *testing.T) {
+    dsn := os.Getenv("MYSQL_DSN")
+    if "" == dsn {
+        t.Skip("MYSQL_DSN not set; skipping bunorm deterministic encryption integration test")
+    }
+
+    ctx := context.Background()
+
+    sqlDb, openErr := sql.Open("mysql", dsn)
+    if nil != openErr {
+        t.Fatalf("open: %v", openErr)
+    }
+    defer sqlDb.Close()
+
+    database := bun.NewDB(sqlDb, mysqldialect.New())
+
+    database.ExecContext(ctx, "DROP TABLE IF EXISTS lookup_record")
+    if _, createErr := database.NewCreateTable().Model((*lookupRecord)(nil)).Exec(ctx); nil != createErr {
+        t.Fatalf("create lookup_record: %v", createErr)
+    }
+
+    cipher := encrypt.NewCipher(encrypt.NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey()}))
+    encrypt.UseCipher(cipher)
+    defer encrypt.UseCipher(nil)
+
+    for _, email := range []string{"alice@example.com", "bob@example.com", "alice@example.com"} {
+        record := &lookupRecord{Email: encrypt.EncryptedDeterministicString(email)}
+        if _, insertErr := database.NewInsert().Model(record).Exec(ctx); nil != insertErr {
+            t.Fatalf("insert %q: %v", email, insertErr)
+        }
+    }
+
+    var rawEmail []byte
+    if rawErr := sqlDb.QueryRowContext(ctx, "SELECT email FROM lookup_record ORDER BY id LIMIT 1").Scan(&rawEmail); nil != rawErr {
+        t.Fatalf("raw select: %v", rawErr)
+    }
+    if "alice@example.com" == string(rawEmail) {
+        t.Fatalf("expected ciphertext at rest, got plaintext")
+    }
+    if false == bytes.Contains(rawEmail, []byte{0}) {
+        t.Fatalf("expected the encryption marker nul bytes to survive at rest, got %q", rawEmail)
+    }
+
+    candidates, candidatesErr := cipher.CiphertextCandidates("alice@example.com")
+    if nil != candidatesErr {
+        t.Fatalf("candidates: %v", candidatesErr)
+    }
+
+    var matches []lookupRecord
+    if scanErr := database.NewSelect().Model(&matches).Where("email IN (?)", bun.In(candidates)).Order("id").Scan(ctx); nil != scanErr {
+        t.Fatalf("deterministic lookup: %v", scanErr)
+    }
+
+    if 2 != len(matches) {
+        t.Fatalf("expected the deterministic IN lookup to find both alice rows, got %d", len(matches))
+    }
+
+    for _, match := range matches {
+        if "alice@example.com" != string(match.Email) {
+            t.Fatalf("expected a decrypted alice row, got %q", match.Email)
+        }
     }
 }
 

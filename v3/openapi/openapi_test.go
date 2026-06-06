@@ -191,9 +191,10 @@ func TestGenerate_NullablePointerToStructUsesAllOf(t *testing.T) {
 
 type taggedRequest struct {
     Tags []string `json:"tags" validate:"min=1,max=5"`
+    Code string   `json:"code" validate:"min=2,max=8"`
 }
 
-func TestGenerate_ArrayConstraintsBecomeItemBounds(t *testing.T) {
+func TestGenerate_MinMaxAppliesOnlyToStringLength(t *testing.T) {
     registry := openapi.NewRegistry()
     registry.Describe("tags.create", openapi.Descriptor{
         RequestType: openapi.TypeOf[taggedRequest](),
@@ -210,16 +211,56 @@ func TestGenerate_ArrayConstraintsBecomeItemBounds(t *testing.T) {
         t.Fatalf("expected an array tags property, got: %+v", tags)
     }
 
-    if nil == tags.MinItems || 1 != *tags.MinItems {
-        t.Fatalf("expected minItems of 1, got: %+v", tags.MinItems)
+    if nil != tags.MinItems || nil != tags.MaxItems || nil != tags.Minimum || nil != tags.Maximum {
+        t.Fatalf("min/max must not emit array or numeric bounds (the validator enforces string length), got: %+v", tags)
     }
 
-    if nil == tags.MaxItems || 5 != *tags.MaxItems {
-        t.Fatalf("expected maxItems of 5, got: %+v", tags.MaxItems)
+    code := document.Components.Schemas["taggedRequest"].Properties["code"]
+    if nil == code || nil == code.MinLength || 2 != *code.MinLength || nil == code.MaxLength || 8 != *code.MaxLength {
+        t.Fatalf("expected min/max to set string length bounds on code, got: %+v", code)
+    }
+}
+
+func firstSameNamedType() reflect.Type {
+    type Request struct {
+        Alpha string `json:"alpha"`
     }
 
-    if nil != tags.MinLength || nil != tags.Minimum {
-        t.Fatalf("expected array constraints not to leak into minLength/minimum, got: %+v", tags)
+    return reflect.TypeOf(Request{})
+}
+
+func secondSameNamedType() reflect.Type {
+    type Request struct {
+        Beta int `json:"beta"`
+    }
+
+    return reflect.TypeOf(Request{})
+}
+
+func TestGenerate_SameNamedTypesGetDistinctComponents(t *testing.T) {
+    registry := openapi.NewRegistry()
+    registry.Describe("first.create", openapi.Descriptor{RequestType: firstSameNamedType()})
+    registry.Describe("second.create", openapi.Descriptor{RequestType: secondSameNamedType()})
+
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "first.create", pattern: "/first/", methods: []string{"POST"}},
+        fakeRoute{name: "second.create", pattern: "/second/", methods: []string{"POST"}},
+    }
+
+    document := openapi.Generate(openapi.Info{Title: "Example", Version: "1.0.0"}, routes, registry)
+
+    first := document.Components.Schemas["Request"]
+    second := document.Components.Schemas["Request2"]
+    if nil == first || nil == second {
+        t.Fatalf("expected two distinct component schemas for the same-named types, got: %v", document.Components.Schemas)
+    }
+
+    if nil == first.Properties["alpha"] {
+        t.Fatalf("expected the first Request schema to carry its own alpha field, got: %+v", first)
+    }
+
+    if nil == second.Properties["beta"] {
+        t.Fatalf("expected the disambiguated Request2 schema to carry its own beta field, got: %+v", second)
     }
 }
 

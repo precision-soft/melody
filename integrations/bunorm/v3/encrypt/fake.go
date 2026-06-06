@@ -22,8 +22,8 @@ func (instance *fakeCipher) EncryptDeterministicWithKeyId(plaintext string, keyI
     return plaintext, nil
 }
 
-func (instance *fakeCipher) CiphertextCandidates(plaintext string) ([]string, error) {
-    return []string{plaintext}, nil
+func (instance *fakeCipher) CiphertextCandidates(plaintext string) ([][]byte, error) {
+    return [][]byte{[]byte(plaintext)}, nil
 }
 
 func (instance *fakeCipher) Decrypt(encoded string) (string, error) {

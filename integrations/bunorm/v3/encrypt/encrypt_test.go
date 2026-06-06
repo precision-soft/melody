@@ -75,7 +75,7 @@ func TestCipher_EncryptDeterministicWithKeyIdStaysSearchableAcrossRotation(t *te
 
     matched := false
     for _, candidate := range candidates {
-        if candidate == rotated {
+        if string(candidate) == rotated {
             matched = true
         }
     }
@@ -107,6 +107,37 @@ func TestEncryptedString_ValueScanRoundTrip(t *testing.T) {
     }
 
     if "personal data" != string(loaded) {
+        t.Fatalf("round-trip mismatch: %q", loaded)
+    }
+}
+
+func TestEncryptedDeterministicString_ValuePreservesMarkerBytes(t *testing.T) {
+    provider := encrypt.NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(7)})
+    encrypt.UseCipher(encrypt.NewCipher(provider))
+    defer encrypt.UseCipher(nil)
+
+    original := encrypt.EncryptedDeterministicString("alice@example.com")
+
+    stored, valueErr := original.Value()
+    if nil != valueErr {
+        t.Fatalf("value: %v", valueErr)
+    }
+
+    storedBytes, isBytes := stored.([]byte)
+    if false == isBytes {
+        t.Fatalf("deterministic value must be []byte so bun emits a binary literal, got %T", stored)
+    }
+
+    if false == strings.Contains(string(storedBytes), "\x00") {
+        t.Fatalf("expected the encryption marker nul bytes to survive in the stored value")
+    }
+
+    var loaded encrypt.EncryptedDeterministicString
+    if scanErr := loaded.Scan(storedBytes); nil != scanErr {
+        t.Fatalf("scan: %v", scanErr)
+    }
+
+    if "alice@example.com" != string(loaded) {
         t.Fatalf("round-trip mismatch: %q", loaded)
     }
 }
@@ -180,7 +211,7 @@ func TestCipher_CiphertextCandidatesCoverAllActiveKeys(t *testing.T) {
     }
 
     current, _ := cipher.EncryptDeterministic("user@example.com")
-    if candidates[0] != current {
+    if string(candidates[0]) != current {
         t.Fatalf("expected the current key candidate first")
     }
 }

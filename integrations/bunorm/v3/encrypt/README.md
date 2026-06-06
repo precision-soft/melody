@@ -66,6 +66,12 @@ candidates, _ := cipher.CiphertextCandidates("user@example.com")
 db.NewSelect().Model(&user).Where("email IN (?)", bun.In(candidates)).Scan(ctx)
 ```
 
+`CiphertextCandidates` returns `[][]byte` (not `[]string`) on purpose: the ciphertext marker carries `\0`
+glue bytes, and bun inlines a `string` argument into the SQL text through a formatter that drops embedded
+NUL bytes — which would corrupt the right-hand side and break the match. As `[][]byte` each candidate is
+emitted as an `X'…'` binary literal, so every byte survives and the lookup compares equal to the stored
+`EncryptedDeterministicString` column (whose `Value()` is likewise a binary `[]byte`).
+
 > ⚠️ Deterministic mode **reveals plaintext equality** (equal values produce identical ciphertext). The
 > nonce is keyed only by `(key, plaintext)`, so equal plaintext yields byte-identical ciphertext **across
 > every deterministic column and table under the same key** — an observer of the stored values can correlate

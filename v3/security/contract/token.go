@@ -10,6 +10,10 @@ type Token interface {
     UserIdentifier() string
 
     Roles() []string
+
+    Scope() map[string]any
+
+    Attributes() map[string]any
 }
 
 type TokenResolver func(request httpcontract.Request) Token

@@ -13,6 +13,7 @@ import (
 const redactedValue = "<redacted>"
 
 var encryptedStringType = reflect.TypeOf(encrypt.EncryptedString(""))
+var encryptedDeterministicStringType = reflect.TypeOf(encrypt.EncryptedDeterministicString(""))
 var baseModelType = reflect.TypeOf(bun.BaseModel{})
 
 type Change struct {
@@ -133,7 +134,7 @@ func isAuditableEmbed(field reflect.StructField) bool {
         return false
     }
 
-    return baseModelType != embedded && encryptedStringType != embedded && reflect.TypeOf(time.Time{}) != embedded
+    return baseModelType != embedded && encryptedStringType != embedded && encryptedDeterministicStringType != embedded && reflect.TypeOf(time.Time{}) != embedded
 }
 
 func structValueOf(value reflect.Value) reflect.Value {
@@ -200,7 +201,7 @@ func isRedactedField(field reflect.StructField) bool {
         return true
     }
 
-    return field.Type == encryptedStringType
+    return field.Type == encryptedStringType || field.Type == encryptedDeterministicStringType
 }
 
 func auditFieldName(field reflect.StructField) (string, bool) {

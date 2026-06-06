@@ -2,6 +2,7 @@ package openapi
 
 import (
     nethttp "net/http"
+    "reflect"
     "strconv"
     "strings"
 
@@ -20,6 +21,7 @@ func Generate(
     }
 
     components := make(map[string]*Schema)
+    componentNames := make(map[reflect.Type]string)
 
     for _, routeDefinition := range routeDefinitions {
         path, pathParameters := convertPattern(routeDefinition.Pattern())
@@ -30,7 +32,7 @@ func Generate(
             descriptor, hasDescriptor = registry.Get(routeDefinition.Name())
         }
 
-        operation := buildOperation(routeDefinition, pathParameters, descriptor, hasDescriptor, components)
+        operation := buildOperation(routeDefinition, pathParameters, descriptor, hasDescriptor, components, componentNames)
 
         pathItem := document.Paths[path]
         for _, method := range routeDefinition.Methods() {
@@ -53,6 +55,7 @@ func buildOperation(
     descriptor Descriptor,
     hasDescriptor bool,
     components map[string]*Schema,
+    names map[reflect.Type]string,
 ) *Operation {
     operation := &Operation{
         OperationId: routeDefinition.Name(),
@@ -69,7 +72,7 @@ func buildOperation(
             operation.RequestBody = &RequestBody{
                 Required: true,
                 Content: map[string]MediaType{
-                    "application/json": {Schema: schemaFromType(descriptor.RequestType, components)},
+                    "application/json": {Schema: schemaFromType(descriptor.RequestType, components, names)},
                 },
             }
         }
@@ -78,7 +81,7 @@ func buildOperation(
             operation.Responses[strconv.Itoa(status)] = ResponseObject{
                 Description: nethttp.StatusText(status),
                 Content: map[string]MediaType{
-                    "application/json": {Schema: schemaFromType(responseType, components)},
+                    "application/json": {Schema: schemaFromType(responseType, components, names)},
                 },
             }
         }
