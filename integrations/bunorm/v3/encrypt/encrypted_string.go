@@ -35,7 +35,7 @@ func (instance EncryptedString) Value() (driver.Value, error) {
         return nil, encryptErr
     }
 
-    return encoded, nil
+    return []byte(encoded), nil
 }
 
 func (instance *EncryptedString) Scan(source any) error {

@@ -1,57 +1,58 @@
 package product
 
 import (
-    "encoding/json"
     nethttp "net/http"
     "strings"
 
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/presenter"
     "github.com/precision-soft/melody/v3/.example/service"
+    melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v3/security"
-    melodyvalidation "github.com/precision-soft/melody/v3/validation"
 )
 
 func ApiCreateHandler() melodyhttpcontract.Handler {
+    createProduct := melodyhttp.JsonHandler(
+        func(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, dto createRequest) (melodyhttpcontract.Response, error) {
+            productService := service.MustGetProductService(runtimeInstance.Container())
+
+            product, createErr := productService.Create(
+                runtimeInstance,
+                strings.TrimSpace(dto.Id),
+                strings.TrimSpace(dto.Name),
+                strings.TrimSpace(dto.Description),
+                strings.TrimSpace(dto.CategoryId),
+                dto.Price,
+                strings.TrimSpace(dto.CurrencyId),
+                dto.Stock,
+            )
+            if nil != createErr {
+                return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to create product", createErr), nil
+            }
+
+            return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusCreated, mapProduct(product)), nil
+        },
+        melodyhttp.WithJsonHandlerErrorResponder(apiJsonErrorResponder),
+    )
+
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         if false == melodysecurity.IsGranted(runtimeInstance, entity.RoleEditor) {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusForbidden, "forbidden"), nil
         }
 
-        var dto createRequest
-
-        decoderErr := json.NewDecoder(request.HttpRequest().Body).Decode(&dto)
-        if nil != decoderErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json"), nil
-        }
-
-        validatorInstance := melodyvalidation.ValidatorMustFromContainer(runtimeInstance.Container())
-
-        validationErrors := validatorInstance.Validate(dto)
-        if nil != validationErrors {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, validationErrors.Error()), nil
-        }
-
-        productService := service.MustGetProductService(runtimeInstance.Container())
-
-        product, createErr := productService.Create(
-            runtimeInstance,
-            strings.TrimSpace(dto.Id),
-            strings.TrimSpace(dto.Name),
-            strings.TrimSpace(dto.Description),
-            strings.TrimSpace(dto.CategoryId),
-            dto.Price,
-            strings.TrimSpace(dto.CurrencyId),
-            dto.Stock,
-        )
-        if nil != createErr {
-            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to create product", createErr), nil
-        }
-
-        return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusCreated, mapProduct(product)), nil
+        return createProduct(runtimeInstance, writer, request)
     }
+}
+
+func apiJsonErrorResponder(
+    runtimeInstance melodyruntimecontract.Runtime,
+    request melodyhttpcontract.Request,
+    status int,
+    message string,
+) (melodyhttpcontract.Response, error) {
+    return presenter.ApiError(runtimeInstance, request, status, message), nil
 }
 
 type createRequest struct {

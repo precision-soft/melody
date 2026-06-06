@@ -1,27 +1,19 @@
 package config
 
 import (
-    "os"
-    "path/filepath"
-
     "github.com/precision-soft/melody/v3/.example/cache"
     "github.com/precision-soft/melody/v3/.example/repository"
     "github.com/precision-soft/melody/v3/.example/service"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodycache "github.com/precision-soft/melody/v3/cache"
     melodycachecontract "github.com/precision-soft/melody/v3/cache/contract"
-    melodyclock "github.com/precision-soft/melody/v3/clock"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     melodyevent "github.com/precision-soft/melody/v3/event"
-    melodylock "github.com/precision-soft/melody/v3/lock"
-    melodylockcontract "github.com/precision-soft/melody/v3/lock/contract"
     melodymailer "github.com/precision-soft/melody/v3/mailer"
     melodymailercontract "github.com/precision-soft/melody/v3/mailer/contract"
     melodymessagebus "github.com/precision-soft/melody/v3/messagebus"
     melodymessagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
     melodyopenapi "github.com/precision-soft/melody/v3/openapi"
-    melodystorage "github.com/precision-soft/melody/v3/storage"
-    melodystoragecontract "github.com/precision-soft/melody/v3/storage/contract"
     melodytranslation "github.com/precision-soft/melody/v3/translation"
     melodytranslationcontract "github.com/precision-soft/melody/v3/translation/contract"
 )
@@ -62,19 +54,9 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
         },
     )
 
-    registrar.RegisterService(
-        melodystorage.ServiceStorage,
-        func(resolver melodycontainercontract.Resolver) (melodystoragecontract.Storage, error) {
-            return melodystorage.NewLocalStorage(filepath.Join(os.TempDir(), "melody-example-storage")), nil
-        },
-    )
-
-    registrar.RegisterService(
-        melodylock.ServiceLocker,
-        func(resolver melodycontainercontract.Resolver) (melodylockcontract.Locker, error) {
-            return melodylock.NewInMemoryLocker(melodyclock.NewSystemClock()), nil
-        },
-    )
+    instance.registerStorageService(registrar)
+    instance.registerLockerService(registrar)
+    instance.registerRedisServices(registrar)
 
     registrar.RegisterService(
         repository.ServiceCategoryRepository,

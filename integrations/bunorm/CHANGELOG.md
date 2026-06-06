@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `v3/audit/` — `ChangeSet` now recurses into promoted (exported, anonymous) embedded structs other than `bun.BaseModel`, so an embedded struct's columns are captured in the diff instead of being silently dropped. Table names passed to `NewRegistry`/`Registry.Register` are validated against a strict SQL-identifier pattern (panic on violation) since they flow unquoted through `ModelTableExpr` into DDL/DML.
 - `v3/encrypt/` — documented that deterministic encryption yields byte-identical ciphertext for equal plaintext across every deterministic column and table under the same key (cross-column/cross-table equality is observable), not just within one column.
+- `v3/encrypt/` — `EncryptedString.Value` now returns the ciphertext as `[]byte` rather than `string`, so the `\x00` bytes in the `<ENC>\0gcm1\0…` marker survive persistence: bun inlines a `driver.Valuer` string into the MySQL statement text and its string formatter drops embedded NUL bytes, which silently corrupted the marker so a subsequent read no longer recognized the value as ciphertext and returned it unencrypted (encryption-at-rest was a no-op for the `EncryptedString` column type on bun + MySQL). Returning `[]byte` makes bun emit an `X'…'` binary literal that preserves every byte; `Scan` already accepts both `string` and `[]byte`, so reads are unaffected.
 
 ## [v3.0.1] - 2026-03-08 - Tidy v3 go.sum Dependencies
 

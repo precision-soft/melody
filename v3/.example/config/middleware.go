@@ -12,6 +12,7 @@ import (
 )
 
 func (instance *Module) RegisterHttpMiddlewares(kernelInstance melodykernelcontract.Kernel, registrar melodyapplicationcontract.HttpMiddlewareRegistrar) {
+    registrar.Use(instance.metricsMiddleware)
     registrar.Use(NewTimingMiddleware())
 }
 

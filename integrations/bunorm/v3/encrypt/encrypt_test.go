@@ -96,13 +96,13 @@ func TestEncryptedString_ValueScanRoundTrip(t *testing.T) {
         t.Fatalf("value: %v", valueErr)
     }
 
-    storedString, isString := stored.(string)
-    if false == isString || "personal data" == storedString {
+    storedBytes, isBytes := stored.([]byte)
+    if false == isBytes || "personal data" == string(storedBytes) {
         t.Fatalf("expected encrypted stored value, got %v", stored)
     }
 
     var loaded encrypt.EncryptedString
-    if scanErr := loaded.Scan(storedString); nil != scanErr {
+    if scanErr := loaded.Scan(storedBytes); nil != scanErr {
         t.Fatalf("scan: %v", scanErr)
     }
 

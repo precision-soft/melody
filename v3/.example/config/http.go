@@ -1,6 +1,7 @@
 package config
 
 import (
+    melodywebsocket "github.com/precision-soft/melody/integrations/websocket/v3"
     "github.com/precision-soft/melody/v3/.example/handler"
     handlercategory "github.com/precision-soft/melody/v3/.example/handler/category"
     handlerevents "github.com/precision-soft/melody/v3/.example/handler/events"
@@ -27,6 +28,25 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     router.HandleNamed("example.platform.demo", "GET", "/platform/demo", handler.PlatformDemoHandler())
 
     router.HandleNamed("example.messagebus.demo", "POST", "/messagebus/demo", handler.MessageBusDemoHandler())
+
+    router.HandleNamed("example.metrics", "GET", "/metrics", metricsRouteHandler(instance.metricsHandler))
+
+    router.HandleNamed("example.websocket", "GET", "/ws", melodywebsocket.NewStreamHandler(instance.serverSentEventHub, melodywebsocket.Options{
+        OriginPatterns: []string{"*"},
+    }))
+
+    router.HandleNamed("example.cache.demo", "GET", "/cache/demo", handler.CacheDemoHandler())
+
+    router.HandleNamed("example.encrypt.demo", "GET", "/encrypt/demo", handler.EncryptDemoHandler(instance.cipher))
+
+    if nil != instance.redisClient {
+        router.HandleNamed("example.redis.token.demo", "GET", "/redis/token/demo", handler.RedisTokenDemoHandler())
+    }
+
+    if nil != instance.database {
+        router.HandleNamed("example.database.demo", "GET", "/database/demo", handler.DatabaseDemoHandler(instance.database))
+        router.HandleNamed("example.database.audit.demo", "GET", "/database/audit/demo", handler.AuditDemoHandler(instance.database))
+    }
 
     router.HandleNamed(route.LoginPageName, "GET", route.LoginPagePattern, handler.LoginPageHandler())
     router.HandleNamed(route.LoginSubmitName, "POST", route.LoginSubmitPattern, handler.LoginHandler())
