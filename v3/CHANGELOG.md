@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.7.0] - 2026-06-06 - Platform Extensions: Messaging, Realtime, Auth, i18n, OpenAPI, Lock, Mailer, and Storage
+
 ### Added
 
 - `messagebus/` — transport-agnostic asynchronous message bus. Messages are wrapped in `Envelope`s carrying `Stamp`s (`BusNameStamp`, `SentStamp`, `ReceivedStamp`, `HandledStamp`); a configurable middleware stack via `NewManager(name, ...Middleware)` with `NewSendMessageMiddleware(routingByType)` (routes typed messages to a transport) and `NewHandleMessageMiddleware(locator)` (dispatches to handlers — a message with no registered handler is logged as a warning so the loss is observable, and `NewHandleMessageMiddlewareWithOptions(locator, HandleOptions{RequireHandler: true})` turns that into an error so a forgotten registration fails loudly instead of being acked and discarded); typed handler registration through `NewHandlerLocator` plus generic `RegisterHandler[T]`; an in-process `NewInMemoryTransport(bufferSize)`; and a long-running `melody:messagebus:consume` command via `NewConsumeCommand(bus, transports)`. The consumer owns the retry policy: `NewConsumeCommandWithRetry(bus, transports, RetryPolicy{MaxRetries, BaseDelay, FailureTransport})` requeues a failing message with an incremented `RedeliveryStamp` (and an optional backoff `DelayStamp` for delay-aware transports) up to `MaxRetries`, then routes the exhausted message to a dead-letter `FailureTransport` if configured — and if that `FailureTransport.Send` itself fails the message is requeued on the source rather than acked-and-lost — or otherwise nacks it without requeue so a transport-native dead-letter (e.g. the AMQP DLX) can claim it rather than dropping it silently; `NewConsumeCommand` defaults to three retries. The `messagebus/contract.Transport` interface (`Send`/`Receive`/`Ack`/`Nack`/`Close`) lets durable backends plug in (see the `amqp` integration); `Close` releases a transport's consumption resources, is idempotent, and is invoked by the consumer on shutdown.
@@ -20,19 +22,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `security/` — `AuthenticatedToken` now carries the enriched claims beyond roles: `NewAuthenticatedTokenFromClaims` populates `Scope()` and `Attributes()` (both returning defensive copies) so a `TokenEnricher` can attach tenant/attribute data that attribute-based access control reads downstream — previously only roles survived enrichment and the rest was silently dropped.
 - `messagebus/` — the `melody:messagebus:consume` command gains a `--concurrency` flag (N worker goroutines reading the transport concurrently; per-transport Ack/Nack stay serialized) and a bounded graceful-drain window configurable via `ConsumeCommand.WithShutdownGrace(d)`: after an interrupt the consumer waits up to the grace period (default 30s) for in-flight handlers to finish, then stops waiting so a wedged, non-context-aware handler cannot block shutdown indefinitely.
 - `mailer/` — `RenderMessage` now emits a unique RFC 5322 `Message-ID` header (random local part + the sender's domain) unless the caller already supplied one in `Headers`.
-- `integrations/websocket/v3` — `Options.ReadLimit` caps a single inbound message's byte size (0 keeps coder/websocket's 32 KiB default), and `Options.OnMessage` is documented as running on the read goroutine and required to be non-blocking.
 
 ### Changed
 
 - `security/` — `JwtConfig` gains `RejectFutureIssuedAt` (default `false`). A future `iat` is no longer rejected by default (RFC 7519 treats `iat` as informational, and the previous strict check false-rejected tokens from issuers whose clocks ran ahead of the verifier's leeway); set the flag to restore strict rejection. The contract adds a `RevocableTokenStore` interface (`TokenStore` plus `Put`/`PutWithTtl`/`Delete`/`DeleteByUser`/`PurgeExpired`) so a custom revocable store can be swapped in through the interface rather than only the concrete `InMemoryTokenStore`.
 - `messagebus/` — the consumer no longer calls `Close` on the transport it was handed; transport lifecycle is owned by the application (the process exit releases AMQP connections), so a transport shared between the dispatcher and the consumer is no longer disabled when the consume command returns. The in-memory transport now honors a `DelayStamp` on requeue (delayed re-push instead of an immediate hot retry). The retry backoff is capped (`maxRetryDelay`) and overflow-safe.
-- `integrations/websocket/v3` — `Options.OnMessage` now receives the inbound `coderwebsocket.MessageType` alongside the payload, and `Options.BinaryWrites` selects binary framing for outbound writes.
 
 ### Fixed
 
 - `security/` — a signed JWT or stored opaque token with an empty/absent/non-string subject is now rejected instead of authenticating as the empty principal `""`. `InMemoryTokenStore.Lookup`/`Put` deep-copy the `Claims` slice/map fields so a caller mutating returned `Roles`/`Scope`/`Attributes` can no longer mutate the stored entry.
 - `messagebus/` — when retries are exhausted and the `FailureTransport` itself rejects the message, the source requeue now carries a backoff `DelayStamp` so a persistently unreachable failure transport no longer spins at full speed. A delivery channel that closes without a cancelled context now returns an error from the consumer (a lost broker connection is no longer reported as a clean exit). The in-memory transport drops a requeue on a closed transport instead of blocking.
-- `integrations/amqp/v3` — `redeliveryCountFromHeader` now also reads `float64`/`float32`/`uint*` header encodings (a broker round-tripping the count as a float no longer silently resets the poison-message guard to zero). The publish path checks the closing flag and refuses to re-open a channel on a closing transport. `republish` documents its at-least-once / possible-duplicate semantics.
 - `translation/` — `#` now stays bound to the enclosing `plural` through a nested `select` (ICU semantics); previously a `select` nested inside a `plural` lost the number substitution.
 - `mailer/` — long header values are folded at whitespace per RFC 5322 (a long pure-ASCII subject no longer produces a single line over the 998-octet limit); the `Manager` validates every address with `net/mail.ParseAddress` (rejecting malformed/smuggled addresses before delivery); and a message with attachments but an empty body no longer emits a spurious empty `text/plain` part.
 - `http/sse.go` — `SseWriter.Send` strips `CR`/`LF` from the `Id` and `Event` fields so a caller-supplied value can no longer inject extra SSE fields or events. The `Data` field is split into multiple `data:` lines on `LF` and now also has stray `CR` stripped from each line — a lone `CR` is an SSE line terminator, so without this a `CR` embedded in `Data` could inject an extra field client-side; this matters now that the SSE backplane carries `Data` across instances as JSON (which preserves `CR`). `SseWriter.Comment` likewise strips `CR`/`LF` from its text (it shares the same field sanitizer as `Send`), so a dynamic comment can no longer break out of the `: ` comment line and inject an SSE field.
@@ -40,9 +39,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `openapi/` — a nullable pointer to a named struct now emits `{"allOf":[{"$ref":…}],"nullable":true}` instead of setting `nullable` as a sibling of `$ref`, which OpenAPI 3.0 tooling ignores (the field's nullability was being lost).
 - `lock/` — `InMemoryLocker` `Refresh` rejects a non-positive `ttl` (returning an error) instead of silently converting a TTL lock into a never-expiring one, matching the Redis backend's guard.
 - `messagebus/` — the in-memory transport gains `WithLogger`; a delayed requeue dropped on a full/closed queue is now logged instead of vanishing silently.
-- `integrations/objectstorage/v3` — `Get` distinguishes a missing object (`NoSuchKey`) from transient errors (permission/network) instead of labelling every failure "not found".
-- `integrations/bunorm/v3/encrypt` — `MigrateReencrypt` skips rows already written under the target key (it is now genuinely idempotent for random-nonce columns); `NewMigrator` rejects a non-MySQL dialect up front; and `gcmForKey` enforces the standard GCM nonce size so the keyless `looksEncrypted` structural check and the real decode cannot disagree.
-- `integrations/otel/v3` — the tracing middleware bounds the span name and `http.route` attribute to the matched route (or `unmatched`), matching the metrics middleware, so unmatched requests no longer explode trace cardinality with raw paths.
 - `lock/` — `InMemoryLocker` opportunistically purges expired holders during `Acquire`, bounding map growth for locks that expire without an explicit `Release`/`Refresh`.
 
 ## [v3.6.0] - 2026-05-16 - Cron Integration, Decoupled Cron Configuration, and `.example` Flat Layout
@@ -255,7 +251,9 @@ Lock-step release — no `v3/` changes this cycle. Tag SHA differs from `v3.0.0`
 - `application/application.go`, `application/application_new.go` — application context in constructor; `New(ctx context.Context, ...)` takes a caller-supplied context used for the full application lifecycle
 - `application/contract/service_module.go` — `ServiceModule` simplification; single `Register(container)` method replacing split register/configure lifecycle
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v3.6.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/v3.7.0...HEAD
+
+[v3.7.0]: https://github.com/precision-soft/melody/compare/v3.6.0...v3.7.0
 
 [v3.6.0]: https://github.com/precision-soft/melody/compare/v3.5.0...v3.6.0
 

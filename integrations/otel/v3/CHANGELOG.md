@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.0.0] - 2026-06-06 - Initial Release — HTTP Tracing and Prometheus Metrics
+
 ### Added
 
 - Initial Melody v3 binding of the OpenTelemetry integration — HTTP tracing and Prometheus metrics middlewares on `go.opentelemetry.io/otel`. Developed v3-first; v1 and v2 bindings to follow.
@@ -14,3 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `metrics_middleware.go` — `NewMetricsMiddleware(meter)`: `http.server.request.count` counter and `http.server.request.duration` (ms) histogram, attributed by method/route/status; route label bounded to the matched pattern (`unmatched` otherwise).
 - `prometheus.go` — `NewPrometheusMeter(name)` (OTel Prometheus exporter + meter provider + registry) and `MetricsHandler(registry)` for a `/metrics` endpoint.
 - `otel_test.go` — in-process tests (in-memory span recorder + Prometheus registry); no collector required.
+
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/otel/v3.0.0...HEAD
+
+[v3.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations/otel/v3.0.0

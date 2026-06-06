@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.1.0] - 2026-06-06 - MySQL Advisory Lock (GET_LOCK)
+
 ### Added
 
 - `v3/lock.go` — MySQL `GET_LOCK`-backed implementation of the core `lock/contract.Locker`/`Lock`. `NewLocker(database)` creates named locks; `Acquire` is non-blocking (`GET_LOCK(?, 0)`, consistent with the try-acquire semantics of the in-memory and Redis backends) and takes a session-scoped lock on a dedicated `*sql.Conn` that is pinned for the lifetime of the held lock and released (`RELEASE_LOCK`) on the same connection. MySQL advisory locks are connection-lifetime: they do not auto-expire, so the `CreateLock(name, ttl)` `ttl` is accepted only for interface compatibility and is documented as not honored as an expiry; `Refresh` therefore has nothing to extend but verifies the lock is still held on its connection (`IS_USED_LOCK(?) = CONNECTION_ID()`) and returns a "lock is no longer held" error if it has been lost, matching the lost-lock signal of the in-memory and Redis backends.
@@ -96,7 +98,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Builder methods: `Provider.WithPoolConfig()`, `WithTimeoutConfig()`
 - `mysql_error.go` — MySQL-specific error detection utilities
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.0.2...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.1.0...HEAD
+
+[v3.1.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.0.2...integrations/bunorm/mysql/v3.1.0
 
 [v3.0.2]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.0.1...integrations/bunorm/mysql/v3.0.2
 

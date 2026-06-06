@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.0.0] - 2026-06-06 - Initial Release — RabbitMQ Message-Bus Transport, Auto-Reconnect, and SSE Backplane
+
 ### Added
 
 - Initial Melody v3 binding of the AMQP integration — a durable `messagebus/contract.Transport` backed by RabbitMQ (AMQP 0-9-1) on `rabbitmq/amqp091-go`. Developed v3-first; v1 and v2 bindings to follow.
@@ -28,3 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The poison-message (decode-failure) log now states whether the message is being dead-lettered or dropped based on whether `DeadLetter` is configured — when no DLQ is declared a nacked-without-requeue delivery is discarded by the broker, so the log no longer misleadingly claims "dead-lettering". Enable `DeadLetter` in production so undecodable deliveries are retained.
 - `sse_backplane.go` — the reconnect paths now close the previous consume/publish channel before overwriting it (`subscribe` re-subscribing onto a fresh channel, and `liveConnection` redialing the connection), so a channel-only loss that leaves the connection alive no longer leaks the stale `*amqp091.Channel`.
 - `sse_backplane.go` — `Publish` now retries once after resetting a dead publish channel, mirroring the message-bus transport's publish path: a broadcast that lands on a silently-closed channel (the broker dropped the channel but the connection is alive) is re-published on a freshly opened channel instead of being lost until the next broadcast happens to re-open it. The retry is single and bounded (best-effort SSE, no amplification) and is skipped when the backplane is closing.
+
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.0.0...HEAD
+
+[v3.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations/amqp/v3.0.0

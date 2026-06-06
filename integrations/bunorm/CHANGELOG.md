@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.1.0] - 2026-06-06 - Column Encryption, Field-Level Audit Trail, and Read/Write Split
+
 ### Added
 
 - `v3/encrypt/` — transparent column encryption at rest with AES-256-GCM, designed as a drop-in over plaintext tables. `Cipher` is an interface (`NewCipher(KeyProvider)`) with a process-wide `UseCipher`; encrypted values carry a marker `<ENC>\0gcm1\0<keyId>:<base64(nonce||ciphertext)>` so reads can tell ciphertext from plaintext: `Decrypt` passes an unmarked legacy value through unchanged (existing rows read correctly and are encrypted on the next write) and `Encrypt` is idempotent on an already-marked value (double-encryption guard). `EncryptedString` (a `driver.Valuer`/`sql.Scanner`) **fails closed** — `Value`/`Scan` error if no cipher is configured rather than silently persisting plaintext — and masks its plaintext in `fmt`/`slog`/error output (`String`/`LogValue` return `<redacted>`). Key rotation: `KeyProvider` adds `ActiveKeyIds()` and `Cipher.EncryptWithKeyId(plaintext, keyId)`; key ids are validated against `^[A-Za-z0-9_.-]{1,32}$`. Searchable encryption: `EncryptDeterministic` derives the nonce from the plaintext (equal plaintext → equal ciphertext under a key) for encrypted-column equality lookups, exposed through the `EncryptedDeterministicString` column type and `Cipher.CiphertextCandidates(plaintext)` (one candidate per active key for rotation-safe `WHERE col IN (...)`) — it reveals plaintext equality, so only for low-entropy lookup fields. `NewFakeCipher()` is an identity cipher for tests/dev. Bulk migration: `Migrator` + the `melody:encrypt:database` command bulk-encrypt, re-encrypt (rotate key), or decrypt a table's columns with keyset pagination; `MigrateReencrypt` skips rows already written under the target key (genuinely idempotent for random-nonce columns rather than rewriting every row on each run), `NewMigrator` rejects a non-MySQL dialect up front, and rows are updated one at a time so a failed run is safe to re-run. `gcmForKey` enforces the standard GCM nonce size so the keyless `looksEncrypted` structural check and the real decode can never disagree.
@@ -70,7 +72,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `errors.go` — error sentinels: `ErrResolverIsRequired`, `ErrNoProviderDefinitions`, `ErrProviderDefinitionNameIsRequired`, `ErrProviderIsRequired`, `ErrProviderDefinitionNameMustBeUnique`, `ErrMultipleDefaultProviderDefinitions`
 - `README.md` — service registration patterns
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.0.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.1.0...HEAD
+
+[v3.1.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.0.1...integrations/bunorm/v3.1.0
 
 [v3.0.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.0.0...integrations/bunorm/v3.0.1
 
