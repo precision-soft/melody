@@ -1,4 +1,4 @@
-package objectstorage
+package awss3
 
 import (
     "io"

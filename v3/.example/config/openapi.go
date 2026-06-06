@@ -31,14 +31,13 @@ func (instance *Module) buildOpenApi() {
 
     instance.openApiRegistry = melodyopenapi.NewRegistry()
 
-    instance.openApiRegistry.Describe(route.ProductsApiCreateName, melodyopenapi.Descriptor{
-        Summary:     "Create a product",
-        Tags:        []string{"products"},
-        RequestType: melodyopenapi.TypeOf[productCreateRequest](),
-        Responses: map[int]reflect.Type{
-            201: melodyopenapi.TypeOf[productView](),
-        },
-    })
+    melodyopenapi.DescribeTyped[productCreateRequest, productView](
+        instance.openApiRegistry,
+        route.ProductsApiCreateName,
+        201,
+        melodyopenapi.WithSummary("Create a product"),
+        melodyopenapi.WithTags("products"),
+    )
 
     instance.openApiRegistry.Describe(route.I18nGreetingName, melodyopenapi.Descriptor{
         Summary: "Translated greeting",

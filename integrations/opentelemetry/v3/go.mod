@@ -1,4 +1,4 @@
-module github.com/precision-soft/melody/integrations/otel/v3
+module github.com/precision-soft/melody/integrations/opentelemetry/v3
 
 go 1.25.0
 

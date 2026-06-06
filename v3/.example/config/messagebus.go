@@ -2,7 +2,6 @@ package config
 
 import (
     "os"
-    "reflect"
 
     amqp "github.com/precision-soft/melody/integrations/amqp/v3"
     "github.com/precision-soft/melody/v3/.example/message"
@@ -34,17 +33,13 @@ func (instance *Module) buildMessageBus() {
         return nil
     })
 
-    routing := map[reflect.Type]melodymessagebus.TransportRouting{
-        reflect.TypeOf(message.WelcomeEmail{}): {
-            Name:      messageBusTransportAsync,
-            Transport: transport,
-        },
-    }
+    routing := melodymessagebus.NewRouting()
+    melodymessagebus.RouteType[message.WelcomeEmail](routing, messageBusTransportAsync, transport)
 
     instance.messageBusTransport = transport
     instance.messageBusDispatch = melodymessagebus.NewManager(
         "default",
-        melodymessagebus.NewSendMessageMiddleware(routing),
+        melodymessagebus.NewSendMessageMiddlewareFromRouting(routing),
         melodymessagebus.NewHandleMessageMiddleware(locator),
     )
     instance.messageBusConsume = melodymessagebus.NewManager(

@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to `precision-soft/melody/integrations/objectstorage` will be documented in this file.
+All notable changes to `precision-soft/melody/integrations/awss3` will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -17,6 +17,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `storage.go` — `Storage` implementing `Put`, `Get` (with a `Stat` existence check that distinguishes a missing object — `NoSuchKey` — from transient errors such as permission/network), `Delete`, `Exists` (maps `NoSuchKey` to `false`), and `PresignedUrl`.
 - `storage_test.go` — put/get/exists/presign/delete integration test, skipped unless `MINIO_ENDPOINT` is set; verified against MinIO.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/objectstorage/v3.0.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/awss3/v3.0.0...HEAD
 
-[v3.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations/objectstorage/v3.0.0
+[v3.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations/awss3/v3.0.0

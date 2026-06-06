@@ -1,4 +1,4 @@
-module github.com/precision-soft/melody/integrations/objectstorage/v3
+module github.com/precision-soft/melody/integrations/awss3/v3
 
 go 1.24.0
 

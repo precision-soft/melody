@@ -124,6 +124,15 @@ func buildBus() (*melodymessagebus.Manager, *melodymessagebus.InMemoryTransport)
 }
 ```
 
+The routing map can also be built type-safely with [`NewRouting`](../../messagebus/routing.go) + [`RouteType[T]`](../../messagebus/routing.go), avoiding the `reflect.TypeOf` keys, and passed via [`NewSendMessageMiddlewareFromRouting`](../../messagebus/routing.go):
+
+```go
+routing := melodymessagebus.NewRouting()
+melodymessagebus.RouteType[WelcomeEmail](routing, "async", transport)
+
+bus := melodymessagebus.NewManager("default", melodymessagebus.NewSendMessageMiddlewareFromRouting(routing))
+```
+
 Consuming asynchronously is done with the [`ConsumeCommand`](../../messagebus/consume_command.go), registered as a CLI command:
 
 ```sh

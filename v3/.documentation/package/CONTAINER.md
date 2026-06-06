@@ -49,6 +49,14 @@ Registration options (see [`RegisterOptions`](../../container/contract/registrar
 - [`WithoutTypeRegistration()`](../../container/register_option.go)  
   Explicitly disables type registration for that registration call.
 
+Type registration is **on by default** (strict) for `RegisterService`/`MustRegisterType`, so every registered service is also resolvable by its concrete return type — no extra option needed. Resolve a service by type with the generic [`MustFromResolverByType[T]`](../../container/resolver.go) / [`FromResolverByType[T]`](../../container/resolver.go):
+
+```go
+bus := container.MustFromResolverByType[messagebuscontract.Bus](resolver)
+```
+
+For a service with a **single** implementation this removes the need to invent a string service-name constant and a per-type `MustGetX` accessor — register it and resolve it by type. Keep the **named** path (`RegisterService(ServiceX, ...)` + `XMustFromResolver`) when a contract has more than one implementation that must coexist: because type registration is strict, registering two services under the same contract type fails at registration (the string name is then the only disambiguator).
+
 ## Usage
 
 The example below demonstrates:

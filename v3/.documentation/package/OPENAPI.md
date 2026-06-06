@@ -61,6 +61,18 @@ command := openapi.NewGenerateCommand(
 )
 ```
 
+For the common single-request / single-response route, [`DescribeTyped[Req, Resp]`](../../openapi/describe_typed.go) takes the types as parameters instead of a `Descriptor` literal:
+
+```go
+openapi.DescribeTyped[ProductCreateRequest, ProductView](
+	registry, "products.create", 201,
+	openapi.WithSummary("Create a product"),
+	openapi.WithTags("products"),
+)
+```
+
+Use `Describe` directly for no-body or multi-response routes (add extra responses with `WithResponse[T](status)`).
+
 Run it to emit the document:
 
 ```sh

@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to `precision-soft/melody/integrations/otel` will be documented in this file.
+All notable changes to `precision-soft/melody/integrations/opentelemetry` will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -18,6 +18,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `prometheus.go` — `NewPrometheusMeter(name)` (OTel Prometheus exporter + meter provider + registry) and `MetricsHandler(registry)` for a `/metrics` endpoint.
 - `otel_test.go` — in-process tests (in-memory span recorder + Prometheus registry); no collector required.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/otel/v3.0.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/opentelemetry/v3.0.0...HEAD
 
-[v3.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations/otel/v3.0.0
+[v3.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations/opentelemetry/v3.0.0

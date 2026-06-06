@@ -1,4 +1,4 @@
-# Melody object storage integration (v3)
+# Melody AWS S3 integration (v3)
 
 An S3-compatible implementation of the Melody core [`storage`](https://github.com/precision-soft/melody) contract, backed by [`minio-go`](https://github.com/minio/minio-go). Works with MinIO and AWS S3 (and any S3-compatible service).
 
@@ -7,17 +7,17 @@ It implements `storage/contract.Storage`, so application code written against th
 ## Installation
 
 ```sh
-go get github.com/precision-soft/melody/integrations/objectstorage/v3
+go get github.com/precision-soft/melody/integrations/awss3/v3
 ```
 
 ```go
-import objectstorage "github.com/precision-soft/melody/integrations/objectstorage/v3"
+import awss3 "github.com/precision-soft/melody/integrations/awss3/v3"
 ```
 
 ## Usage
 
 ```go
-client, clientErr := objectstorage.NewClient(objectstorage.Config{
+client, clientErr := awss3.NewClient(awss3.Config{
 	Endpoint:  "s3.example.com",
 	AccessKey: "...",
 	SecretKey: "...",
@@ -27,11 +27,11 @@ if nil != clientErr {
 	return clientErr
 }
 
-if ensureErr := objectstorage.EnsureBucket(ctx, client, "documents", ""); nil != ensureErr {
+if ensureErr := awss3.EnsureBucket(ctx, client, "documents", ""); nil != ensureErr {
 	return ensureErr
 }
 
-store := objectstorage.NewStorage(client, "documents")
+store := awss3.NewStorage(client, "documents")
 
 putErr := store.Put(runtimeInstance, "labels/awb-123.pdf", reader, size, storagecontract.PutOptions{
 	ContentType: "application/pdf",
@@ -45,7 +45,7 @@ url, _ := store.PresignedUrl(runtimeInstance, "labels/awb-123.pdf", 15*time.Minu
 Register the S3 backend under the core `storage.ServiceStorage` service name in one call, so handlers resolve it from the container with `storage.StorageMustFromResolver`:
 
 ```go
-objectstorage.RegisterStorageService(registrar, client, "documents")
+awss3.RegisterStorageService(registrar, client, "documents")
 ```
 
 ## Footguns & caveats

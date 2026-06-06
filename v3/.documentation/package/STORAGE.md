@@ -1,6 +1,6 @@
 # STORAGE
 
-The [`storage`](../../storage) package provides an object-storage abstraction. The core ships a dependency-free filesystem implementation; an S3-compatible implementation (MinIO/AWS S3) lives in the [`objectstorage`](../../../integrations/objectstorage) integration.
+The [`storage`](../../storage) package provides an object-storage abstraction. The core ships a dependency-free filesystem implementation; an S3-compatible implementation (MinIO/AWS S3) lives in the [`awss3`](../../../integrations/awss3) integration.
 
 ## Scope
 
@@ -34,11 +34,11 @@ putErr := store.Put(runtimeInstance, "labels/awb-123.pdf", reader, size, storage
 reader, getErr := store.Get(runtimeInstance, "labels/awb-123.pdf")
 ```
 
-For S3-compatible object storage, use the [`objectstorage`](../../../integrations/objectstorage) integration, which implements the same contract over `minio-go`:
+For S3-compatible object storage, use the [`awss3`](../../../integrations/awss3) integration, which implements the same contract over `minio-go`:
 
 ```go
-client, _ := objectstorage.NewClient(objectstorage.Config{Endpoint: "s3.example.com", AccessKey: "...", SecretKey: "...", Secure: true})
-store := objectstorage.NewStorage(client, "documents")
+client, _ := awss3.NewClient(awss3.Config{Endpoint: "s3.example.com", AccessKey: "...", SecretKey: "...", Secure: true})
+store := awss3.NewStorage(client, "documents")
 ```
 
 ## Footguns & caveats

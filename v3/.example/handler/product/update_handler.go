@@ -68,10 +68,10 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
 }
 
 type updateRequest struct {
-    Name        string  `json:"name" validation:"required,min=2,max=120"`
-    Description string  `json:"description" validation:"required,min=1,max=40"`
-    CategoryId  string  `json:"categoryId" validation:"required"`
-    Price       float64 `json:"price" validation:"required,min=0"`
-    CurrencyId  string  `json:"currencyId" validation:"required"`
-    Stock       int64   `json:"stock" validation:"required,min=0"`
+    Name        string  `json:"name" validate:"notBlank,min=2,max=120"`
+    Description string  `json:"description" validate:"notBlank,min=1,max=40"`
+    CategoryId  string  `json:"categoryId" validate:"notBlank"`
+    Price       float64 `json:"price" validate:"greaterThan=0"`
+    CurrencyId  string  `json:"currencyId" validate:"notBlank"`
+    Stock       int64   `json:"stock" validate:"greaterThan=-1"`
 }

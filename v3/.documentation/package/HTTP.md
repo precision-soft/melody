@@ -85,6 +85,8 @@ Implementation detail: see [`wrapControllerWithContainer`](../../http/router_uti
 
 Controller functions wired through [`wrapControllerWithContainer`](../../http/router_utility.go) must return a first result that implements [`httpcontract.Response`](../../http/contract/response.go). The first result is not restricted to the concrete [`Response`](../../http/response.go) type; any implementation of the response contract is accepted.
 
+For JSON-body endpoints, [`JsonHandler[Req](handle, ...options)`](../../http/typed_handler.go) wraps a handler so the framework decodes the request body into `Req` and runs the container validator before calling `handle(runtime, request, body)`; a decode/validation failure returns an error, or a caller-supplied response shape via [`WithJsonHandlerErrorResponder`](../../http/typed_handler.go). This removes the per-handler decode-and-validate block.
+
 ## Usage
 
 The example below demonstrates:

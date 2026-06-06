@@ -7,11 +7,11 @@ Structured logging already exists in core Melody; this integration adds traces a
 ## Installation
 
 ```sh
-go get github.com/precision-soft/melody/integrations/otel/v3
+go get github.com/precision-soft/melody/integrations/opentelemetry/v3
 ```
 
 ```go
-import otel "github.com/precision-soft/melody/integrations/otel/v3"
+import opentelemetry "github.com/precision-soft/melody/integrations/opentelemetry/v3"
 ```
 
 ## Usage
@@ -19,15 +19,15 @@ import otel "github.com/precision-soft/melody/integrations/otel/v3"
 ### Metrics (Prometheus)
 
 ```go
-meter, registry, meterErr := otel.NewPrometheusMeter("my-service")
+meter, registry, meterErr := opentelemetry.NewPrometheusMeter("my-service")
 if nil != meterErr {
 	return meterErr
 }
 
-metricsMiddleware, _ := otel.NewMetricsMiddleware(meter)
+metricsMiddleware, _ := opentelemetry.NewMetricsMiddleware(meter)
 // register metricsMiddleware via RegisterHttpMiddlewares
 
-// expose the registry; e.g. route GET /metrics -> otel.MetricsHandler(registry)
+// expose the registry; e.g. route GET /metrics -> opentelemetry.MetricsHandler(registry)
 ```
 
 `NewMetricsMiddleware` records `http.server.request.count` and `http.server.request.duration` (ms) with `http.request.method`, `http.route`, and `http.response.status_code` attributes.
@@ -35,7 +35,7 @@ metricsMiddleware, _ := otel.NewMetricsMiddleware(meter)
 Or build the meter, the middleware, and the `/metrics` handler in one call:
 
 ```go
-metricsMiddleware, metricsHandler, metricsErr := otel.NewMetricsMiddlewareWithPrometheus("my-service")
+metricsMiddleware, metricsHandler, metricsErr := opentelemetry.NewMetricsMiddlewareWithPrometheus("my-service")
 // register metricsMiddleware via RegisterHttpMiddlewares; route GET /metrics -> metricsHandler
 ```
 
@@ -43,7 +43,7 @@ metricsMiddleware, metricsHandler, metricsErr := otel.NewMetricsMiddlewareWithPr
 
 ```go
 tracer := tracerProvider.Tracer("my-service") // your configured *sdktrace.TracerProvider
-tracingMiddleware := otel.NewTracingMiddleware(tracer, nil) // nil -> W3C TraceContext propagation
+tracingMiddleware := opentelemetry.NewTracingMiddleware(tracer, nil) // nil -> W3C TraceContext propagation
 ```
 
 The tracing middleware extracts the incoming trace context from request headers, starts a server span per request (named `<METHOD> <route>`), injects the span context into the runtime passed downstream, records method/route/status attributes, and marks the span as errored on a handler error or a 5xx response.

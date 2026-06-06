@@ -1,4 +1,4 @@
-package otel_test
+package opentelemetry_test
 
 import (
     "context"
@@ -10,7 +10,7 @@ import (
     sdktrace "go.opentelemetry.io/otel/sdk/trace"
     "go.opentelemetry.io/otel/sdk/trace/tracetest"
 
-    otel "github.com/precision-soft/melody/integrations/otel/v3"
+    opentelemetry "github.com/precision-soft/melody/integrations/opentelemetry/v3"
     "github.com/precision-soft/melody/v3/container"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
@@ -35,12 +35,12 @@ func okHandler() httpcontract.Handler {
 }
 
 func TestMetricsMiddleware_RecordsRequestMetrics(t *testing.T) {
-    meter, registry, meterErr := otel.NewPrometheusMeter("melody-test")
+    meter, registry, meterErr := opentelemetry.NewPrometheusMeter("melody-test")
     if nil != meterErr {
         t.Fatalf("meter: %v", meterErr)
     }
 
-    middleware, middlewareErr := otel.NewMetricsMiddleware(meter)
+    middleware, middlewareErr := opentelemetry.NewMetricsMiddleware(meter)
     if nil != middlewareErr {
         t.Fatalf("middleware: %v", middlewareErr)
     }
@@ -74,7 +74,7 @@ func TestTracingMiddleware_RecordsServerSpan(t *testing.T) {
     provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
     tracer := provider.Tracer("melody-test")
 
-    middleware := otel.NewTracingMiddleware(tracer, nil)
+    middleware := opentelemetry.NewTracingMiddleware(tracer, nil)
 
     request, runtimeInstance := testRequestAndRuntime()
     handler := middleware(okHandler())

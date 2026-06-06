@@ -1,13 +1,13 @@
-package otel_test
+package opentelemetry_test
 
 import (
     "testing"
 
-    otel "github.com/precision-soft/melody/integrations/otel/v3"
+    opentelemetry "github.com/precision-soft/melody/integrations/opentelemetry/v3"
 )
 
 func TestNewMetricsMiddlewareWithPrometheus(t *testing.T) {
-    middleware, handler, middlewareErr := otel.NewMetricsMiddlewareWithPrometheus("example")
+    middleware, handler, middlewareErr := opentelemetry.NewMetricsMiddlewareWithPrometheus("example")
     if nil != middlewareErr {
         t.Fatalf("unexpected error: %v", middlewareErr)
     }
