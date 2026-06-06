@@ -132,8 +132,13 @@ func (instance *SseHub) DeliverLocal(topic string, event SseEvent) int {
 
 func (instance *SseHub) replicate(topic string, event SseEvent) {
     instance.mutex.RLock()
+    closed := instance.closed
     backplane := instance.backplane
     instance.mutex.RUnlock()
+
+    if true == closed {
+        return
+    }
 
     if nil == backplane {
         return

@@ -88,6 +88,22 @@ func TestSseHub_DeliverLocalDoesNotReplicate(t *testing.T) {
     }
 }
 
+func TestSseHub_BroadcastAfterShutdownDoesNotReplicate(t *testing.T) {
+    hub := http.NewSseHub()
+    backplane := &recordingBackplane{}
+    hub.SetBackplane(backplane)
+
+    hub.Shutdown()
+
+    if delivered := hub.Broadcast("orders", http.SseEvent{Data: "hello"}); 0 != delivered {
+        t.Fatalf("expected no local delivery after shutdown, got %d", delivered)
+    }
+
+    if 0 != backplane.count() {
+        t.Fatalf("expected no replication after shutdown, got %d", backplane.count())
+    }
+}
+
 func TestSseHub_BackplaneFailureIsCounted(t *testing.T) {
     hub := http.NewSseHub()
     hub.SetBackplane(&recordingBackplane{publishErr: exception.NewError("backplane down", nil, nil)})
