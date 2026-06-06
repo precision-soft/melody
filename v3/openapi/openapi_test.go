@@ -155,6 +155,29 @@ func TestGenerate_NumericConstraintsEmbeddingAndNullability(t *testing.T) {
     }
 }
 
+type shadowedEmbedRequest struct {
+    embeddedAudit
+    CreatedBy int64 `json:"createdBy"`
+}
+
+func TestGenerate_OuterFieldShadowsEmbeddedField(t *testing.T) {
+    registry := openapi.NewRegistry()
+    registry.Describe("shadow.create", openapi.Descriptor{
+        RequestType: openapi.TypeOf[shadowedEmbedRequest](),
+    })
+
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "shadow.create", pattern: "/shadow/", methods: []string{"POST"}},
+    }
+
+    document := openapi.Generate(openapi.Info{Title: "Example", Version: "1.0.0"}, routes, registry)
+
+    createdBy := document.Components.Schemas["shadowedEmbedRequest"].Properties["createdBy"]
+    if nil == createdBy || "integer" != createdBy.Type {
+        t.Fatalf("expected the outer int64 createdBy to shadow the embedded string field (encoding/json semantics), got: %+v", createdBy)
+    }
+}
+
 type nullableRefRequest struct {
     Audit *embeddedAudit `json:"audit,omitempty"`
 }

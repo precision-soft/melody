@@ -126,17 +126,14 @@ func collectStructFields(
     properties map[string]*Schema,
     required *[]string,
 ) {
+    // The struct's own fields are collected before any promoted embed so that an outer
+    // field shadows a same-named embedded field regardless of declaration order, matching
+    // encoding/json (shallower fields win). The first-wins skip in the embed pass then drops
+    // the shadowed embedded field.
     for index := 0; index < structType.NumField(); index++ {
         field := structType.Field(index)
 
         if true == isPromotedEmbed(field) {
-            embedded := field.Type
-            for reflect.Ptr == embedded.Kind() {
-                embedded = embedded.Elem()
-            }
-
-            collectStructFields(embedded, components, names, visited, properties, required)
-
             continue
         }
 
@@ -160,6 +157,21 @@ func collectStructFields(
         if true == isRequired(field.Tag.Get("validate")) {
             *required = append(*required, jsonName)
         }
+    }
+
+    for index := 0; index < structType.NumField(); index++ {
+        field := structType.Field(index)
+
+        if false == isPromotedEmbed(field) {
+            continue
+        }
+
+        embedded := field.Type
+        for reflect.Ptr == embedded.Kind() {
+            embedded = embedded.Elem()
+        }
+
+        collectStructFields(embedded, components, names, visited, properties, required)
     }
 }
 
