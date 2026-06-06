@@ -26,7 +26,7 @@ type Options struct {
     ReadLimit int64
 }
 
-func NewStreamHandler(hub *melodyhttp.SseHub, options Options) httpcontract.Handler {
+func NewStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpcontract.Handler {
     return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         connection, acceptErr := coderwebsocket.Accept(writer, request.HttpRequest(), &coderwebsocket.AcceptOptions{
             OriginPatterns: options.OriginPatterns,

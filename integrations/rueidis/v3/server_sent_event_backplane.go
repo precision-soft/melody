@@ -15,22 +15,22 @@ import (
 )
 
 const (
-    defaultSseBackplaneChannel = "melody:sse"
+    defaultServerSentEventBackplaneChannel = "melody:sse"
 
-    sseBackplaneInitialBackoff = 1 * time.Second
-    sseBackplaneMaxBackoff     = 30 * time.Second
-    sseBackplaneBackoffFactor  = 2
+    serverSentEventBackplaneInitialBackoff = 1 * time.Second
+    serverSentEventBackplaneMaxBackoff     = 30 * time.Second
+    serverSentEventBackplaneBackoffFactor  = 2
 )
 
-type sseWireEvent struct {
+type serverSentEventWireEvent struct {
     Origin string              `json:"origin"`
     Topic  string              `json:"topic"`
-    Event  melodyhttp.SseEvent `json:"event"`
+    Event  melodyhttp.ServerSentEvent `json:"event"`
 }
 
-type SseBackplane struct {
+type ServerSentEventBackplane struct {
     client  rueidis.Client
-    hub     *melodyhttp.SseHub
+    hub     *melodyhttp.ServerSentEventHub
     channel string
     origin  string
     logger  loggingcontract.Logger
@@ -40,21 +40,21 @@ type SseBackplane struct {
     wait   sync.WaitGroup
 }
 
-type SseBackplaneOption func(*SseBackplane)
+type ServerSentEventBackplaneOption func(*ServerSentEventBackplane)
 
-func WithSseBackplaneChannel(channel string) SseBackplaneOption {
-    return func(backplane *SseBackplane) {
+func WithServerSentEventBackplaneChannel(channel string) ServerSentEventBackplaneOption {
+    return func(backplane *ServerSentEventBackplane) {
         backplane.channel = channel
     }
 }
 
-func WithSseBackplaneLogger(logger loggingcontract.Logger) SseBackplaneOption {
-    return func(backplane *SseBackplane) {
+func WithServerSentEventBackplaneLogger(logger loggingcontract.Logger) ServerSentEventBackplaneOption {
+    return func(backplane *ServerSentEventBackplane) {
         backplane.logger = logger
     }
 }
 
-func NewSseBackplane(client rueidis.Client, hub *melodyhttp.SseHub, options ...SseBackplaneOption) *SseBackplane {
+func NewServerSentEventBackplane(client rueidis.Client, hub *melodyhttp.ServerSentEventHub, options ...ServerSentEventBackplaneOption) *ServerSentEventBackplane {
     if nil == client {
         exception.Panic(exception.NewError("redis sse backplane client is nil", nil, nil))
     }
@@ -65,10 +65,10 @@ func NewSseBackplane(client rueidis.Client, hub *melodyhttp.SseHub, options ...S
 
     ctx, cancel := context.WithCancel(context.Background())
 
-    backplane := &SseBackplane{
+    backplane := &ServerSentEventBackplane{
         client:  client,
         hub:     hub,
-        channel: defaultSseBackplaneChannel,
+        channel: defaultServerSentEventBackplaneChannel,
         origin:  newBackplaneOrigin(),
         ctx:     ctx,
         cancel:  cancel,
@@ -79,7 +79,7 @@ func NewSseBackplane(client rueidis.Client, hub *melodyhttp.SseHub, options ...S
     }
 
     if "" == backplane.channel {
-        backplane.channel = defaultSseBackplaneChannel
+        backplane.channel = defaultServerSentEventBackplaneChannel
     }
 
     hub.SetBackplane(backplane)
@@ -90,8 +90,8 @@ func NewSseBackplane(client rueidis.Client, hub *melodyhttp.SseHub, options ...S
     return backplane
 }
 
-func (instance *SseBackplane) Publish(topic string, event melodyhttp.SseEvent) error {
-    payload, marshalErr := json.Marshal(sseWireEvent{Origin: instance.origin, Topic: topic, Event: event})
+func (instance *ServerSentEventBackplane) Publish(topic string, event melodyhttp.ServerSentEvent) error {
+    payload, marshalErr := json.Marshal(serverSentEventWireEvent{Origin: instance.origin, Topic: topic, Event: event})
     if nil != marshalErr {
         return exception.NewError("redis sse backplane could not encode the event", map[string]any{"topic": topic}, marshalErr)
     }
@@ -107,17 +107,17 @@ func (instance *SseBackplane) Publish(topic string, event melodyhttp.SseEvent) e
     return nil
 }
 
-func (instance *SseBackplane) Close() error {
+func (instance *ServerSentEventBackplane) Close() error {
     instance.cancel()
     instance.wait.Wait()
 
     return nil
 }
 
-func (instance *SseBackplane) listen() {
+func (instance *ServerSentEventBackplane) listen() {
     defer instance.wait.Done()
 
-    backoff := sseBackplaneInitialBackoff
+    backoff := serverSentEventBackplaneInitialBackoff
 
     for {
         if nil != instance.ctx.Err() {
@@ -142,17 +142,17 @@ func (instance *SseBackplane) listen() {
                 return
             }
 
-            backoff = nextSseBackplaneBackoff(backoff)
+            backoff = nextServerSentEventBackplaneBackoff(backoff)
 
             continue
         }
 
-        backoff = sseBackplaneInitialBackoff
+        backoff = serverSentEventBackplaneInitialBackoff
     }
 }
 
-func (instance *SseBackplane) handle(message rueidis.PubSubMessage) {
-    wire := sseWireEvent{}
+func (instance *ServerSentEventBackplane) handle(message rueidis.PubSubMessage) {
+    wire := serverSentEventWireEvent{}
     if unmarshalErr := json.Unmarshal([]byte(message.Message), &wire); nil != unmarshalErr {
         instance.logError("redis sse backplane could not decode an event", unmarshalErr)
 
@@ -166,7 +166,7 @@ func (instance *SseBackplane) handle(message rueidis.PubSubMessage) {
     instance.hub.DeliverLocal(wire.Topic, wire.Event)
 }
 
-func (instance *SseBackplane) logError(message string, err error) {
+func (instance *ServerSentEventBackplane) logError(message string, err error) {
     if nil == instance.logger {
         return
     }
@@ -174,10 +174,10 @@ func (instance *SseBackplane) logError(message string, err error) {
     instance.logger.Error(message, exception.LogContext(err))
 }
 
-func nextSseBackplaneBackoff(current time.Duration) time.Duration {
-    next := current * time.Duration(sseBackplaneBackoffFactor)
-    if next > sseBackplaneMaxBackoff {
-        return sseBackplaneMaxBackoff
+func nextServerSentEventBackplaneBackoff(current time.Duration) time.Duration {
+    next := current * time.Duration(serverSentEventBackplaneBackoffFactor)
+    if next > serverSentEventBackplaneMaxBackoff {
+        return serverSentEventBackplaneMaxBackoff
     }
 
     return next
@@ -193,4 +193,4 @@ func newBackplaneOrigin() string {
     return hex.EncodeToString(buffer)
 }
 
-var _ melodyhttp.SseBackplane = (*SseBackplane)(nil)
+var _ melodyhttp.ServerSentEventBackplane = (*ServerSentEventBackplane)(nil)

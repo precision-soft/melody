@@ -8,17 +8,17 @@ import (
     melodyhttp "github.com/precision-soft/melody/v3/http"
 )
 
-func TestSseBackplane_ReplicatesBroadcastToAnotherInstance(t *testing.T) {
+func TestServerSentEventBackplane_ReplicatesBroadcastToAnotherInstance(t *testing.T) {
     client := newTokenStoreClient(t)
 
-    channel := rueidis.WithSseBackplaneChannel("melody:sse:test:replicate")
+    channel := rueidis.WithServerSentEventBackplaneChannel("melody:sse:test:replicate")
 
-    hubA := melodyhttp.NewSseHub()
-    backplaneA := rueidis.NewSseBackplane(client, hubA, channel)
+    hubA := melodyhttp.NewServerSentEventHub()
+    backplaneA := rueidis.NewServerSentEventBackplane(client, hubA, channel)
     defer backplaneA.Close()
 
-    hubB := melodyhttp.NewSseHub()
-    backplaneB := rueidis.NewSseBackplane(client, hubB, channel)
+    hubB := melodyhttp.NewServerSentEventHub()
+    backplaneB := rueidis.NewServerSentEventBackplane(client, hubB, channel)
     defer backplaneB.Close()
 
     subscriber := hubB.Subscribe("orders", 4)
@@ -29,7 +29,7 @@ func TestSseBackplane_ReplicatesBroadcastToAnotherInstance(t *testing.T) {
     defer tick.Stop()
 
     for {
-        hubA.Broadcast("orders", melodyhttp.SseEvent{Data: "from-a"})
+        hubA.Broadcast("orders", melodyhttp.ServerSentEvent{Data: "from-a"})
 
         select {
         case event := <-subscriber.Events():
@@ -45,17 +45,17 @@ func TestSseBackplane_ReplicatesBroadcastToAnotherInstance(t *testing.T) {
     }
 }
 
-func TestSseBackplane_DoesNotEchoToOriginInstanceTwice(t *testing.T) {
+func TestServerSentEventBackplane_DoesNotEchoToOriginInstanceTwice(t *testing.T) {
     client := newTokenStoreClient(t)
 
-    hub := melodyhttp.NewSseHub()
-    backplane := rueidis.NewSseBackplane(client, hub, rueidis.WithSseBackplaneChannel("melody:sse:test:echo"))
+    hub := melodyhttp.NewServerSentEventHub()
+    backplane := rueidis.NewServerSentEventBackplane(client, hub, rueidis.WithServerSentEventBackplaneChannel("melody:sse:test:echo"))
     defer backplane.Close()
 
     subscriber := hub.Subscribe("orders", 4)
     defer hub.Unsubscribe(subscriber)
 
-    if delivered := hub.Broadcast("orders", melodyhttp.SseEvent{Data: "once"}); 1 != delivered {
+    if delivered := hub.Broadcast("orders", melodyhttp.ServerSentEvent{Data: "once"}); 1 != delivered {
         t.Fatalf("expected exactly one local delivery, got %d", delivered)
     }
 

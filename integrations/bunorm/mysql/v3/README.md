@@ -29,6 +29,14 @@ defer namedLock.Release(runtime)
 
 `NewLocker(database)` takes the `*bun.DB` handle and implements `lock/contract.Locker`; `CreateLock(name, ttl)` returns a `lock/contract.Lock`.
 
+### Plug-and-play registration
+
+Register the locker under the core `lock.ServiceLocker` service name in one call, so handlers resolve it with `lock.LockerMustFromResolver`:
+
+```go
+mysql.RegisterLockerService(registrar, database)
+```
+
 ## Semantics
 
 - **Try-acquire only.** `Acquire` issues `SELECT GET_LOCK(?, 0)` — a non-blocking attempt that returns immediately, consistent with the in-memory and Redis backends. A failed acquisition returns `(false, nil)`, not an error.

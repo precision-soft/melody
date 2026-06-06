@@ -158,6 +158,19 @@ func RegisterCacheServices(app *application.Application) {
 }
 ```
 
+### Plug-and-play registration (v3)
+
+In v3 (`github.com/precision-soft/melody/integrations/rueidis/v3`) the integration ships the registration helpers, so the manual wiring above collapses to a few calls. Register the Redis client once, then the lock, the revocable token store, and the cache backend against their core service names:
+
+```go
+rueidis.RegisterClientService(registrar, client)
+rueidis.RegisterLockerService(registrar, client)        // registers lock.ServiceLocker
+rueidis.RegisterTokenStoreService(registrar, client)    // registers rueidis.ServiceTokenStore
+cache.RegisterBackendService(registrar, client, "app")  // registers cache.ServiceCacheBackend
+```
+
+Services then resolve them with `lock.LockerMustFromResolver`, `rueidis.TokenStoreMustFromResolver`, and `cache.CacheMustFromResolver`. The Server-Sent Events backplane self-registers on the hub through `rueidis.NewServerSentEventBackplane(client, hub)`.
+
 ### Request-scoped context
 
 Create a thin helper that binds the service name, then use it in handlers:
@@ -226,14 +239,14 @@ func registerTokenStore(builder containercontract.Builder, client redis.Client) 
 
 Wire the store into an `OpaqueTokenValidator` exactly as you would the in-memory one — the firewall configuration is identical because both satisfy `securitycontract.TokenStore`.
 
-## SSE backplane
+## Server-Sent Events backplane
 
-`NewSseBackplane(client, hub, ...options)` makes the core `http.SseHub` fan its broadcasts out across every application instance behind a load balancer over a Redis pub/sub channel — without it, a `Broadcast` reaches only the clients connected to the instance that emitted it. Each broadcast is published to a shared channel (`WithSseBackplaneChannel`, default `melody:sse`) tagged with a per-instance random origin; a dedicated subscription forwards the events of other instances into the hub via `DeliverLocal` and skips the echo of its own origin, so nothing is delivered twice. The subscription re-subscribes with bounded backoff after a connection drop. The same hub backs the WebSocket integration, so both transports fan out cluster-wide.
+`NewServerSentEventBackplane(client, hub, ...options)` makes the core `http.ServerSentEventHub` fan its broadcasts out across every application instance behind a load balancer over a Redis pub/sub channel — without it, a `Broadcast` reaches only the clients connected to the instance that emitted it. Each broadcast is published to a shared channel (`WithServerSentEventBackplaneChannel`, default `melody:sse`) tagged with a per-instance random origin; a dedicated subscription forwards the events of other instances into the hub via `DeliverLocal` and skips the echo of its own origin, so nothing is delivered twice. The subscription re-subscribes with bounded backoff after a connection drop. The same hub backs the WebSocket integration, so both transports fan out cluster-wide.
 
 ```go
-hub := melodyhttp.NewSseHub()
-backplane := rueidis.NewSseBackplane(client, hub, rueidis.WithSseBackplaneChannel("myapp:sse"))
+hub := melodyhttp.NewServerSentEventHub()
+backplane := rueidis.NewServerSentEventBackplane(client, hub, rueidis.WithServerSentEventBackplaneChannel("myapp:sse"))
 defer backplane.Close()
 ```
 
-`NewSseBackplane` calls `hub.SetBackplane` itself, so after construction `hub.Broadcast(...)` replicates automatically. The Redis client is caller-owned; `Close` stops the subscription but does not close the client. Delivery is best-effort like SSE itself; `hub.BackplaneFailures()` counts broadcasts that could not be published.
+`NewServerSentEventBackplane` calls `hub.SetBackplane` itself, so after construction `hub.Broadcast(...)` replicates automatically. The Redis client is caller-owned; `Close` stops the subscription but does not close the client. Delivery is best-effort like Server-Sent Events itself; `hub.BackplaneFailures()` counts broadcasts that could not be published.

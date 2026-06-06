@@ -63,7 +63,25 @@ The package defines the service names:
 - [`ServiceBus`](../../messagebus/service_resolver.go) (`"service.messagebus.bus"`)
 - [`ServiceHandlerLocator`](../../messagebus/service_resolver.go) (`"service.messagebus.handler_locator"`)
 
-These are not registered by the framework. Userland registers `ServiceBus` to its dispatch bus so that HTTP handlers, services, or commands can resolve and dispatch.
+These are not registered by the framework. Userland registers `ServiceBus` to its dispatch bus once, so that HTTP handlers, services, or commands can resolve and dispatch:
+
+```go
+registrar.RegisterService(
+	messagebus.ServiceBus,
+	func(resolver containercontract.Resolver) (messagebuscontract.Bus, error) {
+		return dispatchBus, nil
+	},
+)
+```
+
+Any service, handler, or command then resolves the same bus and dispatches:
+
+```go
+bus := messagebus.BusMustFromResolver(resolver)
+bus.Dispatch(runtimeInstance, WelcomeEmail{UserId: 1})
+```
+
+`BusMustFromContainer` is the equivalent from a `Container` (for example `runtimeInstance.Container()` inside a handler). The factory result is cached, so every resolver shares the one configured bus — configure it once, dispatch from many places. The example application wires this end-to-end: the bus is registered in [`.example/config/service.go`](../../.example/config/service.go) and resolved in the [`/messagebus/demo`](../../.example/handler/messagebus_demo_handler.go) HTTP handler. Set `AMQP_DSN` before launching the example to route the bus over RabbitMQ via the [`amqp`](../../../integrations/amqp/v3) integration instead of the in-process transport.
 
 ## Usage
 

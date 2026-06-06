@@ -60,11 +60,79 @@ transport := amqp.NewTransport(amqp.TransportConfig{
 })
 ```
 
-Wire it into a dispatch bus with `messagebus.NewSendMessageMiddleware`, and into the `messagebus.NewConsumeCommand` transports map under a name (for example `"async"`). Consume with:
+### Configure a publisher
+
+Wire the transport into a dispatch bus by routing your message types to it, then dispatch:
+
+```go
+locator := messagebus.NewHandlerLocator()
+messagebus.RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, welcome WelcomeEmail) error {
+	return nil
+})
+
+routing := map[reflect.Type]messagebus.TransportRouting{
+	reflect.TypeOf(WelcomeEmail{}): {Name: "async", Transport: transport},
+}
+
+dispatchBus := messagebus.NewManager(
+	"default",
+	messagebus.NewSendMessageMiddleware(routing),
+	messagebus.NewHandleMessageMiddleware(locator),
+)
+
+dispatchBus.Dispatch(runtimeInstance, WelcomeEmail{UserId: 1, Address: "user@example.com"})
+```
+
+A routed type is published to RabbitMQ and the dispatch returns immediately; an unrouted type falls through to the handle middleware and runs inline.
+
+### Configure a consumer
+
+Build a handle-only bus and the consume command, then run it as a long-lived worker:
+
+```go
+consumeBus := messagebus.NewManager(
+	"default.consume",
+	messagebus.NewHandleMessageMiddleware(locator),
+)
+
+consumeCommand := messagebus.NewConsumeCommandWithRetry(
+	consumeBus,
+	map[string]messagebus.Transport{"async": transport},
+	messagebus.RetryPolicy{MaxRetries: 3},
+)
+```
+
+Register `consumeCommand` in your application's command list (so it shows up as `melody:messagebus:consume`), then run it:
 
 ```sh
 app melody:messagebus:consume --transport=async
+app melody:messagebus:consume --transport=async --concurrency=8
 ```
+
+`--transport` selects which entry of the transports map to drain; `--concurrency` runs that many worker goroutines reading the same queue.
+
+### Routing keys
+
+The transport binds one queue and uses a single, static routing key — there is no per-message routing key. Message types are routed to transports in the bus layer (the `reflect.Type` routing map above), not by an AMQP routing key.
+
+- **No `Exchange` (default):** the transport publishes to the default exchange using the queue name as the routing key — a direct delivery to the queue. The `RoutingKey` field is ignored.
+- **With `Exchange` set:** the transport declares it as a `direct` exchange, binds its queue to the exchange with `RoutingKey`, and publishes to `(Exchange, RoutingKey)`. To deliver different message types to different queues, build one transport per destination (each with its own `Queue`/`RoutingKey`) and map the types to them.
+
+### Plug-and-play registration
+
+Configure the connection once and resolve it (or a named transport) from many services:
+
+```go
+amqp.RegisterConnectionService(registrar, connection)
+amqp.RegisterTransportService(registrar, "async", transport)
+```
+
+```go
+connection := amqp.ConnectionMustFromResolver(resolver)
+transport := amqp.TransportMustFromResolver(resolver, "async")
+```
+
+`amqp.RegisterDefaultParameters(registrar)` registers the default `melody.amqp.*` parameters.
 
 ### Auto-reconnect
 
@@ -93,13 +161,13 @@ When `DeadLetter` is `true`, the transport declares a dead-letter exchange (`<qu
 - A handler failure negatively acknowledges it. To avoid poison-message loops, a message that was already redelivered is dead-lettered instead of being requeued again. This is a bounded single-retry policy; delayed/backoff retry is not yet implemented.
 - A delivery that cannot be decoded (missing or unknown `x-message-type`, bad body) is dead-lettered immediately.
 
-## SSE backplane
+## Server-Sent Events backplane
 
-`NewSseBackplane(SseBackplaneConfig{...})` makes the core `http.SseHub` fan its broadcasts out across every application instance behind a load balancer over a fanout exchange — without it, a `Broadcast` reaches only the clients connected to the instance that emitted it. Each instance binds its own exclusive, auto-deleted queue to the exchange (default `melody.sse`), so a published broadcast reaches every instance; the events of other instances are forwarded into the hub via `DeliverLocal`, and a tagged per-instance origin makes each instance skip the echo of its own broadcasts. Replication is best-effort (auto-ack, transient). With a `Dialer` the subscription and publisher re-establish after a broker restart.
+`NewServerSentEventBackplane(ServerSentEventBackplaneConfig{...})` makes the core `http.ServerSentEventHub` fan its broadcasts out across every application instance behind a load balancer over a fanout exchange — without it, a `Broadcast` reaches only the clients connected to the instance that emitted it. Each instance binds its own exclusive, auto-deleted queue to the exchange (default `melody.sse`), so a published broadcast reaches every instance; the events of other instances are forwarded into the hub via `DeliverLocal`, and a tagged per-instance origin makes each instance skip the echo of its own broadcasts. Replication is best-effort (auto-ack, transient). With a `Dialer` the subscription and publisher re-establish after a broker restart.
 
 ```go
-hub := melodyhttp.NewSseHub()
-backplane := amqp.NewSseBackplane(amqp.SseBackplaneConfig{
+hub := melodyhttp.NewServerSentEventHub()
+backplane := amqp.NewServerSentEventBackplane(amqp.ServerSentEventBackplaneConfig{
     Connection: connection,
     Dialer:     provider.Dialer(dsn),
     Hub:        hub,
@@ -107,7 +175,7 @@ backplane := amqp.NewSseBackplane(amqp.SseBackplaneConfig{
 defer backplane.Close()
 ```
 
-`NewSseBackplane` calls `hub.SetBackplane` itself, so after construction `hub.Broadcast(...)` replicates automatically. `Close` tears the subscription down and closes only a connection the backplane itself dialed (never the one you passed in). The same hub backs the WebSocket integration, so both transports fan out cluster-wide.
+`NewServerSentEventBackplane` calls `hub.SetBackplane` itself, so after construction `hub.Broadcast(...)` replicates automatically. `Close` tears the subscription down and closes only a connection the backplane itself dialed (never the one you passed in). The same hub backs the WebSocket integration, so both transports fan out cluster-wide.
 
 ## Footguns & caveats
 

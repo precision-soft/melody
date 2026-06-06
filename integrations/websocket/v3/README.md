@@ -1,6 +1,6 @@
 # Melody WebSocket integration (v3)
 
-Bidirectional WebSocket streaming for Melody, built on [`coder/websocket`](https://github.com/coder/websocket). It bridges the core [`http.SseHub`](https://github.com/precision-soft/melody) so the same topic-keyed fan-out powers both Server-Sent Events and WebSockets.
+Bidirectional WebSocket streaming for Melody, built on [`coder/websocket`](https://github.com/coder/websocket). It bridges the core [`http.ServerSentEventHub`](https://github.com/precision-soft/melody) so the same topic-keyed fan-out powers both Server-Sent Events and WebSockets.
 
 ## Installation
 
@@ -15,7 +15,7 @@ import melodywebsocket "github.com/precision-soft/melody/integrations/websocket/
 ## Usage
 
 ```go
-hub := melodyhttp.NewSseHub()
+hub := melodyhttp.NewServerSentEventHub()
 
 handler := melodywebsocket.NewStreamHandler(hub, melodywebsocket.Options{
 	TopicResolver: func(request httpcontract.Request) string {
@@ -28,14 +28,14 @@ handler := melodywebsocket.NewStreamHandler(hub, melodywebsocket.Options{
 
 // register handler on a route, e.g. GET /ws
 // broadcast from anywhere (e.g. a message handler):
-hub.Broadcast("device-42", melodyhttp.SseEvent{Event: "task.cancelled", Data: payloadJson})
+hub.Broadcast("device-42", melodyhttp.ServerSentEvent{Event: "task.cancelled", Data: payloadJson})
 ```
 
-The handler upgrades the connection, subscribes to the resolved topic, writes each broadcast `SseEvent`'s data to the socket, and reads inbound frames (dispatched to `OnMessage`). It returns `(nil, nil)` once the client disconnects, so the kernel writes nothing further.
+The handler upgrades the connection, subscribes to the resolved topic, writes each broadcast `ServerSentEvent`'s data to the socket, and reads inbound frames (dispatched to `OnMessage`). It returns `(nil, nil)` once the client disconnects, so the kernel writes nothing further.
 
 ## Footguns & caveats
 
-- The hub is shared with SSE: a single `hub.Broadcast(topic, event)` reaches both SSE and WebSocket subscribers of that topic.
+- The hub is shared with Server-Sent Events: a single `hub.Broadcast(topic, event)` reaches both Server-Sent Events and WebSocket subscribers of that topic.
 - Only the event `Data` is written to the socket (as a text frame). Encode structured payloads (for example JSON) into `Data` before broadcasting.
 - `OriginPatterns` is passed to `websocket.Accept`; set it for browser clients on other origins.
 - `Options.ReadLimit` caps a single inbound message's byte size (0 keeps coder/websocket's 32 KiB default); raise it only if you expect larger frames.

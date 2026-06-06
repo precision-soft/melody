@@ -9,14 +9,14 @@ import (
     "github.com/precision-soft/melody/v3/exception"
 )
 
-type SseEvent struct {
+type ServerSentEvent struct {
     Id    string
     Event string
     Data  string
     Retry int
 }
 
-func NewSseWriter(writer nethttp.ResponseWriter) (*SseWriter, error) {
+func NewServerSentEventWriter(writer nethttp.ResponseWriter) (*ServerSentEventWriter, error) {
     flusher, isFlusher := writer.(nethttp.Flusher)
     if false == isFlusher {
         return nil, exception.NewError("response writer does not support streaming", nil, nil)
@@ -31,29 +31,29 @@ func NewSseWriter(writer nethttp.ResponseWriter) (*SseWriter, error) {
     writer.WriteHeader(nethttp.StatusOK)
     flusher.Flush()
 
-    return &SseWriter{
+    return &ServerSentEventWriter{
         writer:  writer,
         flusher: flusher,
     }, nil
 }
 
-type SseWriter struct {
+type ServerSentEventWriter struct {
     writer  nethttp.ResponseWriter
     flusher nethttp.Flusher
 }
 
-func (instance *SseWriter) Send(event SseEvent) error {
+func (instance *ServerSentEventWriter) Send(event ServerSentEvent) error {
     var builder strings.Builder
 
     if "" != event.Id {
         builder.WriteString("id: ")
-        builder.WriteString(sanitizeSseField(event.Id))
+        builder.WriteString(sanitizeServerSentEventField(event.Id))
         builder.WriteString("\n")
     }
 
     if "" != event.Event {
         builder.WriteString("event: ")
-        builder.WriteString(sanitizeSseField(event.Event))
+        builder.WriteString(sanitizeServerSentEventField(event.Event))
         builder.WriteString("\n")
     }
 
@@ -81,12 +81,12 @@ func (instance *SseWriter) Send(event SseEvent) error {
     return nil
 }
 
-func sanitizeSseField(value string) string {
+func sanitizeServerSentEventField(value string) string {
     return strings.NewReplacer("\r", "", "\n", "").Replace(value)
 }
 
-func (instance *SseWriter) Comment(text string) error {
-    _, writeErr := io.WriteString(instance.writer, ": "+sanitizeSseField(text)+"\n\n")
+func (instance *ServerSentEventWriter) Comment(text string) error {
+    _, writeErr := io.WriteString(instance.writer, ": "+sanitizeServerSentEventField(text)+"\n\n")
     if nil != writeErr {
         return writeErr
     }
@@ -96,6 +96,6 @@ func (instance *SseWriter) Comment(text string) error {
     return nil
 }
 
-func (instance *SseWriter) Ping() error {
+func (instance *ServerSentEventWriter) Ping() error {
     return instance.Comment("")
 }

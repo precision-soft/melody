@@ -5,50 +5,50 @@ import (
     "sync/atomic"
 )
 
-type SseBackplane interface {
-    Publish(topic string, event SseEvent) error
+type ServerSentEventBackplane interface {
+    Publish(topic string, event ServerSentEvent) error
 
     Close() error
 }
 
-func NewSseHub() *SseHub {
-    return &SseHub{
-        subscribersByTopic: make(map[string]map[*SseSubscriber]struct{}),
+func NewServerSentEventHub() *ServerSentEventHub {
+    return &ServerSentEventHub{
+        subscribersByTopic: make(map[string]map[*ServerSentEventSubscriber]struct{}),
     }
 }
 
-type SseHub struct {
+type ServerSentEventHub struct {
     mutex              sync.RWMutex
-    subscribersByTopic map[string]map[*SseSubscriber]struct{}
+    subscribersByTopic map[string]map[*ServerSentEventSubscriber]struct{}
     closed             bool
-    backplane          SseBackplane
+    backplane          ServerSentEventBackplane
 
     dropped           uint64
     backplaneFailures uint64
 }
 
-type SseSubscriber struct {
+type ServerSentEventSubscriber struct {
     topic   string
-    channel chan SseEvent
+    channel chan ServerSentEvent
     dropped uint64
 }
 
-func (instance *SseSubscriber) Events() <-chan SseEvent {
+func (instance *ServerSentEventSubscriber) Events() <-chan ServerSentEvent {
     return instance.channel
 }
 
-func (instance *SseSubscriber) DroppedCount() uint64 {
+func (instance *ServerSentEventSubscriber) DroppedCount() uint64 {
     return atomic.LoadUint64(&instance.dropped)
 }
 
-func (instance *SseHub) Subscribe(topic string, bufferSize int) *SseSubscriber {
+func (instance *ServerSentEventHub) Subscribe(topic string, bufferSize int) *ServerSentEventSubscriber {
     if 0 >= bufferSize {
         bufferSize = 16
     }
 
-    subscriber := &SseSubscriber{
+    subscriber := &ServerSentEventSubscriber{
         topic:   topic,
-        channel: make(chan SseEvent, bufferSize),
+        channel: make(chan ServerSentEvent, bufferSize),
     }
 
     instance.mutex.Lock()
@@ -62,7 +62,7 @@ func (instance *SseHub) Subscribe(topic string, bufferSize int) *SseSubscriber {
 
     subscribers, exists := instance.subscribersByTopic[topic]
     if false == exists {
-        subscribers = make(map[*SseSubscriber]struct{})
+        subscribers = make(map[*ServerSentEventSubscriber]struct{})
         instance.subscribersByTopic[topic] = subscribers
     }
 
@@ -71,7 +71,7 @@ func (instance *SseHub) Subscribe(topic string, bufferSize int) *SseSubscriber {
     return subscriber
 }
 
-func (instance *SseHub) Unsubscribe(subscriber *SseSubscriber) {
+func (instance *ServerSentEventHub) Unsubscribe(subscriber *ServerSentEventSubscriber) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -92,14 +92,14 @@ func (instance *SseHub) Unsubscribe(subscriber *SseSubscriber) {
     }
 }
 
-func (instance *SseHub) SetBackplane(backplane SseBackplane) {
+func (instance *ServerSentEventHub) SetBackplane(backplane ServerSentEventBackplane) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
     instance.backplane = backplane
 }
 
-func (instance *SseHub) Broadcast(topic string, event SseEvent) int {
+func (instance *ServerSentEventHub) Broadcast(topic string, event ServerSentEvent) int {
     delivered := instance.DeliverLocal(topic, event)
 
     instance.replicate(topic, event)
@@ -107,7 +107,7 @@ func (instance *SseHub) Broadcast(topic string, event SseEvent) int {
     return delivered
 }
 
-func (instance *SseHub) DeliverLocal(topic string, event SseEvent) int {
+func (instance *ServerSentEventHub) DeliverLocal(topic string, event ServerSentEvent) int {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
 
@@ -130,7 +130,7 @@ func (instance *SseHub) DeliverLocal(topic string, event SseEvent) int {
     return delivered
 }
 
-func (instance *SseHub) replicate(topic string, event SseEvent) {
+func (instance *ServerSentEventHub) replicate(topic string, event ServerSentEvent) {
     instance.mutex.RLock()
     closed := instance.closed
     backplane := instance.backplane
@@ -149,22 +149,22 @@ func (instance *SseHub) replicate(topic string, event SseEvent) {
     }
 }
 
-func (instance *SseHub) BackplaneFailures() uint64 {
+func (instance *ServerSentEventHub) BackplaneFailures() uint64 {
     return atomic.LoadUint64(&instance.backplaneFailures)
 }
 
-func (instance *SseHub) DroppedEventCount() uint64 {
+func (instance *ServerSentEventHub) DroppedEventCount() uint64 {
     return atomic.LoadUint64(&instance.dropped)
 }
 
-func (instance *SseHub) SubscriberCount(topic string) int {
+func (instance *ServerSentEventHub) SubscriberCount(topic string) int {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
 
     return len(instance.subscribersByTopic[topic])
 }
 
-func (instance *SseHub) Shutdown() {
+func (instance *ServerSentEventHub) Shutdown() {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 

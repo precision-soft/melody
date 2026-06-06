@@ -26,6 +26,8 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     router.HandleNamed("example.platform.demo", "GET", "/platform/demo", handler.PlatformDemoHandler())
 
+    router.HandleNamed("example.messagebus.demo", "POST", "/messagebus/demo", handler.MessageBusDemoHandler())
+
     router.HandleNamed(route.LoginPageName, "GET", route.LoginPagePattern, handler.LoginPageHandler())
     router.HandleNamed(route.LoginSubmitName, "POST", route.LoginSubmitPattern, handler.LoginHandler())
     router.HandleNamed(route.LogoutName, "GET", route.LogoutPattern, handler.LogoutHandler())
@@ -36,7 +38,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     router.HandleNamed(route.I18nGreetingName, "GET", route.I18nGreetingPattern, handleri18n.GreetingHandler())
 
-    router.HandleNamed(route.EventsStreamName, "GET", route.EventsStreamPattern, handlerevents.StreamHandler(instance.sseHub))
+    router.HandleNamed(route.EventsStreamName, "GET", route.EventsStreamPattern, handlerevents.StreamHandler(instance.serverSentEventHub))
     router.HandleNamed(route.EventsPublishName, "GET", route.EventsPublishPattern, handlerevents.PublishHandler(instance.messageBusDispatch))
 
     router.HandleNamed(route.CategoriesApiReadAllName, "GET", route.CategoriesApiReadAllPattern, handlercategory.ApiReadAllHandler())

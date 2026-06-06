@@ -18,7 +18,7 @@ import (
 )
 
 func TestStreamHandler_BroadcastReachesClient(t *testing.T) {
-    hub := melodyhttp.NewSseHub()
+    hub := melodyhttp.NewServerSentEventHub()
 
     handler := melodywebsocket.NewStreamHandler(hub, melodywebsocket.Options{
         TopicResolver:  func(request httpcontract.Request) string { return "demo" },
@@ -52,7 +52,7 @@ func TestStreamHandler_BroadcastReachesClient(t *testing.T) {
         time.Sleep(time.Millisecond)
     }
 
-    delivered := hub.Broadcast("demo", melodyhttp.SseEvent{Event: "notification", Data: "hello-ws"})
+    delivered := hub.Broadcast("demo", melodyhttp.ServerSentEvent{Event: "notification", Data: "hello-ws"})
     if 1 != delivered {
         t.Fatalf("expected the broadcast to reach 1 subscriber, got %d", delivered)
     }

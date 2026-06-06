@@ -40,7 +40,13 @@ putErr := store.Put(runtimeInstance, "labels/awb-123.pdf", reader, size, storage
 url, _ := store.PresignedUrl(runtimeInstance, "labels/awb-123.pdf", 15*time.Minute)
 ```
 
-Register the storage under the core `storage.ServiceStorage` service name so handlers can resolve it from the container.
+### Plug-and-play registration
+
+Register the S3 backend under the core `storage.ServiceStorage` service name in one call, so handlers resolve it from the container with `storage.StorageMustFromResolver`:
+
+```go
+objectstorage.RegisterStorageService(registrar, client, "documents")
+```
 
 ## Footguns & caveats
 

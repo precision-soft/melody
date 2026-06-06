@@ -11,9 +11,9 @@ import (
     amqp091 "github.com/rabbitmq/amqp091-go"
 )
 
-func TestSseBackplane_PublishAfterCloseDoesNotRetry(t *testing.T) {
-    hub := melodyhttp.NewSseHub()
-    backplane := amqp.NewSseBackplane(amqp.SseBackplaneConfig{
+func TestServerSentEventBackplane_PublishAfterCloseDoesNotRetry(t *testing.T) {
+    hub := melodyhttp.NewServerSentEventHub()
+    backplane := amqp.NewServerSentEventBackplane(amqp.ServerSentEventBackplaneConfig{
         Dialer: func() (*amqp091.Connection, error) {
             return nil, errors.New("no broker")
         },
@@ -26,7 +26,7 @@ func TestSseBackplane_PublishAfterCloseDoesNotRetry(t *testing.T) {
 
     done := make(chan error, 1)
     go func() {
-        done <- backplane.Publish("orders", melodyhttp.SseEvent{Data: "after-close"})
+        done <- backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "after-close"})
     }()
 
     select {
@@ -39,7 +39,7 @@ func TestSseBackplane_PublishAfterCloseDoesNotRetry(t *testing.T) {
     }
 }
 
-func TestSseBackplane_ReplicatesBroadcastToAnotherInstance(t *testing.T) {
+func TestServerSentEventBackplane_ReplicatesBroadcastToAnotherInstance(t *testing.T) {
     dsn := os.Getenv("AMQP_DSN")
     if "" == dsn {
         t.Skip("AMQP_DSN not set; skipping amqp sse backplane integration test")
@@ -54,12 +54,12 @@ func TestSseBackplane_ReplicatesBroadcastToAnotherInstance(t *testing.T) {
 
     exchange := "melody.sse.test"
 
-    hubA := melodyhttp.NewSseHub()
-    backplaneA := amqp.NewSseBackplane(amqp.SseBackplaneConfig{Connection: connection, Hub: hubA, Exchange: exchange})
+    hubA := melodyhttp.NewServerSentEventHub()
+    backplaneA := amqp.NewServerSentEventBackplane(amqp.ServerSentEventBackplaneConfig{Connection: connection, Hub: hubA, Exchange: exchange})
     defer backplaneA.Close()
 
-    hubB := melodyhttp.NewSseHub()
-    backplaneB := amqp.NewSseBackplane(amqp.SseBackplaneConfig{Connection: connection, Hub: hubB, Exchange: exchange})
+    hubB := melodyhttp.NewServerSentEventHub()
+    backplaneB := amqp.NewServerSentEventBackplane(amqp.ServerSentEventBackplaneConfig{Connection: connection, Hub: hubB, Exchange: exchange})
     defer backplaneB.Close()
 
     subscriber := hubB.Subscribe("orders", 4)
@@ -70,7 +70,7 @@ func TestSseBackplane_ReplicatesBroadcastToAnotherInstance(t *testing.T) {
     defer tick.Stop()
 
     for {
-        hubA.Broadcast("orders", melodyhttp.SseEvent{Data: "from-a"})
+        hubA.Broadcast("orders", melodyhttp.ServerSentEvent{Data: "from-a"})
 
         select {
         case event := <-subscriber.Events():
@@ -86,7 +86,7 @@ func TestSseBackplane_ReplicatesBroadcastToAnotherInstance(t *testing.T) {
     }
 }
 
-func TestSseBackplane_DoesNotEchoToOriginInstanceTwice(t *testing.T) {
+func TestServerSentEventBackplane_DoesNotEchoToOriginInstanceTwice(t *testing.T) {
     dsn := os.Getenv("AMQP_DSN")
     if "" == dsn {
         t.Skip("AMQP_DSN not set; skipping amqp sse backplane integration test")
@@ -99,14 +99,14 @@ func TestSseBackplane_DoesNotEchoToOriginInstanceTwice(t *testing.T) {
     }
     defer provider.Close(connection)
 
-    hub := melodyhttp.NewSseHub()
-    backplane := amqp.NewSseBackplane(amqp.SseBackplaneConfig{Connection: connection, Hub: hub, Exchange: "melody.sse.test.echo"})
+    hub := melodyhttp.NewServerSentEventHub()
+    backplane := amqp.NewServerSentEventBackplane(amqp.ServerSentEventBackplaneConfig{Connection: connection, Hub: hub, Exchange: "melody.sse.test.echo"})
     defer backplane.Close()
 
     subscriber := hub.Subscribe("orders", 4)
     defer hub.Unsubscribe(subscriber)
 
-    if delivered := hub.Broadcast("orders", melodyhttp.SseEvent{Data: "once"}); 1 != delivered {
+    if delivered := hub.Broadcast("orders", melodyhttp.ServerSentEvent{Data: "once"}); 1 != delivered {
         t.Fatalf("expected exactly one local delivery, got %d", delivered)
     }
 

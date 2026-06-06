@@ -9,10 +9,10 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-func StreamHandler(hub *melodyhttp.SseHub) melodyhttpcontract.Handler {
+func StreamHandler(hub *melodyhttp.ServerSentEventHub) melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        sseWriter, sseErr := melodyhttp.NewSseWriter(writer)
-        if nil != sseErr {
+        serverSentEventWriter, serverSentEventErr := melodyhttp.NewServerSentEventWriter(writer)
+        if nil != serverSentEventErr {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "streaming is not supported"), nil
         }
 
@@ -21,7 +21,7 @@ func StreamHandler(hub *melodyhttp.SseHub) melodyhttpcontract.Handler {
         subscriber := hub.Subscribe(topic, 16)
         defer hub.Unsubscribe(subscriber)
 
-        commentErr := sseWriter.Comment("connected")
+        commentErr := serverSentEventWriter.Comment("connected")
         if nil != commentErr {
             return nil, nil
         }
@@ -37,7 +37,7 @@ func StreamHandler(hub *melodyhttp.SseHub) melodyhttpcontract.Handler {
                     return nil, nil
                 }
 
-                if sendErr := sseWriter.Send(event); nil != sendErr {
+                if sendErr := serverSentEventWriter.Send(event); nil != sendErr {
                     return nil, nil
                 }
             }

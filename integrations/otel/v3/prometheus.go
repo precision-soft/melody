@@ -10,6 +10,7 @@ import (
     sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 
     "github.com/precision-soft/melody/v3/exception"
+    httpcontract "github.com/precision-soft/melody/v3/http/contract"
 )
 
 func NewPrometheusMeter(meterName string) (metric.Meter, *prometheus.Registry, error) {
@@ -27,4 +28,18 @@ func NewPrometheusMeter(meterName string) (metric.Meter, *prometheus.Registry, e
 
 func MetricsHandler(registry *prometheus.Registry) nethttp.Handler {
     return promhttp.HandlerFor(registry, promhttp.HandlerOpts{})
+}
+
+func NewMetricsMiddlewareWithPrometheus(meterName string) (httpcontract.Middleware, nethttp.Handler, error) {
+    meter, registry, meterErr := NewPrometheusMeter(meterName)
+    if nil != meterErr {
+        return nil, nil, meterErr
+    }
+
+    middleware, middlewareErr := NewMetricsMiddleware(meter)
+    if nil != middlewareErr {
+        return nil, nil, middlewareErr
+    }
+
+    return middleware, MetricsHandler(registry), nil
 }

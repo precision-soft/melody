@@ -14,18 +14,18 @@ import (
     amqp091 "github.com/rabbitmq/amqp091-go"
 )
 
-const defaultSseBackplaneExchange = "melody.sse"
+const defaultServerSentEventBackplaneExchange = "melody.sse"
 
-type sseWireEvent struct {
+type serverSentEventWireEvent struct {
     Origin string              `json:"origin"`
     Topic  string              `json:"topic"`
-    Event  melodyhttp.SseEvent `json:"event"`
+    Event  melodyhttp.ServerSentEvent `json:"event"`
 }
 
-type SseBackplane struct {
+type ServerSentEventBackplane struct {
     connection *amqp091.Connection
     dialer     func() (*amqp091.Connection, error)
-    hub        *melodyhttp.SseHub
+    hub        *melodyhttp.ServerSentEventHub
     exchange   string
     origin     string
     logger     loggingcontract.Logger
@@ -42,15 +42,15 @@ type SseBackplane struct {
     wait   sync.WaitGroup
 }
 
-type SseBackplaneConfig struct {
+type ServerSentEventBackplaneConfig struct {
     Connection *amqp091.Connection
     Dialer     func() (*amqp091.Connection, error)
-    Hub        *melodyhttp.SseHub
+    Hub        *melodyhttp.ServerSentEventHub
     Exchange   string
     Logger     loggingcontract.Logger
 }
 
-func NewSseBackplane(config SseBackplaneConfig) *SseBackplane {
+func NewServerSentEventBackplane(config ServerSentEventBackplaneConfig) *ServerSentEventBackplane {
     if nil == config.Connection && nil == config.Dialer {
         exception.Panic(exception.NewError("amqp sse backplane needs a connection or a dialer", nil, nil))
     }
@@ -61,17 +61,17 @@ func NewSseBackplane(config SseBackplaneConfig) *SseBackplane {
 
     exchange := config.Exchange
     if "" == exchange {
-        exchange = defaultSseBackplaneExchange
+        exchange = defaultServerSentEventBackplaneExchange
     }
 
     ctx, cancel := context.WithCancel(context.Background())
 
-    backplane := &SseBackplane{
+    backplane := &ServerSentEventBackplane{
         connection: config.Connection,
         dialer:     config.Dialer,
         hub:        config.Hub,
         exchange:   exchange,
-        origin:     newSseBackplaneOrigin(),
+        origin:     newServerSentEventBackplaneOrigin(),
         logger:     config.Logger,
         ctx:        ctx,
         cancel:     cancel,
@@ -85,8 +85,8 @@ func NewSseBackplane(config SseBackplaneConfig) *SseBackplane {
     return backplane
 }
 
-func (instance *SseBackplane) Publish(topic string, event melodyhttp.SseEvent) error {
-    payload, marshalErr := json.Marshal(sseWireEvent{Origin: instance.origin, Topic: topic, Event: event})
+func (instance *ServerSentEventBackplane) Publish(topic string, event melodyhttp.ServerSentEvent) error {
+    payload, marshalErr := json.Marshal(serverSentEventWireEvent{Origin: instance.origin, Topic: topic, Event: event})
     if nil != marshalErr {
         return exception.NewError("amqp sse backplane could not encode the event", map[string]any{"topic": topic}, marshalErr)
     }
@@ -108,7 +108,7 @@ func (instance *SseBackplane) Publish(topic string, event melodyhttp.SseEvent) e
     return nil
 }
 
-func (instance *SseBackplane) publishOnce(payload []byte) error {
+func (instance *ServerSentEventBackplane) publishOnce(payload []byte) error {
     channel, channelErr := instance.ensurePublishChannel()
     if nil != channelErr {
         return channelErr
@@ -123,7 +123,7 @@ func (instance *SseBackplane) publishOnce(payload []byte) error {
     })
 }
 
-func (instance *SseBackplane) Close() error {
+func (instance *ServerSentEventBackplane) Close() error {
     instance.mutex.Lock()
     instance.closing = true
     if nil != instance.consumeChannel {
@@ -148,7 +148,7 @@ func (instance *SseBackplane) Close() error {
     return nil
 }
 
-func (instance *SseBackplane) listen() {
+func (instance *ServerSentEventBackplane) listen() {
     defer instance.wait.Done()
 
     backoff := reconnectInitialBackoff
@@ -177,7 +177,7 @@ func (instance *SseBackplane) listen() {
     }
 }
 
-func (instance *SseBackplane) forward(deliveries <-chan amqp091.Delivery) {
+func (instance *ServerSentEventBackplane) forward(deliveries <-chan amqp091.Delivery) {
     for {
         select {
         case <-instance.ctx.Done():
@@ -187,7 +187,7 @@ func (instance *SseBackplane) forward(deliveries <-chan amqp091.Delivery) {
                 return
             }
 
-            wire := sseWireEvent{}
+            wire := serverSentEventWireEvent{}
             if unmarshalErr := json.Unmarshal(delivery.Body, &wire); nil != unmarshalErr {
                 instance.logError("amqp sse backplane could not decode an event", unmarshalErr)
 
@@ -203,7 +203,7 @@ func (instance *SseBackplane) forward(deliveries <-chan amqp091.Delivery) {
     }
 }
 
-func (instance *SseBackplane) subscribe() (<-chan amqp091.Delivery, error) {
+func (instance *ServerSentEventBackplane) subscribe() (<-chan amqp091.Delivery, error) {
     connection, connectErr := instance.liveConnection()
     if nil != connectErr {
         return nil, connectErr
@@ -256,7 +256,7 @@ func (instance *SseBackplane) subscribe() (<-chan amqp091.Delivery, error) {
     return deliveries, nil
 }
 
-func (instance *SseBackplane) ensurePublishChannel() (*amqp091.Channel, error) {
+func (instance *ServerSentEventBackplane) ensurePublishChannel() (*amqp091.Channel, error) {
     instance.mutex.Lock()
     closing := instance.closing
     existing := instance.publishChannel
@@ -306,7 +306,7 @@ func (instance *SseBackplane) ensurePublishChannel() (*amqp091.Channel, error) {
     return channel, nil
 }
 
-func (instance *SseBackplane) declareExchange(channel *amqp091.Channel) error {
+func (instance *ServerSentEventBackplane) declareExchange(channel *amqp091.Channel) error {
     if declareErr := channel.ExchangeDeclare(instance.exchange, "fanout", false, false, false, false, nil); nil != declareErr {
         return exception.NewError("amqp sse backplane exchange declare failed", map[string]any{"exchange": instance.exchange}, declareErr)
     }
@@ -314,7 +314,7 @@ func (instance *SseBackplane) declareExchange(channel *amqp091.Channel) error {
     return nil
 }
 
-func (instance *SseBackplane) liveConnection() (*amqp091.Connection, error) {
+func (instance *ServerSentEventBackplane) liveConnection() (*amqp091.Connection, error) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -357,7 +357,7 @@ func (instance *SseBackplane) liveConnection() (*amqp091.Connection, error) {
     return connection, nil
 }
 
-func (instance *SseBackplane) resetPublishChannel() {
+func (instance *ServerSentEventBackplane) resetPublishChannel() {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -367,14 +367,14 @@ func (instance *SseBackplane) resetPublishChannel() {
     }
 }
 
-func (instance *SseBackplane) isClosing() bool {
+func (instance *ServerSentEventBackplane) isClosing() bool {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
     return instance.closing
 }
 
-func (instance *SseBackplane) sleep(backoff time.Duration) bool {
+func (instance *ServerSentEventBackplane) sleep(backoff time.Duration) bool {
     select {
     case <-time.After(backoff):
         return true
@@ -383,7 +383,7 @@ func (instance *SseBackplane) sleep(backoff time.Duration) bool {
     }
 }
 
-func (instance *SseBackplane) logError(message string, err error) {
+func (instance *ServerSentEventBackplane) logError(message string, err error) {
     if nil == instance.logger {
         return
     }
@@ -391,7 +391,7 @@ func (instance *SseBackplane) logError(message string, err error) {
     instance.logger.Error(message, exception.LogContext(err))
 }
 
-func newSseBackplaneOrigin() string {
+func newServerSentEventBackplaneOrigin() string {
     buffer := make([]byte, 16)
 
     if _, readErr := rand.Read(buffer); nil != readErr {
@@ -401,4 +401,4 @@ func newSseBackplaneOrigin() string {
     return hex.EncodeToString(buffer)
 }
 
-var _ melodyhttp.SseBackplane = (*SseBackplane)(nil)
+var _ melodyhttp.ServerSentEventBackplane = (*ServerSentEventBackplane)(nil)

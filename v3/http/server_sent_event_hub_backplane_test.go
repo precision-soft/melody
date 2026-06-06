@@ -10,11 +10,11 @@ import (
 
 type recordingBackplane struct {
     mutex     sync.Mutex
-    published []http.SseEvent
+    published []http.ServerSentEvent
     publishErr error
 }
 
-func (instance *recordingBackplane) Publish(topic string, event http.SseEvent) error {
+func (instance *recordingBackplane) Publish(topic string, event http.ServerSentEvent) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -38,15 +38,15 @@ func (instance *recordingBackplane) count() int {
     return len(instance.published)
 }
 
-func TestSseHub_BroadcastReplicatesAndDeliversLocally(t *testing.T) {
-    hub := http.NewSseHub()
+func TestServerSentEventHub_BroadcastReplicatesAndDeliversLocally(t *testing.T) {
+    hub := http.NewServerSentEventHub()
     backplane := &recordingBackplane{}
     hub.SetBackplane(backplane)
 
     subscriber := hub.Subscribe("orders", 1)
     defer hub.Unsubscribe(subscriber)
 
-    if delivered := hub.Broadcast("orders", http.SseEvent{Data: "hello"}); 1 != delivered {
+    if delivered := hub.Broadcast("orders", http.ServerSentEvent{Data: "hello"}); 1 != delivered {
         t.Fatalf("expected one local delivery, got %d", delivered)
     }
 
@@ -64,15 +64,15 @@ func TestSseHub_BroadcastReplicatesAndDeliversLocally(t *testing.T) {
     }
 }
 
-func TestSseHub_DeliverLocalDoesNotReplicate(t *testing.T) {
-    hub := http.NewSseHub()
+func TestServerSentEventHub_DeliverLocalDoesNotReplicate(t *testing.T) {
+    hub := http.NewServerSentEventHub()
     backplane := &recordingBackplane{}
     hub.SetBackplane(backplane)
 
     subscriber := hub.Subscribe("orders", 1)
     defer hub.Unsubscribe(subscriber)
 
-    hub.DeliverLocal("orders", http.SseEvent{Data: "remote"})
+    hub.DeliverLocal("orders", http.ServerSentEvent{Data: "remote"})
 
     if 0 != backplane.count() {
         t.Fatalf("expected DeliverLocal not to replicate, got %d", backplane.count())
@@ -88,14 +88,14 @@ func TestSseHub_DeliverLocalDoesNotReplicate(t *testing.T) {
     }
 }
 
-func TestSseHub_BroadcastAfterShutdownDoesNotReplicate(t *testing.T) {
-    hub := http.NewSseHub()
+func TestServerSentEventHub_BroadcastAfterShutdownDoesNotReplicate(t *testing.T) {
+    hub := http.NewServerSentEventHub()
     backplane := &recordingBackplane{}
     hub.SetBackplane(backplane)
 
     hub.Shutdown()
 
-    if delivered := hub.Broadcast("orders", http.SseEvent{Data: "hello"}); 0 != delivered {
+    if delivered := hub.Broadcast("orders", http.ServerSentEvent{Data: "hello"}); 0 != delivered {
         t.Fatalf("expected no local delivery after shutdown, got %d", delivered)
     }
 
@@ -104,11 +104,11 @@ func TestSseHub_BroadcastAfterShutdownDoesNotReplicate(t *testing.T) {
     }
 }
 
-func TestSseHub_BackplaneFailureIsCounted(t *testing.T) {
-    hub := http.NewSseHub()
+func TestServerSentEventHub_BackplaneFailureIsCounted(t *testing.T) {
+    hub := http.NewServerSentEventHub()
     hub.SetBackplane(&recordingBackplane{publishErr: exception.NewError("backplane down", nil, nil)})
 
-    hub.Broadcast("orders", http.SseEvent{Data: "hello"})
+    hub.Broadcast("orders", http.ServerSentEvent{Data: "hello"})
 
     if 1 != hub.BackplaneFailures() {
         t.Fatalf("expected one backplane failure, got %d", hub.BackplaneFailures())

@@ -25,7 +25,7 @@ type Module struct {
 
     translator melodytranslationcontract.Translator
 
-    sseHub *melodyhttp.SseHub
+    serverSentEventHub *melodyhttp.ServerSentEventHub
 
     openApiInfo     melodyopenapi.Info
     openApiRegistry *melodyopenapi.Registry
@@ -35,7 +35,7 @@ type Module struct {
 
 func NewExampleModule() *Module {
     moduleInstance := &Module{}
-    moduleInstance.buildSse()
+    moduleInstance.buildServerSentEvent()
     moduleInstance.buildMessageBus()
     moduleInstance.buildTokenAuth()
     moduleInstance.buildTranslation()

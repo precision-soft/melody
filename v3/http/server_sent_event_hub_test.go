@@ -6,13 +6,13 @@ import (
     "github.com/precision-soft/melody/v3/http"
 )
 
-func TestSseHub_BroadcastDeliversToTopicSubscribers(t *testing.T) {
-    hub := http.NewSseHub()
+func TestServerSentEventHub_BroadcastDeliversToTopicSubscribers(t *testing.T) {
+    hub := http.NewServerSentEventHub()
 
     subscriber := hub.Subscribe("demo", 4)
     other := hub.Subscribe("other", 4)
 
-    delivered := hub.Broadcast("demo", http.SseEvent{Event: "ping", Data: "hello"})
+    delivered := hub.Broadcast("demo", http.ServerSentEvent{Event: "ping", Data: "hello"})
     if 1 != delivered {
         t.Fatalf("expected 1 delivery, got %d", delivered)
     }
@@ -33,16 +33,16 @@ func TestSseHub_BroadcastDeliversToTopicSubscribers(t *testing.T) {
     }
 }
 
-func TestSseHub_BroadcastCountsDroppedEventsOnFullBuffer(t *testing.T) {
-    hub := http.NewSseHub()
+func TestServerSentEventHub_BroadcastCountsDroppedEventsOnFullBuffer(t *testing.T) {
+    hub := http.NewServerSentEventHub()
 
     hub.Subscribe("demo", 1)
 
-    if delivered := hub.Broadcast("demo", http.SseEvent{Data: "first"}); 1 != delivered {
+    if delivered := hub.Broadcast("demo", http.ServerSentEvent{Data: "first"}); 1 != delivered {
         t.Fatalf("expected the first event to be delivered, got %d", delivered)
     }
 
-    if delivered := hub.Broadcast("demo", http.SseEvent{Data: "second"}); 0 != delivered {
+    if delivered := hub.Broadcast("demo", http.ServerSentEvent{Data: "second"}); 0 != delivered {
         t.Fatalf("expected the second event to be dropped, got %d delivered", delivered)
     }
 
@@ -51,15 +51,15 @@ func TestSseHub_BroadcastCountsDroppedEventsOnFullBuffer(t *testing.T) {
     }
 }
 
-func TestSseHub_ShutdownClosesSubscribersAndStopsDelivery(t *testing.T) {
-    hub := http.NewSseHub()
+func TestServerSentEventHub_ShutdownClosesSubscribersAndStopsDelivery(t *testing.T) {
+    hub := http.NewServerSentEventHub()
 
     first := hub.Subscribe("demo", 4)
     second := hub.Subscribe("other", 4)
 
     hub.Shutdown()
 
-    for label, subscriber := range map[string]*http.SseSubscriber{"demo": first, "other": second} {
+    for label, subscriber := range map[string]*http.ServerSentEventSubscriber{"demo": first, "other": second} {
         select {
         case _, open := <-subscriber.Events():
             if true == open {
@@ -70,15 +70,15 @@ func TestSseHub_ShutdownClosesSubscribersAndStopsDelivery(t *testing.T) {
         }
     }
 
-    if delivered := hub.Broadcast("demo", http.SseEvent{Data: "x"}); 0 != delivered {
+    if delivered := hub.Broadcast("demo", http.ServerSentEvent{Data: "x"}); 0 != delivered {
         t.Fatalf("expected no deliveries after shutdown, got %d", delivered)
     }
 
     hub.Shutdown()
 }
 
-func TestSseHub_SubscribeAfterShutdownReturnsClosedChannel(t *testing.T) {
-    hub := http.NewSseHub()
+func TestServerSentEventHub_SubscribeAfterShutdownReturnsClosedChannel(t *testing.T) {
+    hub := http.NewServerSentEventHub()
     hub.Shutdown()
 
     subscriber := hub.Subscribe("demo", 4)
@@ -93,13 +93,13 @@ func TestSseHub_SubscribeAfterShutdownReturnsClosedChannel(t *testing.T) {
     }
 }
 
-func TestSseHub_UnsubscribeStopsDelivery(t *testing.T) {
-    hub := http.NewSseHub()
+func TestServerSentEventHub_UnsubscribeStopsDelivery(t *testing.T) {
+    hub := http.NewServerSentEventHub()
 
     subscriber := hub.Subscribe("demo", 4)
     hub.Unsubscribe(subscriber)
 
-    delivered := hub.Broadcast("demo", http.SseEvent{Data: "x"})
+    delivered := hub.Broadcast("demo", http.ServerSentEvent{Data: "x"})
     if 0 != delivered {
         t.Fatalf("expected 0 deliveries after unsubscribe, got %d", delivered)
     }

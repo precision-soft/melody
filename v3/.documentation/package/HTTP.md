@@ -185,17 +185,17 @@ func handleRedirectToPing() httpcontract.Handler {
 var _ applicationcontract.HttpModule = (*ExampleHttpModule)(nil)
 ```
 
-## Server-Sent Events (SSE)
+## Server-Sent Events
 
-Handlers receive the raw [`nethttp.ResponseWriter`](../../http/contract/handler.go), so they can stream a long-lived response instead of returning a buffered one. [`NewSseWriter`](../../http/sse.go) type-asserts the writer to `http.Flusher`, sets the `text/event-stream` headers, and flushes after every [`Send`](../../http/sse.go). A streaming handler returns `(nil, nil)` when the client disconnects (detected via `request.HttpRequest().Context().Done()`); the kernel writes nothing further because it only writes a response when one is returned.
+Handlers receive the raw [`nethttp.ResponseWriter`](../../http/contract/handler.go), so they can stream a long-lived response instead of returning a buffered one. [`NewServerSentEventWriter`](../../http/server_sent_event.go) type-asserts the writer to `http.Flusher`, sets the `text/event-stream` headers, and flushes after every [`Send`](../../http/server_sent_event.go). A streaming handler returns `(nil, nil)` when the client disconnects (detected via `request.HttpRequest().Context().Done()`); the kernel writes nothing further because it only writes a response when one is returned.
 
-[`SseHub`](../../http/sse_hub.go) is an optional topic-keyed fan-out registry: [`Subscribe`](../../http/sse_hub.go) returns a buffered subscriber, [`Broadcast`](../../http/sse_hub.go) delivers an [`SseEvent`](../../http/sse.go) to every subscriber of a topic (non-blocking — a full subscriber buffer drops the event), and [`Unsubscribe`](../../http/sse_hub.go) removes and closes it. This pairs naturally with the message bus: a message handler can `hub.Broadcast(...)` so domain events become real-time pushes.
+[`ServerSentEventHub`](../../http/server_sent_event_hub.go) is an optional topic-keyed fan-out registry: [`Subscribe`](../../http/server_sent_event_hub.go) returns a buffered subscriber, [`Broadcast`](../../http/server_sent_event_hub.go) delivers an [`ServerSentEvent`](../../http/server_sent_event.go) to every subscriber of a topic (non-blocking — a full subscriber buffer drops the event), and [`Unsubscribe`](../../http/server_sent_event_hub.go) removes and closes it. This pairs naturally with the message bus: a message handler can `hub.Broadcast(...)` so domain events become real-time pushes.
 
 ```go
-func StreamHandler(hub *http.SseHub) httpcontract.Handler {
+func StreamHandler(hub *http.ServerSentEventHub) httpcontract.Handler {
 	return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-		sseWriter, sseErr := http.NewSseWriter(writer)
-		if nil != sseErr {
+		serverSentEventWriter, serverSentEventErr := http.NewServerSentEventWriter(writer)
+		if nil != serverSentEventErr {
 			return http.JsonErrorResponse(nethttp.StatusInternalServerError, "streaming is not supported"), nil
 		}
 
@@ -211,7 +211,7 @@ func StreamHandler(hub *http.SseHub) httpcontract.Handler {
 				if false == open {
 					return nil, nil
 				}
-				if sendErr := sseWriter.Send(event); nil != sendErr {
+				if sendErr := serverSentEventWriter.Send(event); nil != sendErr {
 					return nil, nil
 				}
 			}
@@ -220,16 +220,16 @@ func StreamHandler(hub *http.SseHub) httpcontract.Handler {
 }
 ```
 
-The example application wires an `SseHub`, an `/events/stream` SSE endpoint (`handler/events/stream_handler.go`), and an `/events/publish` endpoint (`handler/events/publish_handler.go`) that dispatches a message through the bus to a handler which broadcasts to the hub.
+The example application wires an `ServerSentEventHub`, an `/events/stream` Server-Sent Events endpoint (`handler/events/stream_handler.go`), and an `/events/publish` endpoint (`handler/events/publish_handler.go`) that dispatches a message through the bus to a handler which broadcasts to the hub.
 
 ### Behind a load balancer
 
-`SseHub` keeps its subscribers in process, so a plain `Broadcast` only reaches clients connected to **this** instance. When the application runs on several instances behind a load balancer, attach an [`SseBackplane`](../../http/sse_hub.go) with [`SetBackplane`](../../http/sse_hub.go): `Broadcast` then also replicates the event to the other instances, each of which delivers it to its own subscribers via [`DeliverLocal`](../../http/sse_hub.go). The backplane tags every event with a per-instance origin and ignores the echo of its own broadcasts, so nothing is delivered twice. Concrete backplanes ship in [`integrations/rueidis`](../../../integrations/rueidis) (Redis pub/sub) and [`integrations/amqp`](../../../integrations/amqp) (fanout exchange); the WebSocket integration shares the same hub, so it fans out the same way. Without a backplane, pin clients to an instance with sticky sessions and accept that an event only reaches that instance. Replication is best-effort like local delivery; [`BackplaneFailures`](../../http/sse_hub.go) counts broadcasts that could not be replicated. After [`Shutdown`](../../http/sse_hub.go) the hub stops replicating — a `Broadcast` during or after a graceful stop delivers to nobody locally and is not pushed to the backplane.
+`ServerSentEventHub` keeps its subscribers in process, so a plain `Broadcast` only reaches clients connected to **this** instance. When the application runs on several instances behind a load balancer, attach an [`ServerSentEventBackplane`](../../http/server_sent_event_hub.go) with [`SetBackplane`](../../http/server_sent_event_hub.go): `Broadcast` then also replicates the event to the other instances, each of which delivers it to its own subscribers via [`DeliverLocal`](../../http/server_sent_event_hub.go). The backplane tags every event with a per-instance origin and ignores the echo of its own broadcasts, so nothing is delivered twice. Concrete backplanes ship in [`integrations/rueidis`](../../../integrations/rueidis) (Redis pub/sub) and [`integrations/amqp`](../../../integrations/amqp) (fanout exchange); the WebSocket integration shares the same hub, so it fans out the same way. Without a backplane, pin clients to an instance with sticky sessions and accept that an event only reaches that instance. Replication is best-effort like local delivery; [`BackplaneFailures`](../../http/server_sent_event_hub.go) counts broadcasts that could not be replicated. After [`Shutdown`](../../http/server_sent_event_hub.go) the hub stops replicating — a `Broadcast` during or after a graceful stop delivers to nobody locally and is not pushed to the backplane.
 
 ## Footguns & caveats
 
-* SSE handlers must return `(nil, nil)` after streaming; returning a non-nil response would make the kernel write a second header/body.
-* [`SseHub.Broadcast`](../../http/sse_hub.go) is non-blocking and drops events for subscribers whose buffer is full; delivery is **at-most-once**. Size the subscribe buffer for the expected burst, or treat the stream as best-effort. [`SseHub.DroppedEventCount`](../../http/sse_hub.go) returns the cumulative number of dropped events so the loss can be surfaced as a metric.
+* Server-Sent Events handlers must return `(nil, nil)` after streaming; returning a non-nil response would make the kernel write a second header/body.
+* [`ServerSentEventHub.Broadcast`](../../http/server_sent_event_hub.go) is non-blocking and drops events for subscribers whose buffer is full; delivery is **at-most-once**. Size the subscribe buffer for the expected burst, or treat the stream as best-effort. [`ServerSentEventHub.DroppedEventCount`](../../http/server_sent_event_hub.go) returns the cumulative number of dropped events so the loss can be surfaced as a metric.
 * Route names must be unique. URL generation relies on a [`RouteRegistry`](../../http/contract/route_registry.go) entry for the route name.
 * [`UrlGeneratorMustFromContainer`](../../http/service_resolver.go) is a fail-fast helper and will panic if `ServiceUrlGenerator` is missing or has an invalid type.
 
@@ -264,10 +264,10 @@ The example application wires an `SseHub`, an `/events/stream` SSE endpoint (`ha
     * [`NewUrlGenerator(httpcontract.RouteRegistry)`](../../http/url_generator.go)
 
 * Server-Sent Events:
-    * [`type SseEvent`](../../http/sse.go)
-    * [`type SseWriter`](../../http/sse.go) with [`NewSseWriter(nethttp.ResponseWriter) (*SseWriter, error)`](../../http/sse.go), [`(*SseWriter).Send(SseEvent) error`](../../http/sse.go), [`(*SseWriter).Comment(string) error`](../../http/sse.go). Both `Send` (`Id`/`Event`/`Data`) and `Comment` strip `CR`/`LF` from caller-supplied text so a dynamic value cannot inject extra SSE fields or events.
-    * [`type SseHub`](../../http/sse_hub.go) with [`NewSseHub()`](../../http/sse_hub.go), [`Subscribe(topic string, bufferSize int) *SseSubscriber`](../../http/sse_hub.go), [`Unsubscribe(*SseSubscriber)`](../../http/sse_hub.go), [`Broadcast(topic string, event SseEvent) int`](../../http/sse_hub.go), [`SubscriberCount(topic string) int`](../../http/sse_hub.go), [`DroppedEventCount() uint64`](../../http/sse_hub.go)
-    * [`type SseSubscriber`](../../http/sse_hub.go) with [`(*SseSubscriber).Events() <-chan SseEvent`](../../http/sse_hub.go)
+    * [`type ServerSentEvent`](../../http/server_sent_event.go)
+    * [`type ServerSentEventWriter`](../../http/server_sent_event.go) with [`NewServerSentEventWriter(nethttp.ResponseWriter) (*ServerSentEventWriter, error)`](../../http/server_sent_event.go), [`(*ServerSentEventWriter).Send(ServerSentEvent) error`](../../http/server_sent_event.go), [`(*ServerSentEventWriter).Comment(string) error`](../../http/server_sent_event.go). Both `Send` (`Id`/`Event`/`Data`) and `Comment` strip `CR`/`LF` from caller-supplied text so a dynamic value cannot inject extra Server-Sent Events fields or events.
+    * [`type ServerSentEventHub`](../../http/server_sent_event_hub.go) with [`NewServerSentEventHub()`](../../http/server_sent_event_hub.go), [`Subscribe(topic string, bufferSize int) *ServerSentEventSubscriber`](../../http/server_sent_event_hub.go), [`Unsubscribe(*ServerSentEventSubscriber)`](../../http/server_sent_event_hub.go), [`Broadcast(topic string, event ServerSentEvent) int`](../../http/server_sent_event_hub.go), [`SubscriberCount(topic string) int`](../../http/server_sent_event_hub.go), [`DroppedEventCount() uint64`](../../http/server_sent_event_hub.go)
+    * [`type ServerSentEventSubscriber`](../../http/server_sent_event_hub.go) with [`(*ServerSentEventSubscriber).Events() <-chan ServerSentEvent`](../../http/server_sent_event_hub.go)
 
 * Response helpers:
     * [`JsonResponse`](../../http/response.go)

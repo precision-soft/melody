@@ -32,6 +32,13 @@ metricsMiddleware, _ := otel.NewMetricsMiddleware(meter)
 
 `NewMetricsMiddleware` records `http.server.request.count` and `http.server.request.duration` (ms) with `http.request.method`, `http.route`, and `http.response.status_code` attributes.
 
+Or build the meter, the middleware, and the `/metrics` handler in one call:
+
+```go
+metricsMiddleware, metricsHandler, metricsErr := otel.NewMetricsMiddlewareWithPrometheus("my-service")
+// register metricsMiddleware via RegisterHttpMiddlewares; route GET /metrics -> metricsHandler
+```
+
 ### Tracing
 
 ```go
