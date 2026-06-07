@@ -146,6 +146,46 @@ func TestLocalStorage_RejectsSymlinkEscape(t *testing.T) {
     }
 }
 
+func TestLocalStorage_RejectsDanglingSymlinkLeafOnPut(t *testing.T) {
+    base := t.TempDir()
+    outside := t.TempDir()
+
+    /** The leaf is a symlink whose target does not exist yet; EvalSymlinks cannot resolve it, so the
+        ancestor-walk approves it and an O_CREATE write would follow the link and plant a file outside
+        the base directory. The leaf-symlink rejection (and O_NOFOLLOW) must refuse the write. */
+    target := filepath.Join(outside, "planted.txt")
+    if linkErr := os.Symlink(target, filepath.Join(base, "dangling")); nil != linkErr {
+        t.Fatalf("create dangling symlink: %v", linkErr)
+    }
+
+    local := storage.NewLocalStorage(base)
+    runtimeInstance := testRuntime()
+
+    content := "should not escape"
+    if putErr := local.Put(runtimeInstance, "dangling", strings.NewReader(content), int64(len(content)), storagecontract.PutOptions{}); nil == putErr {
+        t.Fatalf("expected dangling symlink leaf to be rejected on put")
+    }
+
+    if _, statErr := os.Stat(target); false == os.IsNotExist(statErr) {
+        t.Fatalf("expected no file planted outside the base directory, stat err: %v", statErr)
+    }
+}
+
+func TestLocalStorage_RejectsSizeMismatch(t *testing.T) {
+    local := storage.NewLocalStorage(t.TempDir())
+    runtimeInstance := testRuntime()
+
+    content := "four"
+    /** The reader yields 4 bytes but the caller declares 10; the declared content length must be enforced. */
+    if putErr := local.Put(runtimeInstance, "obj.bin", strings.NewReader(content), 10, storagecontract.PutOptions{}); nil == putErr {
+        t.Fatalf("expected a size-mismatch error when the reader length does not match the declared size")
+    }
+
+    if exists, _ := local.Exists(runtimeInstance, "obj.bin"); true == exists {
+        t.Fatalf("expected the mismatched object to be removed")
+    }
+}
+
 func TestLocalStorage_WritesObjectsWithRestrictivePermissions(t *testing.T) {
     base := t.TempDir()
     local := storage.NewLocalStorage(base)

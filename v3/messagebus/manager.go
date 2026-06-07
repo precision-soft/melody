@@ -1,6 +1,7 @@
 package messagebus
 
 import (
+    "github.com/precision-soft/melody/v3/exception"
     messagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
@@ -22,6 +23,12 @@ func (instance *Manager) Dispatch(
     message any,
     stamps ...messagebuscontract.Stamp,
 ) (messagebuscontract.Envelope, error) {
+    /** A nil message has no reflectable type, which would later panic when a stage names the message
+        type; reject it up front with a clear error rather than dispatching an untyped, unroutable value. */
+    if nil == message {
+        return nil, exception.NewError("cannot dispatch a nil message", nil, nil)
+    }
+
     envelopeInstance := EnsureEnvelope(message).WithStamp(stamps...)
     envelopeInstance = envelopeInstance.WithStamp(BusNameStamp{BusName: instance.name})
 

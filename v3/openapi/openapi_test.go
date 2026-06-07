@@ -2,6 +2,7 @@ package openapi_test
 
 import (
     "reflect"
+    "strings"
     "testing"
 
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
@@ -403,5 +404,93 @@ func TestGenerate_NormalizesWildcardSegments(t *testing.T) {
     }
     if false == found {
         t.Fatalf("expected a path parameter named 'path', got %+v", operation.Parameters)
+    }
+}
+
+func TestGenerate_StripsOptionalPathParameterMarker(t *testing.T) {
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "page.show", pattern: "/page/:slug?", methods: []string{"GET"}},
+    }
+
+    document := openapi.Generate(openapi.Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+    if _, ok := document.Paths["/page/{slug}"]; false == ok {
+        t.Fatalf("expected optional parameter normalized to /page/{slug}, got %v", keysOf(document.Paths))
+    }
+    if _, ok := document.Paths["/page/{slug?}"]; true == ok {
+        t.Fatalf("path template must not contain the optional marker '?'")
+    }
+
+    operation := document.Paths["/page/{slug}"].Get
+    if nil == operation {
+        t.Fatalf("expected a GET operation for /page/{slug}")
+    }
+    for _, parameter := range operation.Parameters {
+        if true == strings.Contains(parameter.Name, "?") {
+            t.Fatalf("parameter name must not contain '?': %+v", parameter)
+        }
+    }
+}
+
+func TestGenerate_BareWildcardGetsPositionalName(t *testing.T) {
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "catchall", pattern: "/files/*", methods: []string{"GET"}},
+    }
+
+    document := openapi.Generate(openapi.Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+    for path := range document.Paths {
+        if true == strings.Contains(path, "*") {
+            t.Fatalf("raw '*' must not appear in a path key, got %v", keysOf(document.Paths))
+        }
+    }
+}
+
+func TestGenerate_EmitsOptionsAndHeadOperations(t *testing.T) {
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "health", pattern: "/health", methods: []string{"HEAD", "OPTIONS"}},
+    }
+
+    document := openapi.Generate(openapi.Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+    pathItem, ok := document.Paths["/health"]
+    if false == ok {
+        t.Fatalf("expected the /health route to appear in the document, got %v", keysOf(document.Paths))
+    }
+    if nil == pathItem.Head {
+        t.Fatalf("expected a HEAD operation for /health")
+    }
+    if nil == pathItem.Options {
+        t.Fatalf("expected an OPTIONS operation for /health")
+    }
+}
+
+func TestGenerate_NumericConstraintsAreNotEmittedOnStringFields(t *testing.T) {
+    type stringConstraintRequest struct {
+        Code string `json:"code" validate:"greaterThan=0,regex=^x$"`
+    }
+
+    registry := openapi.NewRegistry()
+    registry.Describe("codes.create", openapi.Descriptor{RequestType: openapi.TypeOf[stringConstraintRequest]()})
+
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "codes.create", pattern: "/codes", methods: []string{"POST"}},
+    }
+
+    document := openapi.Generate(openapi.Info{Title: "Example", Version: "1.0.0"}, routes, registry)
+
+    schema := document.Components.Schemas["stringConstraintRequest"]
+    if nil == schema {
+        t.Fatalf("expected a component schema for the request type, got %v", document.Components)
+    }
+
+    codeSchema := schema.Properties["code"]
+    if nil == codeSchema {
+        t.Fatalf("expected a 'code' property schema")
+    }
+
+    /** greaterThan must not emit `minimum` on a string-typed schema; regex/pattern on a string is valid. */
+    if nil != codeSchema.Minimum {
+        t.Fatalf("greaterThan must not set minimum on a string field: %+v", codeSchema)
     }
 }

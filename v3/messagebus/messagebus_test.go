@@ -57,6 +57,18 @@ func TestHandle_NoHandlerPassesThroughByDefault(t *testing.T) {
     }
 }
 
+func TestDispatch_NilMessageReturnsErrorInsteadOfPanicking(t *testing.T) {
+    locator := messagebus.NewHandlerLocator()
+
+    bus := messagebus.NewManager("default", messagebus.NewHandleMessageMiddleware(locator))
+
+    /** A nil message has no reflectable type; without a guard the no-handler path dereferences a nil
+        reflect.Type and panics. Dispatch must reject it cleanly. */
+    if _, dispatchErr := bus.Dispatch(newTestRuntime(), nil); nil == dispatchErr {
+        t.Fatalf("expected an error when dispatching a nil message")
+    }
+}
+
 func TestHandle_RequireHandlerRejectsUnhandledMessage(t *testing.T) {
     locator := messagebus.NewHandlerLocator()
 

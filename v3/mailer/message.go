@@ -52,7 +52,7 @@ func RenderMessage(message mailercontract.Message) ([]byte, error) {
         writeHeader(&builder, "Reply-To", formatAddress(message.ReplyTo))
     }
 
-    writeHeader(&builder, "Subject", mime.QEncoding.Encode("utf-8", message.Subject))
+    writeHeader(&builder, "Subject", encodeHeaderText(message.Subject))
     writeHeader(&builder, "Date", time.Now().Format(time.RFC1123Z))
     writeHeader(&builder, "MIME-Version", "1.0")
 
@@ -204,6 +204,98 @@ func newMessageId(senderEmail string) string {
     }
 
     return "<" + hex.EncodeToString(buffer) + "@" + headerSanitizer.Replace(domain) + ">"
+}
+
+const maxEncodedWordPayload = 60
+
+/** encodeHeaderText prepares an unstructured header value (the Subject) for emission. mime.QEncoding
+    leaves a pure-ASCII value unchanged, so a long no-space ASCII Subject would fold into a single line
+    exceeding the RFC 5322 / SMTP 998-octet hard limit (many MTAs reject or corrupt it). When the value
+    carries a token too long to fold on whitespace, encode it as RFC 2047 encoded-words instead: adjacent
+    encoded-words separated by folding whitespace are concatenated without that whitespace on decode, so
+    the value round-trips while every emitted line stays short. */
+func encodeHeaderText(value string) string {
+    encoded := mime.QEncoding.Encode("utf-8", value)
+    if encoded != value {
+        return encoded
+    }
+
+    if false == hasOverlongToken(value) {
+        return encoded
+    }
+
+    return encodeWordChunks(value)
+}
+
+func hasOverlongToken(value string) bool {
+    for _, token := range strings.Split(value, " ") {
+        if len(token) > maxEncodedWordPayload {
+            return true
+        }
+    }
+
+    return false
+}
+
+func encodeWordChunks(value string) string {
+    var payload strings.Builder
+    for index := 0; index < len(value); index++ {
+        payload.WriteString(encodeQByte(value[index]))
+    }
+
+    remaining := payload.String()
+
+    var builder strings.Builder
+    for "" != remaining {
+        cut := maxEncodedWordPayload
+        if cut > len(remaining) {
+            cut = len(remaining)
+        }
+
+        /** Never cut inside a `=XX` escape triplet, or the two halves would each be an invalid word. */
+        for 0 < cut && true == splitsEscapeTriplet(remaining, cut) {
+            cut--
+        }
+        if 0 == cut {
+            cut = len(remaining)
+        }
+
+        if 0 < builder.Len() {
+            builder.WriteString(" ")
+        }
+        builder.WriteString("=?utf-8?q?")
+        builder.WriteString(remaining[:cut])
+        builder.WriteString("?=")
+
+        remaining = remaining[cut:]
+    }
+
+    return builder.String()
+}
+
+func encodeQByte(character byte) string {
+    switch {
+    case ' ' == character:
+        return "_"
+    case '=' == character || '?' == character || '_' == character:
+        return "=" + strings.ToUpper(hex.EncodeToString([]byte{character}))
+    case character > 0x20 && character < 0x7F:
+        return string(character)
+    default:
+        return "=" + strings.ToUpper(hex.EncodeToString([]byte{character}))
+    }
+}
+
+func splitsEscapeTriplet(payload string, offset int) bool {
+    if 1 <= offset && '=' == payload[offset-1] {
+        return true
+    }
+
+    if 2 <= offset && '=' == payload[offset-2] {
+        return true
+    }
+
+    return false
 }
 
 func foldHeaderLine(name string, value string) string {

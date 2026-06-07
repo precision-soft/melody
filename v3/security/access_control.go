@@ -6,20 +6,42 @@ import (
 
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
+    securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
-func NewAccessControlRule(pathPrefix string, attributes ...string) AccessControlRule {
-    normalizedPrefix := normalizePathPrefix(pathPrefix)
-
+/** normalizeAccessControlAttributes trims blank attributes and rejects PUBLIC_ACCESS combined with any
+    other attribute. The access-control listener grants immediately on a PUBLIC_ACCESS attribute before
+    any token/role/voter check, so a rule such as (PUBLIC_ACCESS, ROLE_ADMIN) would silently open the
+    endpoint to everyone and discard the role requirement — fail closed by forbidding the combination. */
+func normalizeAccessControlAttributes(attributes []string) []string {
     normalizedAttributes := make([]string, 0, len(attributes))
+    publicAccess := false
     for _, attribute := range attributes {
         normalizedAttribute := strings.TrimSpace(attribute)
         if "" == normalizedAttribute {
             continue
         }
 
+        if securitycontract.AttributePublicAccess == normalizedAttribute {
+            publicAccess = true
+        }
+
         normalizedAttributes = append(normalizedAttributes, normalizedAttribute)
     }
+
+    if true == publicAccess && 1 < len(normalizedAttributes) {
+        exception.Panic(
+            exception.NewError("access control PUBLIC_ACCESS may not be combined with other attributes", nil, nil),
+        )
+    }
+
+    return normalizedAttributes
+}
+
+func NewAccessControlRule(pathPrefix string, attributes ...string) AccessControlRule {
+    normalizedPrefix := normalizePathPrefix(pathPrefix)
+
+    normalizedAttributes := normalizeAccessControlAttributes(attributes)
 
     return AccessControlRule{
         pathPrefix:      normalizedPrefix,
@@ -85,15 +107,7 @@ func NewAccessControlRuleWithSegmentPrefix(pathPrefix string, attributes ...stri
         normalizedPrefix = strings.TrimSuffix(normalizedPrefix, "/")
     }
 
-    normalizedAttributes := make([]string, 0, len(attributes))
-    for _, attribute := range attributes {
-        normalizedAttribute := strings.TrimSpace(attribute)
-        if "" == normalizedAttribute {
-            continue
-        }
-
-        normalizedAttributes = append(normalizedAttributes, normalizedAttribute)
-    }
+    normalizedAttributes := normalizeAccessControlAttributes(attributes)
 
     return AccessControlRule{
         pathPrefix:      normalizedPrefix,

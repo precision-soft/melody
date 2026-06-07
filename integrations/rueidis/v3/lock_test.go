@@ -96,3 +96,36 @@ func TestRedisLock_RefreshFailsWhenLostToAnotherClient(t *testing.T) {
         t.Fatalf("expected refresh to fail once the lock was lost")
     }
 }
+
+func TestRedisLock_ReacquireIsReentrantForSameLock(t *testing.T) {
+    address := os.Getenv("REDIS_ADDRESS")
+    if "" == address {
+        t.Skip("REDIS_ADDRESS not set; skipping redis lock integration test")
+    }
+
+    provider := rueidis.NewProvider()
+    client, openErr := provider.Open(rueidis.NewConnectionParams(address, "", ""))
+    if nil != openErr {
+        t.Fatalf("open: %v", openErr)
+    }
+    defer provider.Close(client)
+
+    locker := rueidis.NewLocker(client)
+    runtimeInstance := newLockRuntime()
+
+    lock := locker.CreateLock("melody:lock:reentrant", 10*time.Second)
+    defer lock.Release(runtimeInstance)
+
+    /** Re-acquiring the same lock instance must succeed, matching the in-memory locker's reentrancy that
+        the shared lock contract asserts. A plain SET NX would return false here and the caller, reading
+        "not held", would skip Release and orphan the key. */
+    first, firstErr := lock.Acquire(runtimeInstance)
+    if nil != firstErr || false == first {
+        t.Fatalf("expected first acquire to succeed: %v %v", first, firstErr)
+    }
+
+    second, secondErr := lock.Acquire(runtimeInstance)
+    if nil != secondErr || false == second {
+        t.Fatalf("expected re-acquire of the same lock to be reentrant: %v %v", second, secondErr)
+    }
+}

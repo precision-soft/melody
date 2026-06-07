@@ -44,8 +44,8 @@ store := awss3.NewStorage(client, "documents")
 ## Footguns & caveats
 
 - Storage is opt-in and userland-wired; the framework registers no default storage.
-- [`LocalStorage`](../../storage/local.go) sanitizes keys against path traversal (a key resolving outside the base directory is rejected) and does not support `PresignedUrl` (it returns an error).
-- `Put` takes the content size; pass `-1` to S3 backends when the size is unknown (the integration streams it). `LocalStorage` ignores the size.
+- [`LocalStorage`](../../storage/local.go) sanitizes keys against path traversal (a key resolving outside the base directory is rejected, including via a symlink — a leaf symlink is refused and opens use `O_NOFOLLOW`) and does not support `PresignedUrl` (it returns an error).
+- `Put` takes the content size; pass `-1` when the size is unknown (S3 backends stream it, `LocalStorage` skips its length check). When a non-negative size is given, `LocalStorage` enforces it — a reader that does not yield exactly that many bytes returns an error and the partial object is removed.
 - `Get` returns an `io.ReadCloser` the caller must close.
 
 ## Userland API

@@ -254,6 +254,17 @@ func (instance *ConsumeCommand) consume(
         return
     }
 
+    /** With no FailureTransport the exhausted message is nacked without requeue. Whether it is parked or
+        permanently dropped depends on the transport's dead-letter configuration (the in-memory and the
+        default AMQP transports discard it). Surface the potential data loss, mirroring the decode-failure
+        poison path, so an operator is not silently losing every message that exhausts its retries. */
+    if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
+        logger.Warning(
+            "no failure transport configured; the exhausted message is discarded unless the transport dead-letters it",
+            nil,
+        )
+    }
+
     if nackErr := transport.Nack(runtimeInstance, envelopeInstance, false); nil != nackErr {
         instance.logError(runtimeInstance, "message dead-letter failed", nackErr)
     }

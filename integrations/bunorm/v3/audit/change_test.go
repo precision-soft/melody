@@ -235,3 +235,61 @@ func TestChangeSet_NestedEncryptedValueRedactedInChangesJson(t *testing.T) {
         t.Fatalf("expected the redacted marker in changes json: %s", payload)
     }
 }
+
+func TestChangeSet_RedactTagHonoredInsideNamedStructField(t *testing.T) {
+    type credentials struct {
+        Token string `bun:"token" audit:"redact"`
+        Label string `bun:"label"`
+    }
+    type account struct {
+        Id    int64       `bun:"id,pk"`
+        Creds credentials `bun:"creds"`
+    }
+
+    before := account{Id: 1, Creds: credentials{Token: "super-secret-old", Label: "primary"}}
+    after := account{Id: 1, Creds: credentials{Token: "super-secret-new", Label: "primary"}}
+
+    changes := audit.ChangeSet(before, after)
+
+    payload, marshalErr := json.Marshal(changes)
+    if nil != marshalErr {
+        t.Fatalf("marshal changes: %v", marshalErr)
+    }
+
+    /** A plain `audit:"redact"` field nested inside a named struct field has no MarshalJSON guard, so
+        collectChanges must redact the whole containing field instead of emitting its plaintext. */
+    if true == strings.Contains(string(payload), "super-secret") {
+        t.Fatalf("redact-tagged plaintext leaked into audit changes json: %s", payload)
+    }
+    if false == strings.Contains(string(payload), "redacted") {
+        t.Fatalf("expected the redacted marker in changes json: %s", payload)
+    }
+}
+
+func TestChangeSet_RedactTagHonoredInsideSliceOfStructs(t *testing.T) {
+    type lineItem struct {
+        Secret string `bun:"secret" audit:"redact"`
+        Sku    string `bun:"sku"`
+    }
+    type order struct {
+        Id    int64      `bun:"id,pk"`
+        Lines []lineItem `bun:"lines"`
+    }
+
+    before := order{Id: 1, Lines: []lineItem{{Secret: "alpha-old", Sku: "A1"}}}
+    after := order{Id: 1, Lines: []lineItem{{Secret: "alpha-new", Sku: "A1"}}}
+
+    changes := audit.ChangeSet(before, after)
+
+    payload, marshalErr := json.Marshal(changes)
+    if nil != marshalErr {
+        t.Fatalf("marshal changes: %v", marshalErr)
+    }
+
+    if true == strings.Contains(string(payload), "alpha-") {
+        t.Fatalf("redact-tagged plaintext leaked into audit changes json from a slice element: %s", payload)
+    }
+    if false == strings.Contains(string(payload), "redacted") {
+        t.Fatalf("expected the redacted marker in changes json: %s", payload)
+    }
+}

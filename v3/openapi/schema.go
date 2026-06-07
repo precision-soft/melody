@@ -366,18 +366,24 @@ func applyValidation(schema *Schema, validateTag string) {
                 }
             }
         case "regex", "pattern":
-            schema.Pattern = param
+            if "string" == schema.Type {
+                schema.Pattern = param
+            }
         case "greaterThan":
-            if value, parseErr := strconv.ParseFloat(param, 64); nil == parseErr {
-                exclusive := true
-                schema.Minimum = &value
-                schema.ExclusiveMinimum = &exclusive
+            if "integer" == schema.Type || "number" == schema.Type {
+                if value, parseErr := strconv.ParseFloat(param, 64); nil == parseErr {
+                    exclusive := true
+                    schema.Minimum = &value
+                    schema.ExclusiveMinimum = &exclusive
+                }
             }
         case "lessThan":
-            if value, parseErr := strconv.ParseFloat(param, 64); nil == parseErr {
-                exclusive := true
-                schema.Maximum = &value
-                schema.ExclusiveMaximum = &exclusive
+            if "integer" == schema.Type || "number" == schema.Type {
+                if value, parseErr := strconv.ParseFloat(param, 64); nil == parseErr {
+                    exclusive := true
+                    schema.Maximum = &value
+                    schema.ExclusiveMaximum = &exclusive
+                }
             }
         }
     }

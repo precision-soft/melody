@@ -108,10 +108,19 @@ func (instance *mysqlLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl 
         instance.name,
     ).Scan(&held)
     if nil != queryErr {
+        /** The pinned connection is in an unknown state; drop it so a later Acquire genuinely
+            re-acquires on a fresh connection instead of taking the "already held" fast path. */
+        instance.connection.Close()
+        instance.connection = nil
         return exception.NewError("mysql lock refresh failed", map[string]any{"name": instance.name}, queryErr)
     }
 
     if false == held.Valid || false == held.Bool {
+        /** The lock was lost (session killed or forcibly released). Drop the connection so the lock
+            object reflects the lost state; otherwise a later Acquire sees a non-nil connection and
+            falsely reports the lock as still held without re-issuing GET_LOCK. */
+        instance.connection.Close()
+        instance.connection = nil
         return exception.NewError("mysql lock is no longer held", map[string]any{"name": instance.name}, nil)
     }
 

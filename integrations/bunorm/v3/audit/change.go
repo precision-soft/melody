@@ -207,7 +207,52 @@ func isRedactedField(field reflect.StructField) bool {
         fieldType = fieldType.Elem()
     }
 
-    return fieldType == encryptedStringType || fieldType == encryptedDeterministicStringType
+    if fieldType == encryptedStringType || fieldType == encryptedDeterministicStringType {
+        return true
+    }
+
+    /** A named (non-embedded) composite field — a struct, or a slice/array/map/pointer of structs — is
+        captured and serialized whole by collectChanges, so a `redact`-tagged member nested inside it
+        would otherwise leak its plaintext into the audit changes column. Encrypted types self-redact
+        through MarshalJSON and need no help here; a plain `redact` tag has no serialization guard, so
+        redact the whole containing field whenever its type tree carries one. */
+    return typeContainsRedactTag(field.Type, map[reflect.Type]struct{}{})
+}
+
+func typeContainsRedactTag(fieldType reflect.Type, seen map[reflect.Type]struct{}) bool {
+    for reflect.Ptr == fieldType.Kind() || reflect.Slice == fieldType.Kind() || reflect.Array == fieldType.Kind() {
+        fieldType = fieldType.Elem()
+    }
+
+    if reflect.Map == fieldType.Kind() {
+        return typeContainsRedactTag(fieldType.Elem(), seen)
+    }
+
+    if reflect.Struct != fieldType.Kind() {
+        return false
+    }
+
+    if _, visited := seen[fieldType]; true == visited {
+        return false
+    }
+    seen[fieldType] = struct{}{}
+
+    for index := 0; index < fieldType.NumField(); index++ {
+        subField := fieldType.Field(index)
+        if false == subField.IsExported() {
+            continue
+        }
+
+        if "redact" == subField.Tag.Get("audit") {
+            return true
+        }
+
+        if true == typeContainsRedactTag(subField.Type, seen) {
+            return true
+        }
+    }
+
+    return false
 }
 
 func auditFieldName(field reflect.StructField) (string, bool) {

@@ -2,10 +2,12 @@ package mailer_test
 
 import (
     "bufio"
+    "bytes"
     "context"
     "encoding/base64"
     "mime"
     "net"
+    "net/textproto"
     "strings"
     "testing"
 
@@ -102,6 +104,42 @@ func TestRenderMessage_EncodesNonAsciiSubjectAndName(t *testing.T) {
     }
     if false == strings.Contains(rendered, mime.QEncoding.Encode("utf-8", "Ștefan Mureșan")+" <stefan@example.com>") {
         t.Fatalf("expected an encoded-word display name in:\n%s", rendered)
+    }
+}
+
+func TestRenderMessage_LongAsciiSubjectStaysUnderHardLineLimit(t *testing.T) {
+    original := strings.Repeat("A", 2000)
+
+    payload, renderErr := mailer.RenderMessage(mailercontract.Message{
+        From:    mailercontract.Address{Email: "from@example.com"},
+        To:      []mailercontract.Address{{Email: "to@example.com"}},
+        Subject: original,
+        Text:    "body",
+    })
+    if nil != renderErr {
+        t.Fatalf("render: %v", renderErr)
+    }
+
+    /** RFC 5322 §2.1.1: no line may exceed 998 octets excluding the CRLF. A long no-space ASCII subject
+        must be chunked into encoded-words rather than emitted as one oversized line. */
+    for _, line := range strings.Split(string(payload), "\r\n") {
+        if 998 < len(line) {
+            t.Fatalf("header line exceeds the 998-octet hard limit: %d octets", len(line))
+        }
+    }
+
+    header, parseErr := textproto.NewReader(bufio.NewReader(bytes.NewReader(payload))).ReadMIMEHeader()
+    if nil != parseErr {
+        t.Fatalf("parse headers: %v", parseErr)
+    }
+
+    decoded, decodeErr := new(mime.WordDecoder).DecodeHeader(header.Get("Subject"))
+    if nil != decodeErr {
+        t.Fatalf("decode subject: %v", decodeErr)
+    }
+
+    if decoded != original {
+        t.Fatalf("subject did not round-trip through encoded-word chunking: got %d chars", len(decoded))
     }
 }
 

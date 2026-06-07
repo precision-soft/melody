@@ -111,18 +111,30 @@ func convertPattern(pattern string) (string, []Parameter) {
 
     for index, segment := range segments {
         name := ""
+        placeholder := false
 
         if true == strings.HasPrefix(segment, ":") {
-            name = segment[1:]
+            placeholder = true
+            /** The router marks an optional path parameter with a trailing `?` (e.g. `:slug?`); strip it
+                so the emitted template and parameter name stay valid OpenAPI rather than `{slug?}`/`slug?`. */
+            name = strings.TrimSuffix(segment[1:], "?")
         } else if true == strings.HasPrefix(segment, "{") && true == strings.HasSuffix(segment, "}") {
-            name = segment[1 : len(segment)-1]
+            placeholder = true
+            name = strings.TrimSuffix(segment[1:len(segment)-1], "?")
         } else if true == strings.HasPrefix(segment, "*") {
             /** Router wildcard segments are `*name` (single) and `*name...` (catch-all); both expose a single path parameter, so normalise them to `{name}` rather than leaving the `*` verbatim, which is not a valid OpenAPI path template. */
+            placeholder = true
             name = strings.TrimSuffix(segment[1:], "...")
         }
 
-        if "" == name {
+        if false == placeholder {
             continue
+        }
+
+        if "" == name {
+            /** A bare, unnamed placeholder (`*`, `:`, `{}`) carries no name; synthesise a positional one
+                so the emitted path key stays a valid OpenAPI template instead of leaking the raw router token. */
+            name = "param" + strconv.Itoa(index)
         }
 
         segments[index] = "{" + name + "}"
@@ -149,5 +161,11 @@ func assignOperation(pathItem *PathItem, method string, operation *Operation) {
         pathItem.Patch = operation
     case nethttp.MethodDelete:
         pathItem.Delete = operation
+    case nethttp.MethodOptions:
+        pathItem.Options = operation
+    case nethttp.MethodHead:
+        pathItem.Head = operation
+    case nethttp.MethodTrace:
+        pathItem.Trace = operation
     }
 }

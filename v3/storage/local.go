@@ -5,6 +5,7 @@ import (
     "os"
     "path/filepath"
     "strings"
+    "syscall"
     "time"
 
     "github.com/precision-soft/melody/v3/exception"
@@ -53,14 +54,25 @@ func (instance *LocalStorage) Put(
         return exception.NewError("could not create the storage directory", map[string]any{"key": key}, mkdirErr)
     }
 
-    file, createErr := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o640)
+    /** O_NOFOLLOW refuses to follow a symlink at the final path component, closing the window between
+        resolvePath's check and this open (time-of-check/time-of-use) for a swapped leaf symlink. */
+    file, createErr := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0o640)
     if nil != createErr {
         return exception.NewError("could not create the storage object", map[string]any{"key": key}, createErr)
     }
     defer file.Close()
 
-    if _, copyErr := io.Copy(file, reader); nil != copyErr {
+    written, copyErr := io.Copy(file, reader)
+    if nil != copyErr {
         return exception.NewError("could not write the storage object", map[string]any{"key": key}, copyErr)
+    }
+
+    /** Enforce the caller-declared content length (S3-parity) so a reader that ends early or runs long
+        surfaces an error instead of silently persisting an object whose size does not match. A negative
+        size means "unknown" and skips the check. */
+    if 0 <= size && written != size {
+        _ = os.Remove(path)
+        return exception.NewError("storage object size does not match the declared size", map[string]any{"key": key, "declared": size, "written": written}, nil)
     }
 
     return nil
@@ -75,7 +87,7 @@ func (instance *LocalStorage) Get(
         return nil, pathErr
     }
 
-    file, openErr := os.Open(path)
+    file, openErr := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
     if nil != openErr {
         return nil, exception.NewError("could not open the storage object", map[string]any{"key": key}, openErr)
     }
@@ -144,6 +156,14 @@ func (instance *LocalStorage) resolvePath(key string) (string, error) {
 
     if escapeErr := instance.ensureNoSymlinkEscape(target); nil != escapeErr {
         return "", exception.NewError("storage key escapes the base directory via a symlink", map[string]any{"key": key}, escapeErr)
+    }
+
+    /** Reject a leaf that is itself a symlink, including a dangling one whose target does not yet exist.
+        ensureNoSymlinkEscape only validates resolvable ancestors: a dangling leaf symlink resolves to
+        nothing, so it would otherwise be approved and let an O_CREATE write follow the link to plant a
+        file outside the base directory. */
+    if info, lstatErr := os.Lstat(target); nil == lstatErr && 0 != info.Mode()&os.ModeSymlink {
+        return "", exception.NewError("storage key resolves through a symlink", map[string]any{"key": key}, nil)
     }
 
     return target, nil

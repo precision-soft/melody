@@ -355,3 +355,29 @@ func TestNewAccessControlExactRule_EmptyPathPanics(t *testing.T) {
 
     _ = NewAccessControlExactRule("", "PUBLIC_ACCESS")
 }
+
+func TestNewAccessControlRule_PublicAccessCombinedWithOtherAttributesPanics(t *testing.T) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected panic when PUBLIC_ACCESS is combined with another attribute")
+        }
+    }()
+
+    /** The listener grants on PUBLIC_ACCESS before any role check, so (PUBLIC_ACCESS, ROLE_ADMIN) would
+        silently open the endpoint to everyone; the combination must be rejected at construction. */
+    _ = NewAccessControlRule("/admin", "PUBLIC_ACCESS", "ROLE_ADMIN")
+}
+
+func TestNewAccessControlRule_LonePublicAccessIsAllowed(t *testing.T) {
+    defer func() {
+        if nil != recover() {
+            t.Fatalf("a lone PUBLIC_ACCESS attribute must not panic")
+        }
+    }()
+
+    rule := NewAccessControlRule("/health", "PUBLIC_ACCESS")
+    if 1 != len(rule.attributes) {
+        t.Fatalf("expected exactly one attribute, got %v", rule.attributes)
+    }
+}

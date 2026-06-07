@@ -12,6 +12,22 @@ import (
     "github.com/redis/rueidis"
 )
 
+/** lockAcquireScript grants the lock when the key is absent OR already held by this same token, so a
+    re-acquire of the same lock instance succeeds (refreshing its TTL) instead of failing on the existing
+    key. This matches the reentrant-for-the-same-instance behaviour of the in-memory locker, which the
+    shared lock contract asserts; a plain SET NX would diverge and orphan the key on a re-acquire that the
+    caller reads as "not held" and therefore never releases. */
+var lockAcquireScript = rueidis.NewLuaScript(`local current = redis.call("get", KEYS[1])
+if current == false or current == ARGV[1] then
+    if tonumber(ARGV[2]) > 0 then
+        redis.call("set", KEYS[1], ARGV[1], "PX", tonumber(ARGV[2]))
+    else
+        redis.call("set", KEYS[1], ARGV[1])
+    end
+    return 1
+end
+return 0`)
+
 var lockReleaseScript = rueidis.NewLuaScript(`if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`)
 
 var lockRefreshScript = rueidis.NewLuaScript(`if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pexpire", KEYS[1], ARGV[2]) else return 0 end`)
@@ -47,24 +63,19 @@ type redisLock struct {
 }
 
 func (instance *redisLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
-    var command rueidis.Completed
+    milliseconds := "0"
     if 0 < instance.ttl {
-        command = instance.client.B().Set().Key(instance.name).Value(instance.token).Nx().PxMilliseconds(floorPositiveMilliseconds(instance.ttl)).Build()
-    } else {
-        command = instance.client.B().Set().Key(instance.name).Value(instance.token).Nx().Build()
+        milliseconds = strconv.FormatInt(floorPositiveMilliseconds(instance.ttl), 10)
     }
 
-    result := instance.client.Do(runtimeInstance.Context(), command)
-    resultErr := result.Error()
-    if nil == resultErr {
-        return true, nil
+    result := lockAcquireScript.Exec(runtimeInstance.Context(), instance.client, []string{instance.name}, []string{instance.token, milliseconds})
+
+    acquired, resultErr := result.AsInt64()
+    if nil != resultErr {
+        return false, exception.NewError("redis lock acquire failed", map[string]any{"name": instance.name}, resultErr)
     }
 
-    if true == rueidis.IsRedisNil(resultErr) {
-        return false, nil
-    }
-
-    return false, exception.NewError("redis lock acquire failed", map[string]any{"name": instance.name}, resultErr)
+    return 1 == acquired, nil
 }
 
 func (instance *redisLock) Release(runtimeInstance runtimecontract.Runtime) error {
