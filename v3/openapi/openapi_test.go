@@ -371,3 +371,37 @@ func containsString(values []string, target string) bool {
     }
     return false
 }
+
+func TestGenerate_NormalizesWildcardSegments(t *testing.T) {
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "files.read", pattern: "/files/*path", methods: []string{"GET"}},
+        fakeRoute{name: "assets.read", pattern: "/assets/*rest...", methods: []string{"GET"}},
+    }
+
+    document := openapi.Generate(openapi.Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+    if _, ok := document.Paths["/files/{path}"]; false == ok {
+        t.Fatalf("expected wildcard segment normalized to /files/{path}, got %v", keysOf(document.Paths))
+    }
+    if _, ok := document.Paths["/assets/{rest}"]; false == ok {
+        t.Fatalf("expected catch-all segment normalized to /assets/{rest}, got %v", keysOf(document.Paths))
+    }
+    if _, ok := document.Paths["/files/*path"]; true == ok {
+        t.Fatalf("raw wildcard path key must not be emitted")
+    }
+
+    operation := document.Paths["/files/{path}"].Get
+    if nil == operation {
+        t.Fatalf("expected a GET operation for /files/{path}")
+    }
+
+    found := false
+    for _, parameter := range operation.Parameters {
+        if "path" == parameter.Name && "path" == parameter.In {
+            found = true
+        }
+    }
+    if false == found {
+        t.Fatalf("expected a path parameter named 'path', got %+v", operation.Parameters)
+    }
+}

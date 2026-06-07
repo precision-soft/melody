@@ -116,6 +116,9 @@ func convertPattern(pattern string) (string, []Parameter) {
             name = segment[1:]
         } else if true == strings.HasPrefix(segment, "{") && true == strings.HasSuffix(segment, "}") {
             name = segment[1 : len(segment)-1]
+        } else if true == strings.HasPrefix(segment, "*") {
+            /** Router wildcard segments are `*name` (single) and `*name...` (catch-all); both expose a single path parameter, so normalise them to `{name}` rather than leaving the `*` verbatim, which is not a valid OpenAPI path template. */
+            name = strings.TrimSuffix(segment[1:], "...")
         }
 
         if "" == name {

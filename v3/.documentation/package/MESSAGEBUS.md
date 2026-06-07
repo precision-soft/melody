@@ -184,12 +184,21 @@ A runnable end-to-end demonstration lives in the example application: [`messageb
 - [`type Manager`](../../messagebus/manager.go)
     - [`NewManager(name string, middlewares ...messagebuscontract.Middleware) *Manager`](../../messagebus/manager.go)
 - [`NewHandleMessageMiddleware(locator messagebuscontract.HandlerLocator) messagebuscontract.Middleware`](../../messagebus/middleware_handle.go)
+- [`type HandleOptions`](../../messagebus/middleware_handle.go) (`RequireHandler bool`)
+    - [`NewHandleMessageMiddlewareWithOptions(locator messagebuscontract.HandlerLocator, options HandleOptions) messagebuscontract.Middleware`](../../messagebus/middleware_handle.go)
 - [`type TransportRouting`](../../messagebus/middleware_send.go)
     - [`NewSendMessageMiddleware(routingByType map[reflect.Type]TransportRouting) messagebuscontract.Middleware`](../../messagebus/middleware_send.go)
+- [`type Routing`](../../messagebus/routing.go) — type-safe routing builder
+    - [`NewRouting() *Routing`](../../messagebus/routing.go)
+    - [`RouteType[T any](routing *Routing, name string, transport messagebuscontract.Transport) *Routing`](../../messagebus/routing.go)
+    - [`NewSendMessageMiddlewareFromRouting(routing *Routing) messagebuscontract.Middleware`](../../messagebus/routing.go)
 - [`type InMemoryTransport`](../../messagebus/transport_in_memory.go)
     - [`NewInMemoryTransport(bufferSize int) *InMemoryTransport`](../../messagebus/transport_in_memory.go)
 - [`type ConsumeCommand`](../../messagebus/consume_command.go)
     - [`NewConsumeCommand(bus messagebuscontract.Bus, transports map[string]messagebuscontract.Transport) *ConsumeCommand`](../../messagebus/consume_command.go)
+    - [`NewConsumeCommandWithRetry(bus messagebuscontract.Bus, transports map[string]messagebuscontract.Transport, retryPolicy RetryPolicy) *ConsumeCommand`](../../messagebus/consume_command.go)
+    - [`(*ConsumeCommand).WithShutdownGrace(grace time.Duration) *ConsumeCommand`](../../messagebus/consume_command.go)
+- [`type RetryPolicy`](../../messagebus/consume_command.go) (`MaxRetries int`, `BaseDelay time.Duration`, `FailureTransport messagebuscontract.Transport`)
 
 ### Container helpers (`messagebus`)
 

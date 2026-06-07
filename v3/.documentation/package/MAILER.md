@@ -65,7 +65,7 @@ For tests, swap in [`InMemoryTransport`](../../mailer/in_memory_transport.go) an
 ## Footguns & caveats
 
 - Mailing is opt-in and userland-wired; the framework registers no default mailer.
-- [`NewSmtpTransport`](../../mailer/smtp_transport.go) uses `net/smtp.SendMail`, which issues `STARTTLS` when the server advertises it and authenticates only when a username is set. It does not support implicit TLS (SMTPS on port 465); use an integration transport for that.
+- [`NewSmtpTransport`](../../mailer/smtp_transport.go) issues `STARTTLS` when the server advertises it and authenticates when a username is set. `SmtpConfig` exposes fail-closed controls: `RequireTls` aborts the send if TLS cannot be negotiated, `RequireAuth` requires authentication and refuses to send when no username is configured, `ImplicitTls` dials SMTPS directly (port 465) instead of upgrading via `STARTTLS`, and `TlsConfig` overrides the TLS settings (otherwise the server name is taken from `Host`, falling back to the host in `Address`).
 - [`Manager.Send`](../../mailer/manager.go) requires a sender and at least one recipient; bodies and subjects are otherwise unvalidated.
 - Header names/values and address fields have `CR`/`LF` stripped before they are written, and attachment filenames additionally have `"` stripped, so untrusted values cannot inject extra header lines or break out of the quoted `filename` parameter.
 

@@ -1,12 +1,67 @@
 package encrypt_test
 
 import (
+    "encoding/json"
     "fmt"
     "strings"
     "testing"
 
     "github.com/precision-soft/melody/integrations/bunorm/v3/encrypt"
 )
+
+func TestEncryptedString_MarshalJSONRedactsPlaintext(t *testing.T) {
+    payload, marshalErr := json.Marshal(encrypt.EncryptedString("super-secret"))
+    if nil != marshalErr {
+        t.Fatalf("marshal: %v", marshalErr)
+    }
+
+    if true == strings.Contains(string(payload), "super-secret") {
+        t.Fatalf("plaintext leaked through json: %s", payload)
+    }
+
+    var decoded string
+    if unmarshalErr := json.Unmarshal(payload, &decoded); nil != unmarshalErr {
+        t.Fatalf("unmarshal: %v", unmarshalErr)
+    }
+    if "<redacted>" != decoded {
+        t.Fatalf("expected redacted json, got %q", decoded)
+    }
+}
+
+func TestEncryptedDeterministicString_MarshalJSONRedactsPlaintext(t *testing.T) {
+    payload, marshalErr := json.Marshal(encrypt.EncryptedDeterministicString("super-secret"))
+    if nil != marshalErr {
+        t.Fatalf("marshal: %v", marshalErr)
+    }
+
+    if true == strings.Contains(string(payload), "super-secret") {
+        t.Fatalf("plaintext leaked through json: %s", payload)
+    }
+
+    var decoded string
+    if unmarshalErr := json.Unmarshal(payload, &decoded); nil != unmarshalErr {
+        t.Fatalf("unmarshal: %v", unmarshalErr)
+    }
+    if "<redacted>" != decoded {
+        t.Fatalf("expected redacted json, got %q", decoded)
+    }
+}
+
+func TestEncryptedString_MarshalJSONRedactsWhenNested(t *testing.T) {
+    type holder struct {
+        Email encrypt.EncryptedString   `json:"email"`
+        Tags  []encrypt.EncryptedString `json:"tags"`
+    }
+
+    payload, marshalErr := json.Marshal(holder{Email: "ada@example.com", Tags: []encrypt.EncryptedString{"tag-secret"}})
+    if nil != marshalErr {
+        t.Fatalf("marshal: %v", marshalErr)
+    }
+
+    if true == strings.Contains(string(payload), "ada@example.com") || true == strings.Contains(string(payload), "tag-secret") {
+        t.Fatalf("nested plaintext leaked through json: %s", payload)
+    }
+}
 
 func newKey(filler byte) []byte {
     key := make([]byte, 32)

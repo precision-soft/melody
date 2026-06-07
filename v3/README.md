@@ -162,8 +162,20 @@ Each package below links to its source folder and its package documentation.
 * **KERNEL** — [code](./kernel/) | [docs](.documentation/package/KERNEL.md)  
   Kernel integration points that connect application, runtime, and HTTP/CLI wiring.
 
+* **LOCK** — [code](./lock/) | [docs](.documentation/package/LOCK.md)  
+  Named distributed-lock contracts with an in-memory locker (Redis/SQL backends via integrations).
+
 * **LOGGING** — [code](./logging/) | [docs](.documentation/package/LOGGING.md)  
   Structured logging contracts and framework logging conventions.
+
+* **MAILER** — [code](./mailer/) | [docs](.documentation/package/MAILER.md)  
+  Email sending over a pluggable transport (SMTP, in-memory) with RFC 5322 / MIME rendering.
+
+* **MESSAGEBUS** — [code](./messagebus/) | [docs](.documentation/package/MESSAGEBUS.md)  
+  Transport-agnostic asynchronous message bus, middleware stack, routing, and consumer worker.
+
+* **OPENAPI** — [code](./openapi/) | [docs](.documentation/package/OPENAPI.md)  
+  OpenAPI 3.0.3 document generation from routes and Go types.
 
 * **RUNTIME** — [code](./runtime/) | [docs](.documentation/package/RUNTIME.md)  
   Application runtime lifecycle, boot/compile/run, and wiring orchestration.
@@ -176,6 +188,12 @@ Each package below links to its source folder and its package documentation.
 
 * **SESSION** — [code](./session/) | [docs](.documentation/package/SESSION.md)  
   Session storage contracts and request/session lifecycle integration.
+
+* **STORAGE** — [code](./storage/) | [docs](.documentation/package/STORAGE.md)  
+  Object-storage contracts with a local filesystem backend (S3-compatible backend via integrations).
+
+* **TRANSLATION** — [code](./translation/) | [docs](.documentation/package/TRANSLATION.md)  
+  Message catalogs with an ICU-subset formatter (placeholders, plural, select).
 
 * **VALIDATION** — [code](./validation/) | [docs](.documentation/package/VALIDATION.md)  
   DTO validation engine, constraints, and errors.

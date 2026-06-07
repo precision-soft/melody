@@ -8,7 +8,7 @@ require (
 	github.com/precision-soft/melody/integrations/awss3/v3 v3.0.0
 	github.com/precision-soft/melody/integrations/bunorm/mysql/v3 v3.1.0
 	github.com/precision-soft/melody/integrations/bunorm/v3 v3.1.0
-	github.com/precision-soft/melody/integrations/cron/v3 v3.0.0
+	github.com/precision-soft/melody/integrations/cron/v3 v3.2.0
 	github.com/precision-soft/melody/integrations/opentelemetry/v3 v3.0.0
 	github.com/precision-soft/melody/integrations/rueidis/v3 v3.2.0
 	github.com/precision-soft/melody/integrations/websocket/v3 v3.0.0

@@ -142,7 +142,7 @@ func (instance *RedisTokenStore) put(tokenString string, claims securitycontract
 
     pttl := "0"
     if 0 < ttl {
-        pttl = strconv.FormatInt(ttl.Milliseconds(), 10)
+        pttl = strconv.FormatInt(floorPositiveMilliseconds(ttl), 10)
     }
 
     result := tokenPutScript.Exec(

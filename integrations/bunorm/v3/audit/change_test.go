@@ -205,3 +205,33 @@ func TestChangeSet_RedactsTaggedAndEncryptedFields(t *testing.T) {
         t.Fatalf("expected the deterministic-encrypted field value to be redacted: %+v", lookupChange)
     }
 }
+
+func TestChangeSet_NestedEncryptedValueRedactedInChangesJson(t *testing.T) {
+    type contactDetails struct {
+        Email encrypt.EncryptedString `bun:"email"`
+        City  string                  `bun:"city"`
+    }
+    type customer struct {
+        Id      int64          `bun:"id,pk"`
+        Contact contactDetails `bun:"contact"`
+    }
+
+    before := customer{Id: 1, Contact: contactDetails{Email: "old-secret@example.com", City: "Bucharest"}}
+    after := customer{Id: 1, Contact: contactDetails{Email: "new-secret@example.com", City: "Bucharest"}}
+
+    changes := audit.ChangeSet(before, after)
+
+    payload, marshalErr := json.Marshal(changes)
+    if nil != marshalErr {
+        t.Fatalf("marshal changes: %v", marshalErr)
+    }
+
+    /** The encrypted value lives inside a named (non-embedded) struct field, which collectChanges emits whole; the redaction must hold once the recorder serializes the changes to its json column. */
+    if true == strings.Contains(string(payload), "example.com") {
+        t.Fatalf("encrypted plaintext leaked into audit changes json: %s", payload)
+    }
+    /** json.Marshal HTML-escapes the angle brackets, so match the marker word rather than the literal "<redacted>". */
+    if false == strings.Contains(string(payload), "redacted") {
+        t.Fatalf("expected the redacted marker in changes json: %s", payload)
+    }
+}

@@ -2,6 +2,7 @@ package config
 
 import (
     "github.com/precision-soft/melody/v3/security"
+    securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
 func NewAccessControlBuilder() *AccessControlBuilder {
@@ -18,7 +19,8 @@ func (instance *AccessControlBuilder) Require(pathPrefix string, attributes ...s
 }
 
 func (instance *AccessControlBuilder) AllowAnonymous(pathPrefix string) *AccessControlBuilder {
-    instance.rules = append(instance.rules, security.NewAccessControlRule(pathPrefix))
+    /** The rule must carry the public-access attribute so the access-control listener grants the request without a token; an empty attribute set would instead fall through to the require-authentication path and deny anonymous users. */
+    instance.rules = append(instance.rules, security.NewAccessControlRule(pathPrefix, securitycontract.AttributePublicAccess))
     return instance
 }
 

@@ -74,3 +74,25 @@ func TestJsonHandler_RejectsInvalidBody(t *testing.T) {
         t.Fatalf("expected a validation error for a blank name")
     }
 }
+
+func TestJsonHandler_RejectsTrailingData(t *testing.T) {
+    runtimeInstance := newJsonHandlerRuntime()
+
+    handled := false
+    handler := JsonHandler(func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
+        handled = true
+
+        return TextResponse(nethttp.StatusOK, "ok"), nil
+    })
+
+    httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{"name":"abc"} garbage`))
+    request := NewRequest(httpRequest, nil, runtimeInstance, nil)
+
+    _, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request)
+    if nil == handleErr {
+        t.Fatalf("expected an error for trailing data after the first json value")
+    }
+    if true == handled {
+        t.Fatalf("handler must not run when the body carries trailing data")
+    }
+}

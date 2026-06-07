@@ -49,7 +49,7 @@ type redisLock struct {
 func (instance *redisLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
     var command rueidis.Completed
     if 0 < instance.ttl {
-        command = instance.client.B().Set().Key(instance.name).Value(instance.token).Nx().PxMilliseconds(instance.ttl.Milliseconds()).Build()
+        command = instance.client.B().Set().Key(instance.name).Value(instance.token).Nx().PxMilliseconds(floorPositiveMilliseconds(instance.ttl)).Build()
     } else {
         command = instance.client.B().Set().Key(instance.name).Value(instance.token).Nx().Build()
     }
@@ -81,7 +81,7 @@ func (instance *redisLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl 
         return exception.NewError("redis lock refresh ttl must be positive", map[string]any{"name": instance.name}, nil)
     }
 
-    milliseconds := strconv.FormatInt(ttl.Milliseconds(), 10)
+    milliseconds := strconv.FormatInt(floorPositiveMilliseconds(ttl), 10)
 
     result := lockRefreshScript.Exec(runtimeInstance.Context(), instance.client, []string{instance.name}, []string{instance.token, milliseconds})
 
@@ -95,6 +95,16 @@ func (instance *redisLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl 
     }
 
     return nil
+}
+
+/** floorPositiveMilliseconds converts a positive duration to whole milliseconds, flooring a sub-millisecond duration up to 1ms. A positive TTL whose Milliseconds() truncates to 0 must never reach Redis as 0: SET ... PX 0 is rejected, PEXPIRE key 0 deletes the key, and the token-store persist branch treats 0 as "no expiry". Callers guard with a positive-ttl check before calling, so the only flooring case is a sub-millisecond value. */
+func floorPositiveMilliseconds(ttl time.Duration) int64 {
+    milliseconds := ttl.Milliseconds()
+    if 0 == milliseconds {
+        return 1
+    }
+
+    return milliseconds
 }
 
 func newLockToken() string {
