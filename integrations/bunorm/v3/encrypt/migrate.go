@@ -79,12 +79,6 @@ func (instance *Migrator) reencryptTransform(spec TableSpec, targetKeyId string)
             return instance.cipher.EncryptDeterministicWithKeyId(plaintext, targetKeyId)
         }
 
-        /** A value already sealed under the target key with a random nonce needs no rewrite — a fresh
-            nonce would add write churn without changing confidentiality. The at-rest format does not record
-            whether a value was sealed deterministically, so the only way to tell a searchable value from an
-            already-randomized one is to re-derive the deterministic ciphertext: when the stored value equals
-            it the value is searchable and must be rewritten with a random nonce, otherwise it is already
-            randomized and the rewrite is skipped. */
         if true == sameKey {
             deterministic, deterministicErr := instance.cipher.EncryptDeterministicWithKeyId(plaintext, targetKeyId)
             if nil != deterministicErr {

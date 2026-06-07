@@ -26,7 +26,6 @@ func (instance EncryptedString) LogValue() slog.Value {
     return slog.StringValue(redactedPlaceholder)
 }
 
-/** MarshalJSON redacts the plaintext so an encrypted value never leaks through JSON encoding, including when it is nested inside another value (a named struct field, slice, map, or array) that the audit recorder serializes into its changes column. The encrypted form for storage is produced by Value, not by JSON. */
 func (instance EncryptedString) MarshalJSON() ([]byte, error) {
     return json.Marshal(redactedPlaceholder)
 }

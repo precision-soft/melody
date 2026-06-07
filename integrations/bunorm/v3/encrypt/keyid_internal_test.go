@@ -125,10 +125,6 @@ func TestReencryptTransform_RandomizedSameKeyRewritesDeterministicValue(t *testi
     cipher := NewCipher(provider)
     migrator := &Migrator{cipher: cipher}
 
-    /** A column written deterministically under the target key is searchable. Re-encrypting it in
-        randomized mode (no --deterministic) must rewrite it with a random nonce; the same-key skip used to
-        leave it deterministically encrypted, silently keeping the equality leakage the operator asked to
-        remove. */
     deterministicUnderTarget, _ := cipher.EncryptDeterministicWithKeyId("alice@example.com", "v2")
     if false == deterministicCandidateMatches(t, cipher, "alice@example.com", deterministicUnderTarget) {
         t.Fatalf("precondition: deterministic value should be searchable")

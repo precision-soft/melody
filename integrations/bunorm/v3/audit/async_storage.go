@@ -19,10 +19,6 @@ type AsyncStorage struct {
     mutex    sync.RWMutex
     closed   bool
 
-    /** The drain goroutine starts in the constructor, before the caller can attach a logger via the
-        builder-style WithLogger; loggerMutex guards the field so that write and the goroutine's read do not
-        race. A dedicated mutex (rather than mutex above) avoids nesting locks, since deadLetter runs both
-        from the goroutine and from Save while Save holds mutex's read lock. */
     loggerMutex sync.RWMutex
 
     dropped atomic.Uint64

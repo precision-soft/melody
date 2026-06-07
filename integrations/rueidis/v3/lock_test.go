@@ -116,9 +116,6 @@ func TestRedisLock_ReacquireIsReentrantForSameLock(t *testing.T) {
     lock := locker.CreateLock("melody:lock:reentrant", 10*time.Second)
     defer lock.Release(runtimeInstance)
 
-    /** Re-acquiring the same lock instance must succeed, matching the in-memory locker's reentrancy that
-        the shared lock contract asserts. A plain SET NX would return false here and the caller, reading
-        "not held", would skip Release and orphan the key. */
     first, firstErr := lock.Acquire(runtimeInstance)
     if nil != firstErr || false == first {
         t.Fatalf("expected first acquire to succeed: %v %v", first, firstErr)

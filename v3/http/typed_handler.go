@@ -48,7 +48,6 @@ func JsonHandler[Req any](
             return jsonHandlerError(settings, runtimeInstance, request, nethttp.StatusBadRequest, "invalid json")
         }
 
-        /** Reject trailing data after the first JSON value so the typed handler matches Request.BindJson's whole-body semantics; json.Decoder.Decode otherwise reads only the first value and silently ignores the rest. */
         if true == decoder.More() {
             return jsonHandlerError(settings, runtimeInstance, request, nethttp.StatusBadRequest, "invalid json")
         }

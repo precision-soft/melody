@@ -39,10 +39,6 @@ func buildSchema(targetType reflect.Type, components map[string]*Schema, names m
     case reflect.Float32, reflect.Float64:
         return withNullable(&Schema{Type: "number"}, nullable)
     case reflect.Slice, reflect.Array:
-        /** encoding/json — which the typed handler and Request.BindJson both use — serializes a []byte
-            slice as a base64-encoded string, not an array of integers; describe it as such so the generated
-            spec matches the wire format. Fixed byte arrays ([N]byte) are not special-cased by encoding/json
-            and stay integer arrays. */
         if reflect.Slice == targetType.Kind() && reflect.Uint8 == targetType.Elem().Kind() {
             return withNullable(&Schema{Type: "string", Format: "byte"}, nullable)
         }
@@ -138,14 +134,10 @@ func collectStructFields(
     properties map[string]*Schema,
     required *[]string,
 ) {
-    /** resolved tracks json names already decided at a shallower depth — whether they were added or
-        dropped as ambiguous — so a deeper embedded field can never override a shallower one. This
-        mirrors encoding/json: the shallowest field with a given json name wins, and fields that tie
-        at the minimum depth are dropped (unless exactly one of them is explicitly json-tagged). */
     resolved := make(map[string]bool)
 
-    /** Depth 0: the struct's own (non-embedded) fields. A shallower field always wins, so they are
-        claimed first regardless of an embedded field's declaration order. */
+    ownCandidatesByName := make(map[string][]embeddedCandidate)
+    var ownOrder []string
     var embedQueue []reflect.Type
     for index := 0; index < structType.NumField(); index++ {
         field := structType.Field(index)
@@ -164,16 +156,23 @@ func collectStructFields(
             continue
         }
 
-        if true == resolved[jsonName] {
+        if _, seen := ownCandidatesByName[jsonName]; false == seen {
+            ownOrder = append(ownOrder, jsonName)
+        }
+        ownCandidatesByName[jsonName] = append(ownCandidatesByName[jsonName], embeddedCandidate{field: field})
+    }
+
+    for _, jsonName := range ownOrder {
+        resolved[jsonName] = true
+
+        winner, ok := dominantEmbeddedField(ownCandidatesByName[jsonName])
+        if false == ok {
             continue
         }
 
-        resolved[jsonName] = true
-        addFieldProperty(field, jsonName, components, names, visited, properties, required)
+        addFieldProperty(winner, jsonName, components, names, visited, properties, required)
     }
 
-    /** Promote embedded structs breadth-first by depth: every embed at depth N is resolved before
-        any embed at depth N+1, so the shallowest json name wins and equal-depth ties are dropped. */
     for 0 < len(embedQueue) {
         candidatesByName := make(map[string][]embeddedCandidate)
         var order []string
@@ -246,8 +245,6 @@ func dominantEmbeddedField(group []embeddedCandidate) (reflect.StructField, bool
         return group[0].field, true
     }
 
-    /** More than one promoted field ties at this depth for the same json name: encoding/json keeps
-        the single explicitly-tagged one if there is exactly one, and otherwise drops them all. */
     taggedIndex := -1
     taggedCount := 0
     for index, candidate := range group {

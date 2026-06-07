@@ -60,7 +60,7 @@ func main() {
 Entry point: [`cache.NewBackendService`](./cache/backend_service.go)
 
 `BackendService` is a singleton wrapper intended for service container registration.
-It holds a `Backend` (built with `context.Background()`) and implements [`cache/contract.Backend`](../../../cache/contract/backend.go) by forwarding each call to the underlying `Backend`.
+It holds a `Backend` (built with `context.Background()`) and implements [`cache/contract.Backend`](../../cache/contract/backend.go) by forwarding each call to the underlying `Backend`.
 
 Use `WithContext` to obtain a `*Backend` bound to a specific context. From there you can use either surface:
 
@@ -201,9 +201,9 @@ func (instance *MyController) Handle(
 
 ## Token store
 
-Entry point: [`NewTokenStore`](./token_store.go)
+Entry point: [`NewTokenStore`](./v3/token_store.go)
 
-A Redis-backed implementation of the core [`security/contract.RevocableTokenStore`](../../../v3/security/contract/token_store.go). It is a drop-in replacement for `security.NewInMemoryTokenStore` behind an `OpaqueTokenValidator`, so revocation survives restarts and is shared across instances.
+A Redis-backed implementation of the core [`security/contract.RevocableTokenStore`](../../v3/security/contract/token_store.go). It is a drop-in replacement for `security.NewInMemoryTokenStore` behind an `OpaqueTokenValidator`, so revocation survives restarts and is shared across instances.
 
 Key schema:
 

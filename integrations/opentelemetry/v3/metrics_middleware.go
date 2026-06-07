@@ -92,10 +92,6 @@ var standardHttpMethods = map[string]bool{
     nethttp.MethodTrace:   true,
 }
 
-/** normalizedMethod bounds metric-label and span-name cardinality. Go's http server accepts any RFC 7230
-    token as a request method, so an unauthenticated caller could emit unbounded distinct methods and
-    explode the metric time-series and span-name space (an observability denial of service). Unrecognised
-    methods collapse to the OpenTelemetry "_OTHER" sentinel, matching the semantic conventions. */
 func normalizedMethod(method string) string {
     if true == standardHttpMethods[method] {
         return method

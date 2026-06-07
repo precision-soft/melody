@@ -817,6 +817,31 @@ func TestRenderRejectsWhitespaceInScheduleField(t *testing.T) {
     }
 }
 
+func TestRenderRejectsForbiddenCharacterInScheduleField(t *testing.T) {
+    entries := []Entry{
+        {
+            Name:   "broken",
+            User:   "www-data",
+            Binary: "/usr/local/bin/app",
+            Args:   []string{"broken"},
+            Schedule: &Schedule{
+                Minute: "*/5%id",
+                Hour:   "*",
+            },
+            LogPath: "/var/log/app/broken.log",
+        },
+    }
+
+    _, err := Render(entries, RenderOptions{})
+    if nil == err {
+        t.Fatalf("expected error when Schedule.Minute contains a forbidden %% character, got nil")
+    }
+
+    if false == strings.Contains(err.Error(), "forbidden character") || false == strings.Contains(err.Error(), "Schedule.Minute") {
+        t.Fatalf("expected a forbidden-character error mentioning Schedule.Minute, got: %v", err)
+    }
+}
+
 func TestRenderAcceptsRangeAndStepNotation(t *testing.T) {
     entries := []Entry{
         {

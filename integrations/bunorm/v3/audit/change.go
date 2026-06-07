@@ -90,6 +90,10 @@ func collectChanges(changes *[]Change, beforeValue reflect.Value, afterValue ref
             newValue = afterValue.Field(index).Interface()
         }
 
+        if false == redact {
+            redact = valueContainsRedactTag(oldValue) || valueContainsRedactTag(newValue)
+        }
+
         if true == oldUsable && true == newUsable {
             if true == valuesEqual(oldValue, newValue) {
                 continue
@@ -201,7 +205,6 @@ func isRedactedField(field reflect.StructField) bool {
         return true
     }
 
-    /** A nullable encrypted column is declared as a pointer (e.g. *EncryptedString); unwrap it so a pointer-to-encrypted field is redacted the same as a value field, instead of leaking the plaintext into the audit changes column. */
     fieldType := field.Type
     for reflect.Ptr == fieldType.Kind() {
         fieldType = fieldType.Elem()
@@ -211,12 +214,15 @@ func isRedactedField(field reflect.StructField) bool {
         return true
     }
 
-    /** A named (non-embedded) composite field — a struct, or a slice/array/map/pointer of structs — is
-        captured and serialized whole by collectChanges, so a `redact`-tagged member nested inside it
-        would otherwise leak its plaintext into the audit changes column. Encrypted types self-redact
-        through MarshalJSON and need no help here; a plain `redact` tag has no serialization guard, so
-        redact the whole containing field whenever its type tree carries one. */
     return typeContainsRedactTag(field.Type, map[reflect.Type]struct{}{})
+}
+
+func valueContainsRedactTag(value any) bool {
+    if nil == value {
+        return false
+    }
+
+    return typeContainsRedactTag(reflect.TypeOf(value), map[reflect.Type]struct{}{})
 }
 
 func typeContainsRedactTag(fieldType reflect.Type, seen map[reflect.Type]struct{}) bool {

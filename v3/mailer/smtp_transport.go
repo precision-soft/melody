@@ -78,9 +78,6 @@ func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, 
         }
     }
 
-    /** RequireAuth is a fail-closed control, so it must hold even when no username is configured
-        (e.g. a secret that resolves to the empty string): otherwise the message would be delivered
-        unauthenticated and the control would be a silent no-op exactly when it matters. */
     if true == instance.requireAuth && "" == instance.username {
         return exception.NewError(
             "smtp authentication is required but no username is configured",

@@ -208,12 +208,6 @@ func newMessageId(senderEmail string) string {
 
 const maxEncodedWordPayload = 60
 
-/** encodeHeaderText prepares an unstructured header value (the Subject) for emission. mime.QEncoding
-    leaves a pure-ASCII value unchanged, so a long no-space ASCII Subject would fold into a single line
-    exceeding the RFC 5322 / SMTP 998-octet hard limit (many MTAs reject or corrupt it). When the value
-    carries a token too long to fold on whitespace, encode it as RFC 2047 encoded-words instead: adjacent
-    encoded-words separated by folding whitespace are concatenated without that whitespace on decode, so
-    the value round-trips while every emitted line stays short. */
 func encodeHeaderText(value string) string {
     encoded := mime.QEncoding.Encode("utf-8", value)
     if encoded != value {
@@ -252,7 +246,6 @@ func encodeWordChunks(value string) string {
             cut = len(remaining)
         }
 
-        /** Never cut inside a `=XX` escape triplet, or the two halves would each be an invalid word. */
         for 0 < cut && true == splitsEscapeTriplet(remaining, cut) {
             cut--
         }
@@ -307,11 +300,6 @@ func foldHeaderLine(name string, value string) string {
     lineLength := len(name) + 1
 
     for _, word := range strings.Split(value, " ") {
-        /** Fold before any word that would overflow the line, including the first one: a long
-            opening token (e.g. a single-token custom header value) must move onto a continuation
-            line too, otherwise the first line is left unbounded. An indivisible token longer than
-            the limit is still emitted intact rather than split — folding whitespace injected inside
-            a token would corrupt its value once the receiver unfolds the header. */
         if lineLength+1+len(word) > maxHeaderLineLength {
             builder.WriteString(lineBreak)
             builder.WriteString(" ")

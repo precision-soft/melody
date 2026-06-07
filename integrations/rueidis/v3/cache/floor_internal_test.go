@@ -21,9 +21,6 @@ func TestFloorPositiveExpiry(t *testing.T) {
 
     for _, testCase := range cases {
         t.Run(testCase.name, func(t *testing.T) {
-            /** A positive sub-millisecond ttl must not reach rueidis .Px verbatim: it would derive PX 0 and
-                Redis rejects the whole SET; flooring to one millisecond keeps parity with the in-memory
-                backend, which accepts any positive ttl. */
             if floored := floorPositiveExpiry(testCase.ttl); testCase.expected != floored {
                 t.Fatalf("floorPositiveExpiry(%v) = %v, expected %v", testCase.ttl, floored, testCase.expected)
             }

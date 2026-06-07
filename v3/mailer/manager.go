@@ -39,10 +39,6 @@ func (instance *Manager) Send(runtimeInstance runtimecontract.Runtime, message m
     return instance.transport.Send(runtimeInstance, message)
 }
 
-/** hasDeliverableRecipient reports whether the message has at least one recipient with a non-empty email
-    address. Counting slot lengths is not enough: validateAddresses skips entries with an empty email, so a
-    recipient slot carrying only a display name would otherwise pass the guard and reach the transport with
-    no deliverable recipient (silently accepted by transports that trust the manager's validation). */
 func hasDeliverableRecipient(message mailercontract.Message) bool {
     recipients := append([]mailercontract.Address{}, message.To...)
     recipients = append(recipients, message.Cc...)

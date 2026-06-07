@@ -19,7 +19,6 @@ func (instance *AccessControlBuilder) Require(pathPrefix string, attributes ...s
 }
 
 func (instance *AccessControlBuilder) AllowAnonymous(pathPrefix string) *AccessControlBuilder {
-    /** The rule must carry the public-access attribute so the access-control listener grants the request without a token; an empty attribute set would instead fall through to the require-authentication path and deny anonymous users. */
     instance.rules = append(instance.rules, security.NewAccessControlRule(pathPrefix, securitycontract.AttributePublicAccess))
     return instance
 }

@@ -408,7 +408,7 @@ func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.
 
 ### Full reference module
 
-A copy-pasteable end-to-end module wiring — scheduled command, custom `KubernetesCronjobTemplate`, `RegisterParameters` + `RegisterCliCommands` with template registration — lives in [`.example/cron_module.go`](./.example/cron_module.go) (and the matching files under [`v2/.example/`](./v2/.example/cron_module.go) / [`v3/.example/`](./v3/.example/cron_module.go) for the other bindings). The directory is dot-prefixed so `go build ./...` and `go test ./...` skip it; build it explicitly with `go build ./.example/`.
+A copy-pasteable end-to-end module wiring — scheduled command, custom `KubernetesCronjobTemplate`, `RegisterParameters` + `RegisterCliCommands` with template registration — lives in [`.example/module.go`](./.example/module.go) (and the matching files under [`v2/.example/`](./v2/.example/module.go) / [`v3/.example/`](./v3/.example/module.go) for the other bindings). The directory is dot-prefixed so `go build ./...` and `go test ./...` skip it; build it explicitly with `go build ./.example/`.
 
 ### 3. Generate the crontab file
 

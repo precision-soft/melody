@@ -70,7 +70,6 @@ func NewFileStorageFromFile(fileInstance *os.File) (*FileStorage, error) {
     return storage, nil
 }
 
-/** @important recommended for dev only */
 type FileStorage struct {
     mutex    sync.Mutex
     path     string

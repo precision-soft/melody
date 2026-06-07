@@ -10,9 +10,6 @@ func TestBuildSchema_ByteSliceIsBase64String(t *testing.T) {
     names := map[reflect.Type]string{}
     visited := map[reflect.Type]bool{}
 
-    /** encoding/json serializes a []byte slice as a base64 string, so the generated schema must be a
-        {string, byte}, not an array of integers, or a client generated from the spec would send an integer
-        array that BindJson rejects. */
     byteSlice := buildSchema(reflect.TypeOf([]byte{}), components, names, visited)
     if "string" != byteSlice.Type || "byte" != byteSlice.Format {
         t.Fatalf("expected []byte to be {string, byte}, got {%q, %q}", byteSlice.Type, byteSlice.Format)
@@ -23,9 +20,51 @@ func TestBuildSchema_ByteSliceIsBase64String(t *testing.T) {
         t.Fatalf("expected []string to stay an array, got %q", stringSlice.Type)
     }
 
-    /** Fixed byte arrays are not base64-encoded by encoding/json, so they stay integer arrays. */
     byteArray := buildSchema(reflect.TypeOf([4]byte{}), components, names, visited)
     if "array" != byteArray.Type {
         t.Fatalf("expected [4]byte to stay an array, got %q", byteArray.Type)
+    }
+}
+
+func TestBuildSchema_AmbiguousOwnJsonNameDropped(t *testing.T) {
+    components := map[string]*Schema{}
+    names := map[reflect.Type]string{}
+    visited := map[reflect.Type]bool{}
+
+    stringType := reflect.TypeOf("")
+    collisionType := reflect.StructOf([]reflect.StructField{
+        {Name: "First", Type: stringType, Tag: `json:"dup"`},
+        {Name: "Second", Type: stringType, Tag: `json:"dup"`},
+        {Name: "Unique", Type: stringType, Tag: `json:"unique"`},
+    })
+
+    schema := buildSchema(collisionType, components, names, visited)
+
+    if _, present := schema.Properties["dup"]; true == present {
+        t.Fatalf("expected the ambiguous duplicate json name to be dropped to match encoding/json, got %+v", schema.Properties)
+    }
+    if _, present := schema.Properties["unique"]; false == present {
+        t.Fatalf("expected the unique field to remain, got %+v", schema.Properties)
+    }
+}
+
+func TestBuildSchema_ExplicitlyTaggedOwnFieldWinsImplicitCollision(t *testing.T) {
+    components := map[string]*Schema{}
+    names := map[reflect.Type]string{}
+    visited := map[reflect.Type]bool{}
+
+    collisionType := reflect.StructOf([]reflect.StructField{
+        {Name: "Value", Type: reflect.TypeOf(0)},
+        {Name: "Other", Type: reflect.TypeOf(""), Tag: `json:"Value"`},
+    })
+
+    schema := buildSchema(collisionType, components, names, visited)
+
+    property, present := schema.Properties["Value"]
+    if false == present {
+        t.Fatalf("expected the explicitly-tagged field to win the implicit collision, got %+v", schema.Properties)
+    }
+    if "string" != property.Type {
+        t.Fatalf("expected the tagged string field to win, got type %q", property.Type)
     }
 }

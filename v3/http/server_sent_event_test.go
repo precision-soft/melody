@@ -112,3 +112,39 @@ func TestServerSentEventWriter_CommentStripsCarriageReturnAndNewline(t *testing.
         t.Fatalf("expected a single comment line with no injected fields, got comment=%d field=%d: %q", commentLines, fieldLines, body)
     }
 }
+
+func TestServerSentEventWriter_EmptyDataEmitsNoDataLine(t *testing.T) {
+    recorder := httptest.NewRecorder()
+
+    writer, writerErr := http.NewServerSentEventWriter(recorder)
+    if nil != writerErr {
+        t.Fatalf("new sse writer: %v", writerErr)
+    }
+
+    sendErr := writer.Send(http.ServerSentEvent{Id: "5", Retry: 3000})
+    if nil != sendErr {
+        t.Fatalf("send: %v", sendErr)
+    }
+
+    body := recorder.Body.String()
+
+    idLines, retryLines, dataLines := 0, 0, 0
+    for _, line := range strings.Split(body, "\n") {
+        if true == strings.HasPrefix(line, "id: ") {
+            idLines++
+        }
+        if true == strings.HasPrefix(line, "retry: ") {
+            retryLines++
+        }
+        if true == strings.HasPrefix(line, "data:") {
+            dataLines++
+        }
+    }
+
+    if 1 != idLines || 1 != retryLines {
+        t.Fatalf("expected the id and retry fields to be emitted, got id=%d retry=%d: %q", idLines, retryLines, body)
+    }
+    if 0 != dataLines {
+        t.Fatalf("expected no data line for an id/retry-only event, got data=%d: %q", dataLines, body)
+    }
+}

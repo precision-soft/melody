@@ -115,14 +115,11 @@ func convertPattern(pattern string) (string, []Parameter) {
 
         if true == strings.HasPrefix(segment, ":") {
             placeholder = true
-            /** The router marks an optional path parameter with a trailing `?` (e.g. `:slug?`); strip it
-                so the emitted template and parameter name stay valid OpenAPI rather than `{slug?}`/`slug?`. */
             name = strings.TrimSuffix(segment[1:], "?")
         } else if true == strings.HasPrefix(segment, "{") && true == strings.HasSuffix(segment, "}") {
             placeholder = true
             name = strings.TrimSuffix(segment[1:len(segment)-1], "?")
         } else if true == strings.HasPrefix(segment, "*") {
-            /** Router wildcard segments are `*name` (single) and `*name...` (catch-all); both expose a single path parameter, so normalise them to `{name}` rather than leaving the `*` verbatim, which is not a valid OpenAPI path template. */
             placeholder = true
             name = strings.TrimSuffix(segment[1:], "...")
         }
@@ -132,8 +129,6 @@ func convertPattern(pattern string) (string, []Parameter) {
         }
 
         if "" == name {
-            /** A bare, unnamed placeholder (`*`, `:`, `{}`) carries no name; synthesise a positional one
-                so the emitted path key stays a valid OpenAPI template instead of leaking the raw router token. */
             name = "param" + strconv.Itoa(index)
         }
 

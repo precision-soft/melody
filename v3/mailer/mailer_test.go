@@ -120,8 +120,6 @@ func TestRenderMessage_LongAsciiSubjectStaysUnderHardLineLimit(t *testing.T) {
         t.Fatalf("render: %v", renderErr)
     }
 
-    /** RFC 5322 §2.1.1: no line may exceed 998 octets excluding the CRLF. A long no-space ASCII subject
-        must be chunked into encoded-words rather than emitted as one oversized line. */
     for _, line := range strings.Split(string(payload), "\r\n") {
         if 998 < len(line) {
             t.Fatalf("header line exceeds the 998-octet hard limit: %d octets", len(line))
@@ -282,8 +280,6 @@ func TestSmtpTransport_RequireAuthFailsWhenNoUsernameConfigured(t *testing.T) {
 
     go serveAuthlessSmtp(listener)
 
-    /** RequireAuth without a username is a misconfiguration (e.g. a secret resolving to ""); the
-        transport must fail closed instead of silently delivering the message unauthenticated. */
     transport := mailer.NewSmtpTransport(mailer.SmtpConfig{
         Address:     listener.Addr().String(),
         RequireAuth: true,
@@ -305,8 +301,6 @@ func TestSmtpTransport_RequireAuthFailsWhenNoUsernameConfigured(t *testing.T) {
 }
 
 func TestRenderMessage_FoldsLongFirstHeaderToken(t *testing.T) {
-    /** A long opening token in a custom header (e.g. a tracking id) must fold onto a continuation
-        line; previously the first word never folded and the opening line could breach the limit. */
     longToken := strings.Repeat("A", 995)
 
     payload, renderErr := mailer.RenderMessage(mailercontract.Message{
@@ -438,8 +432,6 @@ func TestManager_RejectsRecipientsWithOnlyEmptyEmails(t *testing.T) {
     transport := mailer.NewInMemoryTransport()
     manager := mailer.NewManager(transport)
 
-    /** A recipient slot that carries only a display name has an empty email; validateAddresses skips it,
-        so the message would otherwise reach the transport with no deliverable recipient. */
     sendErr := manager.Send(testRuntime(), mailercontract.Message{
         From: mailercontract.Address{Email: "shop@example.com"},
         To:   []mailercontract.Address{{Name: "No Address"}},

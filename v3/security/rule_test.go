@@ -11,8 +11,6 @@ func TestNewApiKeyHeaderRule_EmptyExpectedValuePanics(t *testing.T) {
         }
     }()
 
-    /** An empty expected key fails open: a request that omits the header yields "", and a constant-time
-        compare of "" against "" succeeds, granting every unauthenticated request. */
     _ = NewApiKeyHeaderRule(nil, "X-Api-Key", "")
 }
 

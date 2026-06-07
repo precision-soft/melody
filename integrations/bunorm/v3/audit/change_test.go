@@ -105,8 +105,6 @@ func TestChangeSet_RedactsPointerEncryptedFields(t *testing.T) {
         t.Fatalf("expected the pointer deterministic-encrypted field value to be redacted: %+v", lookupChange)
     }
 
-    /** Marshalling the changes is exactly what the recorder writes to the audit table, so the
-        plaintext secret must not survive into that serialized form. */
     serialized, marshalErr := json.Marshal(changes)
     if nil != marshalErr {
         t.Fatalf("could not marshal changes: %v", marshalErr)
@@ -226,11 +224,9 @@ func TestChangeSet_NestedEncryptedValueRedactedInChangesJson(t *testing.T) {
         t.Fatalf("marshal changes: %v", marshalErr)
     }
 
-    /** The encrypted value lives inside a named (non-embedded) struct field, which collectChanges emits whole; the redaction must hold once the recorder serializes the changes to its json column. */
     if true == strings.Contains(string(payload), "example.com") {
         t.Fatalf("encrypted plaintext leaked into audit changes json: %s", payload)
     }
-    /** json.Marshal HTML-escapes the angle brackets, so match the marker word rather than the literal "<redacted>". */
     if false == strings.Contains(string(payload), "redacted") {
         t.Fatalf("expected the redacted marker in changes json: %s", payload)
     }
@@ -256,8 +252,6 @@ func TestChangeSet_RedactTagHonoredInsideNamedStructField(t *testing.T) {
         t.Fatalf("marshal changes: %v", marshalErr)
     }
 
-    /** A plain `audit:"redact"` field nested inside a named struct field has no MarshalJSON guard, so
-        collectChanges must redact the whole containing field instead of emitting its plaintext. */
     if true == strings.Contains(string(payload), "super-secret") {
         t.Fatalf("redact-tagged plaintext leaked into audit changes json: %s", payload)
     }
@@ -288,6 +282,34 @@ func TestChangeSet_RedactTagHonoredInsideSliceOfStructs(t *testing.T) {
 
     if true == strings.Contains(string(payload), "alpha-") {
         t.Fatalf("redact-tagged plaintext leaked into audit changes json from a slice element: %s", payload)
+    }
+    if false == strings.Contains(string(payload), "redacted") {
+        t.Fatalf("expected the redacted marker in changes json: %s", payload)
+    }
+}
+
+func TestChangeSet_RedactTagHonoredInsideInterfaceField(t *testing.T) {
+    type credentials struct {
+        Token string `bun:"token" audit:"redact"`
+        Label string `bun:"label"`
+    }
+    type document struct {
+        Id   int64 `bun:"id,pk"`
+        Data any   `bun:"data"`
+    }
+
+    before := document{Id: 1, Data: credentials{Token: "iface-secret-old", Label: "primary"}}
+    after := document{Id: 1, Data: credentials{Token: "iface-secret-new", Label: "primary"}}
+
+    changes := audit.ChangeSet(before, after)
+
+    payload, marshalErr := json.Marshal(changes)
+    if nil != marshalErr {
+        t.Fatalf("marshal changes: %v", marshalErr)
+    }
+
+    if true == strings.Contains(string(payload), "iface-secret") {
+        t.Fatalf("redact-tagged plaintext leaked into audit changes json through an interface field: %s", payload)
     }
     if false == strings.Contains(string(payload), "redacted") {
         t.Fatalf("expected the redacted marker in changes json: %s", payload)

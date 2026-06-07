@@ -99,9 +99,6 @@ func TestLocalStorage_AllowsBaseUnderSymlinkedAncestorCreatedLazily(t *testing.T
         t.Fatalf("create symlink: %v", linkErr)
     }
 
-    /** The base lives under a symlinked ancestor and does not exist at construction time, so the
-        constructor's EvalSymlinks fails and the base is created lazily on first write. A later read
-        resolves the object through the symlink, which must still be recognised as inside the base. */
     base := filepath.Join(linkRoot, "store")
     local := storage.NewLocalStorage(base)
     runtimeInstance := testRuntime()
@@ -150,9 +147,6 @@ func TestLocalStorage_RejectsDanglingSymlinkLeafOnPut(t *testing.T) {
     base := t.TempDir()
     outside := t.TempDir()
 
-    /** The leaf is a symlink whose target does not exist yet; EvalSymlinks cannot resolve it, so the
-        ancestor-walk approves it and an O_CREATE write would follow the link and plant a file outside
-        the base directory. The leaf-symlink rejection (and O_NOFOLLOW) must refuse the write. */
     target := filepath.Join(outside, "planted.txt")
     if linkErr := os.Symlink(target, filepath.Join(base, "dangling")); nil != linkErr {
         t.Fatalf("create dangling symlink: %v", linkErr)
@@ -176,7 +170,6 @@ func TestLocalStorage_RejectsSizeMismatch(t *testing.T) {
     runtimeInstance := testRuntime()
 
     content := "four"
-    /** The reader yields 4 bytes but the caller declares 10; the declared content length must be enforced. */
     if putErr := local.Put(runtimeInstance, "obj.bin", strings.NewReader(content), 10, storagecontract.PutOptions{}); nil == putErr {
         t.Fatalf("expected a size-mismatch error when the reader length does not match the declared size")
     }

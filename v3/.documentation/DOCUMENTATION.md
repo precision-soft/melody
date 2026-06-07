@@ -124,7 +124,7 @@ Whenever any documentation mentions `go test` or `go vet`, it must:
 
 - List all supported build-tag combinations: default (no tags), `melody_env_embedded`, `melody_static_embedded`, and `melody_env_embedded` + `melody_static_embedded`.
 - State explicitly that both the framework (repository root) and the example application ([`./.example/`](../.example/)) must be tested and vetted under the full matrix.
-- Link to the local development shell aliases defined in [`./.dev/docker/.profile`](../.dev/docker/.profile) when referencing convenience commands.
+- Link to the local development shell aliases defined in [`./.dev/docker/.profile`](../../.dev/docker/.profile) when referencing convenience commands.
 
 The normative build tags are implemented in [`../application/environment_embedded.go`](../application/environment_embedded.go) and [`../application/static_embedded.go`](../application/static_embedded.go).
 

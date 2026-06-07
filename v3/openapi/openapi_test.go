@@ -489,7 +489,6 @@ func TestGenerate_NumericConstraintsAreNotEmittedOnStringFields(t *testing.T) {
         t.Fatalf("expected a 'code' property schema")
     }
 
-    /** greaterThan must not emit `minimum` on a string-typed schema; regex/pattern on a string is valid. */
     if nil != codeSchema.Minimum {
         t.Fatalf("greaterThan must not set minimum on a string field: %+v", codeSchema)
     }

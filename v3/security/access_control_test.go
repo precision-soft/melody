@@ -364,8 +364,6 @@ func TestNewAccessControlRule_PublicAccessCombinedWithOtherAttributesPanics(t *t
         }
     }()
 
-    /** The listener grants on PUBLIC_ACCESS before any role check, so (PUBLIC_ACCESS, ROLE_ADMIN) would
-        silently open the endpoint to everyone; the combination must be rejected at construction. */
     _ = NewAccessControlRule("/admin", "PUBLIC_ACCESS", "ROLE_ADMIN")
 }
 

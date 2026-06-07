@@ -216,9 +216,6 @@ func TestAsyncStorage_FailedDelegateIncrementsCounter(t *testing.T) {
 }
 
 func TestAsyncStorage_WithLoggerDoesNotRaceTheDrainGoroutine(t *testing.T) {
-    /** The drain goroutine starts in the constructor, so attaching a logger via the builder concurrently
-        with failing saves (which call deadLetter from the goroutine) used to race the logger field. Run
-        under -race to detect a regression. */
     storage := audit.NewAsyncStorage(&failingStorage{saveErr: exception.NewError("backend down", nil, nil)}, 64)
 
     var wait sync.WaitGroup

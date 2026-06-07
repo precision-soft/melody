@@ -12,11 +12,6 @@ import (
     "github.com/redis/rueidis"
 )
 
-/** lockAcquireScript grants the lock when the key is absent OR already held by this same token, so a
-    re-acquire of the same lock instance succeeds (refreshing its TTL) instead of failing on the existing
-    key. This matches the reentrant-for-the-same-instance behaviour of the in-memory locker, which the
-    shared lock contract asserts; a plain SET NX would diverge and orphan the key on a re-acquire that the
-    caller reads as "not held" and therefore never releases. */
 var lockAcquireScript = rueidis.NewLuaScript(`local current = redis.call("get", KEYS[1])
 if current == false or current == ARGV[1] then
     if tonumber(ARGV[2]) > 0 then
@@ -108,7 +103,6 @@ func (instance *redisLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl 
     return nil
 }
 
-/** floorPositiveMilliseconds converts a positive duration to whole milliseconds, flooring a sub-millisecond duration up to 1ms. A positive TTL whose Milliseconds() truncates to 0 must never reach Redis as 0: SET ... PX 0 is rejected, PEXPIRE key 0 deletes the key, and the token-store persist branch treats 0 as "no expiry". Callers guard with a positive-ttl check before calling, so the only flooring case is a sub-millisecond value. */
 func floorPositiveMilliseconds(ttl time.Duration) int64 {
     milliseconds := ttl.Milliseconds()
     if 0 == milliseconds {

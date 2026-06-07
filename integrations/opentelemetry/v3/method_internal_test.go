@@ -12,8 +12,6 @@ func TestNormalizedMethod(t *testing.T) {
         }
     }
 
-    /** Non-standard but valid RFC 7230 tokens (and the empty method) must collapse to "_OTHER" so an
-        attacker cannot explode the metric time-series or span-name cardinality. */
     for _, method := range []string{"BREW", "XYZZY", "M0001", "get", ""} {
         if normalized := normalizedMethod(method); "_OTHER" != normalized {
             t.Fatalf("expected non-standard method %q to normalize to _OTHER, got %q", method, normalized)

@@ -63,10 +63,12 @@ func (instance *ServerSentEventWriter) Send(event ServerSentEvent) error {
         builder.WriteString("\n")
     }
 
-    for _, line := range strings.Split(event.Data, "\n") {
-        builder.WriteString("data: ")
-        builder.WriteString(strings.ReplaceAll(line, "\r", ""))
-        builder.WriteString("\n")
+    if "" != event.Data {
+        for _, line := range strings.Split(event.Data, "\n") {
+            builder.WriteString("data: ")
+            builder.WriteString(strings.ReplaceAll(line, "\r", ""))
+            builder.WriteString("\n")
+        }
     }
 
     builder.WriteString("\n")

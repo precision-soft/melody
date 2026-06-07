@@ -58,8 +58,6 @@ func noHandler(
         return nil
     }
 
-    /** reflect.TypeOf(nil) is a nil reflect.Type, so calling .String() on it panics. A nil message has
-        no registered handler and reaches here; report a safe type name instead of dereferencing nil. */
     messageType := "<nil>"
     if message := envelopeInstance.Message(); nil != message {
         messageType = reflect.TypeOf(message).String()

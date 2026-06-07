@@ -54,8 +54,6 @@ func (instance *LocalStorage) Put(
         return exception.NewError("could not create the storage directory", map[string]any{"key": key}, mkdirErr)
     }
 
-    /** O_NOFOLLOW refuses to follow a symlink at the final path component, closing the window between
-        resolvePath's check and this open (time-of-check/time-of-use) for a swapped leaf symlink. */
     file, createErr := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0o640)
     if nil != createErr {
         return exception.NewError("could not create the storage object", map[string]any{"key": key}, createErr)
@@ -67,9 +65,6 @@ func (instance *LocalStorage) Put(
         return exception.NewError("could not write the storage object", map[string]any{"key": key}, copyErr)
     }
 
-    /** Enforce the caller-declared content length (S3-parity) so a reader that ends early or runs long
-        surfaces an error instead of silently persisting an object whose size does not match. A negative
-        size means "unknown" and skips the check. */
     if 0 <= size && written != size {
         _ = os.Remove(path)
         return exception.NewError("storage object size does not match the declared size", map[string]any{"key": key, "declared": size, "written": written}, nil)
@@ -158,10 +153,6 @@ func (instance *LocalStorage) resolvePath(key string) (string, error) {
         return "", exception.NewError("storage key escapes the base directory via a symlink", map[string]any{"key": key}, escapeErr)
     }
 
-    /** Reject a leaf that is itself a symlink, including a dangling one whose target does not yet exist.
-        ensureNoSymlinkEscape only validates resolvable ancestors: a dangling leaf symlink resolves to
-        nothing, so it would otherwise be approved and let an O_CREATE write follow the link to plant a
-        file outside the base directory. */
     if info, lstatErr := os.Lstat(target); nil == lstatErr && 0 != info.Mode()&os.ModeSymlink {
         return "", exception.NewError("storage key resolves through a symlink", map[string]any{"key": key}, nil)
     }
@@ -170,10 +161,6 @@ func (instance *LocalStorage) resolvePath(key string) (string, error) {
 }
 
 func (instance *LocalStorage) ensureNoSymlinkEscape(target string) error {
-    /** Re-resolve the base each call: the base directory is created lazily on first write, so the
-        constructor's EvalSymlinks may have failed and cached the unresolved path. If a symlinked
-        ancestor (e.g. a container mount or /tmp -> /private/tmp) only resolves after the base exists,
-        comparing a resolved target against a stale unresolved base would false-reject every key. */
     realBase := instance.resolvedBase
     if resolved, resolveErr := filepath.EvalSymlinks(instance.cleanedBase); nil == resolveErr {
         realBase = resolved

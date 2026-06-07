@@ -83,6 +83,15 @@ func validateScheduleFields(entry Entry) error {
                 ErrFieldContainsWhitespace,
             )
         }
+
+        forbiddenErr := ValidateNoForbiddenChars(
+            []string{field.value},
+            CrontabForbiddenChars,
+            fmt.Sprintf("entry %q Schedule.%s", entry.Name, field.name),
+        )
+        if nil != forbiddenErr {
+            return forbiddenErr
+        }
     }
 
     return nil

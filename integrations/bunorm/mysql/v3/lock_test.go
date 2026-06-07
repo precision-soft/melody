@@ -133,8 +133,6 @@ func TestMysqlLock_ReacquiresAfterRefreshDetectsLostLock(t *testing.T) {
         t.Fatalf("expected acquire to succeed: %v %v", acquired, acquireErr)
     }
 
-    /** Kill the session that holds the GET_LOCK so the lock is lost server-side. IS_USED_LOCK returns
-        the owning connection id; killing it releases the advisory lock. */
     var ownerId sql.NullInt64
     if ownerErr := sqldb.QueryRowContext(runtimeInstance.Context(), "SELECT IS_USED_LOCK(?)", name).Scan(&ownerId); nil != ownerErr {
         t.Fatalf("read lock owner: %v", ownerErr)
@@ -146,8 +144,6 @@ func TestMysqlLock_ReacquiresAfterRefreshDetectsLostLock(t *testing.T) {
         t.Logf("kill returned (tolerated): %v", killErr)
     }
 
-    /** Refresh must detect the loss AND drop the pinned connection; otherwise the next Acquire takes the
-        stale-connection fast path and falsely reports the lock as held without re-issuing GET_LOCK. */
     if refreshErr := lock.Refresh(runtimeInstance, 0); nil == refreshErr {
         t.Fatalf("expected refresh to detect the lost lock")
     }
@@ -157,8 +153,6 @@ func TestMysqlLock_ReacquiresAfterRefreshDetectsLostLock(t *testing.T) {
         t.Fatalf("expected re-acquire to succeed: %v %v", reacquired, reacquireErr)
     }
 
-    /** Prove the lock is genuinely held again (the fix re-issued GET_LOCK on a fresh connection) rather
-        than only reported held off a stale connection. */
     var heldBy sql.NullInt64
     if heldErr := sqldb.QueryRowContext(runtimeInstance.Context(), "SELECT IS_USED_LOCK(?)", name).Scan(&heldBy); nil != heldErr {
         t.Fatalf("read lock holder after re-acquire: %v", heldErr)
