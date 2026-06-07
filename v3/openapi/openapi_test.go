@@ -211,6 +211,41 @@ func TestGenerate_OuterFieldShadowsEmbeddedField(t *testing.T) {
     }
 }
 
+type deepMarker struct {
+    Marker string `json:"marker"`
+}
+
+type midMarkerEmbed struct {
+    deepMarker
+}
+
+type shallowMarkerEmbed struct {
+    Marker int64 `json:"marker"`
+}
+
+type embedDepthRequest struct {
+    midMarkerEmbed     // declared first; promotes deepMarker.Marker at depth 2
+    shallowMarkerEmbed // declared second; its Marker at depth 1 is the encoding/json winner
+}
+
+func TestGenerate_ShallowerEmbeddedFieldWinsRegardlessOfOrder(t *testing.T) {
+    registry := openapi.NewRegistry()
+    registry.Describe("depth.create", openapi.Descriptor{
+        RequestType: openapi.TypeOf[embedDepthRequest](),
+    })
+
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "depth.create", pattern: "/depth/", methods: []string{"POST"}},
+    }
+
+    document := openapi.Generate(openapi.Info{Title: "Example", Version: "1.0.0"}, routes, registry)
+
+    marker := document.Components.Schemas["embedDepthRequest"].Properties["marker"]
+    if nil == marker || "integer" != marker.Type {
+        t.Fatalf("expected the shallower (depth-1) int64 marker to win over the deeper string field, got: %+v", marker)
+    }
+}
+
 type nullableRefRequest struct {
     Audit *embeddedAudit `json:"audit,omitempty"`
 }

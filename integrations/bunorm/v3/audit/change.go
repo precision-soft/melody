@@ -201,7 +201,13 @@ func isRedactedField(field reflect.StructField) bool {
         return true
     }
 
-    return field.Type == encryptedStringType || field.Type == encryptedDeterministicStringType
+    /** A nullable encrypted column is declared as a pointer (e.g. *EncryptedString); unwrap it so a pointer-to-encrypted field is redacted the same as a value field, instead of leaking the plaintext into the audit changes column. */
+    fieldType := field.Type
+    for reflect.Ptr == fieldType.Kind() {
+        fieldType = fieldType.Elem()
+    }
+
+    return fieldType == encryptedStringType || fieldType == encryptedDeterministicStringType
 }
 
 func auditFieldName(field reflect.StructField) (string, bool) {

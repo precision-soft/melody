@@ -213,10 +213,14 @@ func foldHeaderLine(name string, value string) string {
     builder.WriteString(":")
 
     lineLength := len(name) + 1
-    started := false
 
     for _, word := range strings.Split(value, " ") {
-        if true == started && lineLength+1+len(word) > maxHeaderLineLength {
+        /** Fold before any word that would overflow the line, including the first one: a long
+            opening token (e.g. a single-token custom header value) must move onto a continuation
+            line too, otherwise the first line is left unbounded. An indivisible token longer than
+            the limit is still emitted intact rather than split — folding whitespace injected inside
+            a token would corrupt its value once the receiver unfolds the header. */
+        if lineLength+1+len(word) > maxHeaderLineLength {
             builder.WriteString(lineBreak)
             builder.WriteString(" ")
             builder.WriteString(word)
@@ -228,7 +232,6 @@ func foldHeaderLine(name string, value string) string {
         builder.WriteString(" ")
         builder.WriteString(word)
         lineLength += 1 + len(word)
-        started = true
     }
 
     return builder.String()

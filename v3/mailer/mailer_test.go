@@ -235,6 +235,60 @@ func TestSmtpTransport_RequireAuthFailsWhenServerHasNoAuthExtension(t *testing.T
     }
 }
 
+func TestSmtpTransport_RequireAuthFailsWhenNoUsernameConfigured(t *testing.T) {
+    listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+    if nil != listenErr {
+        t.Fatalf("listen: %v", listenErr)
+    }
+    defer listener.Close()
+
+    go serveAuthlessSmtp(listener)
+
+    /** RequireAuth without a username is a misconfiguration (e.g. a secret resolving to ""); the
+        transport must fail closed instead of silently delivering the message unauthenticated. */
+    transport := mailer.NewSmtpTransport(mailer.SmtpConfig{
+        Address:     listener.Addr().String(),
+        RequireAuth: true,
+    })
+
+    sendErr := transport.Send(testRuntime(), mailercontract.Message{
+        From:    mailercontract.Address{Email: "shop@example.com"},
+        To:      []mailercontract.Address{{Email: "ada@example.com"}},
+        Subject: "Hello",
+        Text:    "body",
+    })
+    if nil == sendErr {
+        t.Fatalf("expected RequireAuth to fail closed when no username is configured")
+    }
+
+    if false == strings.Contains(sendErr.Error(), "username") {
+        t.Fatalf("expected a missing-username error, got %v", sendErr)
+    }
+}
+
+func TestRenderMessage_FoldsLongFirstHeaderToken(t *testing.T) {
+    /** A long opening token in a custom header (e.g. a tracking id) must fold onto a continuation
+        line; previously the first word never folded and the opening line could breach the limit. */
+    longToken := strings.Repeat("A", 995)
+
+    payload, renderErr := mailer.RenderMessage(mailercontract.Message{
+        From:    mailercontract.Address{Email: "shop@example.com"},
+        To:      []mailercontract.Address{{Email: "ada@example.com"}},
+        Subject: "Hello",
+        Text:    "body",
+        Headers: map[string]string{"X-Tracking-Id": longToken + " tail"},
+    })
+    if nil != renderErr {
+        t.Fatalf("render: %v", renderErr)
+    }
+
+    for _, line := range strings.Split(string(payload), "\r\n") {
+        if 998 < len(line) {
+            t.Fatalf("rendered header line exceeds the RFC 5322 limit: %d", len(line))
+        }
+    }
+}
+
 func serveAuthlessSmtp(listener net.Listener) {
     connection, acceptErr := listener.Accept()
     if nil != acceptErr {

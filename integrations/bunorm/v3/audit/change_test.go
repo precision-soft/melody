@@ -1,6 +1,8 @@
 package audit_test
 
 import (
+    "encoding/json"
+    "strings"
     "testing"
 
     "github.com/uptrace/bun"
@@ -68,6 +70,52 @@ type account struct {
     ApiKey      string                               `bun:"api_key" audit:"redact"`
     Password    encrypt.EncryptedString              `bun:"password"`
     LookupEmail encrypt.EncryptedDeterministicString `bun:"lookup_email"`
+}
+
+type nullableSecretAccount struct {
+    Id       int64                                 `bun:"id,pk"`
+    Password *encrypt.EncryptedString              `bun:"password"`
+    Lookup   *encrypt.EncryptedDeterministicString `bun:"lookup"`
+}
+
+func TestChangeSet_RedactsPointerEncryptedFields(t *testing.T) {
+    oldPassword := encrypt.EncryptedString("old-secret")
+    newPassword := encrypt.EncryptedString("new-secret")
+    oldLookup := encrypt.EncryptedDeterministicString("old@example.com")
+    newLookup := encrypt.EncryptedDeterministicString("new@example.com")
+
+    before := nullableSecretAccount{Id: 1, Password: &oldPassword, Lookup: &oldLookup}
+    after := nullableSecretAccount{Id: 1, Password: &newPassword, Lookup: &newLookup}
+
+    changes := audit.ChangeSet(before, after)
+
+    passwordChange, found := findChange(changes, "password")
+    if false == found {
+        t.Fatalf("expected the pointer encrypted field to still be recorded as changed")
+    }
+    if "<redacted>" != passwordChange.Old || "<redacted>" != passwordChange.New {
+        t.Fatalf("expected the pointer encrypted field value to be redacted: %+v", passwordChange)
+    }
+
+    lookupChange, found := findChange(changes, "lookup")
+    if false == found {
+        t.Fatalf("expected the pointer deterministic-encrypted field to still be recorded as changed")
+    }
+    if "<redacted>" != lookupChange.Old || "<redacted>" != lookupChange.New {
+        t.Fatalf("expected the pointer deterministic-encrypted field value to be redacted: %+v", lookupChange)
+    }
+
+    /** Marshalling the changes is exactly what the recorder writes to the audit table, so the
+        plaintext secret must not survive into that serialized form. */
+    serialized, marshalErr := json.Marshal(changes)
+    if nil != marshalErr {
+        t.Fatalf("could not marshal changes: %v", marshalErr)
+    }
+    for _, secret := range []string{"old-secret", "new-secret", "old@example.com", "new@example.com"} {
+        if true == strings.Contains(string(serialized), secret) {
+            t.Fatalf("plaintext secret %q leaked into the serialized audit changes: %s", secret, serialized)
+        }
+    }
 }
 
 type EmbeddedAuditFields struct {

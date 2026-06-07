@@ -92,6 +92,39 @@ func TestLocalStorage_RejectsPathTraversal(t *testing.T) {
     }
 }
 
+func TestLocalStorage_AllowsBaseUnderSymlinkedAncestorCreatedLazily(t *testing.T) {
+    realRoot := t.TempDir()
+    linkRoot := filepath.Join(t.TempDir(), "link")
+    if linkErr := os.Symlink(realRoot, linkRoot); nil != linkErr {
+        t.Fatalf("create symlink: %v", linkErr)
+    }
+
+    /** The base lives under a symlinked ancestor and does not exist at construction time, so the
+        constructor's EvalSymlinks fails and the base is created lazily on first write. A later read
+        resolves the object through the symlink, which must still be recognised as inside the base. */
+    base := filepath.Join(linkRoot, "store")
+    local := storage.NewLocalStorage(base)
+    runtimeInstance := testRuntime()
+
+    key := "labels/awb-1.txt"
+    content := "inside the base via a symlink"
+
+    if putErr := local.Put(runtimeInstance, key, strings.NewReader(content), int64(len(content)), storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("put under a symlinked base should succeed: %v", putErr)
+    }
+
+    reader, getErr := local.Get(runtimeInstance, key)
+    if nil != getErr {
+        t.Fatalf("get under a symlinked base should not be rejected as a symlink escape: %v", getErr)
+    }
+    loaded, _ := io.ReadAll(reader)
+    reader.Close()
+
+    if content != string(loaded) {
+        t.Fatalf("content mismatch: %q", string(loaded))
+    }
+}
+
 func TestLocalStorage_RejectsSymlinkEscape(t *testing.T) {
     base := t.TempDir()
     outside := t.TempDir()

@@ -150,7 +150,14 @@ func (instance *LocalStorage) resolvePath(key string) (string, error) {
 }
 
 func (instance *LocalStorage) ensureNoSymlinkEscape(target string) error {
+    /** Re-resolve the base each call: the base directory is created lazily on first write, so the
+        constructor's EvalSymlinks may have failed and cached the unresolved path. If a symlinked
+        ancestor (e.g. a container mount or /tmp -> /private/tmp) only resolves after the base exists,
+        comparing a resolved target against a stale unresolved base would false-reject every key. */
     realBase := instance.resolvedBase
+    if resolved, resolveErr := filepath.EvalSymlinks(instance.cleanedBase); nil == resolveErr {
+        realBase = resolved
+    }
 
     existing := target
     for {

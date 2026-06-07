@@ -118,6 +118,10 @@ func buildStructSchema(structType reflect.Type, components map[string]*Schema, n
     return schema
 }
 
+type embeddedCandidate struct {
+    field reflect.StructField
+}
+
 func collectStructFields(
     structType reflect.Type,
     components map[string]*Schema,
@@ -126,14 +130,20 @@ func collectStructFields(
     properties map[string]*Schema,
     required *[]string,
 ) {
-    // The struct's own fields are collected before any promoted embed so that an outer
-    // field shadows a same-named embedded field regardless of declaration order, matching
-    // encoding/json (shallower fields win). The first-wins skip in the embed pass then drops
-    // the shadowed embedded field.
+    /** resolved tracks json names already decided at a shallower depth — whether they were added or
+        dropped as ambiguous — so a deeper embedded field can never override a shallower one. This
+        mirrors encoding/json: the shallowest field with a given json name wins, and fields that tie
+        at the minimum depth are dropped (unless exactly one of them is explicitly json-tagged). */
+    resolved := make(map[string]bool)
+
+    /** Depth 0: the struct's own (non-embedded) fields. A shallower field always wins, so they are
+        claimed first regardless of an embedded field's declaration order. */
+    var embedQueue []reflect.Type
     for index := 0; index < structType.NumField(); index++ {
         field := structType.Field(index)
 
         if true == isPromotedEmbed(field) {
+            embedQueue = append(embedQueue, dereferencedStructType(field.Type))
             continue
         }
 
@@ -146,33 +156,123 @@ func collectStructFields(
             continue
         }
 
-        if _, exists := properties[jsonName]; true == exists {
+        if true == resolved[jsonName] {
             continue
         }
 
-        propertySchema := buildSchema(field.Type, components, names, visited)
-        applyValidation(propertySchema, field.Tag.Get("validate"))
-        properties[jsonName] = propertySchema
+        resolved[jsonName] = true
+        addFieldProperty(field, jsonName, components, names, visited, properties, required)
+    }
 
-        if true == isRequired(field.Tag.Get("validate")) {
-            *required = append(*required, jsonName)
+    /** Promote embedded structs breadth-first by depth: every embed at depth N is resolved before
+        any embed at depth N+1, so the shallowest json name wins and equal-depth ties are dropped. */
+    for 0 < len(embedQueue) {
+        candidatesByName := make(map[string][]embeddedCandidate)
+        var order []string
+        var nextLevel []reflect.Type
+
+        for _, embeddedType := range embedQueue {
+            for index := 0; index < embeddedType.NumField(); index++ {
+                field := embeddedType.Field(index)
+
+                if true == isPromotedEmbed(field) {
+                    nextLevel = append(nextLevel, dereferencedStructType(field.Type))
+                    continue
+                }
+
+                if false == field.IsExported() {
+                    continue
+                }
+
+                jsonName, omit := jsonFieldName(field)
+                if true == omit {
+                    continue
+                }
+
+                if true == resolved[jsonName] {
+                    continue
+                }
+
+                if _, seen := candidatesByName[jsonName]; false == seen {
+                    order = append(order, jsonName)
+                }
+                candidatesByName[jsonName] = append(candidatesByName[jsonName], embeddedCandidate{field: field})
+            }
+        }
+
+        for _, jsonName := range order {
+            resolved[jsonName] = true
+
+            winner, ok := dominantEmbeddedField(candidatesByName[jsonName])
+            if false == ok {
+                continue
+            }
+
+            addFieldProperty(winner, jsonName, components, names, visited, properties, required)
+        }
+
+        embedQueue = nextLevel
+    }
+}
+
+func addFieldProperty(
+    field reflect.StructField,
+    jsonName string,
+    components map[string]*Schema,
+    names map[reflect.Type]string,
+    visited map[reflect.Type]bool,
+    properties map[string]*Schema,
+    required *[]string,
+) {
+    propertySchema := buildSchema(field.Type, components, names, visited)
+    applyValidation(propertySchema, field.Tag.Get("validate"))
+    properties[jsonName] = propertySchema
+
+    if true == isRequired(field.Tag.Get("validate")) {
+        *required = append(*required, jsonName)
+    }
+}
+
+func dominantEmbeddedField(group []embeddedCandidate) (reflect.StructField, bool) {
+    if 1 == len(group) {
+        return group[0].field, true
+    }
+
+    /** More than one promoted field ties at this depth for the same json name: encoding/json keeps
+        the single explicitly-tagged one if there is exactly one, and otherwise drops them all. */
+    taggedIndex := -1
+    taggedCount := 0
+    for index, candidate := range group {
+        if true == hasExplicitJsonName(candidate.field) {
+            taggedCount++
+            taggedIndex = index
         }
     }
 
-    for index := 0; index < structType.NumField(); index++ {
-        field := structType.Field(index)
-
-        if false == isPromotedEmbed(field) {
-            continue
-        }
-
-        embedded := field.Type
-        for reflect.Ptr == embedded.Kind() {
-            embedded = embedded.Elem()
-        }
-
-        collectStructFields(embedded, components, names, visited, properties, required)
+    if 1 == taggedCount {
+        return group[taggedIndex].field, true
     }
+
+    return reflect.StructField{}, false
+}
+
+func dereferencedStructType(targetType reflect.Type) reflect.Type {
+    for reflect.Ptr == targetType.Kind() {
+        targetType = targetType.Elem()
+    }
+
+    return targetType
+}
+
+func hasExplicitJsonName(field reflect.StructField) bool {
+    tag := field.Tag.Get("json")
+    if "" == tag {
+        return false
+    }
+
+    parts := strings.Split(tag, ",")
+
+    return "" != parts[0] && "-" != parts[0]
 }
 
 func isPromotedEmbed(field reflect.StructField) bool {
