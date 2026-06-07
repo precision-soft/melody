@@ -36,6 +36,7 @@ func NewMetricsMiddleware(meter metric.Meter) (httpcontract.Middleware, error) {
             startedAt := time.Now()
 
             var response httpcontract.Response
+            var handlerErr error
             completed := false
 
             defer func() {
@@ -44,6 +45,9 @@ func NewMetricsMiddleware(meter metric.Meter) (httpcontract.Middleware, error) {
                     statusCode = nethttp.StatusOK
                     if nil != response {
                         statusCode = response.StatusCode()
+                    }
+                    if nil != handlerErr {
+                        statusCode = nethttp.StatusInternalServerError
                     }
                 }
 
@@ -57,11 +61,12 @@ func NewMetricsMiddleware(meter metric.Meter) (httpcontract.Middleware, error) {
                 requestDuration.Record(runtimeInstance.Context(), float64(time.Since(startedAt).Microseconds())/1000.0, attributes)
             }()
 
-            handlerResponse, handlerErr := next(runtimeInstance, writer, request)
+            handlerResponse, nextErr := next(runtimeInstance, writer, request)
             response = handlerResponse
+            handlerErr = nextErr
             completed = true
 
-            return handlerResponse, handlerErr
+            return handlerResponse, nextErr
         }
     }, nil
 }

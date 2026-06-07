@@ -2,6 +2,7 @@ package messagebus
 
 import (
     "context"
+    "sync/atomic"
     "testing"
     "time"
 
@@ -69,6 +70,38 @@ func TestConsumeFrom_StopsAtLimitAndHandlesMessages(t *testing.T) {
 
     if 3 != sum {
         t.Fatalf("expected handlers to sum to 3, got %d", sum)
+    }
+}
+
+func TestConsumeFrom_DoesNotOvershootLimitWithConcurrency(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    transport := NewInMemoryTransport(16)
+
+    for value := 0; value < 8; value++ {
+        if sendErr := transport.Send(runtimeInstance, NewEnvelope(consumeTestMessage{Value: 1})); nil != sendErr {
+            t.Fatalf("unexpected send error: %v", sendErr)
+        }
+    }
+
+    locator := NewHandlerLocator()
+    var handled int64
+    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage) error {
+        atomic.AddInt64(&handled, 1)
+        return nil
+    })
+
+    bus := NewManager("default", NewHandleMessageMiddleware(locator))
+    command := NewConsumeCommand(bus, nil)
+
+    consumeErr := command.consumeFrom(runtimeInstance, transport, 2, 8)
+    if nil != consumeErr {
+        t.Fatalf("unexpected consume error: %v", consumeErr)
+    }
+
+    if 2 != atomic.LoadInt64(&handled) {
+        t.Fatalf("expected exactly 2 messages handled with limit 2 and concurrency 8, got %d", atomic.LoadInt64(&handled))
     }
 }
 

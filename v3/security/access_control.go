@@ -157,6 +157,15 @@ func (instance *AccessControl) Rules() []AccessControlRule {
 }
 
 func (instance *AccessControl) Match(path string) ([]string, bool) {
+    matchedIndex, matched := instance.matchRuleIndex(path)
+    if false == matched {
+        return []string{}, false
+    }
+
+    return append([]string{}, instance.rules[matchedIndex].attributes...), true
+}
+
+func (instance *AccessControl) matchRuleIndex(path string) (int, bool) {
     normalizedPath := strings.TrimSpace(path)
     if "" == normalizedPath {
         normalizedPath = "/"
@@ -166,10 +175,10 @@ func (instance *AccessControl) Match(path string) ([]string, bool) {
         normalizedPath = strings.TrimSuffix(normalizedPath, "/")
     }
 
-    for _, rule := range instance.rules {
+    for index, rule := range instance.rules {
         if true == rule.isExact {
             if normalizedPath == rule.pathPrefix {
-                return append([]string{}, rule.attributes...), true
+                return index, true
             }
         }
     }
@@ -226,10 +235,10 @@ func (instance *AccessControl) Match(path string) ([]string, bool) {
     }
 
     if -1 != bestIndex {
-        return append([]string{}, instance.rules[bestIndex].attributes...), true
+        return bestIndex, true
     }
 
-    for _, rule := range instance.rules {
+    for index, rule := range instance.rules {
         if false == rule.isRegex {
             continue
         }
@@ -239,15 +248,15 @@ func (instance *AccessControl) Match(path string) ([]string, bool) {
         }
 
         if true == rule.regexCompiled.MatchString(normalizedPath) {
-            return append([]string{}, rule.attributes...), true
+            return index, true
         }
     }
 
     if -1 != fallbackIndex {
-        return append([]string{}, instance.rules[fallbackIndex].attributes...), true
+        return fallbackIndex, true
     }
 
-    return []string{}, false
+    return -1, false
 }
 
 func normalizePathPrefix(pathPrefix string) string {

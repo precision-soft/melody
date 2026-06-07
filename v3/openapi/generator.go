@@ -32,10 +32,12 @@ func Generate(
             descriptor, hasDescriptor = registry.Get(routeDefinition.Name())
         }
 
-        operation := buildOperation(routeDefinition, pathParameters, descriptor, hasDescriptor, components, componentNames)
+        methods := routeDefinition.Methods()
 
         pathItem := document.Paths[path]
-        for _, method := range routeDefinition.Methods() {
+        for _, method := range methods {
+            operationId := operationIdFor(routeDefinition.Name(), method, len(methods))
+            operation := buildOperation(operationId, pathParameters, descriptor, hasDescriptor, components, componentNames)
             assignOperation(&pathItem, method, operation)
         }
 
@@ -49,8 +51,16 @@ func Generate(
     return document
 }
 
+func operationIdFor(routeName string, method string, methodCount int) string {
+    if methodCount <= 1 {
+        return routeName
+    }
+
+    return routeName + "." + strings.ToLower(method)
+}
+
 func buildOperation(
-    routeDefinition httpcontract.RouteDefinition,
+    operationId string,
     pathParameters []Parameter,
     descriptor Descriptor,
     hasDescriptor bool,
@@ -58,7 +68,7 @@ func buildOperation(
     names map[reflect.Type]string,
 ) *Operation {
     operation := &Operation{
-        OperationId: routeDefinition.Name(),
+        OperationId: operationId,
         Parameters:  pathParameters,
         Responses:   make(map[string]ResponseObject),
     }

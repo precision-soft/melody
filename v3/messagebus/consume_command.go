@@ -141,6 +141,7 @@ func (instance *ConsumeCommand) consumeFrom(
     workerContext, cancelWorkers := context.WithCancel(consumeContext)
     defer cancelWorkers()
 
+    var reserved int64
     var processed int64
     var loopErrOnce sync.Once
     var loopErr error
@@ -153,6 +154,10 @@ func (instance *ConsumeCommand) consumeFrom(
             defer wait.Done()
 
             for {
+                if limit > 0 && atomic.AddInt64(&reserved, 1) > limit {
+                    return
+                }
+
                 select {
                 case <-workerContext.Done():
                     return

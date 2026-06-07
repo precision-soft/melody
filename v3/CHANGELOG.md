@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v3.7.0] - 2026-06-06 - Platform Extensions: Messaging, Realtime, Auth, i18n, OpenAPI, Lock, Mailer, and Storage
+## [v3.7.0] - 2026-06-07 - Platform Extensions: Messaging, Realtime, Auth, i18n, OpenAPI, Lock, Mailer, and Storage
 
 ### Added
 
@@ -46,6 +46,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `lock/` — `InMemoryLocker` `Refresh` rejects a non-positive `ttl` (returning an error) instead of silently converting a TTL lock into a never-expiring one, matching the Redis backend's guard.
 - `messagebus/` — the in-memory transport gains `WithLogger`; a delayed requeue dropped on a full/closed queue is now logged instead of vanishing silently.
 - `lock/` — `InMemoryLocker` opportunistically purges expired holders during `Acquire`, bounding map growth for locks that expire without an explicit `Release`/`Refresh`.
+- `security/` — runtime access-control matching now honors the rule type. `(*AccessControl).Match` already implemented the documented exact → longest-prefix → segment-prefix → regex → fallback priority, but the kernel access-control listener matched requests with a separate prefix-only matcher that ignored `isExact`/`isRegex`/`isSegmentPrefix`, so `NewAccessControlExactRule` was enforced as a prefix, `NewAccessControlRuleWithSegmentPrefix` lost its segment boundary, and `NewAccessControlRegexRule` rules (which carry an empty prefix) collapsed into the single empty-prefix fallback — letting a later protected regex rule be silently shadowed by an earlier public one. The listener now routes through `(*AccessControl).Match`, so a protected `^/admin` regex rule is enforced instead of a request falling through to an earlier `PUBLIC_ACCESS` rule.
+- `messagebus/` — `melody:messagebus:consume --limit` no longer overshoots by up to `concurrency-1` messages: the limit budget is reserved before a worker receives an envelope, so a `--limit N --concurrency M` run consumes and acks exactly `N` messages instead of up to `N+M-1` (previously the limit was only checked after a message had already been dispatched and acked).
+- `openapi/` — a route registered with multiple HTTP methods now emits a distinct `Operation` per verb with a unique `operationId` (`<routeName>.<method>`) instead of sharing one `Operation` pointer and a duplicate `operationId` across verbs, which is an invalid OpenAPI 3 document and aliased every verb's request/response shape.
 
 ## [v3.6.0] - 2026-05-16 - Cron Integration, Decoupled Cron Configuration, and `.example` Flat Layout
 

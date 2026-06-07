@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v3.1.0] - 2026-06-06 - Column Encryption, Field-Level Audit Trail, and Read/Write Split
+## [v3.1.0] - 2026-06-07 - Column Encryption, Field-Level Audit Trail, and Read/Write Split
 
 ### Added
 
@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `v3/encrypt/` — `EncryptedString.Value` now returns the ciphertext as `[]byte` rather than `string`, so the `\x00` bytes in the `<ENC>\0gcm1\0…` marker survive persistence: bun inlines a `driver.Valuer` string into the MySQL statement text and its string formatter drops embedded NUL bytes, which silently corrupted the marker so a subsequent read no longer recognized the value as ciphertext and returned it unencrypted (encryption-at-rest was a no-op for the `EncryptedString` column type on bun + MySQL). Returning `[]byte` makes bun emit an `X'…'` binary literal that preserves every byte; `Scan` already accepts both `string` and `[]byte`, so reads are unaffected.
 - `v3/encrypt/` — `EncryptedDeterministicString.Value` carried the identical NUL-drop defect and now also returns `[]byte`, and `Cipher.CiphertextCandidates` now returns `[][]byte` instead of `[]string` for the same reason: the candidates form the right-hand side of a `WHERE col IN (…)` lookup and were likewise NUL-stripped when bun inlined them as strings, which would have broken every deterministic equality lookup once the column stored intact binary ciphertext. As `[][]byte` each candidate is emitted as an `X'…'` binary literal, so the lookup matches the stored value byte-for-byte. The README lookup example is updated accordingly.
 - `v3/audit/` — `ChangeSet` now also masks `EncryptedDeterministicString` columns as `<redacted>` (previously only `EncryptedString` was masked), so the low-entropy lookup PII these columns hold — e.g. an email used for searchable encryption — no longer leaks into the audit trail in cleartext. The promoted-embed walk excludes the deterministic type as well.
+- `v3/encrypt/` — `Migrator.MigrateEncrypt` and the `melody:encrypt:database` command now honor deterministic encryption. `MigrateEncrypt` consults `TableSpec.Deterministic` (it previously always wrote random-nonce ciphertext, so bulk-encrypting an existing column mapped to `EncryptedDeterministicString` produced values that `CiphertextCandidates` equality lookups could never match — the data was present but silently unsearchable), and the command gains a `--deterministic` flag to drive it. `MigrateReencrypt` no longer takes the same-key fast-path skip when `TableSpec.Deterministic` is set: the wire format cannot distinguish a random-nonce from a deterministic ciphertext, so converting an existing random-nonce column to a searchable one under the same key id now actually rewrites the rows instead of skipping them. Deterministic re-encryption is idempotent (stable ciphertext), so rows already stored in deterministic form are left unchanged.
 
 ## [v3.0.1] - 2026-03-08 - Tidy v3 go.sum Dependencies
 

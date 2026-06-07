@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v3.0.0] - 2026-06-06 - Initial Release — S3-Compatible Object Storage
+## [v3.0.0] - 2026-06-07 - Initial Release — S3-Compatible Object Storage
 
 ### Added
 

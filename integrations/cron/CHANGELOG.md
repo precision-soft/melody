@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.2.0] - 2026-06-07 - Plug-and-Play Command Registration
+
 ### Added
 
 - `v3/command.go` — `Commands(configuration)` returns the `melody:cron:generate` command as a `[]cli/contract.Command`, so userland registers the integration's built-in command in one call.
@@ -94,7 +96,9 @@ Identical to `v1.0.0` except: module path is `github.com/precision-soft/melody/i
 
 Identical to `v1.0.0` except: module path is `github.com/precision-soft/melody/integrations/cron/v3`; dependency pinned to `github.com/precision-soft/melody/v3`. See [`v1.0.0`](#v100---2026-05-16---initial-release--cron-integration) for the full change list.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.1.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.2.0...HEAD
+
+[v3.2.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.1.0...integrations/cron/v3.2.0
 
 [v3.1.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.0.0...integrations/cron/v3.1.0
 

@@ -242,16 +242,20 @@ func (instance *RedisTokenStore) Lookup(
     return claims, true, nil
 }
 
+func (instance *RedisTokenStore) keyspace() string {
+    return "{" + instance.prefix + "}"
+}
+
 func (instance *RedisTokenStore) tokenKey(tokenString string) string {
-    return instance.prefix + ":token:" + tokenString
+    return instance.keyspace() + ":token:" + tokenString
 }
 
 func (instance *RedisTokenStore) userKey(userIdentifier string) string {
-    return instance.prefix + ":user:" + userIdentifier
+    return instance.keyspace() + ":user:" + userIdentifier
 }
 
 func (instance *RedisTokenStore) userKeyPrefix() string {
-    return instance.prefix + ":user:"
+    return instance.keyspace() + ":user:"
 }
 
 var _ securitycontract.RevocableTokenStore = (*RedisTokenStore)(nil)

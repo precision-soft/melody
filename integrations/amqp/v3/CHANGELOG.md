@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v3.0.0] - 2026-06-06 - Initial Release — RabbitMQ Message-Bus Transport, Auto-Reconnect, and Server-Sent Events Backplane
+## [v3.0.0] - 2026-06-07 - Initial Release — RabbitMQ Message-Bus Transport, Auto-Reconnect, and Server-Sent Events Backplane
 
 ### Added
 

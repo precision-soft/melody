@@ -36,6 +36,39 @@ func (instance fakeRoute) Locales() []string               { return nil }
 func (instance fakeRoute) Priority() int                   { return 0 }
 func (instance fakeRoute) Attributes() map[string]any      { return nil }
 
+func TestGenerate_MultiMethodRouteEmitsDistinctOperationsAndUniqueOperationIds(t *testing.T) {
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "thing.handle", pattern: "/thing/", methods: []string{"GET", "POST"}},
+    }
+
+    document := openapi.Generate(openapi.Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+    pathItem, hasPath := document.Paths["/thing/"]
+    if false == hasPath {
+        t.Fatalf("expected the /thing/ path")
+    }
+
+    if nil == pathItem.Get || nil == pathItem.Post {
+        t.Fatalf("expected both GET and POST operations")
+    }
+
+    if pathItem.Get == pathItem.Post {
+        t.Fatalf("expected distinct operation instances per method")
+    }
+
+    if pathItem.Get.OperationId == pathItem.Post.OperationId {
+        t.Fatalf("expected a unique operationId per method, got %q for both", pathItem.Get.OperationId)
+    }
+
+    if "thing.handle.get" != pathItem.Get.OperationId {
+        t.Fatalf("unexpected GET operationId: %q", pathItem.Get.OperationId)
+    }
+
+    if "thing.handle.post" != pathItem.Post.OperationId {
+        t.Fatalf("unexpected POST operationId: %q", pathItem.Post.OperationId)
+    }
+}
+
 func TestGenerate_BuildsPathsParametersAndSchemas(t *testing.T) {
     registry := openapi.NewRegistry()
     registry.Describe("products.create", openapi.Descriptor{

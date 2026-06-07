@@ -2,6 +2,7 @@ package opentelemetry_test
 
 import (
     "context"
+    "errors"
     nethttp "net/http"
     "net/http/httptest"
     "strings"
@@ -66,6 +67,50 @@ func TestMetricsMiddleware_RecordsRequestMetrics(t *testing.T) {
 
     if false == found {
         t.Fatalf("expected an http_server_request metric to be recorded")
+    }
+}
+
+func TestMetricsMiddleware_RecordsServerErrorStatusWhenHandlerReturnsError(t *testing.T) {
+    meter, registry, meterErr := opentelemetry.NewPrometheusMeter("melody-test-error")
+    if nil != meterErr {
+        t.Fatalf("meter: %v", meterErr)
+    }
+
+    middleware, middlewareErr := opentelemetry.NewMetricsMiddleware(meter)
+    if nil != middlewareErr {
+        t.Fatalf("middleware: %v", middlewareErr)
+    }
+
+    request, runtimeInstance := testRequestAndRuntime()
+    handler := middleware(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return nil, errors.New("boom")
+    })
+
+    if _, handlerErr := handler(runtimeInstance, httptest.NewRecorder(), request); nil == handlerErr {
+        t.Fatalf("expected the handler error to propagate")
+    }
+
+    families, gatherErr := registry.Gather()
+    if nil != gatherErr {
+        t.Fatalf("gather: %v", gatherErr)
+    }
+
+    statusFound := ""
+    for _, family := range families {
+        if false == strings.Contains(family.GetName(), "http_server_request") {
+            continue
+        }
+        for _, metricInstance := range family.GetMetric() {
+            for _, label := range metricInstance.GetLabel() {
+                if "http_response_status_code" == label.GetName() {
+                    statusFound = label.GetValue()
+                }
+            }
+        }
+    }
+
+    if "500" != statusFound {
+        t.Fatalf("expected the status_code label to be 500 for an errored request, got %q", statusFound)
     }
 }
 

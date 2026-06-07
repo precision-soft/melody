@@ -48,14 +48,26 @@ func NewMigrator(db *bun.DB, cipher Cipher) *Migrator {
 }
 
 func (instance *Migrator) MigrateEncrypt(ctx context.Context, spec TableSpec) (int, error) {
-    return instance.run(ctx, spec, func(value string) (string, error) {
+    return instance.run(ctx, spec, instance.encryptTransform(spec))
+}
+
+func (instance *Migrator) encryptTransform(spec TableSpec) func(string) (string, error) {
+    return func(value string) (string, error) {
+        if true == spec.Deterministic {
+            return instance.cipher.EncryptDeterministic(value)
+        }
+
         return instance.cipher.Encrypt(value)
-    })
+    }
 }
 
 func (instance *Migrator) MigrateReencrypt(ctx context.Context, spec TableSpec, targetKeyId string) (int, error) {
-    return instance.run(ctx, spec, func(value string) (string, error) {
-        if currentKeyId, encrypted := keyIdOf(value); true == encrypted && currentKeyId == targetKeyId {
+    return instance.run(ctx, spec, instance.reencryptTransform(spec, targetKeyId))
+}
+
+func (instance *Migrator) reencryptTransform(spec TableSpec, targetKeyId string) func(string) (string, error) {
+    return func(value string) (string, error) {
+        if currentKeyId, encrypted := keyIdOf(value); true == encrypted && currentKeyId == targetKeyId && false == spec.Deterministic {
             return value, nil
         }
 
@@ -69,7 +81,7 @@ func (instance *Migrator) MigrateReencrypt(ctx context.Context, spec TableSpec, 
         }
 
         return instance.cipher.EncryptWithKeyId(plaintext, targetKeyId)
-    })
+    }
 }
 
 func (instance *Migrator) MigrateDecrypt(ctx context.Context, spec TableSpec) (int, error) {
