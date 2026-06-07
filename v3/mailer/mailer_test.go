@@ -434,6 +434,26 @@ func TestManager_RejectsMalformedAddress(t *testing.T) {
     }
 }
 
+func TestManager_RejectsRecipientsWithOnlyEmptyEmails(t *testing.T) {
+    transport := mailer.NewInMemoryTransport()
+    manager := mailer.NewManager(transport)
+
+    /** A recipient slot that carries only a display name has an empty email; validateAddresses skips it,
+        so the message would otherwise reach the transport with no deliverable recipient. */
+    sendErr := manager.Send(testRuntime(), mailercontract.Message{
+        From: mailercontract.Address{Email: "shop@example.com"},
+        To:   []mailercontract.Address{{Name: "No Address"}},
+        Text: "body",
+    })
+    if nil == sendErr {
+        t.Fatalf("expected a message whose only recipient has an empty email to be rejected")
+    }
+
+    if 0 != len(transport.Sent()) {
+        t.Fatalf("expected nothing to be delivered when there is no deliverable recipient")
+    }
+}
+
 func TestRenderMessage_SkipsEmptyBodyPartWithAttachments(t *testing.T) {
     payload, renderErr := mailer.RenderMessage(mailercontract.Message{
         From: mailercontract.Address{Email: "shop@example.com"},

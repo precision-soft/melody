@@ -6,20 +6,42 @@ import (
 
     "github.com/precision-soft/melody/exception"
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
+    securitycontract "github.com/precision-soft/melody/security/contract"
 )
 
-func NewAccessControlRule(pathPrefix string, attributes ...string) AccessControlRule {
-    normalizedPrefix := normalizePathPrefix(pathPrefix)
-
+/** normalizeAccessControlAttributes trims blank attributes and rejects PUBLIC_ACCESS combined with any
+    other attribute. The access-control listener grants immediately on a PUBLIC_ACCESS attribute before
+    any token/role/voter check, so a rule such as (PUBLIC_ACCESS, ROLE_ADMIN) would silently open the
+    endpoint to everyone and discard the role requirement — fail closed by forbidding the combination. */
+func normalizeAccessControlAttributes(attributes []string) []string {
     normalizedAttributes := make([]string, 0, len(attributes))
+    publicAccess := false
     for _, attribute := range attributes {
         normalizedAttribute := strings.TrimSpace(attribute)
         if "" == normalizedAttribute {
             continue
         }
 
+        if securitycontract.AttributePublicAccess == normalizedAttribute {
+            publicAccess = true
+        }
+
         normalizedAttributes = append(normalizedAttributes, normalizedAttribute)
     }
+
+    if true == publicAccess && 1 < len(normalizedAttributes) {
+        exception.Panic(
+            exception.NewError("access control PUBLIC_ACCESS may not be combined with other attributes", nil, nil),
+        )
+    }
+
+    return normalizedAttributes
+}
+
+func NewAccessControlRule(pathPrefix string, attributes ...string) AccessControlRule {
+    normalizedPrefix := normalizePathPrefix(pathPrefix)
+
+    normalizedAttributes := normalizeAccessControlAttributes(attributes)
 
     return AccessControlRule{
         pathPrefix:      normalizedPrefix,
@@ -85,15 +107,7 @@ func NewAccessControlRuleWithSegmentPrefix(pathPrefix string, attributes ...stri
         normalizedPrefix = strings.TrimSuffix(normalizedPrefix, "/")
     }
 
-    normalizedAttributes := make([]string, 0, len(attributes))
-    for _, attribute := range attributes {
-        normalizedAttribute := strings.TrimSpace(attribute)
-        if "" == normalizedAttribute {
-            continue
-        }
-
-        normalizedAttributes = append(normalizedAttributes, normalizedAttribute)
-    }
+    normalizedAttributes := normalizeAccessControlAttributes(attributes)
 
     return AccessControlRule{
         pathPrefix:      normalizedPrefix,
@@ -157,6 +171,15 @@ func (instance *AccessControl) Rules() []AccessControlRule {
 }
 
 func (instance *AccessControl) Match(path string) ([]string, bool) {
+    matchedIndex, matched := instance.matchRuleIndex(path)
+    if false == matched {
+        return []string{}, false
+    }
+
+    return append([]string{}, instance.rules[matchedIndex].attributes...), true
+}
+
+func (instance *AccessControl) matchRuleIndex(path string) (int, bool) {
     normalizedPath := strings.TrimSpace(path)
     if "" == normalizedPath {
         normalizedPath = "/"
@@ -166,10 +189,10 @@ func (instance *AccessControl) Match(path string) ([]string, bool) {
         normalizedPath = strings.TrimSuffix(normalizedPath, "/")
     }
 
-    for _, rule := range instance.rules {
+    for index, rule := range instance.rules {
         if true == rule.isExact {
             if normalizedPath == rule.pathPrefix {
-                return append([]string{}, rule.attributes...), true
+                return index, true
             }
         }
     }
@@ -226,10 +249,10 @@ func (instance *AccessControl) Match(path string) ([]string, bool) {
     }
 
     if -1 != bestIndex {
-        return append([]string{}, instance.rules[bestIndex].attributes...), true
+        return bestIndex, true
     }
 
-    for _, rule := range instance.rules {
+    for index, rule := range instance.rules {
         if false == rule.isRegex {
             continue
         }
@@ -239,15 +262,15 @@ func (instance *AccessControl) Match(path string) ([]string, bool) {
         }
 
         if true == rule.regexCompiled.MatchString(normalizedPath) {
-            return append([]string{}, rule.attributes...), true
+            return index, true
         }
     }
 
     if -1 != fallbackIndex {
-        return append([]string{}, instance.rules[fallbackIndex].attributes...), true
+        return fallbackIndex, true
     }
 
-    return []string{}, false
+    return -1, false
 }
 
 func normalizePathPrefix(pathPrefix string) string {

@@ -29,7 +29,7 @@ func NewTracingMiddleware(tracer trace.Tracer, propagator propagation.TextMapPro
                 spanName(request),
                 trace.WithSpanKind(trace.SpanKindServer),
                 trace.WithAttributes(
-                    attribute.String("http.request.method", httpRequest.Method),
+                    attribute.String("http.request.method", normalizedMethod(httpRequest.Method)),
                     attribute.String("http.route", routeLabel(request)),
                 ),
             )
@@ -67,5 +67,5 @@ func NewTracingMiddleware(tracer trace.Tracer, propagator propagation.TextMapPro
 }
 
 func spanName(request httpcontract.Request) string {
-    return request.HttpRequest().Method + " " + routeLabel(request)
+    return normalizedMethod(request.HttpRequest().Method) + " " + routeLabel(request)
 }

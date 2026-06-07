@@ -108,7 +108,7 @@ func (instance *Backend) SetCtx(ctx context.Context, key string, payload []byte,
 
     var command rueidis.Completed
     if 0 < ttl {
-        command = instance.client.B().Set().Key(normalizedKey).Value(rueidis.BinaryString(payload)).Px(ttl).Build()
+        command = instance.client.B().Set().Key(normalizedKey).Value(rueidis.BinaryString(payload)).Px(floorPositiveExpiry(ttl)).Build()
     } else {
         command = instance.client.B().Set().Key(normalizedKey).Value(rueidis.BinaryString(payload)).Build()
     }
@@ -276,7 +276,7 @@ func (instance *Backend) SetMultipleCtx(ctx context.Context, items map[string][]
 
         var command rueidis.Completed
         if 0 < ttl {
-            command = instance.client.B().Set().Key(normalizedKey).Value(rueidis.BinaryString(payload)).Px(ttl).Build()
+            command = instance.client.B().Set().Key(normalizedKey).Value(rueidis.BinaryString(payload)).Px(floorPositiveExpiry(ttl)).Build()
         } else {
             command = instance.client.B().Set().Key(normalizedKey).Value(rueidis.BinaryString(payload)).Build()
         }
@@ -296,6 +296,18 @@ func (instance *Backend) SetMultipleCtx(ctx context.Context, items map[string][]
 // Deprecated: prefer SetMultipleCtx, which takes ctx per call.
 func (instance *Backend) SetMultiple(items map[string][]byte, ttl time.Duration) error {
     return instance.SetMultipleCtx(instance.ctx, items, ttl)
+}
+
+/** floorPositiveExpiry floors a positive sub-millisecond TTL to one millisecond. rueidis derives the PX
+    argument as int64(ttl/time.Millisecond), so a positive ttl below one millisecond would become PX 0,
+    which Redis rejects with "invalid expire time in 'set' command"; the in-memory backend accepts the same
+    ttl, so flooring here keeps the two backends consistent rather than failing the whole Set. */
+func floorPositiveExpiry(ttl time.Duration) time.Duration {
+    if 0 < ttl && ttl < time.Millisecond {
+        return time.Millisecond
+    }
+
+    return ttl
 }
 
 func (instance *Backend) DeleteMultipleCtx(ctx context.Context, keys []string) error {

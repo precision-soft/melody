@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- `security/access_control_listener.go` — the access-control listener (the request authorization gate) matched only prefix rules and the empty-prefix fallback, silently ignoring exact (`NewAccessControlExactRule`) and regular-expression (`NewAccessControlRegexRule`) rules; a request could therefore bypass an exact or regular-expression access-control rule entirely. `matchAccessControlRule` now delegates to `AccessControl.matchRuleIndex`, sharing the full exact → prefix → regular-expression → fallback precedence already used by `AccessControl.Match`
+- `security/rule.go` — `ApiKeyHeaderRule.Check` compared the configured key against the request header with a plain `==`, which is not constant-time and leaks key length and shared prefix through timing; the comparison now uses `crypto/subtle.ConstantTimeCompare`. `NewApiKeyHeaderRule` additionally panics when the header name or the expected value is empty, closing a fail-open path where a request that omits the header (yielding `""`) would compare equal to an empty expected key and authorize every caller
+- `security/access_control.go` — `NewAccessControlRule` and `NewAccessControlRuleWithSegmentPrefix` now reject a rule that combines `PUBLIC_ACCESS` with any other attribute (via `normalizeAccessControlAttributes`); the listener grants `PUBLIC_ACCESS` before any role or voter check, so a rule such as `(PUBLIC_ACCESS, ROLE_ADMIN)` would have silently opened the endpoint to everyone and discarded the role requirement
+- `security/config/access_control_builder.go` — `AllowAnonymous` appended a rule with no attributes, which the listener treats as "authentication required", so the helper actually denied anonymous access with a 401; it now carries `securitycontract.AttributePublicAccess` so anonymous requests are granted as intended
+
+### Added
+
+- `security/rule_test.go` — regression coverage for the API-key rule fail-open guards (empty header name and empty expected value both panic at construction); `security/access_control_test.go`, `security/access_control_listener_test.go`, and `security/config/access_control_builder_test.go` extended to cover the access-control matching, `PUBLIC_ACCESS` rejection, and `AllowAnonymous` fixes above
+
 ## [v1.13.0] - 2026-05-16 - Cron Integration, Decoupled Cron Configuration, and `.example` Flat Layout
 
 ### Added

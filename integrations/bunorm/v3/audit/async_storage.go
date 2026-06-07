@@ -19,6 +19,12 @@ type AsyncStorage struct {
     mutex    sync.RWMutex
     closed   bool
 
+    /** The drain goroutine starts in the constructor, before the caller can attach a logger via the
+        builder-style WithLogger; loggerMutex guards the field so that write and the goroutine's read do not
+        race. A dedicated mutex (rather than mutex above) avoids nesting locks, since deadLetter runs both
+        from the goroutine and from Save while Save holds mutex's read lock. */
+    loggerMutex sync.RWMutex
+
     dropped atomic.Uint64
     failed  atomic.Uint64
 }
@@ -49,7 +55,9 @@ func NewAsyncStorage(delegate Storage, bufferSize int) *AsyncStorage {
 }
 
 func (instance *AsyncStorage) WithLogger(logger loggingcontract.Logger) *AsyncStorage {
+    instance.loggerMutex.Lock()
     instance.logger = logger
+    instance.loggerMutex.Unlock()
 
     return instance
 }
@@ -112,11 +120,15 @@ func (instance *AsyncStorage) Close() error {
 }
 
 func (instance *AsyncStorage) deadLetter(entry Entry, saveErr error) {
-    if nil == instance.logger {
+    instance.loggerMutex.RLock()
+    logger := instance.logger
+    instance.loggerMutex.RUnlock()
+
+    if nil == logger {
         return
     }
 
-    instance.logger.Error("async audit entry could not be stored; dead-lettering", loggingcontract.Context{
+    logger.Error("async audit entry could not be stored; dead-lettering", loggingcontract.Context{
         "entity":    entry.Entity,
         "entityId":  entry.EntityId,
         "operation": entry.Operation,

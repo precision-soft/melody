@@ -214,3 +214,33 @@ func TestAsyncStorage_FailedDelegateIncrementsCounter(t *testing.T) {
         t.Fatalf("expected one dead-letter log for the failed save, got %d", logger.count())
     }
 }
+
+func TestAsyncStorage_WithLoggerDoesNotRaceTheDrainGoroutine(t *testing.T) {
+    /** The drain goroutine starts in the constructor, so attaching a logger via the builder concurrently
+        with failing saves (which call deadLetter from the goroutine) used to race the logger field. Run
+        under -race to detect a regression. */
+    storage := audit.NewAsyncStorage(&failingStorage{saveErr: exception.NewError("backend down", nil, nil)}, 64)
+
+    var wait sync.WaitGroup
+    wait.Add(2)
+
+    go func() {
+        defer wait.Done()
+        for index := 0; index < 200; index++ {
+            _ = storage.Save(context.Background(), audit.DefaultTable, audit.Entry{Entity: "user", EntityId: "1", Operation: "insert"})
+        }
+    }()
+
+    go func() {
+        defer wait.Done()
+        for index := 0; index < 200; index++ {
+            storage.WithLogger(&capturingLogger{})
+        }
+    }()
+
+    wait.Wait()
+
+    if closeErr := storage.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+}

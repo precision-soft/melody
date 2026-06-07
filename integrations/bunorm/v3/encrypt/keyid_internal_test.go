@@ -119,3 +119,32 @@ func TestReencryptTransform_ConvertsRandomizedSameKeyValueToDeterministic(t *tes
         t.Fatalf("expected a randomized same-key reencrypt to keep the fast-path skip")
     }
 }
+
+func TestReencryptTransform_RandomizedSameKeyRewritesDeterministicValue(t *testing.T) {
+    provider := NewStaticKeyProvider("v2", map[string][]byte{"v1": newInternalKey(1), "v2": newInternalKey(2)})
+    cipher := NewCipher(provider)
+    migrator := &Migrator{cipher: cipher}
+
+    /** A column written deterministically under the target key is searchable. Re-encrypting it in
+        randomized mode (no --deterministic) must rewrite it with a random nonce; the same-key skip used to
+        leave it deterministically encrypted, silently keeping the equality leakage the operator asked to
+        remove. */
+    deterministicUnderTarget, _ := cipher.EncryptDeterministicWithKeyId("alice@example.com", "v2")
+    if false == deterministicCandidateMatches(t, cipher, "alice@example.com", deterministicUnderTarget) {
+        t.Fatalf("precondition: deterministic value should be searchable")
+    }
+
+    rewritten, rewriteErr := migrator.reencryptTransform(TableSpec{Deterministic: false}, "v2")(deterministicUnderTarget)
+    if nil != rewriteErr {
+        t.Fatalf("randomized reencrypt transform: %v", rewriteErr)
+    }
+    if rewritten == deterministicUnderTarget {
+        t.Fatalf("expected a randomized reencrypt to rewrite a deterministic same-key value, but it was skipped")
+    }
+    if true == deterministicCandidateMatches(t, cipher, "alice@example.com", rewritten) {
+        t.Fatalf("expected the rewritten value to no longer be searchable via CiphertextCandidates")
+    }
+    if plaintext, _ := cipher.Decrypt(rewritten); "alice@example.com" != plaintext {
+        t.Fatalf("expected the rewritten value to still decrypt to the original plaintext")
+    }
+}

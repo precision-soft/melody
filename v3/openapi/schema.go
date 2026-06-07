@@ -39,6 +39,14 @@ func buildSchema(targetType reflect.Type, components map[string]*Schema, names m
     case reflect.Float32, reflect.Float64:
         return withNullable(&Schema{Type: "number"}, nullable)
     case reflect.Slice, reflect.Array:
+        /** encoding/json — which the typed handler and Request.BindJson both use — serializes a []byte
+            slice as a base64-encoded string, not an array of integers; describe it as such so the generated
+            spec matches the wire format. Fixed byte arrays ([N]byte) are not special-cased by encoding/json
+            and stay integer arrays. */
+        if reflect.Slice == targetType.Kind() && reflect.Uint8 == targetType.Elem().Kind() {
+            return withNullable(&Schema{Type: "string", Format: "byte"}, nullable)
+        }
+
         return withNullable(&Schema{Type: "array", Items: buildSchema(targetType.Elem(), components, names, visited)}, nullable)
     case reflect.Map:
         return withNullable(&Schema{Type: "object", AdditionalProperties: buildSchema(targetType.Elem(), components, names, visited)}, nullable)

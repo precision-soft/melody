@@ -52,7 +52,7 @@ func NewMetricsMiddleware(meter metric.Meter) (httpcontract.Middleware, error) {
                 }
 
                 attributes := metric.WithAttributes(
-                    attribute.String("http.request.method", request.HttpRequest().Method),
+                    attribute.String("http.request.method", normalizedMethod(request.HttpRequest().Method)),
                     attribute.String("http.route", routeLabel(request)),
                     attribute.String("http.response.status_code", strconv.Itoa(statusCode)),
                 )
@@ -78,4 +78,28 @@ func routeLabel(request httpcontract.Request) string {
     }
 
     return route
+}
+
+var standardHttpMethods = map[string]bool{
+    nethttp.MethodGet:     true,
+    nethttp.MethodHead:    true,
+    nethttp.MethodPost:    true,
+    nethttp.MethodPut:     true,
+    nethttp.MethodPatch:   true,
+    nethttp.MethodDelete:  true,
+    nethttp.MethodConnect: true,
+    nethttp.MethodOptions: true,
+    nethttp.MethodTrace:   true,
+}
+
+/** normalizedMethod bounds metric-label and span-name cardinality. Go's http server accepts any RFC 7230
+    token as a request method, so an unauthenticated caller could emit unbounded distinct methods and
+    explode the metric time-series and span-name space (an observability denial of service). Unrecognised
+    methods collapse to the OpenTelemetry "_OTHER" sentinel, matching the semantic conventions. */
+func normalizedMethod(method string) string {
+    if true == standardHttpMethods[method] {
+        return method
+    }
+
+    return "_OTHER"
 }

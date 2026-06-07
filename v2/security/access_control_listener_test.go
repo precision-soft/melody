@@ -44,6 +44,56 @@ func (instance *accessControlListenerTestAccessDeniedHandler) Handle(runtimeInst
     return nil, instance.err
 }
 
+func TestMatchAccessControlRule_RegexRuleIsHonoredAndNotShadowedByEarlierRegex(t *testing.T) {
+    accessControl := NewAccessControl(
+        NewAccessControlRegexRule("^/health", securitycontract.AttributePublicAccess),
+        NewAccessControlRegexRule("^/admin", "ROLE_ADMIN"),
+    )
+
+    matchedRule, attributes, matched := matchAccessControlRule(accessControl, "/admin/secret", SourceFirewall, "main")
+    if false == matched {
+        t.Fatalf("expected a matched rule")
+    }
+    if 1 != len(attributes) || "ROLE_ADMIN" != attributes[0] {
+        t.Fatalf("expected ROLE_ADMIN, got %v", attributes)
+    }
+    if 1 != matchedRule.RuleIndex() {
+        t.Fatalf("expected the second regex rule (index 1), got %d", matchedRule.RuleIndex())
+    }
+}
+
+func TestMatchAccessControlRule_ExactRuleDoesNotMatchPrefixPaths(t *testing.T) {
+    accessControl := NewAccessControl(
+        NewAccessControlExactRule("/admin", "ROLE_ADMIN"),
+    )
+
+    _, _, matchedPrefix := matchAccessControlRule(accessControl, "/admin-public", SourceFirewall, "main")
+    if true == matchedPrefix {
+        t.Fatalf("expected exact rule to not match /admin-public")
+    }
+
+    _, attributes, matchedExact := matchAccessControlRule(accessControl, "/admin", SourceFirewall, "main")
+    if false == matchedExact || 1 != len(attributes) || "ROLE_ADMIN" != attributes[0] {
+        t.Fatalf("expected exact /admin to match ROLE_ADMIN, got matched=%v attributes=%v", matchedExact, attributes)
+    }
+}
+
+func TestMatchAccessControlRule_SegmentPrefixRespectsBoundary(t *testing.T) {
+    accessControl := NewAccessControl(
+        NewAccessControlRuleWithSegmentPrefix("/admin", "ROLE_ADMIN"),
+    )
+
+    _, _, matchedSibling := matchAccessControlRule(accessControl, "/administration", SourceFirewall, "main")
+    if true == matchedSibling {
+        t.Fatalf("expected segment-prefix /admin to not match /administration")
+    }
+
+    _, _, matchedChild := matchAccessControlRule(accessControl, "/admin/users", SourceFirewall, "main")
+    if false == matchedChild {
+        t.Fatalf("expected segment-prefix /admin to match /admin/users")
+    }
+}
+
 func TestAccessControlListener_WhenNoSecurityContext_EmitsAuthorizationDeniedAndSets401(t *testing.T) {
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()

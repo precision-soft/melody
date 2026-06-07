@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `prometheus.go` — `NewPrometheusMeter(name)` (OTel Prometheus exporter + meter provider + registry) and `MetricsHandler(registry)` for a `/metrics` endpoint.
 - `opentelemetry_test.go`, `metrics_helper_test.go` — in-process tests (in-memory span recorder + Prometheus registry); no collector required.
 
+### Fixed
+
+- `metrics_middleware.go` + `tracing_middleware.go` — the `http.request.method` metric label and the span name now normalise a non-standard HTTP method to the OpenTelemetry `_OTHER` sentinel. Go's HTTP server accepts any RFC 7230 token as a method, so an unauthenticated caller emitting many distinct methods would otherwise create unbounded metric time-series and span names (an observability denial of service); only the nine standard verbs are kept verbatim.
+
 [Unreleased]: https://github.com/precision-soft/melody/compare/integrations/opentelemetry/v3.0.0...HEAD
 
 [v3.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations/opentelemetry/v3.0.0
