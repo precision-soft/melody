@@ -321,6 +321,27 @@ func TestRenderMessage_FoldsLongFirstHeaderToken(t *testing.T) {
     }
 }
 
+func TestRenderMessage_FoldsOverlongSpacelessHeaderToken(t *testing.T) {
+    spacelessToken := strings.Repeat("A", 999)
+
+    payload, renderErr := mailer.RenderMessage(mailercontract.Message{
+        From:    mailercontract.Address{Email: "shop@example.com"},
+        To:      []mailercontract.Address{{Email: "ada@example.com"}},
+        Subject: "Hello",
+        Text:    "body",
+        Headers: map[string]string{"X-Tracking-Id": spacelessToken},
+    })
+    if nil != renderErr {
+        t.Fatalf("render: %v", renderErr)
+    }
+
+    for _, line := range strings.Split(string(payload), "\r\n") {
+        if 998 < len(line) {
+            t.Fatalf("rendered header line exceeds the RFC 5322 limit: %d", len(line))
+        }
+    }
+}
+
 func serveAuthlessSmtp(listener net.Listener) {
     connection, acceptErr := listener.Accept()
     if nil != acceptErr {

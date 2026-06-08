@@ -68,6 +68,7 @@ For tests, swap in [`InMemoryTransport`](../../mailer/in_memory_transport.go) an
 - [`NewSmtpTransport`](../../mailer/smtp_transport.go) issues `STARTTLS` when the server advertises it and authenticates when a username is set. `SmtpConfig` exposes fail-closed controls: `RequireTls` aborts the send if TLS cannot be negotiated, `RequireAuth` requires authentication and refuses to send when no username is configured, `ImplicitTls` dials SMTPS directly (port 465) instead of upgrading via `STARTTLS`, and `TlsConfig` overrides the TLS settings (otherwise the server name is taken from `Host`, falling back to the host in `Address`).
 - [`Manager.Send`](../../mailer/manager.go) requires a sender and at least one recipient; bodies and subjects are otherwise unvalidated.
 - Header names/values and address fields have `CR`/`LF` stripped before they are written, and attachment filenames additionally have `"` stripped, so untrusted values cannot inject extra header lines or break out of the quoted `filename` parameter.
+- A custom header whose value is a single no-space token longer than the line limit (a tracking id, a signed `List-Unsubscribe` URL, a JWT) is chunked into RFC 2047 encoded-words — the same protection `Subject` receives — so it stays under the 998-octet hard limit instead of emitting one over-long line strict MTAs reject. Short or whitespace-delimited values pass through byte-for-byte; only the pathological indivisible-token case is encoded, and it round-trips for RFC 2047-aware readers.
 
 ## Userland API
 

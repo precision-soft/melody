@@ -64,7 +64,7 @@ func RenderMessage(message mailercontract.Message) ([]byte, error) {
         if _, reserved := reservedHeaders[strings.ToLower(strings.TrimSpace(key))]; true == reserved {
             continue
         }
-        writeHeader(&builder, key, value)
+        writeHeader(&builder, key, encodeHeaderText(value))
     }
 
     if 0 == len(message.Attachments) {
