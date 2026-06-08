@@ -75,6 +75,7 @@ func validateInput(input CreateUserInput) error {
 - Only exported struct fields are validated.
 - `json:"name"` influences the error field name when a non-empty json name is present.
 - `validate:"-"` disables validation for a field.
+- `greaterThan`/`lessThan` operate on numeric fields only and reject a non-numeric value; a floating-point `NaN` is rejected rather than silently passing the bound (`NaN` compares false against every threshold).
 
 ## Userland API
 

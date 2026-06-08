@@ -18,14 +18,17 @@ func NewInMemoryTransport(bufferSize int) *InMemoryTransport {
 }
 
 type InMemoryTransport struct {
-    queue     chan messagebuscontract.Envelope
-    done      chan struct{}
-    closeOnce sync.Once
-    logger    loggingcontract.Logger
+    queue       chan messagebuscontract.Envelope
+    done        chan struct{}
+    closeOnce   sync.Once
+    loggerMutex sync.RWMutex
+    logger      loggingcontract.Logger
 }
 
 func (instance *InMemoryTransport) WithLogger(logger loggingcontract.Logger) *InMemoryTransport {
+    instance.loggerMutex.Lock()
     instance.logger = logger
+    instance.loggerMutex.Unlock()
 
     return instance
 }
@@ -110,8 +113,14 @@ func (instance *InMemoryTransport) requeueAfter(envelopeInstance messagebuscontr
 
     select {
     case <-timer.C:
-        if requeueErr := instance.requeue(envelopeInstance); nil != requeueErr && nil != instance.logger {
-            instance.logger.Error("in-memory transport dropped a delayed requeue", loggingcontract.Context{"error": requeueErr.Error()})
+        if requeueErr := instance.requeue(envelopeInstance); nil != requeueErr {
+            instance.loggerMutex.RLock()
+            logger := instance.logger
+            instance.loggerMutex.RUnlock()
+
+            if nil != logger {
+                logger.Error("in-memory transport dropped a delayed requeue", loggingcontract.Context{"error": requeueErr.Error()})
+            }
         }
     case <-instance.done:
     }

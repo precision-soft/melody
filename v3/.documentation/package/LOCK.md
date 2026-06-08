@@ -67,6 +67,7 @@ locker := mysql.NewLocker(database)
 - Locking is opt-in and userland-wired; the framework registers no default `Locker`.
 - [`InMemoryLocker`](../../lock/in_memory.go) is single-process only — it does not coordinate across instances. Use a Redis or MySQL backend for horizontal scaling.
 - MySQL `GET_LOCK` is per-session: the backend pins a dedicated connection for the lifetime of a held lock and releases it on `Release`. It has no lease expiry, so a crashed process releases the lock only when its connection closes.
+- A reentrant `Acquire` on a MySQL lock re-verifies that its pinned connection still holds the lock before returning `(true, nil)`; if that connection was dropped (so MySQL already released the lock), it transparently re-acquires on a fresh connection instead of falsely reporting the lost lock as still held.
 - `Acquire` does not block or retry; implement waiting in userland if needed.
 
 ## Userland API

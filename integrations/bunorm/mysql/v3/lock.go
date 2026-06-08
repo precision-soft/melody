@@ -45,7 +45,18 @@ func (instance *mysqlLock) Acquire(runtimeInstance runtimecontract.Runtime) (boo
     defer instance.mutex.Unlock()
 
     if nil != instance.connection {
-        return true, nil
+        var held sql.NullBool
+        verifyErr := instance.connection.QueryRowContext(
+            runtimeInstance.Context(),
+            "SELECT IS_USED_LOCK(?) = CONNECTION_ID()",
+            instance.name,
+        ).Scan(&held)
+        if nil == verifyErr && true == held.Valid && true == held.Bool {
+            return true, nil
+        }
+
+        instance.connection.Close()
+        instance.connection = nil
     }
 
     connection, connectionErr := instance.database.DB.Conn(runtimeInstance.Context())

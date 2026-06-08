@@ -165,3 +165,53 @@ func TestMysqlLock_ReacquiresAfterRefreshDetectsLostLock(t *testing.T) {
         t.Fatalf("release: %v", releaseErr)
     }
 }
+
+func TestMysqlLock_ReentrantAcquireDetectsLostLockWithoutRefresh(t *testing.T) {
+    dsn := os.Getenv("MYSQL_DSN")
+    if "" == dsn {
+        t.Skip("MYSQL_DSN not set; skipping mysql lock integration test")
+    }
+
+    sqldb, openErr := sql.Open("mysql", dsn)
+    if nil != openErr {
+        t.Fatalf("open: %v", openErr)
+    }
+    defer sqldb.Close()
+
+    database := bun.NewDB(sqldb, mysqldialect.New())
+
+    locker := mysql.NewLocker(database)
+    runtimeInstance := newLockRuntime()
+
+    name := "melody_lock_reentrant_no_refresh"
+
+    lock := locker.CreateLock(name, 0)
+    acquired, acquireErr := lock.Acquire(runtimeInstance)
+    if nil != acquireErr || false == acquired {
+        t.Fatalf("expected acquire to succeed: %v %v", acquired, acquireErr)
+    }
+
+    var ownerId sql.NullInt64
+    if ownerErr := sqldb.QueryRowContext(runtimeInstance.Context(), "SELECT IS_USED_LOCK(?)", name).Scan(&ownerId); nil != ownerErr {
+        t.Fatalf("read lock owner: %v", ownerErr)
+    }
+    if false == ownerId.Valid {
+        t.Fatalf("expected the lock to be held by a session")
+    }
+    if _, killErr := sqldb.ExecContext(runtimeInstance.Context(), "KILL "+strconv.FormatInt(ownerId.Int64, 10)); nil != killErr {
+        t.Logf("kill returned (tolerated): %v", killErr)
+    }
+
+    competitor := locker.CreateLock(name, 0)
+    competitorAcquired, competitorErr := competitor.Acquire(runtimeInstance)
+    if nil != competitorErr || false == competitorAcquired {
+        t.Fatalf("expected the competitor to acquire the freed lock: %v %v", competitorAcquired, competitorErr)
+    }
+    defer competitor.Release(runtimeInstance)
+
+    stillHeld, reacquireErr := lock.Acquire(runtimeInstance)
+    if true == stillHeld {
+        lock.Release(runtimeInstance)
+        t.Fatalf("reentrant Acquire returned true while the competitor holds the lock; mutual exclusion was violated (err=%v)", reacquireErr)
+    }
+}

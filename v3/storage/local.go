@@ -116,7 +116,7 @@ func (instance *LocalStorage) Exists(
         return false, pathErr
     }
 
-    _, statErr := os.Stat(path)
+    _, statErr := os.Lstat(path)
     if nil == statErr {
         return true, nil
     }

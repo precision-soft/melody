@@ -2,6 +2,7 @@ package validation
 
 import (
     "fmt"
+    "math"
     "reflect"
 
     validationcontract "github.com/precision-soft/melody/v3/validation/contract"
@@ -100,7 +101,7 @@ func (instance *LessThan) Validate(value any, field string) validationcontract.V
 
     case reflect.Float32, reflect.Float64:
         actual := reflectedValue.Float()
-        if actual >= float64(instance.max) {
+        if true == math.IsNaN(actual) || actual >= float64(instance.max) {
             return NewValidationError(
                 field,
                 fmt.Sprintf("value must be less than %d", instance.max),

@@ -26,7 +26,12 @@ func RouteType[T any](routing *Routing, name string, transport messagebuscontrac
 }
 
 func (instance *Routing) build() map[reflect.Type]TransportRouting {
-    return instance.routes
+    copied := make(map[reflect.Type]TransportRouting, len(instance.routes))
+    for key, value := range instance.routes {
+        copied[key] = value
+    }
+
+    return copied
 }
 
 func NewSendMessageMiddlewareFromRouting(routing *Routing) messagebuscontract.Middleware {
