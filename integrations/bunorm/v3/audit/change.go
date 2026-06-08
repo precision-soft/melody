@@ -253,6 +253,9 @@ func valueContainsRedactTagReflect(value reflect.Value, seen map[reflect.Type]st
 
     case reflect.Map:
         for _, key := range value.MapKeys() {
+            if true == valueContainsRedactTagReflect(key, seen) {
+                return true
+            }
             if true == valueContainsRedactTagReflect(value.MapIndex(key), seen) {
                 return true
             }
@@ -300,6 +303,9 @@ func typeContainsRedactTag(fieldType reflect.Type, seen map[reflect.Type]struct{
     }
 
     if reflect.Map == fieldType.Kind() {
+        if true == typeContainsRedactTag(fieldType.Key(), seen) {
+            return true
+        }
         return typeContainsRedactTag(fieldType.Elem(), seen)
     }
 

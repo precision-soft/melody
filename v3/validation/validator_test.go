@@ -76,6 +76,14 @@ type payloadWithInvalidTag struct {
     Name string `validate:"min(1))"`
 }
 
+type payloadWithLessThan struct {
+    Quantity int `json:"quantity" validate:"lessThan(value=100)"`
+}
+
+type payloadWithLessThanShorthand struct {
+    Quantity int `json:"quantity" validate:"lessThan=100"`
+}
+
 func requireNoValidationErrors(t *testing.T, err error) {
     t.Helper()
 
@@ -128,6 +136,17 @@ func TestValidator_AcceptsValidData(t *testing.T) {
 
     err := validatorInstance.Validate(payload)
     requireNoValidationErrors(t, err)
+}
+
+func TestValidator_LessThanIsEnforcedAndNotUnknownRule(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    requireValidationErrors(t, validatorInstance.Validate(payloadWithLessThan{Quantity: 100}))
+    requireValidationErrors(t, validatorInstance.Validate(payloadWithLessThan{Quantity: 150}))
+    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithLessThan{Quantity: 99}))
+
+    requireValidationErrors(t, validatorInstance.Validate(payloadWithLessThanShorthand{Quantity: 150}))
+    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithLessThanShorthand{Quantity: 99}))
 }
 
 func TestValidator_RegexShorthandIsEnforcedNotFailOpen(t *testing.T) {

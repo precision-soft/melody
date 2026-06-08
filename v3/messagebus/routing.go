@@ -25,10 +25,10 @@ func RouteType[T any](routing *Routing, name string, transport messagebuscontrac
     return routing
 }
 
-func (instance *Routing) Build() map[reflect.Type]TransportRouting {
+func (instance *Routing) build() map[reflect.Type]TransportRouting {
     return instance.routes
 }
 
 func NewSendMessageMiddlewareFromRouting(routing *Routing) messagebuscontract.Middleware {
-    return NewSendMessageMiddleware(routing.Build())
+    return NewSendMessageMiddleware(routing.build())
 }

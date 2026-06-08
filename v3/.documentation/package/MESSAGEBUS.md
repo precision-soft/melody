@@ -177,7 +177,9 @@ A runnable end-to-end demonstration lives in the example application: [`messageb
 - [`NewEnvelope(message any, stamps ...messagebuscontract.Stamp) messagebuscontract.Envelope`](../../messagebus/envelope.go)
 - [`EnsureEnvelope(message any) messagebuscontract.Envelope`](../../messagebus/envelope.go)
 - [`type BusNameStamp`](../../messagebus/stamp.go), [`type SentStamp`](../../messagebus/stamp.go), [`type ReceivedStamp`](../../messagebus/stamp.go), [`type HandledStamp`](../../messagebus/stamp.go)
+- [`type RedeliveryStamp`](../../messagebus/stamp.go), [`type DelayStamp`](../../messagebus/stamp.go) — retry metadata carried on a requeued envelope
 - [`LastStampOfType[T messagebuscontract.Stamp](envelope) (T, bool)`](../../messagebus/stamp.go)
+- [`RedeliveryCount(envelope messagebuscontract.Envelope) int`](../../messagebus/stamp.go) — the number of redeliveries so far, for a handler inspecting retry attempts
 - [`type HandlerLocator`](../../messagebus/locator.go)
     - [`NewHandlerLocator() *HandlerLocator`](../../messagebus/locator.go)
     - [`RegisterHandler[T any](locator *HandlerLocator, handle func(runtimecontract.Runtime, T) error)`](../../messagebus/locator.go)
@@ -194,6 +196,7 @@ A runnable end-to-end demonstration lives in the example application: [`messageb
     - [`NewSendMessageMiddlewareFromRouting(routing *Routing) messagebuscontract.Middleware`](../../messagebus/routing.go)
 - [`type InMemoryTransport`](../../messagebus/transport_in_memory.go)
     - [`NewInMemoryTransport(bufferSize int) *InMemoryTransport`](../../messagebus/transport_in_memory.go)
+    - [`(*InMemoryTransport).WithLogger(logger loggingcontract.Logger) *InMemoryTransport`](../../messagebus/transport_in_memory.go)
 - [`type ConsumeCommand`](../../messagebus/consume_command.go)
     - [`NewConsumeCommand(bus messagebuscontract.Bus, transports map[string]messagebuscontract.Transport) *ConsumeCommand`](../../messagebus/consume_command.go)
     - [`NewConsumeCommandWithRetry(bus messagebuscontract.Bus, transports map[string]messagebuscontract.Transport, retryPolicy RetryPolicy) *ConsumeCommand`](../../messagebus/consume_command.go)

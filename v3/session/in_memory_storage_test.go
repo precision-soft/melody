@@ -7,6 +7,51 @@ import (
     "time"
 )
 
+func TestInMemoryStorage_LoadDoesNotDeleteConcurrentlySavedEntry(t *testing.T) {
+    storage := NewInMemoryStorage()
+    defer storage.Close()
+
+    const sessionId = "race-session"
+    const loaders = 6
+
+    for iteration := 0; iteration < 20000; iteration++ {
+        if saveErr := storage.Save(sessionId, map[string]any{"v": "expired"}, time.Nanosecond); nil != saveErr {
+            t.Fatalf("seed save failed: %v", saveErr)
+        }
+
+        start := make(chan struct{})
+        var wait sync.WaitGroup
+        wait.Add(loaders + 1)
+
+        for loader := 0; loader < loaders; loader++ {
+            go func() {
+                defer wait.Done()
+                <-start
+                storage.Load(sessionId)
+            }()
+        }
+        go func() {
+            defer wait.Done()
+            <-start
+            storage.Save(sessionId, map[string]any{"v": "fresh"}, time.Hour)
+        }()
+
+        close(start)
+        wait.Wait()
+
+        data, found, loadErr := storage.Load(sessionId)
+        if nil != loadErr {
+            t.Fatalf("iteration %d: final load failed: %v", iteration, loadErr)
+        }
+        if false == found {
+            t.Fatalf("iteration %d: a concurrently saved fresh session was deleted by the expired-entry cleanup in Load", iteration)
+        }
+        if "fresh" != data["v"] {
+            t.Fatalf("iteration %d: expected fresh session data, got: %v", iteration, data["v"])
+        }
+    }
+}
+
 func TestInMemoryStorageAndManager(t *testing.T) {
     storage := NewInMemoryStorage()
     manager := NewManager(storage, time.Minute)

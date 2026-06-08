@@ -347,6 +347,30 @@ func TestChangeSet_RedactTagHonoredWhenInterfaceIsNestedInsideStructField(t *tes
     }
 }
 
+func TestChangeSet_RedactsEncryptedMapKeyPlaintext(t *testing.T) {
+    type document struct {
+        Id   int64                              `bun:"id,pk"`
+        Meta map[encrypt.EncryptedString]string `bun:"meta"`
+    }
+
+    before := document{Id: 1, Meta: map[encrypt.EncryptedString]string{encrypt.EncryptedString("key-secret-old"): "primary"}}
+    after := document{Id: 1, Meta: map[encrypt.EncryptedString]string{encrypt.EncryptedString("key-secret-new"): "primary"}}
+
+    changes := audit.ChangeSet(before, after)
+
+    payload, marshalErr := json.Marshal(changes)
+    if nil != marshalErr {
+        t.Fatalf("marshal changes: %v", marshalErr)
+    }
+
+    if true == strings.Contains(string(payload), "key-secret") {
+        t.Fatalf("encrypted map-key plaintext leaked into changes json (json serializes string-kind keys directly, bypassing MarshalJSON): %s", payload)
+    }
+    if false == strings.Contains(string(payload), "redacted") {
+        t.Fatalf("expected the redacted marker in changes json: %s", payload)
+    }
+}
+
 func TestChangeSet_RedactTagHonoredInsideMapOfInterfaceValues(t *testing.T) {
     type credentials struct {
         Token string `bun:"token" audit:"redact"`

@@ -15,7 +15,7 @@ The [`validation`](../../validation) package provides tag-driven struct validati
 ## Responsibilities
 
 - Provide the [`Validator`](../../validation/validator.go) type that validates exported struct fields based on the `validate` tag.
-- Provide built-in constraints (for example `notBlank`, `email`, `min`, `max`, `regex`, `greaterThan`, `notEmpty`).
+- Provide built-in constraints (for example `notBlank`, `email`, `min`, `max`, `regex`, `greaterThan`, `lessThan`, `notEmpty`).
 - Provide a standard `ValidationError` implementation and an aggregate error type (`ValidationErrors`).
 - Provide container helpers to resolve a validator instance.
 
@@ -106,7 +106,7 @@ func validateInput(input CreateUserInput) error {
 
 ### Constants
 
-- Constraints: [`ConstraintNotBlank`, `ConstraintEmail`, `ConstraintMinLength`, `ConstraintMaxLength`, `ConstraintRegex`, `ConstraintNumeric`, `ConstraintAlpha`, `ConstraintAlphanumeric`, `ConstraintGreaterThan`, `ConstraintNotEmpty`](../../validation)
+- Constraints: [`ConstraintNotBlank`, `ConstraintEmail`, `ConstraintMinLength`, `ConstraintMaxLength`, `ConstraintRegex`, `ConstraintNumeric`, `ConstraintAlpha`, `ConstraintAlphanumeric`, `ConstraintGreaterThan`, `ConstraintLessThan`, `ConstraintNotEmpty`](../../validation)
 - Deprecated constraint aliases (kept for compatibility): [`ConstraintMin`, `ConstraintMax`](../../validation/const.go)
 - Error codes (core): [`ErrorInvalidRuleSyntax`, `ErrorUnknownRule`](../../validation/const.go)
 - Error codes (per-constraint):
@@ -119,6 +119,7 @@ func validateInput(input CreateUserInput) error {
     - `alpha`: [`ConstraintAlphaErrorNotAlpha`](../../validation/constraint_alpha.go)
     - `alphanumeric`: [`ConstraintAlphanumericErrorNotAlphanumeric`](../../validation/constraint_alphanumeric.go)
     - `greaterThan`: [`ConstraintGreaterThanErrorSmallerThan`](../../validation/constraint_greater_than.go)
+    - `lessThan`: [`ConstraintLessThanErrorGreaterThan`](../../validation/constraint_less_than.go)
     - `notEmpty`: [`ConstraintNotEmptyErrorEmpty`](../../validation/constraint_not_empty.go)
 - Deprecated error code aliases (kept for compatibility): [`ErrorNotBlank`, `ErrorInvalidEmail`, `ErrorMinLength`, `ErrorMaxLength`, `ErrorInvalidPattern`, `ErrorRegexMismatch`, `ErrorNotNumeric`, `ErrorNotAlpha`, `ErrorNotAlphanumeric`, `ErrorEmpty`](../../validation/const.go)
 
@@ -133,5 +134,6 @@ func validateInput(input CreateUserInput) error {
 - [`NewMaxLength(value int)` / `MaxLength`](../../validation/constraint_max_length.go)
 - [`NewRegex(pattern string)` / `Regex`](../../validation/constraint_regex.go)
 - [`NewGreaterThan(min int)` / `GreaterThan`](../../validation/constraint_greater_than.go)
+- [`NewLessThan(max int)` / `LessThan`](../../validation/constraint_less_than.go)
 - [`NewNotEmpty()` / `NotEmpty`](../../validation/constraint_not_empty.go)
 

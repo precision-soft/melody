@@ -2,6 +2,7 @@ package messagebus
 
 import (
     "context"
+    "strings"
     "sync/atomic"
     "testing"
     "time"
@@ -194,6 +195,57 @@ func TestConsumeFrom_AbnormalChannelCloseReturnsError(t *testing.T) {
     consumeErr := command.consumeFrom(runtimeInstance, &closedQueueTransport{queue: queue}, 0, 1)
     if nil == consumeErr {
         t.Fatalf("expected an error when the delivery channel closes without a cancelled context")
+    }
+}
+
+func TestConsumeFrom_ShutdownGraceTimesOutWedgedHandler(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    consumeContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+    runtimeInstance := runtime.New(consumeContext, serviceContainer.NewScope(), serviceContainer)
+
+    transport := NewInMemoryTransport(1)
+    if sendErr := transport.Send(runtimeInstance, NewEnvelope(consumeTestMessage{Value: 1})); nil != sendErr {
+        t.Fatalf("unexpected send error: %v", sendErr)
+    }
+
+    started := make(chan struct{})
+    release := make(chan struct{})
+    defer close(release)
+
+    locator := NewHandlerLocator()
+    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage) error {
+        close(started)
+        <-release
+        return nil
+    })
+    bus := NewManager("default", NewHandleMessageMiddleware(locator))
+
+    command := NewConsumeCommand(bus, nil).WithShutdownGrace(50 * time.Millisecond)
+
+    done := make(chan error, 1)
+    go func() {
+        done <- command.consumeFrom(runtimeInstance, transport, 0, 1)
+    }()
+
+    select {
+    case <-started:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("the handler never started")
+    }
+
+    cancel()
+
+    select {
+    case consumeErr := <-done:
+        if nil == consumeErr {
+            t.Fatalf("expected a shutdown-timeout error for a wedged handler")
+        }
+        if false == strings.Contains(consumeErr.Error(), "timed out") {
+            t.Fatalf("expected a shutdown-timeout error, got: %v", consumeErr)
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatalf("consumeFrom did not return within the grace window after the context was cancelled")
     }
 }
 

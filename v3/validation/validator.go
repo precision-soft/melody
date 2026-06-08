@@ -25,6 +25,7 @@ func NewValidator() *Validator {
     validator.RegisterConstraint(ConstraintAlpha, &Alpha{})
     validator.RegisterConstraint(ConstraintAlphanumeric, &Alphanumeric{})
     validator.RegisterConstraint(ConstraintGreaterThan, NewGreaterThan(0))
+    validator.RegisterConstraint(ConstraintLessThan, NewLessThan(0))
     validator.RegisterConstraint(ConstraintNotEmpty, NewNotEmpty())
 
     return validator
@@ -236,6 +237,12 @@ func (instance *Validator) createConstraintWithParams(name string, params map[st
             return NewGreaterThan(parseInt(valueString, 0))
         }
         return NewGreaterThan(0)
+
+    case ConstraintLessThan:
+        if valueString, exists := params["value"]; true == exists {
+            return NewLessThan(parseInt(valueString, 0))
+        }
+        return NewLessThan(0)
 
     default:
         instance.mutex.RLock()

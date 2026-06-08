@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v3.0.0] - 2026-06-07 - Initial Release — WebSocket Streaming Bridging the Server-Sent Events Hub
+## [v3.0.0] - 2026-06-08 - Initial Release — WebSocket Streaming Bridging the Server-Sent Events Hub
 
 ### Added
 

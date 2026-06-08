@@ -68,7 +68,9 @@ func (instance *InMemoryStorage) Load(sessionId string) (map[string]any, bool, e
         instance.mutex.RUnlock()
 
         instance.mutex.Lock()
-        delete(instance.sessions, sessionId)
+        if current, stillExists := instance.sessions[sessionId]; true == stillExists && nil != current.expiresAt && true == current.expiresAt.Before(now) {
+            delete(instance.sessions, sessionId)
+        }
         instance.mutex.Unlock()
 
         return nil, false, nil

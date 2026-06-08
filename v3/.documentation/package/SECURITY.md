@@ -245,7 +245,7 @@ var _ applicationcontract.HttpModule = (*adminSecurityModule)(nil)
 
 For stateless APIs, [`BearerTokenSource`](../../security/bearer_token_source.go) extracts an `Authorization: Bearer <token>` header and delegates validation to a pluggable [`TokenValidator`](../../security/contract/token_validator.go). Two validators ship in the package:
 
-- [`JwtTokenValidator`](../../security/jwt_token_validator.go) — verifies HS256 JWTs with a shared secret (stdlib only, no external dependency), checks `exp`/`nbf`, and maps the subject and roles claims to [`Claims`](../../security/contract/token_validator.go). A token with an empty, absent, or non-string subject is rejected (it must never authenticate as the empty principal `""`). A future `iat` is accepted by default (RFC 7519 treats `iat` as informational); set `JwtConfig.RejectFutureIssuedAt` to reject it instead. Self-contained; no per-request lookup.
+- [`JwtTokenValidator`](../../security/jwt_token_validator.go) — verifies HS256 JWTs with a shared secret (stdlib only, no external dependency), checks `exp`/`nbf`, and maps the subject and roles claims to [`Claims`](../../security/contract/token_validator.go). The `exp` (expiry) claim is **required by default** — a token without `exp` is rejected unless `JwtConfig{AllowWithoutExpiry: true}` is set, so a missing expiry never silently yields a non-expiring token. Out-of-range or non-finite `exp`/`nbf`/`iat` `NumericDate` values are rejected as malformed rather than saturating on the int64 conversion. A token with an empty, absent, or non-string subject is rejected (it must never authenticate as the empty principal `""`). A future `iat` is accepted by default (RFC 7519 treats `iat` as informational); set `JwtConfig.RejectFutureIssuedAt` to reject it instead. Self-contained; no per-request lookup.
 - [`OpaqueTokenValidator`](../../security/opaque_token_validator.go) — looks the token up in a [`TokenStore`](../../security/contract/token_store.go), so tokens are revocable (a stored token with an empty subject is rejected). [`InMemoryTokenStore`](../../security/in_memory_token_store.go) ships for tests/dev; the `integrations/rueidis` `NewTokenStore` is a production Redis-backed [`RevocableTokenStore`](../../security/contract/token_store.go) (the `TokenStore` lookup interface plus `Put`/`PutWithTtl`/`Delete`/`DeleteByUser`/`PurgeExpired`), keeping the full revocation surface behind the interface so the firewall wiring is identical. Behind a load balancer use the Redis store: the in-memory store is per-process, so a token issued or revoked on one instance is invisible to the others (revocation would not take effect cluster-wide). Run `PurgeExpired` on a schedule from a single instance (e.g. a cron command) rather than from every instance — Redis expires the token keys natively; the purge only reconciles the user index. Roles enrichment runs only via the bearer source's enricher, not the validator.
 
 A failed or missing token resolves to an anonymous token, so the firewall's entry point decides the response. [`JsonEntryPoint`](../../security/json_entry_point.go) (401) and [`JsonAccessDeniedHandler`](../../security/json_access_denied_handler.go) (403) return JSON instead of redirecting — set them globally for pure-API apps.
@@ -278,7 +278,7 @@ The example application wires a stateless `/secure` firewall (`config/security.g
 
 #### Resolving roles after validation (enrichment hook)
 
-When the token only carries an opaque scope (e.g. a tenant/application identifier) and the real roles live in a database, implement the generic [`TokenEnricher`](../../security/contract/token_enricher.go) and wire it with [`NewBearerTokenSourceWithEnricher`](../../security/bearer_token_source.go). It runs **after** the signature is validated and turns the token's `Claims.Scope` into the final roles/attributes. The library ships only the interface and the wiring — any tenant- or product-specific resolution lives in your enricher, keeping the security package generic. An enrichment error falls back to an anonymous token (the firewall then decides the response).
+When the token only carries an opaque scope (e.g. a tenant/application identifier) and the real roles live in a database, implement the generic [`TokenEnricher`](../../security/contract/token_enricher.go) and wire it with [`NewBearerTokenSourceWithEnricher`](../../security/bearer_token_source.go). It runs **after** the signature is validated and turns the token's `Claims.Scope` into the final roles/attributes. The library ships only the interface and the wiring — any tenant- or product-specific resolution lives in your enricher, keeping the security package generic. An enrichment error falls back to an anonymous token (the firewall then decides the response); the error is logged at INFO level so operators can observe the failure and is not propagated to the handler.
 
 The enriched [`AuthenticatedToken`](../../security/authenticated_token.go) carries the resolved `Scope()` and `Attributes()` alongside `Roles()` (both accessors return defensive copies), so attribute-based access control downstream can read the tenant/attribute data the enricher attached — not only the roles.
 
@@ -301,6 +301,7 @@ source := security.NewBearerTokenSourceWithEnricher(validator, scopeRoleEnricher
 
 - `AccessControl` uses a deterministic match priority: exact match first, then longest prefix match (including segment-prefix rules), then regex rules in the order they were registered, then the empty-prefix fallback. See [`(*AccessControl).Match`](../../security/access_control.go).
 - `SecurityContextSetOnRuntime` stores the context in the runtime scope under `security/contract.ServiceSecurityContext`.
+- `JwtTokenValidator` requires the `exp` claim by default: a signed token without `exp` is rejected unless you set `JwtConfig{AllowWithoutExpiry: true}`. This differs from RFC 7519, which treats registered claims as optional — so a token that looks valid but omits `exp` resolves to an anonymous token, not an authenticated one.
 
 ## Userland API
 
@@ -341,7 +342,9 @@ source := security.NewBearerTokenSourceWithEnricher(validator, scopeRoleEnricher
 - Auth: [`ApiKeyHeaderRule`](../../security/rule.go), [`ApiKeyHeaderAuthenticator`](../../security/api_key_authenticator.go), [`AuthenticatorManager`](../../security/authenticator_manager.go), [`AuthenticatorTokenSource`](../../security/token_source.go)
 - Token auth: [`BearerTokenSource`](../../security/bearer_token_source.go), [`JwtTokenValidator`](../../security/jwt_token_validator.go), [`JwtConfig`](../../security/jwt_token_validator.go), [`OpaqueTokenValidator`](../../security/opaque_token_validator.go), [`InMemoryTokenStore`](../../security/in_memory_token_store.go), [`JsonEntryPoint`](../../security/json_entry_point.go), [`JsonAccessDeniedHandler`](../../security/json_access_denied_handler.go)
 - Matchers: [`PathPrefixMatcher`](../../security/matcher.go)
-- Authorization: [`AccessDecisionManager`](../../security/access_decision_manager.go), [`RoleVoter`](../../security/voter.go)
+- Authorization: [`AccessDecisionManager`](../../security/access_decision_manager.go), [`RoleVoter`](../../security/voter.go), [`RoleHierarchyVoter`](../../security/role_hierarchy_voter.go)
+- Token source: [`ResolverTokenSource`](../../security/token_source.go)
+- Events: [`AuthorizationGrantedEvent`](../../security/authorization_granted_event.go), [`AuthorizationDeniedEvent`](../../security/authorization_denied_event.go), [`LoginSuccessEvent`](../../security/login_success_event.go), [`LoginFailureEvent`](../../security/login_failure_event.go), [`LogoutSuccessEvent`](../../security/logout_success_event.go), [`LogoutFailureEvent`](../../security/logout_failure_event.go)
 - Configuration: [`CompiledConfiguration`, `CompiledFirewall`](../../security/compiled_configuration.go)
 - Context: [`SecurityContext`](../../security/security_context.go)
 
@@ -366,10 +369,14 @@ source := security.NewBearerTokenSourceWithEnricher(validator, scopeRoleEnricher
 - [`NewJwtTokenValidator(config JwtConfig)`](../../security/jwt_token_validator.go)
 - [`NewOpaqueTokenValidator(store securitycontract.TokenStore)`](../../security/opaque_token_validator.go)
 - [`NewInMemoryTokenStore()`](../../security/in_memory_token_store.go)
+- [`NewInMemoryTokenStoreWithClock(clockInstance clockcontract.Clock)`](../../security/in_memory_token_store.go)
+- [`NewResolverTokenSource(resolver securitycontract.TokenResolver)`](../../security/token_source.go)
 - [`NewJsonEntryPoint()`](../../security/json_entry_point.go)
 - [`NewJsonAccessDeniedHandler()`](../../security/json_access_denied_handler.go)
 - [`NewAccessDecisionManager(strategy securitycontract.DecisionStrategy, voters ...securitycontract.Voter)`](../../security/access_decision_manager.go)
+- [`NewAccessDecisionManagerWithVoters(strategy securitycontract.DecisionStrategy, voters []securitycontract.Voter)`](../../security/access_decision_manager.go)
 - [`NewRoleVoter()`](../../security/voter.go)
+- [`NewRoleHierarchyVoter(roleHierarchy *RoleHierarchy, delegate *RoleVoter)`](../../security/role_hierarchy_voter.go)
 - [`NewSecurityContext(firewall *CompiledFirewall, token securitycontract.Token)`](../../security/security_context.go)
 - [`NewCompiledFirewall(...)`](../../security/compiled_configuration.go)
 - [`NewCompiledConfiguration(...)`](../../security/compiled_configuration.go)
