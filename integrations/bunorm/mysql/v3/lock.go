@@ -1,6 +1,7 @@
 package mysql
 
 import (
+    "context"
     "database/sql"
     "sync"
     "time"
@@ -10,6 +11,8 @@ import (
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     "github.com/uptrace/bun"
 )
+
+const lockReleaseTimeout = 5 * time.Second
 
 func NewLocker(database *bun.DB) *Locker {
     if nil == database {
@@ -55,8 +58,7 @@ func (instance *mysqlLock) Acquire(runtimeInstance runtimecontract.Runtime) (boo
             return true, nil
         }
 
-        instance.connection.Close()
-        instance.connection = nil
+        instance.releaseAndCloseConnection()
     }
 
     connection, connectionErr := instance.database.DB.Conn(runtimeInstance.Context())
@@ -79,6 +81,15 @@ func (instance *mysqlLock) Acquire(runtimeInstance runtimecontract.Runtime) (boo
     instance.connection = connection
 
     return true, nil
+}
+
+func (instance *mysqlLock) releaseAndCloseConnection() {
+    releaseCtx, cancel := context.WithTimeout(context.Background(), lockReleaseTimeout)
+    defer cancel()
+
+    _, _ = instance.connection.ExecContext(releaseCtx, "DO RELEASE_LOCK(?)", instance.name)
+    instance.connection.Close()
+    instance.connection = nil
 }
 
 func (instance *mysqlLock) Release(runtimeInstance runtimecontract.Runtime) error {
@@ -119,8 +130,7 @@ func (instance *mysqlLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl 
         instance.name,
     ).Scan(&held)
     if nil != queryErr {
-        instance.connection.Close()
-        instance.connection = nil
+        instance.releaseAndCloseConnection()
         return exception.NewError("mysql lock refresh failed", map[string]any{"name": instance.name}, queryErr)
     }
 

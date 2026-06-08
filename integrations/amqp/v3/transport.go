@@ -658,7 +658,7 @@ func (instance *Transport) ensurePublishChannel() (*amqp091.Channel, error) {
         return nil, exception.NewError("amqp transport is closing", nil, nil)
     }
 
-    if nil != existing {
+    if nil != existing && false == existing.IsClosed() {
         return existing, nil
     }
 
@@ -685,7 +685,7 @@ func (instance *Transport) ensurePublishChannel() (*amqp091.Channel, error) {
         return nil, exception.NewError("amqp transport is closing", nil, nil)
     }
 
-    if nil != instance.publishChannel {
+    if nil != instance.publishChannel && false == instance.publishChannel.IsClosed() {
         channel.Close()
         return instance.publishChannel, nil
     }
@@ -705,7 +705,7 @@ func (instance *Transport) ensureConsumeChannel() (*amqp091.Channel, error) {
         return nil, exception.NewError("amqp transport is closing", nil, nil)
     }
 
-    if nil != existing {
+    if nil != existing && false == existing.IsClosed() {
         return existing, nil
     }
 
@@ -737,7 +737,7 @@ func (instance *Transport) ensureConsumeChannel() (*amqp091.Channel, error) {
         return nil, exception.NewError("amqp transport is closing", nil, nil)
     }
 
-    if nil != instance.consumeChannel {
+    if nil != instance.consumeChannel && false == instance.consumeChannel.IsClosed() {
         channel.Close()
         return instance.consumeChannel, nil
     }

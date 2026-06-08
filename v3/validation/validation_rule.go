@@ -16,6 +16,8 @@ type validationRule struct {
 func splitByTopLevelComma(valueString string) []string {
     var parts []string
 
+    bracketsBalanced := hasBalancedBrackets(valueString)
+
     current := strings.Builder{}
     parenDepth := 0
     squareDepth := 0
@@ -35,46 +37,48 @@ func splitByTopLevelComma(valueString string) []string {
             continue
         }
 
-        if '(' == character {
-            parenDepth++
-            current.WriteRune(character)
-            continue
-        }
-
-        if ')' == character {
-            if 0 < parenDepth {
-                parenDepth--
+        if true == bracketsBalanced {
+            if '(' == character {
+                parenDepth++
+                current.WriteRune(character)
+                continue
             }
-            current.WriteRune(character)
-            continue
-        }
 
-        if '[' == character {
-            squareDepth++
-            current.WriteRune(character)
-            continue
-        }
-
-        if ']' == character {
-            if 0 < squareDepth {
-                squareDepth--
+            if ')' == character {
+                if 0 < parenDepth {
+                    parenDepth--
+                }
+                current.WriteRune(character)
+                continue
             }
-            current.WriteRune(character)
-            continue
-        }
 
-        if '{' == character {
-            curlyDepth++
-            current.WriteRune(character)
-            continue
-        }
-
-        if '}' == character {
-            if 0 < curlyDepth {
-                curlyDepth--
+            if '[' == character {
+                squareDepth++
+                current.WriteRune(character)
+                continue
             }
-            current.WriteRune(character)
-            continue
+
+            if ']' == character {
+                if 0 < squareDepth {
+                    squareDepth--
+                }
+                current.WriteRune(character)
+                continue
+            }
+
+            if '{' == character {
+                curlyDepth++
+                current.WriteRune(character)
+                continue
+            }
+
+            if '}' == character {
+                if 0 < curlyDepth {
+                    curlyDepth--
+                }
+                current.WriteRune(character)
+                continue
+            }
         }
 
         if ',' == character {
@@ -91,6 +95,51 @@ func splitByTopLevelComma(valueString string) []string {
     parts = append(parts, current.String())
 
     return parts
+}
+
+func hasBalancedBrackets(valueString string) bool {
+    parenDepth := 0
+    squareDepth := 0
+    curlyDepth := 0
+    wasEscaped := false
+
+    for _, character := range valueString {
+        if true == wasEscaped {
+            wasEscaped = false
+            continue
+        }
+
+        if '\\' == character {
+            wasEscaped = true
+            continue
+        }
+
+        switch character {
+        case '(':
+            parenDepth++
+        case ')':
+            if 0 == parenDepth {
+                return false
+            }
+            parenDepth--
+        case '[':
+            squareDepth++
+        case ']':
+            if 0 == squareDepth {
+                return false
+            }
+            squareDepth--
+        case '{':
+            curlyDepth++
+        case '}':
+            if 0 == curlyDepth {
+                return false
+            }
+            curlyDepth--
+        }
+    }
+
+    return 0 == parenDepth && 0 == squareDepth && 0 == curlyDepth
 }
 
 func splitByCommaOutsideRegexMeta(valueString string) []string {

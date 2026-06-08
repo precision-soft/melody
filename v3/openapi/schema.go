@@ -404,31 +404,221 @@ func splitRules(validateTag string) []string {
         return nil
     }
 
-    return splitByCommaOutsideGroups(trimmed)
+    return splitTopLevelRules(trimmed)
 }
 
-func splitByCommaOutsideGroups(input string) []string {
+func splitTopLevelRules(input string) []string {
     var parts []string
-    depth := 0
-    start := 0
-    for index := 0; index < len(input); index++ {
-        switch input[index] {
-        case '(', '{', '[':
-            depth++
-        case ')', '}', ']':
-            if 0 < depth {
-                depth--
+
+    bracketsBalanced := hasBalancedRuleBrackets(input)
+
+    current := strings.Builder{}
+    parenDepth := 0
+    squareDepth := 0
+    curlyDepth := 0
+    wasEscaped := false
+
+    for _, character := range input {
+        if true == wasEscaped {
+            current.WriteRune(character)
+            wasEscaped = false
+            continue
+        }
+
+        if '\\' == character {
+            current.WriteRune(character)
+            wasEscaped = true
+            continue
+        }
+
+        if true == bracketsBalanced {
+            if '(' == character {
+                parenDepth++
+                current.WriteRune(character)
+                continue
             }
-        case ',':
-            if 0 == depth {
-                parts = append(parts, input[start:index])
-                start = index + 1
+
+            if ')' == character {
+                if 0 < parenDepth {
+                    parenDepth--
+                }
+                current.WriteRune(character)
+                continue
+            }
+
+            if '[' == character {
+                squareDepth++
+                current.WriteRune(character)
+                continue
+            }
+
+            if ']' == character {
+                if 0 < squareDepth {
+                    squareDepth--
+                }
+                current.WriteRune(character)
+                continue
+            }
+
+            if '{' == character {
+                curlyDepth++
+                current.WriteRune(character)
+                continue
+            }
+
+            if '}' == character {
+                if 0 < curlyDepth {
+                    curlyDepth--
+                }
+                current.WriteRune(character)
+                continue
             }
         }
+
+        if ',' == character {
+            if 0 == parenDepth && 0 == squareDepth && 0 == curlyDepth {
+                parts = append(parts, current.String())
+                current.Reset()
+                continue
+            }
+        }
+
+        current.WriteRune(character)
     }
-    parts = append(parts, input[start:])
+
+    parts = append(parts, current.String())
 
     return parts
+}
+
+func splitRuleParameters(input string) []string {
+    var parts []string
+
+    current := strings.Builder{}
+    squareDepth := 0
+    curlyDepth := 0
+    isInSingleQuote := false
+    isInDoubleQuote := false
+    wasEscaped := false
+
+    for _, character := range input {
+        if true == wasEscaped {
+            current.WriteRune(character)
+            wasEscaped = false
+            continue
+        }
+
+        if '\\' == character {
+            current.WriteRune(character)
+            wasEscaped = true
+            continue
+        }
+
+        if '"' == character {
+            if false == isInSingleQuote {
+                isInDoubleQuote = false == isInDoubleQuote
+            }
+            current.WriteRune(character)
+            continue
+        }
+
+        if '\'' == character {
+            if false == isInDoubleQuote {
+                isInSingleQuote = false == isInSingleQuote
+            }
+            current.WriteRune(character)
+            continue
+        }
+
+        if false == isInSingleQuote && false == isInDoubleQuote {
+            if '[' == character {
+                squareDepth++
+                current.WriteRune(character)
+                continue
+            }
+
+            if ']' == character {
+                if 0 < squareDepth {
+                    squareDepth--
+                }
+                current.WriteRune(character)
+                continue
+            }
+
+            if '{' == character {
+                curlyDepth++
+                current.WriteRune(character)
+                continue
+            }
+
+            if '}' == character {
+                if 0 < curlyDepth {
+                    curlyDepth--
+                }
+                current.WriteRune(character)
+                continue
+            }
+
+            if ',' == character {
+                if 0 == squareDepth && 0 == curlyDepth {
+                    parts = append(parts, current.String())
+                    current.Reset()
+                    continue
+                }
+            }
+        }
+
+        current.WriteRune(character)
+    }
+
+    parts = append(parts, current.String())
+
+    return parts
+}
+
+func hasBalancedRuleBrackets(input string) bool {
+    parenDepth := 0
+    squareDepth := 0
+    curlyDepth := 0
+    wasEscaped := false
+
+    for _, character := range input {
+        if true == wasEscaped {
+            wasEscaped = false
+            continue
+        }
+
+        if '\\' == character {
+            wasEscaped = true
+            continue
+        }
+
+        switch character {
+        case '(':
+            parenDepth++
+        case ')':
+            if 0 == parenDepth {
+                return false
+            }
+            parenDepth--
+        case '[':
+            squareDepth++
+        case ']':
+            if 0 == squareDepth {
+                return false
+            }
+            squareDepth--
+        case '{':
+            curlyDepth++
+        case '}':
+            if 0 == curlyDepth {
+                return false
+            }
+            curlyDepth--
+        }
+    }
+
+    return 0 == parenDepth && 0 == squareDepth && 0 == curlyDepth
 }
 
 func splitRule(rule string) (string, map[string]string) {
@@ -439,7 +629,7 @@ func splitRule(rule string) (string, map[string]string) {
     if -1 != openIndex && true == strings.HasSuffix(trimmed, ")") {
         name := strings.TrimSpace(trimmed[:openIndex])
         inner := trimmed[openIndex+1 : len(trimmed)-1]
-        for _, pair := range splitByCommaOutsideGroups(inner) {
+        for _, pair := range splitRuleParameters(inner) {
             pair = strings.TrimSpace(pair)
             if "" == pair {
                 continue

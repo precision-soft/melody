@@ -17,8 +17,12 @@ import (
 )
 
 func newLockRuntime() runtimecontract.Runtime {
+    return newLockRuntimeWithContext(context.Background())
+}
+
+func newLockRuntimeWithContext(ctx context.Context) runtimecontract.Runtime {
     serviceContainer := container.NewContainer()
-    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
 }
 
 func TestMysqlLock_MutualExclusionAndRelease(t *testing.T) {
@@ -163,6 +167,84 @@ func TestMysqlLock_ReacquiresAfterRefreshDetectsLostLock(t *testing.T) {
 
     if releaseErr := lock.Release(runtimeInstance); nil != releaseErr {
         t.Fatalf("release: %v", releaseErr)
+    }
+}
+
+func TestMysqlLock_AcquireVerifyErrorReleasesHeldLock(t *testing.T) {
+    dsn := os.Getenv("MYSQL_DSN")
+    if "" == dsn {
+        t.Skip("MYSQL_DSN not set; skipping mysql lock integration test")
+    }
+
+    sqldb, openErr := sql.Open("mysql", dsn)
+    if nil != openErr {
+        t.Fatalf("open: %v", openErr)
+    }
+    defer sqldb.Close()
+
+    database := bun.NewDB(sqldb, mysqldialect.New())
+
+    locker := mysql.NewLocker(database)
+    name := "melody_lock_verify_error_release"
+
+    lock := locker.CreateLock(name, 0)
+
+    acquired, acquireErr := lock.Acquire(newLockRuntime())
+    if nil != acquireErr || false == acquired {
+        t.Fatalf("expected acquire to succeed: %v %v", acquired, acquireErr)
+    }
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    lock.Acquire(newLockRuntimeWithContext(cancelledContext))
+
+    var holder sql.NullInt64
+    if holderErr := sqldb.QueryRowContext(context.Background(), "SELECT IS_USED_LOCK(?)", name).Scan(&holder); nil != holderErr {
+        t.Fatalf("read lock holder: %v", holderErr)
+    }
+    if true == holder.Valid {
+        t.Fatalf("lock was orphaned: still held by session %d after the verify-error path", holder.Int64)
+    }
+}
+
+func TestMysqlLock_RefreshVerifyErrorReleasesHeldLock(t *testing.T) {
+    dsn := os.Getenv("MYSQL_DSN")
+    if "" == dsn {
+        t.Skip("MYSQL_DSN not set; skipping mysql lock integration test")
+    }
+
+    sqldb, openErr := sql.Open("mysql", dsn)
+    if nil != openErr {
+        t.Fatalf("open: %v", openErr)
+    }
+    defer sqldb.Close()
+
+    database := bun.NewDB(sqldb, mysqldialect.New())
+
+    locker := mysql.NewLocker(database)
+    name := "melody_lock_refresh_verify_error_release"
+
+    lock := locker.CreateLock(name, 0)
+
+    acquired, acquireErr := lock.Acquire(newLockRuntime())
+    if nil != acquireErr || false == acquired {
+        t.Fatalf("expected acquire to succeed: %v %v", acquired, acquireErr)
+    }
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if refreshErr := lock.Refresh(newLockRuntimeWithContext(cancelledContext), 0); nil == refreshErr {
+        t.Fatalf("expected refresh to fail on the cancelled verify query")
+    }
+
+    var holder sql.NullInt64
+    if holderErr := sqldb.QueryRowContext(context.Background(), "SELECT IS_USED_LOCK(?)", name).Scan(&holder); nil != holderErr {
+        t.Fatalf("read lock holder: %v", holderErr)
+    }
+    if true == holder.Valid {
+        t.Fatalf("lock was orphaned: still held by session %d after the refresh verify-error path", holder.Int64)
     }
 }
 
