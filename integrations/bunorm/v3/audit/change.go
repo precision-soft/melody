@@ -222,13 +222,20 @@ func valueContainsRedactTag(value any) bool {
         return false
     }
 
-    return valueContainsRedactTagReflect(reflect.ValueOf(value), map[reflect.Type]struct{}{})
+    return valueContainsRedactTagReflect(reflect.ValueOf(value), map[uintptr]struct{}{})
 }
 
-func valueContainsRedactTagReflect(value reflect.Value, seen map[reflect.Type]struct{}) bool {
+func valueContainsRedactTagReflect(value reflect.Value, seen map[uintptr]struct{}) bool {
     for reflect.Ptr == value.Kind() || reflect.Interface == value.Kind() {
         if true == value.IsNil() {
             return false
+        }
+        if reflect.Ptr == value.Kind() {
+            pointer := value.Pointer()
+            if _, visited := seen[pointer]; true == visited {
+                return false
+            }
+            seen[pointer] = struct{}{}
         }
         value = value.Elem()
     }
@@ -263,11 +270,6 @@ func valueContainsRedactTagReflect(value reflect.Value, seen map[reflect.Type]st
         return false
 
     case reflect.Struct:
-        if _, visited := seen[valueType]; true == visited {
-            return false
-        }
-        seen[valueType] = struct{}{}
-
         for index := 0; index < valueType.NumField(); index++ {
             subField := valueType.Field(index)
             if false == subField.IsExported() {

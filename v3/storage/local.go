@@ -62,6 +62,7 @@ func (instance *LocalStorage) Put(
 
     written, copyErr := io.Copy(file, reader)
     if nil != copyErr {
+        _ = os.Remove(path)
         return exception.NewError("could not write the storage object", map[string]any{"key": key}, copyErr)
     }
 

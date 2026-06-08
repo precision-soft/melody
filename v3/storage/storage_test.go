@@ -2,6 +2,7 @@ package storage_test
 
 import (
     "context"
+    "errors"
     "io"
     "os"
     "path/filepath"
@@ -196,5 +197,42 @@ func TestLocalStorage_WritesObjectsWithRestrictivePermissions(t *testing.T) {
 
     if 0o640 != info.Mode().Perm() {
         t.Fatalf("expected file mode 0640, got %o", info.Mode().Perm())
+    }
+}
+
+type readerFailingAfterData struct {
+    data      []byte
+    readSoFar int
+}
+
+func (instance *readerFailingAfterData) Read(buffer []byte) (int, error) {
+    if instance.readSoFar >= len(instance.data) {
+        return 0, errors.New("source read failure")
+    }
+
+    written := copy(buffer, instance.data[instance.readSoFar:])
+    instance.readSoFar += written
+
+    return written, nil
+}
+
+func TestLocalStorage_PutRemovesPartialObjectOnReaderError(t *testing.T) {
+    local := storage.NewLocalStorage(t.TempDir())
+    runtimeInstance := testRuntime()
+
+    key := "labels/partial.bin"
+    reader := &readerFailingAfterData{data: []byte("partial-body-before-failure")}
+
+    putErr := local.Put(runtimeInstance, key, reader, -1, storagecontract.PutOptions{})
+    if nil == putErr {
+        t.Fatalf("expected put to fail when the source reader errors mid-stream")
+    }
+
+    exists, existsErr := local.Exists(runtimeInstance, key)
+    if nil != existsErr {
+        t.Fatalf("exists: %v", existsErr)
+    }
+    if true == exists {
+        t.Fatalf("expected no object on disk after a failed put, but a partial object remains")
     }
 }

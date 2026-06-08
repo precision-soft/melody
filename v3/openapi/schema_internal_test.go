@@ -75,6 +75,31 @@ func TestBuildSchema_ParenthesizedValidationConstraintsEmitted(t *testing.T) {
     }
 }
 
+func TestBuildSchema_LiteralDashJsonNameNotOmitted(t *testing.T) {
+    components := map[string]*Schema{}
+    names := map[reflect.Type]string{}
+    visited := map[reflect.Type]bool{}
+
+    stringType := reflect.TypeOf("")
+    requestType := reflect.StructOf([]reflect.StructField{
+        {Name: "Literal", Type: stringType, Tag: `json:"-,"`},
+        {Name: "Normal", Type: stringType, Tag: `json:"normal"`},
+        {Name: "Omitted", Type: stringType, Tag: `json:"-"`},
+    })
+
+    schema := buildSchema(requestType, components, names, visited)
+
+    if _, present := schema.Properties["-"]; false == present {
+        t.Fatalf(`expected a property named "-" for the json:"-," field (encoding/json serializes it under the key "-"), got %+v`, schema.Properties)
+    }
+    if _, present := schema.Properties["normal"]; false == present {
+        t.Fatalf("expected the normal field to be present, got %+v", schema.Properties)
+    }
+    if _, present := schema.Properties["Omitted"]; true == present {
+        t.Fatalf(`expected the bare json:"-" field to be omitted, got %+v`, schema.Properties)
+    }
+}
+
 func TestBuildSchema_ExplicitlyTaggedOwnFieldWinsImplicitCollision(t *testing.T) {
     components := map[string]*Schema{}
     names := map[reflect.Type]string{}

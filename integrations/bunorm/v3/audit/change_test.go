@@ -347,6 +347,47 @@ func TestChangeSet_RedactTagHonoredWhenInterfaceIsNestedInsideStructField(t *tes
     }
 }
 
+func TestChangeSet_RedactTagHonoredInSecondSiblingOfSameTypeReachedViaInterface(t *testing.T) {
+    type credentials struct {
+        Token string `bun:"token" audit:"redact"`
+        Label string `bun:"label"`
+    }
+    type holder struct {
+        Data any `bun:"data"`
+    }
+    type pair struct {
+        First  holder `bun:"first"`
+        Second holder `bun:"second"`
+    }
+    type document struct {
+        Id   int64 `bun:"id,pk"`
+        Pair pair  `bun:"pair"`
+    }
+
+    before := document{Id: 1, Pair: pair{
+        First:  holder{Data: "plain-old"},
+        Second: holder{Data: credentials{Token: "sibling-secret-old", Label: "primary"}},
+    }}
+    after := document{Id: 1, Pair: pair{
+        First:  holder{Data: "plain-new"},
+        Second: holder{Data: credentials{Token: "sibling-secret-new", Label: "primary"}},
+    }}
+
+    changes := audit.ChangeSet(before, after)
+
+    payload, marshalErr := json.Marshal(changes)
+    if nil != marshalErr {
+        t.Fatalf("marshal changes: %v", marshalErr)
+    }
+
+    if true == strings.Contains(string(payload), "sibling-secret") {
+        t.Fatalf("redact-tagged plaintext leaked through a same-typed sibling whose redact content was only reachable via an interface field: %s", payload)
+    }
+    if false == strings.Contains(string(payload), "redacted") {
+        t.Fatalf("expected the redacted marker in changes json: %s", payload)
+    }
+}
+
 func TestChangeSet_RedactsEncryptedMapKeyPlaintext(t *testing.T) {
     type document struct {
         Id   int64                              `bun:"id,pk"`

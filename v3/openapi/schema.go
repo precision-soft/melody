@@ -325,10 +325,6 @@ func jsonFieldName(field reflect.StructField) (string, bool) {
     }
 
     parts := strings.Split(tag, ",")
-    if "-" == parts[0] {
-        return "", true
-    }
-
     if "" == parts[0] {
         return field.Name, false
     }

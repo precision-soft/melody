@@ -72,6 +72,14 @@ type payloadWithRegexShorthand struct {
     Value string `validate:"regex=^abc$"`
 }
 
+type payloadWithRegexShorthandCommaInCharClass struct {
+    Value string `validate:"regex=^[a,b]$"`
+}
+
+type payloadWithRegexShorthandCommaInQuantifier struct {
+    Value string `validate:"regex=^a{1,2}$"`
+}
+
 type payloadWithInvalidTag struct {
     Name string `validate:"min(1))"`
 }
@@ -154,6 +162,17 @@ func TestValidator_RegexShorthandIsEnforcedNotFailOpen(t *testing.T) {
 
     requireValidationErrors(t, validatorInstance.Validate(payloadWithRegexShorthand{Value: "does-not-match"}))
     requireNoValidationErrors(t, validatorInstance.Validate(payloadWithRegexShorthand{Value: "abc"}))
+}
+
+func TestValidator_RegexShorthandWithCommaMatchesParenthesizedForm(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithRegexShorthandCommaInCharClass{Value: "a"}))
+    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithRegexShorthandCommaInCharClass{Value: "b"}))
+    requireValidationErrors(t, validatorInstance.Validate(payloadWithRegexShorthandCommaInCharClass{Value: "z"}))
+
+    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithRegexShorthandCommaInQuantifier{Value: "aa"}))
+    requireValidationErrors(t, validatorInstance.Validate(payloadWithRegexShorthandCommaInQuantifier{Value: "aaa"}))
 }
 
 func TestValidator_CustomConstraint(t *testing.T) {

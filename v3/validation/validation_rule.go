@@ -18,6 +18,8 @@ func splitByTopLevelComma(valueString string) []string {
 
     current := strings.Builder{}
     parenDepth := 0
+    squareDepth := 0
+    curlyDepth := 0
     wasEscaped := false
 
     for _, character := range valueString {
@@ -47,8 +49,36 @@ func splitByTopLevelComma(valueString string) []string {
             continue
         }
 
+        if '[' == character {
+            squareDepth++
+            current.WriteRune(character)
+            continue
+        }
+
+        if ']' == character {
+            if 0 < squareDepth {
+                squareDepth--
+            }
+            current.WriteRune(character)
+            continue
+        }
+
+        if '{' == character {
+            curlyDepth++
+            current.WriteRune(character)
+            continue
+        }
+
+        if '}' == character {
+            if 0 < curlyDepth {
+                curlyDepth--
+            }
+            current.WriteRune(character)
+            continue
+        }
+
         if ',' == character {
-            if 0 == parenDepth {
+            if 0 == parenDepth && 0 == squareDepth && 0 == curlyDepth {
                 parts = append(parts, current.String())
                 current.Reset()
                 continue
