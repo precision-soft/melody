@@ -64,9 +64,10 @@ func (instance *ServerSentEventWriter) Send(event ServerSentEvent) error {
     }
 
     if "" != event.Data {
-        for _, line := range strings.Split(event.Data, "\n") {
+        normalizedData := strings.NewReplacer("\r\n", "\n", "\r", "\n").Replace(event.Data)
+        for _, line := range strings.Split(normalizedData, "\n") {
             builder.WriteString("data: ")
-            builder.WriteString(strings.ReplaceAll(line, "\r", ""))
+            builder.WriteString(line)
             builder.WriteString("\n")
         }
     }

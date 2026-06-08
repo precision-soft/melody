@@ -315,3 +315,62 @@ func TestChangeSet_RedactTagHonoredInsideInterfaceField(t *testing.T) {
         t.Fatalf("expected the redacted marker in changes json: %s", payload)
     }
 }
+
+func TestChangeSet_RedactTagHonoredWhenInterfaceIsNestedInsideStructField(t *testing.T) {
+    type credentials struct {
+        Token string `bun:"token" audit:"redact"`
+        Label string `bun:"label"`
+    }
+    type wrapper struct {
+        Inner any `bun:"inner"`
+    }
+    type document struct {
+        Id   int64   `bun:"id,pk"`
+        Wrap wrapper `bun:"wrap"`
+    }
+
+    before := document{Id: 1, Wrap: wrapper{Inner: credentials{Token: "deep-secret-old", Label: "primary"}}}
+    after := document{Id: 1, Wrap: wrapper{Inner: credentials{Token: "deep-secret-new", Label: "primary"}}}
+
+    changes := audit.ChangeSet(before, after)
+
+    payload, marshalErr := json.Marshal(changes)
+    if nil != marshalErr {
+        t.Fatalf("marshal changes: %v", marshalErr)
+    }
+
+    if true == strings.Contains(string(payload), "deep-secret") {
+        t.Fatalf("redact-tagged plaintext leaked through an interface nested one level inside a struct field: %s", payload)
+    }
+    if false == strings.Contains(string(payload), "redacted") {
+        t.Fatalf("expected the redacted marker in changes json: %s", payload)
+    }
+}
+
+func TestChangeSet_RedactTagHonoredInsideMapOfInterfaceValues(t *testing.T) {
+    type credentials struct {
+        Token string `bun:"token" audit:"redact"`
+        Label string `bun:"label"`
+    }
+    type document struct {
+        Id   int64          `bun:"id,pk"`
+        Meta map[string]any `bun:"meta"`
+    }
+
+    before := document{Id: 1, Meta: map[string]any{"k": credentials{Token: "map-secret-old", Label: "primary"}}}
+    after := document{Id: 1, Meta: map[string]any{"k": credentials{Token: "map-secret-new", Label: "primary"}}}
+
+    changes := audit.ChangeSet(before, after)
+
+    payload, marshalErr := json.Marshal(changes)
+    if nil != marshalErr {
+        t.Fatalf("marshal changes: %v", marshalErr)
+    }
+
+    if true == strings.Contains(string(payload), "map-secret") {
+        t.Fatalf("redact-tagged plaintext leaked through an interface value inside a map: %s", payload)
+    }
+    if false == strings.Contains(string(payload), "redacted") {
+        t.Fatalf("expected the redacted marker in changes json: %s", payload)
+    }
+}

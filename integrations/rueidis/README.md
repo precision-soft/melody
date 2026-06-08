@@ -169,7 +169,7 @@ rueidis.RegisterTokenStoreService(registrar, client)    // registers rueidis.Ser
 cache.RegisterBackendService(registrar, client, "app")  // registers cache.ServiceCacheBackend
 ```
 
-Services then resolve them with `lock.LockerMustFromResolver`, `rueidis.TokenStoreMustFromResolver`, and `cache.CacheMustFromResolver`. The Server-Sent Events backplane self-registers on the hub through `rueidis.NewServerSentEventBackplane(client, hub)`.
+Services then resolve them with `lock.LockerMustFromResolver`, `rueidis.TokenStoreMustFromResolver`, and `cache.CacheBackendMustFromResolver` (the backend that `RegisterBackendService` registers under `cache.ServiceCacheBackend`). The Server-Sent Events backplane self-registers on the hub through `rueidis.NewServerSentEventBackplane(client, hub)`.
 
 ### Request-scoped context
 

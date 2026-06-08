@@ -148,9 +148,6 @@ func TestAttachmentResponse_SanitizesQuotesInFilename(t *testing.T) {
     defer response.Close()
 
     disposition := response.Headers().Get("Content-Disposition")
-    if true == strings.Contains(disposition, `"`+`file`+`"`) {
-        // fine: the wrapping quotes are expected
-    }
     if true == strings.Contains(disposition, `name"`) {
         t.Fatalf("raw quote must not appear inside filename, got: %s", disposition)
     }

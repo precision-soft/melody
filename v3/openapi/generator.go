@@ -37,7 +37,7 @@ func Generate(
         pathItem := document.Paths[path]
         for _, method := range methods {
             operationId := operationIdFor(routeDefinition.Name(), method, len(methods))
-            operation := buildOperation(operationId, pathParameters, descriptor, hasDescriptor, components, componentNames)
+            operation := buildOperation(operationId, method, pathParameters, descriptor, hasDescriptor, components, componentNames)
             assignOperation(&pathItem, method, operation)
         }
 
@@ -59,8 +59,18 @@ func operationIdFor(routeName string, method string, methodCount int) string {
     return routeName + "." + strings.ToLower(method)
 }
 
+func methodAcceptsRequestBody(method string) bool {
+    switch strings.ToUpper(method) {
+    case nethttp.MethodGet, nethttp.MethodHead, nethttp.MethodDelete, nethttp.MethodOptions, nethttp.MethodTrace:
+        return false
+    default:
+        return true
+    }
+}
+
 func buildOperation(
     operationId string,
+    method string,
     pathParameters []Parameter,
     descriptor Descriptor,
     hasDescriptor bool,
@@ -78,7 +88,7 @@ func buildOperation(
         operation.Description = descriptor.Description
         operation.Tags = descriptor.Tags
 
-        if nil != descriptor.RequestType {
+        if nil != descriptor.RequestType && true == methodAcceptsRequestBody(method) {
             operation.RequestBody = &RequestBody{
                 Required: true,
                 Content: map[string]MediaType{

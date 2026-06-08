@@ -225,8 +225,8 @@ type shallowMarkerEmbed struct {
 }
 
 type embedDepthRequest struct {
-    midMarkerEmbed     // declared first; promotes deepMarker.Marker at depth 2
-    shallowMarkerEmbed // declared second; its Marker at depth 1 is the encoding/json winner
+    midMarkerEmbed
+    shallowMarkerEmbed
 }
 
 func TestGenerate_ShallowerEmbeddedFieldWinsRegardlessOfOrder(t *testing.T) {
@@ -491,5 +491,36 @@ func TestGenerate_NumericConstraintsAreNotEmittedOnStringFields(t *testing.T) {
 
     if nil != codeSchema.Minimum {
         t.Fatalf("greaterThan must not set minimum on a string field: %+v", codeSchema)
+    }
+}
+
+func TestGenerate_NoRequestBodyOnBodylessMethods(t *testing.T) {
+    registry := openapi.NewRegistry()
+    registry.Describe("things.handle", openapi.Descriptor{
+        RequestType: openapi.TypeOf[createProductRequest](),
+    })
+
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "things.handle", pattern: "/things", methods: []string{"GET", "POST", "DELETE", "HEAD"}},
+    }
+
+    document := openapi.Generate(openapi.Info{Title: "Example", Version: "1.0.0"}, routes, registry)
+
+    pathItem := document.Paths["/things"]
+    if nil == pathItem.Get || nil == pathItem.Post || nil == pathItem.Delete || nil == pathItem.Head {
+        t.Fatalf("expected all four operations to be present")
+    }
+
+    if nil != pathItem.Get.RequestBody {
+        t.Fatalf("GET must not carry a requestBody")
+    }
+    if nil != pathItem.Head.RequestBody {
+        t.Fatalf("HEAD must not carry a requestBody")
+    }
+    if nil != pathItem.Delete.RequestBody {
+        t.Fatalf("DELETE must not carry a requestBody")
+    }
+    if nil == pathItem.Post.RequestBody {
+        t.Fatalf("POST must carry the request body")
     }
 }

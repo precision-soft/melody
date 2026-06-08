@@ -47,7 +47,7 @@ An empty domain resolves to [`DefaultDomain`](../../translation/catalog.go) (`me
 Patterns use an ICU-MessageFormat subset:
 
 - Named placeholders: `Hello, {name}!`
-- Plural: `{count, plural, =0 {No items} one {# item} other {# items}}` — `=N` selectors match exact numbers, `#` is replaced by the number, and the plural category (`one`/`other`) is chosen by a pragmatic rule (`n == 1` → `one`). CLDR plural rules via `golang.org/x/text` are a possible future enhancement.
+- Plural: `{count, plural, =0 {No items} one {# item} other {# items}}` — `=N` selectors match exact numbers, `#` is replaced by the number, and the plural category is chosen per locale: the default `n == 1 → one` rule, plus CLDR-aligned categories for Romanian/Moldovan (`one`/`few`/`other`) and Russian (`one`/`few`/`many`/`other`).
 - Select: `{gender, select, male {He} female {She} other {They}}`
 
 Submessages are interpolated recursively, so placeholders and `#` work inside `plural`/`select` blocks.
@@ -90,9 +90,9 @@ The example application wires a translator (`config/translation.go`) and exposes
 ## Footguns & caveats
 
 - Translation is opt-in and userland-wired; the framework registers no default translator.
-- Plural categories use a pragmatic `n == 1 → one` rule, not full CLDR. Use `=N` selectors for exact cases that matter.
+- Plural categories follow CLDR-aligned rules for the locales with dedicated support — Romanian/Moldovan (`one`/`few`/`other`) and Russian (`one`/`few`/`many`/`other`) — and fall back to the `n == 1 → one` rule for every other locale. Use `=N` selectors for exact cases that matter.
 - One catalog per locale: [`NewManager`](../../translation/manager.go) keys catalogs by `Catalog.Locale()`, so passing two catalogs with the same locale keeps the last one.
-- `JsonDirectoryLoader` expects files named `<domain>.<locale>.json` containing a flat `{messageId: message}` object.
+- `JsonDirectoryLoader` expects files named `<domain>.<locale>.json` containing a flat `{messageId: message}` object. There is no Manager bridge helper; load file-based catalogs explicitly and pass them into the constructor: `catalogs, err := translation.NewJsonDirectoryLoader(dir).Load()` then `translation.NewManager("en", []string{"en"}, catalogs...)`.
 
 ## Userland API
 

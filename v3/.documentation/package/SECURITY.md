@@ -341,8 +341,8 @@ source := security.NewBearerTokenSourceWithEnricher(validator, scopeRoleEnricher
 - Auth: [`ApiKeyHeaderRule`](../../security/rule.go), [`ApiKeyHeaderAuthenticator`](../../security/api_key_authenticator.go), [`AuthenticatorManager`](../../security/authenticator_manager.go), [`AuthenticatorTokenSource`](../../security/token_source.go)
 - Token auth: [`BearerTokenSource`](../../security/bearer_token_source.go), [`JwtTokenValidator`](../../security/jwt_token_validator.go), [`JwtConfig`](../../security/jwt_token_validator.go), [`OpaqueTokenValidator`](../../security/opaque_token_validator.go), [`InMemoryTokenStore`](../../security/in_memory_token_store.go), [`JsonEntryPoint`](../../security/json_entry_point.go), [`JsonAccessDeniedHandler`](../../security/json_access_denied_handler.go)
 - Matchers: [`PathPrefixMatcher`](../../security/matcher.go)
-- Authorization: [`AccessDecisionManager`, `RoleVoter`](../../security/voter.go)
-- Configuration: [`CompiledConfiguration`, `CompiledFirewall`, `CompiledSource`](../../security/compiled_configuration.go)
+- Authorization: [`AccessDecisionManager`](../../security/access_decision_manager.go), [`RoleVoter`](../../security/voter.go)
+- Configuration: [`CompiledConfiguration`, `CompiledFirewall`](../../security/compiled_configuration.go)
 - Context: [`SecurityContext`](../../security/security_context.go)
 
 ### Constructors

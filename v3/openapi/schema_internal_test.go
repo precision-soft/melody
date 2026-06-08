@@ -48,6 +48,33 @@ func TestBuildSchema_AmbiguousOwnJsonNameDropped(t *testing.T) {
     }
 }
 
+func TestBuildSchema_ParenthesizedValidationConstraintsEmitted(t *testing.T) {
+    components := map[string]*Schema{}
+    names := map[reflect.Type]string{}
+    visited := map[reflect.Type]bool{}
+
+    stringType := reflect.TypeOf("")
+    requestType := reflect.StructOf([]reflect.StructField{
+        {Name: "Name", Type: stringType, Tag: `json:"name" validate:"notBlank,min(value=3),max(value=64)"`},
+        {Name: "Code", Type: stringType, Tag: `json:"code" validate:"regex(pattern=^a{1,2}$)"`},
+    })
+
+    schema := buildSchema(requestType, components, names, visited)
+
+    name := schema.Properties["name"]
+    if nil == name.MinLength || 3 != *name.MinLength {
+        t.Fatalf("expected MinLength 3 from min(value=3), got %v", name.MinLength)
+    }
+    if nil == name.MaxLength || 64 != *name.MaxLength {
+        t.Fatalf("expected MaxLength 64 from max(value=64), got %v", name.MaxLength)
+    }
+
+    code := schema.Properties["code"]
+    if "^a{1,2}$" != code.Pattern {
+        t.Fatalf("expected Pattern ^a{1,2}$ from regex(pattern=^a{1,2}$) (comma inside braces preserved), got %q", code.Pattern)
+    }
+}
+
 func TestBuildSchema_ExplicitlyTaggedOwnFieldWinsImplicitCollision(t *testing.T) {
     components := map[string]*Schema{}
     names := map[reflect.Type]string{}

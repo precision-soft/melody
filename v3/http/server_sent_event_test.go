@@ -43,7 +43,7 @@ func TestServerSentEventWriter_StripsNewlinesFromIdAndEvent(t *testing.T) {
     }
 }
 
-func TestServerSentEventWriter_StripsCarriageReturnFromData(t *testing.T) {
+func TestServerSentEventWriter_TreatsCarriageReturnAsDataLineBoundary(t *testing.T) {
     recorder := httptest.NewRecorder()
 
     writer, writerErr := http.NewServerSentEventWriter(recorder)
@@ -52,7 +52,7 @@ func TestServerSentEventWriter_StripsCarriageReturnFromData(t *testing.T) {
     }
 
     sendErr := writer.Send(http.ServerSentEvent{
-        Data: "hello\revent: injected",
+        Data: "first\rsecond\r\nthird",
     })
     if nil != sendErr {
         t.Fatalf("send: %v", sendErr)
@@ -74,8 +74,32 @@ func TestServerSentEventWriter_StripsCarriageReturnFromData(t *testing.T) {
         }
     }
 
-    if 0 != eventLines || 1 != dataLines {
-        t.Fatalf("expected the carriage-return injection neutralized into a single data line, got event=%d data=%d: %q", eventLines, dataLines, body)
+    if 0 != eventLines || 3 != dataLines {
+        t.Fatalf("expected each CR/CRLF/LF to start its own data line with no injected event line, got event=%d data=%d: %q", eventLines, dataLines, body)
+    }
+}
+
+func TestServerSentEventWriter_CarriageReturnDataCannotInjectControlLine(t *testing.T) {
+    recorder := httptest.NewRecorder()
+
+    writer, writerErr := http.NewServerSentEventWriter(recorder)
+    if nil != writerErr {
+        t.Fatalf("new sse writer: %v", writerErr)
+    }
+
+    sendErr := writer.Send(http.ServerSentEvent{
+        Data: "hello\revent: injected",
+    })
+    if nil != sendErr {
+        t.Fatalf("send: %v", sendErr)
+    }
+
+    body := recorder.Body.String()
+
+    for _, line := range strings.Split(body, "\n") {
+        if true == strings.HasPrefix(line, "event: ") {
+            t.Fatalf("a carriage return inside data must not produce an event control line, got %q", body)
+        }
     }
 }
 

@@ -353,30 +353,30 @@ func applyValidation(schema *Schema, validateTag string) {
     }
 
     for _, rule := range splitRules(validateTag) {
-        name, param := splitRule(rule)
+        name, params := splitRule(rule)
 
         switch name {
         case "email":
             schema.Format = "email"
         case "min":
-            if value, parseErr := strconv.Atoi(param); nil == parseErr {
+            if value, parseErr := strconv.Atoi(params["value"]); nil == parseErr {
                 if "string" == schema.Type {
                     schema.MinLength = &value
                 }
             }
         case "max":
-            if value, parseErr := strconv.Atoi(param); nil == parseErr {
+            if value, parseErr := strconv.Atoi(params["value"]); nil == parseErr {
                 if "string" == schema.Type {
                     schema.MaxLength = &value
                 }
             }
         case "regex", "pattern":
             if "string" == schema.Type {
-                schema.Pattern = param
+                schema.Pattern = patternParam(params)
             }
         case "greaterThan":
             if "integer" == schema.Type || "number" == schema.Type {
-                if value, parseErr := strconv.ParseFloat(param, 64); nil == parseErr {
+                if value, parseErr := strconv.ParseFloat(params["value"], 64); nil == parseErr {
                     exclusive := true
                     schema.Minimum = &value
                     schema.ExclusiveMinimum = &exclusive
@@ -384,7 +384,7 @@ func applyValidation(schema *Schema, validateTag string) {
             }
         case "lessThan":
             if "integer" == schema.Type || "number" == schema.Type {
-                if value, parseErr := strconv.ParseFloat(param, 64); nil == parseErr {
+                if value, parseErr := strconv.ParseFloat(params["value"], 64); nil == parseErr {
                     exclusive := true
                     schema.Maximum = &value
                     schema.ExclusiveMaximum = &exclusive
@@ -394,22 +394,83 @@ func applyValidation(schema *Schema, validateTag string) {
     }
 }
 
+func patternParam(params map[string]string) string {
+    if pattern, exists := params["pattern"]; true == exists {
+        return pattern
+    }
+
+    return params["value"]
+}
+
 func splitRules(validateTag string) []string {
     trimmed := strings.TrimSpace(validateTag)
     if "" == trimmed || "-" == trimmed {
         return nil
     }
 
-    return strings.Split(trimmed, ",")
+    return splitByCommaOutsideGroups(trimmed)
 }
 
-func splitRule(rule string) (string, string) {
+func splitByCommaOutsideGroups(input string) []string {
+    var parts []string
+    depth := 0
+    start := 0
+    for index := 0; index < len(input); index++ {
+        switch input[index] {
+        case '(', '{', '[':
+            depth++
+        case ')', '}', ']':
+            if 0 < depth {
+                depth--
+            }
+        case ',':
+            if 0 == depth {
+                parts = append(parts, input[start:index])
+                start = index + 1
+            }
+        }
+    }
+    parts = append(parts, input[start:])
+
+    return parts
+}
+
+func splitRule(rule string) (string, map[string]string) {
     trimmed := strings.TrimSpace(rule)
+    params := make(map[string]string)
+
+    openIndex := strings.IndexByte(trimmed, '(')
+    if -1 != openIndex && true == strings.HasSuffix(trimmed, ")") {
+        name := strings.TrimSpace(trimmed[:openIndex])
+        inner := trimmed[openIndex+1 : len(trimmed)-1]
+        for _, pair := range splitByCommaOutsideGroups(inner) {
+            pair = strings.TrimSpace(pair)
+            if "" == pair {
+                continue
+            }
+
+            separator := strings.IndexByte(pair, '=')
+            if -1 == separator {
+                continue
+            }
+
+            key := strings.TrimSpace(pair[:separator])
+            if "" == key {
+                continue
+            }
+
+            params[key] = strings.TrimSpace(pair[separator+1:])
+        }
+
+        return name, params
+    }
 
     separator := strings.IndexByte(trimmed, '=')
     if -1 == separator {
-        return trimmed, ""
+        return trimmed, params
     }
 
-    return strings.TrimSpace(trimmed[:separator]), strings.TrimSpace(trimmed[separator+1:])
+    params["value"] = strings.TrimSpace(trimmed[separator+1:])
+
+    return strings.TrimSpace(trimmed[:separator]), params
 }

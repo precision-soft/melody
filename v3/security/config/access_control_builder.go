@@ -19,7 +19,7 @@ func (instance *AccessControlBuilder) Require(pathPrefix string, attributes ...s
 }
 
 func (instance *AccessControlBuilder) AllowAnonymous(pathPrefix string) *AccessControlBuilder {
-    instance.rules = append(instance.rules, security.NewAccessControlRule(pathPrefix, securitycontract.AttributePublicAccess))
+    instance.rules = append(instance.rules, security.NewAccessControlRuleWithSegmentPrefix(pathPrefix, securitycontract.AttributePublicAccess))
     return instance
 }
 

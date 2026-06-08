@@ -68,6 +68,10 @@ type payloadWithRegexCommaInQuantifier struct {
     Value string `validate:"regex(pattern=^a{1,2}$)"`
 }
 
+type payloadWithRegexShorthand struct {
+    Value string `validate:"regex=^abc$"`
+}
+
 type payloadWithInvalidTag struct {
     Name string `validate:"min(1))"`
 }
@@ -124,6 +128,13 @@ func TestValidator_AcceptsValidData(t *testing.T) {
 
     err := validatorInstance.Validate(payload)
     requireNoValidationErrors(t, err)
+}
+
+func TestValidator_RegexShorthandIsEnforcedNotFailOpen(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    requireValidationErrors(t, validatorInstance.Validate(payloadWithRegexShorthand{Value: "does-not-match"}))
+    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithRegexShorthand{Value: "abc"}))
 }
 
 func TestValidator_CustomConstraint(t *testing.T) {

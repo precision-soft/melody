@@ -59,15 +59,16 @@ func NewTransport(config TransportConfig) *Transport {
     }
 
     return &Transport{
-        connection: config.Connection,
-        dialer:     config.Dialer,
-        queue:      config.Queue,
-        exchange:   config.Exchange,
-        routingKey: config.RoutingKey,
-        prefetch:   prefetch,
-        registry:   config.Registry,
-        serializer: serializerInstance,
-        deadLetter: config.DeadLetter,
+        connection:  config.Connection,
+        dialer:      config.Dialer,
+        queue:       config.Queue,
+        exchange:    config.Exchange,
+        routingKey:  config.RoutingKey,
+        prefetch:    prefetch,
+        registry:    config.Registry,
+        serializer:  serializerInstance,
+        deadLetter:  config.DeadLetter,
+        closeSignal: make(chan struct{}),
     }
 }
 
@@ -101,6 +102,8 @@ type Transport struct {
     closing           bool
     reconnecting      bool
     ownsConnection    bool
+    closeSignal       chan struct{}
+    closeOnce         sync.Once
 
     publishMutex sync.Mutex
     consumeMutex sync.Mutex
@@ -507,6 +510,9 @@ func (instance *Transport) Close(runtimeInstance runtimecontract.Runtime) error 
     defer instance.mutex.Unlock()
 
     instance.closing = true
+    instance.closeOnce.Do(func() {
+        close(instance.closeSignal)
+    })
 
     if nil != instance.consumeChannel {
         instance.consumeChannel.Close()
@@ -538,6 +544,8 @@ func (instance *Transport) forwardDeliveries(
         select {
         case <-runtimeInstance.Context().Done():
             return forwardDone
+        case <-instance.closeSignal:
+            return forwardDone
         case delivery, open := <-deliveries:
             if false == open {
                 return forwardChannelLost
@@ -562,6 +570,8 @@ func (instance *Transport) forwardDeliveries(
             select {
             case out <- envelopeInstance:
             case <-runtimeInstance.Context().Done():
+                return forwardDone
+            case <-instance.closeSignal:
                 return forwardDone
             }
         }

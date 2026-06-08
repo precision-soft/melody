@@ -222,7 +222,76 @@ func valueContainsRedactTag(value any) bool {
         return false
     }
 
-    return typeContainsRedactTag(reflect.TypeOf(value), map[reflect.Type]struct{}{})
+    return valueContainsRedactTagReflect(reflect.ValueOf(value), map[reflect.Type]struct{}{})
+}
+
+func valueContainsRedactTagReflect(value reflect.Value, seen map[reflect.Type]struct{}) bool {
+    for reflect.Ptr == value.Kind() || reflect.Interface == value.Kind() {
+        if true == value.IsNil() {
+            return false
+        }
+        value = value.Elem()
+    }
+
+    if false == value.IsValid() {
+        return false
+    }
+
+    valueType := value.Type()
+    if valueType == encryptedStringType || valueType == encryptedDeterministicStringType {
+        return true
+    }
+
+    switch value.Kind() {
+    case reflect.Slice, reflect.Array:
+        for index := 0; index < value.Len(); index++ {
+            if true == valueContainsRedactTagReflect(value.Index(index), seen) {
+                return true
+            }
+        }
+        return false
+
+    case reflect.Map:
+        for _, key := range value.MapKeys() {
+            if true == valueContainsRedactTagReflect(value.MapIndex(key), seen) {
+                return true
+            }
+        }
+        return false
+
+    case reflect.Struct:
+        if _, visited := seen[valueType]; true == visited {
+            return false
+        }
+        seen[valueType] = struct{}{}
+
+        for index := 0; index < valueType.NumField(); index++ {
+            subField := valueType.Field(index)
+            if false == subField.IsExported() {
+                continue
+            }
+
+            if "redact" == subField.Tag.Get("audit") {
+                return true
+            }
+
+            subFieldType := subField.Type
+            for reflect.Ptr == subFieldType.Kind() {
+                subFieldType = subFieldType.Elem()
+            }
+            if subFieldType == encryptedStringType || subFieldType == encryptedDeterministicStringType {
+                return true
+            }
+
+            if true == valueContainsRedactTagReflect(value.Field(index), seen) {
+                return true
+            }
+        }
+        return false
+
+    default:
+        return false
+    }
 }
 
 func typeContainsRedactTag(fieldType reflect.Type, seen map[reflect.Type]struct{}) bool {
