@@ -52,7 +52,11 @@ func validateUserField(label string, value string) error {
         )
     }
 
-    return nil
+    return ValidateNoForbiddenChars(
+        []string{value},
+        CrontabForbiddenChars,
+        label,
+    )
 }
 
 func validateScheduleFields(entry Entry) error {

@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v3.2.0] - 2026-06-08 - Plug-and-Play Command Registration
+## [v3.2.0] - 2026-06-09 - Plug-and-Play Command Registration
 
 ### Added
 
@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `v3/validation.go` — the crontab schedule fields (`Minute`/`Hour`/`DayOfMonth`/`Month`/`DayOfWeek`) are now validated against `CrontabForbiddenChars`, like every other token emitted into a crontab line, so a `%` is rejected at the source instead of being written verbatim. `%` is crontab's line-continuation character (translated to a newline before the shell sees it); the schedule fields previously checked only for whitespace, so a `%` slipped through and corrupted the generated entry.
+- `v3/validation.go` — the crontab user field (`Entry.User` and the heartbeat user) is now validated against `CrontabForbiddenChars` too, closing the sibling gap to the schedule-field fix above. `validateUserField` checked only for whitespace, so a `%` in a user value (from the `--user` flag, the `melody.cron.user` parameter, or `EntryConfig.User`) reached the generated crontab verbatim — and because the user is written into the same line position as the schedule, crond's `%`-to-newline translation split the entry into a malformed line plus a stray trailing line. The user value now runs through `ValidateNoForbiddenChars`, rejecting `%` at the source.
 
 ## [v1.1.0] - 2026-05-19 - Auto-Derive Heartbeat Path and Auto-Create Logs Directory
 

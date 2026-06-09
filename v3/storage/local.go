@@ -58,17 +58,23 @@ func (instance *LocalStorage) Put(
     if nil != createErr {
         return exception.NewError("could not create the storage object", map[string]any{"key": key}, createErr)
     }
-    defer file.Close()
 
     written, copyErr := io.Copy(file, reader)
     if nil != copyErr {
+        _ = file.Close()
         _ = os.Remove(path)
         return exception.NewError("could not write the storage object", map[string]any{"key": key}, copyErr)
     }
 
     if 0 <= size && written != size {
+        _ = file.Close()
         _ = os.Remove(path)
         return exception.NewError("storage object size does not match the declared size", map[string]any{"key": key, "declared": size, "written": written}, nil)
+    }
+
+    if closeErr := file.Close(); nil != closeErr {
+        _ = os.Remove(path)
+        return exception.NewError("could not flush the storage object", map[string]any{"key": key}, closeErr)
     }
 
     return nil

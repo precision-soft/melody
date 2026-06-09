@@ -285,7 +285,12 @@ func isPromotedEmbed(field reflect.StructField) bool {
         return false
     }
 
-    if "" != field.Tag.Get("json") {
+    tag := field.Tag.Get("json")
+    if "-" == tag {
+        return false
+    }
+
+    if "" != tag && "" != strings.Split(tag, ",")[0] {
         return false
     }
 

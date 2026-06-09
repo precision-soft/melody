@@ -81,6 +81,37 @@ func TestErrorsIsErrHeartbeatUserMissingFromRender(t *testing.T) {
     }
 }
 
+func TestValidateUserFieldRejectsForbiddenCharacter(t *testing.T) {
+    if false == errors.Is(validateUserField("user", "svc%role"), ErrForbiddenCharacter) {
+        t.Fatalf("expected ErrForbiddenCharacter for a user token containing a crontab line-continuation %%")
+    }
+
+    if nil != validateUserField("user", "deploy") {
+        t.Fatalf("expected a normal user token to validate")
+    }
+}
+
+func TestErrorsIsErrForbiddenCharacterInEntryUser(t *testing.T) {
+    entries := []Entry{
+        {
+            Name:     "percent-user",
+            User:     "svc%role",
+            Binary:   "/usr/local/bin/app",
+            Args:     []string{"run"},
+            Schedule: &Schedule{Minute: "0"},
+        },
+    }
+
+    _, err := Render(entries, RenderOptions{})
+    if nil == err {
+        t.Fatalf("expected error when entry user contains a forbidden %% character, got nil")
+    }
+
+    if false == errors.Is(err, ErrForbiddenCharacter) {
+        t.Fatalf("expected errors.Is(err, ErrForbiddenCharacter) to be true, got: %v", err)
+    }
+}
+
 func TestErrorsIsErrEntryEmptyUser(t *testing.T) {
     entries := []Entry{
         {

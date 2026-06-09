@@ -165,3 +165,32 @@ func TestBuildSchema_ExplicitlyTaggedOwnFieldWinsImplicitCollision(t *testing.T)
         t.Fatalf("expected the tagged string field to win, got type %q", property.Type)
     }
 }
+
+type EmbedInner struct {
+    A string `json:"a"`
+    B string `json:"b"`
+}
+
+func TestBuildSchema_EmptyNameTagEmbeddedStructPromoted(t *testing.T) {
+    components := map[string]*Schema{}
+    names := map[reflect.Type]string{}
+    visited := map[reflect.Type]bool{}
+
+    stringType := reflect.TypeOf("")
+    outerType := reflect.StructOf([]reflect.StructField{
+        {Name: "EmbedInner", Anonymous: true, Type: reflect.TypeOf(EmbedInner{}), Tag: `json:",omitempty"`},
+        {Name: "C", Type: stringType, Tag: `json:"c"`},
+    })
+
+    schema := buildSchema(outerType, components, names, visited)
+
+    for _, name := range []string{"a", "b", "c"} {
+        if _, present := schema.Properties[name]; false == present {
+            t.Fatalf("expected promoted property %q (encoding/json promotes an embedded struct tagged json:\",omitempty\"), got %+v", name, schema.Properties)
+        }
+    }
+
+    if _, present := schema.Properties["EmbedInner"]; true == present {
+        t.Fatalf("expected the embedded struct to be promoted, not emitted as a nested object property, got %+v", schema.Properties)
+    }
+}
