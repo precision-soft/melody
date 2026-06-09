@@ -138,3 +138,9 @@ func TestLessThan_MaxGetter(t *testing.T) {
         t.Fatalf("expected Max() to return 42, got: %d", constraint.Max())
     }
 }
+
+func TestLessThan_ErrorCodeDoesNotCollideWithGreaterThanConstraintName(t *testing.T) {
+    if ConstraintGreaterThan == ConstraintLessThanErrorGreaterThan {
+        t.Fatalf("LessThan error code %q collides with the GreaterThan constraint tag name — they must be distinct strings", ConstraintLessThanErrorGreaterThan)
+    }
+}

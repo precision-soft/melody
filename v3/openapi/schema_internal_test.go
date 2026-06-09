@@ -3,7 +3,51 @@ package openapi
 import (
     "reflect"
     "testing"
+    "time"
 )
+
+type selfEmbedNode struct {
+    *selfEmbedNode
+    Value string `json:"value"`
+}
+
+type mutualEmbedA struct {
+    *mutualEmbedB
+    A string `json:"a"`
+}
+
+type mutualEmbedB struct {
+    *mutualEmbedA
+    B string `json:"b"`
+}
+
+func TestBuildSchema_SelfEmbedDoesNotHang(t *testing.T) {
+    done := make(chan struct{})
+    go func() {
+        buildSchema(reflect.TypeOf(selfEmbedNode{}), map[string]*Schema{}, map[reflect.Type]string{}, map[reflect.Type]bool{})
+        close(done)
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(3 * time.Second):
+        t.Fatal("buildSchema hung on a self-embedded struct: embed-promotion walk lacks a visited-type guard")
+    }
+}
+
+func TestBuildSchema_MutualEmbedDoesNotHang(t *testing.T) {
+    done := make(chan struct{})
+    go func() {
+        buildSchema(reflect.TypeOf(mutualEmbedA{}), map[string]*Schema{}, map[reflect.Type]string{}, map[reflect.Type]bool{})
+        close(done)
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(3 * time.Second):
+        t.Fatal("buildSchema hung on mutually-embedded structs: embed-promotion walk lacks a visited-type guard")
+    }
+}
 
 func TestBuildSchema_ByteSliceIsBase64String(t *testing.T) {
     components := map[string]*Schema{}

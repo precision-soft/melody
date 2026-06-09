@@ -236,3 +236,23 @@ func TestLocalStorage_PutRemovesPartialObjectOnReaderError(t *testing.T) {
         t.Fatalf("expected no object on disk after a failed put, but a partial object remains")
     }
 }
+
+func TestLocalStorage_Get_ErrorOnDirectoryKey(t *testing.T) {
+    base := t.TempDir()
+    local := storage.NewLocalStorage(base)
+    runtimeInstance := testRuntime()
+
+    // Put a file in a subdirectory so the subdirectory exists on disk.
+    if putErr := local.Put(runtimeInstance, "subdir/file.txt", strings.NewReader("x"), 1, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("put: %v", putErr)
+    }
+
+    // "subdir" is a real directory — Get should return an error, not a readable directory fd.
+    rc, getErr := local.Get(runtimeInstance, "subdir")
+    if nil == getErr {
+        if nil != rc {
+            rc.Close()
+        }
+        t.Fatalf("Get on a directory key must return an error, but returned nil error")
+    }
+}

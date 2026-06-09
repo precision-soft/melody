@@ -1,6 +1,7 @@
 package security
 
 import (
+    "github.com/precision-soft/melody/v3/internal"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
@@ -15,8 +16,8 @@ func NewAuthenticatedTokenFromClaims(claims securitycontract.Claims) *Authentica
     return &AuthenticatedToken{
         userIdentifier: claims.UserIdentifier,
         roles:          copyRoles(claims.Roles),
-        scope:          copyAnyMap(claims.Scope),
-        attributes:     copyAnyMap(claims.Attributes),
+        scope:          internal.CopyAnyMap(claims.Scope),
+        attributes:     internal.CopyAnyMap(claims.Attributes),
     }
 }
 
@@ -44,30 +45,17 @@ func (instance *AuthenticatedToken) Roles() []string {
 }
 
 func (instance *AuthenticatedToken) Scope() map[string]any {
-    return copyAnyMap(instance.scope)
+    return internal.CopyAnyMap(instance.scope)
 }
 
 func (instance *AuthenticatedToken) Attributes() map[string]any {
-    return copyAnyMap(instance.attributes)
+    return internal.CopyAnyMap(instance.attributes)
 }
 
 func copyRoles(roles []string) []string {
     copied := []string{}
     if nil != roles {
         copied = append([]string{}, roles...)
-    }
-
-    return copied
-}
-
-func copyAnyMap(source map[string]any) map[string]any {
-    if nil == source {
-        return nil
-    }
-
-    copied := make(map[string]any, len(source))
-    for key, value := range source {
-        copied[key] = value
     }
 
     return copied

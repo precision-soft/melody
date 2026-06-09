@@ -136,6 +136,9 @@ func collectStructFields(
 ) {
     resolved := make(map[string]bool)
 
+    embeddedSeen := make(map[reflect.Type]bool)
+    embeddedSeen[structType] = true
+
     ownCandidatesByName := make(map[string][]embeddedCandidate)
     var ownOrder []string
     var embedQueue []reflect.Type
@@ -143,7 +146,11 @@ func collectStructFields(
         field := structType.Field(index)
 
         if true == isPromotedEmbed(field) {
-            embedQueue = append(embedQueue, dereferencedStructType(field.Type))
+            embeddedType := dereferencedStructType(field.Type)
+            if false == embeddedSeen[embeddedType] {
+                embeddedSeen[embeddedType] = true
+                embedQueue = append(embedQueue, embeddedType)
+            }
             continue
         }
 
@@ -183,7 +190,11 @@ func collectStructFields(
                 field := embeddedType.Field(index)
 
                 if true == isPromotedEmbed(field) {
-                    nextLevel = append(nextLevel, dereferencedStructType(field.Type))
+                    embeddedType := dereferencedStructType(field.Type)
+                    if false == embeddedSeen[embeddedType] {
+                        embeddedSeen[embeddedType] = true
+                        nextLevel = append(nextLevel, embeddedType)
+                    }
                     continue
                 }
 

@@ -63,6 +63,51 @@ func splitByTopLevelComma(valueString string) []string {
     return parts
 }
 
+func hasBalancedBrackets(valueString string) bool {
+    parenDepth := 0
+    squareDepth := 0
+    curlyDepth := 0
+    wasEscaped := false
+
+    for _, character := range valueString {
+        if true == wasEscaped {
+            wasEscaped = false
+            continue
+        }
+
+        if '\\' == character {
+            wasEscaped = true
+            continue
+        }
+
+        switch character {
+        case '(':
+            parenDepth++
+        case ')':
+            if 0 == parenDepth {
+                return false
+            }
+            parenDepth--
+        case '[':
+            squareDepth++
+        case ']':
+            if 0 == squareDepth {
+                return false
+            }
+            squareDepth--
+        case '{':
+            curlyDepth++
+        case '}':
+            if 0 == curlyDepth {
+                return false
+            }
+            curlyDepth--
+        }
+    }
+
+    return 0 == parenDepth && 0 == squareDepth && 0 == curlyDepth
+}
+
 func splitByCommaOutsideRegexMeta(valueString string) []string {
     var parts []string
 
@@ -172,42 +217,14 @@ func parseValidationTag(tag string) ([]validationRule, error) {
             params: make(map[string]string),
         }
 
-        openCount := strings.Count(part, "(")
-        closeCount := strings.Count(part, ")")
+        openIndex := strings.Index(part, "(")
+        equalIndex := strings.Index(part, "=")
 
-        hasAnyParen := false
-        if 0 < openCount || 0 < closeCount {
-            hasAnyParen = true
-        }
+        isParenthesized := 0 <= openIndex && (0 > equalIndex || openIndex < equalIndex)
 
-        if true == hasAnyParen {
-            if 1 != openCount || 1 != closeCount {
-                return nil, exception.NewError(
-                    "invalid validation tag syntax",
-                    exceptioncontract.Context{
-                        "tag":  tag,
-                        "part": part,
-                    },
-                    nil,
-                )
-            }
-
-            openIndex := strings.Index(part, "(")
-            closeIndex := strings.Index(part, ")")
-
-            if 0 > openIndex || 0 > closeIndex || closeIndex <= openIndex {
-                return nil, exception.NewError(
-                    "invalid validation tag syntax",
-                    exceptioncontract.Context{
-                        "tag":  tag,
-                        "part": part,
-                    },
-                    nil,
-                )
-            }
-
+        if true == isParenthesized {
             lastIndex := len(part) - 1
-            if closeIndex != lastIndex {
+            if ')' != part[lastIndex] {
                 return nil, exception.NewError(
                     "invalid validation tag syntax",
                     exceptioncontract.Context{
@@ -230,10 +247,20 @@ func parseValidationTag(tag string) ([]validationRule, error) {
                 )
             }
 
-            rule.name = name
+            paramsString := strings.TrimSpace(part[openIndex+1 : lastIndex])
 
-            paramsString := part[openIndex+1 : closeIndex]
-            paramsString = strings.TrimSpace(paramsString)
+            if false == hasBalancedBrackets(paramsString) {
+                return nil, exception.NewError(
+                    "invalid validation tag syntax",
+                    exceptioncontract.Context{
+                        "tag":  tag,
+                        "part": part,
+                    },
+                    nil,
+                )
+            }
+
+            rule.name = name
 
             if "" != paramsString {
                 paramPairs := splitByCommaOutsideRegexMeta(paramsString)

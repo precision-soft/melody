@@ -34,6 +34,31 @@ func TestInMemoryStorage_LoadDeepCopiesNestedMaps(t *testing.T) {
     }
 }
 
+func TestInMemoryStorage_LoadDeepCopiesSlicesOfMaps(t *testing.T) {
+    store := NewInMemoryStorage()
+    defer store.Close()
+
+    if saveErr := store.Save("session", map[string]any{"permissions": []any{map[string]any{"action": "read"}}}, time.Hour); nil != saveErr {
+        t.Fatalf("save failed: %v", saveErr)
+    }
+
+    loaded, _, loadErr := store.Load("session")
+    if nil != loadErr {
+        t.Fatalf("load failed: %v", loadErr)
+    }
+
+    loaded["permissions"].([]any)[0].(map[string]any)["action"] = "write"
+
+    reloaded, _, reloadErr := store.Load("session")
+    if nil != reloadErr {
+        t.Fatalf("reload failed: %v", reloadErr)
+    }
+
+    if "read" != reloaded["permissions"].([]any)[0].(map[string]any)["action"] {
+        t.Fatalf("mutating a map inside a slice returned by Load leaked into internal storage")
+    }
+}
+
 func TestInMemoryStorage_SaveDeepCopiesNestedMaps(t *testing.T) {
     storage := NewInMemoryStorage()
     defer storage.Close()

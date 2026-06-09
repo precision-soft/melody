@@ -217,6 +217,29 @@ func TestRedisTokenStore_PurgeExpiredPrunesStaleMembers(t *testing.T) {
     }
 }
 
+func TestRedisTokenStore_DeleteByUserDoesNotRevokeReissuedTokenOfAnotherUser(t *testing.T) {
+    client := newTokenStoreClient(t)
+    store := rueidis.NewTokenStore(client, rueidis.WithTokenStorePrefix("melody:token:test:staleindex"))
+
+    store.PutWithTtl("reused-token", securitycontract.Claims{UserIdentifier: "userA"}, 100*time.Millisecond)
+
+    time.Sleep(250 * time.Millisecond)
+
+    store.Put("reused-token", securitycontract.Claims{UserIdentifier: "userB"})
+    defer store.Delete("reused-token")
+
+    store.PurgeExpired()
+
+    if removed := store.DeleteByUser("userA"); 0 != removed {
+        t.Fatalf("expected userA to own no live token (its token expired before being re-issued to userB), got removed=%d", removed)
+    }
+
+    found, exists, lookupErr := store.Lookup(newTokenStoreRuntime(), "reused-token")
+    if nil != lookupErr || false == exists || "userB" != found.UserIdentifier {
+        t.Fatalf("expected userB's live token to survive DeleteByUser(userA): %+v %v %v", found, exists, lookupErr)
+    }
+}
+
 func TestRedisTokenStore_NewTokenStorePanicsOnNilClient(t *testing.T) {
     defer func() {
         if recovered := recover(); nil == recovered {

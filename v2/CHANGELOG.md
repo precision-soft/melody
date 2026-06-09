@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `security/rule_test.go` — regression coverage for the API-key rule fail-open guards (empty header name and empty expected value both panic at construction); `security/access_control_test.go`, `security/access_control_listener_test.go`, and `security/config/access_control_builder_test.go` extended to cover the access-control matching, `PUBLIC_ACCESS` rejection, and `AllowAnonymous` fixes above
+- `validation/validation_rule_internal_test.go` — regression coverage that the shorthand and parenthesized regex tag forms both accept an alternation/capture group, and that unbalanced parentheses are still rejected
+
+### Fixed
+
+- `validation/validation_rule.go` — the `validate` tag grammar now accepts a regex containing a group. `parseValidationTag` classified a rule as parenthesized-form by counting `(`/`)` anywhere in the fragment, so the documented shorthand `regex=^(a|b)$` (the parens are a regex group) was misrouted to the `name(params)` branch and hard-rejected with `"invalid validation tag syntax"`, and the parenthesized `regex(pattern=^(a|b)$)` failed too — no tag spelling could express an alternation/capture group. Classification is now by position (a fragment is parenthesized only when `(` precedes any `=`), with a new `hasBalancedBrackets` helper validating the inner balance, so both spellings carry a grouped pattern verbatim. Ported from the `v3` fix.
 
 ## [v2.7.0] - 2026-05-16 - Cron Integration, Decoupled Cron Configuration, and `.example` Flat Layout
 

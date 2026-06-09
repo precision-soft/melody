@@ -53,8 +53,13 @@ var tokenDeleteByUserScript = rueidis.NewLuaScript(`
 local members = redis.call("smembers", KEYS[1])
 local removed = 0
 for index = 1, #members do
-    if redis.call("del", members[index]) == 1 then
-        removed = removed + 1
+    local value = redis.call("get", members[index])
+    if value then
+        local decoded = cjson.decode(value)
+        if decoded["UserIdentifier"] == ARGV[1] then
+            redis.call("del", members[index])
+            removed = removed + 1
+        end
     end
 end
 redis.call("del", KEYS[1])
@@ -173,7 +178,7 @@ func (instance *RedisTokenStore) DeleteByUser(userIdentifier string) int {
         instance.ctx,
         instance.client,
         []string{instance.userKey(userIdentifier)},
-        nil,
+        []string{userIdentifier},
     )
 
     removed, resultErr := result.AsInt64()

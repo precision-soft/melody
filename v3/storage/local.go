@@ -94,6 +94,11 @@ func (instance *LocalStorage) Get(
         return nil, exception.NewError("could not open the storage object", map[string]any{"key": key}, openErr)
     }
 
+    if info, statErr := file.Stat(); nil == statErr && info.IsDir() {
+        _ = file.Close()
+        return nil, exception.NewError("storage key resolves to a directory", map[string]any{"key": key}, nil)
+    }
+
     return file, nil
 }
 

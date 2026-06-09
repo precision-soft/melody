@@ -10,6 +10,7 @@ import (
 
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
+    "github.com/precision-soft/melody/v3/internal"
     sessioncontract "github.com/precision-soft/melody/v3/session/contract"
 )
 
@@ -113,7 +114,7 @@ func (instance *FileStorage) Load(sessionId string) (map[string]any, bool, error
         return nil, false, nil
     }
 
-    return copyAnyMap(entry.Data), true, nil
+    return internal.CopyAnyMap(entry.Data), true, nil
 }
 
 func (instance *FileStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
@@ -127,7 +128,7 @@ func (instance *FileStorage) Save(sessionId string, data map[string]any, ttl tim
     }
 
     entry := fileSessionEntry{
-        Data:      copyAnyMap(data),
+        Data:      internal.CopyAnyMap(data),
         ExpiresAt: expiresAt,
     }
 
@@ -341,24 +342,6 @@ func writeSessionFileInPlace(fileInstance *os.File, snapshot map[string]fileSess
     }
 
     return nil
-}
-
-func copyAnyMap(data map[string]any) map[string]any {
-    if nil == data {
-        return map[string]any{}
-    }
-
-    copied := make(map[string]any, len(data))
-    for key, value := range data {
-        switch typedValue := value.(type) {
-        case map[string]any:
-            copied[key] = copyAnyMap(typedValue)
-        default:
-            copied[key] = value
-        }
-    }
-
-    return copied
 }
 
 var _ sessioncontract.Storage = (*FileStorage)(nil)

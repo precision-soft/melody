@@ -259,10 +259,14 @@ func (instance *Provider) open(resolver containercontract.Resolver) (*bun.DB, er
         },
     )
 
-    ctx, cancel := context.WithTimeout(context.Background(), timeoutConfig.ConnectTimeout)
-    defer cancel()
+    pingContext := context.Background()
+    pingCancel := func() {}
+    if 0 < timeoutConfig.ConnectTimeout {
+        pingContext, pingCancel = context.WithTimeout(context.Background(), timeoutConfig.ConnectTimeout)
+    }
+    defer pingCancel()
 
-    pingErr := database.PingContext(ctx)
+    pingErr := database.PingContext(pingContext)
     if nil != pingErr {
         _ = database.Close()
 

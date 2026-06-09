@@ -10,7 +10,7 @@ import (
 
 const (
     ConstraintLessThan                 = "lessThan"
-    ConstraintLessThanErrorGreaterThan = "greaterThan"
+    ConstraintLessThanErrorGreaterThan = "greaterThanMax"
 )
 
 func NewLessThan(max int) *LessThan {

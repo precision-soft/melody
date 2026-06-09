@@ -97,19 +97,11 @@ func cloneClaims(claims securitycontract.Claims) securitycontract.Claims {
     }
 
     if nil != claims.Scope {
-        scope := make(map[string]any, len(claims.Scope))
-        for key, value := range claims.Scope {
-            scope[key] = value
-        }
-        cloned.Scope = scope
+        cloned.Scope = internal.CopyAnyMap(claims.Scope)
     }
 
     if nil != claims.Attributes {
-        attributes := make(map[string]any, len(claims.Attributes))
-        for key, value := range claims.Attributes {
-            attributes[key] = value
-        }
-        cloned.Attributes = attributes
+        cloned.Attributes = internal.CopyAnyMap(claims.Attributes)
     }
 
     return cloned

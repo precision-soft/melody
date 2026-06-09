@@ -35,6 +35,7 @@ type ServerSentEventBackplane struct {
     publishChannel *amqp091.Channel
     consumeChannel *amqp091.Channel
     closing        bool
+    reconnecting   bool
     ownsConnection bool
 
     ctx    context.Context
@@ -318,28 +319,48 @@ func (instance *ServerSentEventBackplane) declareExchange(channel *amqp091.Chann
 
 func (instance *ServerSentEventBackplane) liveConnection() (*amqp091.Connection, error) {
     instance.mutex.Lock()
-    defer instance.mutex.Unlock()
 
     if true == instance.closing {
+        instance.mutex.Unlock()
+
         return nil, exception.NewError("amqp sse backplane is closing", nil, nil)
     }
 
     existing := instance.connection
     if nil != existing && false == existing.IsClosed() {
+        instance.mutex.Unlock()
+
         return existing, nil
     }
 
     if nil == instance.dialer {
+        instance.mutex.Unlock()
+
         return nil, exception.NewError("amqp sse backplane connection is closed and no dialer is configured", nil, nil)
     }
 
+    if true == instance.reconnecting {
+        instance.mutex.Unlock()
+
+        return nil, exception.NewError("amqp sse backplane reconnect already in progress", nil, nil)
+    }
+
+    instance.reconnecting = true
+    instance.mutex.Unlock()
+
     connection, dialErr := instance.dialer()
+
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.reconnecting = false
+
     if nil != dialErr {
         return nil, exception.NewError("amqp sse backplane reconnect dial failed", nil, dialErr)
     }
 
     if true == instance.closing {
-        connection.Close()
+        _ = connection.Close()
 
         return nil, exception.NewError("amqp sse backplane is closing", nil, nil)
     }

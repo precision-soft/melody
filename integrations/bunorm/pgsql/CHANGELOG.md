@@ -7,7 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v3.1.0] - 2026-04-20 - Secure-by-Default TLS and Configurable pgdriver TLS
+### Fixed
+
+- `provider.go`, `v2/provider.go` — `Open` no longer fails the connection ping when `ConnectTimeout` is `0`. The ping context was built unconditionally with `context.WithTimeout(ctx, timeoutConfig.ConnectTimeout)`, so a configured zero timeout produced an already-expired context and `PingContext` returned `context.DeadlineExceeded` against a healthy database. The ping context is now guarded with `if 0 < timeoutConfig.ConnectTimeout`, matching the `v3` fix below and the bunorm `mysql` provider. (`v1`/`v2`; no version bump.)
+
+## [v3.1.1] - 2026-06-09 - Honor Zero ConnectTimeout on the Connection Ping
+
+### Fixed
+
+- `v3/provider.go` — `Open` no longer fails the connection ping when `ConnectTimeout` is `0`. The ping context was built unconditionally with `context.WithTimeout(ctx, timeoutConfig.ConnectTimeout)`, so a configured zero timeout (`WithTimeoutConfig(NewTimeoutConfig(0))`, which the framework treats elsewhere — and in the same function's post-build-hook block — as "no deadline / wait indefinitely") produced an already-expired context and `PingContext` returned `context.DeadlineExceeded` against a perfectly healthy database, surfacing as `"database connection failed"`. The ping context is now guarded with `if 0 < timeoutConfig.ConnectTimeout`, mirroring the bunorm `mysql/v3` provider. v3-only (the same parity guard for `v1`/`v2` is deferred).
 
 ### Fixed
 
@@ -108,7 +116,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `connection_config.go` — `pgsql.ConnectionConfig` holding connection details; `SafeContext()` excludes password from logs
 - Builder methods: `Provider.WithPoolConfig()`, `WithTimeoutConfig()`
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v3.1.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v3.1.1...HEAD
+
+[v3.1.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v3.1.0...integrations/bunorm/pgsql/v3.1.1
 
 [v3.1.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v3.0.1...integrations/bunorm/pgsql/v3.1.0
 

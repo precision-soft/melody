@@ -39,6 +39,52 @@ func TestServerSentEventBackplane_PublishAfterCloseDoesNotRetry(t *testing.T) {
     }
 }
 
+func TestServerSentEventBackplane_CloseDoesNotDeadlockDuringReconnect(t *testing.T) {
+    dialStarted := make(chan struct{}, 1)
+    dialUnblock := make(chan struct{})
+
+    hub := melodyhttp.NewServerSentEventHub()
+    backplane := amqp.NewServerSentEventBackplane(amqp.ServerSentEventBackplaneConfig{
+        Dialer: func() (*amqp091.Connection, error) {
+            select {
+            case dialStarted <- struct{}{}:
+            default:
+            }
+            <-dialUnblock
+            return nil, errors.New("dial cancelled")
+        },
+        Hub: hub,
+    })
+
+    // Wait until the listen goroutine's first dial is in progress.
+    select {
+    case <-dialStarted:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("dial never started")
+    }
+
+    // Close() must not deadlock: it must be able to acquire the mutex and set closing=true
+    // even while liveConnection() is blocked inside the dialer. Unblocking the dialer
+    // simulates the dial completing (or timing out), after which the listen goroutine exits.
+    done := make(chan error, 1)
+    go func() { done <- backplane.Close() }()
+
+    // Unblock the dialer shortly after Close() starts — this simulates the dial timing out.
+    // If the fix is correct, Close() acquires the mutex promptly (while dial blocks) and
+    // wait.Wait() resolves once the dialer returns.
+    time.Sleep(50 * time.Millisecond)
+    close(dialUnblock)
+
+    select {
+    case closeErr := <-done:
+        if nil != closeErr {
+            t.Fatalf("close: %v", closeErr)
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatalf("Close() deadlocked — mutex was held during dial and blocked Close()")
+    }
+}
+
 func TestServerSentEventBackplane_ReplicatesBroadcastToAnotherInstance(t *testing.T) {
     dsn := os.Getenv("AMQP_DSN")
     if "" == dsn {
