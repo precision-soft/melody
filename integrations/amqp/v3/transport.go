@@ -481,6 +481,10 @@ func (instance *Transport) republish(
         return instance.nackChannel(channel, stamp.Tag, true)
     }
 
+    if stamp.Generation != instance.currentGeneration() {
+        return nil
+    }
+
     return instance.ackChannel(channel, stamp.Tag)
 }
 

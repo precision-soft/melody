@@ -12,6 +12,7 @@ import (
 
     "github.com/precision-soft/melody/integrations/bunorm/v3"
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/pgdialect"
@@ -53,6 +54,8 @@ func (instance *Provider) Open(params bunorm.ConnectionParams, logger loggingcon
 }
 
 func (instance *Provider) openWithRetry(params bunorm.ConnectionParams, logger loggingcontract.Logger) (*bun.DB, error) {
+    logger = logging.EnsureLogger(logger)
+
     attempt := uint32(0)
     maxAttempts := instance.retryConfig.MaxAttempts
     if 0 == maxAttempts {

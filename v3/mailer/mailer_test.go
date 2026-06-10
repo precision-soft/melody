@@ -488,3 +488,63 @@ func TestRenderMessage_SkipsEmptyBodyPartWithAttachments(t *testing.T) {
         t.Fatalf("expected the attachment part to be present")
     }
 }
+
+func TestRenderMessage_LongAsciiDisplayNameStaysUnderHardLineLimit(t *testing.T) {
+    name := strings.Repeat("A", 2000)
+
+    payload, renderErr := mailer.RenderMessage(mailercontract.Message{
+        From:    mailercontract.Address{Name: name, Email: "from@example.com"},
+        To:      []mailercontract.Address{{Email: "to@example.com"}},
+        Subject: "hello",
+        Text:    "body",
+    })
+    if nil != renderErr {
+        t.Fatalf("render: %v", renderErr)
+    }
+
+    for _, line := range strings.Split(string(payload), "\r\n") {
+        if 998 < len(line) {
+            t.Fatalf("header line exceeds the 998-octet hard limit: %d octets", len(line))
+        }
+    }
+
+    header, parseErr := textproto.NewReader(bufio.NewReader(bytes.NewReader(payload))).ReadMIMEHeader()
+    if nil != parseErr {
+        t.Fatalf("parse headers: %v", parseErr)
+    }
+
+    decoded, decodeErr := new(mime.WordDecoder).DecodeHeader(header.Get("From"))
+    if nil != decodeErr {
+        t.Fatalf("decode from: %v", decodeErr)
+    }
+
+    if false == strings.Contains(decoded, name) {
+        t.Fatalf("display name did not round-trip through encoded-word chunking")
+    }
+}
+
+func TestRenderMessage_LongAsciiAttachmentFilenameStaysUnderHardLineLimit(t *testing.T) {
+    filename := strings.Repeat("A", 2000) + ".txt"
+
+    payload, renderErr := mailer.RenderMessage(mailercontract.Message{
+        From: mailercontract.Address{Email: "shop@example.com"},
+        To:   []mailercontract.Address{{Email: "ada@example.com"}},
+        Text: "see attached",
+        Attachments: []mailercontract.Attachment{
+            {Filename: filename, ContentType: "text/plain", Content: []byte("data")},
+        },
+    })
+    if nil != renderErr {
+        t.Fatalf("render: %v", renderErr)
+    }
+
+    for _, line := range strings.Split(string(payload), "\r\n") {
+        if 998 < len(line) {
+            t.Fatalf("rendered line exceeds the 998-octet hard limit: %d octets", len(line))
+        }
+    }
+
+    if false == strings.Contains(string(payload), "filename*0*=UTF-8''") {
+        t.Fatalf("expected RFC 2231 continuation form for an overlong filename")
+    }
+}

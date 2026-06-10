@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `provider.go`, `v2/provider.go` — `Open` no longer fails the connection ping when `ConnectTimeout` is `0`. The ping context was built unconditionally with `context.WithTimeout(ctx, timeoutConfig.ConnectTimeout)`, so a configured zero timeout produced an already-expired context and `PingContext` returned `context.DeadlineExceeded` against a healthy database. The ping context is now guarded with `if 0 < timeoutConfig.ConnectTimeout`, matching the `v3` fix below and the bunorm `mysql` provider. (`v1`/`v2`; no version bump.)
 
+## [v3.1.2] - 2026-06-10
+
+### Added
+
+- `v3/README.md` — added a v3 module README documenting the option-based `Provider`, the secure-by-default TLS controls (`WithInsecure`/`WithTlsConfig`), the typed pool/timeout/retry configs, and the post-build hook.
+
+### Fixed
+
+- `v3/provider.go` — `openWithRetry` no longer panics when `Open` is called with a `nil` logger and a `RetryConfig`. The retry path called `logger.Info`/`Warning`/`Error` directly, so a transient connection error dereferenced the nil logger; the logger is now normalized through `logging.EnsureLogger`, matching the framework's nil-logger contract that the non-retry path (and the example wiring) already rely on.
+
 ## [v3.1.1] - 2026-06-09 - Honor Zero ConnectTimeout on the Connection Ping
 
 ### Fixed

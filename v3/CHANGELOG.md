@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.7.1] - 2026-06-10
+
+### Fixed
+
+- `internal/copy.go` — `CopyAnyMap`/`CopyAnySlice` now deep-copy typed slices and maps, not only `[]any` and `map[string]any`. The previous type switch matched those two shapes and stored every other value (including `[]string`, `[]int`, `map[string]int`, and nested combinations) by reference, so a caller that retained and mutated such a value after a `session` or `storage` save corrupted the stored copy across `Load`/`Save` cycles. A value whose kind is slice or map is now reflected and copied element-wise (scalars and pointers stay shared, as before); a nil interface element is preserved as the element type's zero value.
+- `mailer/message.go` — an overlong all-ASCII address display name (`From`/`To`/`Cc`/`Reply-To`) no longer produces a header line past the RFC 5322 998-octet hard limit. A quoted display name is a single space-free token, so the header folder could not break it and emitted it whole on a continuation line; `encodePhrase` now routes a name that contains an overlong token through the same `encodeWordChunks` encoded-word splitting already used for long `Subject` and custom-header tokens. Short names keep the existing quoted form.
+- `mailer/message.go` — an overlong all-ASCII attachment filename no longer produces a `Content-Disposition` header line past the 998-octet hard limit. The header was written unfolded with the filename as a single token; when the line would exceed the limit the filename is now emitted as RFC 2231 `filename*0*`/`filename*1*` continuations, each folded under the line limit. Short filenames keep the exact existing `filename="…"` and `filename*=UTF-8''…` forms.
+
 ## [v3.7.0] - 2026-06-09 - Platform Extensions: Messaging, Realtime, Auth, i18n, OpenAPI, Lock, Mailer, and Storage
 
 ### Added

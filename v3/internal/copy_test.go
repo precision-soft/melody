@@ -143,3 +143,55 @@ func TestCopyAnySlice_CopiesMapsInsideSlice(t *testing.T) {
         t.Fatalf("mutating copied slice element leaked into original")
     }
 }
+
+func TestCopyAnyMap_DeepCopiesTypedSlices(t *testing.T) {
+    original := map[string]any{
+        "roles": []string{"user"},
+    }
+
+    copied := CopyAnyMap(original)
+
+    copiedRoles, ok := copied["roles"].([]string)
+    if false == ok {
+        t.Fatalf("expected copied roles to remain a []string")
+    }
+
+    copiedRoles[0] = "admin"
+
+    originalRoles := original["roles"].([]string)
+    if "user" != originalRoles[0] {
+        t.Fatalf("mutating the copy leaked into the original: got %q, want %q", originalRoles[0], "user")
+    }
+}
+
+func TestCopyAnyMap_DeepCopiesTypedMaps(t *testing.T) {
+    original := map[string]any{
+        "flags": map[string]int{"a": 1},
+    }
+
+    copied := CopyAnyMap(original)
+
+    copiedFlags := copied["flags"].(map[string]int)
+    copiedFlags["a"] = 99
+
+    originalFlags := original["flags"].(map[string]int)
+    if 1 != originalFlags["a"] {
+        t.Fatalf("mutating the copied typed map leaked into the original: got %d, want 1", originalFlags["a"])
+    }
+}
+
+func TestCopyAnyMap_DeepCopiesTypedSliceOfTypedSlices(t *testing.T) {
+    original := map[string]any{
+        "matrix": [][]string{{"a"}},
+    }
+
+    copied := CopyAnyMap(original)
+
+    copiedMatrix := copied["matrix"].([][]string)
+    copiedMatrix[0][0] = "z"
+
+    originalMatrix := original["matrix"].([][]string)
+    if "a" != originalMatrix[0][0] {
+        t.Fatalf("mutating the nested typed slice leaked into the original: got %q, want %q", originalMatrix[0][0], "a")
+    }
+}

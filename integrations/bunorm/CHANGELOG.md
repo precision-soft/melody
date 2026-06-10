@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.1.1] - 2026-06-10
+
+### Added
+
+- `v3/README.md` — added a v3 module README documenting the dialect-agnostic `ManagerRegistry`, the `ConnectionParams`/`Provider` contract, the `ManagerRegistry` service-registration pattern, the `ReadWriteSplitter`, and the MySQL/PostgreSQL dialect providers.
+
 ## [v3.1.0] - 2026-06-09 - Column Encryption, Field-Level Audit Trail, and Read/Write Split
 
 ### Added

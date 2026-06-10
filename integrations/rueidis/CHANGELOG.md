@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.2.1] - 2026-06-10
+
+### Added
+
+- `v3/README.md` — added a v3 module README documenting the client `Provider`, the distributed `Locker`, the revocable `RedisTokenStore`, the `ServerSentEventBackplane`, the `cache` backend, and the plug-and-play `Register*` helpers.
+
 ## [v3.2.0] - 2026-06-09 - Redis Lock, Revocable Token Store, and Server-Sent Events Backplane
 
 ### Added

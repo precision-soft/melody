@@ -6,6 +6,7 @@ import (
     "encoding/hex"
     "mime"
     "mime/quotedprintable"
+    "strconv"
     "strings"
     "time"
 
@@ -16,6 +17,8 @@ import (
 const lineBreak = "\r\n"
 
 const maxHeaderLineLength = 78
+
+const maxHardHeaderLineLength = 998
 
 var reservedHeaders = map[string]struct{}{
     "from":                      {},
@@ -159,6 +162,10 @@ func encodePhrase(name string) string {
     encoded := mime.QEncoding.Encode("utf-8", name)
     if encoded != name {
         return encoded
+    }
+
+    if true == hasOverlongToken(name) {
+        return encodeWordChunks(name)
     }
 
     return "\"" + phraseSanitizer.Replace(name) + "\""
@@ -338,10 +345,82 @@ func writeAttachment(builder *strings.Builder, attachment mailercontract.Attachm
 
     builder.WriteString("Content-Type: " + headerSanitizer.Replace(contentType) + lineBreak)
     builder.WriteString("Content-Transfer-Encoding: base64" + lineBreak)
-    builder.WriteString("Content-Disposition: attachment; " + filenameParameter(attachment.Filename) + lineBreak)
+    builder.WriteString(dispositionHeaderLine(attachment.Filename))
+    builder.WriteString(lineBreak)
     builder.WriteString(lineBreak)
     builder.WriteString(encodeBase64Lines(attachment.Content))
     builder.WriteString(lineBreak)
+}
+
+func dispositionHeaderLine(filename string) string {
+    plain := "Content-Disposition: attachment; " + filenameParameter(filename)
+    if len(plain) <= maxHardHeaderLineLength {
+        return plain
+    }
+
+    return foldDispositionFilename(filename)
+}
+
+func foldDispositionFilename(filename string) string {
+    encoded := encodeRfc2231(filename)
+
+    var builder strings.Builder
+    builder.WriteString("Content-Disposition: attachment;")
+
+    segmentIndex := 0
+    remaining := encoded
+    for {
+        prefix := " filename*" + strconv.Itoa(segmentIndex) + "*="
+        if 0 == segmentIndex {
+            prefix = prefix + "UTF-8''"
+        }
+
+        budget := maxHeaderLineLength - len(prefix) - 1
+        if budget < 1 {
+            budget = 1
+        }
+
+        cut := budget
+        if cut > len(remaining) {
+            cut = len(remaining)
+        }
+
+        for 0 < cut && true == splitsPercentTriplet(remaining, cut) {
+            cut--
+        }
+        if 0 == cut {
+            cut = len(remaining)
+        }
+
+        chunk := remaining[:cut]
+        remaining = remaining[cut:]
+
+        builder.WriteString(lineBreak)
+        builder.WriteString(prefix)
+        builder.WriteString(chunk)
+        if "" != remaining {
+            builder.WriteString(";")
+        }
+
+        segmentIndex = segmentIndex + 1
+        if "" == remaining {
+            break
+        }
+    }
+
+    return builder.String()
+}
+
+func splitsPercentTriplet(value string, offset int) bool {
+    if 1 <= offset && '%' == value[offset-1] {
+        return true
+    }
+
+    if 2 <= offset && '%' == value[offset-2] {
+        return true
+    }
+
+    return false
 }
 
 func encodeQuotedPrintable(body string) string {
