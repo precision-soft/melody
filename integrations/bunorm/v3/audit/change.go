@@ -28,12 +28,12 @@ func ChangeSet(before any, after any) []Change {
 
 func changeSetWithIgnore(before any, after any, ignore map[string]struct{}) []Change {
     var changes []Change
-    collectChanges(&changes, structValue(before), structValue(after), ignore)
+    collectChanges(&changes, structValue(before), structValue(after), ignore, false)
 
     return changes
 }
 
-func collectChanges(changes *[]Change, beforeValue reflect.Value, afterValue reflect.Value, ignore map[string]struct{}) {
+func collectChanges(changes *[]Change, beforeValue reflect.Value, afterValue reflect.Value, ignore map[string]struct{}, forceRedact bool) {
     var structType reflect.Type
     if true == beforeValue.IsValid() {
         structType = beforeValue.Type()
@@ -66,7 +66,8 @@ func collectChanges(changes *[]Change, beforeValue reflect.Value, afterValue ref
                 embeddedAfter = structValueOf(afterValue.Field(index))
             }
 
-            collectChanges(changes, embeddedBefore, embeddedAfter, ignore)
+            embedRedact := forceRedact || "redact" == field.Tag.Get("audit")
+            collectChanges(changes, embeddedBefore, embeddedAfter, ignore, embedRedact)
             continue
         }
 
@@ -79,7 +80,7 @@ func collectChanges(changes *[]Change, beforeValue reflect.Value, afterValue ref
             continue
         }
 
-        redact := isRedactedField(field)
+        redact := forceRedact || isRedactedField(field)
 
         var oldValue any
         var newValue any
@@ -259,6 +260,11 @@ func valueContainsRedactTagReflect(value reflect.Value, seen map[uintptr]struct{
         return false
 
     case reflect.Map:
+        pointer := value.Pointer()
+        if _, visited := seen[pointer]; true == visited {
+            return false
+        }
+        seen[pointer] = struct{}{}
         for _, key := range value.MapKeys() {
             if true == valueContainsRedactTagReflect(key, seen) {
                 return true

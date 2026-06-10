@@ -48,7 +48,7 @@ Optional configuration:
 
 ## Cache backend
 
-Package: [`cache`](./cache). [`cache.NewBackend`](./cache/backend.go) wraps a `rueidis.Client` and exposes both the classic methods (`Get`, `Set`, `Delete`, `Has`, `Clear`, `ClearByPrefix`, `Many`, `SetMultiple`, `DeleteMultiple`, `Increment`, `Decrement`) and ctx-first variants (`GetCtx`, `SetCtx`, …) that propagate caller deadlines/cancellation. [`cache.NewBackendService`](./cache/backend_service.go) is a container-friendly singleton wrapper implementing the core `cache/contract.Backend`.
+Package: [`cache`](./cache). [`cache.NewBackend`](./cache/backend.go) wraps a `rueidis.Client` and exposes both the classic methods (`Get`, `Set`, `Delete`, `Has`, `Clear`, `ClearByPrefix`, `Many`, `SetMultiple`, `DeleteMultiple`, `Increment`, `Decrement`) and ctx-first variants (`GetCtx`, `SetCtx`, …) that propagate caller deadlines/cancellation. [`cache.NewBackendService`](./cache/backend_service.go) is a container-friendly singleton wrapper implementing the core `cache/contract.Backend`. The `rueidis.Client` is owned by the application, not the backend: `Backend.Close` does not close the client, so the same client can be shared with the locker, token store, and server-sent-event backplane without one component tearing it down for the others — close the client once during application shutdown.
 
 ## Plug-and-play registration
 

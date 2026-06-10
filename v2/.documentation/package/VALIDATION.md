@@ -46,7 +46,7 @@ import (
 type CreateUserInput struct {
 	Email string `json:"email" validate:"notBlank,email"`
 	Name  string `json:"name" validate:"notBlank,min(value=3),max(value=64)"`
-	Age   int    `json:"age" validate:"min(value=1),max(value=130)"`
+	Age   int    `json:"age" validate:"greaterThan(value=0)"`
 }
 
 func validateInput(input CreateUserInput) error {
@@ -75,6 +75,7 @@ func validateInput(input CreateUserInput) error {
 - Only exported struct fields are validated.
 - `json:"name"` influences the error field name when a non-empty json name is present.
 - `validate:"-"` disables validation for a field.
+- `min`/`max` are **string byte-length** constraints (`MinLength`/`MaxLength`), not numeric range and not rune count. They stringify the value and compare `len()`, so on a numeric field they bound the number of digits, not the value — `max(value=130)` on an `int` accepts any value up to 130 bytes long. Use `greaterThan` for a numeric lower bound (as the `Age` field above does).
 
 ## Userland API
 

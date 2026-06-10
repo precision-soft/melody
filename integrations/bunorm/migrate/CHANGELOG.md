@@ -70,7 +70,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `migrate.go` — `migrate.Up()` / `UpWithOption()` — forward-migration convenience; `Down()` / `DownWithOption()` — rollback convenience
 - `README.md` — migration workflow documentation; CLI commands introduced in v2.0.0
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v3.0.2...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v3.0.3...HEAD
+
+[v3.0.3]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v3.0.2...integrations/bunorm/migrate/v3.0.3
 
 [v3.0.2]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v3.0.1...integrations/bunorm/migrate/v3.0.2
 

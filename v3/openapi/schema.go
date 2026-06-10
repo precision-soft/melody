@@ -388,7 +388,8 @@ func applyValidation(schema *Schema, validateTag string) {
             }
         case "greaterThan":
             if "integer" == schema.Type || "number" == schema.Type {
-                if value, parseErr := strconv.ParseFloat(params["value"], 64); nil == parseErr {
+                if parsed, parseErr := strconv.ParseFloat(params["value"], 64); nil == parseErr {
+                    value := float64(int64(parsed))
                     exclusive := true
                     schema.Minimum = &value
                     schema.ExclusiveMinimum = &exclusive
@@ -396,7 +397,8 @@ func applyValidation(schema *Schema, validateTag string) {
             }
         case "lessThan":
             if "integer" == schema.Type || "number" == schema.Type {
-                if value, parseErr := strconv.ParseFloat(params["value"], 64); nil == parseErr {
+                if parsed, parseErr := strconv.ParseFloat(params["value"], 64); nil == parseErr {
+                    value := float64(int64(parsed))
                     exclusive := true
                     schema.Maximum = &value
                     schema.ExclusiveMaximum = &exclusive
@@ -642,7 +644,8 @@ func splitRule(rule string) (string, map[string]string) {
     params := make(map[string]string)
 
     openIndex := strings.IndexByte(trimmed, '(')
-    if -1 != openIndex && true == strings.HasSuffix(trimmed, ")") {
+    equalIndex := strings.IndexByte(trimmed, '=')
+    if -1 != openIndex && true == strings.HasSuffix(trimmed, ")") && (-1 == equalIndex || openIndex < equalIndex) {
         name := strings.TrimSpace(trimmed[:openIndex])
         inner := trimmed[openIndex+1 : len(trimmed)-1]
         for _, pair := range splitRuleParameters(inner) {
@@ -667,12 +670,11 @@ func splitRule(rule string) (string, map[string]string) {
         return name, params
     }
 
-    separator := strings.IndexByte(trimmed, '=')
-    if -1 == separator {
+    if -1 == equalIndex {
         return trimmed, params
     }
 
-    params["value"] = strings.TrimSpace(trimmed[separator+1:])
+    params["value"] = strings.TrimSpace(trimmed[equalIndex+1:])
 
-    return strings.TrimSpace(trimmed[:separator]), params
+    return strings.TrimSpace(trimmed[:equalIndex]), params
 }

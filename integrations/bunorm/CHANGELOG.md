@@ -7,13 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v3.1.1] - 2026-06-10
-
-### Added
-
-- `v3/README.md` — added a v3 module README documenting the dialect-agnostic `ManagerRegistry`, the `ConnectionParams`/`Provider` contract, the `ManagerRegistry` service-registration pattern, the `ReadWriteSplitter`, and the MySQL/PostgreSQL dialect providers.
-
-## [v3.1.0] - 2026-06-09 - Column Encryption, Field-Level Audit Trail, and Read/Write Split
+## [v3.1.0] - 2026-06-10 - Column Encryption, Field-Level Audit Trail, and Read/Write Split
 
 ### Added
 
@@ -23,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `v3/audit/` — `NewAsyncStorage(delegate, bufferSize)` wraps any `Storage` to persist entries on a background worker so an audited write never blocks the request path; it dead-letters to the configured logger on queue overflow or backend failure (never rolling back the business transaction) and `Close` drains the queue. `Dropped()` and `Failed()` expose per-instance counts of entries discarded (queue full / closed) and entries the delegate could not persist, so operators can alarm on silent audit loss — useful when several instances run behind a load balancer, each with its own buffer that a hard kill would lose (call `Close` during a graceful drain). A `Save` racing or following `Close` is dead-lettered instead of panicking on a closed channel. `FileStorage.Save` now `fsync`s after each batch so a crash cannot lose the last buffered lines.
 - `v3/encrypt/` — `Cipher.EncryptDeterministicWithKeyId(plaintext, keyId)` plus `Migrator`'s `TableSpec.Deterministic` flag re-derive a searchable column's plaintext-bound nonce under the target key during a key-rotation re-encrypt, so a deterministic column stays searchable through rotation (the random-nonce `EncryptWithKeyId` would have silently broken equality lookups).
 - `v3/encrypt/command.go` — `Commands(database, cipher)` returns the `melody:encrypt:database` command as a `[]cli/contract.Command`, so userland registers the integration's built-in command in one call.
+- `v3/README.md` — added a v3 module README documenting the dialect-agnostic `ManagerRegistry`, the `ConnectionParams`/`Provider` contract, the `ManagerRegistry` service-registration pattern, the `ReadWriteSplitter`, and the MySQL/PostgreSQL dialect providers.
 
 ### Changed
 
@@ -30,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `v3/audit/` — an `audit:"redact"` tag placed on an embedded (anonymous) struct field is now honored: the promoted inner fields are redacted as a group. `collectChanges` recursed into an auditable embedded struct without carrying the embed field's `redact` tag (it inspected only the embed's `bun` tag and element type), so the tag was dropped and each promoted field's plaintext was written to the audit `changes` column. The recursion now threads a force-redact flag set from the embed field's `audit:"redact"` tag, complementing the per-field redaction already applied to named fields.
+- `v3/audit/` — the redact-tag value scan no longer overflows the stack on a self-referential map. `valueContainsRedactTagReflect` recorded visited pointers to break cycles for pointer kinds but iterated a `map` without recording it, so a `map[string]any` that (directly or through an interface value) referenced itself recursed forever and crashed the process with a fatal stack overflow. The map header is now added to the cycle-detection set before its keys/values are walked, matching the existing pointer guard (a value-reachable slice can only self-reference through a pointer, already covered).
 - `v3/audit/` — `ChangeSet` now recurses into promoted (exported, anonymous) embedded structs other than `bun.BaseModel`, so an embedded struct's columns are captured in the diff instead of being silently dropped. Table names passed to `NewRegistry`/`Registry.Register` are validated against a strict SQL-identifier pattern (panic on violation) since they flow unquoted through `ModelTableExpr` into DDL/DML.
 - `v3/encrypt/` — documented that deterministic encryption yields byte-identical ciphertext for equal plaintext across every deterministic column and table under the same key (cross-column/cross-table equality is observable), not just within one column.
 - `v3/encrypt/` — `EncryptedString.Value` now returns the ciphertext as `[]byte` rather than `string`, so the `\x00` bytes in the `<ENC>\0gcm1\0…` marker survive persistence: bun inlines a `driver.Valuer` string into the MySQL statement text and its string formatter drops embedded NUL bytes, which silently corrupted the marker so a subsequent read no longer recognized the value as ciphertext and returned it unencrypted (encryption-at-rest was a no-op for the `EncryptedString` column type on bun + MySQL). Returning `[]byte` makes bun emit an `X'…'` binary literal that preserves every byte; `Scan` already accepts both `string` and `[]byte`, so reads are unaffected.

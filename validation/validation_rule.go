@@ -112,6 +112,7 @@ func splitByCommaOutsideRegexMeta(valueString string) []string {
     var parts []string
 
     current := strings.Builder{}
+    parenDepth := 0
     squareDepth := 0
     curlyDepth := 0
     isInSingleQuote := false
@@ -176,8 +177,22 @@ func splitByCommaOutsideRegexMeta(valueString string) []string {
                 continue
             }
 
+            if '(' == character {
+                parenDepth++
+                current.WriteRune(character)
+                continue
+            }
+
+            if ')' == character {
+                if 0 < parenDepth {
+                    parenDepth--
+                }
+                current.WriteRune(character)
+                continue
+            }
+
             if ',' == character {
-                if 0 == squareDepth && 0 == curlyDepth {
+                if 0 == squareDepth && 0 == curlyDepth && 0 == parenDepth {
                     parts = append(parts, current.String())
                     current.Reset()
                     continue

@@ -40,7 +40,7 @@ func romanianPluralCategory(n float64, i float64, hasFraction bool) string {
     }
 
     mod100 := math.Mod(i, 100)
-    if true == hasFraction || 0 == n || (mod100 >= 2 && mod100 <= 19) {
+    if true == hasFraction || 0 == n || (mod100 >= 1 && mod100 <= 19) {
         return "few"
     }
 

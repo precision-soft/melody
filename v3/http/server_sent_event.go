@@ -47,7 +47,7 @@ func (instance *ServerSentEventWriter) Send(event ServerSentEvent) error {
 
     if "" != event.Id {
         builder.WriteString("id: ")
-        builder.WriteString(sanitizeServerSentEventField(event.Id))
+        builder.WriteString(sanitizeServerSentEventId(event.Id))
         builder.WriteString("\n")
     }
 
@@ -86,6 +86,10 @@ func (instance *ServerSentEventWriter) Send(event ServerSentEvent) error {
 
 func sanitizeServerSentEventField(value string) string {
     return strings.NewReplacer("\r", "", "\n", "").Replace(value)
+}
+
+func sanitizeServerSentEventId(value string) string {
+    return strings.NewReplacer("\r", "", "\n", "", "\x00", "").Replace(value)
 }
 
 func (instance *ServerSentEventWriter) Comment(text string) error {

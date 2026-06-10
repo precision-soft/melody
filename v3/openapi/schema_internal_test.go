@@ -189,6 +189,27 @@ func TestBuildSchema_QuotedCommaInRegexParamPreserved(t *testing.T) {
     }
 }
 
+func TestBuildSchema_RegexShorthandEndingInParenPreserved(t *testing.T) {
+    components := map[string]*Schema{}
+    names := map[reflect.Type]string{}
+    visited := map[reflect.Type]bool{}
+
+    stringType := reflect.TypeOf("")
+    requestType := reflect.StructOf([]reflect.StructField{
+        {Name: "Kind", Type: stringType, Tag: `json:"kind" validate:"regex=^(foo|bar)"`},
+    })
+
+    schema := buildSchema(requestType, components, names, visited)
+
+    kind := schema.Properties["kind"]
+    if nil == kind {
+        t.Fatalf("expected a schema for kind, got %+v", schema.Properties)
+    }
+    if "^(foo|bar)" != kind.Pattern {
+        t.Fatalf("expected pattern ^(foo|bar): a shorthand regex value ending in ) must not be mis-parsed as the name(params) form, matching the runtime validator, got %q", kind.Pattern)
+    }
+}
+
 func TestBuildSchema_ExplicitlyTaggedOwnFieldWinsImplicitCollision(t *testing.T) {
     components := map[string]*Schema{}
     names := map[reflect.Type]string{}

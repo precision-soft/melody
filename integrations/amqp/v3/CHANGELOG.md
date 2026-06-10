@@ -7,13 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v3.0.1] - 2026-06-10
-
-### Fixed
-
-- `transport.go` — `Nack` with requeue no longer acknowledges the original delivery on a stale channel after a mid-publish reconnection. `republish` captured the consume channel and its generation before publishing the requeued copy; if that publish triggered a reconnect — which replaces the consume channel and bumps the generation — the following `Ack` ran against the now-closed channel and returned an error for an otherwise-successful requeue. The generation is now re-checked after the publish and the ack is skipped when it changed (the broker requeues the original delivery from the dropped channel), matching the generation guard already used by `Ack`.
-
-## [v3.0.0] - 2026-06-09 - Initial Release — RabbitMQ Message-Bus Transport, Auto-Reconnect, and Server-Sent Events Backplane
+## [v3.0.0] - 2026-06-10 - Initial Release — RabbitMQ Message-Bus Transport, Auto-Reconnect, and Server-Sent Events Backplane
 
 ### Added
 

@@ -342,6 +342,45 @@ func TestRenderMessage_FoldsOverlongSpacelessHeaderToken(t *testing.T) {
     }
 }
 
+func TestRenderMessage_EncodesEspecialsInOverlongAsciiDisplayName(t *testing.T) {
+    name := strings.Repeat("a", 30) + ",(b);d" + strings.Repeat("c", 40)
+
+    payload, renderErr := mailer.RenderMessage(mailercontract.Message{
+        From:    mailercontract.Address{Name: name, Email: "from@example.com"},
+        To:      []mailercontract.Address{{Email: "to@example.com"}},
+        Subject: "Hi",
+        Text:    "body",
+    })
+    if nil != renderErr {
+        t.Fatalf("render: %v", renderErr)
+    }
+
+    header, parseErr := textproto.NewReader(bufio.NewReader(bytes.NewReader(payload))).ReadMIMEHeader()
+    if nil != parseErr {
+        t.Fatalf("parse headers: %v", parseErr)
+    }
+
+    fromHeader := header.Get("From")
+
+    for _, especial := range []string{",", "(", ")", ";"} {
+        if true == strings.Contains(fromHeader, especial) {
+            t.Fatalf("From header leaked RFC 2047 especial %q into a phrase-context encoded-word: %q", especial, fromHeader)
+        }
+    }
+
+    if false == strings.Contains(fromHeader, "=2C") {
+        t.Fatalf("the comma in the display name was not Q-encoded as =2C: %q", fromHeader)
+    }
+
+    decoded, decodeErr := new(mime.WordDecoder).DecodeHeader(fromHeader)
+    if nil != decodeErr {
+        t.Fatalf("decode From: %v", decodeErr)
+    }
+    if false == strings.Contains(decoded, name) {
+        t.Fatalf("display name did not round-trip through the encoded-words; got %q", decoded)
+    }
+}
+
 func serveAuthlessSmtp(listener net.Listener) {
     connection, acceptErr := listener.Accept()
     if nil != acceptErr {

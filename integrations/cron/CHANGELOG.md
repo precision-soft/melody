@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v3.2.0] - 2026-06-09 - Plug-and-Play Command Registration
+## [v3.2.0] - 2026-06-10 - Plug-and-Play Command Registration
 
 ### Added
 

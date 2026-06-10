@@ -161,7 +161,7 @@ func formatAddress(address mailercontract.Address) string {
 func encodePhrase(name string) string {
     encoded := mime.QEncoding.Encode("utf-8", name)
     if encoded != name {
-        return encoded
+        return encodeWordChunks(name)
     }
 
     if true == hasOverlongToken(name) {
@@ -279,11 +279,22 @@ func encodeQByte(character byte) string {
         return "_"
     case '=' == character || '?' == character || '_' == character:
         return "=" + strings.ToUpper(hex.EncodeToString([]byte{character}))
+    case true == isEncodedWordEspecial(character):
+        return "=" + strings.ToUpper(hex.EncodeToString([]byte{character}))
     case character > 0x20 && character < 0x7F:
         return string(character)
     default:
         return "=" + strings.ToUpper(hex.EncodeToString([]byte{character}))
     }
+}
+
+func isEncodedWordEspecial(character byte) bool {
+    switch character {
+    case '(', ')', '<', '>', '@', ',', ';', ':', '"', '/', '[', ']', '.', '\\':
+        return true
+    }
+
+    return false
 }
 
 func splitsEscapeTriplet(payload string, offset int) bool {

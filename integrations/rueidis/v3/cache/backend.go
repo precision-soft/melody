@@ -169,7 +169,7 @@ func (instance *Backend) Has(key string) (bool, error) {
 }
 
 func (instance *Backend) ClearCtx(ctx context.Context) error {
-    pattern := instance.prefix + "*"
+    pattern := escapeRedisGlobMeta(instance.prefix) + "*"
     keys, scanErr := instance.scanKeys(ctx, pattern)
     if nil != scanErr {
         return scanErr
@@ -197,7 +197,7 @@ func (instance *Backend) ClearByPrefixCtx(ctx context.Context, prefix string) er
         return normalizeErr
     }
 
-    pattern := normalizedPrefix + "*"
+    pattern := escapeRedisGlobMeta(normalizedPrefix) + "*"
     keys, scanErr := instance.scanKeys(ctx, pattern)
     if nil != scanErr {
         return scanErr
@@ -395,7 +395,6 @@ func (instance *Backend) Decrement(key string, delta int64) (int64, error) {
 }
 
 func (instance *Backend) Close() error {
-    instance.client.Close()
     return nil
 }
 
@@ -440,6 +439,19 @@ func (instance *Backend) normalizeKey(key string) (string, error) {
 
 func (instance *Backend) stripPrefix(fullKey string) string {
     return strings.TrimPrefix(fullKey, instance.prefix)
+}
+
+func escapeRedisGlobMeta(value string) string {
+    var builder strings.Builder
+    for index := 0; index < len(value); index++ {
+        switch value[index] {
+        case '*', '?', '[', ']', '\\':
+            builder.WriteByte('\\')
+        }
+        builder.WriteByte(value[index])
+    }
+
+    return builder.String()
 }
 
 func (instance *Backend) scanKeys(ctx context.Context, pattern string) ([]string, error) {

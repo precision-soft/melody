@@ -2,6 +2,7 @@ package security
 
 import (
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/internal"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
@@ -47,11 +48,11 @@ func (instance *Token) Roles() []string {
 }
 
 func (instance *Token) Scope() map[string]any {
-    return instance.user.Scope()
+    return internal.CopyAnyMap(instance.user.Scope())
 }
 
 func (instance *Token) Attributes() map[string]any {
-    return instance.user.Attributes()
+    return internal.CopyAnyMap(instance.user.Attributes())
 }
 
 var _ securitycontract.Token = (*Token)(nil)
