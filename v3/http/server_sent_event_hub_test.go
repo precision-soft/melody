@@ -1,18 +1,19 @@
-package http_test
+package http
 
 import (
+    "sync"
     "testing"
 
-    "github.com/precision-soft/melody/v3/http"
+    "github.com/precision-soft/melody/v3/exception"
 )
 
 func TestServerSentEventHub_BroadcastDeliversToTopicSubscribers(t *testing.T) {
-    hub := http.NewServerSentEventHub()
+    hub := NewServerSentEventHub()
 
     subscriber := hub.Subscribe("demo", 4)
     other := hub.Subscribe("other", 4)
 
-    delivered := hub.Broadcast("demo", http.ServerSentEvent{Event: "ping", Data: "hello"})
+    delivered := hub.Broadcast("demo", ServerSentEvent{Event: "ping", Data: "hello"})
     if 1 != delivered {
         t.Fatalf("expected 1 delivery, got %d", delivered)
     }
@@ -34,15 +35,15 @@ func TestServerSentEventHub_BroadcastDeliversToTopicSubscribers(t *testing.T) {
 }
 
 func TestServerSentEventHub_BroadcastCountsDroppedEventsOnFullBuffer(t *testing.T) {
-    hub := http.NewServerSentEventHub()
+    hub := NewServerSentEventHub()
 
     hub.Subscribe("demo", 1)
 
-    if delivered := hub.Broadcast("demo", http.ServerSentEvent{Data: "first"}); 1 != delivered {
+    if delivered := hub.Broadcast("demo", ServerSentEvent{Data: "first"}); 1 != delivered {
         t.Fatalf("expected the first event to be delivered, got %d", delivered)
     }
 
-    if delivered := hub.Broadcast("demo", http.ServerSentEvent{Data: "second"}); 0 != delivered {
+    if delivered := hub.Broadcast("demo", ServerSentEvent{Data: "second"}); 0 != delivered {
         t.Fatalf("expected the second event to be dropped, got %d delivered", delivered)
     }
 
@@ -52,14 +53,14 @@ func TestServerSentEventHub_BroadcastCountsDroppedEventsOnFullBuffer(t *testing.
 }
 
 func TestServerSentEventHub_ShutdownClosesSubscribersAndStopsDelivery(t *testing.T) {
-    hub := http.NewServerSentEventHub()
+    hub := NewServerSentEventHub()
 
     first := hub.Subscribe("demo", 4)
     second := hub.Subscribe("other", 4)
 
     hub.Shutdown()
 
-    for label, subscriber := range map[string]*http.ServerSentEventSubscriber{"demo": first, "other": second} {
+    for label, subscriber := range map[string]*ServerSentEventSubscriber{"demo": first, "other": second} {
         select {
         case _, open := <-subscriber.Events():
             if true == open {
@@ -70,7 +71,7 @@ func TestServerSentEventHub_ShutdownClosesSubscribersAndStopsDelivery(t *testing
         }
     }
 
-    if delivered := hub.Broadcast("demo", http.ServerSentEvent{Data: "x"}); 0 != delivered {
+    if delivered := hub.Broadcast("demo", ServerSentEvent{Data: "x"}); 0 != delivered {
         t.Fatalf("expected no deliveries after shutdown, got %d", delivered)
     }
 
@@ -78,7 +79,7 @@ func TestServerSentEventHub_ShutdownClosesSubscribersAndStopsDelivery(t *testing
 }
 
 func TestServerSentEventHub_SubscribeAfterShutdownReturnsClosedChannel(t *testing.T) {
-    hub := http.NewServerSentEventHub()
+    hub := NewServerSentEventHub()
     hub.Shutdown()
 
     subscriber := hub.Subscribe("demo", 4)
@@ -94,17 +95,126 @@ func TestServerSentEventHub_SubscribeAfterShutdownReturnsClosedChannel(t *testin
 }
 
 func TestServerSentEventHub_UnsubscribeStopsDelivery(t *testing.T) {
-    hub := http.NewServerSentEventHub()
+    hub := NewServerSentEventHub()
 
     subscriber := hub.Subscribe("demo", 4)
     hub.Unsubscribe(subscriber)
 
-    delivered := hub.Broadcast("demo", http.ServerSentEvent{Data: "x"})
+    delivered := hub.Broadcast("demo", ServerSentEvent{Data: "x"})
     if 0 != delivered {
         t.Fatalf("expected 0 deliveries after unsubscribe, got %d", delivered)
     }
 
     if 0 != hub.SubscriberCount("demo") {
         t.Fatalf("expected no subscribers after unsubscribe")
+    }
+}
+
+/** @info backplane */
+
+type recordingBackplane struct {
+    mutex     sync.Mutex
+    published []ServerSentEvent
+    publishErr error
+}
+
+func (instance *recordingBackplane) Publish(topic string, event ServerSentEvent) error {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if nil != instance.publishErr {
+        return instance.publishErr
+    }
+
+    instance.published = append(instance.published, event)
+
+    return nil
+}
+
+func (instance *recordingBackplane) Close() error {
+    return nil
+}
+
+func (instance *recordingBackplane) count() int {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return len(instance.published)
+}
+
+func TestServerSentEventHub_BroadcastReplicatesAndDeliversLocally(t *testing.T) {
+    hub := NewServerSentEventHub()
+    backplane := &recordingBackplane{}
+    hub.SetBackplane(backplane)
+
+    subscriber := hub.Subscribe("orders", 1)
+    defer hub.Unsubscribe(subscriber)
+
+    if delivered := hub.Broadcast("orders", ServerSentEvent{Data: "hello"}); 1 != delivered {
+        t.Fatalf("expected one local delivery, got %d", delivered)
+    }
+
+    if 1 != backplane.count() {
+        t.Fatalf("expected the broadcast to be replicated once, got %d", backplane.count())
+    }
+
+    select {
+    case event := <-subscriber.Events():
+        if "hello" != event.Data {
+            t.Fatalf("unexpected event delivered locally: %q", event.Data)
+        }
+    default:
+        t.Fatalf("expected the event to be delivered to the local subscriber")
+    }
+}
+
+func TestServerSentEventHub_DeliverLocalDoesNotReplicate(t *testing.T) {
+    hub := NewServerSentEventHub()
+    backplane := &recordingBackplane{}
+    hub.SetBackplane(backplane)
+
+    subscriber := hub.Subscribe("orders", 1)
+    defer hub.Unsubscribe(subscriber)
+
+    hub.DeliverLocal("orders", ServerSentEvent{Data: "remote"})
+
+    if 0 != backplane.count() {
+        t.Fatalf("expected DeliverLocal not to replicate, got %d", backplane.count())
+    }
+
+    select {
+    case event := <-subscriber.Events():
+        if "remote" != event.Data {
+            t.Fatalf("unexpected event: %q", event.Data)
+        }
+    default:
+        t.Fatalf("expected the remote event to reach the local subscriber")
+    }
+}
+
+func TestServerSentEventHub_BroadcastAfterShutdownDoesNotReplicate(t *testing.T) {
+    hub := NewServerSentEventHub()
+    backplane := &recordingBackplane{}
+    hub.SetBackplane(backplane)
+
+    hub.Shutdown()
+
+    if delivered := hub.Broadcast("orders", ServerSentEvent{Data: "hello"}); 0 != delivered {
+        t.Fatalf("expected no local delivery after shutdown, got %d", delivered)
+    }
+
+    if 0 != backplane.count() {
+        t.Fatalf("expected no replication after shutdown, got %d", backplane.count())
+    }
+}
+
+func TestServerSentEventHub_BackplaneFailureIsCounted(t *testing.T) {
+    hub := NewServerSentEventHub()
+    hub.SetBackplane(&recordingBackplane{publishErr: exception.NewError("backplane down", nil, nil)})
+
+    hub.Broadcast("orders", ServerSentEvent{Data: "hello"})
+
+    if 1 != hub.BackplaneFailures() {
+        t.Fatalf("expected one backplane failure, got %d", hub.BackplaneFailures())
     }
 }

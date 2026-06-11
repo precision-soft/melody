@@ -179,7 +179,7 @@ func splitByCommaOutsideRegexMeta(valueString string) []string {
             continue
         }
 
-        if '"' == character {
+        if '"' == character && false == classScanner.inClass {
             if false == isInSingleQuote {
                 isInDoubleQuote = false == isInDoubleQuote
             }
@@ -187,7 +187,7 @@ func splitByCommaOutsideRegexMeta(valueString string) []string {
             continue
         }
 
-        if '\'' == character {
+        if '\'' == character && false == classScanner.inClass {
             if false == isInDoubleQuote {
                 isInSingleQuote = false == isInSingleQuote
             }

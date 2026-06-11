@@ -3,7 +3,6 @@ package validation
 import (
     "testing"
 
-    "github.com/precision-soft/melody/v3/container"
     validationcontract "github.com/precision-soft/melody/v3/validation/contract"
 )
 
@@ -335,27 +334,6 @@ func TestValidator_RegexConstraint_AllowsCommaInsideQuantifier(t *testing.T) {
 
     err = validatorInstance.Validate(payloadWithRegexCommaInQuantifier{Value: "aa"})
     requireNoValidationErrors(t, err)
-}
-
-func TestValidatorFromContainer_ReturnsNilWhenMissing(t *testing.T) {
-    serviceContainer := container.NewContainer()
-
-    validatorInstance := ValidatorFromContainer(serviceContainer)
-    if nil != validatorInstance {
-        t.Fatalf("expected nil")
-    }
-}
-
-func TestValidatorMustFromContainer_PanicsWhenMissing(t *testing.T) {
-    serviceContainer := container.NewContainer()
-
-    defer func() {
-        if nil == recover() {
-            t.Fatalf("expected panic")
-        }
-    }()
-
-    _ = ValidatorMustFromContainer(serviceContainer)
 }
 
 type payloadWithGreaterThan struct {

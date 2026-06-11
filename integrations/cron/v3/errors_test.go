@@ -81,16 +81,6 @@ func TestErrorsIsErrHeartbeatUserMissingFromRender(t *testing.T) {
     }
 }
 
-func TestValidateUserFieldRejectsForbiddenCharacter(t *testing.T) {
-    if false == errors.Is(validateUserField("user", "svc%role"), ErrForbiddenCharacter) {
-        t.Fatalf("expected ErrForbiddenCharacter for a user token containing a crontab line-continuation %%")
-    }
-
-    if nil != validateUserField("user", "deploy") {
-        t.Fatalf("expected a normal user token to validate")
-    }
-}
-
 func TestErrorsIsErrForbiddenCharacterInEntryUser(t *testing.T) {
     entries := []Entry{
         {

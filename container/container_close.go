@@ -296,7 +296,7 @@ func isComparableValue(value any) bool {
         return false
     }
 
-    return reflect.TypeOf(value).Comparable()
+    return reflect.ValueOf(value).Comparable()
 }
 
 func pointerKeyOf(value any) (uintptr, bool) {

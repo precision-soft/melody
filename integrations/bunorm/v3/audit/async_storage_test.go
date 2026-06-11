@@ -1,24 +1,23 @@
-package audit_test
+package audit
 
 import (
     "context"
     "sync"
     "testing"
 
-    "github.com/precision-soft/melody/integrations/bunorm/v3/audit"
     "github.com/precision-soft/melody/v3/exception"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
 type recordingStorage struct {
     mutex   sync.Mutex
-    saved   []audit.Entry
+    saved   []Entry
     entered chan struct{}
     release chan struct{}
     blocked bool
 }
 
-func (instance *recordingStorage) Save(ctx context.Context, table string, entries ...audit.Entry) error {
+func (instance *recordingStorage) Save(ctx context.Context, table string, entries ...Entry) error {
     if false == instance.blocked {
         instance.blocked = true
         close(instance.entered)
@@ -83,9 +82,9 @@ func TestAsyncStorage_DrainsQueuedEntriesOnClose(t *testing.T) {
     delegate := newRecordingStorage()
     close(delegate.release)
 
-    storage := audit.NewAsyncStorage(delegate, 16)
+    storage := NewAsyncStorage(delegate, 16)
 
-    if saveErr := storage.Save(context.Background(), audit.DefaultTable, audit.Entry{Entity: "user", EntityId: "1", Operation: "insert"}, audit.Entry{Entity: "user", EntityId: "2", Operation: "update"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), DefaultTable, Entry{Entity: "user", EntityId: "1", Operation: "insert"}, Entry{Entity: "user", EntityId: "2", Operation: "update"}); nil != saveErr {
         t.Fatalf("save: %v", saveErr)
     }
 
@@ -102,19 +101,19 @@ func TestAsyncStorage_OverflowDeadLetters(t *testing.T) {
     delegate := newRecordingStorage()
     logger := &capturingLogger{}
 
-    storage := audit.NewAsyncStorage(delegate, 1).WithLogger(logger)
+    storage := NewAsyncStorage(delegate, 1).WithLogger(logger)
 
-    if saveErr := storage.Save(context.Background(), audit.DefaultTable, audit.Entry{Entity: "user", EntityId: "blocking", Operation: "insert"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), DefaultTable, Entry{Entity: "user", EntityId: "blocking", Operation: "insert"}); nil != saveErr {
         t.Fatalf("save blocking: %v", saveErr)
     }
 
     <-delegate.entered
 
-    if saveErr := storage.Save(context.Background(), audit.DefaultTable, audit.Entry{Entity: "user", EntityId: "buffered", Operation: "insert"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), DefaultTable, Entry{Entity: "user", EntityId: "buffered", Operation: "insert"}); nil != saveErr {
         t.Fatalf("save buffered: %v", saveErr)
     }
 
-    if saveErr := storage.Save(context.Background(), audit.DefaultTable, audit.Entry{Entity: "user", EntityId: "dropped", Operation: "insert"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), DefaultTable, Entry{Entity: "user", EntityId: "dropped", Operation: "insert"}); nil != saveErr {
         t.Fatalf("save dropped: %v", saveErr)
     }
 
@@ -141,7 +140,7 @@ func TestAsyncStorage_CloseIsIdempotent(t *testing.T) {
     delegate := newRecordingStorage()
     close(delegate.release)
 
-    storage := audit.NewAsyncStorage(delegate, 4)
+    storage := NewAsyncStorage(delegate, 4)
 
     if closeErr := storage.Close(); nil != closeErr {
         t.Fatalf("first close: %v", closeErr)
@@ -157,13 +156,13 @@ func TestAsyncStorage_SaveAfterCloseDeadLettersWithoutPanic(t *testing.T) {
     close(delegate.release)
     logger := &capturingLogger{}
 
-    storage := audit.NewAsyncStorage(delegate, 4).WithLogger(logger)
+    storage := NewAsyncStorage(delegate, 4).WithLogger(logger)
 
     if closeErr := storage.Close(); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
-    if saveErr := storage.Save(context.Background(), audit.DefaultTable, audit.Entry{Entity: "user", EntityId: "late", Operation: "insert"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), DefaultTable, Entry{Entity: "user", EntityId: "late", Operation: "insert"}); nil != saveErr {
         t.Fatalf("save after close: %v", saveErr)
     }
 
@@ -184,17 +183,16 @@ type failingStorage struct {
     saveErr error
 }
 
-func (instance *failingStorage) Save(ctx context.Context, table string, entries ...audit.Entry) error {
+func (instance *failingStorage) Save(ctx context.Context, table string, entries ...Entry) error {
     return instance.saveErr
 }
 
 func TestAsyncStorage_FailedDelegateIncrementsCounter(t *testing.T) {
     logger := &capturingLogger{}
-    storage := audit.
-        NewAsyncStorage(&failingStorage{saveErr: exception.NewError("backend down", nil, nil)}, 4).
+    storage := NewAsyncStorage(&failingStorage{saveErr: exception.NewError("backend down", nil, nil)}, 4).
         WithLogger(logger)
 
-    if saveErr := storage.Save(context.Background(), audit.DefaultTable, audit.Entry{Entity: "user", EntityId: "1", Operation: "insert"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), DefaultTable, Entry{Entity: "user", EntityId: "1", Operation: "insert"}); nil != saveErr {
         t.Fatalf("save: %v", saveErr)
     }
 
@@ -216,7 +214,7 @@ func TestAsyncStorage_FailedDelegateIncrementsCounter(t *testing.T) {
 }
 
 func TestAsyncStorage_WithLoggerDoesNotRaceTheDrainGoroutine(t *testing.T) {
-    storage := audit.NewAsyncStorage(&failingStorage{saveErr: exception.NewError("backend down", nil, nil)}, 64)
+    storage := NewAsyncStorage(&failingStorage{saveErr: exception.NewError("backend down", nil, nil)}, 64)
 
     var wait sync.WaitGroup
     wait.Add(2)
@@ -224,7 +222,7 @@ func TestAsyncStorage_WithLoggerDoesNotRaceTheDrainGoroutine(t *testing.T) {
     go func() {
         defer wait.Done()
         for index := 0; index < 200; index++ {
-            _ = storage.Save(context.Background(), audit.DefaultTable, audit.Entry{Entity: "user", EntityId: "1", Operation: "insert"})
+            _ = storage.Save(context.Background(), DefaultTable, Entry{Entity: "user", EntityId: "1", Operation: "insert"})
         }
     }()
 

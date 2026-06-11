@@ -1,36 +1,12 @@
 package event
 
 import (
-    "context"
     "testing"
 
-    "github.com/precision-soft/melody/clock"
-    "github.com/precision-soft/melody/container"
-    containercontract "github.com/precision-soft/melody/container/contract"
     eventcontract "github.com/precision-soft/melody/event/contract"
     "github.com/precision-soft/melody/internal/testhelper"
-    "github.com/precision-soft/melody/logging"
-    loggingcontract "github.com/precision-soft/melody/logging/contract"
-    "github.com/precision-soft/melody/runtime"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
-
-func newEventDispatcherAdapterTestRuntime(t *testing.T) runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
-    scope := serviceContainer.NewScope()
-
-    err := serviceContainer.Register(
-        logging.ServiceLogger,
-        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
-            return logging.NewNopLogger(), nil
-        },
-    )
-    if nil != err {
-        t.Fatalf("unexpected error: %v", err)
-    }
-
-    return runtime.New(context.Background(), scope, serviceContainer)
-}
 
 type testAdapterSubscriber struct {
     events map[string][]eventcontract.SubscribedEvent
@@ -147,34 +123,6 @@ func TestEventDispatcherAdapter_DispatchName_ReturnsErrorOnEmptyName(t *testing.
             _, _ = adapter.DispatchName(nil, "", nil)
         },
     )
-}
-
-func TestEventDispatcher_DispatchName_PayloadIsPreserved(t *testing.T) {
-    dispatcher := NewEventDispatcher(clock.NewSystemClock())
-
-    var receivedPayload any
-
-    dispatcher.AddListener(
-        "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
-            receivedPayload = eventValue.Payload()
-            return nil
-        },
-        0,
-    )
-
-    payload := map[string]any{"a": 1}
-
-    runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
-
-    _, err := dispatcher.DispatchName(runtimeInstance, "e", payload)
-    if nil != err {
-        t.Fatalf("unexpected error: %v", err)
-    }
-
-    if nil == receivedPayload {
-        t.Fatalf("expected payload")
-    }
 }
 
 func TestEventDispatcherAdapter_RemoveListener_RemovesListener(t *testing.T) {

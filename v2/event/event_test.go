@@ -1,12 +1,44 @@
 package event
 
 import (
+    "context"
     "testing"
     "time"
 
     "github.com/precision-soft/melody/v2/clock"
+    clockcontract "github.com/precision-soft/melody/v2/clock/contract"
+    "github.com/precision-soft/melody/v2/container"
+    containercontract "github.com/precision-soft/melody/v2/container/contract"
     "github.com/precision-soft/melody/v2/internal/testhelper"
+    "github.com/precision-soft/melody/v2/logging"
+    loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
+    "github.com/precision-soft/melody/v2/runtime"
+    runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
 )
+
+func testNewEventDispatcher() (*EventDispatcher, clockcontract.Clock) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := NewEventDispatcher(clockInstance)
+
+    return dispatcher, clockInstance
+}
+
+func newEventDispatcherAdapterTestRuntime(t *testing.T) runtimecontract.Runtime {
+    serviceContainer := container.NewContainer()
+    scope := serviceContainer.NewScope()
+
+    err := serviceContainer.Register(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return logging.NewNopLogger(), nil
+        },
+    )
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    return runtime.New(context.Background(), scope, serviceContainer)
+}
 
 func TestEvent_StopPropagation(t *testing.T) {
     eventInstance := NewEvent("e", nil, clock.NewSystemClock())

@@ -1,6 +1,7 @@
 package openapi
 
 import (
+    "fmt"
     "reflect"
     "strconv"
     "strings"
@@ -269,9 +270,24 @@ func addFieldProperty(
     applyValidation(propertySchema, field.Tag.Get("validate"))
     properties[jsonName] = propertySchema
 
-    if true == isRequired(field.Tag.Get("validate")) {
+    if true == isRequired(field.Tag.Get("validate")) || true == pointerBoundRequiresPresence(field) {
         *required = append(*required, jsonName)
     }
+}
+
+func pointerBoundRequiresPresence(field reflect.StructField) bool {
+    if reflect.Ptr != field.Type.Kind() {
+        return false
+    }
+
+    for _, rule := range splitRules(field.Tag.Get("validate")) {
+        name, _ := splitRule(rule)
+        if "greaterThan" == name || "lessThan" == name {
+            return true
+        }
+    }
+
+    return false
 }
 
 func dominantEmbeddedField(group []embeddedCandidate) (reflect.StructField, bool) {
@@ -382,6 +398,15 @@ func isRequired(validateTag string) bool {
     return false
 }
 
+func parseLeadingInt(valueString string) (int64, bool) {
+    var result int64
+    if _, scanErr := fmt.Sscanf(valueString, "%d", &result); nil != scanErr {
+        return 0, false
+    }
+
+    return result, true
+}
+
 func applyValidation(schema *Schema, validateTag string) {
     if "" != schema.Ref || nil != schema.AllOf {
         return
@@ -392,7 +417,9 @@ func applyValidation(schema *Schema, validateTag string) {
 
         switch name {
         case "email":
-            schema.Format = "email"
+            if "string" == schema.Type {
+                schema.Format = "email"
+            }
         case "min":
             if "string" == schema.Type {
                 if valueString, exists := params["value"]; true == exists {
@@ -427,8 +454,8 @@ func applyValidation(schema *Schema, validateTag string) {
                 schema.Nullable = false
                 exclusive := true
                 if valueString, exists := params["value"]; true == exists {
-                    if parsed, parseErr := strconv.ParseFloat(valueString, 64); nil == parseErr {
-                        value := float64(int64(parsed))
+                    if parsed, parsedOk := parseLeadingInt(valueString); true == parsedOk {
+                        value := float64(parsed)
                         schema.Minimum = &value
                         schema.ExclusiveMinimum = &exclusive
                     }
@@ -445,8 +472,8 @@ func applyValidation(schema *Schema, validateTag string) {
                 schema.Nullable = false
                 exclusive := true
                 if valueString, exists := params["value"]; true == exists {
-                    if parsed, parseErr := strconv.ParseFloat(valueString, 64); nil == parseErr {
-                        value := float64(int64(parsed))
+                    if parsed, parsedOk := parseLeadingInt(valueString); true == parsedOk {
+                        value := float64(parsed)
                         schema.Maximum = &value
                         schema.ExclusiveMaximum = &exclusive
                     }

@@ -1,4 +1,4 @@
-package websocket_test
+package websocket
 
 import (
     "context"
@@ -10,7 +10,6 @@ import (
 
     coderwebsocket "github.com/coder/websocket"
 
-    melodywebsocket "github.com/precision-soft/melody/integrations/websocket/v3"
     "github.com/precision-soft/melody/v3/container"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
@@ -20,7 +19,7 @@ import (
 func TestStreamHandler_BroadcastReachesClient(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub()
 
-    handler := melodywebsocket.NewStreamHandler(hub, melodywebsocket.Options{
+    handler := NewStreamHandler(hub, Options{
         TopicResolver:  func(request httpcontract.Request) string { return "demo" },
         OriginPatterns: []string{"*"},
     })

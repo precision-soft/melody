@@ -1,9 +1,8 @@
-package cache_test
+package cache
 
 import (
     "testing"
 
-    cache "github.com/precision-soft/melody/integrations/rueidis/v3/cache"
     melodycache "github.com/precision-soft/melody/v3/cache"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
 )
@@ -19,7 +18,7 @@ func (instance *recordingRegistrar) RegisterService(serviceName string, provider
 func TestRegisterBackendServiceUsesCoreBackendName(t *testing.T) {
     registrar := &recordingRegistrar{}
 
-    cache.RegisterBackendService(registrar, nil, "example")
+    RegisterBackendService(registrar, nil, "example")
 
     if 0 == len(registrar.names) || melodycache.ServiceCacheBackend != registrar.names[0] {
         t.Fatalf("expected %q to be registered, got %v", melodycache.ServiceCacheBackend, registrar.names)

@@ -4,11 +4,8 @@ import (
     "errors"
     "testing"
 
-    eventcontract "github.com/precision-soft/melody/event/contract"
-    "github.com/precision-soft/melody/http"
     httpPkg "github.com/precision-soft/melody/http"
     httpcontract "github.com/precision-soft/melody/http/contract"
-    kernelcontract "github.com/precision-soft/melody/kernel/contract"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
     securitycontract "github.com/precision-soft/melody/security/contract"
 )
@@ -381,30 +378,4 @@ func TestSecurityResolutionListener_WhenTokenSourceReturnsNilToken_SetsAnonymous
     if true == securityContext.Token().IsAuthenticated() {
         t.Fatalf("expected anonymous token when token source returns nil")
     }
-}
-
-func registerTestKernelExceptionListener(kernelInstance *testKernel) {
-    kernelInstance.EventDispatcher().AddListener(
-        kernelcontract.EventKernelException,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
-            exceptionEvent, ok := eventValue.Payload().(*http.KernelExceptionEvent)
-            if false == ok || nil == exceptionEvent {
-                return nil
-            }
-
-            if nil != exceptionEvent.Response() {
-                return nil
-            }
-
-            exceptionEvent.SetResponse(
-                http.JsonErrorResponse(
-                    500,
-                    "internal_server_error",
-                ),
-            )
-
-            return nil
-        },
-        0,
-    )
 }

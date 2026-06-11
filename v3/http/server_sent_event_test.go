@@ -1,22 +1,20 @@
-package http_test
+package http
 
 import (
     "net/http/httptest"
     "strings"
     "testing"
-
-    "github.com/precision-soft/melody/v3/http"
 )
 
 func TestServerSentEventWriter_StripsNewlinesFromIdAndEvent(t *testing.T) {
     recorder := httptest.NewRecorder()
 
-    writer, writerErr := http.NewServerSentEventWriter(recorder)
+    writer, writerErr := NewServerSentEventWriter(recorder)
     if nil != writerErr {
         t.Fatalf("new sse writer: %v", writerErr)
     }
 
-    sendErr := writer.Send(http.ServerSentEvent{
+    sendErr := writer.Send(ServerSentEvent{
         Id:    "1\nevent: injected",
         Event: "notification\ndata: hijacked",
         Data:  "hello",
@@ -46,12 +44,12 @@ func TestServerSentEventWriter_StripsNewlinesFromIdAndEvent(t *testing.T) {
 func TestServerSentEventWriter_TreatsCarriageReturnAsDataLineBoundary(t *testing.T) {
     recorder := httptest.NewRecorder()
 
-    writer, writerErr := http.NewServerSentEventWriter(recorder)
+    writer, writerErr := NewServerSentEventWriter(recorder)
     if nil != writerErr {
         t.Fatalf("new sse writer: %v", writerErr)
     }
 
-    sendErr := writer.Send(http.ServerSentEvent{
+    sendErr := writer.Send(ServerSentEvent{
         Data: "first\rsecond\r\nthird",
     })
     if nil != sendErr {
@@ -82,12 +80,12 @@ func TestServerSentEventWriter_TreatsCarriageReturnAsDataLineBoundary(t *testing
 func TestServerSentEventWriter_CarriageReturnDataCannotInjectControlLine(t *testing.T) {
     recorder := httptest.NewRecorder()
 
-    writer, writerErr := http.NewServerSentEventWriter(recorder)
+    writer, writerErr := NewServerSentEventWriter(recorder)
     if nil != writerErr {
         t.Fatalf("new sse writer: %v", writerErr)
     }
 
-    sendErr := writer.Send(http.ServerSentEvent{
+    sendErr := writer.Send(ServerSentEvent{
         Data: "hello\revent: injected",
     })
     if nil != sendErr {
@@ -106,7 +104,7 @@ func TestServerSentEventWriter_CarriageReturnDataCannotInjectControlLine(t *test
 func TestServerSentEventWriter_CommentStripsCarriageReturnAndNewline(t *testing.T) {
     recorder := httptest.NewRecorder()
 
-    writer, writerErr := http.NewServerSentEventWriter(recorder)
+    writer, writerErr := NewServerSentEventWriter(recorder)
     if nil != writerErr {
         t.Fatalf("new sse writer: %v", writerErr)
     }
@@ -140,12 +138,12 @@ func TestServerSentEventWriter_CommentStripsCarriageReturnAndNewline(t *testing.
 func TestServerSentEventWriter_EmptyDataEmitsNoDataLine(t *testing.T) {
     recorder := httptest.NewRecorder()
 
-    writer, writerErr := http.NewServerSentEventWriter(recorder)
+    writer, writerErr := NewServerSentEventWriter(recorder)
     if nil != writerErr {
         t.Fatalf("new sse writer: %v", writerErr)
     }
 
-    sendErr := writer.Send(http.ServerSentEvent{Id: "5", Retry: 3000})
+    sendErr := writer.Send(ServerSentEvent{Id: "5", Retry: 3000})
     if nil != sendErr {
         t.Fatalf("send: %v", sendErr)
     }
@@ -170,5 +168,29 @@ func TestServerSentEventWriter_EmptyDataEmitsNoDataLine(t *testing.T) {
     }
     if 0 != dataLines {
         t.Fatalf("expected no data line for an id/retry-only event, got data=%d: %q", dataLines, body)
+    }
+}
+
+/** @info server sent event id */
+
+func TestServerSentEventWriter_StripsNulFromId(t *testing.T) {
+    recorder := httptest.NewRecorder()
+
+    writer, writerErr := NewServerSentEventWriter(recorder)
+    if nil != writerErr {
+        t.Fatalf("new sse writer: %v", writerErr)
+    }
+
+    sendErr := writer.Send(ServerSentEvent{Id: "order-42\x00", Data: "payload"})
+    if nil != sendErr {
+        t.Fatalf("send: %v", sendErr)
+    }
+
+    body := recorder.Body.String()
+    if true == strings.Contains(body, "\x00") {
+        t.Fatalf("the id field must not carry a NUL byte (EventSource ignores such an id, breaking Last-Event-ID resumption), got %q", body)
+    }
+    if false == strings.Contains(body, "id: order-42\n") {
+        t.Fatalf("expected the NUL to be stripped from the id line, got %q", body)
     }
 }

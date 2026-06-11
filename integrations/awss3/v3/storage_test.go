@@ -1,4 +1,4 @@
-package awss3_test
+package awss3
 
 import (
     "context"
@@ -8,7 +8,6 @@ import (
     "testing"
     "time"
 
-    awss3 "github.com/precision-soft/melody/integrations/awss3/v3"
     "github.com/precision-soft/melody/v3/container"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -26,7 +25,7 @@ func TestObjectStorage_PutGetExistsPresignDelete(t *testing.T) {
         t.Skip("MINIO_ENDPOINT not set; skipping object storage integration test")
     }
 
-    client, clientErr := awss3.NewClient(awss3.Config{
+    client, clientErr := NewClient(Config{
         Endpoint:  endpoint,
         AccessKey: os.Getenv("MINIO_ACCESS_KEY"),
         SecretKey: os.Getenv("MINIO_SECRET_KEY"),
@@ -37,11 +36,11 @@ func TestObjectStorage_PutGetExistsPresignDelete(t *testing.T) {
     }
 
     bucket := "melody-test"
-    if ensureErr := awss3.EnsureBucket(context.Background(), client, bucket, ""); nil != ensureErr {
+    if ensureErr := EnsureBucket(context.Background(), client, bucket, ""); nil != ensureErr {
         t.Fatalf("ensure bucket: %v", ensureErr)
     }
 
-    store := awss3.NewStorage(client, bucket)
+    store := NewStorage(client, bucket)
     runtimeInstance := newRuntime()
 
     key := "labels/awb-123.txt"

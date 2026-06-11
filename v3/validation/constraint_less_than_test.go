@@ -1,6 +1,7 @@
 package validation
 
 import (
+    "math"
     "testing"
 )
 
@@ -142,5 +143,15 @@ func TestLessThan_MaxGetter(t *testing.T) {
 func TestLessThan_ErrorCodeDoesNotCollideWithGreaterThanConstraintName(t *testing.T) {
     if ConstraintGreaterThan == ConstraintLessThanErrorGreaterThan {
         t.Fatalf("LessThan error code %q collides with the GreaterThan constraint tag name — they must be distinct strings", ConstraintLessThanErrorGreaterThan)
+    }
+}
+
+func TestLessThan_RejectsNaN(t *testing.T) {
+    constraint := NewLessThan(10)
+
+    validationError := constraint.Validate(math.NaN(), "field")
+
+    if nil == validationError {
+        t.Fatalf("expected NaN to be rejected by lessThan, but it passed validation")
     }
 }

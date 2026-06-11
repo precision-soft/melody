@@ -1,11 +1,10 @@
-package translation_test
+package translation
 
 import (
     "os"
     "path/filepath"
     "testing"
 
-    "github.com/precision-soft/melody/v3/translation"
     translationcontract "github.com/precision-soft/melody/v3/translation/contract"
 )
 
@@ -33,7 +32,7 @@ func TestJsonDirectoryLoader_LoadsDomainsAndLocales(t *testing.T) {
     writeCatalogFile(t, directory, "errors.en.json", `{"not_found": "Not found"}`)
     writeCatalogFile(t, directory, "messages.ro.json", `{"greeting": "Salut"}`)
 
-    catalogs, loadErr := translation.NewJsonDirectoryLoader(directory).Load()
+    catalogs, loadErr := NewJsonDirectoryLoader(directory).Load()
     if nil != loadErr {
         t.Fatalf("unexpected load error: %v", loadErr)
     }
@@ -74,7 +73,7 @@ func TestJsonDirectoryLoader_IgnoresNonJsonAndUnparseableNames(t *testing.T) {
         t.Fatalf("could not create directory entry: %v", mkdirErr)
     }
 
-    catalogs, loadErr := translation.NewJsonDirectoryLoader(directory).Load()
+    catalogs, loadErr := NewJsonDirectoryLoader(directory).Load()
     if nil != loadErr {
         t.Fatalf("unexpected load error: %v", loadErr)
     }
@@ -96,7 +95,7 @@ func TestJsonDirectoryLoader_MalformedJsonReturnsError(t *testing.T) {
     directory := t.TempDir()
     writeCatalogFile(t, directory, "messages.en.json", `{"greeting": `)
 
-    _, loadErr := translation.NewJsonDirectoryLoader(directory).Load()
+    _, loadErr := NewJsonDirectoryLoader(directory).Load()
     if nil == loadErr {
         t.Fatalf("expected an error for malformed json")
     }
@@ -105,7 +104,7 @@ func TestJsonDirectoryLoader_MalformedJsonReturnsError(t *testing.T) {
 func TestJsonDirectoryLoader_MissingDirectoryReturnsError(t *testing.T) {
     missing := filepath.Join(t.TempDir(), "does-not-exist")
 
-    _, loadErr := translation.NewJsonDirectoryLoader(missing).Load()
+    _, loadErr := NewJsonDirectoryLoader(missing).Load()
     if nil == loadErr {
         t.Fatalf("expected an error for a missing directory")
     }

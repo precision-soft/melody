@@ -1,4 +1,4 @@
-package mysql_test
+package mysql
 
 import (
     "context"
@@ -8,7 +8,6 @@ import (
     "testing"
 
     _ "github.com/go-sql-driver/mysql"
-    mysql "github.com/precision-soft/melody/integrations/bunorm/mysql/v3"
     "github.com/precision-soft/melody/v3/container"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -39,7 +38,7 @@ func TestMysqlLock_MutualExclusionAndRelease(t *testing.T) {
 
     database := bun.NewDB(sqldb, mysqldialect.New())
 
-    locker := mysql.NewLocker(database)
+    locker := NewLocker(database)
     runtimeInstance := newLockRuntime()
 
     name := "melody_lock_test"
@@ -85,7 +84,7 @@ func TestMysqlLock_RefreshReportsLostLock(t *testing.T) {
 
     database := bun.NewDB(sqldb, mysqldialect.New())
 
-    locker := mysql.NewLocker(database)
+    locker := NewLocker(database)
     runtimeInstance := newLockRuntime()
 
     lock := locker.CreateLock("melody_lock_refresh_test", 0)
@@ -126,7 +125,7 @@ func TestMysqlLock_ReacquiresAfterRefreshDetectsLostLock(t *testing.T) {
 
     database := bun.NewDB(sqldb, mysqldialect.New())
 
-    locker := mysql.NewLocker(database)
+    locker := NewLocker(database)
     runtimeInstance := newLockRuntime()
 
     name := "melody_lock_reacquire"
@@ -184,7 +183,7 @@ func TestMysqlLock_AcquireVerifyErrorReleasesHeldLock(t *testing.T) {
 
     database := bun.NewDB(sqldb, mysqldialect.New())
 
-    locker := mysql.NewLocker(database)
+    locker := NewLocker(database)
     name := "melody_lock_verify_error_release"
 
     lock := locker.CreateLock(name, 0)
@@ -222,7 +221,7 @@ func TestMysqlLock_RefreshVerifyErrorReleasesHeldLock(t *testing.T) {
 
     database := bun.NewDB(sqldb, mysqldialect.New())
 
-    locker := mysql.NewLocker(database)
+    locker := NewLocker(database)
     name := "melody_lock_refresh_verify_error_release"
 
     lock := locker.CreateLock(name, 0)
@@ -262,7 +261,7 @@ func TestMysqlLock_ReentrantAcquireDetectsLostLockWithoutRefresh(t *testing.T) {
 
     database := bun.NewDB(sqldb, mysqldialect.New())
 
-    locker := mysql.NewLocker(database)
+    locker := NewLocker(database)
     runtimeInstance := newLockRuntime()
 
     name := "melody_lock_reentrant_no_refresh"
@@ -312,7 +311,7 @@ func TestMysqlLock_ReleaseOnCanceledContextStillReleases(t *testing.T) {
 
     database := bun.NewDB(sqldb, mysqldialect.New())
 
-    locker := mysql.NewLocker(database)
+    locker := NewLocker(database)
     name := "melody_lock_release_canceled_context"
 
     lock := locker.CreateLock(name, 0)
@@ -337,4 +336,3 @@ func TestMysqlLock_ReleaseOnCanceledContextStillReleases(t *testing.T) {
         t.Fatalf("lock was orphaned: still held by session %d after release on a canceled context", holder.Int64)
     }
 }
-

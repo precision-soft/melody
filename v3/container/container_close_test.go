@@ -233,6 +233,94 @@ func TestContainer_Close_ValueTypeServiceClosedOnce(t *testing.T) {
     }
 }
 
+type unhashableValueCloser struct {
+    counter *int
+    lock    *sync.Mutex
+    payload any
+}
+
+func (instance unhashableValueCloser) Close() error {
+    instance.lock.Lock()
+    defer instance.lock.Unlock()
+
+    *instance.counter++
+
+    return nil
+}
+
+func TestContainer_Close_ValueTypeServiceWithUnhashableContentDoesNotPanicAndClosesOnce(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var lock sync.Mutex
+    count := 0
+
+    MustRegister[unhashableValueCloser](
+        serviceContainer,
+        "unhashable.value.closer",
+        func(resolver containercontract.Resolver) (unhashableValueCloser, error) {
+            return unhashableValueCloser{counter: &count, lock: &lock, payload: []int{1, 2, 3}}, nil
+        },
+    )
+
+    _ = MustFromResolver[unhashableValueCloser](serviceContainer, "unhashable.value.closer")
+    _ = MustFromResolverByType[unhashableValueCloser](serviceContainer)
+
+    if err := serviceContainer.Close(); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    lock.Lock()
+    defer lock.Unlock()
+
+    if 1 != count {
+        t.Fatalf("expected value-type service Close to be called once, got %d", count)
+    }
+}
+
+type nonComparableValueCloser struct {
+    counter *int
+    lock    *sync.Mutex
+    tags    []string
+}
+
+func (instance nonComparableValueCloser) Close() error {
+    instance.lock.Lock()
+    defer instance.lock.Unlock()
+
+    *instance.counter++
+
+    return nil
+}
+
+func TestContainer_Close_NonComparableValueTypeServiceClosedOnce(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var lock sync.Mutex
+    count := 0
+
+    MustRegister[nonComparableValueCloser](
+        serviceContainer,
+        "non.comparable.value.closer",
+        func(resolver containercontract.Resolver) (nonComparableValueCloser, error) {
+            return nonComparableValueCloser{counter: &count, lock: &lock, tags: []string{"a", "b"}}, nil
+        },
+    )
+
+    _ = MustFromResolver[nonComparableValueCloser](serviceContainer, "non.comparable.value.closer")
+    _ = MustFromResolverByType[nonComparableValueCloser](serviceContainer)
+
+    if err := serviceContainer.Close(); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    lock.Lock()
+    defer lock.Unlock()
+
+    if 1 != count {
+        t.Fatalf("expected non-comparable value-type service Close to be called once, got %d", count)
+    }
+}
+
 func TestContainer_Close_ClosesDependentsBeforeDependencies_NamedServiceDependsByTypeOnTypeRegisteredService(t *testing.T) {
     serviceContainer := NewContainer()
 

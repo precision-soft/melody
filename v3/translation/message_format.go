@@ -1,6 +1,7 @@
 package translation
 
 import (
+    "encoding/json"
     "fmt"
     "math"
     "strconv"
@@ -119,7 +120,7 @@ func evaluatePlural(name string, style []rune, parameters map[string]any, locale
         return ""
     }
 
-    pound := formatNumber(number)
+    pound := formatPoundValue(parameters[name], number)
 
     if block, found := selectors["="+pound]; true == found {
         return interpolate(block, parameters, locale, pound, true, depth+1)
@@ -214,6 +215,35 @@ func stringifyParameter(value any) string {
     }
 }
 
+func formatPoundValue(raw any, number float64) string {
+    switch typed := raw.(type) {
+    case int:
+        return strconv.FormatInt(int64(typed), 10)
+    case int8:
+        return strconv.FormatInt(int64(typed), 10)
+    case int16:
+        return strconv.FormatInt(int64(typed), 10)
+    case int32:
+        return strconv.FormatInt(int64(typed), 10)
+    case int64:
+        return strconv.FormatInt(typed, 10)
+    case uint:
+        return strconv.FormatUint(uint64(typed), 10)
+    case uint8:
+        return strconv.FormatUint(uint64(typed), 10)
+    case uint16:
+        return strconv.FormatUint(uint64(typed), 10)
+    case uint32:
+        return strconv.FormatUint(uint64(typed), 10)
+    case uint64:
+        return strconv.FormatUint(typed, 10)
+    case json.Number:
+        return typed.String()
+    default:
+        return formatNumber(number)
+    }
+}
+
 func toFloat(value any) (float64, bool) {
     switch typed := value.(type) {
     case int:
@@ -240,6 +270,12 @@ func toFloat(value any) (float64, bool) {
         return float64(typed), true
     case float64:
         return typed, true
+    case json.Number:
+        parsed, parseErr := typed.Float64()
+        if nil != parseErr {
+            return 0, false
+        }
+        return parsed, true
     case string:
         parsed, parseErr := strconv.ParseFloat(typed, 64)
         if nil != parseErr {

@@ -1,4 +1,4 @@
-package rueidis_test
+package rueidis
 
 import (
     "context"
@@ -6,7 +6,6 @@ import (
     "testing"
     "time"
 
-    rueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
     "github.com/precision-soft/melody/v3/container"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -23,14 +22,14 @@ func TestRedisLock_MutualExclusionReleaseAndRefresh(t *testing.T) {
         t.Skip("REDIS_ADDRESS not set; skipping redis lock integration test")
     }
 
-    provider := rueidis.NewProvider()
-    client, openErr := provider.Open(rueidis.NewConnectionParams(address, "", ""))
+    provider := NewProvider()
+    client, openErr := provider.Open(NewConnectionParams(address, "", ""))
     if nil != openErr {
         t.Fatalf("open: %v", openErr)
     }
     defer provider.Close(client)
 
-    locker := rueidis.NewLocker(client)
+    locker := NewLocker(client)
     runtimeInstance := newLockRuntime()
 
     name := "melody:lock:test"
@@ -70,14 +69,14 @@ func TestRedisLock_RefreshFailsWhenLostToAnotherClient(t *testing.T) {
         t.Skip("REDIS_ADDRESS not set; skipping redis lock integration test")
     }
 
-    provider := rueidis.NewProvider()
-    client, openErr := provider.Open(rueidis.NewConnectionParams(address, "", ""))
+    provider := NewProvider()
+    client, openErr := provider.Open(NewConnectionParams(address, "", ""))
     if nil != openErr {
         t.Fatalf("open: %v", openErr)
     }
     defer provider.Close(client)
 
-    locker := rueidis.NewLocker(client)
+    locker := NewLocker(client)
     runtimeInstance := newLockRuntime()
 
     name := "melody:lock:lost"
@@ -103,14 +102,14 @@ func TestRedisLock_ReacquireIsReentrantForSameLock(t *testing.T) {
         t.Skip("REDIS_ADDRESS not set; skipping redis lock integration test")
     }
 
-    provider := rueidis.NewProvider()
-    client, openErr := provider.Open(rueidis.NewConnectionParams(address, "", ""))
+    provider := NewProvider()
+    client, openErr := provider.Open(NewConnectionParams(address, "", ""))
     if nil != openErr {
         t.Fatalf("open: %v", openErr)
     }
     defer provider.Close(client)
 
-    locker := rueidis.NewLocker(client)
+    locker := NewLocker(client)
     runtimeInstance := newLockRuntime()
 
     lock := locker.CreateLock("melody:lock:reentrant", 10*time.Second)
@@ -124,5 +123,30 @@ func TestRedisLock_ReacquireIsReentrantForSameLock(t *testing.T) {
     second, secondErr := lock.Acquire(runtimeInstance)
     if nil != secondErr || false == second {
         t.Fatalf("expected re-acquire of the same lock to be reentrant: %v %v", second, secondErr)
+    }
+}
+
+/** @info floorPositiveMilliseconds */
+
+func TestFloorPositiveMilliseconds_FloorsSubMillisecondToOne(t *testing.T) {
+    cases := []struct {
+        name     string
+        ttl      time.Duration
+        expected int64
+    }{
+        {"sub-millisecond floors to 1", 500 * time.Microsecond, 1},
+        {"one nanosecond floors to 1", time.Nanosecond, 1},
+        {"exact millisecond preserved", time.Millisecond, 1},
+        {"two milliseconds preserved", 2 * time.Millisecond, 2},
+        {"one second is 1000ms", time.Second, 1000},
+    }
+
+    for _, testCase := range cases {
+        t.Run(testCase.name, func(t *testing.T) {
+            actual := floorPositiveMilliseconds(testCase.ttl)
+            if testCase.expected != actual {
+                t.Fatalf("floorPositiveMilliseconds(%v) = %d, want %d", testCase.ttl, actual, testCase.expected)
+            }
+        })
     }
 }

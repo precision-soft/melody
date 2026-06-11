@@ -9,9 +9,6 @@ import (
 )
 
 func NewApiKeyHeaderRule(matcher securitycontract.Matcher, headerName string, expectedValue string) *ApiKeyHeaderRule {
-    /** Reject misconfiguration at construction, mirroring ApiKeyHeaderAuthenticator: an empty header
-        name or an empty expected key would fail open — a request that omits the header yields "", and a
-        constant-time compare of "" against "" succeeds, granting every unauthenticated request. */
     if "" == headerName {
         exception.Panic(exception.NewError("api key header rule header name is empty", nil, nil))
     }

@@ -1,4 +1,4 @@
-package openapi_test
+package openapi
 
 import (
     "context"
@@ -12,7 +12,6 @@ import (
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
-    "github.com/precision-soft/melody/v3/openapi"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
@@ -36,18 +35,18 @@ func TestSpecHandler_ServesDocumentFromLiveRoutes(t *testing.T) {
         },
     )
 
-    registry := openapi.NewRegistry()
-    registry.Describe("products.create", openapi.Descriptor{
+    registry := NewRegistry()
+    registry.Describe("products.create", Descriptor{
         Summary:     "Create a product",
-        RequestType: openapi.TypeOf[createProductRequest](),
+        RequestType: TypeOf[createProductRequest](),
         Responses: map[int]reflect.Type{
-            201: openapi.TypeOf[productResponse](),
+            201: TypeOf[productResponse](),
         },
     })
 
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
-    handler := openapi.SpecHandler(openapi.Info{Title: "Example", Version: "1.0.0"}, registry)
+    handler := SpecHandler(Info{Title: "Example", Version: "1.0.0"}, registry)
 
     response, handlerErr := handler(runtimeInstance, nil, nil)
     if nil != handlerErr {

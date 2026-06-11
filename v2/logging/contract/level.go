@@ -9,7 +9,6 @@ import (
 type Level string
 
 const (
-    /** @internal */
     LevelUnknown Level = "unknown"
 
     LevelDebug     Level = "debug"

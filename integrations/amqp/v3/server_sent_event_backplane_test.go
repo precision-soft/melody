@@ -1,4 +1,4 @@
-package amqp_test
+package amqp
 
 import (
     "errors"
@@ -6,14 +6,13 @@ import (
     "testing"
     "time"
 
-    amqp "github.com/precision-soft/melody/integrations/amqp/v3"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     amqp091 "github.com/rabbitmq/amqp091-go"
 )
 
 func TestServerSentEventBackplane_PublishAfterCloseDoesNotRetry(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub()
-    backplane := amqp.NewServerSentEventBackplane(amqp.ServerSentEventBackplaneConfig{
+    backplane := NewServerSentEventBackplane(ServerSentEventBackplaneConfig{
         Dialer: func() (*amqp091.Connection, error) {
             return nil, errors.New("no broker")
         },
@@ -44,7 +43,7 @@ func TestServerSentEventBackplane_CloseDoesNotDeadlockDuringReconnect(t *testing
     dialUnblock := make(chan struct{})
 
     hub := melodyhttp.NewServerSentEventHub()
-    backplane := amqp.NewServerSentEventBackplane(amqp.ServerSentEventBackplaneConfig{
+    backplane := NewServerSentEventBackplane(ServerSentEventBackplaneConfig{
         Dialer: func() (*amqp091.Connection, error) {
             select {
             case dialStarted <- struct{}{}:
@@ -56,22 +55,15 @@ func TestServerSentEventBackplane_CloseDoesNotDeadlockDuringReconnect(t *testing
         Hub: hub,
     })
 
-    // Wait until the listen goroutine's first dial is in progress.
     select {
     case <-dialStarted:
     case <-time.After(2 * time.Second):
         t.Fatalf("dial never started")
     }
 
-    // Close() must not deadlock: it must be able to acquire the mutex and set closing=true
-    // even while liveConnection() is blocked inside the dialer. Unblocking the dialer
-    // simulates the dial completing (or timing out), after which the listen goroutine exits.
     done := make(chan error, 1)
     go func() { done <- backplane.Close() }()
 
-    // Unblock the dialer shortly after Close() starts — this simulates the dial timing out.
-    // If the fix is correct, Close() acquires the mutex promptly (while dial blocks) and
-    // wait.Wait() resolves once the dialer returns.
     time.Sleep(50 * time.Millisecond)
     close(dialUnblock)
 
@@ -85,13 +77,54 @@ func TestServerSentEventBackplane_CloseDoesNotDeadlockDuringReconnect(t *testing
     }
 }
 
+func TestServerSentEventBackplane_CloseReturnsWhileDialStillBlocked(t *testing.T) {
+    dialStarted := make(chan struct{}, 1)
+    dialUnblock := make(chan struct{})
+
+    hub := melodyhttp.NewServerSentEventHub()
+    backplane := NewServerSentEventBackplane(ServerSentEventBackplaneConfig{
+        Dialer: func() (*amqp091.Connection, error) {
+            select {
+            case dialStarted <- struct{}{}:
+            default:
+            }
+            <-dialUnblock
+            return nil, errors.New("dial released")
+        },
+        Hub: hub,
+    })
+
+    select {
+    case <-dialStarted:
+    case <-time.After(2 * time.Second):
+        close(dialUnblock)
+        t.Fatalf("dial never started")
+    }
+
+    done := make(chan error, 1)
+    go func() { done <- backplane.Close() }()
+
+    select {
+    case closeErr := <-done:
+        if nil != closeErr {
+            close(dialUnblock)
+            t.Fatalf("close: %v", closeErr)
+        }
+    case <-time.After(2 * time.Second):
+        close(dialUnblock)
+        t.Fatalf("Close() blocked on the in-flight dial instead of returning once the context was cancelled")
+    }
+
+    close(dialUnblock)
+}
+
 func TestServerSentEventBackplane_ReplicatesBroadcastToAnotherInstance(t *testing.T) {
     dsn := os.Getenv("AMQP_DSN")
     if "" == dsn {
         t.Skip("AMQP_DSN not set; skipping amqp sse backplane integration test")
     }
 
-    provider := amqp.NewProvider()
+    provider := NewProvider()
     connection, openErr := provider.Open(dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -101,11 +134,11 @@ func TestServerSentEventBackplane_ReplicatesBroadcastToAnotherInstance(t *testin
     exchange := "melody.sse.test"
 
     hubA := melodyhttp.NewServerSentEventHub()
-    backplaneA := amqp.NewServerSentEventBackplane(amqp.ServerSentEventBackplaneConfig{Connection: connection, Hub: hubA, Exchange: exchange})
+    backplaneA := NewServerSentEventBackplane(ServerSentEventBackplaneConfig{Connection: connection, Hub: hubA, Exchange: exchange})
     defer backplaneA.Close()
 
     hubB := melodyhttp.NewServerSentEventHub()
-    backplaneB := amqp.NewServerSentEventBackplane(amqp.ServerSentEventBackplaneConfig{Connection: connection, Hub: hubB, Exchange: exchange})
+    backplaneB := NewServerSentEventBackplane(ServerSentEventBackplaneConfig{Connection: connection, Hub: hubB, Exchange: exchange})
     defer backplaneB.Close()
 
     subscriber := hubB.Subscribe("orders", 4)
@@ -138,7 +171,7 @@ func TestServerSentEventBackplane_DoesNotEchoToOriginInstanceTwice(t *testing.T)
         t.Skip("AMQP_DSN not set; skipping amqp sse backplane integration test")
     }
 
-    provider := amqp.NewProvider()
+    provider := NewProvider()
     connection, openErr := provider.Open(dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -146,7 +179,7 @@ func TestServerSentEventBackplane_DoesNotEchoToOriginInstanceTwice(t *testing.T)
     defer provider.Close(connection)
 
     hub := melodyhttp.NewServerSentEventHub()
-    backplane := amqp.NewServerSentEventBackplane(amqp.ServerSentEventBackplaneConfig{Connection: connection, Hub: hub, Exchange: "melody.sse.test.echo"})
+    backplane := NewServerSentEventBackplane(ServerSentEventBackplaneConfig{Connection: connection, Hub: hub, Exchange: "melody.sse.test.echo"})
     defer backplane.Close()
 
     subscriber := hub.Subscribe("orders", 4)
@@ -169,5 +202,64 @@ func TestServerSentEventBackplane_DoesNotEchoToOriginInstanceTwice(t *testing.T)
     case event := <-subscriber.Events():
         t.Fatalf("expected no echoed re-delivery of the origin's own broadcast, got %q", event.Data)
     case <-time.After(time.Second):
+    }
+}
+
+/** @info reconnect backoff reset */
+
+func TestShouldResetReconnectBackoff(t *testing.T) {
+    if true == shouldResetReconnectBackoff(reconnectInitialBackoff-time.Nanosecond) {
+        t.Fatalf("expected no backoff reset for a subscription that died sooner than the initial backoff")
+    }
+
+    if false == shouldResetReconnectBackoff(reconnectInitialBackoff) {
+        t.Fatalf("expected a backoff reset for a subscription that lived at least the initial backoff")
+    }
+
+    if false == shouldResetReconnectBackoff(2*reconnectInitialBackoff) {
+        t.Fatalf("expected a backoff reset for a long-lived subscription")
+    }
+}
+
+/** @info publish channel reopen */
+
+func TestServerSentEventBackplane_EnsurePublishChannel_ReopensClosedChannel(t *testing.T) {
+    dsn := os.Getenv("AMQP_DSN")
+    if "" == dsn {
+        t.Skip("AMQP_DSN not set; skipping amqp integration test")
+    }
+
+    provider := NewProvider()
+    connection, openErr := provider.Open(dsn)
+    if nil != openErr {
+        t.Fatalf("open connection: %v", openErr)
+    }
+    defer provider.Close(connection)
+
+    backplane := NewServerSentEventBackplane(ServerSentEventBackplaneConfig{
+        Connection: connection,
+        Hub:        melodyhttp.NewServerSentEventHub(),
+        Exchange:   "melody.sse.reopen-publish",
+    })
+
+    first, firstErr := backplane.ensurePublishChannel()
+    if nil != firstErr {
+        t.Fatalf("first ensurePublishChannel: %v", firstErr)
+    }
+
+    first.Close()
+    if false == first.IsClosed() {
+        t.Fatalf("expected the channel to report closed after Close")
+    }
+
+    second, secondErr := backplane.ensurePublishChannel()
+    if nil != secondErr {
+        t.Fatalf("second ensurePublishChannel: %v", secondErr)
+    }
+    if true == second.IsClosed() {
+        t.Fatalf("expected a fresh open channel, got a closed one (the stale channel was reused)")
+    }
+    if second == first {
+        t.Fatalf("expected the stale closed channel to be replaced, got the same channel")
     }
 }

@@ -75,14 +75,81 @@ func (instance *container) Close() error {
         return nil, false
     }
 
-    /** @important the same instance can be created under several node keys (a named service that also registers its type lives under both "service:<name>" and "type:<T>"); collapse those aliases onto one representative so a dependency edge recorded against any alias constrains the close order of the shared instance and it is closed exactly once in dependent-before-dependency order */
+    /** @important the same instance can be created under several node keys (a named service that also registers its type lives under both "service:<name>" and "type:<T>"); collapse those aliases onto one representative so a dependency edge recorded against any alias constrains the close order of the shared instance and it is closed exactly once in dependent-before-dependency order. The "type:<T>" node is collapsed onto its backing "service:<name>" structurally (via typeRegistrationNamesByType), which is correct even for a value-type service whose dynamic contents are not hashable; pointer/value identity then groups any remaining same-instance aliases */
     valueOfNodeKey := make(map[string]any, len(createdNodeKeys))
     representativeOf := make(map[string]string, len(createdNodeKeys))
     pointerRepresentative := make(map[uintptr]string, len(createdNodeKeys))
     valueRepresentative := make(map[any]string, len(createdNodeKeys))
     canonicalNodeKeys := make([]string, 0, len(createdNodeKeys))
 
+    assignRepresentative := func(nodeKey string, value any) {
+        if pointerKey, hasPointer := pointerKeyOf(value); true == hasPointer {
+            if existingRepresentative, alreadyGrouped := pointerRepresentative[pointerKey]; true == alreadyGrouped {
+                representativeOf[nodeKey] = existingRepresentative
+
+                return
+            }
+
+            pointerRepresentative[pointerKey] = nodeKey
+            representativeOf[nodeKey] = nodeKey
+            canonicalNodeKeys = append(canonicalNodeKeys, nodeKey)
+
+            return
+        }
+
+        if true == isComparableValue(value) {
+            if existingRepresentative, alreadyGrouped := valueRepresentative[value]; true == alreadyGrouped {
+                representativeOf[nodeKey] = existingRepresentative
+
+                return
+            }
+
+            valueRepresentative[value] = nodeKey
+            representativeOf[nodeKey] = nodeKey
+            canonicalNodeKeys = append(canonicalNodeKeys, nodeKey)
+
+            return
+        }
+
+        representativeOf[nodeKey] = nodeKey
+        canonicalNodeKeys = append(canonicalNodeKeys, nodeKey)
+    }
+
+    typeAliasRepresentative := func(typeNodeKey string) (string, bool) {
+        typeString := strings.TrimPrefix(typeNodeKey, "type:")
+        targetType, typeExists := typeStringToType[typeString]
+        if false == typeExists {
+            return "", false
+        }
+
+        for _, serviceName := range instance.typeRegistrationNamesByType[targetType] {
+            if existingRepresentative, hasRepresentative := representativeOf["service:"+serviceName]; true == hasRepresentative {
+                return existingRepresentative, true
+            }
+        }
+
+        return "", false
+    }
+
     for _, nodeKey := range createdNodeKeys {
+        if false == strings.HasPrefix(nodeKey, "service:") {
+            continue
+        }
+
+        value, exists := resolveNodeValue(nodeKey)
+        if false == exists {
+            continue
+        }
+
+        valueOfNodeKey[nodeKey] = value
+        assignRepresentative(nodeKey, value)
+    }
+
+    for _, nodeKey := range createdNodeKeys {
+        if false == strings.HasPrefix(nodeKey, "type:") {
+            continue
+        }
+
         value, exists := resolveNodeValue(nodeKey)
         if false == exists {
             continue
@@ -90,36 +157,13 @@ func (instance *container) Close() error {
 
         valueOfNodeKey[nodeKey] = value
 
-        if pointerKey, hasPointer := pointerKeyOf(value); true == hasPointer {
-            if existingRepresentative, alreadyGrouped := pointerRepresentative[pointerKey]; true == alreadyGrouped {
-                representativeOf[nodeKey] = existingRepresentative
-
-                continue
-            }
-
-            pointerRepresentative[pointerKey] = nodeKey
-            representativeOf[nodeKey] = nodeKey
-            canonicalNodeKeys = append(canonicalNodeKeys, nodeKey)
+        if aliasRepresentative, aliased := typeAliasRepresentative(nodeKey); true == aliased {
+            representativeOf[nodeKey] = aliasRepresentative
 
             continue
         }
 
-        if true == isComparableValue(value) {
-            if existingRepresentative, alreadyGrouped := valueRepresentative[value]; true == alreadyGrouped {
-                representativeOf[nodeKey] = existingRepresentative
-
-                continue
-            }
-
-            valueRepresentative[value] = nodeKey
-            representativeOf[nodeKey] = nodeKey
-            canonicalNodeKeys = append(canonicalNodeKeys, nodeKey)
-
-            continue
-        }
-
-        representativeOf[nodeKey] = nodeKey
-        canonicalNodeKeys = append(canonicalNodeKeys, nodeKey)
+        assignRepresentative(nodeKey, value)
     }
 
     adjacency := make(map[string]map[string]struct{}, len(canonicalNodeKeys))
@@ -343,7 +387,7 @@ func isComparableValue(value any) bool {
         return false
     }
 
-    return reflect.TypeOf(value).Comparable()
+    return reflect.ValueOf(value).Comparable()
 }
 
 func pointerKeyOf(value any) (uintptr, bool) {

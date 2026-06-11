@@ -9,7 +9,6 @@ import (
     "time"
 
     "github.com/precision-soft/melody/clock"
-    clockcontract "github.com/precision-soft/melody/clock/contract"
     "github.com/precision-soft/melody/container"
     containercontract "github.com/precision-soft/melody/container/contract"
     eventcontract "github.com/precision-soft/melody/event/contract"
@@ -20,13 +19,6 @@ import (
     "github.com/precision-soft/melody/runtime"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
-
-func testNewEventDispatcher() (*EventDispatcher, clockcontract.Clock) {
-    clockInstance := clock.NewSystemClock()
-    dispatcher := NewEventDispatcher(clockInstance)
-
-    return dispatcher, clockInstance
-}
 
 func TestEventDispatcherStableOrderingForEqualPriorities(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
@@ -200,6 +192,34 @@ func TestEventDispatcher_DispatchName_PanicsOnEmptyName(t *testing.T) {
             _, _ = dispatcher.DispatchName(runtimeInstance, "", nil)
         },
     )
+}
+
+func TestEventDispatcher_DispatchName_PayloadIsPreserved(t *testing.T) {
+    dispatcher := NewEventDispatcher(clock.NewSystemClock())
+
+    var receivedPayload any
+
+    dispatcher.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            receivedPayload = eventValue.Payload()
+            return nil
+        },
+        0,
+    )
+
+    payload := map[string]any{"a": 1}
+
+    runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
+
+    _, err := dispatcher.DispatchName(runtimeInstance, "e", payload)
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if nil == receivedPayload {
+        t.Fatalf("expected payload")
+    }
 }
 
 func TestEventDispatcher_StopPropagation_SkipsRemainingListeners(t *testing.T) {

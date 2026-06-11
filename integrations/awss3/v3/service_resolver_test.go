@@ -1,9 +1,8 @@
-package awss3_test
+package awss3
 
 import (
     "testing"
 
-    awss3 "github.com/precision-soft/melody/integrations/awss3/v3"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     melodystorage "github.com/precision-soft/melody/v3/storage"
 )
@@ -19,7 +18,7 @@ func (instance *recordingRegistrar) RegisterService(serviceName string, provider
 func TestRegisterStorageServiceUsesCoreStorageName(t *testing.T) {
     registrar := &recordingRegistrar{}
 
-    awss3.RegisterStorageService(registrar, nil, "example-bucket")
+    RegisterStorageService(registrar, nil, "example-bucket")
 
     if 0 == len(registrar.names) || melodystorage.ServiceStorage != registrar.names[0] {
         t.Fatalf("expected %q to be registered, got %v", melodystorage.ServiceStorage, registrar.names)

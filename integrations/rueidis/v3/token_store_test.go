@@ -1,48 +1,16 @@
-package rueidis_test
+package rueidis
 
 import (
-    "context"
-    "os"
+    "strings"
     "testing"
     "time"
 
-    rueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
-    "github.com/precision-soft/melody/v3/container"
-    "github.com/precision-soft/melody/v3/runtime"
-    runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
-    redisclient "github.com/redis/rueidis"
 )
-
-func newTokenStoreRuntime() runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
-    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
-}
-
-func newTokenStoreClient(t *testing.T) redisclient.Client {
-    t.Helper()
-
-    address := os.Getenv("REDIS_ADDRESS")
-    if "" == address {
-        t.Skip("REDIS_ADDRESS not set; skipping redis token store integration test")
-    }
-
-    provider := rueidis.NewProvider()
-    client, openErr := provider.Open(rueidis.NewConnectionParams(address, "", ""))
-    if nil != openErr {
-        t.Fatalf("open: %v", openErr)
-    }
-
-    t.Cleanup(func() {
-        provider.Close(client)
-    })
-
-    return client
-}
 
 func TestRedisTokenStore_PutThenLookupRoundTrips(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := rueidis.NewTokenStore(client, rueidis.WithTokenStorePrefix("melody:token:test:roundtrip"))
+    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:roundtrip"))
 
     claims := securitycontract.Claims{
         UserIdentifier: "alice",
@@ -74,7 +42,7 @@ func TestRedisTokenStore_PutThenLookupRoundTrips(t *testing.T) {
 
 func TestRedisTokenStore_LookupMissingReturnsFalse(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := rueidis.NewTokenStore(client, rueidis.WithTokenStorePrefix("melody:token:test:missing"))
+    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:missing"))
 
     _, exists, lookupErr := store.Lookup(newTokenStoreRuntime(), "absent")
     if nil != lookupErr {
@@ -88,7 +56,7 @@ func TestRedisTokenStore_LookupMissingReturnsFalse(t *testing.T) {
 
 func TestRedisTokenStore_PutWithTtlExpires(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := rueidis.NewTokenStore(client, rueidis.WithTokenStorePrefix("melody:token:test:ttl"))
+    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:ttl"))
 
     store.PutWithTtl("token-ttl", securitycontract.Claims{UserIdentifier: "bob"}, 100*time.Millisecond)
 
@@ -106,7 +74,7 @@ func TestRedisTokenStore_PutWithTtlExpires(t *testing.T) {
 
 func TestRedisTokenStore_ZeroTtlDoesNotExpire(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := rueidis.NewTokenStore(client, rueidis.WithTokenStorePrefix("melody:token:test:noexpiry"))
+    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:noexpiry"))
 
     store.Put("token-noexpiry", securitycontract.Claims{UserIdentifier: "carol"})
     defer store.Delete("token-noexpiry")
@@ -125,7 +93,7 @@ func TestRedisTokenStore_ZeroTtlDoesNotExpire(t *testing.T) {
 
 func TestRedisTokenStore_DeleteRemovesTokenAndIndex(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := rueidis.NewTokenStore(client, rueidis.WithTokenStorePrefix("melody:token:test:delete"))
+    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:delete"))
 
     store.Put("token-delete", securitycontract.Claims{UserIdentifier: "dave"})
     store.Delete("token-delete")
@@ -146,7 +114,7 @@ func TestRedisTokenStore_DeleteRemovesTokenAndIndex(t *testing.T) {
 
 func TestRedisTokenStore_PutReindexesOnUserChange(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := rueidis.NewTokenStore(client, rueidis.WithTokenStorePrefix("melody:token:test:reindex"))
+    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:reindex"))
 
     store.Put("token-shared", securitycontract.Claims{UserIdentifier: "userA"})
     store.Put("token-shared", securitycontract.Claims{UserIdentifier: "userB"})
@@ -164,7 +132,7 @@ func TestRedisTokenStore_PutReindexesOnUserChange(t *testing.T) {
 
 func TestRedisTokenStore_DeleteByUserCountsAndClears(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := rueidis.NewTokenStore(client, rueidis.WithTokenStorePrefix("melody:token:test:deleteuser"))
+    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:deleteuser"))
 
     store.Put("token-1", securitycontract.Claims{UserIdentifier: "erin"})
     store.Put("token-2", securitycontract.Claims{UserIdentifier: "erin"})
@@ -188,7 +156,7 @@ func TestRedisTokenStore_DeleteByUserCountsAndClears(t *testing.T) {
 
 func TestRedisTokenStore_DeleteByUserSkipsExpiredMembers(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := rueidis.NewTokenStore(client, rueidis.WithTokenStorePrefix("melody:token:test:expiredmember"))
+    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:expiredmember"))
 
     store.Put("token-live", securitycontract.Claims{UserIdentifier: "frank"})
     store.PutWithTtl("token-expiring", securitycontract.Claims{UserIdentifier: "frank"}, 100*time.Millisecond)
@@ -202,7 +170,7 @@ func TestRedisTokenStore_DeleteByUserSkipsExpiredMembers(t *testing.T) {
 
 func TestRedisTokenStore_PurgeExpiredPrunesStaleMembers(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := rueidis.NewTokenStore(client, rueidis.WithTokenStorePrefix("melody:token:test:purge"))
+    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:purge"))
 
     store.PutWithTtl("token-stale", securitycontract.Claims{UserIdentifier: "grace"}, 100*time.Millisecond)
 
@@ -219,7 +187,7 @@ func TestRedisTokenStore_PurgeExpiredPrunesStaleMembers(t *testing.T) {
 
 func TestRedisTokenStore_DeleteByUserDoesNotRevokeReissuedTokenOfAnotherUser(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := rueidis.NewTokenStore(client, rueidis.WithTokenStorePrefix("melody:token:test:staleindex"))
+    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:staleindex"))
 
     store.PutWithTtl("reused-token", securitycontract.Claims{UserIdentifier: "userA"}, 100*time.Millisecond)
 
@@ -247,7 +215,44 @@ func TestRedisTokenStore_NewTokenStorePanicsOnNilClient(t *testing.T) {
         }
     }()
 
-    rueidis.NewTokenStore(nil)
+    NewTokenStore(nil)
 }
 
-var _ securitycontract.RevocableTokenStore = (*rueidis.RedisTokenStore)(nil)
+var _ securitycontract.RevocableTokenStore = (*RedisTokenStore)(nil)
+
+/** @info hash-tag cluster co-location */
+
+func hashTagOf(key string) string {
+    start := strings.Index(key, "{")
+    if -1 == start {
+        return ""
+    }
+
+    end := strings.Index(key[start+1:], "}")
+    if -1 == end {
+        return ""
+    }
+
+    return key[start+1 : start+1+end]
+}
+
+func TestTokenStoreKeysShareHashTagForClusterColocation(t *testing.T) {
+    store := &RedisTokenStore{prefix: "melody:token"}
+
+    tokenTag := hashTagOf(store.tokenKey("abc"))
+    userTag := hashTagOf(store.userKey("alice"))
+    userPrefixTag := hashTagOf(store.userKeyPrefix())
+
+    if "" == tokenTag {
+        t.Fatalf("expected the token key to carry a hash tag, got %q", store.tokenKey("abc"))
+    }
+
+    if tokenTag != userTag || tokenTag != userPrefixTag {
+        t.Fatalf(
+            "expected every token-store key to share one hash tag for cluster co-location, got token=%q user=%q prefix=%q",
+            tokenTag,
+            userTag,
+            userPrefixTag,
+        )
+    }
+}

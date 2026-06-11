@@ -77,7 +77,6 @@ func TestEnrichContextWithCause_NestedCause_BuildsFullChain(t *testing.T) {
     }
 
     if 2 < len(causeChain) {
-        /** @info the chain walks through middle and root */
     }
 
     causeContextChainValue, hasCauseContextChain := enrichedContext["causeContextChain"]

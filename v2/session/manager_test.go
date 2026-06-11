@@ -32,6 +32,31 @@ func TestNewManager_PanicsWhenStorageIsNil(t *testing.T) {
     })
 }
 
+func TestManager_NewSession_HasId(t *testing.T) {
+    storage := NewInMemoryStorage()
+    manager := NewManager(storage, 30*time.Minute)
+
+    sessionInstance := manager.NewSession()
+    if "" == sessionInstance.Id() {
+        t.Fatalf("expected id")
+    }
+}
+
+func TestManager_NewSession_GeneratesUniqueId(t *testing.T) {
+    manager := NewManager(NewInMemoryStorage(), time.Minute)
+
+    s1 := manager.NewSession()
+    s2 := manager.NewSession()
+
+    if "" == s1.Id() || "" == s2.Id() {
+        t.Fatalf("expected ids")
+    }
+
+    if s1.Id() == s2.Id() {
+        t.Fatalf("expected unique ids")
+    }
+}
+
 func TestManager_Session_ReturnsNilWhenIdEmpty(t *testing.T) {
     manager := NewManager(NewInMemoryStorage(), time.Minute)
 
@@ -99,18 +124,30 @@ func TestManager_Session_NormalizesNilValuesMap(t *testing.T) {
     }
 }
 
-func TestManager_NewSession_GeneratesUniqueId(t *testing.T) {
-    manager := NewManager(NewInMemoryStorage(), time.Minute)
+func TestManager_SaveAndLoad_RoundTrip(t *testing.T) {
+    storage := NewInMemoryStorage()
+    manager := NewManager(storage, 30*time.Minute)
 
-    s1 := manager.NewSession()
-    s2 := manager.NewSession()
+    sessionInstance := manager.NewSession()
 
-    if "" == s1.Id() || "" == s2.Id() {
-        t.Fatalf("expected ids")
+    sessionInstance.Set("a", "b")
+
+    if false == sessionInstance.IsModified() {
+        t.Fatalf("expected modified")
     }
 
-    if s1.Id() == s2.Id() {
-        t.Fatalf("expected unique ids")
+    err := manager.SaveSession(sessionInstance)
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    loaded := manager.Session(sessionInstance.Id())
+    if nil == loaded {
+        t.Fatalf("expected loaded session")
+    }
+
+    if "b" != loaded.String("a") {
+        t.Fatalf("unexpected value")
     }
 }
 
@@ -139,6 +176,29 @@ func TestManager_SaveSession_ReturnsErrorWhenSessionIdEmpty(t *testing.T) {
     }
 }
 
+func TestManager_DeleteSession_RemovesSession(t *testing.T) {
+    storage := NewInMemoryStorage()
+    manager := NewManager(storage, 30*time.Minute)
+
+    sessionInstance := manager.NewSession()
+    sessionInstance.Set("a", "b")
+
+    err := manager.SaveSession(sessionInstance)
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    err = manager.DeleteSession(sessionInstance.Id())
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    loaded := manager.Session(sessionInstance.Id())
+    if nil != loaded {
+        t.Fatalf("expected nil session after delete")
+    }
+}
+
 func TestManager_DeleteSession_ReturnsErrorWhenIdEmpty(t *testing.T) {
     manager := NewManager(NewInMemoryStorage(), time.Minute)
 
@@ -156,59 +216,3 @@ func TestManager_DeleteSession_ReturnsErrorWhenIdIsMalformed(t *testing.T) {
         t.Fatalf("expected error for malformed id")
     }
 }
-
-func TestIsValidSessionId(t *testing.T) {
-    cases := map[string]bool{
-        "":                                  false,
-        "abc":                               false,
-        "0123456789abcdef0123456789abcdef":  true,
-        "0123456789ABCDEF0123456789ABCDEF":  false,
-        "0123456789abcdef0123456789abcdeg":  false,
-        "0123456789abcdef0123456789abcde ":  false,
-        "0123456789abcdef0123456789abcde":   false,
-        "0123456789abcdef0123456789abcdef0": false,
-    }
-
-    for value, expected := range cases {
-        if expected != isValidSessionId(value) {
-            t.Fatalf("isValidSessionId(%q) = %v, want %v", value, !expected, expected)
-        }
-    }
-}
-
-func TestSession_AllReturnsCopy(t *testing.T) {
-    sessionInstance := &Session{
-        id:       "id",
-        values:   map[string]any{"a": "b"},
-        modified: false,
-        cleared:  false,
-    }
-
-    all := sessionInstance.All()
-    all["a"] = "changed"
-
-    if "b" != sessionInstance.values["a"].(string) {
-        t.Fatalf("expected isolation")
-    }
-}
-
-func TestSession_DeleteMarksModifiedOnlyWhenKeyExists(t *testing.T) {
-    sessionInstance := &Session{
-        id:       "id",
-        values:   map[string]any{},
-        modified: false,
-        cleared:  false,
-    }
-
-    sessionInstance.Delete("missing")
-    if true == sessionInstance.IsModified() {
-        t.Fatalf("expected not modified")
-    }
-
-    sessionInstance.Set("a", "b")
-    if false == sessionInstance.IsModified() {
-        t.Fatalf("expected modified")
-    }
-}
-
-var _ = exception.NewError

@@ -1,9 +1,8 @@
-package amqp_test
+package amqp
 
 import (
     "testing"
 
-    amqp "github.com/precision-soft/melody/integrations/amqp/v3"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
 )
 
@@ -28,17 +27,17 @@ func (instance *recordingRegistrar) has(serviceName string) bool {
 func TestRegisterConnectionServiceUsesConnectionName(t *testing.T) {
     registrar := &recordingRegistrar{}
 
-    amqp.RegisterConnectionService(registrar, nil)
+    RegisterConnectionService(registrar, nil)
 
-    if false == registrar.has(amqp.ServiceConnection) {
-        t.Fatalf("expected %q to be registered, got %v", amqp.ServiceConnection, registrar.names)
+    if false == registrar.has(ServiceConnection) {
+        t.Fatalf("expected %q to be registered, got %v", ServiceConnection, registrar.names)
     }
 }
 
 func TestRegisterTransportServiceUsesGivenName(t *testing.T) {
     registrar := &recordingRegistrar{}
 
-    amqp.RegisterTransportService(registrar, "async", nil)
+    RegisterTransportService(registrar, "async", nil)
 
     if false == registrar.has("async") {
         t.Fatalf("expected %q to be registered, got %v", "async", registrar.names)

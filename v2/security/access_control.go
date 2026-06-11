@@ -9,10 +9,6 @@ import (
     securitycontract "github.com/precision-soft/melody/v2/security/contract"
 )
 
-/** normalizeAccessControlAttributes trims blank attributes and rejects PUBLIC_ACCESS combined with any
-    other attribute. The access-control listener grants immediately on a PUBLIC_ACCESS attribute before
-    any token/role/voter check, so a rule such as (PUBLIC_ACCESS, ROLE_ADMIN) would silently open the
-    endpoint to everyone and discard the role requirement — fail closed by forbidding the combination. */
 func normalizeAccessControlAttributes(attributes []string) []string {
     normalizedAttributes := make([]string, 0, len(attributes))
     publicAccess := false

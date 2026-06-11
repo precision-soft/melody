@@ -164,7 +164,7 @@ func mapClaim(rawClaims map[string]any, name string) map[string]any {
 }
 
 func (instance *JwtTokenValidator) verifyTimeClaims(rawClaims map[string]any, now time.Time) error {
-    expiry, hasExpiry, expiryValid := numericClaim(rawClaims, "exp")
+    expiry, hasExpiry, expiryValid := numericClaim(rawClaims, "exp", false)
     if true == hasExpiry && false == expiryValid {
         return exception.NewError("jwt exp claim is malformed", nil, nil)
     }
@@ -180,7 +180,7 @@ func (instance *JwtTokenValidator) verifyTimeClaims(rawClaims map[string]any, no
         }
     }
 
-    notBefore, hasNotBefore, notBeforeValid := numericClaim(rawClaims, "nbf")
+    notBefore, hasNotBefore, notBeforeValid := numericClaim(rawClaims, "nbf", true)
     if true == hasNotBefore && false == notBeforeValid {
         return exception.NewError("jwt nbf claim is malformed", nil, nil)
     }
@@ -192,7 +192,7 @@ func (instance *JwtTokenValidator) verifyTimeClaims(rawClaims map[string]any, no
         }
     }
 
-    issuedAt, hasIssuedAt, issuedAtValid := numericClaim(rawClaims, "iat")
+    issuedAt, hasIssuedAt, issuedAtValid := numericClaim(rawClaims, "iat", true)
     if true == hasIssuedAt && false == issuedAtValid {
         return exception.NewError("jwt iat claim is malformed", nil, nil)
     }
@@ -284,7 +284,7 @@ func stringSliceClaim(rawClaims map[string]any, name string) []string {
     }
 }
 
-func numericClaim(rawClaims map[string]any, name string) (int64, bool, bool) {
+func numericClaim(rawClaims map[string]any, name string, roundUp bool) (int64, bool, bool) {
     value, exists := rawClaims[name]
     if false == exists {
         return 0, false, false
@@ -303,7 +303,11 @@ func numericClaim(rawClaims map[string]any, name string) (int64, bool, bool) {
         return 0, true, false
     }
 
-    return int64(floatValue), true, true
+    if true == roundUp {
+        return int64(math.Ceil(floatValue)), true, true
+    }
+
+    return int64(math.Floor(floatValue)), true, true
 }
 
 var _ securitycontract.TokenValidator = (*JwtTokenValidator)(nil)

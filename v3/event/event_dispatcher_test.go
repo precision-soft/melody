@@ -9,7 +9,6 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v3/clock"
-    clockcontract "github.com/precision-soft/melody/v3/clock/contract"
     "github.com/precision-soft/melody/v3/container"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     eventcontract "github.com/precision-soft/melody/v3/event/contract"
@@ -21,12 +20,31 @@ import (
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-func testNewEventDispatcher() (*EventDispatcher, clockcontract.Clock) {
-    clockInstance := clock.NewSystemClock()
-    dispatcher := NewEventDispatcher(clockInstance)
-
-    return dispatcher, clockInstance
+type testSubscriber struct {
+    events map[string][]eventcontract.SubscribedEvent
 }
+
+func (instance *testSubscriber) SubscribedEvents() map[string][]eventcontract.SubscribedEvent {
+    return instance.events
+}
+
+type emptyNameEvent struct{}
+
+func (instance *emptyNameEvent) Name() string {
+    return ""
+}
+
+func (instance *emptyNameEvent) Payload() any {
+    return nil
+}
+
+func (instance *emptyNameEvent) Timestamp() time.Time {
+    return time.Now()
+}
+
+func (instance *emptyNameEvent) StopPropagation() {}
+
+func (instance *emptyNameEvent) IsPropagationStopped() bool { return false }
 
 func TestEventDispatcherStableOrderingForEqualPriorities(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
@@ -79,14 +97,6 @@ func TestEventDispatcherStableOrderingForEqualPriorities(t *testing.T) {
     if "c" != invoked[2] {
         t.Fatalf("expected third listener to be 'c', got: %s", invoked[2])
     }
-}
-
-type testSubscriber struct {
-    events map[string][]eventcontract.SubscribedEvent
-}
-
-func (instance *testSubscriber) SubscribedEvents() map[string][]eventcontract.SubscribedEvent {
-    return instance.events
 }
 
 func TestEventDispatcher_AddListener_SortsByPriorityDescending(t *testing.T) {
@@ -158,24 +168,6 @@ func TestEventDispatcher_Dispatch_PanicsOnNilEvent(t *testing.T) {
     )
 }
 
-type emptyNameEvent struct{}
-
-func (instance *emptyNameEvent) Name() string {
-    return ""
-}
-
-func (instance *emptyNameEvent) Payload() any {
-    return nil
-}
-
-func (instance *emptyNameEvent) Timestamp() time.Time {
-    return time.Now()
-}
-
-func (instance *emptyNameEvent) StopPropagation() {}
-
-func (instance *emptyNameEvent) IsPropagationStopped() bool { return false }
-
 func TestEventDispatcher_Dispatch_PanicsOnEmptyName(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
 
@@ -200,6 +192,34 @@ func TestEventDispatcher_DispatchName_PanicsOnEmptyName(t *testing.T) {
             _, _ = dispatcher.DispatchName(runtimeInstance, "", nil)
         },
     )
+}
+
+func TestEventDispatcher_DispatchName_PayloadIsPreserved(t *testing.T) {
+    dispatcher := NewEventDispatcher(clock.NewSystemClock())
+
+    var receivedPayload any
+
+    dispatcher.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            receivedPayload = eventValue.Payload()
+            return nil
+        },
+        0,
+    )
+
+    payload := map[string]any{"a": 1}
+
+    runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
+
+    _, err := dispatcher.DispatchName(runtimeInstance, "e", payload)
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if nil == receivedPayload {
+        t.Fatalf("expected payload")
+    }
 }
 
 func TestEventDispatcher_StopPropagation_SkipsRemainingListeners(t *testing.T) {

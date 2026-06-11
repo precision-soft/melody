@@ -333,6 +333,33 @@ func (instance *ServerSentEventBackplane) declareExchange(channel *amqp091.Chann
     return nil
 }
 
+func (instance *ServerSentEventBackplane) dialWithContext() (*amqp091.Connection, error) {
+    type dialOutcome struct {
+        connection *amqp091.Connection
+        err        error
+    }
+
+    outcome := make(chan dialOutcome, 1)
+    go func() {
+        connection, dialErr := instance.dialer()
+        outcome <- dialOutcome{connection: connection, err: dialErr}
+    }()
+
+    select {
+    case result := <-outcome:
+        return result.connection, result.err
+    case <-instance.ctx.Done():
+        go func() {
+            result := <-outcome
+            if nil != result.connection {
+                _ = result.connection.Close()
+            }
+        }()
+
+        return nil, exception.NewError("amqp sse backplane dial canceled", nil, instance.ctx.Err())
+    }
+}
+
 func (instance *ServerSentEventBackplane) liveConnection() (*amqp091.Connection, error) {
     instance.mutex.Lock()
 
@@ -364,7 +391,7 @@ func (instance *ServerSentEventBackplane) liveConnection() (*amqp091.Connection,
     instance.reconnecting = true
     instance.mutex.Unlock()
 
-    connection, dialErr := instance.dialer()
+    connection, dialErr := instance.dialWithContext()
 
     instance.mutex.Lock()
     defer instance.mutex.Unlock()

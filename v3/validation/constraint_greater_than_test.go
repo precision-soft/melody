@@ -1,6 +1,7 @@
 package validation
 
 import (
+    "math"
     "testing"
 )
 
@@ -156,5 +157,15 @@ func TestGreaterThan_MinGetter(t *testing.T) {
 
     if 42 != constraint.Min() {
         t.Fatalf("expected Min() to return 42, got: %d", constraint.Min())
+    }
+}
+
+func TestGreaterThan_RejectsNaN(t *testing.T) {
+    constraint := NewGreaterThan(10)
+
+    validationError := constraint.Validate(math.NaN(), "field")
+
+    if nil == validationError {
+        t.Fatalf("expected NaN to be rejected by greaterThan, but it passed validation")
     }
 }

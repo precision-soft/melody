@@ -1,10 +1,8 @@
-package openapi_test
+package openapi
 
 import (
     nethttp "net/http"
     "testing"
-
-    "github.com/precision-soft/melody/v3/openapi"
 )
 
 type describeTypedRequest struct {
@@ -16,14 +14,14 @@ type describeTypedResponse struct {
 }
 
 func TestDescribeTyped_RegistersRequestAndResponseTypes(t *testing.T) {
-    registry := openapi.NewRegistry()
+    registry := NewRegistry()
 
-    openapi.DescribeTyped[describeTypedRequest, describeTypedResponse](
+    DescribeTyped[describeTypedRequest, describeTypedResponse](
         registry,
         "products.create",
         nethttp.StatusCreated,
-        openapi.WithSummary("Create a product"),
-        openapi.WithTags("products"),
+        WithSummary("Create a product"),
+        WithTags("products"),
     )
 
     descriptor, exists := registry.Get("products.create")
@@ -31,11 +29,11 @@ func TestDescribeTyped_RegistersRequestAndResponseTypes(t *testing.T) {
         t.Fatalf("expected the route to be described")
     }
 
-    if openapi.TypeOf[describeTypedRequest]() != descriptor.RequestType {
+    if TypeOf[describeTypedRequest]() != descriptor.RequestType {
         t.Fatalf("unexpected request type %v", descriptor.RequestType)
     }
 
-    if openapi.TypeOf[describeTypedResponse]() != descriptor.Responses[nethttp.StatusCreated] {
+    if TypeOf[describeTypedResponse]() != descriptor.Responses[nethttp.StatusCreated] {
         t.Fatalf("unexpected response type for 201")
     }
 

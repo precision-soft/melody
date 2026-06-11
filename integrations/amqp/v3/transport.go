@@ -334,6 +334,7 @@ func (instance *Transport) consumeLoop(
     backoff := reconnectInitialBackoff
 
     for {
+        startedAt := time.Now()
         if forwardDone == instance.forwardDeliveries(runtimeInstance, channel, deliveries, out) {
             return
         }
@@ -360,6 +361,20 @@ func (instance *Transport) consumeLoop(
 
         instance.resetConsumeChannel()
 
+        if true == shouldResetReconnectBackoff(time.Since(startedAt)) {
+            backoff = reconnectInitialBackoff
+        } else {
+            select {
+            case <-time.After(backoff):
+            case <-runtimeInstance.Context().Done():
+                return
+            case <-instance.closeSignal:
+                return
+            }
+
+            backoff = nextBackoff(backoff)
+        }
+
         reopenedChannel, reopenedDeliveries, reopenErr := instance.reopenConsume(runtimeInstance, &backoff)
         if nil != reopenErr {
             return
@@ -367,7 +382,6 @@ func (instance *Transport) consumeLoop(
 
         channel = reopenedChannel
         deliveries = reopenedDeliveries
-        backoff = reconnectInitialBackoff
     }
 }
 

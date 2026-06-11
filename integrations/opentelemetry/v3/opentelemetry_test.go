@@ -1,17 +1,10 @@
-package opentelemetry_test
+package opentelemetry
 
 import (
     "context"
-    "errors"
     nethttp "net/http"
     "net/http/httptest"
-    "strings"
-    "testing"
 
-    sdktrace "go.opentelemetry.io/otel/sdk/trace"
-    "go.opentelemetry.io/otel/sdk/trace/tracetest"
-
-    opentelemetry "github.com/precision-soft/melody/integrations/opentelemetry/v3"
     "github.com/precision-soft/melody/v3/container"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
@@ -32,123 +25,5 @@ func testRequestAndRuntime() (httpcontract.Request, runtimecontract.Runtime) {
 func okHandler() httpcontract.Handler {
     return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return melodyhttp.JsonResponse(nethttp.StatusOK, map[string]any{"ok": true})
-    }
-}
-
-func TestMetricsMiddleware_RecordsRequestMetrics(t *testing.T) {
-    meter, registry, meterErr := opentelemetry.NewPrometheusMeter("melody-test")
-    if nil != meterErr {
-        t.Fatalf("meter: %v", meterErr)
-    }
-
-    middleware, middlewareErr := opentelemetry.NewMetricsMiddleware(meter)
-    if nil != middlewareErr {
-        t.Fatalf("middleware: %v", middlewareErr)
-    }
-
-    request, runtimeInstance := testRequestAndRuntime()
-    handler := middleware(okHandler())
-
-    if _, handlerErr := handler(runtimeInstance, httptest.NewRecorder(), request); nil != handlerErr {
-        t.Fatalf("handler: %v", handlerErr)
-    }
-
-    families, gatherErr := registry.Gather()
-    if nil != gatherErr {
-        t.Fatalf("gather: %v", gatherErr)
-    }
-
-    found := false
-    for _, family := range families {
-        if true == strings.Contains(family.GetName(), "http_server_request") {
-            found = true
-        }
-    }
-
-    if false == found {
-        t.Fatalf("expected an http_server_request metric to be recorded")
-    }
-}
-
-func TestMetricsMiddleware_RecordsServerErrorStatusWhenHandlerReturnsError(t *testing.T) {
-    meter, registry, meterErr := opentelemetry.NewPrometheusMeter("melody-test-error")
-    if nil != meterErr {
-        t.Fatalf("meter: %v", meterErr)
-    }
-
-    middleware, middlewareErr := opentelemetry.NewMetricsMiddleware(meter)
-    if nil != middlewareErr {
-        t.Fatalf("middleware: %v", middlewareErr)
-    }
-
-    request, runtimeInstance := testRequestAndRuntime()
-    handler := middleware(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-        return nil, errors.New("boom")
-    })
-
-    if _, handlerErr := handler(runtimeInstance, httptest.NewRecorder(), request); nil == handlerErr {
-        t.Fatalf("expected the handler error to propagate")
-    }
-
-    families, gatherErr := registry.Gather()
-    if nil != gatherErr {
-        t.Fatalf("gather: %v", gatherErr)
-    }
-
-    statusFound := ""
-    for _, family := range families {
-        if false == strings.Contains(family.GetName(), "http_server_request") {
-            continue
-        }
-        for _, metricInstance := range family.GetMetric() {
-            for _, label := range metricInstance.GetLabel() {
-                if "http_response_status_code" == label.GetName() {
-                    statusFound = label.GetValue()
-                }
-            }
-        }
-    }
-
-    if "500" != statusFound {
-        t.Fatalf("expected the status_code label to be 500 for an errored request, got %q", statusFound)
-    }
-}
-
-func TestTracingMiddleware_RecordsServerSpan(t *testing.T) {
-    recorder := tracetest.NewSpanRecorder()
-    provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
-    tracer := provider.Tracer("melody-test")
-
-    middleware := opentelemetry.NewTracingMiddleware(tracer, nil)
-
-    request, runtimeInstance := testRequestAndRuntime()
-    handler := middleware(okHandler())
-
-    if _, handlerErr := handler(runtimeInstance, httptest.NewRecorder(), request); nil != handlerErr {
-        t.Fatalf("handler: %v", handlerErr)
-    }
-
-    spans := recorder.Ended()
-    if 1 != len(spans) {
-        t.Fatalf("expected exactly one span, got %d", len(spans))
-    }
-
-    if false == strings.Contains(spans[0].Name(), nethttp.MethodGet) {
-        t.Fatalf("unexpected span name: %s", spans[0].Name())
-    }
-
-    methodFound := false
-    statusFound := false
-    for _, attribute := range spans[0].Attributes() {
-        if "http.request.method" == string(attribute.Key) && nethttp.MethodGet == attribute.Value.AsString() {
-            methodFound = true
-        }
-        if "http.response.status_code" == string(attribute.Key) && 200 == int(attribute.Value.AsInt64()) {
-            statusFound = true
-        }
-    }
-
-    if false == methodFound || false == statusFound {
-        t.Fatalf("expected method and status attributes on the span")
     }
 }

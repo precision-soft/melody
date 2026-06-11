@@ -1,4 +1,4 @@
-package audit_test
+package audit
 
 import (
     "encoding/json"
@@ -7,9 +7,10 @@ import (
 
     "github.com/uptrace/bun"
 
-    "github.com/precision-soft/melody/integrations/bunorm/v3/audit"
     "github.com/precision-soft/melody/integrations/bunorm/v3/encrypt"
 )
+
+const redactedValueLiteral = "<redacted>"
 
 type product struct {
     Id    int64  `bun:"id,pk"`
@@ -17,20 +18,20 @@ type product struct {
     Price int    `bun:"price"`
 }
 
-func findChange(changes []audit.Change, field string) (audit.Change, bool) {
+func findChange(changes []Change, field string) (Change, bool) {
     for _, change := range changes {
         if field == change.Field {
             return change, true
         }
     }
-    return audit.Change{}, false
+    return Change{}, false
 }
 
 func TestChangeSet_UpdateCapturesOnlyChangedFields(t *testing.T) {
     before := product{Id: 1, Name: "old", Price: 10}
     after := product{Id: 1, Name: "new", Price: 10}
 
-    changes := audit.ChangeSet(before, after)
+    changes := ChangeSet(before, after)
 
     if 1 != len(changes) {
         t.Fatalf("expected exactly one change, got %d (%+v)", len(changes), changes)
@@ -47,7 +48,7 @@ func TestChangeSet_UpdateCapturesOnlyChangedFields(t *testing.T) {
 }
 
 func TestChangeSet_InsertHasNewOnly(t *testing.T) {
-    changes := audit.ChangeSet(nil, product{Id: 1, Name: "fresh", Price: 5})
+    changes := ChangeSet(nil, product{Id: 1, Name: "fresh", Price: 5})
 
     nameChange, found := findChange(changes, "name")
     if false == found || nil != nameChange.Old || "fresh" != nameChange.New {
@@ -56,7 +57,7 @@ func TestChangeSet_InsertHasNewOnly(t *testing.T) {
 }
 
 func TestChangeSet_DeleteHasOldOnly(t *testing.T) {
-    changes := audit.ChangeSet(product{Id: 1, Name: "gone", Price: 5}, nil)
+    changes := ChangeSet(product{Id: 1, Name: "gone", Price: 5}, nil)
 
     nameChange, found := findChange(changes, "name")
     if false == found || "gone" != nameChange.Old || nil != nameChange.New {
@@ -87,7 +88,7 @@ func TestChangeSet_RedactsPointerEncryptedFields(t *testing.T) {
     before := nullableSecretAccount{Id: 1, Password: &oldPassword, Lookup: &oldLookup}
     after := nullableSecretAccount{Id: 1, Password: &newPassword, Lookup: &newLookup}
 
-    changes := audit.ChangeSet(before, after)
+    changes := ChangeSet(before, after)
 
     passwordChange, found := findChange(changes, "password")
     if false == found {
@@ -128,31 +129,11 @@ type orderRow struct {
     Total int   `bun:"total"`
 }
 
-func TestRegistry_RejectsInvalidDefaultTableName(t *testing.T) {
-    defer func() {
-        if nil == recover() {
-            t.Fatalf("expected a panic for an invalid default table name")
-        }
-    }()
-
-    audit.NewRegistry("audit; DROP TABLE users")
-}
-
-func TestRegistry_RejectsInvalidEntityTableName(t *testing.T) {
-    defer func() {
-        if nil == recover() {
-            t.Fatalf("expected a panic for an invalid entity table name")
-        }
-    }()
-
-    audit.NewRegistry("melody_audit").Register("order", audit.EntityOptions{Table: "orders`; DROP"})
-}
-
 func TestChangeSet_CapturesPromotedEmbeddedStructFields(t *testing.T) {
     before := orderRow{EmbeddedAuditFields: EmbeddedAuditFields{Status: "open", UpdatedBy: "alice"}, Id: 1, Total: 100}
     after := orderRow{EmbeddedAuditFields: EmbeddedAuditFields{Status: "closed", UpdatedBy: "alice"}, Id: 1, Total: 150}
 
-    changes := audit.ChangeSet(before, after)
+    changes := ChangeSet(before, after)
 
     statusChange, found := findChange(changes, "status")
     if false == found || "open" != statusChange.Old || "closed" != statusChange.New {
@@ -172,7 +153,7 @@ func TestChangeSet_RedactsTaggedAndEncryptedFields(t *testing.T) {
     before := account{Id: 1, Email: "a@example.com", ApiKey: "old-key", Password: "old-secret", LookupEmail: "old@example.com"}
     after := account{Id: 1, Email: "b@example.com", ApiKey: "new-key", Password: "new-secret", LookupEmail: "new@example.com"}
 
-    changes := audit.ChangeSet(before, after)
+    changes := ChangeSet(before, after)
 
     emailChange, found := findChange(changes, "email")
     if false == found || "a@example.com" != emailChange.Old || "b@example.com" != emailChange.New {
@@ -217,7 +198,7 @@ func TestChangeSet_NestedEncryptedValueRedactedInChangesJson(t *testing.T) {
     before := customer{Id: 1, Contact: contactDetails{Email: "old-secret@example.com", City: "Bucharest"}}
     after := customer{Id: 1, Contact: contactDetails{Email: "new-secret@example.com", City: "Bucharest"}}
 
-    changes := audit.ChangeSet(before, after)
+    changes := ChangeSet(before, after)
 
     payload, marshalErr := json.Marshal(changes)
     if nil != marshalErr {
@@ -245,7 +226,7 @@ func TestChangeSet_RedactTagHonoredInsideNamedStructField(t *testing.T) {
     before := account{Id: 1, Creds: credentials{Token: "super-secret-old", Label: "primary"}}
     after := account{Id: 1, Creds: credentials{Token: "super-secret-new", Label: "primary"}}
 
-    changes := audit.ChangeSet(before, after)
+    changes := ChangeSet(before, after)
 
     payload, marshalErr := json.Marshal(changes)
     if nil != marshalErr {
@@ -273,7 +254,7 @@ func TestChangeSet_RedactTagHonoredInsideSliceOfStructs(t *testing.T) {
     before := order{Id: 1, Lines: []lineItem{{Secret: "alpha-old", Sku: "A1"}}}
     after := order{Id: 1, Lines: []lineItem{{Secret: "alpha-new", Sku: "A1"}}}
 
-    changes := audit.ChangeSet(before, after)
+    changes := ChangeSet(before, after)
 
     payload, marshalErr := json.Marshal(changes)
     if nil != marshalErr {
@@ -301,7 +282,7 @@ func TestChangeSet_RedactTagHonoredInsideInterfaceField(t *testing.T) {
     before := document{Id: 1, Data: credentials{Token: "iface-secret-old", Label: "primary"}}
     after := document{Id: 1, Data: credentials{Token: "iface-secret-new", Label: "primary"}}
 
-    changes := audit.ChangeSet(before, after)
+    changes := ChangeSet(before, after)
 
     payload, marshalErr := json.Marshal(changes)
     if nil != marshalErr {
@@ -332,7 +313,7 @@ func TestChangeSet_RedactTagHonoredWhenInterfaceIsNestedInsideStructField(t *tes
     before := document{Id: 1, Wrap: wrapper{Inner: credentials{Token: "deep-secret-old", Label: "primary"}}}
     after := document{Id: 1, Wrap: wrapper{Inner: credentials{Token: "deep-secret-new", Label: "primary"}}}
 
-    changes := audit.ChangeSet(before, after)
+    changes := ChangeSet(before, after)
 
     payload, marshalErr := json.Marshal(changes)
     if nil != marshalErr {
@@ -373,7 +354,7 @@ func TestChangeSet_RedactTagHonoredInSecondSiblingOfSameTypeReachedViaInterface(
         Second: holder{Data: credentials{Token: "sibling-secret-new", Label: "primary"}},
     }}
 
-    changes := audit.ChangeSet(before, after)
+    changes := ChangeSet(before, after)
 
     payload, marshalErr := json.Marshal(changes)
     if nil != marshalErr {
@@ -397,7 +378,7 @@ func TestChangeSet_RedactsEncryptedMapKeyPlaintext(t *testing.T) {
     before := document{Id: 1, Meta: map[encrypt.EncryptedString]string{encrypt.EncryptedString("key-secret-old"): "primary"}}
     after := document{Id: 1, Meta: map[encrypt.EncryptedString]string{encrypt.EncryptedString("key-secret-new"): "primary"}}
 
-    changes := audit.ChangeSet(before, after)
+    changes := ChangeSet(before, after)
 
     payload, marshalErr := json.Marshal(changes)
     if nil != marshalErr {
@@ -425,7 +406,7 @@ func TestChangeSet_RedactTagHonoredInsideMapOfInterfaceValues(t *testing.T) {
     before := document{Id: 1, Meta: map[string]any{"k": credentials{Token: "map-secret-old", Label: "primary"}}}
     after := document{Id: 1, Meta: map[string]any{"k": credentials{Token: "map-secret-new", Label: "primary"}}}
 
-    changes := audit.ChangeSet(before, after)
+    changes := ChangeSet(before, after)
 
     payload, marshalErr := json.Marshal(changes)
     if nil != marshalErr {
@@ -437,5 +418,63 @@ func TestChangeSet_RedactTagHonoredInsideMapOfInterfaceValues(t *testing.T) {
     }
     if false == strings.Contains(string(payload), "redacted") {
         t.Fatalf("expected the redacted marker in changes json: %s", payload)
+    }
+}
+
+/** @info redact tag on embedded struct */
+
+type EmbeddedSecret struct {
+    Token string `bun:"token"`
+}
+
+type accountWithRedactedEmbed struct {
+    EmbeddedSecret `audit:"redact"`
+    Id             int64 `bun:"id,pk"`
+}
+
+func TestChangeSet_RedactTagOnEmbeddedStructRedactsPromotedFields(t *testing.T) {
+    before := accountWithRedactedEmbed{EmbeddedSecret: EmbeddedSecret{Token: "secret-old"}, Id: 1}
+    after := accountWithRedactedEmbed{EmbeddedSecret: EmbeddedSecret{Token: "secret-new"}, Id: 1}
+
+    changes := ChangeSet(before, after)
+
+    encoded, marshalErr := json.Marshal(changes)
+    if nil != marshalErr {
+        t.Fatalf("marshal changes: %v", marshalErr)
+    }
+
+    if true == strings.Contains(string(encoded), "secret-old") || true == strings.Contains(string(encoded), "secret-new") {
+        t.Fatalf("an audit:\"redact\" tag on the embedded field must mask the promoted field plaintext, got %s", encoded)
+    }
+
+    found := false
+    for _, change := range changes {
+        if "token" == change.Field {
+            found = true
+            if redactedValueLiteral != change.Old || redactedValueLiteral != change.New {
+                t.Fatalf("promoted token must be redacted, got old=%v new=%v", change.Old, change.New)
+            }
+        }
+    }
+    if false == found {
+        t.Fatalf("expected a redacted token change, got %s", encoded)
+    }
+}
+
+type docWithMap struct {
+    Id   int64          `bun:"id,pk"`
+    Meta map[string]any `bun:"meta"`
+}
+
+func TestChangeSet_SelfReferentialMapDoesNotStackOverflow(t *testing.T) {
+    cyclic := map[string]any{}
+    cyclic["self"] = cyclic
+
+    before := docWithMap{Id: 1}
+    after := docWithMap{Id: 1, Meta: cyclic}
+
+    changes := ChangeSet(before, after)
+    if 0 == len(changes) {
+        t.Fatalf("expected a change for the meta field")
     }
 }

@@ -2,40 +2,14 @@ package security
 
 import (
     "errors"
-    nethttp "net/http"
-    "net/http/httptest"
     "testing"
-    "time"
 
     "github.com/precision-soft/melody/v3/bag"
     bagcontract "github.com/precision-soft/melody/v3/bag/contract"
-    "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
-
-type firewallTestRequestContext struct {
-    requestIdValue string
-    startedAtValue time.Time
-}
-
-func (instance *firewallTestRequestContext) RequestId() string    { return instance.requestIdValue }
-func (instance *firewallTestRequestContext) StartedAt() time.Time { return instance.startedAtValue }
-
-func newFirewallTestRequest(path string) httpcontract.Request {
-    req := httptest.NewRequest(nethttp.MethodGet, "http://example.com"+path, nil)
-
-    return http.NewRequest(
-        req,
-        nil,
-        nil,
-        &firewallTestRequestContext{
-            requestIdValue: "test",
-            startedAtValue: time.Now(),
-        },
-    )
-}
 
 type firewallTestRule struct {
     appliesCallback func(request httpcontract.Request) bool

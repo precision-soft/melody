@@ -156,8 +156,12 @@ func (instance *LocalStorage) Exists(
     defer root.Close()
 
     /** @important Root.Stat cannot escape the base: a missing key reports absent, while a symlink pointing outside is rejected with an error that never leaks the external target (consistent with Get and Delete) */
-    _, statErr := root.Stat(relativeKey)
+    info, statErr := root.Stat(relativeKey)
     if nil == statErr {
+        if true == info.IsDir() {
+            return false, nil
+        }
+
         return true, nil
     }
 

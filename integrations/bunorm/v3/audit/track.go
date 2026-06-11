@@ -70,8 +70,51 @@ func cloneModel(model any) (any, error) {
         return nil, exception.NewError("audited model must be a non-nil pointer to a struct", nil, nil)
     }
 
-    clone := reflect.New(value.Elem().Type())
-    clone.Elem().Set(value.Elem())
+    source := value.Elem()
+    clone := reflect.New(source.Type())
+    target := clone.Elem()
+    target.Set(source)
+
+    for index := 0; index < source.NumField(); index++ {
+        if false == target.Field(index).CanSet() {
+            continue
+        }
+
+        decoupleClonedField(target.Field(index), source.Field(index))
+    }
 
     return clone.Interface(), nil
+}
+
+func decoupleClonedField(target reflect.Value, source reflect.Value) {
+    switch source.Kind() {
+    case reflect.Pointer:
+        if true == source.IsNil() {
+            return
+        }
+
+        copied := reflect.New(source.Elem().Type())
+        copied.Elem().Set(source.Elem())
+        target.Set(copied)
+
+    case reflect.Slice:
+        if true == source.IsNil() {
+            return
+        }
+
+        copied := reflect.MakeSlice(source.Type(), source.Len(), source.Len())
+        reflect.Copy(copied, source)
+        target.Set(copied)
+
+    case reflect.Map:
+        if true == source.IsNil() {
+            return
+        }
+
+        copied := reflect.MakeMap(source.Type())
+        for _, key := range source.MapKeys() {
+            copied.SetMapIndex(key, source.MapIndex(key))
+        }
+        target.Set(copied)
+    }
 }
