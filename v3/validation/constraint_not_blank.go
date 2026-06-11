@@ -15,11 +15,12 @@ const (
 type NotBlank struct{}
 
 func (instance *NotBlank) Validate(value any, field string) validationcontract.ValidationError {
-    if nil == value {
+    resolved, ok := dereferenceValue(value)
+    if false == ok {
         return NewValidationError(field, "this field is required", ConstraintNotBlankErrorIsBlank, nil)
     }
 
-    stringValue := fmt.Sprintf("%v", value)
+    stringValue := fmt.Sprintf("%v", resolved)
     if "" == strings.TrimSpace(stringValue) {
         return NewValidationError(field, "this field is required", ConstraintNotBlankErrorIsBlank, nil)
     }

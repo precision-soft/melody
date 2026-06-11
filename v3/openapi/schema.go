@@ -360,7 +360,7 @@ func isRequired(validateTag string) bool {
 }
 
 func applyValidation(schema *Schema, validateTag string) {
-    if "" != schema.Ref {
+    if "" != schema.Ref || nil != schema.AllOf {
         return
     }
 
@@ -513,6 +513,7 @@ func splitRuleParameters(input string) []string {
     var parts []string
 
     current := strings.Builder{}
+    parenDepth := 0
     squareDepth := 0
     curlyDepth := 0
     isInSingleQuote := false
@@ -549,6 +550,20 @@ func splitRuleParameters(input string) []string {
         }
 
         if false == isInSingleQuote && false == isInDoubleQuote {
+            if '(' == character {
+                parenDepth++
+                current.WriteRune(character)
+                continue
+            }
+
+            if ')' == character {
+                if 0 < parenDepth {
+                    parenDepth--
+                }
+                current.WriteRune(character)
+                continue
+            }
+
             if '[' == character {
                 squareDepth++
                 current.WriteRune(character)
@@ -578,7 +593,7 @@ func splitRuleParameters(input string) []string {
             }
 
             if ',' == character {
-                if 0 == squareDepth && 0 == curlyDepth {
+                if 0 == parenDepth && 0 == squareDepth && 0 == curlyDepth {
                     parts = append(parts, current.String())
                     current.Reset()
                     continue

@@ -63,7 +63,10 @@ func (instance *baseCommand) resolveDatabase(
         return defaultManager.Database(), "<default>", nil
     }
 
-    manager := registry.MustManager(managerName)
+    manager, managerErr := registry.Manager(managerName)
+    if nil != managerErr {
+        return nil, "", managerErr
+    }
 
     return manager.Database(), managerName, nil
 }

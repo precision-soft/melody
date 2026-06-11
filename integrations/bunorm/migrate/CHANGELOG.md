@@ -7,11 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v3.0.3] - 2026-06-10
+### Fixed
+
+- `v2/base_command.go` — every `db:*` migration command now returns a clean error instead of panicking when the `--manager` flag names an unregistered or un-openable manager; `resolveDatabase` now uses the error-returning `registry.Manager` rather than the panicking `registry.MustManager`. Ported from the `v3` fix (no `v2` tag in this release).
+
+## [v3.0.3] - 2026-06-11
 
 ### Added
 
 - `v3/README.md` — added a v3 module README documenting `RegisterCommands`, the `Options` defaults, the `CliModule` wiring, and the generated `db:*` migration commands.
+
+### Fixed
+
+- `v3/base_command.go` — every `db:*` migration command (`init`/`migrate`/`rollback`/`status`/`unlock`/`create`) now returns a clean error instead of panicking when the `--manager` flag names a manager that is not registered (a typo) or whose database fails to open. `resolveDatabase` resolved a named manager through the panicking `registry.MustManager`, so an unknown name crashed the CLI with a stack trace rather than a `printError` message and a non-zero exit; it now uses the error-returning `registry.Manager`, matching the default-manager branch.
 
 ## [v3.0.2] - 2026-03-08 - Fix Stale bunorm/v2 Import in v3
 

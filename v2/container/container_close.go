@@ -190,12 +190,19 @@ func (instance *container) Close() error {
     instance.mutex.Unlock()
 
     closedPointers := make(map[uintptr]struct{})
+    closedValues := make(map[any]struct{})
     failures := make(map[string]string)
 
     for _, candidate := range candidates {
         pointerKey, hasPointer := pointerKeyOf(candidate.value)
+        comparableValue := false == hasPointer && true == isComparableValue(candidate.value)
+
         if true == hasPointer {
             if _, alreadyClosed := closedPointers[pointerKey]; true == alreadyClosed {
+                continue
+            }
+        } else if true == comparableValue {
+            if _, alreadyClosed := closedValues[candidate.value]; true == alreadyClosed {
                 continue
             }
         }
@@ -204,6 +211,8 @@ func (instance *container) Close() error {
         if false == isCloseable {
             if true == hasPointer {
                 closedPointers[pointerKey] = struct{}{}
+            } else if true == comparableValue {
+                closedValues[candidate.value] = struct{}{}
             }
 
             continue
@@ -216,6 +225,8 @@ func (instance *container) Close() error {
 
         if true == hasPointer {
             closedPointers[pointerKey] = struct{}{}
+        } else if true == comparableValue {
+            closedValues[candidate.value] = struct{}{}
         }
     }
 
@@ -278,6 +289,14 @@ func (instance *nodeKeyHeap) Pop() any {
     value := instance.items[lastIndex]
     instance.items = instance.items[:lastIndex]
     return value
+}
+
+func isComparableValue(value any) bool {
+    if nil == value {
+        return false
+    }
+
+    return reflect.TypeOf(value).Comparable()
 }
 
 func pointerKeyOf(value any) (uintptr, bool) {

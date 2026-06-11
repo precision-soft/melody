@@ -9,6 +9,7 @@ import (
     "strconv"
     "strings"
     "time"
+    "unicode/utf8"
 
     "github.com/precision-soft/melody/v3/exception"
     mailercontract "github.com/precision-soft/melody/v3/mailer/contract"
@@ -239,38 +240,43 @@ func hasOverlongToken(value string) bool {
 }
 
 func encodeWordChunks(value string) string {
-    var payload strings.Builder
-    for index := 0; index < len(value); index++ {
-        payload.WriteString(encodeQByte(value[index]))
-    }
-
-    remaining := payload.String()
-
     var builder strings.Builder
-    for "" != remaining {
-        cut := maxEncodedWordPayload
-        if cut > len(remaining) {
-            cut = len(remaining)
-        }
+    var word strings.Builder
 
-        for 0 < cut && true == splitsEscapeTriplet(remaining, cut) {
-            cut--
-        }
-        if 0 == cut {
-            cut = len(remaining)
-        }
-
+    flushWord := func() {
         if 0 < builder.Len() {
             builder.WriteString(" ")
         }
         builder.WriteString("=?utf-8?q?")
-        builder.WriteString(remaining[:cut])
+        builder.WriteString(word.String())
         builder.WriteString("?=")
+        word.Reset()
+    }
 
-        remaining = remaining[cut:]
+    for _, runeValue := range value {
+        token := encodeRune(runeValue)
+
+        if 0 < word.Len() && (word.Len()+len(token)) > maxEncodedWordPayload {
+            flushWord()
+        }
+
+        word.WriteString(token)
+    }
+
+    if 0 < word.Len() {
+        flushWord()
     }
 
     return builder.String()
+}
+
+func encodeRune(runeValue rune) string {
+    var token strings.Builder
+    for _, encodedByte := range []byte(string(runeValue)) {
+        token.WriteString(encodeQByte(encodedByte))
+    }
+
+    return token.String()
 }
 
 func encodeQByte(character byte) string {
@@ -297,18 +303,6 @@ func isEncodedWordEspecial(character byte) bool {
     return false
 }
 
-func splitsEscapeTriplet(payload string, offset int) bool {
-    if 1 <= offset && '=' == payload[offset-1] {
-        return true
-    }
-
-    if 2 <= offset && '=' == payload[offset-2] {
-        return true
-    }
-
-    return false
-}
-
 func foldHeaderLine(name string, value string) string {
     var builder strings.Builder
 
@@ -321,18 +315,47 @@ func foldHeaderLine(name string, value string) string {
         if lineLength+1+len(word) > maxHeaderLineLength {
             builder.WriteString(lineBreak)
             builder.WriteString(" ")
-            builder.WriteString(word)
-            lineLength = 1 + len(word)
-
-            continue
+            lineLength = 1
+        } else {
+            builder.WriteString(" ")
+            lineLength++
         }
 
-        builder.WriteString(" ")
+        for lineLength+len(word) > maxHardHeaderLineLength {
+            split := runeSafeSplit(word, maxHardHeaderLineLength-lineLength)
+            builder.WriteString(word[:split])
+            builder.WriteString(lineBreak)
+            builder.WriteString(" ")
+            word = word[split:]
+            lineLength = 1
+        }
+
         builder.WriteString(word)
-        lineLength += 1 + len(word)
+        lineLength += len(word)
     }
 
     return builder.String()
+}
+
+func runeSafeSplit(value string, limit int) int {
+    if limit >= len(value) {
+        return len(value)
+    }
+
+    if 1 > limit {
+        limit = 1
+    }
+
+    split := limit
+    for split > 0 && false == utf8.RuneStart(value[split]) {
+        split--
+    }
+
+    if 0 == split {
+        return limit
+    }
+
+    return split
 }
 
 func writeTextPart(builder *strings.Builder, boundary string, contentType string, body string) {

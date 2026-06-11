@@ -225,7 +225,7 @@ func TestValidator_ReturnsUnknownRuleError(t *testing.T) {
     }
 
     if ErrorUnknownRule != validationError.Code() {
-        t.Fatalf("unexpected code `" + validationError.Code() + "`")
+        t.Fatalf("unexpected code %q", validationError.Code())
     }
 }
 

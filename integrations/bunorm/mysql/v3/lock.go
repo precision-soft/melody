@@ -69,6 +69,7 @@ func (instance *mysqlLock) Acquire(runtimeInstance runtimecontract.Runtime) (boo
     var acquired sql.NullInt64
     queryErr := connection.QueryRowContext(runtimeInstance.Context(), "SELECT GET_LOCK(?, 0)", instance.name).Scan(&acquired)
     if nil != queryErr {
+        releaseOrphanedLock(connection, instance.name)
         connection.Close()
         return false, exception.NewError("mysql lock acquire failed", map[string]any{"name": instance.name}, queryErr)
     }
@@ -90,6 +91,14 @@ func (instance *mysqlLock) releaseAndCloseConnection() {
     _, _ = instance.connection.ExecContext(releaseCtx, "DO RELEASE_LOCK(?)", instance.name)
     instance.connection.Close()
     instance.connection = nil
+}
+
+/** @important best-effort release for the acquire error path: GET_LOCK may have taken the lock server-side before Scan failed (for example on context cancellation), so release on a fresh context before the connection returns to the pool */
+func releaseOrphanedLock(connection *sql.Conn, name string) {
+    releaseCtx, cancel := context.WithTimeout(context.Background(), lockReleaseTimeout)
+    defer cancel()
+
+    _, _ = connection.ExecContext(releaseCtx, "DO RELEASE_LOCK(?)", name)
 }
 
 func (instance *mysqlLock) Release(runtimeInstance runtimecontract.Runtime) error {

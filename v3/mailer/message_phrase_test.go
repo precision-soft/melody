@@ -5,8 +5,10 @@ import (
     "bytes"
     "mime"
     "net/textproto"
+    "regexp"
     "strings"
     "testing"
+    "unicode/utf8"
 
     "github.com/precision-soft/melody/v3/mailer"
     mailercontract "github.com/precision-soft/melody/v3/mailer/contract"
@@ -44,5 +46,51 @@ func TestRenderMessage_EncodesEspecialsInNonAsciiDisplayName(t *testing.T) {
     }
     if false == strings.Contains(decoded, name) {
         t.Fatalf("display name did not round-trip through the encoded-words; got %q", decoded)
+    }
+}
+
+func TestRenderMessage_DoesNotSplitMultibyteRuneAcrossEncodedWords(t *testing.T) {
+    name := strings.Repeat("a", 57) + "ă" + strings.Repeat("b", 10)
+
+    payload, renderErr := mailer.RenderMessage(mailercontract.Message{
+        From:    mailercontract.Address{Name: name, Email: "from@example.com"},
+        To:      []mailercontract.Address{{Email: "to@example.com"}},
+        Subject: "Hi",
+        Text:    "body",
+    })
+    if nil != renderErr {
+        t.Fatalf("render: %v", renderErr)
+    }
+
+    header, parseErr := textproto.NewReader(bufio.NewReader(bytes.NewReader(payload))).ReadMIMEHeader()
+    if nil != parseErr {
+        t.Fatalf("parse headers: %v", parseErr)
+    }
+
+    fromHeader := header.Get("From")
+
+    words := regexp.MustCompile(`=\?utf-8\?q\?.*?\?=`).FindAllString(fromHeader, -1)
+    if 2 > len(words) {
+        t.Fatalf("expected the long non-ASCII display name to chunk into multiple encoded-words, got %d: %q", len(words), fromHeader)
+    }
+
+    decoder := new(mime.WordDecoder)
+    for _, word := range words {
+        decodedWord, decodeErr := decoder.Decode(word)
+        if nil != decodeErr {
+            t.Fatalf("decode encoded-word %q: %v", word, decodeErr)
+        }
+
+        if false == utf8.ValidString(decodedWord) {
+            t.Fatalf("encoded-word %q decoded to invalid UTF-8 — a multi-byte rune was split across adjacent encoded-words", word)
+        }
+    }
+
+    full, decodeErr := decoder.DecodeHeader(fromHeader)
+    if nil != decodeErr {
+        t.Fatalf("decode From: %v", decodeErr)
+    }
+    if false == strings.Contains(full, name) {
+        t.Fatalf("display name did not round-trip; got %q", full)
     }
 }

@@ -125,6 +125,8 @@ func (instance *ServerSentEventBackplane) listen() {
             return
         }
 
+        startedAt := time.Now()
+
         receiveErr := instance.client.Receive(
             instance.ctx,
             instance.client.B().Subscribe().Channel(instance.channel).Build(),
@@ -136,20 +138,26 @@ func (instance *ServerSentEventBackplane) listen() {
 
         if nil != receiveErr {
             instance.logError("redis sse backplane subscription lost, resubscribing", receiveErr)
+        }
 
-            select {
-            case <-time.After(backoff):
-            case <-instance.ctx.Done():
-                return
-            }
-
-            backoff = nextServerSentEventBackplaneBackoff(backoff)
+        if true == shouldResetBackplaneBackoff(time.Since(startedAt)) {
+            backoff = serverSentEventBackplaneInitialBackoff
 
             continue
         }
 
-        backoff = serverSentEventBackplaneInitialBackoff
+        select {
+        case <-time.After(backoff):
+        case <-instance.ctx.Done():
+            return
+        }
+
+        backoff = nextServerSentEventBackplaneBackoff(backoff)
     }
+}
+
+func shouldResetBackplaneBackoff(subscriptionDuration time.Duration) bool {
+    return serverSentEventBackplaneInitialBackoff <= subscriptionDuration
 }
 
 func (instance *ServerSentEventBackplane) handle(message rueidis.PubSubMessage) {

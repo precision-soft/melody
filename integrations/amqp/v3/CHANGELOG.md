@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v3.0.0] - 2026-06-10 - Initial Release — RabbitMQ Message-Bus Transport, Auto-Reconnect, and Server-Sent Events Backplane
+## [v3.0.0] - 2026-06-11 - Initial Release — RabbitMQ Message-Bus Transport, Auto-Reconnect, and Server-Sent Events Backplane
 
 ### Added
 
@@ -35,6 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `server_sent_event_backplane.go` — `liveConnection` no longer holds the mutex while calling `dialer()`. The previous `defer instance.mutex.Unlock()` pattern blocked the mutex for the entire broker dial duration — which can span the full reconnect timeout under a dead broker — causing `Close()` to stall for that same duration since `Close` also needs the mutex to set `closing = true`. The fix matches the pattern already used by `Transport.connect`: unlock before dialing, re-lock and update fields after. A concurrent-reconnect guard (`reconnecting bool`) prevents two simultaneous dials.
 - `transport.go` — `Transport.Close` now unblocks a consume goroutine parked on the output channel. `forwardDeliveries` only released on the runtime context being cancelled, so calling `Close` directly (without cancelling the context) while a decoded delivery was waiting for a reader on the output channel leaked the consume goroutine. `Close` now closes an internal signal that both `forwardDeliveries` selects observe, so the goroutine returns promptly on a direct `Close`.
 - `transport.go` — `ensurePublishChannel`/`ensureConsumeChannel` now treat a cached-but-closed `*amqp091.Channel` as absent (`IsClosed()` guard on both the fast path and the post-open double-check) and open a fresh one. A broker channel-level exception (publishing to a removed exchange, a policy violation, any protocol error) closes the channel while leaving the connection alive; with no `Dialer` configured (a supported `Connection`-only transport) the publish retry never reset the channel, so the closed channel was reused forever and every subsequent `Send` failed permanently even though a fresh channel could be opened on the still-live connection. The guard restores self-healing for channel-level losses without requiring a reconnect.
+- `server_sent_event_backplane.go` — `ensurePublishChannel` now applies the same `IsClosed()` guard the message-bus `Transport` already carries, on both its fast path and its post-lock double-check. The backplane reused a broker-closed publish channel (it returned the cached channel whenever it was non-nil), so a channel-level exception that left the connection alive forced one failed publish before the existing reset-and-retry recovered; the guard replaces the stale channel up front.
+- `transport.go` — a positive but sub-millisecond requeue `DelayStamp` no longer collapses to a `"0"` message TTL. `republish` formatted the delay with `time.Duration.Milliseconds()`, which truncates any delay below 1ms to `0`; a `RetryPolicy{BaseDelay: 200µs}` therefore routed the message to the delay queue with `expiration = "0"`, and RabbitMQ treats a `0` TTL as immediate expiry — so the message dead-lettered straight back with no spacing and the intended backoff was silently lost. A positive delay is now floored to 1ms.
 
 [Unreleased]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.0.0...HEAD
 

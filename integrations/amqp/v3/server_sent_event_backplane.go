@@ -269,7 +269,7 @@ func (instance *ServerSentEventBackplane) ensurePublishChannel() (*amqp091.Chann
         return nil, exception.NewError("amqp sse backplane is closing", nil, nil)
     }
 
-    if nil != existing {
+    if nil != existing && false == existing.IsClosed() {
         return existing, nil
     }
 
@@ -298,7 +298,7 @@ func (instance *ServerSentEventBackplane) ensurePublishChannel() (*amqp091.Chann
         return nil, exception.NewError("amqp sse backplane is closing", nil, nil)
     }
 
-    if nil != instance.publishChannel {
+    if nil != instance.publishChannel && false == instance.publishChannel.IsClosed() {
         channel.Close()
 
         return instance.publishChannel, nil

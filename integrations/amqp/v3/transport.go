@@ -453,6 +453,15 @@ func (instance *Transport) Nack(
     return instance.republish(runtimeInstance, channel, stamp, envelopeInstance)
 }
 
+func delayExpirationMilliseconds(delay time.Duration) int64 {
+    milliseconds := delay.Milliseconds()
+    if 0 >= milliseconds {
+        milliseconds = 1
+    }
+
+    return milliseconds
+}
+
 func (instance *Transport) republish(
     runtimeInstance runtimecontract.Runtime,
     channel *amqp091.Channel,
@@ -463,7 +472,7 @@ func (instance *Transport) republish(
     exchange, routingKey := instance.mainTarget()
 
     if delayStamp, hasDelay := melodymessagebus.LastStampOfType[melodymessagebus.DelayStamp](envelopeInstance); true == hasDelay && 0 < delayStamp.Delay {
-        expiration = strconv.FormatInt(delayStamp.Delay.Milliseconds(), 10)
+        expiration = strconv.FormatInt(delayExpirationMilliseconds(delayStamp.Delay), 10)
         exchange = ""
         routingKey = instance.queue + ".delay"
     }

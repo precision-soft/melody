@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v3.1.0] - 2026-06-10 - Column Encryption, Field-Level Audit Trail, and Read/Write Split
+## [v3.1.0] - 2026-06-11 - Column Encryption, Field-Level Audit Trail, and Read/Write Split
 
 ### Added
 

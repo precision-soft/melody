@@ -196,7 +196,7 @@ func (instance *RedisTokenStore) PurgeExpired() int {
     for {
         scan, scanErr := instance.client.Do(
             instance.ctx,
-            instance.client.B().Scan().Cursor(cursor).Match(instance.userKeyPrefix()+"*").Count(tokenStoreScanCount).Build(),
+            instance.client.B().Scan().Cursor(cursor).Match(escapeRedisGlobMeta(instance.userKeyPrefix())+"*").Count(tokenStoreScanCount).Build(),
         ).AsScanEntry()
         if nil != scanErr {
             exception.Panic(exception.NewError("redis token store purge scan failed", nil, scanErr))

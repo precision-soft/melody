@@ -5,7 +5,6 @@ import (
     "os"
     "path/filepath"
     "strings"
-    "syscall"
     "time"
 
     "github.com/precision-soft/melody/v3/exception"
@@ -18,24 +17,13 @@ func NewLocalStorage(baseDirectory string) *LocalStorage {
         exception.Panic(exception.NewError("local storage base directory is empty", nil, nil))
     }
 
-    cleanedBase := filepath.Clean(baseDirectory)
-
-    resolvedBase, resolveErr := filepath.EvalSymlinks(cleanedBase)
-    if nil != resolveErr {
-        resolvedBase = cleanedBase
-    }
-
     return &LocalStorage{
-        baseDirectory: baseDirectory,
-        cleanedBase:   cleanedBase,
-        resolvedBase:  resolvedBase,
+        baseDirectory: filepath.Clean(baseDirectory),
     }
 }
 
 type LocalStorage struct {
     baseDirectory string
-    cleanedBase   string
-    resolvedBase  string
 }
 
 func (instance *LocalStorage) Put(
@@ -45,16 +33,29 @@ func (instance *LocalStorage) Put(
     size int64,
     options storagecontract.PutOptions,
 ) error {
-    path, pathErr := instance.resolvePath(key)
-    if nil != pathErr {
-        return pathErr
+    relativeKey, keyErr := storageRelativeKey(key)
+    if nil != keyErr {
+        return keyErr
     }
 
-    if mkdirErr := os.MkdirAll(filepath.Dir(path), 0o750); nil != mkdirErr {
+    /** @important the base directory is created lazily on first write; os.OpenRoot then pins it so every key operation is confined to it, with each path component checked against symlink escape */
+    if mkdirErr := os.MkdirAll(instance.baseDirectory, 0o750); nil != mkdirErr {
         return exception.NewError("could not create the storage directory", map[string]any{"key": key}, mkdirErr)
     }
 
-    file, createErr := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0o640)
+    root, rootErr := os.OpenRoot(instance.baseDirectory)
+    if nil != rootErr {
+        return exception.NewError("could not open the storage base directory", map[string]any{"key": key}, rootErr)
+    }
+    defer root.Close()
+
+    if directory := filepath.Dir(relativeKey); "." != directory {
+        if mkdirErr := root.MkdirAll(directory, 0o750); nil != mkdirErr {
+            return exception.NewError("could not create the storage directory", map[string]any{"key": key}, mkdirErr)
+        }
+    }
+
+    file, createErr := root.OpenFile(relativeKey, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o640)
     if nil != createErr {
         return exception.NewError("could not create the storage object", map[string]any{"key": key}, createErr)
     }
@@ -62,18 +63,18 @@ func (instance *LocalStorage) Put(
     written, copyErr := io.Copy(file, reader)
     if nil != copyErr {
         _ = file.Close()
-        _ = os.Remove(path)
+        _ = root.Remove(relativeKey)
         return exception.NewError("could not write the storage object", map[string]any{"key": key}, copyErr)
     }
 
     if 0 <= size && written != size {
         _ = file.Close()
-        _ = os.Remove(path)
+        _ = root.Remove(relativeKey)
         return exception.NewError("storage object size does not match the declared size", map[string]any{"key": key, "declared": size, "written": written}, nil)
     }
 
     if closeErr := file.Close(); nil != closeErr {
-        _ = os.Remove(path)
+        _ = root.Remove(relativeKey)
         return exception.NewError("could not flush the storage object", map[string]any{"key": key}, closeErr)
     }
 
@@ -84,12 +85,18 @@ func (instance *LocalStorage) Get(
     runtimeInstance runtimecontract.Runtime,
     key string,
 ) (io.ReadCloser, error) {
-    path, pathErr := instance.resolvePath(key)
-    if nil != pathErr {
-        return nil, pathErr
+    relativeKey, keyErr := storageRelativeKey(key)
+    if nil != keyErr {
+        return nil, keyErr
     }
 
-    file, openErr := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+    root, rootErr := os.OpenRoot(instance.baseDirectory)
+    if nil != rootErr {
+        return nil, exception.NewError("could not open the storage object", map[string]any{"key": key}, rootErr)
+    }
+    defer root.Close()
+
+    file, openErr := root.Open(relativeKey)
     if nil != openErr {
         return nil, exception.NewError("could not open the storage object", map[string]any{"key": key}, openErr)
     }
@@ -106,12 +113,22 @@ func (instance *LocalStorage) Delete(
     runtimeInstance runtimecontract.Runtime,
     key string,
 ) error {
-    path, pathErr := instance.resolvePath(key)
-    if nil != pathErr {
-        return pathErr
+    relativeKey, keyErr := storageRelativeKey(key)
+    if nil != keyErr {
+        return keyErr
     }
 
-    removeErr := os.Remove(path)
+    root, rootErr := os.OpenRoot(instance.baseDirectory)
+    if nil != rootErr {
+        if true == os.IsNotExist(rootErr) {
+            return nil
+        }
+
+        return exception.NewError("could not delete the storage object", map[string]any{"key": key}, rootErr)
+    }
+    defer root.Close()
+
+    removeErr := root.Remove(relativeKey)
     if nil != removeErr && false == os.IsNotExist(removeErr) {
         return exception.NewError("could not delete the storage object", map[string]any{"key": key}, removeErr)
     }
@@ -123,12 +140,23 @@ func (instance *LocalStorage) Exists(
     runtimeInstance runtimecontract.Runtime,
     key string,
 ) (bool, error) {
-    path, pathErr := instance.resolvePath(key)
-    if nil != pathErr {
-        return false, pathErr
+    relativeKey, keyErr := storageRelativeKey(key)
+    if nil != keyErr {
+        return false, keyErr
     }
 
-    _, statErr := os.Lstat(path)
+    root, rootErr := os.OpenRoot(instance.baseDirectory)
+    if nil != rootErr {
+        if true == os.IsNotExist(rootErr) {
+            return false, nil
+        }
+
+        return false, exception.NewError("could not stat the storage object", map[string]any{"key": key}, rootErr)
+    }
+    defer root.Close()
+
+    /** @important Root.Stat follows symlinks but cannot escape the base, so a symlink pointing outside is reported as absent rather than leaking the external target */
+    _, statErr := root.Stat(relativeKey)
     if nil == statErr {
         return true, nil
     }
@@ -148,58 +176,15 @@ func (instance *LocalStorage) PresignedUrl(
     return "", exception.NewError("presigned urls are not supported by local storage", nil, nil)
 }
 
-func (instance *LocalStorage) resolvePath(key string) (string, error) {
-    cleaned := filepath.Clean("/" + strings.ReplaceAll(key, "\\", "/"))
-    target := filepath.Join(instance.baseDirectory, cleaned)
+func storageRelativeKey(key string) (string, error) {
+    normalized := strings.ReplaceAll(key, "\\", "/")
+    cleaned := strings.TrimPrefix(filepath.Clean("/"+normalized), "/")
 
-    base := instance.cleanedBase
-    if target == base {
+    if "" == cleaned || "." == cleaned {
         return "", exception.NewError("storage key is empty or invalid", map[string]any{"key": key}, nil)
     }
 
-    if false == strings.HasPrefix(target, base+string(os.PathSeparator)) {
-        return "", exception.NewError("storage key escapes the base directory", map[string]any{"key": key}, nil)
-    }
-
-    if escapeErr := instance.ensureNoSymlinkEscape(target); nil != escapeErr {
-        return "", exception.NewError("storage key escapes the base directory via a symlink", map[string]any{"key": key}, escapeErr)
-    }
-
-    if info, lstatErr := os.Lstat(target); nil == lstatErr && 0 != info.Mode()&os.ModeSymlink {
-        return "", exception.NewError("storage key resolves through a symlink", map[string]any{"key": key}, nil)
-    }
-
-    return target, nil
-}
-
-func (instance *LocalStorage) ensureNoSymlinkEscape(target string) error {
-    realBase := instance.resolvedBase
-    if resolved, resolveErr := filepath.EvalSymlinks(instance.cleanedBase); nil == resolveErr {
-        realBase = resolved
-    }
-
-    existing := target
-    for {
-        resolved, resolveErr := filepath.EvalSymlinks(existing)
-        if nil == resolveErr {
-            if resolved != realBase && false == strings.HasPrefix(resolved, realBase+string(os.PathSeparator)) {
-                return exception.NewError("resolved path is outside the base directory", nil, nil)
-            }
-
-            return nil
-        }
-
-        if existing == instance.cleanedBase {
-            return nil
-        }
-
-        parent := filepath.Dir(existing)
-        if parent == existing {
-            return nil
-        }
-
-        existing = parent
-    }
+    return cleaned, nil
 }
 
 var _ storagecontract.Storage = (*LocalStorage)(nil)

@@ -119,6 +119,24 @@ func TestBuildSchema_ParenthesizedValidationConstraintsEmitted(t *testing.T) {
     }
 }
 
+func TestBuildSchema_ParenthesizedRegexCommaInGroupPreserved(t *testing.T) {
+    components := map[string]*Schema{}
+    names := map[reflect.Type]string{}
+    visited := map[reflect.Type]bool{}
+
+    stringType := reflect.TypeOf("")
+    requestType := reflect.StructOf([]reflect.StructField{
+        {Name: "Code", Type: stringType, Tag: `json:"code" validate:"regex(pattern=^(a,b)$)"`},
+    })
+
+    schema := buildSchema(requestType, components, names, visited)
+
+    code := schema.Properties["code"]
+    if "^(a,b)$" != code.Pattern {
+        t.Fatalf("expected Pattern ^(a,b)$ from regex(pattern=^(a,b)$) (comma inside () group preserved, matching the runtime validator), got %q", code.Pattern)
+    }
+}
+
 func TestBuildSchema_LiteralDashJsonNameNotOmitted(t *testing.T) {
     components := map[string]*Schema{}
     names := map[reflect.Type]string{}
