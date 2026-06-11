@@ -7,10 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- `provider.go`, `v2/provider.go` — `Open` no longer fails the connection ping when `ConnectTimeout` is `0`. The ping context was built unconditionally with `context.WithTimeout(ctx, timeoutConfig.ConnectTimeout)`, so a configured zero timeout produced an already-expired context and `PingContext` returned `context.DeadlineExceeded` against a healthy database. The ping context is now guarded with `if 0 < timeoutConfig.ConnectTimeout`, back-porting the `v3` fix that shipped in `v3.1.0`. (`v1`/`v2`; no version bump.)
-
 ## [v3.1.0] - 2026-06-11 - MySQL Advisory Lock (GET_LOCK)
 
 ### Added
@@ -51,6 +47,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Code duplicated into `integrations/bunorm/mysql/v3/`; v2 and v3 implementations maintained in parallel
 - Dependencies pinned to `bunorm/v3` and `melody/v3`
 
+## [v2.0.1] - 2026-06-11 - Honor Zero ConnectTimeout on the Connection Ping
+
+### Fixed
+
+- `v2/provider.go` — `Open` no longer fails the connection ping when `ConnectTimeout` is `0`. The ping context was built unconditionally with `context.WithTimeout(ctx, timeoutConfig.ConnectTimeout)`, so a configured zero timeout produced an already-expired context and `PingContext` returned `context.DeadlineExceeded` against a healthy database. The ping context is now guarded with `if 0 < timeoutConfig.ConnectTimeout`, back-porting the `v3` fix that shipped in `v3.1.0`.
+
 ## [v2.0.0] - 2026-02-17 - Introduce v2 Module Path and Simplify Provider.Open Signature
 
 ### Breaking Changes
@@ -64,6 +66,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Code moved to `integrations/bunorm/mysql/v2/` with matching module path
 - Dependencies: `github.com/precision-soft/melody/integrations/bunorm/v2 v2.0.0`, `github.com/precision-soft/melody/v2 v2.0.0`
+
+## [v1.1.2] - 2026-06-11 - Honor Zero ConnectTimeout on the Connection Ping
+
+### Fixed
+
+- `provider.go` — `Open` no longer fails the connection ping when `ConnectTimeout` is `0`. The ping context was built unconditionally with `context.WithTimeout(ctx, timeoutConfig.ConnectTimeout)`, so a configured zero timeout produced an already-expired context and `PingContext` returned `context.DeadlineExceeded` against a healthy database. The ping context is now guarded with `if 0 < timeoutConfig.ConnectTimeout`, back-porting the `v3` fix that shipped in `v3.1.0`.
 
 ## [v1.1.1] - 2026-02-17 - Fix Transient Error Detection for DNS Errors
 
@@ -122,8 +130,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [v3.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations/bunorm/mysql/v3.0.0
 
+[v2.0.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v2.0.0...integrations/bunorm/mysql/v2.0.1
 [v2.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations/bunorm/mysql/v2.0.0
 
+[v1.1.2]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v1.1.1...integrations/bunorm/mysql/v1.1.2
 [v1.1.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v1.1.0...integrations/bunorm/mysql/v1.1.1
 
 [v1.1.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v1.0.1...integrations/bunorm/mysql/v1.1.0

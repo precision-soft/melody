@@ -161,6 +161,30 @@ func TestRenderMessage_EncodesNonAsciiAttachmentFilename(t *testing.T) {
     }
 }
 
+func TestRenderMessage_AttachmentFilenameTrailingBackslashDoesNotEscapeClosingQuote(t *testing.T) {
+    payload, renderErr := mailer.RenderMessage(mailercontract.Message{
+        From: mailercontract.Address{Email: "shop@example.com"},
+        To:   []mailercontract.Address{{Email: "ada@example.com"}},
+        Text: "see attached",
+        Attachments: []mailercontract.Attachment{
+            {Filename: `report\`, ContentType: "application/pdf", Content: []byte("pdf")},
+        },
+    })
+    if nil != renderErr {
+        t.Fatalf("render: %v", renderErr)
+    }
+
+    rendered := string(payload)
+
+    if true == strings.Contains(rendered, `filename="report\"`) {
+        t.Fatalf("a trailing backslash escaped the closing quote of the Content-Disposition filename, leaving an unterminated quoted-string:\n%s", rendered)
+    }
+
+    if false == strings.Contains(rendered, `filename="report"`) {
+        t.Fatalf("expected the backslash to be stripped from the filename (matching the display-name sanitizer), got:\n%s", rendered)
+    }
+}
+
 func TestRenderMessage_FiltersReservedCallerHeaders(t *testing.T) {
     payload, renderErr := mailer.RenderMessage(mailercontract.Message{
         From:    mailercontract.Address{Email: "shop@example.com"},

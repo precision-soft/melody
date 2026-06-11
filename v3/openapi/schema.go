@@ -139,6 +139,9 @@ func collectStructFields(
     embeddedSeen := make(map[reflect.Type]bool)
     embeddedSeen[structType] = true
 
+    /** @info embedCount tracks how many equal-depth paths reach an embedded type, mirroring encoding/json: a type reached via N paths has its fields duplicated N times so a diamond annihilates in dominantEmbeddedField. */
+    embedCount := make(map[reflect.Type]int)
+
     ownCandidatesByName := make(map[string][]embeddedCandidate)
     var ownOrder []string
     var embedQueue []reflect.Type
@@ -147,10 +150,13 @@ func collectStructFields(
 
         if true == isPromotedEmbed(field) {
             embeddedType := dereferencedStructType(field.Type)
-            if false == embeddedSeen[embeddedType] {
-                embeddedSeen[embeddedType] = true
+            if true == embeddedSeen[embeddedType] {
+                continue
+            }
+            if 0 == embedCount[embeddedType] {
                 embedQueue = append(embedQueue, embeddedType)
             }
+            embedCount[embeddedType]++
             continue
         }
 
@@ -184,17 +190,31 @@ func collectStructFields(
         candidatesByName := make(map[string][]embeddedCandidate)
         var order []string
         var nextLevel []reflect.Type
+        nextCount := make(map[reflect.Type]int)
 
         for _, embeddedType := range embedQueue {
+            if true == embeddedSeen[embeddedType] {
+                continue
+            }
+            embeddedSeen[embeddedType] = true
+
+            multiplicity := embedCount[embeddedType]
+            if multiplicity < 1 {
+                multiplicity = 1
+            }
+
             for index := 0; index < embeddedType.NumField(); index++ {
                 field := embeddedType.Field(index)
 
                 if true == isPromotedEmbed(field) {
-                    embeddedType := dereferencedStructType(field.Type)
-                    if false == embeddedSeen[embeddedType] {
-                        embeddedSeen[embeddedType] = true
-                        nextLevel = append(nextLevel, embeddedType)
+                    childType := dereferencedStructType(field.Type)
+                    if true == embeddedSeen[childType] {
+                        continue
                     }
+                    if 0 == nextCount[childType] {
+                        nextLevel = append(nextLevel, childType)
+                    }
+                    nextCount[childType] += multiplicity
                     continue
                 }
 
@@ -214,7 +234,9 @@ func collectStructFields(
                 if _, seen := candidatesByName[jsonName]; false == seen {
                     order = append(order, jsonName)
                 }
-                candidatesByName[jsonName] = append(candidatesByName[jsonName], embeddedCandidate{field: field})
+                for copyIndex := 0; copyIndex < multiplicity; copyIndex++ {
+                    candidatesByName[jsonName] = append(candidatesByName[jsonName], embeddedCandidate{field: field})
+                }
             }
         }
 
@@ -230,6 +252,7 @@ func collectStructFields(
         }
 
         embedQueue = nextLevel
+        embedCount = nextCount
     }
 }
 

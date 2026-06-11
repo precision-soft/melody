@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.13.1] - 2026-06-11 - Back-port v3 Security and Correctness Fixes
+
 ### Security
 
 - `security/access_control_listener.go` — the access-control listener (the request authorization gate) matched only prefix rules and the empty-prefix fallback, silently ignoring exact (`NewAccessControlExactRule`) and regular-expression (`NewAccessControlRegexRule`) rules; a request could therefore bypass an exact or regular-expression access-control rule entirely. `matchAccessControlRule` now delegates to `AccessControl.matchRuleIndex`, sharing the full exact → prefix → regular-expression → fallback precedence already used by `AccessControl.Match`
@@ -367,7 +369,8 @@ Lock-step release — no `v1/` changes this cycle. Tag published to keep the cor
 - `session/` — session management with file-based and in-memory storage backends
 - `validation/` — validation framework with `greaterThan`, `notEmpty`, `notBlank`, `alpha`, `alphanumeric`, `email`, `numeric`, `regex`, `minLength`, `maxLength` constraints
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v1.13.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/v1.13.1...HEAD
+[v1.13.1]: https://github.com/precision-soft/melody/compare/v1.13.0...v1.13.1
 
 [v1.13.0]: https://github.com/precision-soft/melody/compare/v1.12.1...v1.13.0
 

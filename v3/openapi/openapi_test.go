@@ -247,6 +247,46 @@ func TestGenerate_ShallowerEmbeddedFieldWinsRegardlessOfOrder(t *testing.T) {
     }
 }
 
+type diamondEmbedBase struct {
+    Shared string `json:"shared"`
+}
+
+type diamondEmbedLeft struct {
+    diamondEmbedBase
+}
+
+type diamondEmbedRight struct {
+    diamondEmbedBase
+}
+
+type diamondEmbedRequest struct {
+    diamondEmbedLeft
+    diamondEmbedRight
+    Own string `json:"own"`
+}
+
+func TestGenerate_DiamondEmbeddedFieldDroppedAsAmbiguous(t *testing.T) {
+    registry := openapi.NewRegistry()
+    registry.Describe("diamond.create", openapi.Descriptor{
+        RequestType: openapi.TypeOf[diamondEmbedRequest](),
+    })
+
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "diamond.create", pattern: "/diamond/", methods: []string{"POST"}},
+    }
+
+    document := openapi.Generate(openapi.Info{Title: "Example", Version: "1.0.0"}, routes, registry)
+
+    properties := document.Components.Schemas["diamondEmbedRequest"].Properties
+
+    if _, present := properties["shared"]; true == present {
+        t.Fatalf("expected the field reachable through two equal-depth embedded paths to be dropped as ambiguous (encoding/json omits it), got: %+v", properties)
+    }
+    if _, present := properties["own"]; false == present {
+        t.Fatalf("expected the root's own field to survive, got: %+v", properties)
+    }
+}
+
 type nullableRefRequest struct {
     Audit *embeddedAudit `json:"audit,omitempty"`
 }

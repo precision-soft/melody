@@ -147,7 +147,7 @@ var headerSanitizer = strings.NewReplacer("\r", "", "\n", "")
 
 var phraseSanitizer = strings.NewReplacer("\r", "", "\n", "", "\"", "", "\\", "")
 
-var filenameSanitizer = strings.NewReplacer("\r", "", "\n", "", "\"", "")
+var filenameSanitizer = strings.NewReplacer("\r", "", "\n", "", "\"", "", "\\", "")
 
 func formatAddress(address mailercontract.Address) string {
     email := headerSanitizer.Replace(address.Email)
