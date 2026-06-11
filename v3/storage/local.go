@@ -155,7 +155,7 @@ func (instance *LocalStorage) Exists(
     }
     defer root.Close()
 
-    /** @important Root.Stat follows symlinks but cannot escape the base, so a symlink pointing outside is reported as absent rather than leaking the external target */
+    /** @important Root.Stat cannot escape the base: a missing key reports absent, while a symlink pointing outside is rejected with an error that never leaks the external target (consistent with Get and Delete) */
     _, statErr := root.Stat(relativeKey)
     if nil == statErr {
         return true, nil

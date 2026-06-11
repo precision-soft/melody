@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `container/container_close.go` — `Container.Close` could close a dependency before its dependent when the dependent resolved that dependency *by type* and the dependency was a named service that also registered its type (`WithTypeRegistration`): the same instance was tracked under both a `service:<name>` node and a `type:<T>` node, and the dependency edge constrained only one of them, so the unconstrained alias was scheduled — and closed — first. `Close` now collapses every node that resolves to the same instance onto a single representative before computing the topological close order, so a dependency edge recorded against any alias constrains the shared instance and it is closed exactly once in dependent-before-dependency order
+- `http/kernel.go` — a `kernel.response` listener that replaced the outgoing response via `KernelResponseEvent.SetResponse(...)` was silently dropped on the controller-success path and the panic-recovery path: both dispatched the event but then wrote the pre-dispatch response instead of re-reading `kernelResponseEvent.Response()`. Both sites now re-read the event response after dispatch, matching the `kernel.request` and `kernel.controller` short-circuit paths that already did so
+- `event/event_dispatcher_adapter.go` — `EventDispatcherAdapter.RegisteredEvents` sorted the map-owned listener slice in place while holding only a read lock, so two concurrent callers raced on the same backing array; it now sorts a copy
+
+### Added
+
+- `container/cr38_close_order_test.go`, `http/cr38_kernel_response_test.go`, `event/cr38_adapter_race_test.go` — regression coverage for the close-order, response-replacement, and concurrent-`RegisteredEvents` fixes above
+
 ## [v2.7.1] - 2026-06-11 - Back-port v3 Security and Correctness Fixes
 
 ### Security

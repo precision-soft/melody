@@ -54,40 +54,109 @@ func (instance *container) Close() error {
         },
     )
 
-    createdSet := make(map[string]struct{}, len(createdNodeKeys))
-    for _, nodeKey := range createdNodeKeys {
-        createdSet[nodeKey] = struct{}{}
+    resolveNodeValue := func(nodeKey string) (any, bool) {
+        if true == strings.HasPrefix(nodeKey, "service:") {
+            serviceName := strings.TrimPrefix(nodeKey, "service:")
+            instanceValue, exists := instance.instances[serviceName]
+            return instanceValue, exists
+        }
+
+        if true == strings.HasPrefix(nodeKey, "type:") {
+            typeString := strings.TrimPrefix(nodeKey, "type:")
+            targetType, typeExists := typeStringToType[typeString]
+            if false == typeExists {
+                return nil, false
+            }
+
+            instanceValue, exists := instance.typeInstances[targetType]
+            return instanceValue, exists
+        }
+
+        return nil, false
     }
 
-    adjacency := make(map[string]map[string]struct{}, len(createdNodeKeys))
-    inDegree := make(map[string]int, len(createdNodeKeys))
+    /** @important the same instance can be created under several node keys (a named service that also registers its type lives under both "service:<name>" and "type:<T>"); collapse those aliases onto one representative so a dependency edge recorded against any alias constrains the close order of the shared instance and it is closed exactly once in dependent-before-dependency order */
+    valueOfNodeKey := make(map[string]any, len(createdNodeKeys))
+    representativeOf := make(map[string]string, len(createdNodeKeys))
+    pointerRepresentative := make(map[uintptr]string, len(createdNodeKeys))
+    valueRepresentative := make(map[any]string, len(createdNodeKeys))
+    canonicalNodeKeys := make([]string, 0, len(createdNodeKeys))
 
     for _, nodeKey := range createdNodeKeys {
+        value, exists := resolveNodeValue(nodeKey)
+        if false == exists {
+            continue
+        }
+
+        valueOfNodeKey[nodeKey] = value
+
+        if pointerKey, hasPointer := pointerKeyOf(value); true == hasPointer {
+            if existingRepresentative, alreadyGrouped := pointerRepresentative[pointerKey]; true == alreadyGrouped {
+                representativeOf[nodeKey] = existingRepresentative
+
+                continue
+            }
+
+            pointerRepresentative[pointerKey] = nodeKey
+            representativeOf[nodeKey] = nodeKey
+            canonicalNodeKeys = append(canonicalNodeKeys, nodeKey)
+
+            continue
+        }
+
+        if true == isComparableValue(value) {
+            if existingRepresentative, alreadyGrouped := valueRepresentative[value]; true == alreadyGrouped {
+                representativeOf[nodeKey] = existingRepresentative
+
+                continue
+            }
+
+            valueRepresentative[value] = nodeKey
+            representativeOf[nodeKey] = nodeKey
+            canonicalNodeKeys = append(canonicalNodeKeys, nodeKey)
+
+            continue
+        }
+
+        representativeOf[nodeKey] = nodeKey
+        canonicalNodeKeys = append(canonicalNodeKeys, nodeKey)
+    }
+
+    adjacency := make(map[string]map[string]struct{}, len(canonicalNodeKeys))
+    inDegree := make(map[string]int, len(canonicalNodeKeys))
+
+    for _, nodeKey := range canonicalNodeKeys {
         inDegree[nodeKey] = 0
     }
 
     for dependentKey, dependencySet := range instance.dependencyGraph {
-        if _, dependentCreated := createdSet[dependentKey]; false == dependentCreated {
+        canonicalDependent, dependentCreated := representativeOf[dependentKey]
+        if false == dependentCreated {
             continue
         }
 
         for dependencyKey := range dependencySet {
-            if _, dependencyCreated := createdSet[dependencyKey]; false == dependencyCreated {
+            canonicalDependency, dependencyCreated := representativeOf[dependencyKey]
+            if false == dependencyCreated {
                 continue
             }
 
-            dependencies, exists := adjacency[dependentKey]
+            if canonicalDependent == canonicalDependency {
+                continue
+            }
+
+            dependencies, exists := adjacency[canonicalDependent]
             if false == exists {
                 dependencies = make(map[string]struct{})
-                adjacency[dependentKey] = dependencies
+                adjacency[canonicalDependent] = dependencies
             }
 
-            if _, alreadyAdded := dependencies[dependencyKey]; true == alreadyAdded {
+            if _, alreadyAdded := dependencies[canonicalDependency]; true == alreadyAdded {
                 continue
             }
 
-            dependencies[dependencyKey] = struct{}{}
-            inDegree[dependencyKey] = inDegree[dependencyKey] + 1
+            dependencies[canonicalDependency] = struct{}{}
+            inDegree[canonicalDependency] = inDegree[canonicalDependency] + 1
         }
     }
 
@@ -151,31 +220,9 @@ func (instance *container) Close() error {
     candidates := make([]closeCandidate, 0, len(closeOrder))
 
     for _, nodeKey := range closeOrder {
-        value := any(nil)
-
-        if true == strings.HasPrefix(nodeKey, "service:") {
-            serviceName := strings.TrimPrefix(nodeKey, "service:")
-            instanceValue, exists := instance.instances[serviceName]
-            if false == exists {
-                continue
-            }
-
-            value = instanceValue
-        }
-
-        if true == strings.HasPrefix(nodeKey, "type:") {
-            typeString := strings.TrimPrefix(nodeKey, "type:")
-            targetType, exists := typeStringToType[typeString]
-            if false == exists {
-                continue
-            }
-
-            instanceValue, exists := instance.typeInstances[targetType]
-            if false == exists {
-                continue
-            }
-
-            value = instanceValue
+        value, exists := valueOfNodeKey[nodeKey]
+        if false == exists {
+            continue
         }
 
         candidates = append(

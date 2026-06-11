@@ -174,10 +174,26 @@ func (instance *ServerSentEventBackplane) listen() {
             continue
         }
 
-        backoff = reconnectInitialBackoff
-
+        startedAt := time.Now()
         instance.forward(deliveries)
+
+        /** @important only reset the backoff when the subscription actually lived: a subscribe that succeeds but loses its channel immediately must keep backing off, otherwise it becomes a no-delay reconnect storm against the broker */
+        if true == shouldResetReconnectBackoff(time.Since(startedAt)) {
+            backoff = reconnectInitialBackoff
+
+            continue
+        }
+
+        if false == instance.sleep(backoff) {
+            return
+        }
+
+        backoff = nextBackoff(backoff)
     }
+}
+
+func shouldResetReconnectBackoff(subscriptionDuration time.Duration) bool {
+    return reconnectInitialBackoff <= subscriptionDuration
 }
 
 func (instance *ServerSentEventBackplane) forward(deliveries <-chan amqp091.Delivery) {

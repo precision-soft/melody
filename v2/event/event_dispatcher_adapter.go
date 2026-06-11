@@ -279,7 +279,10 @@ func (instance *EventDispatcherAdapter) RegisteredEvents() []eventcontract.Regis
     registeredEvents := make([]eventcontract.RegisteredEvent, 0, len(eventNameList))
 
     for _, eventName := range eventNameList {
-        listenerList := instance.listenerRegistrations[eventName]
+        /** @important sort a copy: the map-owned slice is shared, and RLock permits concurrent readers that would otherwise race sorting the same backing array */
+        registeredSlice := instance.listenerRegistrations[eventName]
+        listenerList := make([]adapterListenerRegistration, len(registeredSlice))
+        copy(listenerList, registeredSlice)
 
         sort.SliceStable(
             listenerList,

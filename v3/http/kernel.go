@@ -345,13 +345,15 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
             finalResponse = exceptionEvent.Response()
 
+            kernelResponseEvent := NewKernelResponseEvent(melodyRequest, finalResponse)
             _, eventKernelExceptionErr = eventDispatcher.DispatchName(
                 runtimeInstance,
                 kernelcontract.EventKernelResponse,
-                NewKernelResponseEvent(melodyRequest, finalResponse),
+                kernelResponseEvent,
             )
             instance.logEventDispatchError(requestLogger, "kernel response error", eventKernelExceptionErr)
 
+            finalResponse = kernelResponseEvent.Response()
             writeResponse(
                 runtimeInstance,
                 melodyRequest,
@@ -589,10 +591,11 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
         if nil != response {
             finalResponse = response
+            kernelResponseEvent := NewKernelResponseEvent(melodyRequest, finalResponse)
             _, eventKernelResponseErr := eventDispatcher.DispatchName(
                 runtimeInstance,
                 kernelcontract.EventKernelResponse,
-                NewKernelResponseEvent(melodyRequest, finalResponse),
+                kernelResponseEvent,
             )
             if nil != eventKernelResponseErr {
                 requestLogger.Error(
@@ -601,6 +604,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 )
             }
 
+            finalResponse = kernelResponseEvent.Response()
             writeResponse(
                 runtimeInstance,
                 melodyRequest,

@@ -394,15 +394,27 @@ func applyValidation(schema *Schema, validateTag string) {
         case "email":
             schema.Format = "email"
         case "min":
-            if value, parseErr := strconv.Atoi(params["value"]); nil == parseErr {
-                if "string" == schema.Type {
-                    schema.MinLength = &value
+            if "string" == schema.Type {
+                if valueString, exists := params["value"]; true == exists {
+                    if value, parseErr := strconv.Atoi(valueString); nil == parseErr {
+                        schema.MinLength = &value
+                    }
+                } else {
+                    /** @important a value-less min constraint is enforced as minLength 1 by the validator, so the spec must advertise the same bound */
+                    defaultMinLength := 1
+                    schema.MinLength = &defaultMinLength
                 }
             }
         case "max":
-            if value, parseErr := strconv.Atoi(params["value"]); nil == parseErr {
-                if "string" == schema.Type {
-                    schema.MaxLength = &value
+            if "string" == schema.Type {
+                if valueString, exists := params["value"]; true == exists {
+                    if value, parseErr := strconv.Atoi(valueString); nil == parseErr {
+                        schema.MaxLength = &value
+                    }
+                } else {
+                    /** @important a value-less max constraint is enforced as maxLength 100 by the validator, so the spec must advertise the same bound */
+                    defaultMaxLength := 100
+                    schema.MaxLength = &defaultMaxLength
                 }
             }
         case "regex", "pattern":
@@ -411,18 +423,32 @@ func applyValidation(schema *Schema, validateTag string) {
             }
         case "greaterThan":
             if "integer" == schema.Type || "number" == schema.Type {
-                if parsed, parseErr := strconv.ParseFloat(params["value"], 64); nil == parseErr {
-                    value := float64(int64(parsed))
-                    exclusive := true
+                exclusive := true
+                if valueString, exists := params["value"]; true == exists {
+                    if parsed, parseErr := strconv.ParseFloat(valueString, 64); nil == parseErr {
+                        value := float64(int64(parsed))
+                        schema.Minimum = &value
+                        schema.ExclusiveMinimum = &exclusive
+                    }
+                } else {
+                    /** @important a value-less greaterThan constraint is enforced as > 0 by the validator, so the spec must advertise the same bound */
+                    value := float64(0)
                     schema.Minimum = &value
                     schema.ExclusiveMinimum = &exclusive
                 }
             }
         case "lessThan":
             if "integer" == schema.Type || "number" == schema.Type {
-                if parsed, parseErr := strconv.ParseFloat(params["value"], 64); nil == parseErr {
-                    value := float64(int64(parsed))
-                    exclusive := true
+                exclusive := true
+                if valueString, exists := params["value"]; true == exists {
+                    if parsed, parseErr := strconv.ParseFloat(valueString, 64); nil == parseErr {
+                        value := float64(int64(parsed))
+                        schema.Maximum = &value
+                        schema.ExclusiveMaximum = &exclusive
+                    }
+                } else {
+                    /** @important a value-less lessThan constraint is enforced as < 0 by the validator, so the spec must advertise the same bound */
+                    value := float64(0)
                     schema.Maximum = &value
                     schema.ExclusiveMaximum = &exclusive
                 }
