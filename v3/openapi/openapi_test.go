@@ -564,3 +564,48 @@ func TestGenerate_NoRequestBodyOnBodylessMethods(t *testing.T) {
         t.Fatalf("POST must carry the request body")
     }
 }
+
+type nullableNumericRequest struct {
+    MinCount *int     `json:"minCount" validate:"greaterThan=0"`
+    MaxScore *float64 `json:"maxScore" validate:"lessThan=100"`
+    Optional *int     `json:"optional"`
+}
+
+func TestGenerate_PointerNumericWithBoundIsNotNullable(t *testing.T) {
+    registry := openapi.NewRegistry()
+    registry.Describe("metrics.create", openapi.Descriptor{
+        RequestType: openapi.TypeOf[nullableNumericRequest](),
+    })
+
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "metrics.create", pattern: "/metrics/", methods: []string{"POST"}},
+    }
+
+    document := openapi.Generate(openapi.Info{Title: "Example", Version: "1.0.0"}, routes, registry)
+
+    schema := document.Components.Schemas["nullableNumericRequest"]
+    if nil == schema {
+        t.Fatalf("expected the nullableNumericRequest component schema")
+    }
+
+    minCount := schema.Properties["minCount"]
+    if nil == minCount || true == minCount.Nullable {
+        t.Fatalf("expected minCount to not be nullable (greaterThan rejects null), got: %+v", minCount)
+    }
+    if nil == minCount.Minimum || 0 != *minCount.Minimum || nil == minCount.ExclusiveMinimum || false == *minCount.ExclusiveMinimum {
+        t.Fatalf("expected an exclusive minimum of 0 on minCount, got: %+v", minCount)
+    }
+
+    maxScore := schema.Properties["maxScore"]
+    if nil == maxScore || true == maxScore.Nullable {
+        t.Fatalf("expected maxScore to not be nullable (lessThan rejects null), got: %+v", maxScore)
+    }
+    if nil == maxScore.Maximum || 100 != *maxScore.Maximum || nil == maxScore.ExclusiveMaximum || false == *maxScore.ExclusiveMaximum {
+        t.Fatalf("expected an exclusive maximum of 100 on maxScore, got: %+v", maxScore)
+    }
+
+    optional := schema.Properties["optional"]
+    if nil == optional || false == optional.Nullable {
+        t.Fatalf("expected a bound-less pointer field to remain nullable, got: %+v", optional)
+    }
+}

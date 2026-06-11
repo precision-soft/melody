@@ -35,6 +35,14 @@ var reservedHeaders = map[string]struct{}{
     "content-disposition":       {},
 }
 
+/** @important RFC 2047 §5 forbids encoded-words inside the msg-id/addr tokens of these structured headers; Q-encoding them would corrupt the value and silently break mail threading, so they are emitted intact (still CRLF-stripped and folded by writeHeader) rather than routed through encodeHeaderText */
+var structuredIdentifierHeaders = map[string]struct{}{
+    "message-id":  {},
+    "in-reply-to": {},
+    "references":  {},
+    "content-id":  {},
+}
+
 func RenderMessage(message mailercontract.Message) ([]byte, error) {
     if "" == message.From.Email {
         return nil, exception.NewError("mailer message has no sender", nil, nil)
@@ -65,7 +73,12 @@ func RenderMessage(message mailercontract.Message) ([]byte, error) {
     }
 
     for key, value := range message.Headers {
-        if _, reserved := reservedHeaders[strings.ToLower(strings.TrimSpace(key))]; true == reserved {
+        normalizedKey := strings.ToLower(strings.TrimSpace(key))
+        if _, reserved := reservedHeaders[normalizedKey]; true == reserved {
+            continue
+        }
+        if _, structured := structuredIdentifierHeaders[normalizedKey]; true == structured {
+            writeHeader(&builder, key, value)
             continue
         }
         writeHeader(&builder, key, encodeHeaderText(value))

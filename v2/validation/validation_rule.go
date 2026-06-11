@@ -63,20 +63,71 @@ func splitByTopLevelComma(valueString string) []string {
     return parts
 }
 
+/** @important tracks whether the scan is inside a regex character class [...] so the bracket/comma bookkeeping treats ')', ']', '}', '(', '{' and ',' as literal class members. A ']' is a literal (not a close) when it is the class's first content character — and the leading negation '^' does not count as content — mirroring regexp/syntax. */
+type charClassScanner struct {
+    inClass      bool
+    contentSeen  bool
+    caretAllowed bool
+}
+
+func (instance *charClassScanner) step(character rune) bool {
+    if true == instance.inClass {
+        if ('^' == character) && (false == instance.contentSeen) && (true == instance.caretAllowed) {
+            instance.caretAllowed = false
+
+            return true
+        }
+
+        instance.caretAllowed = false
+
+        if (']' == character) && (true == instance.contentSeen) {
+            instance.inClass = false
+
+            return true
+        }
+
+        instance.contentSeen = true
+
+        return true
+    }
+
+    if '[' == character {
+        instance.inClass = true
+        instance.contentSeen = false
+        instance.caretAllowed = true
+
+        return true
+    }
+
+    return false
+}
+
+func (instance *charClassScanner) noteEscaped() {
+    if true == instance.inClass {
+        instance.caretAllowed = false
+        instance.contentSeen = true
+    }
+}
+
 func hasBalancedBrackets(valueString string) bool {
     parenDepth := 0
-    squareDepth := 0
     curlyDepth := 0
     wasEscaped := false
+    classScanner := charClassScanner{}
 
     for _, character := range valueString {
         if true == wasEscaped {
             wasEscaped = false
+            classScanner.noteEscaped()
             continue
         }
 
         if '\\' == character {
             wasEscaped = true
+            continue
+        }
+
+        if true == classScanner.step(character) {
             continue
         }
 
@@ -88,13 +139,8 @@ func hasBalancedBrackets(valueString string) bool {
                 return false
             }
             parenDepth--
-        case '[':
-            squareDepth++
         case ']':
-            if 0 == squareDepth {
-                return false
-            }
-            squareDepth--
+            return false
         case '{':
             curlyDepth++
         case '}':
@@ -105,7 +151,7 @@ func hasBalancedBrackets(valueString string) bool {
         }
     }
 
-    return 0 == parenDepth && 0 == squareDepth && 0 == curlyDepth
+    return 0 == parenDepth && 0 == curlyDepth && false == classScanner.inClass
 }
 
 func splitByCommaOutsideRegexMeta(valueString string) []string {
@@ -113,16 +159,17 @@ func splitByCommaOutsideRegexMeta(valueString string) []string {
 
     current := strings.Builder{}
     parenDepth := 0
-    squareDepth := 0
     curlyDepth := 0
     isInSingleQuote := false
     isInDoubleQuote := false
     wasEscaped := false
+    classScanner := charClassScanner{}
 
     for _, character := range valueString {
         if true == wasEscaped {
             current.WriteRune(character)
             wasEscaped = false
+            classScanner.noteEscaped()
             continue
         }
 
@@ -149,16 +196,7 @@ func splitByCommaOutsideRegexMeta(valueString string) []string {
         }
 
         if false == isInSingleQuote && false == isInDoubleQuote {
-            if '[' == character {
-                squareDepth++
-                current.WriteRune(character)
-                continue
-            }
-
-            if ']' == character {
-                if 0 < squareDepth {
-                    squareDepth--
-                }
+            if true == classScanner.step(character) {
                 current.WriteRune(character)
                 continue
             }
@@ -192,7 +230,7 @@ func splitByCommaOutsideRegexMeta(valueString string) []string {
             }
 
             if ',' == character {
-                if 0 == squareDepth && 0 == curlyDepth && 0 == parenDepth {
+                if 0 == curlyDepth && 0 == parenDepth {
                     parts = append(parts, current.String())
                     current.Reset()
                     continue

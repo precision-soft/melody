@@ -297,3 +297,44 @@ func TestMysqlLock_ReentrantAcquireDetectsLostLockWithoutRefresh(t *testing.T) {
         t.Fatalf("reentrant Acquire returned true while the competitor holds the lock; mutual exclusion was violated (err=%v)", reacquireErr)
     }
 }
+
+func TestMysqlLock_ReleaseOnCanceledContextStillReleases(t *testing.T) {
+    dsn := os.Getenv("MYSQL_DSN")
+    if "" == dsn {
+        t.Skip("MYSQL_DSN not set; skipping mysql lock integration test")
+    }
+
+    sqldb, openErr := sql.Open("mysql", dsn)
+    if nil != openErr {
+        t.Fatalf("open: %v", openErr)
+    }
+    defer sqldb.Close()
+
+    database := bun.NewDB(sqldb, mysqldialect.New())
+
+    locker := mysql.NewLocker(database)
+    name := "melody_lock_release_canceled_context"
+
+    lock := locker.CreateLock(name, 0)
+
+    acquired, acquireErr := lock.Acquire(newLockRuntime())
+    if nil != acquireErr || false == acquired {
+        t.Fatalf("expected acquire to succeed: %v %v", acquired, acquireErr)
+    }
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if releaseErr := lock.Release(newLockRuntimeWithContext(cancelledContext)); nil != releaseErr {
+        t.Fatalf("expected release to succeed even with a canceled context: %v", releaseErr)
+    }
+
+    var holder sql.NullInt64
+    if holderErr := sqldb.QueryRowContext(context.Background(), "SELECT IS_USED_LOCK(?)", name).Scan(&holder); nil != holderErr {
+        t.Fatalf("read lock holder: %v", holderErr)
+    }
+    if true == holder.Valid {
+        t.Fatalf("lock was orphaned: still held by session %d after release on a canceled context", holder.Int64)
+    }
+}
+

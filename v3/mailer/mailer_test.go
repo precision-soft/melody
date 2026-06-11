@@ -185,6 +185,34 @@ func TestRenderMessage_AttachmentFilenameTrailingBackslashDoesNotEscapeClosingQu
     }
 }
 
+func TestRenderMessage_StructuredIdentifierHeadersAreNotEncoded(t *testing.T) {
+    longMessageId := "<" + strings.Repeat("a", 70) + "@example.com>"
+
+    payload, renderErr := mailer.RenderMessage(mailercontract.Message{
+        From:    mailercontract.Address{Email: "shop@example.com"},
+        To:      []mailercontract.Address{{Email: "ada@example.com"}},
+        Subject: "Hello",
+        Text:    "body",
+        Headers: map[string]string{
+            "In-Reply-To": longMessageId,
+            "References":  longMessageId,
+        },
+    })
+    if nil != renderErr {
+        t.Fatalf("render: %v", renderErr)
+    }
+
+    rendered := string(payload)
+
+    if true == strings.Contains(rendered, "=?utf-8?q?") {
+        t.Fatalf("a structured identifier header must not be RFC 2047 encoded (it would break mail threading):\n%s", rendered)
+    }
+
+    if false == strings.Contains(rendered, longMessageId) {
+        t.Fatalf("expected the In-Reply-To/References message-id to be emitted intact:\n%s", rendered)
+    }
+}
+
 func TestRenderMessage_FiltersReservedCallerHeaders(t *testing.T) {
     payload, renderErr := mailer.RenderMessage(mailercontract.Message{
         From:    mailercontract.Address{Email: "shop@example.com"},

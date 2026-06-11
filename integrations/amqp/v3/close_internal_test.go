@@ -3,6 +3,7 @@ package amqp
 import (
     "context"
     "encoding/json"
+    "errors"
     "testing"
     "time"
 
@@ -62,5 +63,41 @@ func TestForwardDeliveries_CloseUnblocksGoroutineParkedOnOutput(t *testing.T) {
         }
     case <-time.After(2 * time.Second):
         t.Fatalf("forwardDeliveries did not return after Close — the consume goroutine leaked")
+    }
+}
+
+func TestReopenConsume_CloseUnblocksGoroutineParkedOnBackoff(t *testing.T) {
+    transport := NewTransport(TransportConfig{
+        Dialer:   func() (*amqp091.Connection, error) { return nil, errors.New("broker down") },
+        Queue:    "melody.amqp.reopen-backoff",
+        Registry: NewMessageRegistry(),
+    })
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+
+    /** @important a long backoff so a Close that does not watch closeSignal would leave this goroutine parked well past the test deadline */
+    backoff := 10 * time.Second
+    done := make(chan error, 1)
+
+    go func() {
+        _, _, reopenErr := transport.reopenConsume(runtimeInstance, &backoff)
+        done <- reopenErr
+    }()
+
+    time.Sleep(50 * time.Millisecond)
+
+    transport.Close(runtimeInstance)
+
+    select {
+    case reopenErr := <-done:
+        if nil == reopenErr {
+            t.Fatalf("expected reopenConsume to return an error after Close")
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatalf("reopenConsume did not return after Close — the reconnect goroutine leaked while parked on backoff")
     }
 }

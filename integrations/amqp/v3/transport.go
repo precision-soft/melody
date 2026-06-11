@@ -391,6 +391,8 @@ func (instance *Transport) reopenConsume(
         case <-time.After(*backoff):
         case <-runtimeInstance.Context().Done():
             return nil, nil, exception.NewError("amqp transport is closing", nil, nil)
+        case <-instance.closeSignal:
+            return nil, nil, exception.NewError("amqp transport is closing", nil, nil)
         }
 
         *backoff = nextBackoff(*backoff)

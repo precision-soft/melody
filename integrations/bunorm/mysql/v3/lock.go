@@ -109,7 +109,11 @@ func (instance *mysqlLock) Release(runtimeInstance runtimecontract.Runtime) erro
         return nil
     }
 
-    _, execErr := instance.connection.ExecContext(runtimeInstance.Context(), "DO RELEASE_LOCK(?)", instance.name)
+    /** @important release on a fresh context so a canceled request context cannot leave the GET_LOCK held on the connection returned to the pool, mirroring releaseAndCloseConnection/releaseOrphanedLock */
+    releaseCtx, cancel := context.WithTimeout(context.Background(), lockReleaseTimeout)
+    defer cancel()
+
+    _, execErr := instance.connection.ExecContext(releaseCtx, "DO RELEASE_LOCK(?)", instance.name)
     closeErr := instance.connection.Close()
     instance.connection = nil
 

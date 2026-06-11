@@ -38,3 +38,29 @@ func TestParseValidationTag_UnbalancedParensStillRejected(t *testing.T) {
         t.Fatal("expected a rule with an unbalanced trailing paren to be rejected")
     }
 }
+
+func TestParseValidationTag_ParenthesizedRegexCharClassWithClosingBracketParses(t *testing.T) {
+    rules, err := parseValidationTag("regex(value=^[)]$)")
+    if nil != err {
+        t.Fatalf("parenthesized regex with ')' inside a character class must parse, got: %v", err)
+    }
+    if 1 != len(rules) || "regex" != rules[0].name || "^[)]$" != rules[0].params["value"] {
+        t.Fatalf("expected a single regex rule with pattern '^[)]$', got %#v", rules)
+    }
+}
+
+func TestHasBalancedBrackets_CharClassMembersAreLiteral(t *testing.T) {
+    balanced := []string{"^[)]$", "^[}]$", "^[(){}]+$", "[]]", "[^]]", "a{2,3}[xyz]"}
+    for _, value := range balanced {
+        if false == hasBalancedBrackets(value) {
+            t.Fatalf("expected %q to be reported as balanced", value)
+        }
+    }
+
+    unbalanced := []string{"^[a", "a{2", "(a", "a)", "]a"}
+    for _, value := range unbalanced {
+        if true == hasBalancedBrackets(value) {
+            t.Fatalf("expected %q to be reported as unbalanced", value)
+        }
+    }
+}

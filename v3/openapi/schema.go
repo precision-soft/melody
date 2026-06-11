@@ -423,6 +423,8 @@ func applyValidation(schema *Schema, validateTag string) {
             }
         case "greaterThan":
             if "integer" == schema.Type || "number" == schema.Type {
+                /** @important the validator rejects a null pointer for greaterThan/lessThan, so the spec must not advertise the field as nullable */
+                schema.Nullable = false
                 exclusive := true
                 if valueString, exists := params["value"]; true == exists {
                     if parsed, parseErr := strconv.ParseFloat(valueString, 64); nil == parseErr {
@@ -439,6 +441,8 @@ func applyValidation(schema *Schema, validateTag string) {
             }
         case "lessThan":
             if "integer" == schema.Type || "number" == schema.Type {
+                /** @important the validator rejects a null pointer for greaterThan/lessThan, so the spec must not advertise the field as nullable */
+                schema.Nullable = false
                 exclusive := true
                 if valueString, exists := params["value"]; true == exists {
                     if parsed, parseErr := strconv.ParseFloat(valueString, 64); nil == parseErr {
