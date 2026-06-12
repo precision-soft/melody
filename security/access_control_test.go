@@ -93,6 +93,25 @@ func TestAccessControl_Match_EmptyPathNormalizedToRoot(t *testing.T) {
     }
 }
 
+func TestAccessControl_Match_ExactRuleMatchesMultipleTrailingSlashes(t *testing.T) {
+    control := NewAccessControl(
+        NewAccessControlExactRule("/admin", "ROLE_ADMIN"),
+    )
+
+    attributes, matched := control.Match("/admin//")
+    if false == matched {
+        t.Fatalf("auth bypass: /admin// did not match the exact /admin rule (router collapses all trailing slashes)")
+    }
+    if 1 != len(attributes) || "ROLE_ADMIN" != attributes[0] {
+        t.Fatalf("unexpected attributes %v", attributes)
+    }
+
+    attributes, matched = control.Match("/admin///")
+    if false == matched {
+        t.Fatalf("auth bypass: /admin/// did not match the exact /admin rule")
+    }
+}
+
 func TestAccessControlMatch_ExactWinsBeforePrefixAndRegex(t *testing.T) {
     accessControl := NewAccessControl(
         NewAccessControlRegexRule("^/", "ROLE_USER"),

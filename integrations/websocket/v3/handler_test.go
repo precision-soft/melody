@@ -14,6 +14,7 @@ import (
     melodyhttp "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/runtime"
+    runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
 func TestStreamHandler_BroadcastReachesClient(t *testing.T) {
@@ -66,4 +67,21 @@ func TestStreamHandler_BroadcastReachesClient(t *testing.T) {
     }
 
     connection.Close(coderwebsocket.StatusNormalClosure, "")
+}
+
+func TestDispatchOnMessage_RecoversPanicFromCallback(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    options := Options{
+        OnMessage: func(_ runtimecontract.Runtime, _ coderwebsocket.MessageType, _ []byte) {
+            panic("boom from user callback")
+        },
+    }
+
+    panicked := dispatchOnMessage(runtimeInstance, options, coderwebsocket.MessageText, []byte("payload"))
+
+    if false == panicked {
+        t.Fatalf("expected dispatchOnMessage to recover the callback panic and report it, so the read goroutine does not crash the process")
+    }
 }

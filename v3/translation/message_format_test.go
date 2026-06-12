@@ -21,6 +21,15 @@ func TestInterpolate_PoundStaysBoundThroughNestedSelect(t *testing.T) {
 
 /** @info numeric */
 
+func TestEvaluatePlural_PoundFloat32MatchesPlaceholder(t *testing.T) {
+    pattern := "{value, plural, other {# km}}"
+
+    result := formatMessage(pattern, map[string]any{"value": float32(0.1)}, "en")
+    if "0.1 km" != result {
+        t.Fatalf("expected the `#` substitution to render float32 with shortest representation like {value}, got %q", result)
+    }
+}
+
 func TestEvaluatePlural_PoundPreservesLargeIntegerPrecision(t *testing.T) {
     pattern := "{count, plural, other {# items}}"
 

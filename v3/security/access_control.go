@@ -182,7 +182,10 @@ func (instance *AccessControl) matchRuleIndex(path string) (int, bool) {
     }
 
     if "/" != normalizedPath {
-        normalizedPath = strings.TrimSuffix(normalizedPath, "/")
+        normalizedPath = strings.TrimRight(normalizedPath, "/")
+        if "" == normalizedPath {
+            normalizedPath = "/"
+        }
     }
 
     for index, rule := range instance.rules {

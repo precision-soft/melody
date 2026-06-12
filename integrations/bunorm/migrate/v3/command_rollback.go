@@ -46,6 +46,15 @@ func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, co
         return migratorErr
     }
 
+    /** @important take the bun migration lock so two replicas rolling back concurrently cannot both act on the same applied group. */
+    if lockErr := migrator.Lock(runtimeInstance.Context()); nil != lockErr {
+        outputInstance.printError(lockErr)
+        return lockErr
+    }
+    defer func() {
+        _ = migrator.Unlock(runtimeInstance.Context())
+    }()
+
     if option.Verbose {
         identity, identityErr := fetchDatabaseIdentity(runtimeInstance.Context(), db)
         if nil != identityErr {

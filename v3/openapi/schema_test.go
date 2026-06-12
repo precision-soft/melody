@@ -119,6 +119,42 @@ func TestBuildSchema_ParenthesizedValidationConstraintsEmitted(t *testing.T) {
     }
 }
 
+func TestBuildSchema_RegexCharacterClassBracketPreserved(t *testing.T) {
+    components := map[string]*Schema{}
+    names := map[reflect.Type]string{}
+    visited := map[reflect.Type]bool{}
+
+    stringType := reflect.TypeOf("")
+    requestType := reflect.StructOf([]reflect.StructField{
+        {Name: "Code", Type: stringType, Tag: `json:"code" validate:"regex=^[)]a{2,3}b$"`},
+    })
+
+    schema := buildSchema(requestType, components, names, visited)
+
+    code := schema.Properties["code"]
+    if "^[)]a{2,3}b$" != code.Pattern {
+        t.Fatalf("expected the full pattern ^[)]a{2,3}b$ (a ')' inside a [...] class is a literal, and the comma in {2,3} must not split), matching the runtime validator, got %q", code.Pattern)
+    }
+}
+
+func TestBuildSchema_MaxLengthAcceptsNonIntegerPrefix(t *testing.T) {
+    components := map[string]*Schema{}
+    names := map[reflect.Type]string{}
+    visited := map[reflect.Type]bool{}
+
+    stringType := reflect.TypeOf("")
+    requestType := reflect.StructOf([]reflect.StructField{
+        {Name: "Name", Type: stringType, Tag: `json:"name" validate:"max=99.5"`},
+    })
+
+    schema := buildSchema(requestType, components, names, visited)
+
+    name := schema.Properties["name"]
+    if nil == name.MaxLength || 99 != *name.MaxLength {
+        t.Fatalf("expected MaxLength 99 from max=99.5 (validator truncates the leading integer via Sscanf), got %v", name.MaxLength)
+    }
+}
+
 func TestBuildSchema_ParenthesizedRegexCommaInGroupPreserved(t *testing.T) {
     components := map[string]*Schema{}
     names := map[reflect.Type]string{}

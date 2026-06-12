@@ -2,6 +2,7 @@ package audit
 
 import (
     "encoding/json"
+    "reflect"
     "strings"
     "testing"
 
@@ -9,6 +10,19 @@ import (
 
     "github.com/precision-soft/melody/integrations/bunorm/v3/encrypt"
 )
+
+func TestAuditFieldName_SkipsManyToManyRelationField(t *testing.T) {
+    field := reflect.StructField{
+        Name: "Items",
+        Type: reflect.TypeOf([]int{}),
+        Tag:  `bun:"m2m:order_to_items,join:Order=Item"`,
+    }
+
+    _, skip := auditFieldName(field)
+    if false == skip {
+        t.Fatalf("expected an m2m relation field to be skipped like rel: fields, so a loaded relation is not diffed into the audit row")
+    }
+}
 
 const redactedValueLiteral = "<redacted>"
 
@@ -476,5 +490,23 @@ func TestChangeSet_SelfReferentialMapDoesNotStackOverflow(t *testing.T) {
     changes := ChangeSet(before, after)
     if 0 == len(changes) {
         t.Fatalf("expected a change for the meta field")
+    }
+}
+
+type docWithSlice struct {
+    Id   int64 `bun:"id,pk"`
+    Data []any `bun:"data"`
+}
+
+func TestChangeSet_SelfReferentialSliceDoesNotStackOverflow(t *testing.T) {
+    cyclic := make([]any, 1)
+    cyclic[0] = cyclic
+
+    before := docWithSlice{Id: 1}
+    after := docWithSlice{Id: 1, Data: cyclic}
+
+    changes := ChangeSet(before, after)
+    if 0 == len(changes) {
+        t.Fatalf("expected a change for the data field")
     }
 }

@@ -14,6 +14,16 @@ func TestEmail_PointerToStringInvalidIsRejected(t *testing.T) {
     }
 }
 
+func TestEmail_NamedStringTypeInvalidIsRejected(t *testing.T) {
+    constraint := &Email{}
+
+    validationError := constraint.Validate(namedString("definitely not an email"), "field")
+
+    if nil == validationError {
+        t.Fatalf("fail-open: invalid email via named string type passed validation")
+    }
+}
+
 func TestEmail_PointerToStringValidPasses(t *testing.T) {
     constraint := &Email{}
 

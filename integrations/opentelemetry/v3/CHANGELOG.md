@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v3.0.0] - 2026-06-11 - Initial Release — HTTP Tracing and Prometheus Metrics
+## [v3.0.0] - 2026-06-12 - Initial Release — HTTP Tracing and Prometheus Metrics
 
 ### Added
 
@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `tracing_middleware.go` — `NewTracingMiddleware(tracer, propagator)`: W3C TraceContext extraction (default), one server span per request named `<METHOD> <route>`, span context injected into the downstream runtime, method/route/status attributes, error status on handler error or 5xx.
 - `metrics_middleware.go` — `NewMetricsMiddleware(meter)`: `http.server.request.count` counter and `http.server.request.duration` (ms) histogram, attributed by method/route/status; route label bounded to the matched pattern (`unmatched` otherwise).
 - `prometheus.go` — `NewPrometheusMeter(name)` (OTel Prometheus exporter + meter provider + registry) and `MetricsHandler(registry)` for a `/metrics` endpoint.
-- `opentelemetry_test.go`, `metrics_helper_test.go` — in-process tests (in-memory span recorder + Prometheus registry); no collector required.
+- `opentelemetry_test.go`, `prometheus_test.go`, `metrics_middleware_test.go`, `tracing_middleware_test.go` — in-process tests (in-memory span recorder + Prometheus registry); no collector required.
 
 ### Fixed
 

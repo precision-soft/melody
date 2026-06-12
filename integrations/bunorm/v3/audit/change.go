@@ -251,7 +251,23 @@ func valueContainsRedactTagReflect(value reflect.Value, seen map[uintptr]struct{
     }
 
     switch value.Kind() {
-    case reflect.Slice, reflect.Array:
+    case reflect.Slice:
+        /** @important guard self-referential slices reached through an interface element (slice -> any -> same slice), which carry no pointer node for the deref loop to catch and would otherwise recurse until the stack overflows. */
+        pointer := value.Pointer()
+        if 0 != pointer {
+            if _, visited := seen[pointer]; true == visited {
+                return false
+            }
+            seen[pointer] = struct{}{}
+        }
+        for index := 0; index < value.Len(); index++ {
+            if true == valueContainsRedactTagReflect(value.Index(index), seen) {
+                return true
+            }
+        }
+        return false
+
+    case reflect.Array:
         for index := 0; index < value.Len(); index++ {
             if true == valueContainsRedactTagReflect(value.Index(index), seen) {
                 return true
@@ -363,7 +379,7 @@ func auditFieldName(field reflect.StructField) (string, bool) {
         first = tag[:comma]
     }
 
-    if true == strings.HasPrefix(first, "rel:") {
+    if true == strings.HasPrefix(first, "rel:") || true == strings.HasPrefix(first, "m2m:") {
         return "", true
     }
 

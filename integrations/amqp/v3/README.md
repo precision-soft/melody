@@ -97,7 +97,7 @@ consumeBus := messagebus.NewManager(
 
 consumeCommand := messagebus.NewConsumeCommandWithRetry(
 	consumeBus,
-	map[string]messagebus.Transport{"async": transport},
+	map[string]messagebuscontract.Transport{"async": transport},
 	messagebus.RetryPolicy{MaxRetries: 3},
 )
 ```

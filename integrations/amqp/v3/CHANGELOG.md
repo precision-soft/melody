@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v3.0.0] - 2026-06-11 - Initial Release — RabbitMQ Message-Bus Transport, Auto-Reconnect, and Server-Sent Events Backplane
+## [v3.0.0] - 2026-06-12 - Initial Release — RabbitMQ Message-Bus Transport, Auto-Reconnect, and Server-Sent Events Backplane
 
 ### Added
 
@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dead-letter support: when `DeadLetter` is enabled, declares `<queue>.dlx` / `<queue>.dlq` and points the main queue at it. A message whose retries are exhausted is nacked without requeue (`Nack(requeue=false)`) so it lands in the DLX rather than being dropped; the retry count itself is owned by the consumer through the persisted `x-redelivery-count` header (see `transport.go`).
 - `parameter.go` — `ParameterDsn`, `ParameterExchange`, `ParameterPrefetch`, and `RegisterDefaultParameters`.
 - `transport_test.go` — send/receive/ack integration test, plus tests that a re-published message persists its `x-redelivery-count` and dead-letters once retries are exhausted, that a `DelayStamp` routes through the `<queue>.delay` queue and returns after its TTL, and that the consumer reconnects after its broker connection is dropped and still delivers a subsequently-published message on the same channel; all skipped unless `AMQP_DSN` is set; verified end-to-end against RabbitMQ 3.13.
-- `reconnect_test.go` — broker-free unit tests for the reconnect machinery: backoff growth/cap, the no-dialer fallback, single-flight redial, the delivery-loop lost/done reasons, and that the consume loop closes its output channel on both channel-loss-without-dialer and context cancellation.
+- `transport_test.go` — broker-free unit tests for the reconnect machinery: backoff growth/cap, the no-dialer fallback, single-flight redial, the delivery-loop lost/done reasons, and that the consume loop closes its output channel on both channel-loss-without-dialer and context cancellation.
 - A `rabbitmq` service added to `.dev/docker/docker-compose.yml` for local/integration runs.
 
 ### Fixed
@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `transport.go` — `ensurePublishChannel`/`ensureConsumeChannel` now treat a cached-but-closed `*amqp091.Channel` as absent (`IsClosed()` guard on both the fast path and the post-open double-check) and open a fresh one. A broker channel-level exception (publishing to a removed exchange, a policy violation, any protocol error) closes the channel while leaving the connection alive; with no `Dialer` configured (a supported `Connection`-only transport) the publish retry never reset the channel, so the closed channel was reused forever and every subsequent `Send` failed permanently even though a fresh channel could be opened on the still-live connection. The guard restores self-healing for channel-level losses without requiring a reconnect.
 - `server_sent_event_backplane.go` — `ensurePublishChannel` now applies the same `IsClosed()` guard the message-bus `Transport` already carries, on both its fast path and its post-lock double-check. The backplane reused a broker-closed publish channel (it returned the cached channel whenever it was non-nil), so a channel-level exception that left the connection alive forced one failed publish before the existing reset-and-retry recovered; the guard replaces the stale channel up front.
 - `transport.go` — a positive but sub-millisecond requeue `DelayStamp` no longer collapses to a `"0"` message TTL. `republish` formatted the delay with `time.Duration.Milliseconds()`, which truncates any delay below 1ms to `0`; a `RetryPolicy{BaseDelay: 200µs}` therefore routed the message to the delay queue with `expiration = "0"`, and RabbitMQ treats a `0` TTL as immediate expiry — so the message dead-lettered straight back with no spacing and the intended backoff was silently lost. A positive delay is now floored to 1ms.
+- `transport.go`, `server_sent_event_backplane.go` — `resetPublishChannel` is now identity-aware: it closes the cached publish channel only when it is still the one the failing caller used. Two publishers that both failed on the same dead channel could otherwise have the second caller's reset close the healthy channel the first caller had just reopened, turning a recoverable single-retry into a spurious publish error on an otherwise-healthy broker. `publishOnce` now returns the channel it used and `resetPublishChannel` compares identity before closing.
 
 [Unreleased]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.0.0...HEAD
 

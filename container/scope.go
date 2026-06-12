@@ -220,6 +220,9 @@ func (instance *scope) OverrideProtectedInstance(serviceName string, value any) 
         )
     }
 
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
     if nil == instance.container.Load() {
         exception.Panic(
             exception.NewError(
@@ -229,9 +232,6 @@ func (instance *scope) OverrideProtectedInstance(serviceName string, value any) 
             ),
         )
     }
-
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
 
     instance.instances[serviceName] = value
 

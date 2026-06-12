@@ -80,3 +80,34 @@ func TestObjectStorage_PutGetExistsPresignDelete(t *testing.T) {
         t.Fatalf("expected object to be gone after delete")
     }
 }
+
+func TestNormalizeObjectKey_MatchesLocalStorageContract(t *testing.T) {
+    cases := []struct {
+        input    string
+        expected string
+    }{
+        {input: "report.txt", expected: "report.txt"},
+        {input: "/report.txt", expected: "report.txt"},
+        {input: "a\\b.txt", expected: "a/b.txt"},
+        {input: "uploads/../f.txt", expected: "f.txt"},
+        {input: "nested/dir/file.bin", expected: "nested/dir/file.bin"},
+    }
+
+    for _, testCase := range cases {
+        normalized, err := normalizeObjectKey(testCase.input)
+        if nil != err {
+            t.Fatalf("key %q: unexpected error %s", testCase.input, err.Error())
+        }
+        if testCase.expected != normalized {
+            t.Fatalf("key %q: expected %q, got %q", testCase.input, testCase.expected, normalized)
+        }
+    }
+}
+
+func TestNormalizeObjectKey_RejectsEmptyAndDotKeys(t *testing.T) {
+    for _, input := range []string{"", "/", ".", "uploads/.."} {
+        if _, err := normalizeObjectKey(input); nil == err {
+            t.Fatalf("expected key %q to be rejected as empty or invalid", input)
+        }
+    }
+}

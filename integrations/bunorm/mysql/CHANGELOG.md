@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v3.1.0] - 2026-06-11 - MySQL Advisory Lock (GET_LOCK)
+## [v3.1.0] - 2026-06-12 - MySQL Advisory Lock (GET_LOCK)
 
 ### Added
 

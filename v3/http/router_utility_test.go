@@ -208,6 +208,59 @@ func TestWriteResponse_SetsSessionCookieWithSecureAndSameSite(t *testing.T) {
     }
 }
 
+func TestWriteResponse_NilResponsePersistsSessionAndWritesNoContent(t *testing.T) {
+    netRequest := httptest.NewRequest(nethttp.MethodPost, "http://example.com/logout", nil)
+    netRequest.RemoteAddr = "127.0.0.1:1234"
+
+    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+
+    writer := httptest.NewRecorder()
+
+    sessionManager := &stubSessionManager{}
+    sessionInstance := &stubSession{
+        id:         "session-123",
+        isModified: false,
+        isCleared:  true,
+    }
+
+    writeResponse(
+        nil,
+        melodyRequest,
+        writer,
+        nil,
+        sessionManager,
+        sessionInstance,
+        httpcontract.ForwardedHeadersPolicy{
+            TrustForwardedHeaders: false,
+            TrustedProxyList:      []string{},
+        },
+        httpcontract.SessionCookiePolicy{
+            Path:     "/",
+            Domain:   "",
+            SameSite: nethttp.SameSiteLaxMode,
+        },
+    )
+
+    if 1 != sessionManager.deleteCalled {
+        t.Fatalf("nil response dropped the session: expected DeleteSession to be called once, got %d", sessionManager.deleteCalled)
+    }
+
+    httpResponse := writer.Result()
+
+    if nethttp.StatusNoContent != httpResponse.StatusCode {
+        t.Fatalf("expected 204 No Content for a nil response, got %d", httpResponse.StatusCode)
+    }
+
+    cookies := httpResponse.Cookies()
+    if 1 != len(cookies) {
+        t.Fatalf("nil response dropped the clearing Set-Cookie: expected one cookie, got %d", len(cookies))
+    }
+
+    if -1 != cookies[0].MaxAge {
+        t.Fatalf("expected the session cookie to be cleared (MaxAge -1), got %d", cookies[0].MaxAge)
+    }
+}
+
 func TestWriteResponse_ClearsSessionCookieWithMaxAgeNegative(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"

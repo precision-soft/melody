@@ -92,15 +92,17 @@ func (instance *ServerSentEventBackplane) Publish(topic string, event melodyhttp
         return exception.NewError("amqp sse backplane could not encode the event", map[string]any{"topic": topic}, marshalErr)
     }
 
-    if publishErr := instance.publishOnce(payload); nil != publishErr {
+    usedChannel, publishErr := instance.publishOnce(payload)
+    if nil != publishErr {
         if true == instance.isClosing() {
             return exception.NewError("amqp sse backplane publish failed", map[string]any{"topic": topic}, publishErr)
         }
 
-        instance.resetPublishChannel()
+        instance.resetPublishChannel(usedChannel)
 
-        if retryErr := instance.publishOnce(payload); nil != retryErr {
-            instance.resetPublishChannel()
+        retryChannel, retryErr := instance.publishOnce(payload)
+        if nil != retryErr {
+            instance.resetPublishChannel(retryChannel)
 
             return exception.NewError("amqp sse backplane publish failed", map[string]any{"topic": topic}, retryErr)
         }
@@ -109,19 +111,21 @@ func (instance *ServerSentEventBackplane) Publish(topic string, event melodyhttp
     return nil
 }
 
-func (instance *ServerSentEventBackplane) publishOnce(payload []byte) error {
+func (instance *ServerSentEventBackplane) publishOnce(payload []byte) (*amqp091.Channel, error) {
     channel, channelErr := instance.ensurePublishChannel()
     if nil != channelErr {
-        return channelErr
+        return nil, channelErr
     }
 
     instance.publishMutex.Lock()
     defer instance.publishMutex.Unlock()
 
-    return channel.PublishWithContext(instance.ctx, instance.exchange, "", false, false, amqp091.Publishing{
+    publishErr := channel.PublishWithContext(instance.ctx, instance.exchange, "", false, false, amqp091.Publishing{
         ContentType: "application/json",
         Body:        payload,
     })
+
+    return channel, publishErr
 }
 
 func (instance *ServerSentEventBackplane) Close() error {
@@ -423,14 +427,21 @@ func (instance *ServerSentEventBackplane) liveConnection() (*amqp091.Connection,
     return connection, nil
 }
 
-func (instance *ServerSentEventBackplane) resetPublishChannel() {
+/** @important closes the cached publish channel only when it is still the one the caller failed on, so a concurrent publisher that already reopened a healthy channel is not torn down. */
+func (instance *ServerSentEventBackplane) resetPublishChannel(failed *amqp091.Channel) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    if nil != instance.publishChannel {
-        instance.publishChannel.Close()
-        instance.publishChannel = nil
+    if nil == instance.publishChannel {
+        return
     }
+
+    if nil != failed && instance.publishChannel != failed {
+        return
+    }
+
+    instance.publishChannel.Close()
+    instance.publishChannel = nil
 }
 
 func (instance *ServerSentEventBackplane) isClosing() bool {

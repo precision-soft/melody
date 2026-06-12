@@ -2,6 +2,7 @@ package websocket
 
 import (
     "context"
+    "fmt"
     nethttp "net/http"
     "time"
 
@@ -57,9 +58,11 @@ func NewStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpc
         for {
             select {
             case <-connectionContext.Done():
+                closeNormally(connection)
                 return nil, nil
             case event, open := <-subscriber.Events():
                 if false == open {
+                    closeNormally(connection)
                     return nil, nil
                 }
 
@@ -90,9 +93,40 @@ func readLoop(
         }
 
         if nil != options.OnMessage {
-            options.OnMessage(runtimeInstance, messageType, payload)
+            if true == dispatchOnMessage(runtimeInstance, options, messageType, payload) {
+                cancel()
+                return
+            }
         }
     }
+}
+
+/** @important the read goroutine runs outside the kernel's panic recovery, so a panic in the user OnMessage callback would crash the whole process; recover it, log it, and signal the connection to close. */
+func dispatchOnMessage(
+    runtimeInstance runtimecontract.Runtime,
+    options Options,
+    messageType coderwebsocket.MessageType,
+    payload []byte,
+) (panicked bool) {
+    defer func() {
+        recovered := recover()
+        if nil != recovered {
+            logError(
+                runtimeInstance,
+                "websocket OnMessage panicked",
+                exception.NewError(fmt.Sprintf("%v", recovered), nil, nil),
+            )
+            panicked = true
+        }
+    }()
+
+    options.OnMessage(runtimeInstance, messageType, payload)
+
+    return false
+}
+
+func closeNormally(connection *coderwebsocket.Conn) {
+    _ = connection.Close(coderwebsocket.StatusNormalClosure, "")
 }
 
 func writeMessageType(options Options) coderwebsocket.MessageType {

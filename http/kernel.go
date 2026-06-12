@@ -614,6 +614,17 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
             return
         }
+
+        writeResponse(
+            runtimeInstance,
+            melodyRequest,
+            writer,
+            nil,
+            sessionManager,
+            sessionInstance,
+            instance.options.ForwardedHeadersPolicy,
+            instance.options.SessionCookiePolicy,
+        )
     })
 }
 

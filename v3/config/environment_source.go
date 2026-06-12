@@ -176,7 +176,7 @@ func (instance *EnvironmentSource) loadExistingDotEnvFile(values map[string]stri
             continue
         }
 
-        values[trimmedKey] = strings.TrimSpace(value)
+        values[trimmedKey] = value
     }
 
     return nil
@@ -198,6 +198,7 @@ func preprocessDotEnvContent(content string) (string, error) {
 
         inQuotes := false
         var quoteChar rune = 0
+        var previousChar rune = 0
 
         for _, character := range line {
             if '"' == character || '\'' == character {
@@ -210,14 +211,18 @@ func preprocessDotEnvContent(content string) (string, error) {
                 }
 
                 _, _ = builder.WriteRune(character)
+                previousChar = character
                 continue
             }
 
             if '#' == character && false == inQuotes {
-                break
+                if 0 == previousChar || true == unicode.IsSpace(previousChar) {
+                    break
+                }
             }
 
             _, _ = builder.WriteRune(character)
+            previousChar = character
         }
 
         processed := strings.TrimRightFunc(builder.String(), unicode.IsSpace)

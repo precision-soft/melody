@@ -204,9 +204,11 @@ func writeResponse(
     sessionCookiePolicy httpcontract.SessionCookiePolicy,
 ) {
     if nil == response {
-        writer.WriteHeader(nethttp.StatusNoContent)
-
-        return
+        response = &Response{
+            statusCode: nethttp.StatusNoContent,
+            headers:    make(nethttp.Header),
+            bodyReader: nil,
+        }
     }
 
     if nil != sessionManager && nil != sessionInstance {

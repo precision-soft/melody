@@ -239,6 +239,8 @@ func formatPoundValue(raw any, number float64) string {
         return strconv.FormatUint(typed, 10)
     case json.Number:
         return typed.String()
+    case float32:
+        return strconv.FormatFloat(float64(typed), 'f', -1, 32)
     default:
         return formatNumber(number)
     }

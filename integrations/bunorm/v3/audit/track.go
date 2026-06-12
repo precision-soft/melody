@@ -42,7 +42,7 @@ func (instance *Tracker) Update(ctx context.Context, entity string, entityId str
             return cloneErr
         }
 
-        if selectErr := tx.NewSelect().Model(before).WherePK().Scan(ctx); nil != selectErr {
+        if selectErr := tx.NewSelect().Model(before).WherePK().For("UPDATE").Scan(ctx); nil != selectErr {
             return exception.NewError("audited update could not load the current row", map[string]any{"entity": entity}, selectErr)
         }
 

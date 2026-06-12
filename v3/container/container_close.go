@@ -29,6 +29,9 @@ func (instance *container) Close() error {
         return existingErr
     }
 
+    /** @important mark closed while still holding the lock so a concurrent Close() returns at the guard above instead of snapshotting the same services and closing every one of them twice. */
+    instance.isClosed = true
+
     typeStringToType := make(map[string]reflect.Type, len(instance.typeInstances))
 
     createdNodeKeys := make(

@@ -112,7 +112,13 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, transform fun
 
     selectColumns := append([]string{spec.PrimaryKey}, spec.Columns...)
     selectClause := strings.Join(quoteIdentifiers(selectColumns), ", ")
-    selectSql := fmt.Sprintf(
+    firstSelectSql := fmt.Sprintf(
+        "SELECT %s FROM %s ORDER BY %s ASC LIMIT ?",
+        selectClause,
+        quoteIdentifier(spec.Table),
+        quoteIdentifier(spec.PrimaryKey),
+    )
+    nextSelectSql := fmt.Sprintf(
         "SELECT %s FROM %s WHERE %s > ? ORDER BY %s ASC LIMIT ?",
         selectClause,
         quoteIdentifier(spec.Table),
@@ -121,10 +127,19 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, transform fun
     )
 
     var cursor string
+    hasCursor := false
     processed := 0
 
     for {
-        rows, queryErr := instance.db.DB.QueryContext(ctx, selectSql, cursor, batchSize)
+        var rows *sql.Rows
+        var queryErr error
+
+        /** @important the first page must not be keyset-filtered: WHERE pk > '' coerces to pk > 0 on an integer key and would silently skip rows whose primary key is zero or negative. */
+        if false == hasCursor {
+            rows, queryErr = instance.db.DB.QueryContext(ctx, firstSelectSql, batchSize)
+        } else {
+            rows, queryErr = instance.db.DB.QueryContext(ctx, nextSelectSql, cursor, batchSize)
+        }
         if nil != queryErr {
             return processed, exception.NewError("migrate select failed", map[string]any{"table": spec.Table}, queryErr)
         }
@@ -141,6 +156,7 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, transform fun
 
         for _, row := range batch {
             cursor = row.primaryKey
+            hasCursor = true
 
             if updateErr := instance.applyRow(ctx, spec, row, transform); nil != updateErr {
                 return processed, updateErr
@@ -159,7 +175,9 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, transform fun
 
 func (instance *Migrator) applyRow(ctx context.Context, spec TableSpec, row migrateRow, transform func(string) (string, error)) error {
     assignments := make([]string, 0, len(spec.Columns))
-    arguments := make([]any, 0, len(spec.Columns)+1)
+    setArguments := make([]any, 0, len(spec.Columns))
+    valuePredicates := make([]string, 0, len(spec.Columns))
+    valueArguments := make([]any, 0, len(spec.Columns))
 
     for index, column := range spec.Columns {
         value := row.values[index]
@@ -177,19 +195,31 @@ func (instance *Migrator) applyRow(ctx context.Context, spec TableSpec, row migr
         }
 
         assignments = append(assignments, quoteIdentifier(column)+" = ?")
-        arguments = append(arguments, transformed)
+        setArguments = append(setArguments, transformed)
+        valuePredicates = append(valuePredicates, quoteIdentifier(column)+" = ?")
+        valueArguments = append(valueArguments, value.String)
     }
 
     if 0 == len(assignments) {
         return nil
     }
 
+    arguments := make([]any, 0, len(setArguments)+1+len(valueArguments))
+    arguments = append(arguments, setArguments...)
     arguments = append(arguments, row.primaryKey)
+    arguments = append(arguments, valueArguments...)
+
+    /** @important guard each assignment on the value read for this row so a concurrent application write between the select and this update is not silently reverted; a row that changed under us matches zero rows and is re-encrypted on the next run. */
+    whereClause := quoteIdentifier(spec.PrimaryKey) + " = ?"
+    for _, predicate := range valuePredicates {
+        whereClause += " AND " + predicate
+    }
+
     updateSql := fmt.Sprintf(
-        "UPDATE %s SET %s WHERE %s = ?",
+        "UPDATE %s SET %s WHERE %s",
         quoteIdentifier(spec.Table),
         strings.Join(assignments, ", "),
-        quoteIdentifier(spec.PrimaryKey),
+        whereClause,
     )
 
     if _, execErr := instance.db.DB.ExecContext(ctx, updateSql, arguments...); nil != execErr {

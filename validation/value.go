@@ -31,5 +31,9 @@ func dereferenceValue(value any) (any, bool) {
         return nil, false
     }
 
+    if reflect.String == reflectedValue.Kind() {
+        return reflectedValue.String(), true
+    }
+
     return reflectedValue.Interface(), true
 }

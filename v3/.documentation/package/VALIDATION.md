@@ -109,7 +109,6 @@ func validateInput(input CreateUserInput) error {
 ### Constants
 
 - Constraints: [`ConstraintNotBlank`, `ConstraintEmail`, `ConstraintMinLength`, `ConstraintMaxLength`, `ConstraintRegex`, `ConstraintNumeric`, `ConstraintAlpha`, `ConstraintAlphanumeric`, `ConstraintGreaterThan`, `ConstraintLessThan`, `ConstraintNotEmpty`](../../validation)
-- Deprecated constraint aliases (kept for compatibility): [`ConstraintMin`, `ConstraintMax`](../../validation/const.go)
 - Error codes (core): [`ErrorInvalidRuleSyntax`, `ErrorUnknownRule`](../../validation/const.go)
 - Error codes (per-constraint):
     - `notBlank`: [`ConstraintNotBlankErrorIsBlank`](../../validation/constraint_not_blank.go)
@@ -123,7 +122,6 @@ func validateInput(input CreateUserInput) error {
     - `greaterThan`: [`ConstraintGreaterThanErrorSmallerThan`](../../validation/constraint_greater_than.go)
     - `lessThan`: [`ConstraintLessThanErrorGreaterThan`](../../validation/constraint_less_than.go)
     - `notEmpty`: [`ConstraintNotEmptyErrorEmpty`](../../validation/constraint_not_empty.go)
-- Deprecated error code aliases (kept for compatibility): [`ErrorNotBlank`, `ErrorInvalidEmail`, `ErrorMinLength`, `ErrorMaxLength`, `ErrorInvalidPattern`, `ErrorRegexMismatch`, `ErrorNotNumeric`, `ErrorNotAlpha`, `ErrorNotAlphanumeric`, `ErrorEmpty`](../../validation/const.go)
 
 ### Constraint implementations
 

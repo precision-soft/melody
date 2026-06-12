@@ -423,7 +423,8 @@ func applyValidation(schema *Schema, validateTag string) {
         case "min":
             if "string" == schema.Type {
                 if valueString, exists := params["value"]; true == exists {
-                    if value, parseErr := strconv.Atoi(valueString); nil == parseErr {
+                    if parsed, parsedOk := parseLeadingInt(valueString); true == parsedOk {
+                        value := int(parsed)
                         schema.MinLength = &value
                     }
                 } else {
@@ -435,7 +436,8 @@ func applyValidation(schema *Schema, validateTag string) {
         case "max":
             if "string" == schema.Type {
                 if valueString, exists := params["value"]; true == exists {
-                    if value, parseErr := strconv.Atoi(valueString); nil == parseErr {
+                    if parsed, parsedOk := parseLeadingInt(valueString); true == parsedOk {
+                        value := int(parsed)
                         schema.MaxLength = &value
                     }
                 } else {
@@ -505,6 +507,52 @@ func splitRules(validateTag string) []string {
     return splitTopLevelRules(trimmed)
 }
 
+/** @important tracks whether the scan is inside a regex character class [...] so the bracket/comma bookkeeping treats ')', ']', '}', '(', '{' and ',' as literal class members. A ']' is a literal (not a close) when it is the class's first content character — and the leading negation '^' does not count as content — mirroring regexp/syntax. */
+type charClassScanner struct {
+    inClass      bool
+    contentSeen  bool
+    caretAllowed bool
+}
+
+func (instance *charClassScanner) step(character rune) bool {
+    if true == instance.inClass {
+        if ('^' == character) && (false == instance.contentSeen) && (true == instance.caretAllowed) {
+            instance.caretAllowed = false
+
+            return true
+        }
+
+        instance.caretAllowed = false
+
+        if (']' == character) && (true == instance.contentSeen) {
+            instance.inClass = false
+
+            return true
+        }
+
+        instance.contentSeen = true
+
+        return true
+    }
+
+    if '[' == character {
+        instance.inClass = true
+        instance.contentSeen = false
+        instance.caretAllowed = true
+
+        return true
+    }
+
+    return false
+}
+
+func (instance *charClassScanner) noteEscaped() {
+    if true == instance.inClass {
+        instance.caretAllowed = false
+        instance.contentSeen = true
+    }
+}
+
 func splitTopLevelRules(input string) []string {
     var parts []string
 
@@ -512,14 +560,15 @@ func splitTopLevelRules(input string) []string {
 
     current := strings.Builder{}
     parenDepth := 0
-    squareDepth := 0
     curlyDepth := 0
     wasEscaped := false
+    classScanner := charClassScanner{}
 
     for _, character := range input {
         if true == wasEscaped {
             current.WriteRune(character)
             wasEscaped = false
+            classScanner.noteEscaped()
             continue
         }
 
@@ -530,6 +579,11 @@ func splitTopLevelRules(input string) []string {
         }
 
         if true == bracketsBalanced {
+            if true == classScanner.step(character) {
+                current.WriteRune(character)
+                continue
+            }
+
             if '(' == character {
                 parenDepth++
                 current.WriteRune(character)
@@ -539,20 +593,6 @@ func splitTopLevelRules(input string) []string {
             if ')' == character {
                 if 0 < parenDepth {
                     parenDepth--
-                }
-                current.WriteRune(character)
-                continue
-            }
-
-            if '[' == character {
-                squareDepth++
-                current.WriteRune(character)
-                continue
-            }
-
-            if ']' == character {
-                if 0 < squareDepth {
-                    squareDepth--
                 }
                 current.WriteRune(character)
                 continue
@@ -574,7 +614,7 @@ func splitTopLevelRules(input string) []string {
         }
 
         if ',' == character {
-            if 0 == parenDepth && 0 == squareDepth && 0 == curlyDepth {
+            if 0 == parenDepth && 0 == curlyDepth {
                 parts = append(parts, current.String())
                 current.Reset()
                 continue
@@ -594,16 +634,17 @@ func splitRuleParameters(input string) []string {
 
     current := strings.Builder{}
     parenDepth := 0
-    squareDepth := 0
     curlyDepth := 0
     isInSingleQuote := false
     isInDoubleQuote := false
     wasEscaped := false
+    classScanner := charClassScanner{}
 
     for _, character := range input {
         if true == wasEscaped {
             current.WriteRune(character)
             wasEscaped = false
+            classScanner.noteEscaped()
             continue
         }
 
@@ -613,7 +654,7 @@ func splitRuleParameters(input string) []string {
             continue
         }
 
-        if '"' == character {
+        if '"' == character && false == classScanner.inClass {
             if false == isInSingleQuote {
                 isInDoubleQuote = false == isInDoubleQuote
             }
@@ -621,7 +662,7 @@ func splitRuleParameters(input string) []string {
             continue
         }
 
-        if '\'' == character {
+        if '\'' == character && false == classScanner.inClass {
             if false == isInDoubleQuote {
                 isInSingleQuote = false == isInSingleQuote
             }
@@ -630,6 +671,11 @@ func splitRuleParameters(input string) []string {
         }
 
         if false == isInSingleQuote && false == isInDoubleQuote {
+            if true == classScanner.step(character) {
+                current.WriteRune(character)
+                continue
+            }
+
             if '(' == character {
                 parenDepth++
                 current.WriteRune(character)
@@ -639,20 +685,6 @@ func splitRuleParameters(input string) []string {
             if ')' == character {
                 if 0 < parenDepth {
                     parenDepth--
-                }
-                current.WriteRune(character)
-                continue
-            }
-
-            if '[' == character {
-                squareDepth++
-                current.WriteRune(character)
-                continue
-            }
-
-            if ']' == character {
-                if 0 < squareDepth {
-                    squareDepth--
                 }
                 current.WriteRune(character)
                 continue
@@ -673,7 +705,7 @@ func splitRuleParameters(input string) []string {
             }
 
             if ',' == character {
-                if 0 == parenDepth && 0 == squareDepth && 0 == curlyDepth {
+                if 0 == parenDepth && 0 == curlyDepth {
                     parts = append(parts, current.String())
                     current.Reset()
                     continue
@@ -691,18 +723,23 @@ func splitRuleParameters(input string) []string {
 
 func hasBalancedRuleBrackets(input string) bool {
     parenDepth := 0
-    squareDepth := 0
     curlyDepth := 0
     wasEscaped := false
+    classScanner := charClassScanner{}
 
     for _, character := range input {
         if true == wasEscaped {
             wasEscaped = false
+            classScanner.noteEscaped()
             continue
         }
 
         if '\\' == character {
             wasEscaped = true
+            continue
+        }
+
+        if true == classScanner.step(character) {
             continue
         }
 
@@ -714,13 +751,8 @@ func hasBalancedRuleBrackets(input string) bool {
                 return false
             }
             parenDepth--
-        case '[':
-            squareDepth++
         case ']':
-            if 0 == squareDepth {
-                return false
-            }
-            squareDepth--
+            return false
         case '{':
             curlyDepth++
         case '}':
@@ -731,7 +763,7 @@ func hasBalancedRuleBrackets(input string) bool {
         }
     }
 
-    return 0 == parenDepth && 0 == squareDepth && 0 == curlyDepth
+    return 0 == parenDepth && 0 == curlyDepth && false == classScanner.inClass
 }
 
 func splitRule(rule string) (string, map[string]string) {

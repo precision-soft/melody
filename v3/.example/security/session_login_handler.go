@@ -31,11 +31,14 @@ func (instance *sessionLoginHandler) Login(
     }
 
     userIdentifier := ""
+    var roles []string
     if nil != input.Token {
         userIdentifier = input.Token.UserIdentifier()
+        roles = input.Token.Roles()
     }
 
     sessionInstance.Set(SessionKeySecurityUserId, userIdentifier)
+    sessionInstance.Set(SessionKeySecurityRoles, roles)
 
     response, err := melodyhttp.JsonResponse(http.StatusOK, map[string]any{
         "success": true,

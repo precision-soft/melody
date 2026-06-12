@@ -239,7 +239,7 @@ func (instance *Transport) publish(
     routingKey string,
     publishing amqp091.Publishing,
 ) error {
-    publishErr := instance.publishOnce(ctx, exchange, routingKey, publishing)
+    usedChannel, publishErr := instance.publishOnce(ctx, exchange, routingKey, publishing)
     if nil == publishErr {
         return nil
     }
@@ -248,9 +248,11 @@ func (instance *Transport) publish(
         return publishErr
     }
 
-    instance.resetPublishChannel()
+    instance.resetPublishChannel(usedChannel)
 
-    return instance.publishOnce(ctx, exchange, routingKey, publishing)
+    _, retryErr := instance.publishOnce(ctx, exchange, routingKey, publishing)
+
+    return retryErr
 }
 
 func (instance *Transport) publishOnce(
@@ -258,30 +260,37 @@ func (instance *Transport) publishOnce(
     exchange string,
     routingKey string,
     publishing amqp091.Publishing,
-) error {
+) (*amqp091.Channel, error) {
     channel, channelErr := instance.ensurePublishChannel()
     if nil != channelErr {
-        return channelErr
+        return nil, channelErr
     }
 
     instance.publishMutex.Lock()
     publishErr := channel.PublishWithContext(ctx, exchange, routingKey, false, false, publishing)
     instance.publishMutex.Unlock()
     if nil != publishErr {
-        return exception.NewError("amqp publish failed", map[string]any{"queue": instance.queue}, publishErr)
+        return channel, exception.NewError("amqp publish failed", map[string]any{"queue": instance.queue}, publishErr)
     }
 
-    return nil
+    return channel, nil
 }
 
-func (instance *Transport) resetPublishChannel() {
+/** @important closes the cached publish channel only when it is still the one the caller failed on, so a concurrent publisher that already reopened a healthy channel is not torn down. */
+func (instance *Transport) resetPublishChannel(failed *amqp091.Channel) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    if nil != instance.publishChannel {
-        instance.publishChannel.Close()
-        instance.publishChannel = nil
+    if nil == instance.publishChannel {
+        return
     }
+
+    if nil != failed && instance.publishChannel != failed {
+        return
+    }
+
+    instance.publishChannel.Close()
+    instance.publishChannel = nil
 }
 
 func (instance *Transport) resetConsumeChannel() {

@@ -19,6 +19,18 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         melodysecurity.NewAccessControlRegexRule("^/i18n", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/events", melodysecuritycontract.AttributePublicAccess),
 
+        melodysecurity.NewAccessControlRegexRule("^/health", melodysecuritycontract.AttributePublicAccess),
+        melodysecurity.NewAccessControlRegexRule("^/metrics", melodysecuritycontract.AttributePublicAccess),
+        melodysecurity.NewAccessControlRegexRule("^/openapi.json", melodysecuritycontract.AttributePublicAccess),
+        melodysecurity.NewAccessControlRegexRule("^/ws", melodysecuritycontract.AttributePublicAccess),
+        melodysecurity.NewAccessControlRegexRule("^/platform/demo", melodysecuritycontract.AttributePublicAccess),
+        melodysecurity.NewAccessControlRegexRule("^/messagebus/demo", melodysecuritycontract.AttributePublicAccess),
+        melodysecurity.NewAccessControlRegexRule("^/cache/demo", melodysecuritycontract.AttributePublicAccess),
+        melodysecurity.NewAccessControlRegexRule("^/encrypt/demo", melodysecuritycontract.AttributePublicAccess),
+        melodysecurity.NewAccessControlRegexRule("^/redis/token/demo", melodysecuritycontract.AttributePublicAccess),
+        melodysecurity.NewAccessControlRegexRule("^/database/demo", melodysecuritycontract.AttributePublicAccess),
+        melodysecurity.NewAccessControlRegexRule("^/database/audit/demo", melodysecuritycontract.AttributePublicAccess),
+
         melodysecurity.NewAccessControlRule(route.ProductsPrefix, entity.RoleEditor),
         melodysecurity.NewAccessControlRule(route.CategoriesPrefix, entity.RoleUser),
         melodysecurity.NewAccessControlRule(route.CurrenciesPrefix, entity.RoleUser),
