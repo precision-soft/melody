@@ -435,6 +435,98 @@ func TestRemember_WaitTimeoutIsPerCaller_DoesNotPoisonInFlightCall(t *testing.T)
     }
 }
 
+func TestRemember_CancelableLateJoinerIsNotPoisonedByCanceledCall(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    backend := NewInMemoryBackend(
+        100,
+        time.Hour,
+        clockInstance,
+    )
+    defer backend.Close()
+
+    cacheManager := NewManager(
+        backend,
+        NewJsonSerializer(),
+    )
+
+    callbackStarted := make(chan struct{})
+    callbackCanceled := make(chan struct{})
+    holdLeader := make(chan struct{})
+
+    var callbackCalls int64
+    callback := func(ctx context.Context) (any, error) {
+        call := atomic.AddInt64(&callbackCalls, 1)
+        if 1 == call {
+            close(callbackStarted)
+            <-ctx.Done()
+            close(callbackCanceled)
+            <-holdLeader
+
+            return nil, ctx.Err()
+        }
+
+        return "fresh", nil
+    }
+
+    timedOutChannel := make(chan error, 1)
+    go func() {
+        _, err := Remember(
+            cacheManager,
+            "product.late-joiner",
+            time.Minute,
+            callback,
+            NewDefaultRememberOption().
+                WithWaitTimeout(30*time.Millisecond).
+                WithCancelable(true),
+        )
+        timedOutChannel <- err
+    }()
+
+    <-callbackStarted
+
+    timedOutErr := <-timedOutChannel
+    if nil == timedOutErr {
+        t.Fatalf("expected the only waiter to time out")
+    }
+
+    <-callbackCanceled
+
+    joinerValueChannel := make(chan any, 1)
+    joinerErrChannel := make(chan error, 1)
+    go func() {
+        value, err := Remember(
+            cacheManager,
+            "product.late-joiner",
+            time.Minute,
+            callback,
+            NewDefaultRememberOption().
+                WithWaitTimeout(2*time.Second).
+                WithCancelable(true),
+        )
+        joinerValueChannel <- value
+        joinerErrChannel <- err
+    }()
+
+    time.Sleep(20 * time.Millisecond)
+    close(holdLeader)
+
+    joinerValue := <-joinerValueChannel
+    joinerErr := <-joinerErrChannel
+
+    if nil != joinerErr {
+        t.Fatalf("late joiner inherited the canceled call's poison: %v", joinerErr)
+    }
+
+    if "fresh" != joinerValue {
+        t.Fatalf("unexpected late joiner value: %v", joinerValue)
+    }
+
+    if 2 != atomic.LoadInt64(&callbackCalls) {
+        t.Fatalf("expected the late joiner to lead a fresh computation, callback calls: %d", atomic.LoadInt64(&callbackCalls))
+    }
+}
+
 func TestRemember_CancelableGroupIsSeparatedFromNonCancelableGroup(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 

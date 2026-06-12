@@ -15,7 +15,7 @@ Encrypted values are stored as:
 The `<ENC>\0gcm1\0` marker lets reads distinguish ciphertext from plaintext:
 
 - `Decrypt` returns an **unmarked** value (legacy/un-migrated plaintext) unchanged.
-- `Encrypt` is a **no-op** on an already-marked value (no double-encryption).
+- `Encrypt` is a **no-op** on an already-marked value (no double-encryption). The marker alone is not trusted: a marked value passes through only if it actually decrypts under its (known) key, so a plaintext that merely *looks* like ciphertext is sealed normally instead of being stored raw and poisoning later reads. A marked value carrying an **unknown** `keyId` still passes through unchanged, so data sealed under a retired key is never double-encrypted.
 - The `keyId` travels in the value, so decryption always uses the key that wrote it (rotation-safe).
 
 > **Nullable columns:** `EncryptedString`/`EncryptedDeterministicString` are non-nullable value types — a SQL `NULL` scans to the Go zero value `""`, and writing it back encrypts the empty string into a non-`NULL` ciphertext (and, for a deterministic column, makes the row match an equality search on the empty plaintext). For a nullable column declare the field as a **pointer** (`*EncryptedString` / `*EncryptedDeterministicString`): bun leaves a `NULL` column as a `nil` pointer and never calls `Value`, so `NULL` round-trips faithfully.

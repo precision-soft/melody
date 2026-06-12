@@ -209,7 +209,7 @@ func TestScope_ConcurrentGetAndClose(t *testing.T) {
                     return
                 }
 
-                if iteration == 50 {
+                if 50 == iteration {
                     closeOnce.Do(func() {
                         close(closeSignal)
                     })
@@ -294,7 +294,7 @@ func TestScope_ConcurrentHasAndClose(t *testing.T) {
                 _ = scopeInstance.Has("service.any")
                 _ = scopeInstance.HasType(reflect.TypeOf((*scopeTestService)(nil)))
 
-                if iteration == 100 {
+                if 100 == iteration {
                     closeOnce.Do(func() {
                         close(closeSignal)
                     })

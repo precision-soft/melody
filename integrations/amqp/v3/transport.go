@@ -97,6 +97,7 @@ type Transport struct {
 
     mutex             sync.Mutex
     publishChannel    *amqp091.Channel
+    publishReturns    <-chan amqp091.Return
     consumeChannel    *amqp091.Channel
     consumeGeneration uint64
     closing           bool
@@ -160,6 +161,7 @@ func (instance *Transport) connect() (*amqp091.Connection, error) {
     instance.connection = connection
     instance.ownsConnection = true
     instance.publishChannel = nil
+    instance.publishReturns = nil
     instance.consumeChannel = nil
 
     return connection, nil
@@ -255,25 +257,69 @@ func (instance *Transport) publish(
     return retryErr
 }
 
+/** @important the channel runs in publisher-confirm mode and the publish is serialized with its confirmation wait: a message is reported sent only after the broker acked it and no basic.return arrived, so republish-then-ack cannot drop a message the broker silently discarded (reject-publish policy, deleted queue). */
 func (instance *Transport) publishOnce(
     ctx context.Context,
     exchange string,
     routingKey string,
     publishing amqp091.Publishing,
 ) (*amqp091.Channel, error) {
-    channel, channelErr := instance.ensurePublishChannel()
+    channel, returns, channelErr := instance.ensurePublishChannel()
     if nil != channelErr {
         return nil, channelErr
     }
 
     instance.publishMutex.Lock()
-    publishErr := channel.PublishWithContext(ctx, exchange, routingKey, false, false, publishing)
-    instance.publishMutex.Unlock()
+    defer instance.publishMutex.Unlock()
+
+    _, _ = drainPublishReturn(returns)
+
+    confirmation, publishErr := channel.PublishWithDeferredConfirmWithContext(ctx, exchange, routingKey, true, false, publishing)
     if nil != publishErr {
         return channel, exception.NewError("amqp publish failed", map[string]any{"queue": instance.queue}, publishErr)
     }
 
+    acked, waitErr := confirmation.WaitContext(ctx)
+    if nil != waitErr {
+        return channel, exception.NewError("amqp publish confirmation wait failed", map[string]any{"queue": instance.queue}, waitErr)
+    }
+
+    if returned, wasReturned := drainPublishReturn(returns); true == wasReturned {
+        return channel, exception.NewError(
+            "amqp publish was returned as unroutable",
+            map[string]any{
+                "queue":      instance.queue,
+                "exchange":   exchange,
+                "routingKey": routingKey,
+                "replyCode":  returned.ReplyCode,
+                "replyText":  returned.ReplyText,
+            },
+            nil,
+        )
+    }
+
+    if false == acked {
+        return channel, exception.NewError("amqp publish was nacked by the broker", map[string]any{"queue": instance.queue}, nil)
+    }
+
     return channel, nil
+}
+
+func drainPublishReturn(returns <-chan amqp091.Return) (amqp091.Return, bool) {
+    if nil == returns {
+        return amqp091.Return{}, false
+    }
+
+    select {
+    case returned, open := <-returns:
+        if false == open {
+            return amqp091.Return{}, false
+        }
+
+        return returned, true
+    default:
+        return amqp091.Return{}, false
+    }
 }
 
 /** @important closes the cached publish channel only when it is still the one the caller failed on, so a concurrent publisher that already reopened a healthy channel is not torn down. */
@@ -291,6 +337,7 @@ func (instance *Transport) resetPublishChannel(failed *amqp091.Channel) {
 
     instance.publishChannel.Close()
     instance.publishChannel = nil
+    instance.publishReturns = nil
 }
 
 func (instance *Transport) resetConsumeChannel() {
@@ -560,6 +607,7 @@ func (instance *Transport) Close(runtimeInstance runtimecontract.Runtime) error 
     if nil != instance.publishChannel {
         instance.publishChannel.Close()
         instance.publishChannel = nil
+        instance.publishReturns = nil
     }
 
     if true == instance.ownsConnection && nil != instance.connection {
@@ -686,51 +734,60 @@ func redeliveryCountFromHeader(headers amqp091.Table) int {
     }
 }
 
-func (instance *Transport) ensurePublishChannel() (*amqp091.Channel, error) {
+func (instance *Transport) ensurePublishChannel() (*amqp091.Channel, <-chan amqp091.Return, error) {
     instance.mutex.Lock()
     closing := instance.closing
     existing := instance.publishChannel
+    existingReturns := instance.publishReturns
     instance.mutex.Unlock()
 
     if true == closing {
-        return nil, exception.NewError("amqp transport is closing", nil, nil)
+        return nil, nil, exception.NewError("amqp transport is closing", nil, nil)
     }
 
     if nil != existing && false == existing.IsClosed() {
-        return existing, nil
+        return existing, existingReturns, nil
     }
 
     connection, connectErr := instance.connect()
     if nil != connectErr {
-        return nil, connectErr
+        return nil, nil, connectErr
     }
 
     channel, channelErr := connection.Channel()
     if nil != channelErr {
-        return nil, exception.NewError("amqp channel open failed", nil, channelErr)
+        return nil, nil, exception.NewError("amqp channel open failed", nil, channelErr)
     }
 
     if topologyErr := instance.declareTopology(channel); nil != topologyErr {
         channel.Close()
-        return nil, topologyErr
+        return nil, nil, topologyErr
     }
+
+    if confirmErr := channel.Confirm(false); nil != confirmErr {
+        channel.Close()
+        return nil, nil, exception.NewError("amqp confirm mode failed", map[string]any{"queue": instance.queue}, confirmErr)
+    }
+
+    returns := channel.NotifyReturn(make(chan amqp091.Return, 16))
 
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
     if true == instance.closing {
         channel.Close()
-        return nil, exception.NewError("amqp transport is closing", nil, nil)
+        return nil, nil, exception.NewError("amqp transport is closing", nil, nil)
     }
 
     if nil != instance.publishChannel && false == instance.publishChannel.IsClosed() {
         channel.Close()
-        return instance.publishChannel, nil
+        return instance.publishChannel, instance.publishReturns, nil
     }
 
     instance.publishChannel = channel
+    instance.publishReturns = returns
 
-    return channel, nil
+    return channel, returns, nil
 }
 
 func (instance *Transport) ensureConsumeChannel() (*amqp091.Channel, error) {

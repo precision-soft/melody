@@ -53,7 +53,7 @@ type aes256Cipher struct {
 }
 
 func (instance *aes256Cipher) Encrypt(plaintext string) (string, error) {
-    if true == looksEncrypted(plaintext) {
+    if true == instance.isPassThroughCiphertext(plaintext) {
         return plaintext, nil
     }
 
@@ -61,7 +61,7 @@ func (instance *aes256Cipher) Encrypt(plaintext string) (string, error) {
 }
 
 func (instance *aes256Cipher) EncryptWithKeyId(plaintext string, keyId string) (string, error) {
-    if true == looksEncrypted(plaintext) {
+    if true == instance.isPassThroughCiphertext(plaintext) {
         return plaintext, nil
     }
 
@@ -69,7 +69,7 @@ func (instance *aes256Cipher) EncryptWithKeyId(plaintext string, keyId string) (
 }
 
 func (instance *aes256Cipher) EncryptDeterministic(plaintext string) (string, error) {
-    if true == looksEncrypted(plaintext) {
+    if true == instance.isPassThroughCiphertext(plaintext) {
         return plaintext, nil
     }
 
@@ -77,11 +77,31 @@ func (instance *aes256Cipher) EncryptDeterministic(plaintext string) (string, er
 }
 
 func (instance *aes256Cipher) EncryptDeterministicWithKeyId(plaintext string, keyId string) (string, error) {
-    if true == looksEncrypted(plaintext) {
+    if true == instance.isPassThroughCiphertext(plaintext) {
         return plaintext, nil
     }
 
     return instance.seal(plaintext, keyId, true)
+}
+
+/** @important a marker-shaped plaintext must not be stored as-is: it would poison every later Scan/Decrypt. Pass through only values that authenticate under a known key; an unknown key id keeps the historical pass-through so a value sealed under a retired key is not destroyed by double encryption. */
+func (instance *aes256Cipher) isPassThroughCiphertext(value string) bool {
+    if false == looksEncrypted(value) {
+        return false
+    }
+
+    keyId, hasKeyId := keyIdOf(value)
+    if false == hasKeyId {
+        return false
+    }
+
+    if _, keyErr := instance.keys.Key(keyId); nil != keyErr {
+        return true
+    }
+
+    _, decryptErr := instance.Decrypt(value)
+
+    return nil == decryptErr
 }
 
 func (instance *aes256Cipher) CiphertextCandidates(plaintext string) ([][]byte, error) {

@@ -95,6 +95,10 @@ func (instance *container) serviceWithCreationGuardLocked(
         return value, nil
     }
 
+    if true == instance.isClosed {
+        return nil, newContainerClosedError(creatingKey)
+    }
+
     newState := &creationState{
         waitChannel:     make(chan struct{}),
         ownerContextId:  resolver.contextId,
@@ -215,6 +219,15 @@ func (instance *container) serviceWithCreationGuardLocked(
         )
     }
 
+    /** @important a value created while Close() ran would be stored after the close snapshot and leak un-closed; close it best-effort instead of storing it and fail the resolution. */
+    if nil == err && true == instance.isClosed {
+        instance.mutex.Unlock()
+        closeValueAfterContainerClose(createdValue)
+        instance.mutex.Lock()
+
+        err = newContainerClosedError(creatingKey)
+    }
+
     if nil == err {
         store(createdValue)
     }
@@ -228,6 +241,25 @@ func (instance *container) serviceWithCreationGuardLocked(
     }
 
     return createdValue, nil
+}
+
+func newContainerClosedError(creatingKey string) error {
+    return exception.NewError(
+        "container is closed",
+        map[string]any{
+            "creatingKey": creatingKey,
+        },
+        nil,
+    )
+}
+
+func closeValueAfterContainerClose(value any) {
+    closeable, isCloseable := value.(interface{ Close() error })
+    if false == isCloseable {
+        return
+    }
+
+    _ = closeable.Close()
 }
 
 func (instance *container) registerResolverWaitLocked(

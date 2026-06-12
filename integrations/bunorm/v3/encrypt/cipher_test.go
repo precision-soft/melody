@@ -1,6 +1,7 @@
 package encrypt
 
 import (
+    "encoding/base64"
     "strings"
     "testing"
 )
@@ -99,6 +100,88 @@ func TestCipher_EncryptIsIdempotentOnAlreadyEncrypted(t *testing.T) {
 
     if once != twice {
         t.Fatalf("expected double-encryption guard to return the value unchanged")
+    }
+}
+
+/** @info marker-shaped plaintext */
+
+func TestCipher_EncryptSealsMarkerShapedPlaintextInsteadOfStoringItRaw(t *testing.T) {
+    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    cipher := NewCipher(provider)
+
+    forged := "<ENC>\x00gcm1\x00v1:" + base64.RawStdEncoding.EncodeToString([]byte("forged payload bytes"))
+
+    if _, decryptErr := cipher.Decrypt(forged); nil == decryptErr {
+        t.Fatalf("precondition: the forged value must not authenticate under the known key")
+    }
+
+    encoded, encryptErr := cipher.Encrypt(forged)
+    if nil != encryptErr {
+        t.Fatalf("encrypt: %v", encryptErr)
+    }
+
+    if forged == encoded {
+        t.Fatalf("expected the marker-shaped plaintext to be sealed; storing it raw poisons every later read")
+    }
+
+    decrypted, decryptErr := cipher.Decrypt(encoded)
+    if nil != decryptErr {
+        t.Fatalf("decrypt: %v", decryptErr)
+    }
+
+    if forged != decrypted {
+        t.Fatalf("round-trip mismatch: %q", decrypted)
+    }
+}
+
+func TestCipher_EncryptDeterministicSealsMarkerShapedPlaintext(t *testing.T) {
+    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    cipher := NewCipher(provider)
+
+    forged := "<ENC>\x00gcm1\x00v1:" + base64.RawStdEncoding.EncodeToString([]byte("forged payload bytes"))
+
+    encoded, encryptErr := cipher.EncryptDeterministic(forged)
+    if nil != encryptErr {
+        t.Fatalf("deterministic encrypt: %v", encryptErr)
+    }
+
+    if forged == encoded {
+        t.Fatalf("expected the marker-shaped plaintext to be sealed deterministically")
+    }
+
+    candidates, candidatesErr := cipher.CiphertextCandidates(forged)
+    if nil != candidatesErr {
+        t.Fatalf("candidates: %v", candidatesErr)
+    }
+
+    matched := false
+    for _, candidate := range candidates {
+        if string(candidate) == encoded {
+            matched = true
+        }
+    }
+    if false == matched {
+        t.Fatalf("stored deterministic value %q not found among lookup candidates", encoded)
+    }
+}
+
+func TestCipher_EncryptPassesThroughCiphertextSealedUnderRetiredKey(t *testing.T) {
+    sealingProvider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    sealed, sealErr := NewCipher(sealingProvider).Encrypt("secret")
+    if nil != sealErr {
+        t.Fatalf("seal: %v", sealErr)
+    }
+
+    rotatedProvider := NewStaticKeyProvider("v2", map[string][]byte{"v2": newKey(2)})
+    rotatedCipher := NewCipher(rotatedProvider)
+
+    encoded, encryptErr := rotatedCipher.Encrypt(sealed)
+    if nil != encryptErr {
+        t.Fatalf("encrypt: %v", encryptErr)
+    }
+
+    if sealed != encoded {
+        t.Fatalf("expected a value sealed under a retired key to pass through unchanged, not be double-encrypted")
     }
 }
 

@@ -12,6 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `.dev/docker/docker-compose.yml`, `.dev/docker/.env`, `dc` — the development recipe now starts in two categories: `./dc up:minimal` starts only the `dev` container (enough for the build-tag matrix and unit tests), and `./dc up:all` also starts the infrastructure services needed by the live end-to-end tests (`rabbitmq`, `redis`, `mysql`, `minio`, grouped under the compose profile `all`); `./dc down` tears down both categories. Every published host port is now an `.env` variable (`DEV_HTTP_HOST_PORT`, `RABBITMQ_HOST_PORT`, `RABBITMQ_MANAGEMENT_HOST_PORT`, `REDIS_HOST_PORT`, `MYSQL_HOST_PORT`, `MINIO_HOST_PORT`, `MINIO_CONSOLE_HOST_PORT`) with the previous values as defaults, so a machine where another stack already holds a port can override it in `.dev/docker/.env.local`
 - `.dev/docker/.gitignore` — `.env.local` is no longer tracked (it is machine-local by design and auto-created by the `dc` wrapper); it is now ignored alongside `.bash_aliases_local`
 
+### Added
+
+- `container/container_resolver_test.go`, `cache/remember_test.go` — regression coverage for the closed-container resolution guard and the cancelable-`Remember` late-joiner fix back-ported below
+
+### Fixed
+
+- `container/container_resolver.go` — a service resolution that raced `Close()` could store its freshly created instance after the close snapshot was taken, so the instance was never closed (a connection/file-handle leak for standalone container users). The creation guard now fails fast with a `container is closed` error when the container is already closed, and a value whose creation completed while `Close()` ran is closed best-effort instead of being stored; already-created instances remain readable after `Close()`. Ported from the `v3` fix.
+- `cache/remember.go` — a **cancelable** `Remember` call whose waiters all timed out cancels the leader's context, but the in-flight entry lingered until the leader's deferred cleanup ran, so a caller that joined in that window inherited the doomed call and received its cancellation error even though a fresh computation would have succeeded. A late joiner now detects the canceled call, replaces the entry, and leads a fresh computation; the leader's cleanup deletes only its own entry so it can no longer evict the replacement. Ported from the `v3` fix.
+
 ## [v1.13.1] - 2026-06-11 - Back-port v3 Security and Correctness Fixes
 
 ### Security

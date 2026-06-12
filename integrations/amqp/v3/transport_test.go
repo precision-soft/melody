@@ -657,6 +657,60 @@ func TestReopenConsume_CloseUnblocksGoroutineParkedOnBackoff(t *testing.T) {
     }
 }
 
+/** @info publisher confirms */
+
+func TestTransport_SendSurfacesUnroutablePublishAfterQueueDelete(t *testing.T) {
+    dsn := os.Getenv("AMQP_DSN")
+    if "" == dsn {
+        t.Skip("AMQP_DSN not set; skipping amqp integration test")
+    }
+
+    provider := NewProvider()
+    connection, openErr := provider.Open(dsn)
+    if nil != openErr {
+        t.Fatalf("open connection: %v", openErr)
+    }
+    defer provider.Close(connection)
+
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, "amqp.confirm.message")
+
+    queueName := "melody.amqp.confirm-unroutable"
+
+    transport := NewTransport(TransportConfig{
+        Connection: connection,
+        Queue:      queueName,
+        Registry:   registry,
+    })
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+    defer transport.Close(runtimeInstance)
+
+    firstErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "routable"}))
+    if nil != firstErr {
+        t.Fatalf("first send: %v", firstErr)
+    }
+
+    admin, adminErr := connection.Channel()
+    if nil != adminErr {
+        t.Fatalf("open admin channel: %v", adminErr)
+    }
+    defer admin.Close()
+
+    if _, deleteErr := admin.QueueDelete(queueName, false, false, false); nil != deleteErr {
+        t.Fatalf("delete queue: %v", deleteErr)
+    }
+
+    secondErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "unroutable"}))
+    if nil == secondErr {
+        t.Fatalf("expected Send to fail after the queue was deleted; the broker silently discarded the message")
+    }
+}
+
 /** @info channel reopen */
 
 func TestEnsurePublishChannel_ReopensClosedChannelWithoutDialer(t *testing.T) {
@@ -678,7 +732,7 @@ func TestEnsurePublishChannel_ReopensClosedChannelWithoutDialer(t *testing.T) {
         Registry:   NewMessageRegistry(),
     })
 
-    first, firstErr := transport.ensurePublishChannel()
+    first, _, firstErr := transport.ensurePublishChannel()
     if nil != firstErr {
         t.Fatalf("first ensurePublishChannel: %v", firstErr)
     }
@@ -688,7 +742,7 @@ func TestEnsurePublishChannel_ReopensClosedChannelWithoutDialer(t *testing.T) {
         t.Fatalf("expected the channel to report closed after Close")
     }
 
-    second, secondErr := transport.ensurePublishChannel()
+    second, _, secondErr := transport.ensurePublishChannel()
     if nil != secondErr {
         t.Fatalf("second ensurePublishChannel: %v", secondErr)
     }

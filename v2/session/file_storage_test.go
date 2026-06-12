@@ -286,7 +286,7 @@ func TestFileStorage_AtomicWrite_DoesNotLeaveTempFiles(t *testing.T) {
 
     for _, entry := range entries {
         name := entry.Name()
-        if name == "session.json" {
+        if "session.json" == name {
             continue
         }
 
