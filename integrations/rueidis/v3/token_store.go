@@ -139,28 +139,6 @@ func (instance *RedisTokenStore) PutWithTtl(tokenString string, claims securityc
     instance.put(tokenString, claims, ttl)
 }
 
-func (instance *RedisTokenStore) put(tokenString string, claims securitycontract.Claims, ttl time.Duration) {
-    payload, marshalErr := json.Marshal(claims)
-    if nil != marshalErr {
-        exception.Panic(exception.NewError("redis token store could not encode claims", map[string]any{"user": claims.UserIdentifier}, marshalErr))
-    }
-
-    pttl := "0"
-    if 0 < ttl {
-        pttl = strconv.FormatInt(floorPositiveMilliseconds(ttl), 10)
-    }
-
-    result := tokenPutScript.Exec(
-        instance.ctx,
-        instance.client,
-        []string{instance.tokenKey(tokenString)},
-        []string{string(payload), pttl, instance.userKeyPrefix(), claims.UserIdentifier},
-    )
-    if resultErr := result.Error(); nil != resultErr {
-        exception.Panic(exception.NewError("redis token store put failed", map[string]any{"user": claims.UserIdentifier}, resultErr))
-    }
-}
-
 func (instance *RedisTokenStore) Delete(tokenString string) {
     result := tokenDeleteScript.Exec(
         instance.ctx,
@@ -245,6 +223,28 @@ func (instance *RedisTokenStore) Lookup(
     }
 
     return claims, true, nil
+}
+
+func (instance *RedisTokenStore) put(tokenString string, claims securitycontract.Claims, ttl time.Duration) {
+    payload, marshalErr := json.Marshal(claims)
+    if nil != marshalErr {
+        exception.Panic(exception.NewError("redis token store could not encode claims", map[string]any{"user": claims.UserIdentifier}, marshalErr))
+    }
+
+    pttl := "0"
+    if 0 < ttl {
+        pttl = strconv.FormatInt(floorPositiveMilliseconds(ttl), 10)
+    }
+
+    result := tokenPutScript.Exec(
+        instance.ctx,
+        instance.client,
+        []string{instance.tokenKey(tokenString)},
+        []string{string(payload), pttl, instance.userKeyPrefix(), claims.UserIdentifier},
+    )
+    if resultErr := result.Error(); nil != resultErr {
+        exception.Panic(exception.NewError("redis token store put failed", map[string]any{"user": claims.UserIdentifier}, resultErr))
+    }
 }
 
 func (instance *RedisTokenStore) keyspace() string {

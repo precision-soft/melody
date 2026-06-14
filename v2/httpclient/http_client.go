@@ -174,6 +174,27 @@ func (instance *HttpClient) RequestStream(
     ), nil
 }
 
+func (instance *HttpClient) SetBaseUrl(baseUrl string) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.baseUrl = baseUrl
+}
+
+func (instance *HttpClient) SetHeader(key string, value string) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.headers[key] = value
+}
+
+func (instance *HttpClient) SetTimeout(timeout time.Duration) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.timeout = timeout
+}
+
 func (instance *HttpClient) buildRequest(method string, urlString string, requestConfig *RequestOptions) (*nethttp.Request, error) {
     fullUrl, err := instance.buildUrl(urlString, requestConfig.Query())
     if nil != err {
@@ -272,27 +293,6 @@ func (instance *HttpClient) buildUrl(urlString string, query map[string]string) 
 
     parsedUrl.RawQuery = queryValues.Encode()
     return parsedUrl.String(), nil
-}
-
-func (instance *HttpClient) SetBaseUrl(baseUrl string) {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    instance.baseUrl = baseUrl
-}
-
-func (instance *HttpClient) SetHeader(key string, value string) {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    instance.headers[key] = value
-}
-
-func (instance *HttpClient) SetTimeout(timeout time.Duration) {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    instance.timeout = timeout
 }
 
 func (instance *HttpClient) clientForRequest(timeout time.Duration) *nethttp.Client {

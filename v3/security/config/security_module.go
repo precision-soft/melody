@@ -174,6 +174,24 @@ func (instance *Builder) AddStatefulFirewall(
     )
 }
 
+func (instance *Builder) BuildAndCompile() *security.CompiledConfiguration {
+    if 0 == len(instance.firewalls) {
+        return nil
+    }
+
+    compiled, err := Compile(
+        Configuration{
+            global:    instance.global,
+            firewalls: instance.firewalls,
+        },
+    )
+    if nil != err {
+        exception.Panic(exception.FromError(err))
+    }
+
+    return compiled
+}
+
 func (instance *Builder) addFirewall(
     name string,
     matcher securitycontract.Matcher,
@@ -319,24 +337,6 @@ func (instance *Builder) validateFirewall(
             ),
         )
     }
-}
-
-func (instance *Builder) BuildAndCompile() *security.CompiledConfiguration {
-    if 0 == len(instance.firewalls) {
-        return nil
-    }
-
-    compiled, err := Compile(
-        Configuration{
-            global:    instance.global,
-            firewalls: instance.firewalls,
-        },
-    )
-    if nil != err {
-        exception.Panic(exception.FromError(err))
-    }
-
-    return compiled
 }
 
 func NewFirewallOverrideConfiguration() FirewallOverrideConfiguration {

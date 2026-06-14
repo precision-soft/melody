@@ -150,6 +150,16 @@ func (instance *CompiledFirewall) Login(
         return nil, err
     }
 
+    if nil == result {
+        return nil, exception.NewError(
+            "firewall login handler returned nil result",
+            exceptioncontract.Context{
+                "firewallName": instance.name,
+            },
+            nil,
+        )
+    }
+
     dispatchErr := instance.dispatchLoginSuccess(runtimeInstance, request, result.Token)
     if nil != dispatchErr {
         return nil, dispatchErr
@@ -189,6 +199,10 @@ func (instance *CompiledFirewall) Logout(
     }
 
     return result, nil
+}
+
+func (instance *CompiledFirewall) Sources() (Source, Source, Source, Source, Source) {
+    return instance.roleHierarchySource, instance.accessDecisionManagerSource, instance.accessControlSource, instance.entryPointSource, instance.accessDeniedHandlerSource
 }
 
 func (instance *CompiledFirewall) dispatchLoginSuccess(
@@ -252,10 +266,6 @@ func (instance *CompiledFirewall) dispatchLogoutFailure(
     )
 
     return err
-}
-
-func (instance *CompiledFirewall) Sources() (Source, Source, Source, Source, Source) {
-    return instance.roleHierarchySource, instance.accessDecisionManagerSource, instance.accessControlSource, instance.entryPointSource, instance.accessDeniedHandlerSource
 }
 
 var _ securitycontract.Firewall = (*CompiledFirewall)(nil)

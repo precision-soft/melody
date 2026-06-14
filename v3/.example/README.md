@@ -72,7 +72,7 @@ The [`config/`](./config/) package keeps [`main.go`](./main.go) small by groupin
 
 ### Cron integration
 
-The example demonstrates Melody's [`integrations/cron`](../integrations/cron/v3/) package. Commands stay plain Melody CLI commands — there is no `cron.Metadata` interface to implement. Schedules are declared separately in [`config/cli.go`](./config/cli.go) through a `cron.Configuration` registry:
+The example demonstrates Melody's [`integrations/cron`](../../integrations/cron/v3/) package. Commands stay plain Melody CLI commands — there is no `cron.Metadata` interface to implement. Schedules are declared separately in [`config/cli.go`](./config/cli.go) through a `cron.Configuration` registry:
 
 ```go
 cronConfiguration := cron.NewConfiguration().

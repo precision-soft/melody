@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `provider.go` — `Provider.Open` no longer fails against a healthy Redis when a caller-supplied `TimeoutConfig` leaves `ConnectTimeout` at zero. The startup ping built `context.WithTimeout(…, 0)` — an already-expired context — so any partial config (for example one that only sets `CommandTimeout`) made `Open` return `redis connection failed` (`context.DeadlineExceeded`) every time. A zero or negative `ConnectTimeout` now pings without a deadline, matching the `bunorm` mysql/pgsql providers' connection-ping guard. Ported from the `v3` fix.
+- `v2/provider.go` — same `ConnectTimeout` zero-value ping guard as above. Ported from the `v3` fix.
+
 ## [v3.2.0] - 2026-06-12 - Redis Lock, Revocable Token Store, and Server-Sent Events Backplane
 
 ### Added
@@ -19,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `v3/provider.go` — `Provider.Open` no longer fails against a healthy Redis when a caller-supplied `TimeoutConfig` leaves `ConnectTimeout` at zero. The startup ping built `context.WithTimeout(…, 0)` — an already-expired context — so any partial config (for example one that only sets `CommandTimeout`) made `Open` return `redis connection failed` (`context.DeadlineExceeded`) every time. A zero or negative `ConnectTimeout` now pings without a deadline, matching the `bunorm` mysql/pgsql providers' connection-ping guard. Regression coverage in `v3/provider_test.go`.
 - `v3/cache/backend.go` — `Clear`/`ClearByPrefix` now glob-escape the literal key prefix before appending the `*` wildcard for `SCAN MATCH`. Keys are stored with the prefix as a literal string, but `SCAN MATCH` interprets `*`, `?`, `[`, `]`, and `\` as glob metacharacters, so a prefix (or a `ClearByPrefix` argument) containing one of them produced a pattern that no longer matched the stored keys — silently skipping the delete — or over-matched and deleted siblings. The literal prefix is now escaped while the trailing prefix-match `*` stays literal.
 - `v3/token_store.go` — `DeleteByUser` no longer revokes another user's live token. The user-index set member is only re-pointed away from the previous owner inside the `if existing` branch of the put script, so when a token string's prior value had already TTL-expired before the same string was re-issued to a different user, the stale membership lingered in the old owner's set — and `PurgeExpired` could not prune it (the token key exists again). `DeleteByUser` then deleted that token (now owned by the new user) and counted it for the wrong user. `tokenDeleteByUserScript` now re-reads each member's stored `UserIdentifier` and deletes only tokens still owned by the requested user, so a stale index member can no longer cross-revoke.
 - `v3/lock.go` + `v3/token_store.go` — a positive but sub-millisecond TTL is now floored to 1ms instead of truncating to `0` via `time.Duration.Milliseconds()`. A `0` reached Redis with three different broken outcomes: the token store's persist branch treated `"0"` as "no expiry", so a token meant to expire was stored **permanently**; `Lock.Acquire` built `SET … PX 0`, which Redis rejects (`invalid expire time`), so the acquire failed instead of taking a short-lived lock; and `Lock.Refresh` ran `PEXPIRE key 0`, which deletes the key immediately, silently dropping the lock while the holder still believed it held it. A shared `floorPositiveMilliseconds` helper guarantees a positive TTL never collapses to `0`.

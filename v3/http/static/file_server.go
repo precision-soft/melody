@@ -134,6 +134,79 @@ type resolvedFile struct {
     notModified  bool
 }
 
+func (instance *FileServer) Serve(
+    request httpcontract.Request,
+    logger loggingcontract.Logger,
+) (int, nethttp.Header, []byte, bool) {
+    logger = logging.EnsureLogger(logger)
+
+    if nil == request {
+        logger.Warning("static serve skipped because request is nil", nil)
+
+        return 0, nil, nil, false
+    }
+
+    resolved, ok := instance.resolveAndOpen(request, logger)
+    if false == ok {
+        return 0, nil, nil, false
+    }
+
+    if true == resolved.notModified {
+        return nethttp.StatusNotModified, resolved.headers, nil, true
+    }
+
+    defer func() {
+        if nil != resolved.file {
+            _ = resolved.file.Close()
+        }
+    }()
+
+    if nethttp.MethodHead == request.HttpRequest().Method {
+        resolved.headers.Set("Content-Length", formatContentLength(resolved.fileInfo.Size()))
+
+        logger.Info(
+            "static serve head success",
+            loggingcontract.Context{
+                "relativePath": resolved.relativePath,
+                "size":         resolved.fileInfo.Size(),
+                "contentType":  resolved.headers.Get("Content-Type"),
+            },
+        )
+
+        return nethttp.StatusOK, resolved.headers, nil, true
+    }
+
+    content, readErr := io.ReadAll(resolved.file)
+    if nil != readErr {
+        logger.Error(
+            "static serve read failed",
+            exception.LogContext(
+                readErr,
+                exceptioncontract.Context{
+                    "relativePath": resolved.relativePath,
+                },
+            ),
+        )
+
+        return nethttp.StatusInternalServerError, nil, nil, true
+    }
+
+    if 0 < resolved.fileInfo.Size() {
+        resolved.headers.Set("Content-Length", formatContentLength(resolved.fileInfo.Size()))
+    }
+
+    logger.Info(
+        "static serve success",
+        loggingcontract.Context{
+            "relativePath": resolved.relativePath,
+            "size":         len(content),
+            "contentType":  resolved.headers.Get("Content-Type"),
+        },
+    )
+
+    return nethttp.StatusOK, resolved.headers, content, true
+}
+
 func (instance *FileServer) resolveAndOpen(
     request httpcontract.Request,
     logger loggingcontract.Logger,
@@ -357,79 +430,6 @@ func (instance *FileServer) resolveAndOpen(
         headers:      headers,
         notModified:  notModified,
     }, true
-}
-
-func (instance *FileServer) Serve(
-    request httpcontract.Request,
-    logger loggingcontract.Logger,
-) (int, nethttp.Header, []byte, bool) {
-    logger = logging.EnsureLogger(logger)
-
-    if nil == request {
-        logger.Warning("static serve skipped because request is nil", nil)
-
-        return 0, nil, nil, false
-    }
-
-    resolved, ok := instance.resolveAndOpen(request, logger)
-    if false == ok {
-        return 0, nil, nil, false
-    }
-
-    if true == resolved.notModified {
-        return nethttp.StatusNotModified, resolved.headers, nil, true
-    }
-
-    defer func() {
-        if nil != resolved.file {
-            _ = resolved.file.Close()
-        }
-    }()
-
-    if nethttp.MethodHead == request.HttpRequest().Method {
-        resolved.headers.Set("Content-Length", formatContentLength(resolved.fileInfo.Size()))
-
-        logger.Info(
-            "static serve head success",
-            loggingcontract.Context{
-                "relativePath": resolved.relativePath,
-                "size":         resolved.fileInfo.Size(),
-                "contentType":  resolved.headers.Get("Content-Type"),
-            },
-        )
-
-        return nethttp.StatusOK, resolved.headers, nil, true
-    }
-
-    content, readErr := io.ReadAll(resolved.file)
-    if nil != readErr {
-        logger.Error(
-            "static serve read failed",
-            exception.LogContext(
-                readErr,
-                exceptioncontract.Context{
-                    "relativePath": resolved.relativePath,
-                },
-            ),
-        )
-
-        return nethttp.StatusInternalServerError, nil, nil, true
-    }
-
-    if 0 < resolved.fileInfo.Size() {
-        resolved.headers.Set("Content-Length", formatContentLength(resolved.fileInfo.Size()))
-    }
-
-    logger.Info(
-        "static serve success",
-        loggingcontract.Context{
-            "relativePath": resolved.relativePath,
-            "size":         len(content),
-            "contentType":  resolved.headers.Get("Content-Type"),
-        },
-    )
-
-    return nethttp.StatusOK, resolved.headers, content, true
 }
 
 func (instance *FileServer) serveForStreaming(

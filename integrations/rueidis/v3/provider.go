@@ -94,10 +94,14 @@ func (instance *Provider) Open(params ConnectionParams) (rueidis.Client, error) 
         return client, nil
     }
 
-    ctx, cancel := context.WithTimeout(context.Background(), timeoutConfig.ConnectTimeout)
-    defer cancel()
+    pingContext := context.Background()
+    pingCancel := func() {}
+    if 0 < timeoutConfig.ConnectTimeout {
+        pingContext, pingCancel = context.WithTimeout(context.Background(), timeoutConfig.ConnectTimeout)
+    }
+    defer pingCancel()
 
-    pingErr := client.Do(ctx, client.B().Ping().Build()).Error()
+    pingErr := client.Do(pingContext, client.B().Ping().Build()).Error()
     if nil == pingErr {
         return client, nil
     }

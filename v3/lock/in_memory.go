@@ -49,6 +49,21 @@ func (instance *InMemoryLocker) CreateLock(name string, ttl time.Duration) lockc
     }
 }
 
+func (instance *InMemoryLocker) PurgeExpired() int {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    purged := 0
+    for name, holder := range instance.holders {
+        if false == instance.isActive(holder) {
+            delete(instance.holders, name)
+            purged++
+        }
+    }
+
+    return purged
+}
+
 func (instance *InMemoryLocker) acquire(name string, token uint64, ttl time.Duration) bool {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -95,21 +110,6 @@ func (instance *InMemoryLocker) refresh(name string, token uint64, ttl time.Dura
     }
 
     return true
-}
-
-func (instance *InMemoryLocker) PurgeExpired() int {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    purged := 0
-    for name, holder := range instance.holders {
-        if false == instance.isActive(holder) {
-            delete(instance.holders, name)
-            purged++
-        }
-    }
-
-    return purged
 }
 
 func (instance *InMemoryLocker) maybePurgeLocked() {

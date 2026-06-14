@@ -51,6 +51,20 @@ func (instance *Registry) Register(entity string, options EntityOptions) *Regist
     return instance
 }
 
+func (instance *Registry) EnsureSchema(ctx context.Context, database *bun.DB) error {
+    if _, txErr := database.NewCreateTable().Model((*Transaction)(nil)).IfNotExists().Exec(ctx); nil != txErr {
+        return txErr
+    }
+
+    for _, table := range instance.distinctTables() {
+        if _, createErr := database.NewCreateTable().Model((*Entry)(nil)).ModelTableExpr(table).IfNotExists().Exec(ctx); nil != createErr {
+            return createErr
+        }
+    }
+
+    return nil
+}
+
 func (instance *Registry) tableFor(entity string) string {
     if options, exists := instance.optionsByEntity[entity]; true == exists && "" != options.Table {
         return options.Table
@@ -90,18 +104,4 @@ func (instance *Registry) distinctTables() []string {
     }
 
     return tables
-}
-
-func (instance *Registry) EnsureSchema(ctx context.Context, database *bun.DB) error {
-    if _, txErr := database.NewCreateTable().Model((*Transaction)(nil)).IfNotExists().Exec(ctx); nil != txErr {
-        return txErr
-    }
-
-    for _, table := range instance.distinctTables() {
-        if _, createErr := database.NewCreateTable().Model((*Entry)(nil)).ModelTableExpr(table).IfNotExists().Exec(ctx); nil != createErr {
-            return createErr
-        }
-    }
-
-    return nil
 }

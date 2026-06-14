@@ -130,25 +130,6 @@ func (instance *ServerSentEventHub) DeliverLocal(topic string, event ServerSentE
     return delivered
 }
 
-func (instance *ServerSentEventHub) replicate(topic string, event ServerSentEvent) {
-    instance.mutex.RLock()
-    closed := instance.closed
-    backplane := instance.backplane
-    instance.mutex.RUnlock()
-
-    if true == closed {
-        return
-    }
-
-    if nil == backplane {
-        return
-    }
-
-    if publishErr := backplane.Publish(topic, event); nil != publishErr {
-        atomic.AddUint64(&instance.backplaneFailures, 1)
-    }
-}
-
 func (instance *ServerSentEventHub) BackplaneFailures() uint64 {
     return atomic.LoadUint64(&instance.backplaneFailures)
 }
@@ -180,5 +161,24 @@ func (instance *ServerSentEventHub) Shutdown() {
         }
 
         delete(instance.subscribersByTopic, topic)
+    }
+}
+
+func (instance *ServerSentEventHub) replicate(topic string, event ServerSentEvent) {
+    instance.mutex.RLock()
+    closed := instance.closed
+    backplane := instance.backplane
+    instance.mutex.RUnlock()
+
+    if true == closed {
+        return
+    }
+
+    if nil == backplane {
+        return
+    }
+
+    if publishErr := backplane.Publish(topic, event); nil != publishErr {
+        atomic.AddUint64(&instance.backplaneFailures, 1)
     }
 }

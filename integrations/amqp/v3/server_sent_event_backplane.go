@@ -111,23 +111,6 @@ func (instance *ServerSentEventBackplane) Publish(topic string, event melodyhttp
     return nil
 }
 
-func (instance *ServerSentEventBackplane) publishOnce(payload []byte) (*amqp091.Channel, error) {
-    channel, channelErr := instance.ensurePublishChannel()
-    if nil != channelErr {
-        return nil, channelErr
-    }
-
-    instance.publishMutex.Lock()
-    defer instance.publishMutex.Unlock()
-
-    publishErr := channel.PublishWithContext(instance.ctx, instance.exchange, "", false, false, amqp091.Publishing{
-        ContentType: "application/json",
-        Body:        payload,
-    })
-
-    return channel, publishErr
-}
-
 func (instance *ServerSentEventBackplane) Close() error {
     instance.hub.SetBackplane(nil)
 
@@ -153,6 +136,23 @@ func (instance *ServerSentEventBackplane) Close() error {
     }
 
     return nil
+}
+
+func (instance *ServerSentEventBackplane) publishOnce(payload []byte) (*amqp091.Channel, error) {
+    channel, channelErr := instance.ensurePublishChannel()
+    if nil != channelErr {
+        return nil, channelErr
+    }
+
+    instance.publishMutex.Lock()
+    defer instance.publishMutex.Unlock()
+
+    publishErr := channel.PublishWithContext(instance.ctx, instance.exchange, "", false, false, amqp091.Publishing{
+        ContentType: "application/json",
+        Body:        payload,
+    })
+
+    return channel, publishErr
 }
 
 func (instance *ServerSentEventBackplane) listen() {

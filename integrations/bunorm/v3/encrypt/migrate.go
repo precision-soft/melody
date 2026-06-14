@@ -51,6 +51,16 @@ func (instance *Migrator) MigrateEncrypt(ctx context.Context, spec TableSpec) (i
     return instance.run(ctx, spec, instance.encryptTransform(spec))
 }
 
+func (instance *Migrator) MigrateReencrypt(ctx context.Context, spec TableSpec, targetKeyId string) (int, error) {
+    return instance.run(ctx, spec, instance.reencryptTransform(spec, targetKeyId))
+}
+
+func (instance *Migrator) MigrateDecrypt(ctx context.Context, spec TableSpec) (int, error) {
+    return instance.run(ctx, spec, func(value string) (string, error) {
+        return instance.cipher.Decrypt(value)
+    })
+}
+
 func (instance *Migrator) encryptTransform(spec TableSpec) func(string) (string, error) {
     return func(value string) (string, error) {
         if true == spec.Deterministic {
@@ -59,10 +69,6 @@ func (instance *Migrator) encryptTransform(spec TableSpec) func(string) (string,
 
         return instance.cipher.Encrypt(value)
     }
-}
-
-func (instance *Migrator) MigrateReencrypt(ctx context.Context, spec TableSpec, targetKeyId string) (int, error) {
-    return instance.run(ctx, spec, instance.reencryptTransform(spec, targetKeyId))
 }
 
 func (instance *Migrator) reencryptTransform(spec TableSpec, targetKeyId string) func(string) (string, error) {
@@ -92,12 +98,6 @@ func (instance *Migrator) reencryptTransform(spec TableSpec, targetKeyId string)
 
         return instance.cipher.EncryptWithKeyId(plaintext, targetKeyId)
     }
-}
-
-func (instance *Migrator) MigrateDecrypt(ctx context.Context, spec TableSpec) (int, error) {
-    return instance.run(ctx, spec, func(value string) (string, error) {
-        return instance.cipher.Decrypt(value)
-    })
 }
 
 func (instance *Migrator) run(ctx context.Context, spec TableSpec, transform func(string) (string, error)) (int, error) {

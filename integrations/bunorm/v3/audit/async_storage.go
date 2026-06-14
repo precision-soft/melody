@@ -83,17 +83,6 @@ func (instance *AsyncStorage) Save(ctx context.Context, table string, entries ..
     return nil
 }
 
-func (instance *AsyncStorage) run() {
-    defer instance.wait.Done()
-
-    for item := range instance.queue {
-        if saveErr := instance.delegate.Save(context.Background(), item.table, item.entry); nil != saveErr {
-            instance.failed.Add(1)
-            instance.deadLetter(item.entry, saveErr)
-        }
-    }
-}
-
 func (instance *AsyncStorage) Dropped() uint64 {
     return instance.dropped.Load()
 }
@@ -113,6 +102,17 @@ func (instance *AsyncStorage) Close() error {
     instance.wait.Wait()
 
     return nil
+}
+
+func (instance *AsyncStorage) run() {
+    defer instance.wait.Done()
+
+    for item := range instance.queue {
+        if saveErr := instance.delegate.Save(context.Background(), item.table, item.entry); nil != saveErr {
+            instance.failed.Add(1)
+            instance.deadLetter(item.entry, saveErr)
+        }
+    }
 }
 
 func (instance *AsyncStorage) deadLetter(entry Entry, saveErr error) {

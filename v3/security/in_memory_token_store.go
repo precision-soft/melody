@@ -53,60 +53,6 @@ func (instance *InMemoryTokenStore) PutWithTtl(tokenString string, claims securi
     instance.put(tokenString, claims, expiresAt)
 }
 
-func (instance *InMemoryTokenStore) put(tokenString string, claims securitycontract.Claims, expiresAt time.Time) {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    if existing, found := instance.entriesByToken[tokenString]; true == found && existing.claims.UserIdentifier != claims.UserIdentifier {
-        instance.unindexLocked(existing.claims.UserIdentifier, tokenString)
-    }
-
-    instance.entriesByToken[tokenString] = tokenEntry{claims: cloneClaims(claims), expiresAt: expiresAt}
-    instance.indexLocked(claims.UserIdentifier, tokenString)
-}
-
-func (instance *InMemoryTokenStore) indexLocked(userIdentifier string, tokenString string) {
-    tokens, exists := instance.tokensByUser[userIdentifier]
-    if false == exists {
-        tokens = make(map[string]struct{})
-        instance.tokensByUser[userIdentifier] = tokens
-    }
-
-    tokens[tokenString] = struct{}{}
-}
-
-func (instance *InMemoryTokenStore) unindexLocked(userIdentifier string, tokenString string) {
-    tokens, exists := instance.tokensByUser[userIdentifier]
-    if false == exists {
-        return
-    }
-
-    delete(tokens, tokenString)
-    if 0 == len(tokens) {
-        delete(instance.tokensByUser, userIdentifier)
-    }
-}
-
-func cloneClaims(claims securitycontract.Claims) securitycontract.Claims {
-    cloned := securitycontract.Claims{
-        UserIdentifier: claims.UserIdentifier,
-    }
-
-    if nil != claims.Roles {
-        cloned.Roles = append([]string{}, claims.Roles...)
-    }
-
-    if nil != claims.Scope {
-        cloned.Scope = internal.CopyAnyMap(claims.Scope)
-    }
-
-    if nil != claims.Attributes {
-        cloned.Attributes = internal.CopyAnyMap(claims.Attributes)
-    }
-
-    return cloned
-}
-
 func (instance *InMemoryTokenStore) Delete(tokenString string) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -155,6 +101,26 @@ func (instance *InMemoryTokenStore) PurgeExpired() int {
     return purged
 }
 
+func cloneClaims(claims securitycontract.Claims) securitycontract.Claims {
+    cloned := securitycontract.Claims{
+        UserIdentifier: claims.UserIdentifier,
+    }
+
+    if nil != claims.Roles {
+        cloned.Roles = append([]string{}, claims.Roles...)
+    }
+
+    if nil != claims.Scope {
+        cloned.Scope = internal.CopyAnyMap(claims.Scope)
+    }
+
+    if nil != claims.Attributes {
+        cloned.Attributes = internal.CopyAnyMap(claims.Attributes)
+    }
+
+    return cloned
+}
+
 func (instance *InMemoryTokenStore) Lookup(
     runtimeInstance runtimecontract.Runtime,
     tokenString string,
@@ -172,6 +138,40 @@ func (instance *InMemoryTokenStore) Lookup(
     }
 
     return cloneClaims(entry.claims), true, nil
+}
+
+func (instance *InMemoryTokenStore) put(tokenString string, claims securitycontract.Claims, expiresAt time.Time) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if existing, found := instance.entriesByToken[tokenString]; true == found && existing.claims.UserIdentifier != claims.UserIdentifier {
+        instance.unindexLocked(existing.claims.UserIdentifier, tokenString)
+    }
+
+    instance.entriesByToken[tokenString] = tokenEntry{claims: cloneClaims(claims), expiresAt: expiresAt}
+    instance.indexLocked(claims.UserIdentifier, tokenString)
+}
+
+func (instance *InMemoryTokenStore) indexLocked(userIdentifier string, tokenString string) {
+    tokens, exists := instance.tokensByUser[userIdentifier]
+    if false == exists {
+        tokens = make(map[string]struct{})
+        instance.tokensByUser[userIdentifier] = tokens
+    }
+
+    tokens[tokenString] = struct{}{}
+}
+
+func (instance *InMemoryTokenStore) unindexLocked(userIdentifier string, tokenString string) {
+    tokens, exists := instance.tokensByUser[userIdentifier]
+    if false == exists {
+        return
+    }
+
+    delete(tokens, tokenString)
+    if 0 == len(tokens) {
+        delete(instance.tokensByUser, userIdentifier)
+    }
 }
 
 var _ securitycontract.RevocableTokenStore = (*InMemoryTokenStore)(nil)

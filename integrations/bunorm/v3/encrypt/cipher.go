@@ -84,26 +84,6 @@ func (instance *aes256Cipher) EncryptDeterministicWithKeyId(plaintext string, ke
     return instance.seal(plaintext, keyId, true)
 }
 
-/** @important a marker-shaped plaintext must not be stored as-is: it would poison every later Scan/Decrypt. Pass through only values that authenticate under a known key; an unknown key id keeps the historical pass-through so a value sealed under a retired key is not destroyed by double encryption. */
-func (instance *aes256Cipher) isPassThroughCiphertext(value string) bool {
-    if false == looksEncrypted(value) {
-        return false
-    }
-
-    keyId, hasKeyId := keyIdOf(value)
-    if false == hasKeyId {
-        return false
-    }
-
-    if _, keyErr := instance.keys.Key(keyId); nil != keyErr {
-        return true
-    }
-
-    _, decryptErr := instance.Decrypt(value)
-
-    return nil == decryptErr
-}
-
 func (instance *aes256Cipher) CiphertextCandidates(plaintext string) ([][]byte, error) {
     keyIds := instance.keys.ActiveKeyIds()
 
@@ -118,32 +98,6 @@ func (instance *aes256Cipher) CiphertextCandidates(plaintext string) ([][]byte, 
     }
 
     return candidates, nil
-}
-
-func (instance *aes256Cipher) seal(plaintext string, keyId string, deterministic bool) (string, error) {
-    key, keyErr := instance.keys.Key(keyId)
-    if nil != keyErr {
-        return "", keyErr
-    }
-
-    gcm, gcmErr := gcmForKey(key, keyId)
-    if nil != gcmErr {
-        return "", gcmErr
-    }
-
-    var nonce []byte
-    if true == deterministic {
-        nonce = deterministicNonce(key, plaintext, gcm.NonceSize())
-    } else {
-        nonce = make([]byte, gcm.NonceSize())
-        if _, readErr := rand.Read(nonce); nil != readErr {
-            return "", exception.NewError("could not generate a nonce", nil, readErr)
-        }
-    }
-
-    ciphertext := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
-
-    return markerPrefix + keyId + ":" + base64.RawStdEncoding.EncodeToString(ciphertext), nil
 }
 
 func (instance *aes256Cipher) Decrypt(encoded string) (string, error) {
@@ -188,6 +142,52 @@ func (instance *aes256Cipher) Decrypt(encoded string) (string, error) {
     }
 
     return string(plaintext), nil
+}
+
+/** @important a marker-shaped plaintext must not be stored as-is: it would poison every later Scan/Decrypt. Pass through only values that authenticate under a known key; an unknown key id keeps the historical pass-through so a value sealed under a retired key is not destroyed by double encryption. */
+func (instance *aes256Cipher) isPassThroughCiphertext(value string) bool {
+    if false == looksEncrypted(value) {
+        return false
+    }
+
+    keyId, hasKeyId := keyIdOf(value)
+    if false == hasKeyId {
+        return false
+    }
+
+    if _, keyErr := instance.keys.Key(keyId); nil != keyErr {
+        return true
+    }
+
+    _, decryptErr := instance.Decrypt(value)
+
+    return nil == decryptErr
+}
+
+func (instance *aes256Cipher) seal(plaintext string, keyId string, deterministic bool) (string, error) {
+    key, keyErr := instance.keys.Key(keyId)
+    if nil != keyErr {
+        return "", keyErr
+    }
+
+    gcm, gcmErr := gcmForKey(key, keyId)
+    if nil != gcmErr {
+        return "", gcmErr
+    }
+
+    var nonce []byte
+    if true == deterministic {
+        nonce = deterministicNonce(key, plaintext, gcm.NonceSize())
+    } else {
+        nonce = make([]byte, gcm.NonceSize())
+        if _, readErr := rand.Read(nonce); nil != readErr {
+            return "", exception.NewError("could not generate a nonce", nil, readErr)
+        }
+    }
+
+    ciphertext := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
+
+    return markerPrefix + keyId + ":" + base64.RawStdEncoding.EncodeToString(ciphertext), nil
 }
 
 func gcmForKey(key []byte, keyId string) (cipher.AEAD, error) {

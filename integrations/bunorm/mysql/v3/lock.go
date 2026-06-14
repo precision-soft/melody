@@ -84,23 +84,6 @@ func (instance *mysqlLock) Acquire(runtimeInstance runtimecontract.Runtime) (boo
     return true, nil
 }
 
-func (instance *mysqlLock) releaseAndCloseConnection() {
-    releaseCtx, cancel := context.WithTimeout(context.Background(), lockReleaseTimeout)
-    defer cancel()
-
-    _, _ = instance.connection.ExecContext(releaseCtx, "DO RELEASE_LOCK(?)", instance.name)
-    instance.connection.Close()
-    instance.connection = nil
-}
-
-/** @important best-effort release for the acquire error path: GET_LOCK may have taken the lock server-side before Scan failed (for example on context cancellation), so release on a fresh context before the connection returns to the pool */
-func releaseOrphanedLock(connection *sql.Conn, name string) {
-    releaseCtx, cancel := context.WithTimeout(context.Background(), lockReleaseTimeout)
-    defer cancel()
-
-    _, _ = connection.ExecContext(releaseCtx, "DO RELEASE_LOCK(?)", name)
-}
-
 func (instance *mysqlLock) Release(runtimeInstance runtimecontract.Runtime) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -126,6 +109,14 @@ func (instance *mysqlLock) Release(runtimeInstance runtimecontract.Runtime) erro
     }
 
     return nil
+}
+
+/** @important best-effort release for the acquire error path: GET_LOCK may have taken the lock server-side before Scan failed (for example on context cancellation), so release on a fresh context before the connection returns to the pool */
+func releaseOrphanedLock(connection *sql.Conn, name string) {
+    releaseCtx, cancel := context.WithTimeout(context.Background(), lockReleaseTimeout)
+    defer cancel()
+
+    _, _ = connection.ExecContext(releaseCtx, "DO RELEASE_LOCK(?)", name)
 }
 
 func (instance *mysqlLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl time.Duration) error {
@@ -154,6 +145,15 @@ func (instance *mysqlLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl 
     }
 
     return nil
+}
+
+func (instance *mysqlLock) releaseAndCloseConnection() {
+    releaseCtx, cancel := context.WithTimeout(context.Background(), lockReleaseTimeout)
+    defer cancel()
+
+    _, _ = instance.connection.ExecContext(releaseCtx, "DO RELEASE_LOCK(?)", instance.name)
+    instance.connection.Close()
+    instance.connection = nil
 }
 
 var _ lockcontract.Locker = (*Locker)(nil)

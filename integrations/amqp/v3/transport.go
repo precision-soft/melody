@@ -110,6 +110,110 @@ type Transport struct {
     consumeMutex sync.Mutex
 }
 
+func (instance *Transport) Send(
+    runtimeInstance runtimecontract.Runtime,
+    envelopeInstance messagebuscontract.Envelope,
+) error {
+    publishing, buildErr := instance.buildPublishing(envelopeInstance, "")
+    if nil != buildErr {
+        return buildErr
+    }
+
+    exchange, routingKey := instance.mainTarget()
+
+    return instance.publish(runtimeInstance.Context(), exchange, routingKey, publishing)
+}
+
+func (instance *Transport) Receive(
+    runtimeInstance runtimecontract.Runtime,
+) (<-chan messagebuscontract.Envelope, error) {
+    channel, deliveries, subscribeErr := instance.subscribe()
+    if nil != subscribeErr {
+        return nil, subscribeErr
+    }
+
+    out := make(chan messagebuscontract.Envelope)
+
+    go instance.consumeLoop(runtimeInstance, channel, deliveries, out)
+
+    return out, nil
+}
+
+func (instance *Transport) Ack(
+    runtimeInstance runtimecontract.Runtime,
+    envelopeInstance messagebuscontract.Envelope,
+) error {
+    stamp, exists := melodymessagebus.LastStampOfType[DeliveryStamp](envelopeInstance)
+    if false == exists {
+        return exception.NewError("envelope has no amqp delivery stamp", nil, nil)
+    }
+
+    channel, generation := instance.consumeChannelForAck()
+    if nil == channel {
+        return exception.NewError("amqp consume channel is not open", nil, nil)
+    }
+
+    if stamp.Generation != generation {
+        return nil
+    }
+
+    return instance.ackChannel(channel, stamp.Tag)
+}
+
+func (instance *Transport) Nack(
+    runtimeInstance runtimecontract.Runtime,
+    envelopeInstance messagebuscontract.Envelope,
+    requeue bool,
+) error {
+    stamp, exists := melodymessagebus.LastStampOfType[DeliveryStamp](envelopeInstance)
+    if false == exists {
+        return exception.NewError("envelope has no amqp delivery stamp", nil, nil)
+    }
+
+    channel, generation := instance.consumeChannelForAck()
+    if nil == channel {
+        return exception.NewError("amqp consume channel is not open", nil, nil)
+    }
+
+    if stamp.Generation != generation {
+        return nil
+    }
+
+    if false == requeue {
+        return instance.nackChannel(channel, stamp.Tag, false)
+    }
+
+    return instance.republish(runtimeInstance, channel, stamp, envelopeInstance)
+}
+
+func (instance *Transport) Close(runtimeInstance runtimecontract.Runtime) error {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.closing = true
+    instance.closeOnce.Do(func() {
+        close(instance.closeSignal)
+    })
+
+    if nil != instance.consumeChannel {
+        instance.consumeChannel.Close()
+        instance.consumeChannel = nil
+    }
+
+    if nil != instance.publishChannel {
+        instance.publishChannel.Close()
+        instance.publishChannel = nil
+        instance.publishReturns = nil
+    }
+
+    if true == instance.ownsConnection && nil != instance.connection {
+        instance.connection.Close()
+        instance.connection = nil
+    }
+
+    return nil
+}
+
 func (instance *Transport) connect() (*amqp091.Connection, error) {
     instance.mutex.Lock()
 
@@ -181,18 +285,21 @@ func (instance *Transport) nackChannel(channel *amqp091.Channel, tag uint64, req
     return channel.Nack(tag, false, requeue)
 }
 
-func (instance *Transport) Send(
-    runtimeInstance runtimecontract.Runtime,
-    envelopeInstance messagebuscontract.Envelope,
-) error {
-    publishing, buildErr := instance.buildPublishing(envelopeInstance, "")
-    if nil != buildErr {
-        return buildErr
+func drainPublishReturn(returns <-chan amqp091.Return) (amqp091.Return, bool) {
+    if nil == returns {
+        return amqp091.Return{}, false
     }
 
-    exchange, routingKey := instance.mainTarget()
+    select {
+    case returned, open := <-returns:
+        if false == open {
+            return amqp091.Return{}, false
+        }
 
-    return instance.publish(runtimeInstance.Context(), exchange, routingKey, publishing)
+        return returned, true
+    default:
+        return amqp091.Return{}, false
+    }
 }
 
 func (instance *Transport) mainTarget() (string, string) {
@@ -305,23 +412,6 @@ func (instance *Transport) publishOnce(
     return channel, nil
 }
 
-func drainPublishReturn(returns <-chan amqp091.Return) (amqp091.Return, bool) {
-    if nil == returns {
-        return amqp091.Return{}, false
-    }
-
-    select {
-    case returned, open := <-returns:
-        if false == open {
-            return amqp091.Return{}, false
-        }
-
-        return returned, true
-    default:
-        return amqp091.Return{}, false
-    }
-}
-
 /** @important closes the cached publish channel only when it is still the one the caller failed on, so a concurrent publisher that already reopened a healthy channel is not torn down. */
 func (instance *Transport) resetPublishChannel(failed *amqp091.Channel) {
     instance.mutex.Lock()
@@ -350,19 +440,13 @@ func (instance *Transport) resetConsumeChannel() {
     }
 }
 
-func (instance *Transport) Receive(
-    runtimeInstance runtimecontract.Runtime,
-) (<-chan messagebuscontract.Envelope, error) {
-    channel, deliveries, subscribeErr := instance.subscribe()
-    if nil != subscribeErr {
-        return nil, subscribeErr
+func nextBackoff(current time.Duration) time.Duration {
+    next := current * time.Duration(reconnectBackoffFactor)
+    if next > reconnectMaxBackoff {
+        return reconnectMaxBackoff
     }
 
-    out := make(chan messagebuscontract.Envelope)
-
-    go instance.consumeLoop(runtimeInstance, channel, deliveries, out)
-
-    return out, nil
+    return next
 }
 
 func (instance *Transport) subscribe() (*amqp091.Channel, <-chan amqp091.Delivery, error) {
@@ -441,6 +525,15 @@ func (instance *Transport) consumeLoop(
     }
 }
 
+func delayExpirationMilliseconds(delay time.Duration) int64 {
+    milliseconds := delay.Milliseconds()
+    if 0 >= milliseconds {
+        milliseconds = 1
+    }
+
+    return milliseconds
+}
+
 func (instance *Transport) reopenConsume(
     runtimeInstance runtimecontract.Runtime,
     backoff *time.Duration,
@@ -467,71 +560,6 @@ func (instance *Transport) reopenConsume(
 
         *backoff = nextBackoff(*backoff)
     }
-}
-
-func nextBackoff(current time.Duration) time.Duration {
-    next := current * time.Duration(reconnectBackoffFactor)
-    if next > reconnectMaxBackoff {
-        return reconnectMaxBackoff
-    }
-
-    return next
-}
-
-func (instance *Transport) Ack(
-    runtimeInstance runtimecontract.Runtime,
-    envelopeInstance messagebuscontract.Envelope,
-) error {
-    stamp, exists := melodymessagebus.LastStampOfType[DeliveryStamp](envelopeInstance)
-    if false == exists {
-        return exception.NewError("envelope has no amqp delivery stamp", nil, nil)
-    }
-
-    channel, generation := instance.consumeChannelForAck()
-    if nil == channel {
-        return exception.NewError("amqp consume channel is not open", nil, nil)
-    }
-
-    if stamp.Generation != generation {
-        return nil
-    }
-
-    return instance.ackChannel(channel, stamp.Tag)
-}
-
-func (instance *Transport) Nack(
-    runtimeInstance runtimecontract.Runtime,
-    envelopeInstance messagebuscontract.Envelope,
-    requeue bool,
-) error {
-    stamp, exists := melodymessagebus.LastStampOfType[DeliveryStamp](envelopeInstance)
-    if false == exists {
-        return exception.NewError("envelope has no amqp delivery stamp", nil, nil)
-    }
-
-    channel, generation := instance.consumeChannelForAck()
-    if nil == channel {
-        return exception.NewError("amqp consume channel is not open", nil, nil)
-    }
-
-    if stamp.Generation != generation {
-        return nil
-    }
-
-    if false == requeue {
-        return instance.nackChannel(channel, stamp.Tag, false)
-    }
-
-    return instance.republish(runtimeInstance, channel, stamp, envelopeInstance)
-}
-
-func delayExpirationMilliseconds(delay time.Duration) int64 {
-    milliseconds := delay.Milliseconds()
-    if 0 >= milliseconds {
-        milliseconds = 1
-    }
-
-    return milliseconds
 }
 
 func (instance *Transport) republish(
@@ -588,34 +616,6 @@ func (instance *Transport) currentGeneration() uint64 {
     defer instance.mutex.Unlock()
 
     return instance.consumeGeneration
-}
-
-func (instance *Transport) Close(runtimeInstance runtimecontract.Runtime) error {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    instance.closing = true
-    instance.closeOnce.Do(func() {
-        close(instance.closeSignal)
-    })
-
-    if nil != instance.consumeChannel {
-        instance.consumeChannel.Close()
-        instance.consumeChannel = nil
-    }
-
-    if nil != instance.publishChannel {
-        instance.publishChannel.Close()
-        instance.publishChannel = nil
-        instance.publishReturns = nil
-    }
-
-    if true == instance.ownsConnection && nil != instance.connection {
-        instance.connection.Close()
-        instance.connection = nil
-    }
-
-    return nil
 }
 
 func (instance *Transport) forwardDeliveries(

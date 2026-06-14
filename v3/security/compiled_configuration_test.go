@@ -1,9 +1,13 @@
 package security
 
 import (
+    "context"
     "testing"
 
+    "github.com/precision-soft/melody/v3/container"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/runtime"
+    runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
@@ -50,6 +54,53 @@ func TestCompiledFirewall_Rules_ReturnsCopy(t *testing.T) {
     rulesCopyAgain := firewall.Rules()
     if nil == rulesCopyAgain[0] {
         t.Fatalf("expected internal rules to be immutable from returned slice")
+    }
+}
+
+type compiledFirewallNilResultLoginHandler struct{}
+
+func (instance *compiledFirewallNilResultLoginHandler) Login(
+    runtimeInstance runtimecontract.Runtime,
+    request httpcontract.Request,
+    input securitycontract.LoginInput,
+) (*securitycontract.LoginResult, error) {
+    return nil, nil
+}
+
+var _ securitycontract.LoginHandler = (*compiledFirewallNilResultLoginHandler)(nil)
+
+func TestCompiledFirewall_Login_NilResultWithoutErrorFailsClosed(t *testing.T) {
+    firewall := NewCompiledFirewall(
+        "main",
+        nil,
+        "matcher",
+        []securitycontract.Rule{},
+        nil,
+        nil,
+        nil,
+        nil,
+        nil,
+        nil,
+        "/admin/login",
+        "/admin/logout",
+        &compiledFirewallNilResultLoginHandler{},
+        nil,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+    )
+
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    result, loginErr := firewall.Login(runtimeInstance, nil, securitycontract.LoginInput{})
+    if nil == loginErr {
+        t.Fatalf("expected error when login handler returns nil result without error")
+    }
+    if nil != result {
+        t.Fatalf("expected nil result, got %v", result)
     }
 }
 
