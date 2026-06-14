@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `command_migrate.go`, `command_rollback.go` (v1 and v2 modules) — `db:migrate`/`db:rollback` now take the bun migration lock (`migrator.Lock`/`Unlock`) around the run, so two replicas running the command during a rolling deploy cannot both compute the same pending set and double-apply a migration. Ported from the `v3` fix; no v1/v2 tag is cut for this change.
 
-## [v3.0.3] - 2026-06-12
+## [v3.0.3] - 2026-06-15
 
 ### Added
 
