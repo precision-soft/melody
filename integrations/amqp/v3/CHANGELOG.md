@@ -7,13 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- `reconnect_config.go` — `ReconnectConfig` (`InitialBackoff`, `MaxBackoff`, `BackoffFactor`) with `DefaultReconnectConfig()` (the former hardcoded 1s / 30s / ×2) and `NewReconnectConfig(...)`. The reconnect/backoff timings that drive the consumer reconnect loop and the Server-Sent Events backplane were previously package-level constants with no way for an application to tune them; they are now fully configurable. Resolution is two-layer and per-field: a **general** default set once on the `Provider` via `WithReconnectConfig(...)` is inherited by every transport and backplane built through `Provider.NewTransport(...)` / `Provider.NewServerSentEventBackplane(...)`, and an individual `TransportConfig.Reconnect` / `ServerSentEventBackplaneConfig.Reconnect` overrides it field-by-field (a zero field inherits, so a transport can override just `MaxBackoff` and keep the general `InitialBackoff`). A zero general layer falls back to the built-in defaults, so existing call sites keep the previous 1s→30s behaviour unchanged.
-- `transport.go` — `TransportConfig.PublishReturnBuffer` makes the publisher-returns channel buffer (previously a hardcoded `16`) configurable; zero keeps the default.
-- `connection.go` — `WithReconnectConfig(*ReconnectConfig)` provider option plus `Provider.NewTransport(...)` and `Provider.NewServerSentEventBackplane(...)` that inject the provider's general reconnect config as the inherited layer.
-- `reconnect_config_test.go`, `connection_test.go` — broker-free unit tests covering `DefaultReconnectConfig`, `resolveReconnectConfig` per-field precedence (override > general > default), the publish-return buffer default/override, and the provider general-layer inheritance and per-transport override.
-
 ## [v3.0.0] - 2026-06-15 - Initial Release — RabbitMQ Message-Bus Transport, Auto-Reconnect, and Server-Sent Events Backplane
 
 ### Added
@@ -32,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `transport_test.go` — send/receive/ack integration test, plus tests that a re-published message persists its `x-redelivery-count` and dead-letters once retries are exhausted, that a `DelayStamp` routes through the `<queue>.delay` queue and returns after its TTL, and that the consumer reconnects after its broker connection is dropped and still delivers a subsequently-published message on the same channel; all skipped unless `AMQP_DSN` is set; verified end-to-end against RabbitMQ 3.13.
 - `transport_test.go` — broker-free unit tests for the reconnect machinery: backoff growth/cap, the no-dialer fallback, single-flight redial, the delivery-loop lost/done reasons, and that the consume loop closes its output channel on both channel-loss-without-dialer and context cancellation.
 - A `rabbitmq` service added to `.dev/docker/docker-compose.yml` for local/integration runs.
+- `reconnect_config.go` — `ReconnectConfig` (`InitialBackoff`, `MaxBackoff`, `BackoffFactor`) with `DefaultReconnectConfig()` (the former hardcoded 1s / 30s / ×2) and `NewReconnectConfig(...)`. The reconnect/backoff timings that drive the consumer reconnect loop and the Server-Sent Events backplane were previously package-level constants with no way for an application to tune them; they are now fully configurable. Resolution is two-layer and per-field: a **general** default set once on the `Provider` via `WithReconnectConfig(...)` is inherited by every transport and backplane built through `Provider.NewTransport(...)` / `Provider.NewServerSentEventBackplane(...)`, and an individual `TransportConfig.Reconnect` / `ServerSentEventBackplaneConfig.Reconnect` overrides it field-by-field (a zero field inherits, so a transport can override just `MaxBackoff` and keep the general `InitialBackoff`). A zero general layer falls back to the built-in defaults, so existing call sites keep the previous 1s→30s behaviour unchanged.
+- `transport.go` — `TransportConfig.PublishReturnBuffer` makes the publisher-returns channel buffer (previously a hardcoded `16`) configurable; zero keeps the default.
+- `connection.go` — `WithReconnectConfig(*ReconnectConfig)` provider option plus `Provider.NewTransport(...)` and `Provider.NewServerSentEventBackplane(...)` that inject the provider's general reconnect config as the inherited layer.
 
 ### Fixed
 

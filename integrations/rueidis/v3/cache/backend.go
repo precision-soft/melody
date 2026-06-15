@@ -18,13 +18,21 @@ const (
     rueidisBackendDefaultMaxKeyLength = 1024
 )
 
+type BackendOption func(*Backend)
+
+func WithMaxKeyLength(maxKeyLength int) BackendOption {
+    return func(instance *Backend) {
+        instance.maxKeyLength = maxKeyLength
+    }
+}
+
 func NewBackend(
     client rueidis.Client,
     ctx context.Context,
     prefix string,
     scanCount int,
     deleteBatch int,
-    maxKeyLength int,
+    options ...BackendOption,
 ) (*Backend, error) {
     if nil == client {
         return nil, exception.NewError(
@@ -53,19 +61,24 @@ func NewBackend(
         normalizedDeleteBatch = rueidisBackendDefaultDeleteBatch
     }
 
-    normalizedMaxKeyLength := maxKeyLength
-    if 0 >= normalizedMaxKeyLength {
-        normalizedMaxKeyLength = rueidisBackendDefaultMaxKeyLength
-    }
-
-    return &Backend{
+    instance := &Backend{
         client:       client,
         ctx:          ctx,
         prefix:       normalizedPrefix,
         scanCount:    normalizedScanCount,
         deleteBatch:  normalizedDeleteBatch,
-        maxKeyLength: normalizedMaxKeyLength,
-    }, nil
+        maxKeyLength: rueidisBackendDefaultMaxKeyLength,
+    }
+
+    for _, option := range options {
+        option(instance)
+    }
+
+    if 0 >= instance.maxKeyLength {
+        instance.maxKeyLength = rueidisBackendDefaultMaxKeyLength
+    }
+
+    return instance, nil
 }
 
 type Backend struct {

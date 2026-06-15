@@ -7,12 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- `httpclient/transport_config.go` — `TransportConfig` (`DialTimeout`, `KeepAlive`, `MaxIdleConns`, `IdleConnTimeout`, `TlsHandshakeTimeout`, `ExpectContinueTimeout`, `ResponseHeaderTimeout`) with `DefaultTransportConfig()` exposes the previously-hardcoded `net/http.Transport` tuning of the HTTP client. Set it via the new fluent `HttpClientConfig.WithTransport(*TransportConfig)`; zero fields inherit the defaults, and a client built without it keeps the previous behaviour unchanged (backwards compatible).
-- `application/` — the HTTP graceful-shutdown grace period (previously a hardcoded `5s`) is now overridable: a `Configuration` that also implements the optional `HttpShutdownConfiguration` (`GetShutdownTimeout() time.Duration`) sets it, mirroring the existing `HttpTimeoutConfiguration` mechanism; a zero or absent value keeps the 5s default (backwards compatible).
-- `messagebus/` — `RetryPolicy` gains optional `MaxDelay` (the exponential-backoff cap, previously a hardcoded 1h) and `FailureRequeueDelay` (the fallback requeue delay when no `BaseDelay` is set, previously a hardcoded 5s); zero keeps the previous defaults, so existing `RetryPolicy` values are unaffected (backwards compatible).
-
 ## [v3.7.0] - 2026-06-15 - Platform Extensions: Messaging, Realtime, Auth, i18n, OpenAPI, Lock, Mailer, and Storage
 
 ### Added
@@ -33,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `openapi/` — `DescribeTyped[Req, Resp](registry, routeName, status, ...options)` describes a route's request/response from Go types via `WithSummary`/`WithDescription`/`WithTags`/`WithResponse[T]`, removing the `Descriptor{RequestType: TypeOf[…](), Responses: map[int]reflect.Type{…}}` literal; the existing `Describe` is unchanged (still used for no-body or multi-response routes).
 - `container/` — documented that type registration is on by default, so any registered service is resolvable by its contract type via `MustFromResolverByType[T]` — a single-implementation service needs no string-name constant or per-type accessor (named registration remains for coexisting multi-implementation contracts, which are strict).
 - `validation/` — `lessThan` constraint (`NewLessThan(max)`, the `LessThan` type, and the `ConstraintLessThan` registration). A field tagged `validate:"lessThan(value=N)"` (or the shorthand `validate:"lessThan=N"`) now enforces an exclusive upper bound on numeric fields, mirroring the existing `greaterThan` lower-bound constraint and the exclusive `maximum`/`exclusiveMaximum` the `openapi` generator already emits for it.
+- `httpclient/transport_config.go` — `TransportConfig` (`DialTimeout`, `KeepAlive`, `MaxIdleConns`, `IdleConnTimeout`, `TlsHandshakeTimeout`, `ExpectContinueTimeout`, `ResponseHeaderTimeout`) with `DefaultTransportConfig()` exposes the previously-hardcoded `net/http.Transport` tuning of the HTTP client. Set it via the new fluent `HttpClientConfig.WithTransport(*TransportConfig)`; zero fields inherit the defaults, and a client built without it keeps the previous behaviour unchanged (backwards compatible).
+- `application/` — the HTTP graceful-shutdown grace period (previously a hardcoded `5s`) is now overridable: a `Configuration` that also implements the optional `HttpShutdownConfiguration` (`GetShutdownTimeout() time.Duration`) sets it, mirroring the existing `HttpTimeoutConfiguration` mechanism; a zero or absent value keeps the 5s default (backwards compatible).
+- `messagebus/` — `RetryPolicy` gains optional `MaxDelay` (the exponential-backoff cap, previously a hardcoded 1h) and `FailureRequeueDelay` (the fallback requeue delay when no `BaseDelay` is set, previously a hardcoded 5s); zero keeps the previous defaults, so existing `RetryPolicy` values are unaffected (backwards compatible).
 
 ### Changed
 

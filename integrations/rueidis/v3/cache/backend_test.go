@@ -23,7 +23,7 @@ func (instance *closeTrackingClient) Close() {
 func TestBackendCloseDoesNotCloseCallerOwnedClient(t *testing.T) {
     client := &closeTrackingClient{}
 
-    backend, backendErr := NewBackend(client, nil, "", 0, 0, 0)
+    backend, backendErr := NewBackend(client, nil, "", 0, 0)
     if nil != backendErr {
         t.Fatalf("NewBackend returned an error: %v", backendErr)
     }
@@ -209,7 +209,7 @@ func TestEscapeRedisGlobMeta(t *testing.T) {
 func TestNewBackend_DefaultMaxKeyLength(t *testing.T) {
     client := &closeTrackingClient{}
 
-    backend, backendErr := NewBackend(client, nil, "", 0, 0, 0)
+    backend, backendErr := NewBackend(client, nil, "", 0, 0)
     if nil != backendErr {
         t.Fatalf("NewBackend returned an error: %v", backendErr)
     }
@@ -222,7 +222,7 @@ func TestNewBackend_DefaultMaxKeyLength(t *testing.T) {
 func TestNewBackend_MaxKeyLengthOverrideRejectsLongKey(t *testing.T) {
     client := &closeTrackingClient{}
 
-    backend, backendErr := NewBackend(client, nil, "", 0, 0, 8)
+    backend, backendErr := NewBackend(client, nil, "", 0, 0, WithMaxKeyLength(8))
     if nil != backendErr {
         t.Fatalf("NewBackend returned an error: %v", backendErr)
     }

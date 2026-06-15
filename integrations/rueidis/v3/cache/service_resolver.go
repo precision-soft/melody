@@ -15,7 +15,7 @@ func RegisterBackendService(registrar ServiceRegistrar, client rueidis.Client, p
     registrar.RegisterService(
         melodycache.ServiceCacheBackend,
         func(resolver containercontract.Resolver) (cachecontract.Backend, error) {
-            return NewBackendService(client, prefix, 0, 0, 0)
+            return NewBackendService(client, prefix, 0, 0)
         },
     )
 }
