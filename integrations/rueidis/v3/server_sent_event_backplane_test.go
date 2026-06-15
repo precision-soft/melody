@@ -77,15 +77,17 @@ func TestServerSentEventBackplane_DoesNotEchoToOriginInstanceTwice(t *testing.T)
 /** @info shouldResetBackplaneBackoff */
 
 func TestShouldResetBackplaneBackoff(t *testing.T) {
-    if true == shouldResetBackplaneBackoff(10*time.Microsecond) {
+    instance := &ServerSentEventBackplane{reconnect: resolveReconnectConfig(nil)}
+
+    if true == instance.shouldResetBackplaneBackoff(10*time.Microsecond) {
         t.Fatalf("a sub-second subscription (such as an immediate nil Receive return) must NOT reset backoff, otherwise listen() busy-loops re-subscribing with zero delay")
     }
 
-    if true == shouldResetBackplaneBackoff(serverSentEventBackplaneInitialBackoff-time.Millisecond) {
+    if true == instance.shouldResetBackplaneBackoff(instance.reconnect.InitialBackoff-time.Millisecond) {
         t.Fatalf("a subscription shorter than the healthy threshold must not reset backoff")
     }
 
-    if false == shouldResetBackplaneBackoff(5*time.Second) {
+    if false == instance.shouldResetBackplaneBackoff(5*time.Second) {
         t.Fatalf("a healthy long-lived subscription must reset backoff for a fast reconnect")
     }
 }

@@ -13,8 +13,8 @@ import (
 )
 
 const (
-    defaultTokenStorePrefix = "melody:token"
-    tokenStoreScanCount     = 256
+    defaultTokenStorePrefix    = "melody:token"
+    defaultTokenStoreScanCount = 256
 )
 
 var tokenPutScript = rueidis.NewLuaScript(`
@@ -87,9 +87,10 @@ func NewTokenStore(client rueidis.Client, options ...TokenStoreOption) *RedisTok
     }
 
     store := &RedisTokenStore{
-        client: client,
-        ctx:    context.Background(),
-        prefix: defaultTokenStorePrefix,
+        client:    client,
+        ctx:       context.Background(),
+        prefix:    defaultTokenStorePrefix,
+        scanCount: defaultTokenStoreScanCount,
     }
 
     for _, option := range options {
@@ -98,6 +99,10 @@ func NewTokenStore(client rueidis.Client, options ...TokenStoreOption) *RedisTok
 
     if "" == store.prefix {
         store.prefix = defaultTokenStorePrefix
+    }
+
+    if 0 >= store.scanCount {
+        store.scanCount = defaultTokenStoreScanCount
     }
 
     if nil == store.ctx {
@@ -115,6 +120,12 @@ func WithTokenStorePrefix(prefix string) TokenStoreOption {
     }
 }
 
+func WithTokenStoreScanCount(scanCount int) TokenStoreOption {
+    return func(store *RedisTokenStore) {
+        store.scanCount = scanCount
+    }
+}
+
 func WithTokenStoreContext(ctx context.Context) TokenStoreOption {
     return func(store *RedisTokenStore) {
         if nil == ctx {
@@ -126,9 +137,10 @@ func WithTokenStoreContext(ctx context.Context) TokenStoreOption {
 }
 
 type RedisTokenStore struct {
-    client rueidis.Client
-    ctx    context.Context
-    prefix string
+    client    rueidis.Client
+    ctx       context.Context
+    prefix    string
+    scanCount int
 }
 
 func (instance *RedisTokenStore) Put(tokenString string, claims securitycontract.Claims) {
@@ -174,7 +186,7 @@ func (instance *RedisTokenStore) PurgeExpired() int {
     for {
         scan, scanErr := instance.client.Do(
             instance.ctx,
-            instance.client.B().Scan().Cursor(cursor).Match(escapeRedisGlobMeta(instance.userKeyPrefix())+"*").Count(tokenStoreScanCount).Build(),
+            instance.client.B().Scan().Cursor(cursor).Match(escapeRedisGlobMeta(instance.userKeyPrefix())+"*").Count(int64(instance.scanCount)).Build(),
         ).AsScanEntry()
         if nil != scanErr {
             exception.Panic(exception.NewError("redis token store purge scan failed", nil, scanErr))

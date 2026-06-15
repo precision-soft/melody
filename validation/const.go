@@ -8,36 +8,36 @@ const (
 )
 
 const (
-    // ErrorNotAlpha @deprecated
+    // Deprecated: use ConstraintAlphaErrorNotAlpha instead.
     ErrorNotAlpha = ConstraintAlphaErrorNotAlpha
 
-    // ErrorNotAlphanumeric @deprecated
+    // Deprecated: use ConstraintAlphanumericErrorNotAlphanumeric instead.
     ErrorNotAlphanumeric = ConstraintAlphanumericErrorNotAlphanumeric
 
-    // ErrorInvalidEmail @deprecated
+    // Deprecated: use ConstraintEmailErrorInvalidEmail instead.
     ErrorInvalidEmail = ConstraintEmailErrorInvalidEmail
 
-    // ConstraintMax @deprecated
+    // Deprecated: use ConstraintMaxLength instead.
     ConstraintMax = ConstraintMaxLength
-    // ErrorMaxLength @deprecated
+    // Deprecated: use ConstraintMaxLengthErrorTooLong instead.
     ErrorMaxLength = ConstraintMaxLengthErrorTooLong
 
-    // ConstraintMin @deprecated
+    // Deprecated: use ConstraintMinLength instead.
     ConstraintMin = ConstraintMinLength
-    // ErrorMinLength @deprecated
+    // Deprecated: use ConstraintMinLengthErrorInsufficientLength instead.
     ErrorMinLength = ConstraintMinLengthErrorInsufficientLength
 
-    // ErrorNotBlank @deprecated
+    // Deprecated: use ConstraintNotBlankErrorIsBlank instead.
     ErrorNotBlank = ConstraintNotBlankErrorIsBlank
 
-    // ErrorEmpty @deprecated
+    // Deprecated: use ConstraintNotEmptyErrorEmpty instead.
     ErrorEmpty = ConstraintNotEmptyErrorEmpty
 
-    // ErrorNotNumeric @deprecated
+    // Deprecated: use ConstraintNumericErrorNotNumeric instead.
     ErrorNotNumeric = ConstraintNumericErrorNotNumeric
 
-    // ErrorRegexMismatch @deprecated
+    // Deprecated: use ConstraintRegexErrorMismatch instead.
     ErrorRegexMismatch = ConstraintRegexErrorMismatch
-    // ErrorInvalidPattern @deprecated
+    // Deprecated: use ConstraintRegexErrorInvalidPattern instead.
     ErrorInvalidPattern = ConstraintRegexErrorInvalidPattern
 )

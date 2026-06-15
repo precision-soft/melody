@@ -29,6 +29,7 @@ type ServerSentEventBackplane struct {
     exchange   string
     origin     string
     logger     loggingcontract.Logger
+    reconnect  ReconnectConfig
 
     mutex          sync.Mutex
     publishMutex   sync.Mutex
@@ -49,9 +50,14 @@ type ServerSentEventBackplaneConfig struct {
     Hub        *melodyhttp.ServerSentEventHub
     Exchange   string
     Logger     loggingcontract.Logger
+    Reconnect  *ReconnectConfig
 }
 
 func NewServerSentEventBackplane(config ServerSentEventBackplaneConfig) *ServerSentEventBackplane {
+    return newServerSentEventBackplane(config, nil)
+}
+
+func newServerSentEventBackplane(config ServerSentEventBackplaneConfig, general *ReconnectConfig) *ServerSentEventBackplane {
     if nil == config.Connection && nil == config.Dialer {
         exception.Panic(exception.NewError("amqp sse backplane needs a connection or a dialer", nil, nil))
     }
@@ -74,6 +80,7 @@ func NewServerSentEventBackplane(config ServerSentEventBackplaneConfig) *ServerS
         exchange:   exchange,
         origin:     newServerSentEventBackplaneOrigin(),
         logger:     config.Logger,
+        reconnect:  resolveReconnectConfig(general, config.Reconnect),
         ctx:        ctx,
         cancel:     cancel,
     }
@@ -158,7 +165,7 @@ func (instance *ServerSentEventBackplane) publishOnce(payload []byte) (*amqp091.
 func (instance *ServerSentEventBackplane) listen() {
     defer instance.wait.Done()
 
-    backoff := reconnectInitialBackoff
+    backoff := instance.reconnect.InitialBackoff
 
     for {
         if nil != instance.ctx.Err() || true == instance.isClosing() {
@@ -173,7 +180,7 @@ func (instance *ServerSentEventBackplane) listen() {
                 return
             }
 
-            backoff = nextBackoff(backoff)
+            backoff = instance.nextBackoff(backoff)
 
             continue
         }
@@ -182,8 +189,8 @@ func (instance *ServerSentEventBackplane) listen() {
         instance.forward(deliveries)
 
         /** @important only reset the backoff when the subscription actually lived: a subscribe that succeeds but loses its channel immediately must keep backing off, otherwise it becomes a no-delay reconnect storm against the broker */
-        if true == shouldResetReconnectBackoff(time.Since(startedAt)) {
-            backoff = reconnectInitialBackoff
+        if true == instance.shouldResetReconnectBackoff(time.Since(startedAt)) {
+            backoff = instance.reconnect.InitialBackoff
 
             continue
         }
@@ -192,12 +199,21 @@ func (instance *ServerSentEventBackplane) listen() {
             return
         }
 
-        backoff = nextBackoff(backoff)
+        backoff = instance.nextBackoff(backoff)
     }
 }
 
-func shouldResetReconnectBackoff(subscriptionDuration time.Duration) bool {
-    return reconnectInitialBackoff <= subscriptionDuration
+func (instance *ServerSentEventBackplane) nextBackoff(current time.Duration) time.Duration {
+    next := time.Duration(float64(current) * instance.reconnect.BackoffFactor)
+    if next > instance.reconnect.MaxBackoff {
+        return instance.reconnect.MaxBackoff
+    }
+
+    return next
+}
+
+func (instance *ServerSentEventBackplane) shouldResetReconnectBackoff(subscriptionDuration time.Duration) bool {
+    return instance.reconnect.InitialBackoff <= subscriptionDuration
 }
 
 func (instance *ServerSentEventBackplane) forward(deliveries <-chan amqp091.Delivery) {

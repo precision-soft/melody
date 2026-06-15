@@ -19,15 +19,17 @@ import (
 
 const (
     defaultMaxRetries          = 3
-    maxRetryDelay              = 1 * time.Hour
+    defaultMaxRetryDelay       = 1 * time.Hour
     defaultFailureRequeueDelay = 5 * time.Second
     defaultShutdownGrace       = 30 * time.Second
 )
 
 type RetryPolicy struct {
-    MaxRetries       int
-    BaseDelay        time.Duration
-    FailureTransport messagebuscontract.Transport
+    MaxRetries          int
+    BaseDelay           time.Duration
+    FailureTransport    messagebuscontract.Transport
+    MaxDelay            time.Duration
+    FailureRequeueDelay time.Duration
 }
 
 func NewConsumeCommand(
@@ -44,6 +46,14 @@ func NewConsumeCommandWithRetry(
 ) *ConsumeCommand {
     if 0 > retryPolicy.MaxRetries {
         retryPolicy.MaxRetries = 0
+    }
+
+    if 0 >= retryPolicy.MaxDelay {
+        retryPolicy.MaxDelay = defaultMaxRetryDelay
+    }
+
+    if 0 >= retryPolicy.FailureRequeueDelay {
+        retryPolicy.FailureRequeueDelay = defaultFailureRequeueDelay
     }
 
     return &ConsumeCommand{
@@ -271,13 +281,15 @@ func (instance *ConsumeCommand) retryDelay(attempt int) time.Duration {
         return 0
     }
 
-    if attempt > int(maxRetryDelay/instance.retryPolicy.BaseDelay) {
-        return maxRetryDelay
+    maxDelay := instance.retryPolicy.MaxDelay
+
+    if attempt > int(maxDelay/instance.retryPolicy.BaseDelay) {
+        return maxDelay
     }
 
     delay := instance.retryPolicy.BaseDelay * time.Duration(attempt)
-    if delay > maxRetryDelay || 0 > delay {
-        return maxRetryDelay
+    if delay > maxDelay || 0 > delay {
+        return maxDelay
     }
 
     return delay
@@ -286,7 +298,7 @@ func (instance *ConsumeCommand) retryDelay(attempt int) time.Duration {
 func (instance *ConsumeCommand) failureRequeueDelay() time.Duration {
     delay := instance.retryDelay(instance.retryPolicy.MaxRetries + 1)
     if 0 >= delay {
-        return defaultFailureRequeueDelay
+        return instance.retryPolicy.FailureRequeueDelay
     }
 
     return delay

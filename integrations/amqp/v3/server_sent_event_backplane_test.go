@@ -208,15 +208,18 @@ func TestServerSentEventBackplane_DoesNotEchoToOriginInstanceTwice(t *testing.T)
 /** @info reconnect backoff reset */
 
 func TestShouldResetReconnectBackoff(t *testing.T) {
-    if true == shouldResetReconnectBackoff(reconnectInitialBackoff-time.Nanosecond) {
+    instance := &ServerSentEventBackplane{reconnect: resolveReconnectConfig(nil, nil)}
+    initialBackoff := instance.reconnect.InitialBackoff
+
+    if true == instance.shouldResetReconnectBackoff(initialBackoff-time.Nanosecond) {
         t.Fatalf("expected no backoff reset for a subscription that died sooner than the initial backoff")
     }
 
-    if false == shouldResetReconnectBackoff(reconnectInitialBackoff) {
+    if false == instance.shouldResetReconnectBackoff(initialBackoff) {
         t.Fatalf("expected a backoff reset for a subscription that lived at least the initial backoff")
     }
 
-    if false == shouldResetReconnectBackoff(2*reconnectInitialBackoff) {
+    if false == instance.shouldResetReconnectBackoff(2*initialBackoff) {
         t.Fatalf("expected a backoff reset for a long-lived subscription")
     }
 }

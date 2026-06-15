@@ -23,7 +23,7 @@ func (instance *closeTrackingClient) Close() {
 func TestBackendCloseDoesNotCloseCallerOwnedClient(t *testing.T) {
     client := &closeTrackingClient{}
 
-    backend, backendErr := NewBackend(client, nil, "", 0, 0)
+    backend, backendErr := NewBackend(client, nil, "", 0, 0, 0)
     if nil != backendErr {
         t.Fatalf("NewBackend returned an error: %v", backendErr)
     }
@@ -203,5 +203,39 @@ func TestEscapeRedisGlobMeta(t *testing.T) {
                 t.Fatalf("escapeRedisGlobMeta(%q) = %q, want %q (an unescaped glob metacharacter in the literal prefix makes SCAN MATCH miss or over-match keys)", testCase.input, result, testCase.expected)
             }
         })
+    }
+}
+
+func TestNewBackend_DefaultMaxKeyLength(t *testing.T) {
+    client := &closeTrackingClient{}
+
+    backend, backendErr := NewBackend(client, nil, "", 0, 0, 0)
+    if nil != backendErr {
+        t.Fatalf("NewBackend returned an error: %v", backendErr)
+    }
+
+    if rueidisBackendDefaultMaxKeyLength != backend.maxKeyLength {
+        t.Fatalf("expected default max key length %d, got %d", rueidisBackendDefaultMaxKeyLength, backend.maxKeyLength)
+    }
+}
+
+func TestNewBackend_MaxKeyLengthOverrideRejectsLongKey(t *testing.T) {
+    client := &closeTrackingClient{}
+
+    backend, backendErr := NewBackend(client, nil, "", 0, 0, 8)
+    if nil != backendErr {
+        t.Fatalf("NewBackend returned an error: %v", backendErr)
+    }
+
+    if 8 != backend.maxKeyLength {
+        t.Fatalf("expected max key length 8, got %d", backend.maxKeyLength)
+    }
+
+    if _, normalizeErr := backend.normalizeKey("123456789"); nil == normalizeErr {
+        t.Fatalf("expected a key longer than the configured maximum to be rejected")
+    }
+
+    if _, normalizeErr := backend.normalizeKey("12345678"); nil != normalizeErr {
+        t.Fatalf("expected a key at the configured maximum to be accepted, got %v", normalizeErr)
     }
 }

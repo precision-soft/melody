@@ -6,6 +6,7 @@ import (
     "os"
     "strconv"
     "testing"
+    "time"
 
     _ "github.com/go-sql-driver/mysql"
     "github.com/precision-soft/melody/v3/container"
@@ -334,5 +335,45 @@ func TestMysqlLock_ReleaseOnCanceledContextStillReleases(t *testing.T) {
     }
     if true == holder.Valid {
         t.Fatalf("lock was orphaned: still held by session %d after release on a canceled context", holder.Int64)
+    }
+}
+
+func newOfflineLockDatabase(t *testing.T) *bun.DB {
+    t.Helper()
+
+    sqldb, openErr := sql.Open("mysql", "user:pass@tcp(127.0.0.1:3306)/db")
+    if nil != openErr {
+        t.Fatalf("open: %v", openErr)
+    }
+
+    t.Cleanup(func() {
+        sqldb.Close()
+    })
+
+    return bun.NewDB(sqldb, mysqldialect.New())
+}
+
+func TestNewLocker_DefaultReleaseTimeout(t *testing.T) {
+    locker := NewLocker(newOfflineLockDatabase(t))
+
+    if defaultLockReleaseTimeout != locker.releaseTimeout {
+        t.Fatalf("expected default release timeout %s, got %s", defaultLockReleaseTimeout, locker.releaseTimeout)
+    }
+}
+
+func TestNewLocker_ReleaseTimeoutOverridePropagatesToLock(t *testing.T) {
+    locker := NewLocker(newOfflineLockDatabase(t), WithLockReleaseTimeout(2*time.Second))
+
+    if 2*time.Second != locker.releaseTimeout {
+        t.Fatalf("expected overridden release timeout 2s, got %s", locker.releaseTimeout)
+    }
+
+    lock, isMysqlLock := locker.CreateLock("name", 0).(*mysqlLock)
+    if false == isMysqlLock {
+        t.Fatalf("expected a *mysqlLock")
+    }
+
+    if 2*time.Second != lock.releaseTimeout {
+        t.Fatalf("expected the lock to inherit the release timeout 2s, got %s", lock.releaseTimeout)
     }
 }

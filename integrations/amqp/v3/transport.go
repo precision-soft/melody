@@ -21,9 +21,7 @@ const (
     headerMessageType     = "x-message-type"
     headerRedeliveryCount = "x-redelivery-count"
 
-    reconnectInitialBackoff = 1 * time.Second
-    reconnectMaxBackoff     = 30 * time.Second
-    reconnectBackoffFactor  = 2
+    defaultPublishReturnBuffer = 16
 )
 
 type forwardReason int
@@ -36,6 +34,10 @@ const (
 var errReconnectInProgress = exception.NewError("amqp reconnect already in progress", nil, nil)
 
 func NewTransport(config TransportConfig) *Transport {
+    return newTransport(config, nil)
+}
+
+func newTransport(config TransportConfig, general *ReconnectConfig) *Transport {
     if nil == config.Connection && nil == config.Dialer {
         exception.Panic(exception.NewError("amqp transport needs a connection or a dialer", nil, nil))
     }
@@ -58,30 +60,41 @@ func NewTransport(config TransportConfig) *Transport {
         prefetch = 1
     }
 
+    publishReturnBuffer := config.PublishReturnBuffer
+    if 0 >= publishReturnBuffer {
+        publishReturnBuffer = defaultPublishReturnBuffer
+    }
+
+    reconnect := resolveReconnectConfig(general, config.Reconnect)
+
     return &Transport{
-        connection:  config.Connection,
-        dialer:      config.Dialer,
-        queue:       config.Queue,
-        exchange:    config.Exchange,
-        routingKey:  config.RoutingKey,
-        prefetch:    prefetch,
-        registry:    config.Registry,
-        serializer:  serializerInstance,
-        deadLetter:  config.DeadLetter,
-        closeSignal: make(chan struct{}),
+        connection:          config.Connection,
+        dialer:              config.Dialer,
+        queue:               config.Queue,
+        exchange:            config.Exchange,
+        routingKey:          config.RoutingKey,
+        prefetch:            prefetch,
+        registry:            config.Registry,
+        serializer:          serializerInstance,
+        deadLetter:          config.DeadLetter,
+        publishReturnBuffer: publishReturnBuffer,
+        reconnect:           reconnect,
+        closeSignal:         make(chan struct{}),
     }
 }
 
 type TransportConfig struct {
-    Connection *amqp091.Connection
-    Dialer     func() (*amqp091.Connection, error)
-    Queue      string
-    Exchange   string
-    RoutingKey string
-    Prefetch   int
-    Registry   *MessageRegistry
-    Serializer serializercontract.Serializer
-    DeadLetter bool
+    Connection          *amqp091.Connection
+    Dialer              func() (*amqp091.Connection, error)
+    Queue               string
+    Exchange            string
+    RoutingKey          string
+    Prefetch            int
+    Registry            *MessageRegistry
+    Serializer          serializercontract.Serializer
+    DeadLetter          bool
+    Reconnect           *ReconnectConfig
+    PublishReturnBuffer int
 }
 
 type Transport struct {
@@ -94,6 +107,9 @@ type Transport struct {
     registry   *MessageRegistry
     serializer serializercontract.Serializer
     deadLetter bool
+
+    publishReturnBuffer int
+    reconnect           ReconnectConfig
 
     mutex             sync.Mutex
     publishChannel    *amqp091.Channel
@@ -440,13 +456,17 @@ func (instance *Transport) resetConsumeChannel() {
     }
 }
 
-func nextBackoff(current time.Duration) time.Duration {
-    next := current * time.Duration(reconnectBackoffFactor)
-    if next > reconnectMaxBackoff {
-        return reconnectMaxBackoff
+func (instance *Transport) nextBackoff(current time.Duration) time.Duration {
+    next := time.Duration(float64(current) * instance.reconnect.BackoffFactor)
+    if next > instance.reconnect.MaxBackoff {
+        return instance.reconnect.MaxBackoff
     }
 
     return next
+}
+
+func (instance *Transport) shouldResetReconnectBackoff(subscriptionDuration time.Duration) bool {
+    return instance.reconnect.InitialBackoff <= subscriptionDuration
 }
 
 func (instance *Transport) subscribe() (*amqp091.Channel, <-chan amqp091.Delivery, error) {
@@ -471,7 +491,7 @@ func (instance *Transport) consumeLoop(
 ) {
     defer close(out)
 
-    backoff := reconnectInitialBackoff
+    backoff := instance.reconnect.InitialBackoff
 
     for {
         startedAt := time.Now()
@@ -501,8 +521,8 @@ func (instance *Transport) consumeLoop(
 
         instance.resetConsumeChannel()
 
-        if true == shouldResetReconnectBackoff(time.Since(startedAt)) {
-            backoff = reconnectInitialBackoff
+        if true == instance.shouldResetReconnectBackoff(time.Since(startedAt)) {
+            backoff = instance.reconnect.InitialBackoff
         } else {
             select {
             case <-time.After(backoff):
@@ -512,7 +532,7 @@ func (instance *Transport) consumeLoop(
                 return
             }
 
-            backoff = nextBackoff(backoff)
+            backoff = instance.nextBackoff(backoff)
         }
 
         reopenedChannel, reopenedDeliveries, reopenErr := instance.reopenConsume(runtimeInstance, &backoff)
@@ -558,7 +578,7 @@ func (instance *Transport) reopenConsume(
             return nil, nil, exception.NewError("amqp transport is closing", nil, nil)
         }
 
-        *backoff = nextBackoff(*backoff)
+        *backoff = instance.nextBackoff(*backoff)
     }
 }
 
@@ -769,7 +789,7 @@ func (instance *Transport) ensurePublishChannel() (*amqp091.Channel, <-chan amqp
         return nil, nil, exception.NewError("amqp confirm mode failed", map[string]any{"queue": instance.queue}, confirmErr)
     }
 
-    returns := channel.NotifyReturn(make(chan amqp091.Return, 16))
+    returns := channel.NotifyReturn(make(chan amqp091.Return, instance.publishReturnBuffer))
 
     instance.mutex.Lock()
     defer instance.mutex.Unlock()

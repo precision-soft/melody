@@ -4,7 +4,6 @@ import (
     "context"
     "errors"
     nethttp "net/http"
-    "time"
 
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/http"
@@ -12,8 +11,6 @@ import (
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     "github.com/precision-soft/melody/v3/logging"
 )
-
-const httpShutdownTimeout = 5 * time.Second
 
 func (instance *Application) RegisterHttpRoute(
     method string,
@@ -102,7 +99,7 @@ func (instance *Application) runHttp(
 
     select {
     case <-ctx.Done():
-        shutdownContext, cancel := context.WithTimeout(context.Background(), httpShutdownTimeout)
+        shutdownContext, cancel := context.WithTimeout(context.Background(), resolveHttpShutdownTimeout(configuration))
         defer cancel()
 
         shutdownErr := httpServer.Shutdown(shutdownContext)

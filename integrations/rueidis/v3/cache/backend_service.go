@@ -16,6 +16,7 @@ func NewBackendService(
     prefix string,
     scanCount int,
     deleteBatch int,
+    maxKeyLength int,
 ) (*BackendService, error) {
     backend, err := NewBackend(
         client,
@@ -23,6 +24,7 @@ func NewBackendService(
         prefix,
         scanCount,
         deleteBatch,
+        maxKeyLength,
     )
     if nil != err {
         return nil, err
@@ -50,6 +52,7 @@ func (instance *BackendService) WithContext(ctx context.Context) *Backend {
         instance.backend.prefix,
         instance.backend.scanCount,
         instance.backend.deleteBatch,
+        instance.backend.maxKeyLength,
     )
 
     if nil != err {

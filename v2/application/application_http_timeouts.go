@@ -17,12 +17,17 @@ type HttpTimeoutConfiguration interface {
     GetMaxHeaderBytes() int
 }
 
+type HttpShutdownConfiguration interface {
+    GetShutdownTimeout() time.Duration
+}
+
 const (
     defaultHttpReadTimeout       = 15 * time.Second
     defaultHttpReadHeaderTimeout = 5 * time.Second
     defaultHttpWriteTimeout      = 30 * time.Second
     defaultHttpIdleTimeout       = 60 * time.Second
     defaultHttpMaxHeaderBytes    = 1 << 20
+    defaultHttpShutdownTimeout   = 5 * time.Second
 )
 
 func applyHttpServerTimeouts(httpServer *nethttp.Server, configuration any) {
@@ -42,4 +47,18 @@ func applyHttpServerTimeouts(httpServer *nethttp.Server, configuration any) {
     httpServer.WriteTimeout = overrides.GetWriteTimeout()
     httpServer.IdleTimeout = overrides.GetIdleTimeout()
     httpServer.MaxHeaderBytes = overrides.GetMaxHeaderBytes()
+}
+
+func resolveHttpShutdownTimeout(configuration any) time.Duration {
+    overrides, ok := configuration.(HttpShutdownConfiguration)
+    if false == ok {
+        return defaultHttpShutdownTimeout
+    }
+
+    timeout := overrides.GetShutdownTimeout()
+    if 0 >= timeout {
+        return defaultHttpShutdownTimeout
+    }
+
+    return timeout
 }

@@ -14,13 +14,7 @@ import (
     "github.com/redis/rueidis"
 )
 
-const (
-    defaultServerSentEventBackplaneChannel = "melody:sse"
-
-    serverSentEventBackplaneInitialBackoff = 1 * time.Second
-    serverSentEventBackplaneMaxBackoff     = 30 * time.Second
-    serverSentEventBackplaneBackoffFactor  = 2
-)
+const defaultServerSentEventBackplaneChannel = "melody:sse"
 
 type serverSentEventWireEvent struct {
     Origin string              `json:"origin"`
@@ -29,11 +23,12 @@ type serverSentEventWireEvent struct {
 }
 
 type ServerSentEventBackplane struct {
-    client  rueidis.Client
-    hub     *melodyhttp.ServerSentEventHub
-    channel string
-    origin  string
-    logger  loggingcontract.Logger
+    client    rueidis.Client
+    hub       *melodyhttp.ServerSentEventHub
+    channel   string
+    origin    string
+    logger    loggingcontract.Logger
+    reconnect ReconnectConfig
 
     ctx    context.Context
     cancel context.CancelFunc
@@ -54,6 +49,12 @@ func WithServerSentEventBackplaneLogger(logger loggingcontract.Logger) ServerSen
     }
 }
 
+func WithServerSentEventBackplaneReconnectConfig(reconnectConfig *ReconnectConfig) ServerSentEventBackplaneOption {
+    return func(backplane *ServerSentEventBackplane) {
+        backplane.reconnect = resolveReconnectConfig(reconnectConfig)
+    }
+}
+
 func NewServerSentEventBackplane(client rueidis.Client, hub *melodyhttp.ServerSentEventHub, options ...ServerSentEventBackplaneOption) *ServerSentEventBackplane {
     if nil == client {
         exception.Panic(exception.NewError("redis sse backplane client is nil", nil, nil))
@@ -66,12 +67,13 @@ func NewServerSentEventBackplane(client rueidis.Client, hub *melodyhttp.ServerSe
     ctx, cancel := context.WithCancel(context.Background())
 
     backplane := &ServerSentEventBackplane{
-        client:  client,
-        hub:     hub,
-        channel: defaultServerSentEventBackplaneChannel,
-        origin:  newBackplaneOrigin(),
-        ctx:     ctx,
-        cancel:  cancel,
+        client:    client,
+        hub:       hub,
+        channel:   defaultServerSentEventBackplaneChannel,
+        origin:    newBackplaneOrigin(),
+        reconnect: resolveReconnectConfig(nil),
+        ctx:       ctx,
+        cancel:    cancel,
     }
 
     for _, option := range options {
@@ -118,7 +120,7 @@ func (instance *ServerSentEventBackplane) Close() error {
 func (instance *ServerSentEventBackplane) listen() {
     defer instance.wait.Done()
 
-    backoff := serverSentEventBackplaneInitialBackoff
+    backoff := instance.reconnect.InitialBackoff
 
     for {
         if nil != instance.ctx.Err() {
@@ -140,8 +142,8 @@ func (instance *ServerSentEventBackplane) listen() {
             instance.logError("redis sse backplane subscription lost, resubscribing", receiveErr)
         }
 
-        if true == shouldResetBackplaneBackoff(time.Since(startedAt)) {
-            backoff = serverSentEventBackplaneInitialBackoff
+        if true == instance.shouldResetBackplaneBackoff(time.Since(startedAt)) {
+            backoff = instance.reconnect.InitialBackoff
 
             continue
         }
@@ -152,12 +154,12 @@ func (instance *ServerSentEventBackplane) listen() {
             return
         }
 
-        backoff = nextServerSentEventBackplaneBackoff(backoff)
+        backoff = instance.nextServerSentEventBackplaneBackoff(backoff)
     }
 }
 
-func shouldResetBackplaneBackoff(subscriptionDuration time.Duration) bool {
-    return serverSentEventBackplaneInitialBackoff <= subscriptionDuration
+func (instance *ServerSentEventBackplane) shouldResetBackplaneBackoff(subscriptionDuration time.Duration) bool {
+    return instance.reconnect.InitialBackoff <= subscriptionDuration
 }
 
 func (instance *ServerSentEventBackplane) handle(message rueidis.PubSubMessage) {
@@ -183,10 +185,10 @@ func (instance *ServerSentEventBackplane) logError(message string, err error) {
     instance.logger.Error(message, exception.LogContext(err))
 }
 
-func nextServerSentEventBackplaneBackoff(current time.Duration) time.Duration {
-    next := current * time.Duration(serverSentEventBackplaneBackoffFactor)
-    if next > serverSentEventBackplaneMaxBackoff {
-        return serverSentEventBackplaneMaxBackoff
+func (instance *ServerSentEventBackplane) nextServerSentEventBackplaneBackoff(current time.Duration) time.Duration {
+    next := time.Duration(float64(current) * instance.reconnect.BackoffFactor)
+    if next > instance.reconnect.MaxBackoff {
+        return instance.reconnect.MaxBackoff
     }
 
     return next

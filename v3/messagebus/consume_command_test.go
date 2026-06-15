@@ -251,13 +251,13 @@ func TestConsumeFrom_ShutdownGraceTimesOutWedgedHandler(t *testing.T) {
 
 func TestRetryDelay_IsCappedAndOverflowSafe(t *testing.T) {
     capped := NewConsumeCommandWithRetry(nil, nil, RetryPolicy{MaxRetries: 5, BaseDelay: time.Hour})
-    if maxRetryDelay != capped.retryDelay(100) {
-        t.Fatalf("expected the linear delay to be capped at %v, got %v", maxRetryDelay, capped.retryDelay(100))
+    if defaultMaxRetryDelay != capped.retryDelay(100) {
+        t.Fatalf("expected the linear delay to be capped at %v, got %v", defaultMaxRetryDelay, capped.retryDelay(100))
     }
 
     huge := NewConsumeCommandWithRetry(nil, nil, RetryPolicy{MaxRetries: 5, BaseDelay: time.Duration(1) << 60})
     delay := huge.retryDelay(64)
-    if 0 > delay || delay > maxRetryDelay {
+    if 0 > delay || delay > defaultMaxRetryDelay {
         t.Fatalf("expected a non-negative, capped delay, got %v", delay)
     }
 
@@ -276,5 +276,21 @@ func TestFailureRequeueDelay_NeverZero(t *testing.T) {
     withBase := NewConsumeCommandWithRetry(nil, nil, RetryPolicy{MaxRetries: 2, BaseDelay: time.Second})
     if 0 >= withBase.failureRequeueDelay() {
         t.Fatalf("expected a positive failure backoff, got %v", withBase.failureRequeueDelay())
+    }
+}
+
+func TestRetryDelay_MaxDelayOverride(t *testing.T) {
+    command := NewConsumeCommandWithRetry(nil, nil, RetryPolicy{MaxRetries: 5, BaseDelay: time.Hour, MaxDelay: 10 * time.Minute})
+
+    if 10*time.Minute != command.retryDelay(100) {
+        t.Fatalf("expected the delay to be capped at the overridden MaxDelay 10m, got %v", command.retryDelay(100))
+    }
+}
+
+func TestFailureRequeueDelay_Override(t *testing.T) {
+    command := NewConsumeCommandWithRetry(nil, nil, RetryPolicy{MaxRetries: 3, FailureRequeueDelay: 7 * time.Second})
+
+    if 7*time.Second != command.failureRequeueDelay() {
+        t.Fatalf("expected the overridden failure requeue delay 7s, got %v", command.failureRequeueDelay())
     }
 }

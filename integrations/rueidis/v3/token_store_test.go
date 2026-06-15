@@ -256,3 +256,30 @@ func TestTokenStoreKeysShareHashTagForClusterColocation(t *testing.T) {
         )
     }
 }
+
+func TestWithTokenStoreScanCount_SetsField(t *testing.T) {
+    store := &RedisTokenStore{}
+    WithTokenStoreScanCount(512)(store)
+
+    if 512 != store.scanCount {
+        t.Fatalf("expected scan count 512, got %d", store.scanCount)
+    }
+}
+
+func TestNewTokenStore_DefaultScanCount(t *testing.T) {
+    client := newTokenStoreClient(t)
+    store := NewTokenStore(client)
+
+    if defaultTokenStoreScanCount != store.scanCount {
+        t.Fatalf("expected default scan count %d, got %d", defaultTokenStoreScanCount, store.scanCount)
+    }
+}
+
+func TestNewTokenStore_ScanCountOverride(t *testing.T) {
+    client := newTokenStoreClient(t)
+    store := NewTokenStore(client, WithTokenStoreScanCount(512))
+
+    if 512 != store.scanCount {
+        t.Fatalf("expected overridden scan count 512, got %d", store.scanCount)
+    }
+}

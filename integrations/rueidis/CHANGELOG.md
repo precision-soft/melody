@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `v3/reconnect_config.go` — `ReconnectConfig` (`InitialBackoff`, `MaxBackoff`, `BackoffFactor`) with `DefaultReconnectConfig()` (the former hardcoded 1s / 30s / ×2) and `NewReconnectConfig(...)`. The Server-Sent Events backplane resubscribe backoff was previously fixed package constants; it is now configurable via the new `WithServerSentEventBackplaneReconnectConfig(*ReconnectConfig)` option, with zero fields inheriting the defaults so existing behaviour is unchanged.
+- `v3/token_store.go` — `WithTokenStoreScanCount(int)` option exposes the `PurgeExpired` SCAN cursor batch size (previously a hardcoded `256`); zero keeps the default.
+
+### Changed
+
+- `v3/cache/backend.go`, `v3/cache/backend_service.go` — `NewBackend(...)` and `NewBackendService(...)` take an additional trailing `maxKeyLength int` parameter so the cache-key length guard (previously a hardcoded `1024`) is tunable; zero keeps the default. **Breaking** for direct callers of these constructors — pass `0` to preserve the previous limit. `cache.RegisterBackendService` is unaffected.
+
 ## [v3.2.0] - 2026-06-15 - Redis Lock, Revocable Token Store, and Server-Sent Events Backplane
 
 ### Added

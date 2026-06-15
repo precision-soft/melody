@@ -378,9 +378,11 @@ func TestNextBackoff_GrowsAndCaps(t *testing.T) {
         30 * time.Second,
     }
 
-    current := reconnectInitialBackoff
+    instance := &Transport{reconnect: resolveReconnectConfig(nil, nil)}
+
+    current := instance.reconnect.InitialBackoff
     for index, want := range expected {
-        current = nextBackoff(current)
+        current = instance.nextBackoff(current)
         if want != current {
             t.Fatalf("step %d: expected %s, got %s", index, want, current)
         }

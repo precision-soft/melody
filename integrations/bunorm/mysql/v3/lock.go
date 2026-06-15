@@ -12,32 +12,54 @@ import (
     "github.com/uptrace/bun"
 )
 
-const lockReleaseTimeout = 5 * time.Second
+const defaultLockReleaseTimeout = 5 * time.Second
 
-func NewLocker(database *bun.DB) *Locker {
+func NewLocker(database *bun.DB, options ...LockerOption) *Locker {
     if nil == database {
         exception.Panic(exception.NewError("mysql lock database is nil", nil, nil))
     }
 
-    return &Locker{
-        database: database,
+    locker := &Locker{
+        database:       database,
+        releaseTimeout: defaultLockReleaseTimeout,
+    }
+
+    for _, option := range options {
+        option(locker)
+    }
+
+    if 0 >= locker.releaseTimeout {
+        locker.releaseTimeout = defaultLockReleaseTimeout
+    }
+
+    return locker
+}
+
+type LockerOption func(*Locker)
+
+func WithLockReleaseTimeout(releaseTimeout time.Duration) LockerOption {
+    return func(locker *Locker) {
+        locker.releaseTimeout = releaseTimeout
     }
 }
 
 type Locker struct {
-    database *bun.DB
+    database       *bun.DB
+    releaseTimeout time.Duration
 }
 
 func (instance *Locker) CreateLock(name string, ttl time.Duration) lockcontract.Lock {
     return &mysqlLock{
-        database: instance.database,
-        name:     name,
+        database:       instance.database,
+        name:           name,
+        releaseTimeout: instance.releaseTimeout,
     }
 }
 
 type mysqlLock struct {
-    database *bun.DB
-    name     string
+    database       *bun.DB
+    name           string
+    releaseTimeout time.Duration
 
     mutex      sync.Mutex
     connection *sql.Conn
@@ -69,7 +91,7 @@ func (instance *mysqlLock) Acquire(runtimeInstance runtimecontract.Runtime) (boo
     var acquired sql.NullInt64
     queryErr := connection.QueryRowContext(runtimeInstance.Context(), "SELECT GET_LOCK(?, 0)", instance.name).Scan(&acquired)
     if nil != queryErr {
-        releaseOrphanedLock(connection, instance.name)
+        releaseOrphanedLock(connection, instance.name, instance.releaseTimeout)
         connection.Close()
         return false, exception.NewError("mysql lock acquire failed", map[string]any{"name": instance.name}, queryErr)
     }
@@ -93,7 +115,7 @@ func (instance *mysqlLock) Release(runtimeInstance runtimecontract.Runtime) erro
     }
 
     /** @important release on a fresh context so a canceled request context cannot leave the GET_LOCK held on the connection returned to the pool, mirroring releaseAndCloseConnection/releaseOrphanedLock */
-    releaseCtx, cancel := context.WithTimeout(context.Background(), lockReleaseTimeout)
+    releaseCtx, cancel := context.WithTimeout(context.Background(), instance.releaseTimeout)
     defer cancel()
 
     _, execErr := instance.connection.ExecContext(releaseCtx, "DO RELEASE_LOCK(?)", instance.name)
@@ -112,8 +134,8 @@ func (instance *mysqlLock) Release(runtimeInstance runtimecontract.Runtime) erro
 }
 
 /** @important best-effort release for the acquire error path: GET_LOCK may have taken the lock server-side before Scan failed (for example on context cancellation), so release on a fresh context before the connection returns to the pool */
-func releaseOrphanedLock(connection *sql.Conn, name string) {
-    releaseCtx, cancel := context.WithTimeout(context.Background(), lockReleaseTimeout)
+func releaseOrphanedLock(connection *sql.Conn, name string, releaseTimeout time.Duration) {
+    releaseCtx, cancel := context.WithTimeout(context.Background(), releaseTimeout)
     defer cancel()
 
     _, _ = connection.ExecContext(releaseCtx, "DO RELEASE_LOCK(?)", name)
@@ -148,7 +170,7 @@ func (instance *mysqlLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl 
 }
 
 func (instance *mysqlLock) releaseAndCloseConnection() {
-    releaseCtx, cancel := context.WithTimeout(context.Background(), lockReleaseTimeout)
+    releaseCtx, cancel := context.WithTimeout(context.Background(), instance.releaseTimeout)
     defer cancel()
 
     _, _ = instance.connection.ExecContext(releaseCtx, "DO RELEASE_LOCK(?)", instance.name)

@@ -25,8 +25,23 @@ func WithHeartbeat(heartbeat time.Duration) ProviderOption {
     }
 }
 
+func WithReconnectConfig(reconnectConfig *ReconnectConfig) ProviderOption {
+    return func(provider *Provider) {
+        provider.reconnectConfig = reconnectConfig
+    }
+}
+
 type Provider struct {
-    heartbeat time.Duration
+    heartbeat       time.Duration
+    reconnectConfig *ReconnectConfig
+}
+
+func (instance *Provider) NewTransport(config TransportConfig) *Transport {
+    return newTransport(config, instance.reconnectConfig)
+}
+
+func (instance *Provider) NewServerSentEventBackplane(config ServerSentEventBackplaneConfig) *ServerSentEventBackplane {
+    return newServerSentEventBackplane(config, instance.reconnectConfig)
 }
 
 func (instance *Provider) Open(dsn string) (*amqp091.Connection, error) {

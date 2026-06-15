@@ -24,6 +24,7 @@ func NewBackend(
     prefix string,
     scanCount int,
     deleteBatch int,
+    maxKeyLength int,
 ) (*Backend, error) {
     if nil == client {
         return nil, exception.NewError(
@@ -52,21 +53,28 @@ func NewBackend(
         normalizedDeleteBatch = rueidisBackendDefaultDeleteBatch
     }
 
+    normalizedMaxKeyLength := maxKeyLength
+    if 0 >= normalizedMaxKeyLength {
+        normalizedMaxKeyLength = rueidisBackendDefaultMaxKeyLength
+    }
+
     return &Backend{
-        client:      client,
-        ctx:         ctx,
-        prefix:      normalizedPrefix,
-        scanCount:   normalizedScanCount,
-        deleteBatch: normalizedDeleteBatch,
+        client:       client,
+        ctx:          ctx,
+        prefix:       normalizedPrefix,
+        scanCount:    normalizedScanCount,
+        deleteBatch:  normalizedDeleteBatch,
+        maxKeyLength: normalizedMaxKeyLength,
     }, nil
 }
 
 type Backend struct {
-    client      rueidis.Client
-    ctx         context.Context
-    prefix      string
-    scanCount   int
-    deleteBatch int
+    client       rueidis.Client
+    ctx          context.Context
+    prefix       string
+    scanCount    int
+    deleteBatch  int
+    maxKeyLength int
 }
 
 func (instance *Backend) GetCtx(ctx context.Context, key string) ([]byte, bool, error) {
@@ -423,11 +431,11 @@ func (instance *Backend) normalizeKey(key string) (string, error) {
         )
     }
 
-    if rueidisBackendDefaultMaxKeyLength < len(key) {
+    if instance.maxKeyLength < len(key) {
         return "", exception.NewError(
             "cache key is too long",
             exceptioncontract.Context{
-                "maxKeyLength": rueidisBackendDefaultMaxKeyLength,
+                "maxKeyLength": instance.maxKeyLength,
                 "keyLength":    len(key),
             },
             nil,

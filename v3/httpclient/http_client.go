@@ -45,15 +45,17 @@ func NewHttpClient(config *HttpClientConfig) *HttpClient {
         headers = make(map[string]string)
     }
 
+    transportConfig := resolveTransportConfig(config.Transport())
+
     transport := &nethttp.Transport{
         Proxy:                 nethttp.ProxyFromEnvironment,
-        DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+        DialContext:           (&net.Dialer{Timeout: transportConfig.DialTimeout, KeepAlive: transportConfig.KeepAlive}).DialContext,
         ForceAttemptHTTP2:     true,
-        MaxIdleConns:          100,
-        IdleConnTimeout:       90 * time.Second,
-        TLSHandshakeTimeout:   10 * time.Second,
-        ExpectContinueTimeout: 1 * time.Second,
-        ResponseHeaderTimeout: 15 * time.Second,
+        MaxIdleConns:          transportConfig.MaxIdleConns,
+        IdleConnTimeout:       transportConfig.IdleConnTimeout,
+        TLSHandshakeTimeout:   transportConfig.TlsHandshakeTimeout,
+        ExpectContinueTimeout: transportConfig.ExpectContinueTimeout,
+        ResponseHeaderTimeout: transportConfig.ResponseHeaderTimeout,
     }
 
     return &HttpClient{

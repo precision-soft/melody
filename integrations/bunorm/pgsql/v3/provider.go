@@ -59,7 +59,7 @@ func (instance *Provider) openWithRetry(params bunorm.ConnectionParams, logger l
     attempt := uint32(0)
     maxAttempts := instance.retryConfig.MaxAttempts
     if 0 == maxAttempts {
-        maxAttempts = 3
+        maxAttempts = DefaultRetryConfig().MaxAttempts
     }
 
     for {
@@ -202,19 +202,21 @@ func (instance *Provider) open(params bunorm.ConnectionParams) (*bun.DB, error) 
 }
 
 func (instance *Provider) computeBackoffDelay(attempt uint32) time.Duration {
+    defaults := DefaultRetryConfig()
+
     initialDelay := instance.retryConfig.InitialDelay
     if 0 == initialDelay {
-        initialDelay = 500 * time.Millisecond
+        initialDelay = defaults.InitialDelay
     }
 
     maxDelay := instance.retryConfig.MaxDelay
     if 0 == maxDelay {
-        maxDelay = 5 * time.Second
+        maxDelay = defaults.MaxDelay
     }
 
     backoffMultiplier := instance.retryConfig.BackoffMultiplier
     if 0.0 == backoffMultiplier {
-        backoffMultiplier = 2.0
+        backoffMultiplier = defaults.BackoffMultiplier
     }
 
     multiplier := 1.0
