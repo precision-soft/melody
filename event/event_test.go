@@ -16,7 +16,7 @@ import (
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
-/** @info shared test helpers */
+/* @info shared test helpers */
 
 func testNewEventDispatcher() (*EventDispatcher, clockcontract.Clock) {
     clockInstance := clock.NewSystemClock()
@@ -42,7 +42,7 @@ func newEventDispatcherAdapterTestRuntime(t *testing.T) runtimecontract.Runtime 
     return runtime.New(context.Background(), scope, serviceContainer)
 }
 
-/** @info event */
+/* @info event */
 
 func TestEvent_StopPropagation(t *testing.T) {
     eventInstance := NewEvent("e", nil, clock.NewSystemClock())

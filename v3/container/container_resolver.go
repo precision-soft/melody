@@ -219,7 +219,7 @@ func (instance *container) serviceWithCreationGuardLocked(
         )
     }
 
-    /** @important a value created while Close() ran would be stored after the close snapshot and leak un-closed; close it best-effort instead of storing it and fail the resolution. */
+    /* @important a value created while Close() ran would be stored after the close snapshot and leak un-closed; close it best-effort instead of storing it and fail the resolution. */
     if nil == err && true == instance.isClosed {
         instance.mutex.Unlock()
         closeValueAfterContainerClose(createdValue)

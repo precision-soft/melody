@@ -199,7 +199,7 @@ func TestValidator_GreaterThan_RejectsZeroFloat(t *testing.T) {
     _ = requireValidationErrors(t, err)
 }
 
-/** @info nan rejection */
+/* @info nan rejection */
 
 func TestGreaterThan_RejectsNaN(t *testing.T) {
     constraint := NewGreaterThan(0)

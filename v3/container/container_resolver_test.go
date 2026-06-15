@@ -7,7 +7,7 @@ import (
     containercontract "github.com/precision-soft/melody/v3/container/contract"
 )
 
-/** @info closed-container resolution */
+/* @info closed-container resolution */
 
 type closedGuardCloser struct {
     mutex  sync.Mutex

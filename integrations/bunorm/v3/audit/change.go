@@ -252,7 +252,7 @@ func valueContainsRedactTagReflect(value reflect.Value, seen map[uintptr]struct{
 
     switch value.Kind() {
     case reflect.Slice:
-        /** @important guard self-referential slices reached through an interface element (slice -> any -> same slice), which carry no pointer node for the deref loop to catch and would otherwise recurse until the stack overflows. */
+        /* @important guard self-referential slices reached through an interface element (slice -> any -> same slice), which carry no pointer node for the deref loop to catch and would otherwise recurse until the stack overflows. */
         pointer := value.Pointer()
         if 0 != pointer {
             if _, visited := seen[pointer]; true == visited {

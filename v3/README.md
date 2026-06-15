@@ -4,6 +4,69 @@ Melody is a Go framework focused on building **HTTP applications and CLI command
 
 The repository also contains a complete userland showcase under [`./.example/`](./.example/).
 
+> **v3 is the stable, actively maintained version of Melody.** New features land here; v1 and v2 receive
+> fixes only. See [Project status](#project-status).
+
+## Getting started
+
+Install the module:
+
+```bash
+go get github.com/precision-soft/melody/v3
+```
+
+A minimal HTTP application:
+
+```go
+package main
+
+import (
+    "context"
+    nethttp "net/http"
+
+    "github.com/precision-soft/melody/v3/application"
+    melodyhttp "github.com/precision-soft/melody/v3/http"
+    melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
+    melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
+)
+
+func main() {
+    app := application.NewApplication(context.Background(), nil, nil)
+
+    app.RegisterHttpRoute(
+        "GET",
+        "/health",
+        func(
+            runtimeInstance melodyruntimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request melodyhttpcontract.Request,
+        ) (melodyhttpcontract.Response, error) {
+            return melodyhttp.NewResponse(nethttp.StatusOK, []byte(`{"status":"ok"}`)), nil
+        },
+    )
+
+    app.Run()
+}
+```
+
+Run it, then call the endpoint (the HTTP server listens on `:8080` by default):
+
+```bash
+go run .
+curl http://localhost:8080/health
+# {"status":"ok"}
+```
+
+For a realistic, fully wired application — modules, services, security, sessions, events, CLI commands, and
+every platform integration — see [`.example/README.md`](./.example/README.md).
+
+## Project status
+
+v3 is the actively maintained version. All new features land on v3; v1 and v2 are in maintenance mode and
+receive security and critical correctness fixes only. Within v3, APIs that need to change are first marked
+with a `/* Deprecated: ... */` doc comment and kept working, with a future v4 cut once enough breaking changes accumulate. See the
+repository [`README.md`](../README.md#versions--project-status) and [`CONTRIBUTING.md`](../CONTRIBUTING.md).
+
 ## Why Melody
 
 Melody is designed for teams that want:
@@ -21,6 +84,27 @@ At a high level, a Melody application is assembled as follows:
 - **HTTP** ([code](./http/)) uses the runtime + container scopes to run middleware and dispatch handlers.
 - **CLI** ([code](./cli/)) runs commands inside the same runtime/container infrastructure.
 - Cross-cutting packages are wired as services: [logging](./logging/), [event](./event/), [validation](./validation/), [cache](./cache/), [session](./session/), [security](./security/).
+
+The HTTP and CLI entrypoints share the same runtime and container; boot wiring happens once, then each
+request or command runs in its own scope:
+
+```
+  Application                  boot order:
+  modules · services · config  modules (pre-config) -> config resolve -> modules (post-config)
+        |                                            -> container -> CLI -> HTTP
+        | wires
+        v
+  Kernel
+  container · config · clock · event dispatcher · http router
+        |
+        | creates a scope per request / command
+        v
+  Runtime  -----------------------------+
+        |                               |
+        v                               v
+  HTTP entry                      CLI entry
+  middleware -> handler           command execution
+```
 
 ## Extensibility
 

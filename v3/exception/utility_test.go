@@ -8,7 +8,7 @@ import (
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
-/** @info FromError */
+/* @info FromError */
 
 func TestFromError_ReturnsNilOnNil(t *testing.T) {
     if nil != FromError(nil) {
@@ -45,7 +45,7 @@ func TestFromError_WrapsNonExceptionError(t *testing.T) {
     }
 }
 
-/** @info BuildCauseChain / BuildCauseContextChain / LogContext */
+/* @info BuildCauseChain / BuildCauseContextChain / LogContext */
 
 func TestBuildCauseChain_NilReturnsNil(t *testing.T) {
     chain := BuildCauseChain(nil, 8)

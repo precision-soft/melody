@@ -158,7 +158,7 @@ func TestParseValidationTag_UnbalancedParensStillRejected(t *testing.T) {
     }
 }
 
-/** @info parenthesized regex comma-in-group */
+/* @info parenthesized regex comma-in-group */
 
 func TestParseValidationTag_ParenthesizedRegexWithCommaInsideGroup(t *testing.T) {
     pattern := `^(\d{1,3},){3}\d{1,3}$`

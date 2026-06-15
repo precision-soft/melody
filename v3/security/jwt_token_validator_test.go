@@ -295,7 +295,7 @@ func TestJwtTokenValidator_FutureIssuedAtRejectedWhenConfigured(t *testing.T) {
     }
 }
 
-/** @info algorithm and leeway */
+/* @info algorithm and leeway */
 
 func TestJwtTokenValidator_RejectsNoneAlgorithm(t *testing.T) {
     secret := []byte("super-secret-value")

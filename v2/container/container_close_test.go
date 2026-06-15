@@ -325,7 +325,7 @@ func TestContainer_Close_ClosesDiamondDependencyInDeterministicOrder(t *testing.
     }
 }
 
-/** @info named-depends-by-type on type-registered service */
+/* @info named-depends-by-type on type-registered service */
 
 func TestContainer_Close_ClosesDependentsBeforeDependencies_NamedServiceDependsByTypeOnTypeRegisteredService(t *testing.T) {
     serviceContainer := NewContainer()
@@ -388,7 +388,7 @@ func TestContainer_Close_ClosesDependentsBeforeDependencies_NamedServiceDependsB
     }
 }
 
-/** @info value-type service single close */
+/* @info value-type service single close */
 
 type valueCloser struct {
     counter *int
@@ -433,7 +433,7 @@ func TestContainer_Close_ValueTypeServiceClosedOnce(t *testing.T) {
     }
 }
 
-/** @info value-type service with unhashable/non-comparable content */
+/* @info value-type service with unhashable/non-comparable content */
 
 type cr40UnhashableValueCloser struct {
     counter *int

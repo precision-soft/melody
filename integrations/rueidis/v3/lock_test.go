@@ -126,7 +126,7 @@ func TestRedisLock_ReacquireIsReentrantForSameLock(t *testing.T) {
     }
 }
 
-/** @info floorPositiveMilliseconds */
+/* @info floorPositiveMilliseconds */
 
 func TestFloorPositiveMilliseconds_FloorsSubMillisecondToOne(t *testing.T) {
     cases := []struct {

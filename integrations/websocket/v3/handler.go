@@ -101,7 +101,7 @@ func readLoop(
     }
 }
 
-/** @important the read goroutine runs outside the kernel's panic recovery, so a panic in the user OnMessage callback would crash the whole process; recover it, log it, and signal the connection to close. */
+/* @important the read goroutine runs outside the kernel's panic recovery, so a panic in the user OnMessage callback would crash the whole process; recover it, log it, and signal the connection to close. */
 func dispatchOnMessage(
     runtimeInstance runtimecontract.Runtime,
     options Options,

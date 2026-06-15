@@ -96,7 +96,7 @@ func TestBearerTokenSource_RejectsEmptySubjectOpaqueToken(t *testing.T) {
     }
 }
 
-/** @info enricher */
+/* @info enricher */
 
 type scopeRoleEnricher struct{}
 

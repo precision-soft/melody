@@ -45,7 +45,7 @@ func TestToken_DelegatesToUnderlyingToken(t *testing.T) {
     }
 }
 
-/** @info scope and attribute defensive copy */
+/* @info scope and attribute defensive copy */
 
 type sharedMapToken struct {
     scope      map[string]any

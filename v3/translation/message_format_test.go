@@ -19,7 +19,7 @@ func TestInterpolate_PoundStaysBoundThroughNestedSelect(t *testing.T) {
     }
 }
 
-/** @info numeric */
+/* @info numeric */
 
 func TestEvaluatePlural_PoundFloat32MatchesPlaceholder(t *testing.T) {
     pattern := "{value, plural, other {# km}}"

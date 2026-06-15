@@ -325,7 +325,7 @@ func TestContainer_Close_ClosesDiamondDependencyInDeterministicOrder(t *testing.
     }
 }
 
-/** @info value-type close */
+/* @info value-type close */
 
 type valueCloser struct {
     counter *int

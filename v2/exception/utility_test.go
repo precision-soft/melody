@@ -224,7 +224,7 @@ func TestLogContext_PlainError_SetsErrorField(t *testing.T) {
     }
 }
 
-/** @info FromError */
+/* @info FromError */
 
 func TestFromError_ReturnsNilOnNil(t *testing.T) {
     if nil != FromError(nil) {

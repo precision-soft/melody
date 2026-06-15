@@ -146,7 +146,7 @@ func buildApplication(embeddedPublicFiles fs.FS, embeddedConfigFiles fs.FS) *app
 
 	app.RegisterModule(&demoModule{})
 
-	/**
+	/*
 	 * Backwards compatible: direct registration is still available
 	 * (RegisterParameter/RegisterService/RegisterHttpRoute/etc.).
 	 */

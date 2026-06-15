@@ -353,7 +353,7 @@ func TestFileStorage_ConcurrentLoadSaveIsRaceFree(t *testing.T) {
     waitGroup.Wait()
 }
 
-/** @info copyAnyMap */
+/* @info copyAnyMap */
 
 func TestCopyAnyMap_DeepCopiesSlicesOfMaps(t *testing.T) {
     nested := map[string]any{"role": "admin"}

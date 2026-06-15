@@ -29,7 +29,7 @@ func (instance *container) Close() error {
         return existingErr
     }
 
-    /** @important mark closed while still holding the lock so a concurrent Close() returns at the guard above instead of snapshotting the same services and closing every one of them twice. */
+    /* @important mark closed while still holding the lock so a concurrent Close() returns at the guard above instead of snapshotting the same services and closing every one of them twice. */
     instance.isClosed = true
 
     typeStringToType := make(map[string]reflect.Type, len(instance.typeInstances))
@@ -78,7 +78,7 @@ func (instance *container) Close() error {
         return nil, false
     }
 
-    /** @important the same instance can be created under several node keys (a named service that also registers its type lives under both "service:<name>" and "type:<T>"); collapse those aliases onto one representative so a dependency edge recorded against any alias constrains the close order of the shared instance and it is closed exactly once in dependent-before-dependency order. The "type:<T>" node is collapsed onto its backing "service:<name>" structurally (via typeRegistrationNamesByType), which is correct even for a value-type service whose dynamic contents are not hashable; pointer/value identity then groups any remaining same-instance aliases */
+    /* @important the same instance can be created under several node keys (a named service that also registers its type lives under both "service:<name>" and "type:<T>"); collapse those aliases onto one representative so a dependency edge recorded against any alias constrains the close order of the shared instance and it is closed exactly once in dependent-before-dependency order. The "type:<T>" node is collapsed onto its backing "service:<name>" structurally (via typeRegistrationNamesByType), which is correct even for a value-type service whose dynamic contents are not hashable; pointer/value identity then groups any remaining same-instance aliases */
     valueOfNodeKey := make(map[string]any, len(createdNodeKeys))
     representativeOf := make(map[string]string, len(createdNodeKeys))
     pointerRepresentative := make(map[uintptr]string, len(createdNodeKeys))

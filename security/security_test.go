@@ -26,7 +26,7 @@ import (
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
-/** @info request helpers */
+/* @info request helpers */
 
 type securityTestRequestContext struct {
     requestIdValue string
@@ -81,7 +81,7 @@ func newFirewallTestRequest(path string) httpcontract.Request {
     )
 }
 
-/** @info test scope */
+/* @info test scope */
 
 type testScope struct {
     mutex      sync.RWMutex
@@ -184,7 +184,7 @@ func (instance *testScope) Close() error {
 
 var _ containercontract.Scope = (*testScope)(nil)
 
-/** @info test kernel */
+/* @info test kernel */
 
 type testKernel struct {
     configuration    configcontract.Configuration
@@ -277,7 +277,7 @@ func registerTestKernelExceptionListener(kernelInstance *testKernel) {
     )
 }
 
-/** @info package-level interface assertions */
+/* @info package-level interface assertions */
 
 var _ bagcontract.ParameterBag = bag.NewParameterBag()
 var _ runtimecontract.Runtime = nil

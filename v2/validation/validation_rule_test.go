@@ -75,7 +75,7 @@ func TestHasBalancedBrackets_CharClassMembersAreLiteral(t *testing.T) {
     }
 }
 
-/** @info parenthesized regex with comma group */
+/* @info parenthesized regex with comma group */
 
 func TestParseValidationTagParenthesizedRegexWithCommaGroup(t *testing.T) {
     pattern := `^(\d{1,3},){3}\d{1,3}$`

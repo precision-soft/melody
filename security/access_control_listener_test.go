@@ -364,7 +364,7 @@ func TestAccessControlListener_WhenDecisionDenied_EmitsAuthorizationDeniedAndSet
     }
 }
 
-/** @info matchAccessControlRule */
+/* @info matchAccessControlRule */
 
 func TestMatchAccessControlRule_SetsMetadataCorrectly(t *testing.T) {
     control := NewAccessControl(

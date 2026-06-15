@@ -38,7 +38,7 @@ func (instance *LocalStorage) Put(
         return keyErr
     }
 
-    /** @important the base directory is created lazily on first write; os.OpenRoot then pins it so every key operation is confined to it, with each path component checked against symlink escape */
+    /* @important the base directory is created lazily on first write; os.OpenRoot then pins it so every key operation is confined to it, with each path component checked against symlink escape */
     if mkdirErr := os.MkdirAll(instance.baseDirectory, 0o750); nil != mkdirErr {
         return exception.NewError("could not create the storage directory", map[string]any{"key": key}, mkdirErr)
     }
@@ -155,7 +155,7 @@ func (instance *LocalStorage) Exists(
     }
     defer root.Close()
 
-    /** @important Root.Stat cannot escape the base: a missing key reports absent, while a symlink pointing outside is rejected with an error that never leaks the external target (consistent with Get and Delete) */
+    /* @important Root.Stat cannot escape the base: a missing key reports absent, while a symlink pointing outside is rejected with an error that never leaks the external target (consistent with Get and Delete) */
     info, statErr := root.Stat(relativeKey)
     if nil == statErr {
         if true == info.IsDir() {

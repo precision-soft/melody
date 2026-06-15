@@ -26,7 +26,7 @@ func TestNormalizedMethod(t *testing.T) {
     }
 }
 
-/** @info middleware metrics */
+/* @info middleware metrics */
 
 func TestMetricsMiddleware_RecordsRequestMetrics(t *testing.T) {
     meter, registry, meterErr := NewPrometheusMeter("melody-test")

@@ -114,7 +114,7 @@ func (instance *mysqlLock) Release(runtimeInstance runtimecontract.Runtime) erro
         return nil
     }
 
-    /** @important release on a fresh context so a canceled request context cannot leave the GET_LOCK held on the connection returned to the pool, mirroring releaseAndCloseConnection/releaseOrphanedLock */
+    /* @important release on a fresh context so a canceled request context cannot leave the GET_LOCK held on the connection returned to the pool, mirroring releaseAndCloseConnection/releaseOrphanedLock */
     releaseCtx, cancel := context.WithTimeout(context.Background(), instance.releaseTimeout)
     defer cancel()
 
@@ -133,7 +133,7 @@ func (instance *mysqlLock) Release(runtimeInstance runtimecontract.Runtime) erro
     return nil
 }
 
-/** @important best-effort release for the acquire error path: GET_LOCK may have taken the lock server-side before Scan failed (for example on context cancellation), so release on a fresh context before the connection returns to the pool */
+/* @important best-effort release for the acquire error path: GET_LOCK may have taken the lock server-side before Scan failed (for example on context cancellation), so release on a fresh context before the connection returns to the pool */
 func releaseOrphanedLock(connection *sql.Conn, name string, releaseTimeout time.Duration) {
     releaseCtx, cancel := context.WithTimeout(context.Background(), releaseTimeout)
     defer cancel()

@@ -140,7 +140,7 @@ func collectStructFields(
     embeddedSeen := make(map[reflect.Type]bool)
     embeddedSeen[structType] = true
 
-    /** @info embedCount tracks how many equal-depth paths reach an embedded type, mirroring encoding/json: a type reached via N paths has its fields duplicated N times so a diamond annihilates in dominantEmbeddedField. */
+    /* @info embedCount tracks how many equal-depth paths reach an embedded type, mirroring encoding/json: a type reached via N paths has its fields duplicated N times so a diamond annihilates in dominantEmbeddedField. */
     embedCount := make(map[reflect.Type]int)
 
     ownCandidatesByName := make(map[string][]embeddedCandidate)
@@ -428,7 +428,7 @@ func applyValidation(schema *Schema, validateTag string) {
                         schema.MinLength = &value
                     }
                 } else {
-                    /** @important a value-less min constraint is enforced as minLength 1 by the validator, so the spec must advertise the same bound */
+                    /* @important a value-less min constraint is enforced as minLength 1 by the validator, so the spec must advertise the same bound */
                     defaultMinLength := 1
                     schema.MinLength = &defaultMinLength
                 }
@@ -441,7 +441,7 @@ func applyValidation(schema *Schema, validateTag string) {
                         schema.MaxLength = &value
                     }
                 } else {
-                    /** @important a value-less max constraint is enforced as maxLength 100 by the validator, so the spec must advertise the same bound */
+                    /* @important a value-less max constraint is enforced as maxLength 100 by the validator, so the spec must advertise the same bound */
                     defaultMaxLength := 100
                     schema.MaxLength = &defaultMaxLength
                 }
@@ -452,7 +452,7 @@ func applyValidation(schema *Schema, validateTag string) {
             }
         case "greaterThan":
             if "integer" == schema.Type || "number" == schema.Type {
-                /** @important the validator rejects a null pointer for greaterThan/lessThan, so the spec must not advertise the field as nullable */
+                /* @important the validator rejects a null pointer for greaterThan/lessThan, so the spec must not advertise the field as nullable */
                 schema.Nullable = false
                 exclusive := true
                 if valueString, exists := params["value"]; true == exists {
@@ -462,7 +462,7 @@ func applyValidation(schema *Schema, validateTag string) {
                         schema.ExclusiveMinimum = &exclusive
                     }
                 } else {
-                    /** @important a value-less greaterThan constraint is enforced as > 0 by the validator, so the spec must advertise the same bound */
+                    /* @important a value-less greaterThan constraint is enforced as > 0 by the validator, so the spec must advertise the same bound */
                     value := float64(0)
                     schema.Minimum = &value
                     schema.ExclusiveMinimum = &exclusive
@@ -470,7 +470,7 @@ func applyValidation(schema *Schema, validateTag string) {
             }
         case "lessThan":
             if "integer" == schema.Type || "number" == schema.Type {
-                /** @important the validator rejects a null pointer for greaterThan/lessThan, so the spec must not advertise the field as nullable */
+                /* @important the validator rejects a null pointer for greaterThan/lessThan, so the spec must not advertise the field as nullable */
                 schema.Nullable = false
                 exclusive := true
                 if valueString, exists := params["value"]; true == exists {
@@ -480,7 +480,7 @@ func applyValidation(schema *Schema, validateTag string) {
                         schema.ExclusiveMaximum = &exclusive
                     }
                 } else {
-                    /** @important a value-less lessThan constraint is enforced as < 0 by the validator, so the spec must advertise the same bound */
+                    /* @important a value-less lessThan constraint is enforced as < 0 by the validator, so the spec must advertise the same bound */
                     value := float64(0)
                     schema.Maximum = &value
                     schema.ExclusiveMaximum = &exclusive
@@ -507,7 +507,7 @@ func splitRules(validateTag string) []string {
     return splitTopLevelRules(trimmed)
 }
 
-/** @important tracks whether the scan is inside a regex character class [...] so the bracket/comma bookkeeping treats ')', ']', '}', '(', '{' and ',' as literal class members. A ']' is a literal (not a close) when it is the class's first content character — and the leading negation '^' does not count as content — mirroring regexp/syntax. */
+/* @important tracks whether the scan is inside a regex character class [...] so the bracket/comma bookkeeping treats ')', ']', '}', '(', '{' and ',' as literal class members. A ']' is a literal (not a close) when it is the class's first content character — and the leading negation '^' does not count as content — mirroring regexp/syntax. */
 type charClassScanner struct {
     inClass      bool
     contentSeen  bool

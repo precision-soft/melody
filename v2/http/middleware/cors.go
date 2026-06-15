@@ -5,7 +5,7 @@ import (
     "github.com/precision-soft/melody/v2/http/cors"
 )
 
-// Deprecated: use github.com/precision-soft/melody/v2/http/cors.Service instead.
+/* Deprecated: use github.com/precision-soft/melody/v2/http/cors.Service instead. */
 type CorsConfig struct {
     allowOrigins     []string
     allowMethods     []string
@@ -16,7 +16,7 @@ type CorsConfig struct {
     allowOriginFunc  func(origin string) bool
 }
 
-// Deprecated: use github.com/precision-soft/melody/v2/http/cors.NewService instead.
+/* Deprecated: use github.com/precision-soft/melody/v2/http/cors.NewService instead. */
 func NewCorsConfig(
     allowOrigins []string,
     allowMethods []string,
@@ -77,7 +77,7 @@ func (instance *CorsConfig) AllowOriginFunc() func(origin string) bool {
     return instance.allowOriginFunc
 }
 
-// Deprecated: use github.com/precision-soft/melody/v2/http/cors.DefaultService instead.
+/* Deprecated: use github.com/precision-soft/melody/v2/http/cors.DefaultService instead. */
 func DefaultCorsConfig() *CorsConfig {
     return NewCorsConfig(
         []string{"*"},
@@ -90,7 +90,7 @@ func DefaultCorsConfig() *CorsConfig {
     )
 }
 
-// Deprecated: use github.com/precision-soft/melody/v2/http/cors.RestrictiveService instead.
+/* Deprecated: use github.com/precision-soft/melody/v2/http/cors.RestrictiveService instead. */
 func RestrictiveCorsConfig(allowedOrigins []string) *CorsConfig {
     return NewCorsConfig(
         allowedOrigins,
@@ -103,7 +103,7 @@ func RestrictiveCorsConfig(allowedOrigins []string) *CorsConfig {
     )
 }
 
-// Deprecated: use github.com/precision-soft/melody/v2/http/cors.Middleware instead.
+/* Deprecated: use github.com/precision-soft/melody/v2/http/cors.Middleware instead. */
 func CorsMiddleware(config *CorsConfig) httpcontract.Middleware {
     service := cors.NewService(cors.Config{
         AllowOrigins:     config.allowOrigins,
@@ -118,12 +118,12 @@ func CorsMiddleware(config *CorsConfig) httpcontract.Middleware {
     return cors.Middleware(service)
 }
 
-// Deprecated: use github.com/precision-soft/melody/v2/http/cors.DefaultMiddleware instead.
+/* Deprecated: use github.com/precision-soft/melody/v2/http/cors.DefaultMiddleware instead. */
 func DefaultCorsMiddleware() httpcontract.Middleware {
     return cors.DefaultMiddleware()
 }
 
-// Deprecated: use github.com/precision-soft/melody/v2/http/cors.Restrictive instead.
+/* Deprecated: use github.com/precision-soft/melody/v2/http/cors.Restrictive instead. */
 func RestrictiveCors(allowedOrigins ...string) httpcontract.Middleware {
     return cors.Restrictive(allowedOrigins...)
 }

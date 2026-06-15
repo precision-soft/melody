@@ -9,7 +9,7 @@ import (
     "github.com/redis/rueidis"
 )
 
-/** @info backend close */
+/* @info backend close */
 
 type closeTrackingClient struct {
     rueidis.Client
@@ -37,7 +37,7 @@ func TestBackendCloseDoesNotCloseCallerOwnedClient(t *testing.T) {
     }
 }
 
-/** @info backend struct and method surface */
+/* @info backend struct and method surface */
 
 func reflectFieldNames(value any) []string {
     reflectedValue := reflect.ValueOf(value)
@@ -157,7 +157,7 @@ var (
     _ func(*Backend, string, int64) (int64, error)           = (*Backend).Decrement
 )
 
-/** @info floor positive expiry */
+/* @info floor positive expiry */
 
 func TestFloorPositiveExpiry(t *testing.T) {
     cases := []struct {
@@ -182,7 +182,7 @@ func TestFloorPositiveExpiry(t *testing.T) {
     }
 }
 
-/** @info escape redis glob meta */
+/* @info escape redis glob meta */
 
 func TestEscapeRedisGlobMeta(t *testing.T) {
     cases := []struct {

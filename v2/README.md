@@ -1,4 +1,8 @@
-# Melody
+# Melody (v2)
+
+> **v2 is in maintenance mode — it receives security and critical correctness fixes only.** New features
+> land on **v3**. For new projects use [`../v3/`](../v3/) and its [example](../v3/.example/). See the
+> repository [`README.md`](../README.md#versions--project-status) for the versioning rationale.
 
 Melody is a Go framework focused on building **HTTP applications and CLI commands** on top of the same runtime, container, configuration, logging, and validation infrastructure.
 

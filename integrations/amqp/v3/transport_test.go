@@ -79,7 +79,7 @@ func drainedToDeadLetter(t *testing.T, connection *amqp091.Connection, deadLette
     }
 }
 
-/** @info send/receive integration */
+/* @info send/receive integration */
 
 func TestTransport_SendReceiveAck(t *testing.T) {
     dsn := os.Getenv("AMQP_DSN")
@@ -366,7 +366,7 @@ func TestTransport_ReconnectsAfterConnectionDrop(t *testing.T) {
     }
 }
 
-/** @info reconnect and backoff */
+/* @info reconnect and backoff */
 
 func TestNextBackoff_GrowsAndCaps(t *testing.T) {
     expected := []time.Duration{
@@ -573,7 +573,7 @@ func TestConsumeLoop_ContextDoneClosesOut(t *testing.T) {
     }
 }
 
-/** @info close unblocks parked goroutines */
+/* @info close unblocks parked goroutines */
 
 func TestForwardDeliveries_CloseUnblocksGoroutineParkedOnOutput(t *testing.T) {
     registry := NewMessageRegistry()
@@ -659,7 +659,7 @@ func TestReopenConsume_CloseUnblocksGoroutineParkedOnBackoff(t *testing.T) {
     }
 }
 
-/** @info publisher confirms */
+/* @info publisher confirms */
 
 func TestTransport_SendSurfacesUnroutablePublishAfterQueueDelete(t *testing.T) {
     dsn := os.Getenv("AMQP_DSN")
@@ -713,7 +713,7 @@ func TestTransport_SendSurfacesUnroutablePublishAfterQueueDelete(t *testing.T) {
     }
 }
 
-/** @info channel reopen */
+/* @info channel reopen */
 
 func TestEnsurePublishChannel_ReopensClosedChannelWithoutDialer(t *testing.T) {
     dsn := os.Getenv("AMQP_DSN")
@@ -797,7 +797,7 @@ func TestEnsureConsumeChannel_ReopensClosedChannelWithoutDialer(t *testing.T) {
     }
 }
 
-/** @info delay expiration */
+/* @info delay expiration */
 
 func TestDelayExpirationMilliseconds_ClampsSubMillisecondToOne(t *testing.T) {
     if 1 != delayExpirationMilliseconds(200*time.Microsecond) {
@@ -813,7 +813,7 @@ func TestDelayExpirationMilliseconds_ClampsSubMillisecondToOne(t *testing.T) {
     }
 }
 
-/** @info redelivery header */
+/* @info redelivery header */
 
 func TestRedeliveryCountFromHeader(t *testing.T) {
     cases := []struct {
@@ -842,7 +842,7 @@ func TestRedeliveryCountFromHeader(t *testing.T) {
     }
 }
 
-/** @info message type name */
+/* @info message type name */
 
 func TestMessageTypeName_NilDoesNotPanic(t *testing.T) {
     if "<nil>" != messageTypeName(nil) {

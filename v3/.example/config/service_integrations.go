@@ -16,7 +16,7 @@ import (
 )
 
 func (instance *Module) registerStorageService(registrar melodyapplicationcontract.ServiceRegistrar) {
-    /** @info the S3 backend is registered by the awss3 module when configured (see configure.go); this is the local-disk fallback. */
+    /* @info the S3 backend is registered by the awss3 module when configured (see configure.go); this is the local-disk fallback. */
     if nil != instance.storageClient {
         return
     }

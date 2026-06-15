@@ -134,7 +134,7 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, transform fun
         var rows *sql.Rows
         var queryErr error
 
-        /** @important the first page must not be keyset-filtered: WHERE pk > '' coerces to pk > 0 on an integer key and would silently skip rows whose primary key is zero or negative. */
+        /* @important the first page must not be keyset-filtered: WHERE pk > '' coerces to pk > 0 on an integer key and would silently skip rows whose primary key is zero or negative. */
         if false == hasCursor {
             rows, queryErr = instance.db.DB.QueryContext(ctx, firstSelectSql, batchSize)
         } else {
@@ -209,7 +209,7 @@ func (instance *Migrator) applyRow(ctx context.Context, spec TableSpec, row migr
     arguments = append(arguments, row.primaryKey)
     arguments = append(arguments, valueArguments...)
 
-    /** @important guard each assignment on the value read for this row so a concurrent application write between the select and this update is not silently reverted; a row that changed under us matches zero rows and is re-encrypted on the next run. */
+    /* @important guard each assignment on the value read for this row so a concurrent application write between the select and this update is not silently reverted; a row that changed under us matches zero rows and is re-encrypted on the next run. */
     whereClause := quoteIdentifier(spec.PrimaryKey) + " = ?"
     for _, predicate := range valuePredicates {
         whereClause += " AND " + predicate

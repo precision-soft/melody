@@ -35,7 +35,7 @@ var reservedHeaders = map[string]struct{}{
     "content-disposition":       {},
 }
 
-/** @important RFC 2047 §5 forbids encoded-words inside the msg-id/addr tokens of these structured headers; Q-encoding them would corrupt the value and silently break mail threading, so they are emitted intact (still CRLF-stripped and folded by writeHeader) rather than routed through encodeHeaderText */
+/* @important RFC 2047 §5 forbids encoded-words inside the msg-id/addr tokens of these structured headers; Q-encoding them would corrupt the value and silently break mail threading, so they are emitted intact (still CRLF-stripped and folded by writeHeader) rather than routed through encodeHeaderText */
 var structuredIdentifierHeaders = map[string]struct{}{
     "message-id":  {},
     "in-reply-to": {},

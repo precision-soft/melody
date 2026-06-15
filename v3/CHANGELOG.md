@@ -158,6 +158,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `security/access_control.go` — an exact or anchored-regex access-control rule could be bypassed by appending extra trailing slashes to the request path. The router collapses **all** trailing slashes (`strings.TrimRight`), so `/admin//` routes to the `/admin` handler, but `matchRuleIndex` trimmed only **one** (`strings.TrimSuffix`), normalizing `/admin//` to `/admin/` — which an exact rule `/admin` (or a `^/admin$` regex) no longer matches. With no other matching rule the listener treated the request as unguarded and ran the protected handler anonymously. `matchRuleIndex` now collapses all trailing slashes like the router, so the two path views agree.
 
+### Documentation
+
+- `v3/README.md` — added a "Getting started" section (install, a minimal runnable HTTP application, and next steps) and a "Project status" section noting that v3 is the actively maintained version, that v1/v2 receive fixes only, and the deprecate-toward-v4 approach. The package list already covers the v3-only packages (`lock`, `mailer`, `messagebus`, `openapi`, `storage`, `translation`). Also added an ASCII architecture diagram (HTTP and CLI sharing the runtime and container, with the boot order).
+- `doc.go` — added a one-line package synopsis to every top-level v3 package (26 files) so each renders a summary on `pkg.go.dev`.
+- Comment style — `/** ... */` comments converted to `/* ... */` across the v3 `.go` files, and `// Deprecated:` markers to `/* Deprecated: ... */` (see the repository `CHANGELOG.md`). Comments-only change; no behavior change.
+
 ## [v3.6.0] - 2026-05-16 - Cron Integration, Decoupled Cron Configuration, and `.example` Flat Layout
 
 ### Added

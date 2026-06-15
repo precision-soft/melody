@@ -28,7 +28,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     router.HandleNamed("example.messagebus.demo", "POST", "/messagebus/demo", handler.MessageBusDemoHandler())
 
-    /** @info the example.metrics and example.websocket routes are contributed by the opentelemetry and websocket modules (see configure.go). */
+    /* @info the example.metrics and example.websocket routes are contributed by the opentelemetry and websocket modules (see configure.go). */
 
     router.HandleNamed("example.cache.demo", "GET", "/cache/demo", handler.CacheDemoHandler())
 

@@ -220,7 +220,7 @@ func TestRedisTokenStore_NewTokenStorePanicsOnNilClient(t *testing.T) {
 
 var _ securitycontract.RevocableTokenStore = (*RedisTokenStore)(nil)
 
-/** @info hash-tag cluster co-location */
+/* @info hash-tag cluster co-location */
 
 func hashTagOf(key string) string {
     start := strings.Index(key, "{")

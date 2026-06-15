@@ -171,7 +171,7 @@ func TestServerSentEventWriter_EmptyDataEmitsNoDataLine(t *testing.T) {
     }
 }
 
-/** @info server sent event id */
+/* @info server sent event id */
 
 func TestServerSentEventWriter_StripsNulFromId(t *testing.T) {
     recorder := httptest.NewRecorder()

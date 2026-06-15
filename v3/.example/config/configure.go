@@ -15,7 +15,7 @@ import (
 func Configure(app *melodyapplication.Application) {
     moduleInstance := NewExampleModule()
 
-    /** @info observability module first so its metrics middleware wraps outermost, ahead of the example timing middleware. */
+    /* @info observability module first so its metrics middleware wraps outermost, ahead of the example timing middleware. */
     app.RegisterModule(melodyopentelemetry.NewModule(melodyopentelemetry.ModuleConfig{
         Middlewares:      []melodyhttpcontract.Middleware{moduleInstance.metricsMiddleware},
         MetricsHandler:   moduleInstance.metricsHandler,
@@ -30,7 +30,7 @@ func Configure(app *melodyapplication.Application) {
         Cipher:   moduleInstance.cipher,
     }))
 
-    /** @info cron's Configuration is kernel-dependent (reads parameters), so it is supplied as a factory evaluated at command-registration time. */
+    /* @info cron's Configuration is kernel-dependent (reads parameters), so it is supplied as a factory evaluated at command-registration time. */
     app.RegisterModule(melodycron.NewModule(melodycron.ModuleConfig{
         ConfigurationFactory: newCronConfiguration,
     }))

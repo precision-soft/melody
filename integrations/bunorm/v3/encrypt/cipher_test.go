@@ -103,7 +103,7 @@ func TestCipher_EncryptIsIdempotentOnAlreadyEncrypted(t *testing.T) {
     }
 }
 
-/** @info marker-shaped plaintext */
+/* @info marker-shaped plaintext */
 
 func TestCipher_EncryptSealsMarkerShapedPlaintextInsteadOfStoringItRaw(t *testing.T) {
     provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
@@ -248,7 +248,7 @@ func TestMigrator_EncryptThenReencryptRoundTripValues(t *testing.T) {
     }
 }
 
-/** @info keyIdOf */
+/* @info keyIdOf */
 
 func TestKeyIdOf_ReportsKeyForEncryptedValue(t *testing.T) {
     provider := NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2)})

@@ -12,7 +12,7 @@ func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.
     return []melodyclicontract.Command{
         cli.NewAppInfoCommand(),
         cli.NewProductListCommand(),
-        /** @info the cron command is contributed by the cron module (see configure.go). */
+        /* @info the cron command is contributed by the cron module (see configure.go). */
         instance.messageBusConsumeCommand,
         cli.NewMessageBusDemoCommand(
             instance.messageBusDispatch,

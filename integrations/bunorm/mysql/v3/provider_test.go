@@ -35,7 +35,7 @@ func TestProviderOpenWithRetryAndNilLoggerDoesNotPanic(t *testing.T) {
     }
 }
 
-/** @info provider open zero connect timeout */
+/* @info provider open zero connect timeout */
 
 func TestProviderOpenWithZeroConnectTimeoutConnects(t *testing.T) {
     dsn := os.Getenv("MYSQL_DSN")

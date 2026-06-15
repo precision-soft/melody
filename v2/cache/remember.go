@@ -117,7 +117,7 @@ func rememberWithStampedeProtection(
 
     call, exists := shard.inFlightByKey[singleFlightKey]
 
-    /** @important a cancelable call whose waiters all timed out is already doomed to a cancellation error; a late joiner must not inherit that poison, so it replaces the entry and becomes a fresh leader. */
+    /* @important a cancelable call whose waiters all timed out is already doomed to a cancellation error; a late joiner must not inherit that poison, so it replaces the entry and becomes a fresh leader. */
     if true == exists && true == call.IsCanceled() {
         exists = false
     }

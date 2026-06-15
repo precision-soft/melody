@@ -203,7 +203,7 @@ func TestEventDispatcherAdapter_RemoveSubscriber_RemovesAllSubscriberListeners(t
     }
 }
 
-/** @info concurrent reader race */
+/* @info concurrent reader race */
 
 func TestEventDispatcherAdapter_RegisteredEventsIsSafeForConcurrentReaders(t *testing.T) {
     dispatcher, clockInstance := testNewEventDispatcher()

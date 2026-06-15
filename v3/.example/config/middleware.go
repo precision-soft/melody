@@ -12,7 +12,7 @@ import (
 )
 
 func (instance *Module) RegisterHttpMiddlewares(kernelInstance melodykernelcontract.Kernel, registrar melodyapplicationcontract.HttpMiddlewareRegistrar) {
-    /** @info the metrics middleware is contributed by the opentelemetry module (see configure.go); this module adds only the example-specific timing middleware. */
+    /* @info the metrics middleware is contributed by the opentelemetry module (see configure.go); this module adds only the example-specific timing middleware. */
     registrar.Use(NewTimingMiddleware())
 }
 

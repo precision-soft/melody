@@ -225,7 +225,7 @@ func TestInMemoryStorage_ConcurrentLoadSaveIsRaceFree(t *testing.T) {
     waitGroup.Wait()
 }
 
-/** @info nested deep-copy */
+/* @info nested deep-copy */
 
 func TestInMemoryStorage_LoadDeepCopiesNestedMaps(t *testing.T) {
     storage := NewInMemoryStorage()

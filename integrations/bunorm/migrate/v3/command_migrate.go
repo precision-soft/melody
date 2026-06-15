@@ -52,7 +52,7 @@ func (instance *MigrateCommand) Run(runtimeInstance runtimecontract.Runtime, com
         return migratorErr
     }
 
-    /** @important take the bun migration lock so two replicas running the migrate command during a rolling deploy cannot both compute the same pending set and double-apply a migration. */
+    /* @important take the bun migration lock so two replicas running the migrate command during a rolling deploy cannot both compute the same pending set and double-apply a migration. */
     if lockErr := migrator.Lock(runtimeInstance.Context()); nil != lockErr {
         outputInstance.printError(lockErr)
         return lockErr

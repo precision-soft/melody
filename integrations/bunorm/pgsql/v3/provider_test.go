@@ -8,7 +8,7 @@ import (
     "github.com/precision-soft/melody/integrations/bunorm/v3"
 )
 
-/** @info Open with retry and nil logger */
+/* @info Open with retry and nil logger */
 
 func TestProviderOpenWithRetryAndNilLoggerDoesNotPanic(t *testing.T) {
     provider := NewProvider(
@@ -36,7 +36,7 @@ func TestProviderOpenWithRetryAndNilLoggerDoesNotPanic(t *testing.T) {
     }
 }
 
-/** @info Open with zero connect timeout */
+/* @info Open with zero connect timeout */
 
 func TestProviderOpenWithZeroConnectTimeoutConnects(t *testing.T) {
     host := os.Getenv("PGSQL_HOST")

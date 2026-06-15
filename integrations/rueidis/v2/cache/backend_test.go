@@ -125,7 +125,7 @@ var (
     _ func(*Backend, string, int64) (int64, error)           = (*Backend).Decrement
 )
 
-/** @info escapeRedisGlobMeta */
+/* @info escapeRedisGlobMeta */
 
 func TestEscapeRedisGlobMeta(t *testing.T) {
     cases := []struct {

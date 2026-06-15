@@ -8,36 +8,36 @@ const (
 )
 
 const (
-    // Deprecated: use ConstraintAlphaErrorNotAlpha instead.
+    /* Deprecated: use ConstraintAlphaErrorNotAlpha instead. */
     ErrorNotAlpha = ConstraintAlphaErrorNotAlpha
 
-    // Deprecated: use ConstraintAlphanumericErrorNotAlphanumeric instead.
+    /* Deprecated: use ConstraintAlphanumericErrorNotAlphanumeric instead. */
     ErrorNotAlphanumeric = ConstraintAlphanumericErrorNotAlphanumeric
 
-    // Deprecated: use ConstraintEmailErrorInvalidEmail instead.
+    /* Deprecated: use ConstraintEmailErrorInvalidEmail instead. */
     ErrorInvalidEmail = ConstraintEmailErrorInvalidEmail
 
-    // Deprecated: use ConstraintMaxLength instead.
+    /* Deprecated: use ConstraintMaxLength instead. */
     ConstraintMax = ConstraintMaxLength
-    // Deprecated: use ConstraintMaxLengthErrorTooLong instead.
+    /* Deprecated: use ConstraintMaxLengthErrorTooLong instead. */
     ErrorMaxLength = ConstraintMaxLengthErrorTooLong
 
-    // Deprecated: use ConstraintMinLength instead.
+    /* Deprecated: use ConstraintMinLength instead. */
     ConstraintMin = ConstraintMinLength
-    // Deprecated: use ConstraintMinLengthErrorInsufficientLength instead.
+    /* Deprecated: use ConstraintMinLengthErrorInsufficientLength instead. */
     ErrorMinLength = ConstraintMinLengthErrorInsufficientLength
 
-    // Deprecated: use ConstraintNotBlankErrorIsBlank instead.
+    /* Deprecated: use ConstraintNotBlankErrorIsBlank instead. */
     ErrorNotBlank = ConstraintNotBlankErrorIsBlank
 
-    // Deprecated: use ConstraintNotEmptyErrorEmpty instead.
+    /* Deprecated: use ConstraintNotEmptyErrorEmpty instead. */
     ErrorEmpty = ConstraintNotEmptyErrorEmpty
 
-    // Deprecated: use ConstraintNumericErrorNotNumeric instead.
+    /* Deprecated: use ConstraintNumericErrorNotNumeric instead. */
     ErrorNotNumeric = ConstraintNumericErrorNotNumeric
 
-    // Deprecated: use ConstraintRegexErrorMismatch instead.
+    /* Deprecated: use ConstraintRegexErrorMismatch instead. */
     ErrorRegexMismatch = ConstraintRegexErrorMismatch
-    // Deprecated: use ConstraintRegexErrorInvalidPattern instead.
+    /* Deprecated: use ConstraintRegexErrorInvalidPattern instead. */
     ErrorInvalidPattern = ConstraintRegexErrorInvalidPattern
 )

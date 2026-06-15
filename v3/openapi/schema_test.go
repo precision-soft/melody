@@ -314,7 +314,7 @@ func TestBuildSchema_EmptyNameTagEmbeddedStructPromoted(t *testing.T) {
     }
 }
 
-/** @info nullable ref validation */
+/* @info nullable ref validation */
 
 type emailRefTarget struct {
     Value string `json:"value"`
@@ -350,7 +350,7 @@ func TestApplyValidation_EmailFormatNotLeakedOntoNullableRefWrapper(t *testing.T
     }
 }
 
-/** @info numeric bound */
+/* @info numeric bound */
 
 func TestApplyValidation_EmailFormatOnlyOnStringType(t *testing.T) {
     structType := reflect.StructOf([]reflect.StructField{
@@ -442,7 +442,7 @@ func TestApplyValidation_GreaterLessThanBoundMatchesValidatorIntegerTruncation(t
     }
 }
 
-/** @info bare and valued constraint defaults */
+/* @info bare and valued constraint defaults */
 
 func TestApplyValidation_BareStringConstraintsMirrorValidatorDefaults(t *testing.T) {
     minSchema := &Schema{Type: "string"}

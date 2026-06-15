@@ -188,7 +188,7 @@ func (instance *ServerSentEventBackplane) listen() {
         startedAt := time.Now()
         instance.forward(deliveries)
 
-        /** @important only reset the backoff when the subscription actually lived: a subscribe that succeeds but loses its channel immediately must keep backing off, otherwise it becomes a no-delay reconnect storm against the broker */
+        /* @important only reset the backoff when the subscription actually lived: a subscribe that succeeds but loses its channel immediately must keep backing off, otherwise it becomes a no-delay reconnect storm against the broker */
         if true == instance.shouldResetReconnectBackoff(time.Since(startedAt)) {
             backoff = instance.reconnect.InitialBackoff
 
@@ -443,7 +443,7 @@ func (instance *ServerSentEventBackplane) liveConnection() (*amqp091.Connection,
     return connection, nil
 }
 
-/** @important closes the cached publish channel only when it is still the one the caller failed on, so a concurrent publisher that already reopened a healthy channel is not torn down. */
+/* @important closes the cached publish channel only when it is still the one the caller failed on, so a concurrent publisher that already reopened a healthy channel is not torn down. */
 func (instance *ServerSentEventBackplane) resetPublishChannel(failed *amqp091.Channel) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()

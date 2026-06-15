@@ -144,7 +144,7 @@ func (instance *aes256Cipher) Decrypt(encoded string) (string, error) {
     return string(plaintext), nil
 }
 
-/** @important a marker-shaped plaintext must not be stored as-is: it would poison every later Scan/Decrypt. Pass through only values that authenticate under a known key; an unknown key id keeps the historical pass-through so a value sealed under a retired key is not destroyed by double encryption. */
+/* @important a marker-shaped plaintext must not be stored as-is: it would poison every later Scan/Decrypt. Pass through only values that authenticate under a known key; an unknown key id keeps the historical pass-through so a value sealed under a retired key is not destroyed by double encryption. */
 func (instance *aes256Cipher) isPassThroughCiphertext(value string) bool {
     if false == looksEncrypted(value) {
         return false

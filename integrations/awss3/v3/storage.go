@@ -13,7 +13,7 @@ import (
     storagecontract "github.com/precision-soft/melody/v3/storage/contract"
 )
 
-/** @important normalizes a key the same way LocalStorage does (backslash to slash, clean dot segments, strip the leading slash) so a given key addresses the same object on both backends and a '..' segment cannot produce a presigned URL the client collapses into a different signed path. */
+/* @important normalizes a key the same way LocalStorage does (backslash to slash, clean dot segments, strip the leading slash) so a given key addresses the same object on both backends and a '..' segment cannot produce a presigned URL the client collapses into a different signed path. */
 func normalizeObjectKey(key string) (string, error) {
     normalized := strings.ReplaceAll(key, "\\", "/")
     cleaned := strings.TrimPrefix(path.Clean("/"+normalized), "/")

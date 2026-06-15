@@ -74,7 +74,7 @@ func TestServerSentEventBackplane_DoesNotEchoToOriginInstanceTwice(t *testing.T)
     }
 }
 
-/** @info shouldResetBackplaneBackoff */
+/* @info shouldResetBackplaneBackoff */
 
 func TestShouldResetBackplaneBackoff(t *testing.T) {
     instance := &ServerSentEventBackplane{reconnect: resolveReconnectConfig(nil)}

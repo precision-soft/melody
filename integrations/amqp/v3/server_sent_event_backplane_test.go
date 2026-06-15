@@ -205,7 +205,7 @@ func TestServerSentEventBackplane_DoesNotEchoToOriginInstanceTwice(t *testing.T)
     }
 }
 
-/** @info reconnect backoff reset */
+/* @info reconnect backoff reset */
 
 func TestShouldResetReconnectBackoff(t *testing.T) {
     instance := &ServerSentEventBackplane{reconnect: resolveReconnectConfig(nil, nil)}
@@ -224,7 +224,7 @@ func TestShouldResetReconnectBackoff(t *testing.T) {
     }
 }
 
-/** @info publish channel reopen */
+/* @info publish channel reopen */
 
 func TestServerSentEventBackplane_EnsurePublishChannel_ReopensClosedChannel(t *testing.T) {
     dsn := os.Getenv("AMQP_DSN")

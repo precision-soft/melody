@@ -60,6 +60,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `container/container_resolver.go` — a service resolution that raced `Close()` could store its freshly created instance after the close snapshot was taken, so the instance was never closed (a connection/file-handle leak for standalone container users). The creation guard now fails fast with a `container is closed` error when the container is already closed, and a value whose creation completed while `Close()` ran is closed best-effort instead of being stored; already-created instances remain readable after `Close()`. Ported from the `v3` fix.
 - `cache/remember.go` — a **cancelable** `Remember` call whose waiters all timed out cancels the leader's context, but the in-flight entry lingered until the leader's deferred cleanup ran, so a caller that joined in that window inherited the doomed call and received its cancellation error even though a fresh computation would have succeeded. A late joiner now detects the canceled call, replaces the entry, and leads a fresh computation; the leader's cleanup deletes only its own entry so it can no longer evict the replacement. Ported from the `v3` fix.
 
+### Documentation
+
+- `README.md` — added a "Getting started" section (install, a minimal runnable HTTP application, and next steps) and a "Versions & project status" section: the v1/v2/v3 module lines, v3 being the actively maintained version, the security/critical-fix back-port policy, the deprecate-toward-v4 approach, and the rationale for the intentional version duplication. Added an "Integrations" pointer and moved the build-tag reference below the usage guidance.
+- `CONTRIBUTING.md` — added a "Versioning and where to make changes" section (features land on v3 only; back-port to v1/v2 only for security or critical correctness fixes; the version duplication is intentional and must not be consolidated), documented the `./dc up:minimal` / `up:all` development shell, and pointed the security guidance at `SECURITY.md`.
+- `SECURITY.md` — added: supported version lines and private vulnerability reporting through GitHub.
+- `integrations/README.md` — added an integrations index (what each integration provides, supported version lines, and links to per-integration documentation).
+- `CODE_OF_CONDUCT.md` — added (Contributor Covenant 2.1 by reference; private reporting through GitHub).
+- `.github/` — added issue templates (bug, feature), an issue-template config that links private security reporting and disables blank issues, and a pull-request template that reflects the versioning and back-port rules.
+- Comment style — the house comment delimiter changed from `/** ... */` to `/* ... */` across all `.go` files. Single-star block comments render correctly on `pkg.go.dev` and machine-recognize the `Deprecated:` marker, so the previous `// Deprecated:` exception was dropped and existing markers were converted to `/* Deprecated: ... */`. `CONTRIBUTING.md` and the documentation canon were updated accordingly. Comments-only change; no behavior change.
+
 ## [v1.13.0] - 2026-05-16 - Cron Integration, Decoupled Cron Configuration, and `.example` Flat Layout
 
 ### Added

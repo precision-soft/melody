@@ -319,7 +319,7 @@ func TestInMemoryBackend_Decrement_MinInt64Delta_ReturnsError(t *testing.T) {
     }
 }
 
-/** @info increment ttl preservation */
+/* @info increment ttl preservation */
 
 func TestInMemoryBackend_IncrementPreservesExistingTtl(t *testing.T) {
     start := time.Unix(10, 0)
