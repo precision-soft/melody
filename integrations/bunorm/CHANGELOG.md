@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `encrypt/module.go` — `encrypt.NewModule(ModuleConfig{Database, Cipher})` self-registering application module that registers the `melody:encrypt:database` command, so `app.RegisterModule(encrypt.NewModule(...))` exposes the bulk encrypt/re-encrypt/decrypt command without hand-wiring it into the application's `RegisterCliCommands`. Skipped when the database or cipher is nil. v3 only.
+
 ## [v3.1.0] - 2026-06-15 - Column Encryption, Field-Level Audit Trail, and Read/Write Split
 
 ### Added

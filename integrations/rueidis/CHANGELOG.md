@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `module.go` — `rueidis.NewModule(ModuleConfig{Client, AsLocker, AsTokenStore, TokenStoreOptions})` and `cache.NewModule(ModuleConfig{Client, Prefix})` self-registering application modules: a single `app.RegisterModule(...)` registers the client service and, opt-in, the locker and revocable token-store services (and the cache backend), instead of calling `RegisterClientService`/`RegisterLockerService`/`RegisterTokenStoreService`/`RegisterBackendService` by hand. v3 only.
+
 ## [v3.2.0] - 2026-06-15 - Redis Lock, Revocable Token Store, and Server-Sent Events Backplane
 
 ### Added

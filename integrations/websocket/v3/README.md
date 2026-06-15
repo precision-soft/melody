@@ -33,6 +33,18 @@ hub.Broadcast("device-42", melodyhttp.ServerSentEvent{Event: "task.cancelled", D
 
 The handler upgrades the connection, subscribes to the resolved topic, writes each broadcast `ServerSentEvent`'s data to the socket, and reads inbound frames (dispatched to `OnMessage`). It returns `(nil, nil)` once the client disconnects, so the kernel writes nothing further.
 
+### Register as a module
+
+Bundle the stream route as a self-registering application module — one `RegisterModule` call registers the route on the configured hub (skipped when no hub or path is configured):
+
+```go
+app.RegisterModule(melodywebsocket.NewModule(melodywebsocket.ModuleConfig{
+    Hub:     hub,
+    Path:    "/ws",
+    Options: melodywebsocket.Options{OriginPatterns: []string{"*"}},
+}))
+```
+
 ## Footguns & caveats
 
 - The hub is shared with Server-Sent Events: a single `hub.Broadcast(topic, event)` reaches both Server-Sent Events and WebSocket subscribers of that topic.

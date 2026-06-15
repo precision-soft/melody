@@ -1,7 +1,6 @@
 package config
 
 import (
-    melodycron "github.com/precision-soft/melody/integrations/cron/v3"
     "github.com/precision-soft/melody/v3/.example/cli"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
@@ -13,7 +12,7 @@ func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.
     return []melodyclicontract.Command{
         cli.NewAppInfoCommand(),
         cli.NewProductListCommand(),
-        melodycron.NewGenerateCommand(newCronConfiguration(kernelInstance)),
+        /** @info the cron command is contributed by the cron module (see configure.go). */
         instance.messageBusConsumeCommand,
         cli.NewMessageBusDemoCommand(
             instance.messageBusDispatch,

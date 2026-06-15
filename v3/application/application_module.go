@@ -18,6 +18,28 @@ func (instance *Application) RegisterModule(moduleInstance applicationcontract.M
     }
 
     instance.modules = append(instance.modules, moduleInstance)
+
+    if moduleProvider, ok := moduleInstance.(applicationcontract.ModuleProvider); true == ok {
+        for _, providedModule := range moduleProvider.Modules() {
+            instance.RegisterModule(providedModule)
+        }
+    }
+}
+
+func (instance *Application) RegisterModuleProvider(provider applicationcontract.ModuleProvider) {
+    if true == instance.booted {
+        exception.Panic(exception.NewError("may not register modules after boot", nil, nil))
+    }
+
+    if nil == provider {
+        exception.Panic(
+            exception.NewError("module provider may not be nil", nil, nil),
+        )
+    }
+
+    for _, providedModule := range provider.Modules() {
+        instance.RegisterModule(providedModule)
+    }
 }
 
 func (instance *Application) bootModulesPreConfigurationResolve() {

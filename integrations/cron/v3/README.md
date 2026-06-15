@@ -23,6 +23,27 @@ import (
 
 See the [umbrella README](../README.md#configuration-parameters) for the full wiring walk-through (`cron.Configuration` registry, `RegisterDefaultParameters`, `NewGenerateCommand(configuration)`, parameter cascade, per-command overrides). The same examples apply verbatim with the v3 import paths above.
 
+Or bundle it as a self-registering application module — one `RegisterModule` call contributes the crontab-generation command and, opt-in, the default parameters:
+
+```go
+app.RegisterModule(melodycron.NewModule(melodycron.ModuleConfig{
+    Configuration:         configuration,
+    WithDefaultParameters: true,
+}))
+```
+
+When the `Configuration` depends on the kernel (resolved parameters, the manager registry, schedules referencing container services) supply a `ConfigurationFactory` instead — it is evaluated at command-registration time, when the kernel exists, and takes precedence over the eager `Configuration`:
+
+```go
+app.RegisterModule(melodycron.NewModule(melodycron.ModuleConfig{
+    ConfigurationFactory: func(kernelInstance melodykernelcontract.Kernel) *melodycron.Configuration {
+        return melodycron.NewConfiguration().Schedule(/* … reads kernelInstance.Config() … */)
+    },
+}))
+```
+
+`NewModule` is available for the v1, v2, and v3 bindings.
+
 ## Module dependencies
 
 This module requires:

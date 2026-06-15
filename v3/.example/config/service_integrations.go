@@ -4,10 +4,8 @@ import (
     "os"
     "path/filepath"
 
-    melodyawss3 "github.com/precision-soft/melody/integrations/awss3/v3"
     melodymysql "github.com/precision-soft/melody/integrations/bunorm/mysql/v3"
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
-    melodyrueidiscache "github.com/precision-soft/melody/integrations/rueidis/v3/cache"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodyclock "github.com/precision-soft/melody/v3/clock"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
@@ -18,9 +16,8 @@ import (
 )
 
 func (instance *Module) registerStorageService(registrar melodyapplicationcontract.ServiceRegistrar) {
+    /** @info the S3 backend is registered by the awss3 module when configured (see configure.go); this is the local-disk fallback. */
     if nil != instance.storageClient {
-        melodyawss3.RegisterStorageService(registrar, instance.storageClient, instance.storageBucket)
-
         return
     }
 
@@ -51,13 +48,4 @@ func (instance *Module) registerLockerService(registrar melodyapplicationcontrac
             return melodylock.NewInMemoryLocker(melodyclock.NewSystemClock()), nil
         },
     )
-}
-
-func (instance *Module) registerRedisServices(registrar melodyapplicationcontract.ServiceRegistrar) {
-    if nil == instance.redisClient {
-        return
-    }
-
-    melodyrueidiscache.RegisterBackendService(registrar, instance.redisClient, "melody-example:")
-    melodyrueidis.RegisterTokenStoreService(registrar, instance.redisClient)
 }

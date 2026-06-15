@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `module.go` — `cron.NewModule(ModuleConfig{Configuration | ConfigurationFactory, WithDefaultParameters})` self-registering application module that registers the crontab-generation command and, opt-in, the default parameters, replacing hand-written `Commands`/`RegisterDefaultParameters` wiring. `ConfigurationFactory func(kernel) *Configuration` is evaluated at command-registration time (when the kernel/container exists), for the common case where the `Configuration` depends on resolved parameters or the manager registry; it takes precedence over the eager `Configuration` when both are set. Available for the v1, v2, and v3 bindings.
+
 ## [v3.2.0] - 2026-06-15 - Plug-and-Play Command Registration
 
 ### Added

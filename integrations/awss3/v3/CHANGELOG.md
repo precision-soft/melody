@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `module.go` — `NewModule(ModuleConfig{Client, Bucket})` self-registering application module: a single `app.RegisterModule(awss3.NewModule(...))` registers the object-storage service (skipped when the client is nil), replacing a hand-written `RegisterStorageService` call.
+
 ## [v3.0.0] - 2026-06-15 - Initial Release — S3-Compatible Object Storage
 
 ### Added

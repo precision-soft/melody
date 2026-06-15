@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `module.go` — `NewModule(ModuleConfig{Middlewares, MetricsHandler, MetricsPath, MetricsRouteName})` self-registering application module that `Use`s the tracing/metrics middlewares and registers the Prometheus metrics route in one `app.RegisterModule(...)`; plus `MetricsRouteHandler(nethttp.Handler)` adapting a standard handler to a melody route handler. The metrics route is skipped when no handler or path is configured.
+
 ## [v3.0.0] - 2026-06-15 - Initial Release — HTTP Tracing and Prometheus Metrics
 
 ### Added

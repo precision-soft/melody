@@ -48,9 +48,15 @@ Register the S3 backend under the core `storage.ServiceStorage` service name in 
 awss3.RegisterStorageService(registrar, client, "documents")
 ```
 
+Or bundle it as a self-registering application module — one `RegisterModule` call registers the storage service (skipped when the client is nil):
+
+```go
+app.RegisterModule(awss3.NewModule(awss3.ModuleConfig{Client: client, Bucket: "documents"}))
+```
+
 ## Footguns & caveats
 
 - `Put` forwards the provided size to MinIO; pass `-1` when the size is unknown and the client will stream the object.
 - `Get` returns the object's reader after a `Stat`, so a missing object fails fast instead of erroring only on first read. Close the reader.
 - `PresignedUrl` issues a presigned GET URL valid for the given expiry.
-- The integration test (`storage_test.go`) is skipped unless `MINIO_ENDPOINT` (and `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY`) are set; it was verified against MinIO.
+- The integration test (`storage_test.go`) is skipped unless `MINIO_ENDPOINT` (and `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY`) are set; it was verified against MinIO and LocalStack (the dev `docker-compose.yml` ships a LocalStack `s3` service).

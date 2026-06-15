@@ -61,6 +61,17 @@ func (instance *YourModule) RegisterCliCommands(kernelInstance kernelcontract.Ke
 }
 ```
 
+Or bundle it as a self-registering application module, so a single `RegisterModule` call contributes the commands instead of hand-writing `RegisterCliCommands`:
+
+```go
+app.RegisterModule(bunormmigrate.NewModule(bunormmigrate.ModuleConfig{
+    Migrations: migrations.Migrations,
+    Options:    bunormmigrate.Options{CommandPrefix: "db"},
+}))
+```
+
+`NewModule` is available for the v1, v2, and v3 bindings.
+
 ## Options
 
 `RegisterCommands` accepts an [`Options`](./option.go) value; empty fields fall back to [`DefaultOptions`](./option.go).

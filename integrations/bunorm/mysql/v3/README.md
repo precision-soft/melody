@@ -37,6 +37,12 @@ Register the locker under the core `lock.ServiceLocker` service name in one call
 mysql.RegisterLockerService(registrar, database)
 ```
 
+Or bundle it as a self-registering application module — one `RegisterModule` call registers the locker (opt-in via `AsLocker`, skipped when the database is nil):
+
+```go
+app.RegisterModule(mysql.NewModule(mysql.ModuleConfig{Database: database, AsLocker: true}))
+```
+
 ## Semantics
 
 - **Try-acquire only.** `Acquire` issues `SELECT GET_LOCK(?, 0)` — a non-blocking attempt that returns immediately, consistent with the in-memory and Redis backends. A failed acquisition returns `(false, nil)`, not an error.

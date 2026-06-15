@@ -48,6 +48,20 @@ tracingMiddleware := opentelemetry.NewTracingMiddleware(tracer, nil) // nil -> W
 
 The tracing middleware extracts the incoming trace context from request headers, starts a server span per request (named `<METHOD> <route>`), injects the span context into the runtime passed downstream, records method/route/status attributes, and marks the span as errored on a handler error or a 5xx response.
 
+### Register as a module
+
+Bundle the middlewares and the `/metrics` route as a self-registering application module — one `RegisterModule` call `Use`s the middlewares and registers the metrics route (`MetricsRouteHandler` adapts the standard handler):
+
+```go
+app.RegisterModule(opentelemetry.NewModule(opentelemetry.ModuleConfig{
+    Middlewares:    []httpcontract.Middleware{metricsMiddleware, tracingMiddleware},
+    MetricsHandler: metricsHandler,
+    MetricsPath:    "/metrics",
+}))
+```
+
+The metrics route is skipped when no handler or path is configured.
+
 ## Footguns & caveats
 
 - The route attribute uses the matched route pattern to keep metric cardinality bounded; unmatched requests are labelled `unmatched`.

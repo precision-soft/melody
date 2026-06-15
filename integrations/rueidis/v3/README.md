@@ -62,3 +62,10 @@ rueidiscache.RegisterBackendService(registrar, client, "app:") // core cache.Ser
 ```
 
 `RegisterClientService`, `RegisterLockerService`, and `RegisterTokenStoreService` live in [`service_resolver.go`](./service_resolver.go); `RegisterBackendService` lives in [`cache/service_resolver.go`](./cache/service_resolver.go).
+
+Or bundle them as self-registering application modules — `RegisterModule` registers the client service and, opt-in, the locker and revocable token store (and the cache backend), instead of calling each helper by hand:
+
+```go
+app.RegisterModule(rueidis.NewModule(rueidis.ModuleConfig{Client: client, AsLocker: true, AsTokenStore: true}))
+app.RegisterModule(rueidiscache.NewModule(rueidiscache.ModuleConfig{Client: client, Prefix: "app:"}))
+```

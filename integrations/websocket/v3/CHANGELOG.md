@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `module.go` — `NewModule(ModuleConfig{Hub, Options, Path, RouteName})` self-registering application module that registers the WebSocket stream route on the configured server-sent-event hub via one `app.RegisterModule(...)` (skipped when no hub or path is configured).
+
 ## [v3.0.0] - 2026-06-15 - Initial Release — WebSocket Streaming Bridging the Server-Sent Events Hub
 
 ### Added

@@ -56,7 +56,6 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
 
     instance.registerStorageService(registrar)
     instance.registerLockerService(registrar)
-    instance.registerRedisServices(registrar)
 
     registrar.RegisterService(
         repository.ServiceCategoryRepository,

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `module.go` — `NewModule(ModuleConfig{Connection, Transports, WithDefaultParameters})` self-registering application module: a single `app.RegisterModule(amqp.NewModule(...))` wires the connection service, any named transport services, and the default parameters, instead of calling `RegisterConnectionService`/`RegisterTransportService`/`RegisterDefaultParameters` by hand. Conditional on config — a nil connection or a nil transport entry is skipped.
+
 ## [v3.0.0] - 2026-06-15 - Initial Release — RabbitMQ Message-Bus Transport, Auto-Reconnect, and Server-Sent Events Backplane
 
 ### Added

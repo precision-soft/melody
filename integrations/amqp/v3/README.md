@@ -134,6 +134,16 @@ transport := amqp.TransportMustFromResolver(resolver, "async")
 
 `amqp.RegisterDefaultParameters(registrar)` registers the default `melody.amqp.*` parameters.
 
+Or bundle all of it as a self-registering application module — one `RegisterModule` call wires the connection service, the named transport services, and the default parameters:
+
+```go
+app.RegisterModule(amqp.NewModule(amqp.ModuleConfig{
+    Connection:            connection,
+    Transports:            map[string]*amqp.Transport{"async": transport},
+    WithDefaultParameters: true,
+}))
+```
+
 ### Auto-reconnect
 
 By default a dropped broker connection stops the consumer (run it under a process supervisor). To let the transport recover on its own, also set a `Dialer` — `Provider.Dialer(dsn)` builds one from the same DSN:

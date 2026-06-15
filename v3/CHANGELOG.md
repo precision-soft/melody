@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `application/` — `Application.RegisterModuleProvider(provider)` plus expansion of the (previously dormant) `application/contract.ModuleProvider` inside `RegisterModule`: a module that also implements `ModuleProvider` now contributes its child modules in the same call, so an integration or application can register a whole group of capability-modules at once. Existing single-module registration is unchanged.
+
 ## [v3.7.0] - 2026-06-15 - Platform Extensions: Messaging, Realtime, Auth, i18n, OpenAPI, Lock, Mailer, and Storage
 
 ### Added

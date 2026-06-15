@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `module.go` — `mysql.NewModule(ModuleConfig{Database, AsLocker})` self-registering application module that registers the MySQL advisory-lock locker service (opt-in via `AsLocker`, skipped when the database is nil), replacing a hand-written `RegisterLockerService` call. v3 only.
+
 ## [v3.1.0] - 2026-06-15 - MySQL Advisory Lock (GET_LOCK)
 
 ### Added

@@ -100,6 +100,22 @@ melody melody:encrypt:database --table=users --column=email --mode=reencrypt --t
 > searchable. Re-encrypting a deterministic column without the flag rewrites it with random nonces and
 > silently breaks `CiphertextCandidates` equality lookups.
 
+## Register as a module
+
+The `melody:encrypt:database` command is **not** registered automatically — like every Melody command it
+has to be wired into the application. The integration ships a self-registering module so a single call does it:
+
+```go
+app.RegisterModule(encrypt.NewModule(encrypt.ModuleConfig{
+    Database: database, // *bun.DB (MySQL dialect)
+    Cipher:   cipher,
+}))
+```
+
+This implements [`CliModule`](../../../../v3/application/contract/cli_module.go) and registers the command
+through `RegisterCliCommands`. Registration is skipped when `Database` or `Cipher` is nil. If you wire the
+application's `RegisterCliCommands` by hand instead, append the slice from `encrypt.Commands(database, cipher)`.
+
 ## Testing / dev
 
 `encrypt.NewFakeCipher()` is an identity cipher (no confidentiality) for tests and local development.
