@@ -7,20 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- `httpclient/transport_config.go` — `TransportConfig` (`DialTimeout`, `KeepAlive`, `MaxIdleConns`, `IdleConnTimeout`, `TlsHandshakeTimeout`, `ExpectContinueTimeout`, `ResponseHeaderTimeout`) with `DefaultTransportConfig()` exposes the previously-hardcoded `net/http.Transport` tuning of the HTTP client. Set it via the new fluent `HttpClientConfig.WithTransport(*TransportConfig)`; zero fields inherit the defaults, and a client built without it keeps the previous behaviour unchanged (backwards compatible). Back-ported from v3.
-- `application/` — the HTTP graceful-shutdown grace period (previously a hardcoded `5s`) is now overridable: a `Configuration` that also implements the optional `HttpShutdownConfiguration` (`GetShutdownTimeout() time.Duration`) sets it, mirroring the existing `HttpTimeoutConfiguration` mechanism; a zero or absent value keeps the 5s default (backwards compatible). Back-ported from v3.
-- `container/container_resolver_test.go`, `cache/remember_test.go` — regression coverage for the closed-container resolution guard and the cancelable-`Remember` late-joiner fix back-ported below
-- `security/compiled_configuration_test.go` — regression coverage for the nil-login-result guard back-ported below
-
-### Fixed
-
-- `security/compiled_configuration.go` — `CompiledFirewall.Login` no longer panics with a nil-pointer dereference when a userland `LoginHandler` returns `(nil, nil)`. The contract returns `(*LoginResult, error)`, so a handler returning neither a result nor an error is valid Go, but the firewall previously dereferenced `result.Token` unguarded inside the request goroutine; it now fails closed with a `firewall login handler returned nil result` error before the login-success event is dispatched. Ported from the `v3` fix.
-- `container/container_resolver.go` — a service resolution that raced `Close()` could store its freshly created instance after the close snapshot was taken, so the instance was never closed (a connection/file-handle leak for standalone container users). The creation guard now fails fast with a `container is closed` error when the container is already closed, and a value whose creation completed while `Close()` ran is closed best-effort instead of being stored; already-created instances remain readable after `Close()`. Ported from the `v3` fix.
-- `cache/remember.go` — a **cancelable** `Remember` call whose waiters all timed out cancels the leader's context, but the in-flight entry lingered until the leader's deferred cleanup ran, so a caller that joined in that window inherited the doomed call and received its cancellation error even though a fresh computation would have succeeded. A late joiner now detects the canceled call, replaces the entry, and leads a fresh computation; the leader's cleanup deletes only its own entry so it can no longer evict the replacement. Ported from the `v3` fix.
-
-## [v2.7.1] - 2026-06-11 - Back-port v3 Security and Correctness Fixes
+## [v2.8.0] - 2026-06-15 - Configurable Transport & Shutdown Tunables + v3 Security and Correctness Back-ports
 
 ### Security
 
@@ -38,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `validation/validation_rule_paren_test.go`, `validation/constraint_greater_than_nan_test.go`, `cache/in_memory_increment_ttl_test.go`, `session/copy_any_slice_test.go`, `http/result_handler_typed_nil_test.go` — regression coverage for the parenthesized-regex comma-in-group parse, the `greaterThan` `NaN` rejection, the cache-increment TTL preservation, the session `[]any` deep-copy, and the typed-nil `*Response` normalization back-ported above
 - `validation/constraint_pointer_deref_test.go`, `container/container_close_value_test.go` — regression coverage for the string-constraint `*string` fail-open and the value-type service double-close back-ported above
 - `container/cr38_close_order_test.go`, `http/cr38_kernel_response_test.go`, `event/cr38_adapter_race_test.go` — regression coverage for the close-order, response-replacement, and concurrent-`RegisteredEvents` fixes back-ported above
+- `httpclient/transport_config.go` — `TransportConfig` (`DialTimeout`, `KeepAlive`, `MaxIdleConns`, `IdleConnTimeout`, `TlsHandshakeTimeout`, `ExpectContinueTimeout`, `ResponseHeaderTimeout`) with `DefaultTransportConfig()` exposes the previously-hardcoded `net/http.Transport` tuning of the HTTP client. Set it via the new fluent `HttpClientConfig.WithTransport(*TransportConfig)`; zero fields inherit the defaults, and a client built without it keeps the previous behaviour unchanged (backwards compatible). Back-ported from v3.
+- `application/` — the HTTP graceful-shutdown grace period (previously a hardcoded `5s`) is now overridable: a `Configuration` that also implements the optional `HttpShutdownConfiguration` (`GetShutdownTimeout() time.Duration`) sets it, mirroring the existing `HttpTimeoutConfiguration` mechanism; a zero or absent value keeps the 5s default (backwards compatible). Back-ported from v3.
+- `container/container_resolver_test.go`, `cache/remember_test.go` — regression coverage for the closed-container resolution guard and the cancelable-`Remember` late-joiner fix back-ported below
+- `security/compiled_configuration_test.go` — regression coverage for the nil-login-result guard back-ported below
 
 ### Fixed
 
@@ -60,6 +51,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `http/router_utility.go`, `http/kernel.go` — a controller that mutates or clears the session and returns a `nil` response no longer loses the session change (and the clearing `Set-Cookie`) or returns an implicit `200` instead of `204`. Ported from the `v3` fix.
 - `container/container_close.go` — `Close()` is now safe against a concurrent second `Close()`: `isClosed` is set while still holding the entry lock instead of only after the close loop, so two overlapping calls no longer both snapshot and double-close every service. Ported from the `v3` fix.
 - `container/scope.go` — `OverrideProtectedInstance` now checks the closed-scope flag **inside** the mutex (matching the lookup methods), closing a race where a concurrent `Close()` nilling the maps caused an `assignment to entry in nil map` panic. Ported from the `v3` fix.
+- `security/compiled_configuration.go` — `CompiledFirewall.Login` no longer panics with a nil-pointer dereference when a userland `LoginHandler` returns `(nil, nil)`. The contract returns `(*LoginResult, error)`, so a handler returning neither a result nor an error is valid Go, but the firewall previously dereferenced `result.Token` unguarded inside the request goroutine; it now fails closed with a `firewall login handler returned nil result` error before the login-success event is dispatched. Ported from the `v3` fix.
+- `container/container_resolver.go` — a service resolution that raced `Close()` could store its freshly created instance after the close snapshot was taken, so the instance was never closed (a connection/file-handle leak for standalone container users). The creation guard now fails fast with a `container is closed` error when the container is already closed, and a value whose creation completed while `Close()` ran is closed best-effort instead of being stored; already-created instances remain readable after `Close()`. Ported from the `v3` fix.
+- `cache/remember.go` — a **cancelable** `Remember` call whose waiters all timed out cancels the leader's context, but the in-flight entry lingered until the leader's deferred cleanup ran, so a caller that joined in that window inherited the doomed call and received its cancellation error even though a fresh computation would have succeeded. A late joiner now detects the canceled call, replaces the entry, and leads a fresh computation; the leader's cleanup deletes only its own entry so it can no longer evict the replacement. Ported from the `v3` fix.
 
 ## [v2.7.0] - 2026-05-16 - Cron Integration, Decoupled Cron Configuration, and `.example` Flat Layout
 
@@ -293,8 +287,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `go.mod` — introduce Melody v2 module (`github.com/precision-soft/melody/v2`)
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v2.7.1...HEAD
-[v2.7.1]: https://github.com/precision-soft/melody/compare/v2.7.0...v2.7.1
+[Unreleased]: https://github.com/precision-soft/melody/compare/v2.8.0...HEAD
+[v2.8.0]: https://github.com/precision-soft/melody/compare/v2.7.0...v2.8.0
 
 [v2.7.0]: https://github.com/precision-soft/melody/compare/v2.6.0...v2.7.0
 

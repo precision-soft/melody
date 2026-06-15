@@ -65,7 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `v3/connection_params.go` — `ConnectionConfig` renamed to `ConnectionParams` with value semantics
 - Dependencies pinned to `github.com/precision-soft/melody/v3 v3.0.0`
 
-## [v2.0.1] - 2026-06-11 - Glob-Escape the Cache Clear Prefix
+## [v2.0.1] - 2026-06-15 - Glob-Escape the Cache Clear Prefix
 
 ### Fixed
 
@@ -84,7 +84,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `v2/README.md` — documentation examples reformatted to be copy-paste runnable (wrapped in `main()` functions)
 - `Provider.Open()` signature unchanged in v2 (still accepts `containercontract.Resolver`) — contrast with v3 where it changes
 
-## [v1.0.1] - 2026-06-11 - Glob-Escape the Cache Clear Prefix
+## [v1.0.1] - 2026-06-15 - Glob-Escape the Cache Clear Prefix
 
 ### Fixed
 

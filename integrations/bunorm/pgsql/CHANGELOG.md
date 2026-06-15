@@ -56,7 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Code duplicated into `integrations/bunorm/pgsql/v3/`; v2 and v3 implementations maintained in parallel
 - Dependencies pinned to `bunorm/v3` and `melody/v3`
 
-## [v2.0.1] - 2026-06-11 - Honor Zero ConnectTimeout on the Connection Ping
+## [v2.0.1] - 2026-06-15 - Honor Zero ConnectTimeout on the Connection Ping
 
 ### Fixed
 
@@ -75,7 +75,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Code moved to `integrations/bunorm/pgsql/v2/` with matching module path
 - Dependencies: `github.com/precision-soft/melody/integrations/bunorm/v2 v2.0.0`, `github.com/precision-soft/melody/v2 v2.0.0`
 
-## [v1.1.2] - 2026-06-11 - Honor Zero ConnectTimeout on the Connection Ping
+## [v1.1.2] - 2026-06-15 - Honor Zero ConnectTimeout on the Connection Ping
 
 ### Fixed
 

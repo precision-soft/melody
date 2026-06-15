@@ -7,10 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- `command_migrate.go`, `command_rollback.go` (v1 and v2 modules) — `db:migrate`/`db:rollback` now take the bun migration lock (`migrator.Lock`/`Unlock`) around the run, so two replicas running the command during a rolling deploy cannot both compute the same pending set and double-apply a migration. Ported from the `v3` fix; no v1/v2 tag is cut for this change.
-
 ## [v3.0.3] - 2026-06-15
 
 ### Added
@@ -48,11 +44,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Code duplicated into `integrations/bunorm/migrate/v3/`; v2 and v3 implementations maintained in parallel
 - `go.mod` — dependencies: `github.com/precision-soft/melody/integrations/bunorm/v3 v3.0.0`, `github.com/precision-soft/melody/v3 v3.0.0`
 
-## [v2.0.1] - 2026-06-11 - Return a Clean Error for an Unknown --manager
+## [v2.0.1] - 2026-06-15 - Return a Clean Error for an Unknown --manager and Lock Concurrent Migrations
 
 ### Fixed
 
 - `v2/base_command.go` — every `db:*` migration command now returns a clean error instead of panicking when the `--manager` flag names an unregistered or un-openable manager; `resolveDatabase` now uses the error-returning `registry.Manager` rather than the panicking `registry.MustManager`. Ported from the `v3` fix.
+- `v2/command_migrate.go`, `v2/command_rollback.go` — `db:migrate`/`db:rollback` now take the bun migration lock (`migrator.Lock`/`Unlock`) around the run, so two replicas running the command during a rolling deploy cannot both compute the same pending set and double-apply a migration. Ported from the `v3` fix.
 
 ## [v2.0.0] - 2026-02-17 - Introduce v2 Module Path and CLI Command Integration
 
@@ -74,6 +71,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `command_create.go`, `command_init.go`, `command_migrate.go`, `command_rollback.go`, `command_status.go`, `command_unlock.go` — CLI migration commands
 - `base_command.go` — `BaseCommand` — shared resolver-based manager lookup and error handling
 - `option.go` — `Option` — builder for runner output/color customization; `WithOption()` variants of `Migrate` methods
+
+## [v1.0.1] - 2026-06-15 - Lock Concurrent Migrations
+
+### Fixed
+
+- `command_migrate.go`, `command_rollback.go` — `db:migrate`/`db:rollback` now take the bun migration lock (`migrator.Lock`/`Unlock`) around the run, so two replicas running the command during a rolling deploy cannot both compute the same pending set and double-apply a migration. Ported from the `v3` fix.
 
 ## [v1.0.0] - 2026-02-06 - Initial Release — Programmatic Migration Helpers
 
