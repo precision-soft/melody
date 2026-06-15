@@ -27,6 +27,14 @@ func (instance fakeModuleProvider) Modules() []applicationcontract.Module {
     return instance.children
 }
 
+type selfReferencingModuleProvider struct {
+    fakeModule
+}
+
+func (instance selfReferencingModuleProvider) Modules() []applicationcontract.Module {
+    return []applicationcontract.Module{instance}
+}
+
 func assertModuleNames(t *testing.T, modules []applicationcontract.Module, expected []string) {
     t.Helper()
 
@@ -77,6 +85,21 @@ func TestRegisterModule_ExpandsNestedProviders(t *testing.T) {
     instance.RegisterModule(outer)
 
     assertModuleNames(t, instance.modules, []string{"outer", "inner", "leaf"})
+}
+
+func TestRegisterModule_PanicsOnProviderCycleInsteadOfStackOverflow(t *testing.T) {
+    instance := &Application{}
+
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatal("expected a panic on a cyclic module provider, got none")
+        }
+    }()
+
+    instance.RegisterModule(selfReferencingModuleProvider{fakeModule: fakeModule{name: "cyclic"}})
+
+    t.Fatal("RegisterModule returned without guarding a module provider cycle")
 }
 
 func TestRegisterModuleProvider_RegistersChildrenWithoutProvider(t *testing.T) {

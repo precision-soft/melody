@@ -14,6 +14,8 @@ provider := pgsql.NewProvider()
 
 Register it through the core registry by attaching it to a [`bunorm.ProviderDefinition`](../../v3/provider_definition.go) (see the [bunorm README](../../v3/README.md)).
 
+Unlike the [MySQL provider](../../mysql/v3/README.md), this package ships no self-registering application module: PostgreSQL exposes no application-level service (the MySQL module exists only to register the advisory-lock `Locker`). Register the provider through the core registry as shown above.
+
 ### Options
 
 * [`WithPoolConfig`](./provider_option.go) — connection-pool sizing via [`NewPoolConfig`](./pool_config.go).

@@ -5,12 +5,6 @@ All notable changes to `precision-soft/melody/v3` will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Added
-
-- `application/` — `Application.RegisterModuleProvider(provider)` plus expansion of the (previously dormant) `application/contract.ModuleProvider` inside `RegisterModule`: a module that also implements `ModuleProvider` now contributes its child modules in the same call, so an integration or application can register a whole group of capability-modules at once. Existing single-module registration is unchanged.
-
 ## [v3.7.0] - 2026-06-15 - Platform Extensions: Messaging, Realtime, Auth, i18n, OpenAPI, Lock, Mailer, and Storage
 
 ### Added
@@ -34,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `httpclient/transport_config.go` — `TransportConfig` (`DialTimeout`, `KeepAlive`, `MaxIdleConns`, `IdleConnTimeout`, `TlsHandshakeTimeout`, `ExpectContinueTimeout`, `ResponseHeaderTimeout`) with `DefaultTransportConfig()` exposes the previously-hardcoded `net/http.Transport` tuning of the HTTP client. Set it via the new fluent `HttpClientConfig.WithTransport(*TransportConfig)`; zero fields inherit the defaults, and a client built without it keeps the previous behaviour unchanged (backwards compatible).
 - `application/` — the HTTP graceful-shutdown grace period (previously a hardcoded `5s`) is now overridable: a `Configuration` that also implements the optional `HttpShutdownConfiguration` (`GetShutdownTimeout() time.Duration`) sets it, mirroring the existing `HttpTimeoutConfiguration` mechanism; a zero or absent value keeps the 5s default (backwards compatible).
 - `messagebus/` — `RetryPolicy` gains optional `MaxDelay` (the exponential-backoff cap, previously a hardcoded 1h) and `FailureRequeueDelay` (the fallback requeue delay when no `BaseDelay` is set, previously a hardcoded 5s); zero keeps the previous defaults, so existing `RetryPolicy` values are unaffected (backwards compatible).
+- `application/` — `Application.RegisterModuleProvider(provider)` plus activation of the (previously dormant) `application/contract.ModuleProvider` inside `RegisterModule`: a module that also implements `ModuleProvider` now contributes its child modules in the same call, so an integration or application can register a whole group of capability-modules at once. Every Melody v3 integration now ships a self-registering module exposed through its `NewModule(ModuleConfig{...})`, wired with a single `app.RegisterModule(...)` call instead of hand-calling the individual `Register*` helpers (see each integration's CHANGELOG); `HttpMiddlewareModule` joins the public module contracts (`Module`, `ModuleProvider`, `ParameterModule`, `ServiceModule`, `HttpModule`, `CliModule`, `EventModule`, `ConfigModule`). Existing single-module registration is unchanged.
 
 ### Changed
 
@@ -44,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `application/application_module.go` — `RegisterModule` now guards `ModuleProvider` expansion against a provider cycle. A module that (directly or transitively) provides itself was expanded recursively with no bound, overflowing the goroutine stack and crashing the process at boot; expansion depth is now capped (`maxModuleProviderDepth`) and a cycle fails fast with a `module provider expansion exceeded maximum depth, possible provider cycle` panic instead of an unrecoverable stack overflow. Regression coverage in `application/application_module_test.go`.
 - `security/compiled_configuration.go` — `CompiledFirewall.Login` no longer panics with a nil-pointer dereference when a userland `LoginHandler` returns `(nil, nil)`. The contract returns `(*LoginResult, error)`, so a handler returning neither a result nor an error is valid Go, but the firewall previously dereferenced `result.Token` unguarded inside the request goroutine; it now fails closed with a `firewall login handler returned nil result` error before the login-success event is dispatched. Regression coverage in `security/compiled_configuration_test.go`.
 - `container/container_resolver.go` — a service resolution that raced `Close()` could store its freshly created instance after the close snapshot was taken, so the instance was never closed (a connection/file-handle leak for standalone container users). The creation guard now fails fast with a `container is closed` error when the container is already closed, and a value whose creation completed while `Close()` ran is closed best-effort instead of being stored; already-created instances remain readable after `Close()`. Regression coverage in `container/container_resolver_test.go`.
 - `cache/remember.go` — a **cancelable** `Remember` call whose waiters all timed out cancels the leader's context, but the in-flight entry lingered until the leader's deferred cleanup ran, so a caller that joined in that window inherited the doomed call and received its cancellation error even though a fresh computation would have succeeded. A late joiner now detects the canceled call, replaces the entry, and leads a fresh computation; the leader's cleanup deletes only its own entry so it can no longer evict the replacement. Regression coverage in `cache/remember_test.go`.
@@ -374,7 +370,6 @@ Lock-step release — no `v3/` changes this cycle. Tag SHA differs from `v3.0.0`
 - `application/application.go`, `application/application_new.go` — application context in constructor; `New(ctx context.Context, ...)` takes a caller-supplied context used for the full application lifecycle
 - `application/contract/service_module.go` — `ServiceModule` simplification; single `Register(container)` method replacing split register/configure lifecycle
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v3.7.0...HEAD
 
 [v3.7.0]: https://github.com/precision-soft/melody/compare/v3.6.0...v3.7.0
 

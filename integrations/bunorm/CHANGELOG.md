@@ -5,12 +5,6 @@ All notable changes to `precision-soft/melody/integrations/bunorm` will be docum
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Added
-
-- `encrypt/module.go` — `encrypt.NewModule(ModuleConfig{Database, Cipher})` self-registering application module that registers the `melody:encrypt:database` command, so `app.RegisterModule(encrypt.NewModule(...))` exposes the bulk encrypt/re-encrypt/decrypt command without hand-wiring it into the application's `RegisterCliCommands`. Skipped when the database or cipher is nil. v3 only.
-
 ## [v3.1.0] - 2026-06-15 - Column Encryption, Field-Level Audit Trail, and Read/Write Split
 
 ### Added
@@ -21,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `v3/audit/` — `NewAsyncStorage(delegate, bufferSize)` wraps any `Storage` to persist entries on a background worker so an audited write never blocks the request path; it dead-letters to the configured logger on queue overflow or backend failure (never rolling back the business transaction) and `Close` drains the queue. `Dropped()` and `Failed()` expose per-instance counts of entries discarded (queue full / closed) and entries the delegate could not persist, so operators can alarm on silent audit loss — useful when several instances run behind a load balancer, each with its own buffer that a hard kill would lose (call `Close` during a graceful drain). A `Save` racing or following `Close` is dead-lettered instead of panicking on a closed channel. `FileStorage.Save` now `fsync`s after each batch so a crash cannot lose the last buffered lines.
 - `v3/encrypt/` — `Cipher.EncryptDeterministicWithKeyId(plaintext, keyId)` plus `Migrator`'s `TableSpec.Deterministic` flag re-derive a searchable column's plaintext-bound nonce under the target key during a key-rotation re-encrypt, so a deterministic column stays searchable through rotation (the random-nonce `EncryptWithKeyId` would have silently broken equality lookups).
 - `v3/encrypt/command.go` — `Commands(database, cipher)` returns the `melody:encrypt:database` command as a `[]cli/contract.Command`, so userland registers the integration's built-in command in one call.
+- `v3/encrypt/module.go` — `encrypt.NewModule(ModuleConfig{Database, Cipher})` self-registering application module that registers the `melody:encrypt:database` command, so `app.RegisterModule(encrypt.NewModule(...))` exposes the bulk encrypt/re-encrypt/decrypt command without hand-wiring it into the application's `RegisterCliCommands`. Skipped when the database or cipher is nil. v3 only.
 - `v3/README.md` — added a v3 module README documenting the dialect-agnostic `ManagerRegistry`, the `ConnectionParams`/`Provider` contract, the `ManagerRegistry` service-registration pattern, the `ReadWriteSplitter`, and the MySQL/PostgreSQL dialect providers.
 
 ### Changed
@@ -99,7 +94,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `errors.go` — error sentinels: `ErrResolverIsRequired`, `ErrNoProviderDefinitions`, `ErrProviderDefinitionNameIsRequired`, `ErrProviderIsRequired`, `ErrProviderDefinitionNameMustBeUnique`, `ErrMultipleDefaultProviderDefinitions`
 - `README.md` — service registration patterns
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.1.0...HEAD
 
 [v3.1.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.0.1...integrations/bunorm/v3.1.0
 

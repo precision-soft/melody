@@ -9,13 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `module.go` — `migrate.NewModule(ModuleConfig{Migrations, Options})` self-registering application module that registers the migration commands, so `app.RegisterModule(migrate.NewModule(...))` replaces a hand-written `RegisterCommands` call into the application's `RegisterCliCommands`. Available for the v1, v2, and v3 bindings.
+- `module.go`, `v2/module.go` — the same `migrate.NewModule(...)` self-registering application module for the v1 and v2 migrate bindings, to be released with a future v1/v2 migrate version (the v3 binding ships in v3.0.3 below).
 
 ## [v3.0.3] - 2026-06-15
 
 ### Added
 
 - `v3/README.md` — added a v3 module README documenting `RegisterCommands`, the `Options` defaults, the `CliModule` wiring, and the generated `db:*` migration commands.
+- `v3/module.go` — `migrate.NewModule(ModuleConfig{Migrations, Options})` self-registering application module that registers the migration commands, so `app.RegisterModule(migrate.NewModule(...))` replaces a hand-written `RegisterCommands` call into the application's `RegisterCliCommands`. v3 binding.
 
 ### Fixed
 

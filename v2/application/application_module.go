@@ -6,7 +6,13 @@ import (
     securityconfig "github.com/precision-soft/melody/v2/security/config"
 )
 
+const maxModuleProviderDepth = 100
+
 func (instance *Application) RegisterModule(moduleInstance applicationcontract.Module) {
+    instance.registerModuleAtDepth(moduleInstance, 0)
+}
+
+func (instance *Application) registerModuleAtDepth(moduleInstance applicationcontract.Module, depth int) {
     if true == instance.booted {
         exception.Panic(exception.NewError("may not register modules after boot", nil, nil))
     }
@@ -17,11 +23,17 @@ func (instance *Application) RegisterModule(moduleInstance applicationcontract.M
         )
     }
 
+    if depth > maxModuleProviderDepth {
+        exception.Panic(
+            exception.NewError("module provider expansion exceeded maximum depth, possible provider cycle", nil, nil),
+        )
+    }
+
     instance.modules = append(instance.modules, moduleInstance)
 
     if moduleProvider, ok := moduleInstance.(applicationcontract.ModuleProvider); true == ok {
         for _, providedModule := range moduleProvider.Modules() {
-            instance.RegisterModule(providedModule)
+            instance.registerModuleAtDepth(providedModule, depth+1)
         }
     }
 }
