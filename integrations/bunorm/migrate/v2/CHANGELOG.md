@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v2.1.0] - 2026-06-15 - Return a Clean Error for an Unknown --manager, Lock Concurrent Migrations, and Plug-and-Play Module Registration
+## [v2.1.0] - 2026-06-16 - Return a Clean Error for an Unknown --manager, Lock Concurrent Migrations, and Plug-and-Play Module Registration
 
 ### Added
 

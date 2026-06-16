@@ -9,6 +9,10 @@ services:
                 CONFIG_PATH: ${DOCKER_PATH}
                 ROOT_PATH: ${CONTAINER_ROOT_PATH}
         restart: 'no'
+        environment:
+            MELODY_DEV_REFLEX_ENABLED: ${MELODY_DEV_REFLEX_ENABLED:-1}
+            MELODY_DEV_EXAMPLE_DIR: ${MELODY_DEV_EXAMPLE_DIR:-/app/v3/.example}
+            MELODY_DEV_RUN_COMMAND: ${MELODY_DEV_RUN_COMMAND:-go run .}
         volumes:
             - ${RELATIVE_PATH_TO_ROOT}:${CONTAINER_ROOT_PATH}
             - ${RELATIVE_PATH_TO_ROOT}/.dev-data/go/pkg/mod:/go/pkg/mod

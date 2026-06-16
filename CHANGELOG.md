@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v1.14.0] - 2026-06-15 - Configurable Transport & Shutdown Tunables + v3 Security and Correctness Back-ports
+## [v1.14.0] - 2026-06-16 - Configurable Transport & Shutdown Tunables + v3 Security and Correctness Back-ports
 
 ### Security
 
@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `.dev/docker/docker-compose.yml`, `.dev/docker/.env`, `dc` — the development recipe now starts in two categories: `./dc up:minimal` starts only the `dev` container (enough for the build-tag matrix and unit tests), and `./dc up:all` also starts the infrastructure services needed by the live end-to-end tests (`rabbitmq`, `redis`, `mysql`, `minio`, grouped under the compose profile `all`); `./dc down` tears down both categories. Every published host port is now an `.env` variable (`DEV_HTTP_HOST_PORT`, `RABBITMQ_HOST_PORT`, `RABBITMQ_MANAGEMENT_HOST_PORT`, `REDIS_HOST_PORT`, `MYSQL_HOST_PORT`, `MINIO_HOST_PORT`, `MINIO_CONSOLE_HOST_PORT`) with the previous values as defaults, so a machine where another stack already holds a port can override it in `.dev/docker/.env.local`
 - `.dev/docker/.gitignore` — `.env.local` is no longer tracked (it is machine-local by design and auto-created by the `dc` wrapper); it is now ignored alongside `.bash_aliases_local`
+- `.dev/docker/Dockerfile`, `.dev/docker/entrypoint.sh`, `.dev/docker/docker-compose.yml` — the `dev` container now boots the `v3/.example` application by default with `reflex` hot-reload (rebuild-and-restart on `.go`/`.env`/`.yaml`/`.json`/`.toml` changes), so `./dc up:minimal` brings up a live example on `DEV_HTTP_HOST_PORT` (default `8180`). `github.com/cespare/reflex` is installed in the image. Three environment knobs override the behaviour (defaulted in compose, settable in `.dev/docker/.env.local`): `MELODY_DEV_REFLEX_ENABLED` (`0` runs once without watching), `MELODY_DEV_EXAMPLE_DIR` (point at `./.example` or `v2/.example`), and `MELODY_DEV_RUN_COMMAND` (empty idles the container like before). The example boots in-memory by default and wires the live services when their env vars are set under `./dc up:all`
 
 ### Fixed
 

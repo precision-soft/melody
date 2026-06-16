@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v3.2.0] - 2026-06-15 - Redis Lock, Revocable Token Store, and Server-Sent Events Backplane
+## [v3.2.0] - 2026-06-16 - Redis Lock, Revocable Token Store, and Server-Sent Events Backplane
 
 ### Added
 

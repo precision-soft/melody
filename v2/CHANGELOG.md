@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v2.8.0] - 2026-06-15 - Configurable Transport & Shutdown Tunables + v3 Security and Correctness Back-ports
+## [v2.8.0] - 2026-06-16 - Configurable Transport & Shutdown Tunables + v3 Security and Correctness Back-ports
 
 ### Security
 

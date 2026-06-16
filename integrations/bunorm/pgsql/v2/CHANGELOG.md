@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v2.0.1] - 2026-06-15 - Honor Zero ConnectTimeout on the Connection Ping
+## [v2.0.1] - 2026-06-16 - Honor Zero ConnectTimeout on the Connection Ping
 
 ### Fixed
 

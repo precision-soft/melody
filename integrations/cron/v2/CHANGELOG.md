@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v2.2.0] - 2026-06-15 - Plug-and-Play Module Registration
+## [v2.2.0] - 2026-06-16 - Plug-and-Play Module Registration
 
 Identical to the corresponding v1 release except: module path is `github.com/precision-soft/melody/integrations/cron/v2`; dependency pinned to `github.com/precision-soft/melody/v2`. See the [v1 changelog](../CHANGELOG.md#v120---2026-06-15---plug-and-play-module-registration) for the full change list.
 
