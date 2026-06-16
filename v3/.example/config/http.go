@@ -3,8 +3,8 @@ package config
 import (
     "github.com/precision-soft/melody/v3/.example/handler"
     handlercategory "github.com/precision-soft/melody/v3/.example/handler/category"
-    handlerevents "github.com/precision-soft/melody/v3/.example/handler/events"
     handlercurrency "github.com/precision-soft/melody/v3/.example/handler/currency"
+    handlerevents "github.com/precision-soft/melody/v3/.example/handler/events"
     handleri18n "github.com/precision-soft/melody/v3/.example/handler/i18n"
     handlerproduct "github.com/precision-soft/melody/v3/.example/handler/product"
     handlersecure "github.com/precision-soft/melody/v3/.example/handler/secure"

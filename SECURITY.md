@@ -5,11 +5,11 @@
 Melody is developed as three parallel module lines. **v3 is the actively maintained version**; v1 and v2 are
 in maintenance mode but still receive security fixes.
 
-| Version line | Status | Security fixes |
-| --- | --- | --- |
-| v3.x (`github.com/precision-soft/melody/v3`) | Actively maintained | Yes |
-| v2.x (`github.com/precision-soft/melody/v2`) | Maintenance (fixes only) | Yes |
-| v1.x (`github.com/precision-soft/melody`) | Maintenance (fixes only) | Yes |
+| Version line                                 | Status                   | Security fixes |
+|----------------------------------------------|--------------------------|----------------|
+| v3.x (`github.com/precision-soft/melody/v3`) | Actively maintained      | Yes            |
+| v2.x (`github.com/precision-soft/melody/v2`) | Maintenance (fixes only) | Yes            |
+| v1.x (`github.com/precision-soft/melody`)    | Maintenance (fixes only) | Yes            |
 
 Security fixes are applied to all three lines. Other bug fixes and all new features land on v3 only
 (see [`CONTRIBUTING.md`](./CONTRIBUTING.md)).

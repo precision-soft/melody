@@ -94,11 +94,11 @@ At a high level, a Melody application is assembled as follows:
 
 Melody ships as three parallel Go module lines:
 
-| Version line | Module path | Status |
-| --- | --- | --- |
-| **v3** | `github.com/precision-soft/melody/v3` ([`./v3/`](./v3/)) | **Stable, actively maintained — use this for new projects.** |
-| v2 | `github.com/precision-soft/melody/v2` ([`./v2/`](./v2/)) | Maintenance — fixes only. |
-| v1 | `github.com/precision-soft/melody` (repository root) | Maintenance — fixes only. |
+| Version line | Module path                                              | Status                                                       |
+|--------------|----------------------------------------------------------|--------------------------------------------------------------|
+| **v3**       | `github.com/precision-soft/melody/v3` ([`./v3/`](./v3/)) | **Stable, actively maintained — use this for new projects.** |
+| v2           | `github.com/precision-soft/melody/v2` ([`./v2/`](./v2/)) | Maintenance — fixes only.                                    |
+| v1           | `github.com/precision-soft/melody` (repository root)     | Maintenance — fixes only.                                    |
 
 Three versions exist for historical reasons: earlier major versions introduced changes that were not
 backwards compatible, and each was maintained in parallel. **Going forward, all new features land on v3 only.**

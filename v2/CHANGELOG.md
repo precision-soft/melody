@@ -298,6 +298,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `go.mod` — introduce Melody v2 module (`github.com/precision-soft/melody/v2`)
 
 [Unreleased]: https://github.com/precision-soft/melody/compare/v2.8.0...HEAD
+
 [v2.8.0]: https://github.com/precision-soft/melody/compare/v2.7.0...v2.8.0
 
 [v2.7.0]: https://github.com/precision-soft/melody/compare/v2.6.0...v2.7.0

@@ -10,11 +10,11 @@ type securityTestToken struct {
     roles []string
 }
 
-func (instance *securityTestToken) UserIdentifier() string      { return "u" }
-func (instance *securityTestToken) Roles() []string             { return instance.roles }
-func (instance *securityTestToken) IsAuthenticated() bool       { return true }
-func (instance *securityTestToken) Scope() map[string]any       { return map[string]any{} }
-func (instance *securityTestToken) Attributes() map[string]any  { return map[string]any{} }
+func (instance *securityTestToken) UserIdentifier() string     { return "u" }
+func (instance *securityTestToken) Roles() []string            { return instance.roles }
+func (instance *securityTestToken) IsAuthenticated() bool      { return true }
+func (instance *securityTestToken) Scope() map[string]any      { return map[string]any{} }
+func (instance *securityTestToken) Attributes() map[string]any { return map[string]any{} }
 
 type securityTestVoter struct {
     attribute string

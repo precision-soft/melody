@@ -15,7 +15,7 @@ func (instance *Module) buildTokenAuth() {
     instance.jwtSecret = []byte(demoJwtSecret)
     instance.tokenValidator = melodysecurity.NewJwtTokenValidator(
         melodysecurity.JwtConfig{
-            Secret: instance.jwtSecret,
+            Secret:     instance.jwtSecret,
             ScopeClaim: "scope",
         },
     )

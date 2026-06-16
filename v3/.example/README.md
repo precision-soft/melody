@@ -150,16 +150,16 @@ The example registers two scheduled commands in [`config/cli.go`](./config/cli.g
 
 The example wires **every v3 platform integration**. Each backend that needs external infrastructure is **gated on an environment variable**: when the variable is unset the application boots with an in-process fallback (the example always runs with zero infrastructure), and when it is set the matching integration is activated and resolved through the same core service constant, so the rest of the app is unchanged.
 
-| Integration | Activated by | Falls back to | Demo endpoint |
-|-------------|--------------|---------------|---------------|
-| [`opentelemetry`](../../integrations/opentelemetry/v3/) — Prometheus metrics middleware | always on | — | `GET /metrics` |
-| [`websocket`](../../integrations/websocket/v3/) — WebSocket bound to the SSE hub | always on | — | `GET /ws` (and `GET /events/stream` for SSE) |
-| `encrypt` ([`bunorm/v3/encrypt`](../../integrations/bunorm/v3/encrypt/)) — AES-256-GCM cipher | always on | — | `GET /encrypt/demo` |
-| [`amqp`](../../integrations/amqp/v3/) — durable message-bus transport | `AMQP_DSN` | in-memory transport | `POST /messagebus/demo` |
-| [`awss3`](../../integrations/awss3/v3/) — S3 object storage (`storage.ServiceStorage`) | `S3_ENDPOINT` | local filesystem storage | `GET /platform/demo` |
-| [`rueidis`](../../integrations/rueidis/v3/) — Redis cache backend, distributed lock (`lock.ServiceLocker`), revocable token store, SSE backplane | `REDIS_ADDRESS` | in-memory cache/lock | `GET /cache/demo`, `GET /redis/token/demo` |
-| [`bunorm/mysql`](../../integrations/bunorm/mysql/v3/) — MySQL `GET_LOCK` distributed lock | `MYSQL_HOST` (when `REDIS_ADDRESS` is unset) | in-memory lock | `GET /platform/demo` |
-| [`bunorm`](../../integrations/bunorm/v3/) — bun ORM `*bun.DB`, transparent column encryption, field-level audit trail | `MYSQL_HOST` | — | `GET /database/demo`, `GET /database/audit/demo` |
+| Integration                                                                                                                                      | Activated by                                 | Falls back to            | Demo endpoint                                    |
+|--------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------|--------------------------|--------------------------------------------------|
+| [`opentelemetry`](../../integrations/opentelemetry/v3/) — Prometheus metrics middleware                                                          | always on                                    | —                        | `GET /metrics`                                   |
+| [`websocket`](../../integrations/websocket/v3/) — WebSocket bound to the SSE hub                                                                 | always on                                    | —                        | `GET /ws` (and `GET /events/stream` for SSE)     |
+| `encrypt` ([`bunorm/v3/encrypt`](../../integrations/bunorm/v3/encrypt/)) — AES-256-GCM cipher                                                    | always on                                    | —                        | `GET /encrypt/demo`                              |
+| [`amqp`](../../integrations/amqp/v3/) — durable message-bus transport                                                                            | `AMQP_DSN`                                   | in-memory transport      | `POST /messagebus/demo`                          |
+| [`awss3`](../../integrations/awss3/v3/) — S3 object storage (`storage.ServiceStorage`)                                                           | `S3_ENDPOINT`                                | local filesystem storage | `GET /platform/demo`                             |
+| [`rueidis`](../../integrations/rueidis/v3/) — Redis cache backend, distributed lock (`lock.ServiceLocker`), revocable token store, SSE backplane | `REDIS_ADDRESS`                              | in-memory cache/lock     | `GET /cache/demo`, `GET /redis/token/demo`       |
+| [`bunorm/mysql`](../../integrations/bunorm/mysql/v3/) — MySQL `GET_LOCK` distributed lock                                                        | `MYSQL_HOST` (when `REDIS_ADDRESS` is unset) | in-memory lock           | `GET /platform/demo`                             |
+| [`bunorm`](../../integrations/bunorm/v3/) — bun ORM `*bun.DB`, transparent column encryption, field-level audit trail                            | `MYSQL_HOST`                                 | —                        | `GET /database/demo`, `GET /database/audit/demo` |
 
 The lock service follows a single priority: Redis if configured, otherwise MySQL, otherwise in-memory. `GET /database/demo` writes an `encrypt.EncryptedString` column and reads it back — the response shows the decrypted value next to the raw ciphertext stored in MySQL (`<ENC>…`), demonstrating transparent encryption-at-rest.
 

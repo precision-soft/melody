@@ -45,11 +45,11 @@ func TestInMemoryTransport_CloseRejectsFurtherSendsAndIsIdempotent(t *testing.T)
 type raceTestLogger struct{}
 
 func (raceTestLogger) Log(loggingcontract.Level, string, loggingcontract.Context) {}
-func (raceTestLogger) Debug(string, loggingcontract.Context)                       {}
-func (raceTestLogger) Info(string, loggingcontract.Context)                        {}
-func (raceTestLogger) Warning(string, loggingcontract.Context)                     {}
-func (raceTestLogger) Error(string, loggingcontract.Context)                       {}
-func (raceTestLogger) Emergency(string, loggingcontract.Context)                   {}
+func (raceTestLogger) Debug(string, loggingcontract.Context)                      {}
+func (raceTestLogger) Info(string, loggingcontract.Context)                       {}
+func (raceTestLogger) Warning(string, loggingcontract.Context)                    {}
+func (raceTestLogger) Error(string, loggingcontract.Context)                      {}
+func (raceTestLogger) Emergency(string, loggingcontract.Context)                  {}
 
 func TestInMemoryTransport_WithLoggerIsRaceFreeWithDelayedRequeue(t *testing.T) {
     transport := NewInMemoryTransport(0)

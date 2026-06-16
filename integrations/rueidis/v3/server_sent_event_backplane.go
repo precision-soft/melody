@@ -17,8 +17,8 @@ import (
 const defaultServerSentEventBackplaneChannel = "melody:sse"
 
 type serverSentEventWireEvent struct {
-    Origin string              `json:"origin"`
-    Topic  string              `json:"topic"`
+    Origin string                     `json:"origin"`
+    Topic  string                     `json:"topic"`
     Event  melodyhttp.ServerSentEvent `json:"event"`
 }
 

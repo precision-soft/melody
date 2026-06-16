@@ -26,10 +26,10 @@ func NewInMemoryLocker(clockInstance clockcontract.Clock) *InMemoryLocker {
 const inMemoryPurgeInterval = 512
 
 type InMemoryLocker struct {
-    clock     clockcontract.Clock
-    mutex     sync.Mutex
-    holders   map[string]inMemoryHolder
-    counter   uint64
+    clock      clockcontract.Clock
+    mutex      sync.Mutex
+    holders    map[string]inMemoryHolder
+    counter    uint64
     purgeTicks int
 }
 

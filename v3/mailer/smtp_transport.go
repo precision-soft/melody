@@ -30,14 +30,14 @@ func NewSmtpTransport(config SmtpConfig) *SmtpTransport {
 }
 
 type SmtpConfig struct {
-    Address  string
-    Host     string
-    Username string
-    Password string
-    RequireTls bool
+    Address     string
+    Host        string
+    Username    string
+    Password    string
+    RequireTls  bool
     RequireAuth bool
     ImplicitTls bool
-    TlsConfig *tls.Config
+    TlsConfig   *tls.Config
 }
 
 type SmtpTransport struct {

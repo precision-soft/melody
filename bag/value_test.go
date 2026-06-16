@@ -173,4 +173,3 @@ func TestBagFloat64_ConversionsAndErrors(t *testing.T) {
         t.Fatalf("expected error")
     }
 }
-

@@ -18,11 +18,11 @@ import amqp "github.com/precision-soft/melody/integrations/amqp/v3"
 
 `RegisterDefaultParameters` registers sensible defaults that userland may override:
 
-| Parameter | Constant | Default |
-| --- | --- | --- |
-| `melody.amqp.dsn` | `ParameterDsn` | `amqp://guest:guest@localhost:5672/` |
-| `melody.amqp.prefetch` | `ParameterPrefetch` | `10` |
-| `melody.amqp.exchange` | `ParameterExchange` | _(unset; direct-to-queue)_ |
+| Parameter              | Constant            | Default                              |
+|------------------------|---------------------|--------------------------------------|
+| `melody.amqp.dsn`      | `ParameterDsn`      | `amqp://guest:guest@localhost:5672/` |
+| `melody.amqp.prefetch` | `ParameterPrefetch` | `10`                                 |
+| `melody.amqp.exchange` | `ParameterExchange` | _(unset; direct-to-queue)_           |
 
 ## Usage
 

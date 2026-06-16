@@ -3,8 +3,8 @@ package config
 import (
     "os"
 
-    melodybunorm "github.com/precision-soft/melody/integrations/bunorm/v3"
     melodymysql "github.com/precision-soft/melody/integrations/bunorm/mysql/v3"
+    melodybunorm "github.com/precision-soft/melody/integrations/bunorm/v3"
     "github.com/precision-soft/melody/v3/exception"
 )
 

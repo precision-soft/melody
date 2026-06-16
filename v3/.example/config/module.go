@@ -3,19 +3,19 @@ package config
 import (
     nethttp "net/http"
 
+    minio "github.com/minio/minio-go/v7"
     melodyencrypt "github.com/precision-soft/melody/integrations/bunorm/v3/encrypt"
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
-    melodymessagebus "github.com/precision-soft/melody/v3/messagebus"
     melodymailercontract "github.com/precision-soft/melody/v3/mailer/contract"
+    melodymessagebus "github.com/precision-soft/melody/v3/messagebus"
     melodymessagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
     melodyopenapi "github.com/precision-soft/melody/v3/openapi"
     melodysecurity "github.com/precision-soft/melody/v3/security"
     melodysecuritycontract "github.com/precision-soft/melody/v3/security/contract"
     melodytranslationcontract "github.com/precision-soft/melody/v3/translation/contract"
-    minio "github.com/minio/minio-go/v7"
     rueidis "github.com/redis/rueidis"
     bun "github.com/uptrace/bun"
 )

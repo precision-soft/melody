@@ -84,11 +84,11 @@ emitted as an `X'…'` binary literal, so every byte survives and the lookup com
 
 `Migrator` (and the `melody:encrypt:database` CLI command) stream a table in keyset-paginated batches:
 
-| Mode | What it does |
-|------|--------------|
-| `encrypt`   | encrypt plaintext columns (idempotent — already-encrypted values are skipped) |
+| Mode        | What it does                                                                            |
+|-------------|-----------------------------------------------------------------------------------------|
+| `encrypt`   | encrypt plaintext columns (idempotent — already-encrypted values are skipped)           |
 | `reencrypt` | decrypt with whichever key wrote each value, re-encrypt under `--target-key` (rotation) |
-| `decrypt`   | rewrite columns as plaintext |
+| `decrypt`   | rewrite columns as plaintext                                                            |
 
 ```bash
 melody melody:encrypt:database --table=users --primary-key=id --column=email --column=ssn --mode=encrypt

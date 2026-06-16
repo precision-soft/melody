@@ -37,40 +37,40 @@ func NewJwtTokenValidator(config JwtConfig) *JwtTokenValidator {
     }
 
     return &JwtTokenValidator{
-        secret:             config.Secret,
-        subjectClaim:       subjectClaim,
-        rolesClaim:         rolesClaim,
-        scopeClaim:         config.ScopeClaim,
-        leeway:             config.Leeway,
-        allowWithoutExpiry: config.AllowWithoutExpiry,
+        secret:               config.Secret,
+        subjectClaim:         subjectClaim,
+        rolesClaim:           rolesClaim,
+        scopeClaim:           config.ScopeClaim,
+        leeway:               config.Leeway,
+        allowWithoutExpiry:   config.AllowWithoutExpiry,
         rejectFutureIssuedAt: config.RejectFutureIssuedAt,
-        audience:           config.Audience,
-        issuer:             config.Issuer,
+        audience:             config.Audience,
+        issuer:               config.Issuer,
     }
 }
 
 type JwtConfig struct {
-    Secret             []byte
-    SubjectClaim       string
-    RolesClaim         string
-    ScopeClaim         string
-    Leeway             time.Duration
-    AllowWithoutExpiry bool
+    Secret               []byte
+    SubjectClaim         string
+    RolesClaim           string
+    ScopeClaim           string
+    Leeway               time.Duration
+    AllowWithoutExpiry   bool
     RejectFutureIssuedAt bool
-    Issuer string
-    Audience string
+    Issuer               string
+    Audience             string
 }
 
 type JwtTokenValidator struct {
-    secret             []byte
-    subjectClaim       string
-    rolesClaim         string
-    scopeClaim         string
-    leeway             time.Duration
-    allowWithoutExpiry bool
+    secret               []byte
+    subjectClaim         string
+    rolesClaim           string
+    scopeClaim           string
+    leeway               time.Duration
+    allowWithoutExpiry   bool
     rejectFutureIssuedAt bool
-    audience           string
-    issuer             string
+    audience             string
+    issuer               string
 }
 
 func (instance *JwtTokenValidator) Validate(
