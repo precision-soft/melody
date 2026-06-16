@@ -21,6 +21,16 @@ services:
         ports:
             - "${DEV_HTTP_HOST_PORT:-8180}:8080"
 
+    load-balancer:
+        image: nginx:1.27-alpine
+        restart: 'no'
+        depends_on:
+            - dev
+        volumes:
+            - ${RELATIVE_PATH_TO_ROOT}/${DOCKER_PATH}/load-balancer/vhost.conf:/etc/nginx/conf.d/default.conf:ro
+        ports:
+            - "${LOAD_BALANCER_HTTP_HOST_PORT:-80}:80"
+
     rabbitmq:
         image: rabbitmq:3.13-management
         profiles: [ 'all' ]

@@ -3,6 +3,7 @@ package static
 import (
     "net/http"
     "os"
+    "strings"
     "testing"
     "testing/fstest"
     "time"
@@ -303,6 +304,21 @@ func TestFileServer_IfNoneMatch_ReturnsNotModified(t *testing.T) {
 
     if http.StatusNotModified != statusCode {
         t.Fatalf("expected 304")
+    }
+}
+
+func TestContentTypeByExtension_ResolvesIcoAndIsCaseInsensitive(t *testing.T) {
+    icoType := contentTypeByExtension(".ico")
+    if false == strings.HasPrefix(icoType, "image/") {
+        t.Fatalf("expected an image content type for .ico, got %q", icoType)
+    }
+
+    if contentTypeByExtension(".ICO") != icoType {
+        t.Fatalf("expected case-insensitive resolution for .ICO, got %q want %q", contentTypeByExtension(".ICO"), icoType)
+    }
+
+    if "" == contentTypeByExtension(".svg") {
+        t.Fatalf("expected a content type for .svg, got empty")
     }
 }
 

@@ -1,3 +1,7 @@
+<p align="center">
+    <img src=".assets/logo.png" alt="Melody" width="128"/>
+</p>
+
 # Melody
 
 [![Go >= 1.22](https://img.shields.io/badge/go-%3E%3D1.22-00ADD8)](https://go.dev/)

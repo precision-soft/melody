@@ -7,6 +7,9 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet"/>
     <link href="/assets/app.css" rel="stylesheet"/>
     <title>Product</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg"/>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico"/>
+    <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png"/>
 </head>
 <body class="bg-light" data-page="product_detail">
 <div class="container py-4">
@@ -181,7 +184,7 @@
                 populateSelectOptions(categoryIdInput, categoriesResult?.payload ?? [], 'id', 'name');
                 populateSelectOptions(currencyIdInput, currenciesResult?.payload ?? [], 'id', 'code');
 
-                window.melodyExample.ui.setStatus('Ready.');
+                window.melodyExample.ui.setStatus('');
             } else {
                 title.text('Update product');
                 saveLabel.text('Save');
@@ -197,7 +200,7 @@
                 renderProduct(detail?.product ?? null);
                 deleteButton.removeClass('d-none');
                 debug.text(JSON.stringify(detailResult, null, 2));
-                window.melodyExample.ui.setStatus('OK');
+                window.melodyExample.ui.setStatus('');
             }
 
             $('#saveButton').on('click', async () => {

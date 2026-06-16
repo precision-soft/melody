@@ -18,7 +18,7 @@ install_git_hooks
 case "${1:-}" in
     up:minimal)
         shift
-        docker_compose up -d dev "$@"
+        docker_compose up -d dev load-balancer "$@"
         ;;
     up:all)
         shift
