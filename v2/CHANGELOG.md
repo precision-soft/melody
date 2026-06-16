@@ -7,14 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- `application/` — `Application.RegisterModuleProvider(provider)` plus expansion of the (previously dormant) `application/contract.ModuleProvider` inside `RegisterModule`: a module that also implements `ModuleProvider` now contributes its child modules in the same call, so an integration or application can register a whole group of capability-modules at once. Existing single-module registration is unchanged.
-
-### Fixed
-
-- `application/application_module.go` — `RegisterModule` now guards `ModuleProvider` expansion against a provider cycle: a module that (directly or transitively) provides itself recursed without bound and overflowed the goroutine stack at boot. Expansion depth is now capped (`maxModuleProviderDepth`) and a cycle fails fast with a `module provider expansion exceeded maximum depth, possible provider cycle` panic instead of an unrecoverable stack overflow. Ported from the `v3` fix.
-
 ## [v2.8.0] - 2026-06-15 - Configurable Transport & Shutdown Tunables + v3 Security and Correctness Back-ports
 
 ### Security
@@ -37,9 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `application/` — the HTTP graceful-shutdown grace period (previously a hardcoded `5s`) is now overridable: a `Configuration` that also implements the optional `HttpShutdownConfiguration` (`GetShutdownTimeout() time.Duration`) sets it, mirroring the existing `HttpTimeoutConfiguration` mechanism; a zero or absent value keeps the 5s default (backwards compatible). Back-ported from v3.
 - `container/container_resolver_test.go`, `cache/remember_test.go` — regression coverage for the closed-container resolution guard and the cancelable-`Remember` late-joiner fix back-ported below
 - `security/compiled_configuration_test.go` — regression coverage for the nil-login-result guard back-ported below
+- `application/` — `Application.RegisterModuleProvider(provider)` plus expansion of the (previously dormant) `application/contract.ModuleProvider` inside `RegisterModule`: a module that also implements `ModuleProvider` now contributes its child modules in the same call, so an integration or application can register a whole group of capability-modules at once. Existing single-module registration is unchanged. Back-ported from v3.
 
 ### Fixed
 
+- `http/kernel.go` — the per-request service-container scope is now closed even when request-logger setup fails: the `scope.Close()` defer was registered after `requestIdLogger`, so a panic during logger resolution leaked the freshly created scope on every such request. The defer is now registered immediately after `NewScope()`, with the logger reference nil-guarded for the pre-setup failure path. Ported from the `v3` fix.
+- `application/application_module.go` — `RegisterModule` now guards `ModuleProvider` expansion against a provider cycle: a module that (directly or transitively) provides itself recursed without bound and overflowed the goroutine stack at boot. Expansion depth is now capped (`maxModuleProviderDepth`) and a cycle fails fast with a `module provider expansion exceeded maximum depth, possible provider cycle` panic instead of an unrecoverable stack overflow. Ported from the `v3` fix.
 - `validation/validation_rule.go` — the `validate` tag grammar now accepts a regex containing a group. `parseValidationTag` classified a rule as parenthesized-form by counting `(`/`)` anywhere in the fragment, so the documented shorthand `regex=^(a|b)$` (the parens are a regex group) was misrouted to the `name(params)` branch and hard-rejected with `"invalid validation tag syntax"`, and the parenthesized `regex(pattern=^(a|b)$)` failed too — no tag spelling could express an alternation/capture group. Classification is now by position (a fragment is parenthesized only when `(` precedes any `=`), with a new `hasBalancedBrackets` helper validating the inner balance, so both spellings carry a grouped pattern verbatim. Ported from the `v3` fix.
 - `validation/validation_rule.go` — the parenthesized constraint form `name(value=…)` now accepts a regex whose pattern contains a comma inside a `()` group (for example `regex(value=^(\d{1,3},){3}\d{1,3}$)`). `splitByCommaOutsideRegexMeta` (which splits a parenthesized rule's parameter list) tracked `[]`/`{}` nesting but not `()` depth, so a comma inside a regex group was treated as a parameter separator, split the value mid-pattern, and failed as `invalid validation tag syntax` — even though the shorthand `regex=…` form accepted the same pattern. The parameter splitter now tracks `()` depth too. Ported from the `v3` fix.
 - `validation/constraint_greater_than.go` — `greaterThan` now rejects a floating-point `NaN` instead of silently accepting it. IEEE-754 comparisons against `NaN` are always false, so `NaN <= min` evaluated false and the value passed the bound; the constraint now rejects a non-finite float explicitly. Ported from the `v3` fix.

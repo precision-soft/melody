@@ -11,6 +11,7 @@ import (
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/event"
     eventcontract "github.com/precision-soft/melody/v3/event/contract"
+    "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     "github.com/precision-soft/melody/v3/runtime"
@@ -85,4 +86,43 @@ func newHttpTestContainer() containercontract.Container {
     )
 
     return serviceContainer
+}
+
+/** @info fakes */
+
+/* closeRecordingScope wraps a real scope to record Close calls and optionally force OverrideProtectedInstance to fail */
+type closeRecordingScope struct {
+    containercontract.Scope
+    failOverride bool
+    closed       bool
+}
+
+func (instance *closeRecordingScope) OverrideProtectedInstance(serviceName string, value any) error {
+    if true == instance.failOverride {
+        return exception.NewError("forced override failure", nil, nil)
+    }
+
+    return instance.Scope.OverrideProtectedInstance(serviceName, value)
+}
+
+func (instance *closeRecordingScope) Close() error {
+    instance.closed = true
+
+    return instance.Scope.Close()
+}
+
+/* scopeRecordingContainer wraps a real container and hands out a closeRecordingScope so a test can observe scope lifecycle */
+type scopeRecordingContainer struct {
+    containercontract.Container
+    failOverride bool
+    scope        *closeRecordingScope
+}
+
+func (instance *scopeRecordingContainer) NewScope() containercontract.Scope {
+    instance.scope = &closeRecordingScope{
+        Scope:        instance.Container.NewScope(),
+        failOverride: instance.failOverride,
+    }
+
+    return instance.scope
 }
