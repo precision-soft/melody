@@ -12,6 +12,7 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
     httpcontract "github.com/precision-soft/melody/v2/http/contract"
     "github.com/precision-soft/melody/v2/internal"
+    "github.com/precision-soft/melody/v2/logging"
     loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
     "github.com/precision-soft/melody/v2/session"
@@ -211,7 +212,11 @@ func writeResponse(
         }
     }
 
-    if nil != sessionManager && nil != sessionInstance {
+    /* @info persist the session at most once per request: the panic-recovery path can re-enter writeResponse after the first call already committed the session but then failed while writing the body, and SaveSession does not reset the modified flag, so without this guard the session store would be written twice. The header-commit flag cannot gate this — a handler that streamed its own response still needs its session persisted on that first (already-committed) call. */
+    persistenceRecorder, isPersistenceRecorder := writer.(sessionPersistenceRecorder)
+    sessionAlreadyPersisted := true == isPersistenceRecorder && true == persistenceRecorder.SessionPersisted()
+
+    if false == sessionAlreadyPersisted && nil != sessionManager && nil != sessionInstance {
         if true == sessionInstance.IsCleared() {
             err := sessionManager.DeleteSession(sessionInstance.Id())
             if nil != err {
@@ -262,6 +267,17 @@ func writeResponse(
 
             SetCookie(response, cookie)
         }
+
+        if true == isPersistenceRecorder {
+            persistenceRecorder.MarkSessionPersisted()
+        }
+    }
+
+    /* @info a handler that streamed its own response has already committed the headers; whether it then returned no response or failed after committing, skip writing so we do not emit a superfluous WriteHeader over the in-flight stream. */
+    recorder, isRecorder := writer.(headerCommitRecorder)
+    if true == isRecorder && true == recorder.HeadersWritten() {
+        closeDiscardedResponseBody(response, logging.LoggerFromRuntime(runtimeInstance))
+        return
     }
 
     err := WriteToHttpResponseWriter(runtimeInstance, request, writer, response)

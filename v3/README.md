@@ -1,3 +1,7 @@
+<p align="center">
+    <img src="../.assets/logo.png" alt="Melody" width="128"/>
+</p>
+
 # Melody
 
 Melody is a Go framework focused on building **HTTP applications and CLI commands** on top of the same runtime, container, configuration, logging, and validation infrastructure.

@@ -5,13 +5,13 @@ import (
     "net/http/httptest"
     "testing"
 
-    "github.com/precision-soft/melody/v2/event"
-    eventcontract "github.com/precision-soft/melody/v2/event/contract"
-    httpcontract "github.com/precision-soft/melody/v2/http/contract"
-    kernelcontract "github.com/precision-soft/melody/v2/kernel/contract"
-    runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
-    "github.com/precision-soft/melody/v2/session"
-    sessioncontract "github.com/precision-soft/melody/v2/session/contract"
+    "github.com/precision-soft/melody/event"
+    eventcontract "github.com/precision-soft/melody/event/contract"
+    httpcontract "github.com/precision-soft/melody/http/contract"
+    kernelcontract "github.com/precision-soft/melody/kernel/contract"
+    runtimecontract "github.com/precision-soft/melody/runtime/contract"
+    "github.com/precision-soft/melody/session"
+    sessioncontract "github.com/precision-soft/melody/session/contract"
 )
 
 func TestKernel_ResponseListenerReplacesResponseOnSuccessPath(t *testing.T) {

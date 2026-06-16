@@ -1,3 +1,7 @@
+<p align="center">
+    <img src="../.assets/logo.png" alt="Melody" width="128"/>
+</p>
+
 # Melody (v2)
 
 > **v2 is in maintenance mode — it receives security and critical correctness fixes only.** New features

@@ -1,7 +1,11 @@
 package http
 
 import (
+    "bufio"
     "context"
+    "io"
+    "net"
+    nethttp "net/http"
     "time"
 
     "github.com/precision-soft/melody/v3/clock"
@@ -43,6 +47,10 @@ func (instance *testEnvironmentSource) Load() (map[string]string, error) {
 }
 
 func newHttpTestContainer() containercontract.Container {
+    return newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage())
+}
+
+func newHttpTestContainerWithSessionStorage(storage sessioncontract.Storage) containercontract.Container {
     serviceContainer := container.NewContainer()
 
     serviceContainer.MustRegister(
@@ -73,7 +81,6 @@ func newHttpTestContainer() containercontract.Container {
     serviceContainer.MustRegister(
         session.ServiceSessionManager,
         func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
-            storage := session.NewInMemoryStorage()
             return session.NewManager(storage, 30*time.Minute), nil
         },
     )
@@ -90,7 +97,6 @@ func newHttpTestContainer() containercontract.Container {
 
 /** @info fakes */
 
-/* closeRecordingScope wraps a real scope to record Close calls and optionally force OverrideProtectedInstance to fail */
 type closeRecordingScope struct {
     containercontract.Scope
     failOverride bool
@@ -111,7 +117,6 @@ func (instance *closeRecordingScope) Close() error {
     return instance.Scope.Close()
 }
 
-/* scopeRecordingContainer wraps a real container and hands out a closeRecordingScope so a test can observe scope lifecycle */
 type scopeRecordingContainer struct {
     containercontract.Container
     failOverride bool
@@ -125,4 +130,116 @@ func (instance *scopeRecordingContainer) NewScope() containercontract.Scope {
     }
 
     return instance.scope
+}
+
+type writeHeaderCountingResponseWriter struct {
+    nethttp.ResponseWriter
+    writeHeaderCount int
+}
+
+func (instance *writeHeaderCountingResponseWriter) WriteHeader(statusCode int) {
+    instance.writeHeaderCount = instance.writeHeaderCount + 1
+    instance.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (instance *writeHeaderCountingResponseWriter) Flush() {
+    flusher, isFlusher := instance.ResponseWriter.(nethttp.Flusher)
+    if true == isFlusher {
+        flusher.Flush()
+    }
+}
+
+type hijackableResponseWriter struct {
+    nethttp.ResponseWriter
+    hijacked bool
+}
+
+func (instance *hijackableResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+    instance.hijacked = true
+
+    serverConnection, clientConnection := net.Pipe()
+    _ = clientConnection.Close()
+
+    return serverConnection, bufio.NewReadWriter(bufio.NewReader(serverConnection), bufio.NewWriter(serverConnection)), nil
+}
+
+type failingHijackResponseWriter struct {
+    nethttp.ResponseWriter
+    writeHeaderCount int
+}
+
+func (instance *failingHijackResponseWriter) WriteHeader(statusCode int) {
+    instance.writeHeaderCount = instance.writeHeaderCount + 1
+    instance.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (instance *failingHijackResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+    return nil, nil, nethttp.ErrHijacked
+}
+
+type nonFlushingResponseWriter struct {
+    header     nethttp.Header
+    statusCode int
+}
+
+func (instance *nonFlushingResponseWriter) Header() nethttp.Header {
+    if nil == instance.header {
+        instance.header = make(nethttp.Header)
+    }
+
+    return instance.header
+}
+
+func (instance *nonFlushingResponseWriter) Write(data []byte) (int, error) {
+    return len(data), nil
+}
+
+func (instance *nonFlushingResponseWriter) WriteHeader(statusCode int) {
+    instance.statusCode = statusCode
+}
+
+type closeRecordingReadCloser struct {
+    closeCount int
+}
+
+func (instance *closeRecordingReadCloser) Read(buffer []byte) (int, error) {
+    return 0, io.EOF
+}
+
+func (instance *closeRecordingReadCloser) Close() error {
+    instance.closeCount = instance.closeCount + 1
+
+    return nil
+}
+
+type writeFailingResponseWriter struct {
+    header     nethttp.Header
+    statusCode int
+}
+
+func (instance *writeFailingResponseWriter) Header() nethttp.Header {
+    if nil == instance.header {
+        instance.header = make(nethttp.Header)
+    }
+
+    return instance.header
+}
+
+func (instance *writeFailingResponseWriter) Write(data []byte) (int, error) {
+    return 0, exception.NewError("forced write failure", nil, nil)
+}
+
+func (instance *writeFailingResponseWriter) WriteHeader(statusCode int) {
+    instance.statusCode = statusCode
+}
+
+type countingSessionStorage struct {
+    sessioncontract.Storage
+    saveCount int
+}
+
+func (instance *countingSessionStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+    instance.saveCount = instance.saveCount + 1
+
+    return instance.Storage.Save(sessionId, data, ttl)
 }

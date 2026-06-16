@@ -10,6 +10,8 @@ import (
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
+    "github.com/precision-soft/melody/v3/session"
+    sessioncontract "github.com/precision-soft/melody/v3/session/contract"
 )
 
 func TestKernel_ResponseListenerReplacesResponseOnSuccessPath(t *testing.T) {
@@ -95,6 +97,218 @@ func TestKernel_ResponseListenerReplacesResponseOnPanicRecoveryPath(t *testing.T
 
     if "recovered-replaced" != rec.Body.String() {
         t.Fatalf("expected listener-replaced body on panic-recovery path, got %q", rec.Body.String())
+    }
+}
+
+func TestKernel_ClosesHandlerReturnedBodyWhenHandlerAlreadyStreamed(t *testing.T) {
+    body := &closeRecordingReadCloser{}
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/stream-then-return",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            writer.WriteHeader(nethttp.StatusOK)
+
+            return &Response{
+                statusCode: nethttp.StatusOK,
+                headers:    make(nethttp.Header),
+                bodyReader: body,
+            }, nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainer()
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/stream-then-return", nil)
+
+    handler.ServeHTTP(httptest.NewRecorder(), request)
+
+    if 1 != body.closeCount {
+        t.Fatalf("expected the discarded handler-returned response body to be closed exactly once, got %d", body.closeCount)
+    }
+}
+
+func TestKernel_DoesNotWriteDefaultResponseWhenHandlerAlreadyStreamed(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/stream",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            streamWriter, streamErr := NewServerSentEventWriter(writer)
+            if nil != streamErr {
+                return nil, streamErr
+            }
+
+            commentErr := streamWriter.Comment("connected")
+            if nil != commentErr {
+                return nil, commentErr
+            }
+
+            return nil, nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainer()
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/stream", nil)
+    countingWriter := &writeHeaderCountingResponseWriter{
+        ResponseWriter: httptest.NewRecorder(),
+    }
+
+    handler.ServeHTTP(countingWriter, request)
+
+    if 1 != countingWriter.writeHeaderCount {
+        t.Fatalf("expected exactly one WriteHeader call for a streamed response, got %d", countingWriter.writeHeaderCount)
+    }
+}
+
+func TestKernel_PreservesHijackerForWrappedResponseWriter(t *testing.T) {
+    sawHijacker := false
+    var hijackErr error
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/ws",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            hijacker, isHijacker := writer.(nethttp.Hijacker)
+            sawHijacker = isHijacker
+            if true == isHijacker {
+                connection, _, err := hijacker.Hijack()
+                hijackErr = err
+                if nil != connection {
+                    _ = connection.Close()
+                }
+            }
+
+            return nil, nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainer()
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/ws", nil)
+    underlying := &hijackableResponseWriter{
+        ResponseWriter: httptest.NewRecorder(),
+    }
+
+    handler.ServeHTTP(underlying, request)
+
+    if false == sawHijacker {
+        t.Fatal("expected the kernel-wrapped response writer to preserve http.Hijacker")
+    }
+
+    if nil != hijackErr {
+        t.Fatalf("expected Hijack to forward to the underlying writer, got %v", hijackErr)
+    }
+
+    if false == underlying.hijacked {
+        t.Fatal("expected Hijack to reach the underlying response writer")
+    }
+}
+
+func TestKernel_WritesDefaultResponseWhenHijackFails(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/ws",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            hijacker, isHijacker := writer.(nethttp.Hijacker)
+            if true == isHijacker {
+                _, _, _ = hijacker.Hijack()
+            }
+
+            return nil, nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainer()
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/ws", nil)
+    underlying := &failingHijackResponseWriter{
+        ResponseWriter: httptest.NewRecorder(),
+    }
+
+    handler.ServeHTTP(underlying, request)
+
+    if 0 == underlying.writeHeaderCount {
+        t.Fatal("expected the kernel to write a default response after a failed hijack")
+    }
+}
+
+func TestKernel_DoesNotRewriteResponseWhenHandlerStreamedThenPanicked(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/stream-panic",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            writer.WriteHeader(nethttp.StatusOK)
+
+            _, writeErr := writer.Write([]byte("partial"))
+            if nil != writeErr {
+                return nil, writeErr
+            }
+
+            panic("boom after streaming")
+        },
+    )
+
+    serviceContainer := newHttpTestContainer()
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/stream-panic", nil)
+    countingWriter := &writeHeaderCountingResponseWriter{
+        ResponseWriter: httptest.NewRecorder(),
+    }
+
+    handler.ServeHTTP(countingWriter, request)
+
+    if 1 != countingWriter.writeHeaderCount {
+        t.Fatalf("expected exactly one WriteHeader call when a handler streamed then panicked, got %d", countingWriter.writeHeaderCount)
+    }
+}
+
+func TestKernel_DoesNotDoublePersistSessionWhenWriteFailsAfterCommit(t *testing.T) {
+    storage := &countingSessionStorage{
+        Storage: session.NewInMemoryStorage(),
+    }
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/save",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            sessionValue, exists := request.Attributes().Get(RequestAttributeSession)
+            if false == exists {
+                t.Fatal("expected the request to carry a session")
+            }
+
+            sessionInstance, ok := sessionValue.(sessioncontract.Session)
+            if false == ok {
+                t.Fatal("expected the session attribute to be a session")
+            }
+
+            sessionInstance.Set("key", "value")
+
+            return TextResponse(nethttp.StatusOK, "body"), nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainerWithSessionStorage(storage)
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/save", nil)
+
+    /* @info the write fails after the headers were committed, so the first writeResponse persists the session and then panics, and the panic-recovery path re-enters writeResponse. */
+    handler.ServeHTTP(&writeFailingResponseWriter{}, request)
+
+    if 1 != storage.saveCount {
+        t.Fatalf("expected the session to be persisted exactly once across the first write and the panic-recovery write, got %d", storage.saveCount)
     }
 }
 

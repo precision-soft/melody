@@ -37,6 +37,10 @@ func (instance *testEnvironmentSource) Load() (map[string]string, error) {
 }
 
 func newHttpTestContainer() containercontract.Container {
+    return newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage())
+}
+
+func newHttpTestContainerWithSessionStorage(storage sessioncontract.Storage) containercontract.Container {
     serviceContainer := container.NewContainer()
 
     serviceContainer.MustRegister(
@@ -67,7 +71,6 @@ func newHttpTestContainer() containercontract.Container {
     serviceContainer.MustRegister(
         session.ServiceSessionManager,
         func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
-            storage := session.NewInMemoryStorage()
             return session.NewManager(storage, 30*time.Minute), nil
         },
     )
