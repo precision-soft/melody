@@ -72,7 +72,7 @@ The [`config/`](./config/) package keeps [`main.go`](./main.go) small by groupin
 
 ### Cron integration
 
-The example demonstrates Melody's [`integrations/cron`](../integrations/cron/v3/) package. Commands stay plain Melody CLI commands — there is no `cron.Metadata` interface to implement. Schedules are declared separately in [`config/cli.go`](./config/cli.go) through a `cron.Configuration` registry:
+The example demonstrates Melody's [`integrations/cron`](../../integrations/cron/v3/) package. Commands stay plain Melody CLI commands — there is no `cron.Metadata` interface to implement. Schedules are declared separately in [`config/cli.go`](./config/cli.go) through a `cron.Configuration` registry:
 
 ```go
 cronConfiguration := cron.NewConfiguration().
@@ -106,7 +106,7 @@ All wiring and integration logic lives outside `main.go`.
 
 ## Running locally
 
-The example is a standalone Go module (`v3/.example/go.mod`) that depends on Melody and the cron integration. From the repository root:
+The example is a standalone Go module (`v3/.example/go.mod`) that depends on Melody and its platform integrations (see [Platform integrations](#platform-integrations-optional-env-gated) below). From the repository root:
 
 ```bash
 cd v3/.example
@@ -143,6 +143,44 @@ go run . melody:cron:generate --out ./generated_conf/cron/crontab
 ```
 
 The example registers two scheduled commands in [`config/cli.go`](./config/cli.go) (`product:list` every 6 hours, `app:info` daily at noon) plus a heartbeat enabled via `APP_CRON_HEARTBEAT_AUTO_ENABLED=true` in [`.env`](./.env) (the path is auto-derived from `melody.cron.logs_dir`), so the generated crontab is not empty.
+
+---
+
+## Platform integrations (optional, env-gated)
+
+The example wires **every v3 platform integration**. Each backend that needs external infrastructure is **gated on an environment variable**: when the variable is unset the application boots with an in-process fallback (the example always runs with zero infrastructure), and when it is set the matching integration is activated and resolved through the same core service constant, so the rest of the app is unchanged.
+
+| Integration                                                                                                                                      | Activated by                                 | Falls back to            | Demo endpoint                                    |
+|--------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------|--------------------------|--------------------------------------------------|
+| [`opentelemetry`](../../integrations/opentelemetry/v3/) — Prometheus metrics middleware                                                          | always on                                    | —                        | `GET /metrics`                                   |
+| [`websocket`](../../integrations/websocket/v3/) — WebSocket bound to the SSE hub                                                                 | always on                                    | —                        | `GET /ws` (and `GET /events/stream` for SSE)     |
+| `encrypt` ([`bunorm/v3/encrypt`](../../integrations/bunorm/v3/encrypt/)) — AES-256-GCM cipher                                                    | always on                                    | —                        | `GET /encrypt/demo`                              |
+| [`amqp`](../../integrations/amqp/v3/) — durable message-bus transport                                                                            | `AMQP_DSN`                                   | in-memory transport      | `POST /messagebus/demo`                          |
+| [`awss3`](../../integrations/awss3/v3/) — S3 object storage (`storage.ServiceStorage`)                                                           | `S3_ENDPOINT`                                | local filesystem storage | `GET /platform/demo`                             |
+| [`rueidis`](../../integrations/rueidis/v3/) — Redis cache backend, distributed lock (`lock.ServiceLocker`), revocable token store, SSE backplane | `REDIS_ADDRESS`                              | in-memory cache/lock     | `GET /cache/demo`, `GET /redis/token/demo`       |
+| [`bunorm/mysql`](../../integrations/bunorm/mysql/v3/) — MySQL `GET_LOCK` distributed lock                                                        | `MYSQL_HOST` (when `REDIS_ADDRESS` is unset) | in-memory lock           | `GET /platform/demo`                             |
+| [`bunorm`](../../integrations/bunorm/v3/) — bun ORM `*bun.DB`, transparent column encryption, field-level audit trail                            | `MYSQL_HOST`                                 | —                        | `GET /database/demo`, `GET /database/audit/demo` |
+
+The lock service follows a single priority: Redis if configured, otherwise MySQL, otherwise in-memory. `GET /database/demo` writes an `encrypt.EncryptedString` column and reads it back — the response shows the decrypted value next to the raw ciphertext stored in MySQL (`<ENC>…`), demonstrating transparent encryption-at-rest.
+
+### Running fully against containers
+
+The dev [`docker-compose.yml`](../../.dev/docker/docker-compose.yml) provides RabbitMQ, Redis, MySQL, and MinIO (an S3-compatible mock). Bring them up with the [`./dc`](../../dc) wrapper, then start the example with every integration pointed at the mapped host ports:
+
+```bash
+# from the repository root — start the backing services
+./dc up -d rabbitmq redis mysql minio
+
+# from v3/.example — run with all integrations enabled
+cd v3/.example
+AMQP_DSN="amqp://guest:guest@localhost:5673/" \
+REDIS_ADDRESS="localhost:6380" \
+S3_ENDPOINT="localhost:9000" S3_ACCESS_KEY="minioadmin" S3_SECRET_KEY="minioadmin" S3_BUCKET="melody-example" \
+MYSQL_HOST="localhost" MYSQL_PORT="3307" MYSQL_DATABASE="melody_example" MYSQL_USER="melody" MYSQL_PASSWORD="melody" \
+go run .
+```
+
+Leave the variables unset to run the same application end-to-end with no infrastructure. The demo endpoints above let you exercise each backend (e.g. `curl localhost:8080/database/demo`, `curl localhost:8080/cache/demo`).
 
 ---
 

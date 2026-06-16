@@ -94,19 +94,21 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
     return nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
         scope := serviceContainer.NewScope()
 
+        /* @important close the scope before anything that can fail, so a panic during request-logger setup cannot leak it; the logger is captured by reference and nil-guarded for the pre-setup failure path */
+        var requestLogger loggingcontract.Logger
+        defer func() {
+            scopeCloseErr := scope.Close()
+            if nil != scopeCloseErr && nil != requestLogger {
+                requestLogger.Error("failed to close service container scope", exception.LogContext(scopeCloseErr))
+            }
+        }()
+
         requestLogger, requestId, requestIdLoggerErr := instance.requestIdLogger(serviceContainer, scope)
         if nil != requestIdLoggerErr {
             exception.Panic(
                 exception.NewError("failed to create request logger", nil, requestIdLoggerErr),
             )
         }
-
-        defer func() {
-            scopeCloseErr := scope.Close()
-            if nil != scopeCloseErr {
-                requestLogger.Error("failed to close service container scope", exception.LogContext(scopeCloseErr))
-            }
-        }()
 
         requestContext := NewRequestContext(requestId, time.Now())
         serviceRequestContextErr := scope.OverrideProtectedInstance(ServiceRequestContext, requestContext)
@@ -345,13 +347,15 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
             finalResponse = exceptionEvent.Response()
 
+            kernelResponseEvent := NewKernelResponseEvent(melodyRequest, finalResponse)
             _, eventKernelExceptionErr = eventDispatcher.DispatchName(
                 runtimeInstance,
                 kernelcontract.EventKernelResponse,
-                NewKernelResponseEvent(melodyRequest, finalResponse),
+                kernelResponseEvent,
             )
             instance.logEventDispatchError(requestLogger, "kernel response error", eventKernelExceptionErr)
 
+            finalResponse = kernelResponseEvent.Response()
             writeResponse(
                 runtimeInstance,
                 melodyRequest,
@@ -589,10 +593,11 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
         if nil != response {
             finalResponse = response
+            kernelResponseEvent := NewKernelResponseEvent(melodyRequest, finalResponse)
             _, eventKernelResponseErr := eventDispatcher.DispatchName(
                 runtimeInstance,
                 kernelcontract.EventKernelResponse,
-                NewKernelResponseEvent(melodyRequest, finalResponse),
+                kernelResponseEvent,
             )
             if nil != eventKernelResponseErr {
                 requestLogger.Error(
@@ -601,6 +606,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 )
             }
 
+            finalResponse = kernelResponseEvent.Response()
             writeResponse(
                 runtimeInstance,
                 melodyRequest,
@@ -614,6 +620,17 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
             return
         }
+
+        writeResponse(
+            runtimeInstance,
+            melodyRequest,
+            writer,
+            nil,
+            sessionManager,
+            sessionInstance,
+            instance.options.ForwardedHeadersPolicy,
+            instance.options.SessionCookiePolicy,
+        )
     })
 }
 

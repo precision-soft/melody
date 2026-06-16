@@ -116,6 +116,12 @@ func rememberWithStampedeProtection(
     shard.mutex.Lock()
 
     call, exists := shard.inFlightByKey[singleFlightKey]
+
+    /* @important a cancelable call whose waiters all timed out is already doomed to a cancellation error; a late joiner must not inherit that poison, so it replaces the entry and becomes a fresh leader. */
+    if true == exists && true == call.IsCanceled() {
+        exists = false
+    }
+
     if true == exists {
         call.AddWaiter()
         shard.mutex.Unlock()
@@ -155,7 +161,9 @@ func executeRememberInFlightLeader(
 ) {
     defer func() {
         shard.mutex.Lock()
-        delete(shard.inFlightByKey, singleFlightKey)
+        if call == shard.inFlightByKey[singleFlightKey] {
+            delete(shard.inFlightByKey, singleFlightKey)
+        }
         shard.mutex.Unlock()
     }()
 

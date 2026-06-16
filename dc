@@ -15,4 +15,20 @@ install_git_hooks() {
 
 install_git_hooks
 
-docker_compose "$@"
+case "${1:-}" in
+    up:minimal)
+        shift
+        docker_compose up -d dev load-balancer "$@"
+        ;;
+    up:all)
+        shift
+        docker_compose --profile all up -d "$@"
+        ;;
+    down)
+        shift
+        docker_compose --profile all down "$@"
+        ;;
+    *)
+        docker_compose "$@"
+        ;;
+esac

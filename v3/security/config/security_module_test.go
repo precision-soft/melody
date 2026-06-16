@@ -197,4 +197,8 @@ func (instance *testRoleToken) UserIdentifier() string { return "test" }
 
 func (instance *testRoleToken) Roles() []string { return instance.roles }
 
+func (instance *testRoleToken) Scope() map[string]any { return map[string]any{} }
+
+func (instance *testRoleToken) Attributes() map[string]any { return map[string]any{} }
+
 func (instance *testRoleToken) IsAuthenticated() bool { return true }

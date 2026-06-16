@@ -30,7 +30,9 @@ if [[ "" = "${STAGED_PATH_LIST_STRING}" ]]; then
     exit 1
 fi
 
-FORBIDDEN_PATH_LIST_STRING="$(printf '%s\n' "${STAGED_PATH_LIST_STRING}" | awk '
+STAGED_NON_DELETED_PATH_LIST_STRING="$(git --no-pager diff --cached --name-only --diff-filter=d | awk 'NF' || true)"
+
+FORBIDDEN_PATH_LIST_STRING="$(printf '%s\n' "${STAGED_NON_DELETED_PATH_LIST_STRING}" | awk '
     /^\.dev-data\// && $0 != ".dev-data/.gitignore" { print; next }
     $0 == ".dev/docker/.env.local" { print; next }
 ')"

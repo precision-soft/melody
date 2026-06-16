@@ -17,7 +17,7 @@ type FileServerConfig struct {
     indexFile   string
     stripPrefix string
     enableCache bool
-    cacheMaxAge int /** in seconds */
+    cacheMaxAge int
     weakEtag    bool
 }
 

@@ -40,6 +40,18 @@ func (instance FirewallOverrideConfiguration) WithStateless(stateless bool) Fire
     return instance
 }
 
+func (instance FirewallOverrideConfiguration) WithEntryPoint(entryPoint securitycontract.EntryPoint) FirewallOverrideConfiguration {
+    instance.entryPoint = entryPoint
+
+    return instance
+}
+
+func (instance FirewallOverrideConfiguration) WithAccessDeniedHandler(accessDeniedHandler securitycontract.AccessDeniedHandler) FirewallOverrideConfiguration {
+    instance.accessDeniedHandler = accessDeniedHandler
+
+    return instance
+}
+
 type FirewallConfiguration struct {
     name          string
     matcher       securitycontract.Matcher
@@ -160,6 +172,24 @@ func (instance *Builder) AddStatefulFirewall(
         logoutHandler,
         override,
     )
+}
+
+func (instance *Builder) BuildAndCompile() *security.CompiledConfiguration {
+    if 0 == len(instance.firewalls) {
+        return nil
+    }
+
+    compiled, err := Compile(
+        Configuration{
+            global:    instance.global,
+            firewalls: instance.firewalls,
+        },
+    )
+    if nil != err {
+        exception.Panic(exception.FromError(err))
+    }
+
+    return compiled
 }
 
 func (instance *Builder) addFirewall(
@@ -307,24 +337,6 @@ func (instance *Builder) validateFirewall(
             ),
         )
     }
-}
-
-func (instance *Builder) BuildAndCompile() *security.CompiledConfiguration {
-    if 0 == len(instance.firewalls) {
-        return nil
-    }
-
-    compiled, err := Compile(
-        Configuration{
-            global:    instance.global,
-            firewalls: instance.firewalls,
-        },
-    )
-    if nil != err {
-        exception.Panic(exception.FromError(err))
-    }
-
-    return compiled
 }
 
 func NewFirewallOverrideConfiguration() FirewallOverrideConfiguration {

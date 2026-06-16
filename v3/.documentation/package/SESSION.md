@@ -40,8 +40,8 @@ The example below demonstrates resolving the session manager from the container 
 package main
 
 import (
-	containercontract "github.com/precision-soft/melody/v2/container/contract"
-	"github.com/precision-soft/melody/v2/session"
+	containercontract "github.com/precision-soft/melody/v3/container/contract"
+	"github.com/precision-soft/melody/v3/session"
 )
 
 func updateSession(

@@ -30,6 +30,7 @@ func (instance *sessionLogoutHandler) Logout(
     }
 
     sessionInstance.Delete(SessionKeySecurityUserId)
+    sessionInstance.Delete(SessionKeySecurityRoles)
 
     response, err := melodyhttp.JsonResponse(http.StatusOK, map[string]any{
         "success": true,

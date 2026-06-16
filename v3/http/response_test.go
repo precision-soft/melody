@@ -148,9 +148,6 @@ func TestAttachmentResponse_SanitizesQuotesInFilename(t *testing.T) {
     defer response.Close()
 
     disposition := response.Headers().Get("Content-Disposition")
-    if true == strings.Contains(disposition, `"`+`file`+`"`) {
-        // fine: the wrapping quotes are expected
-    }
     if true == strings.Contains(disposition, `name"`) {
         t.Fatalf("raw quote must not appear inside filename, got: %s", disposition)
     }
@@ -310,5 +307,20 @@ func TestJsonErrorResponse_ContainsErrorField(t *testing.T) {
     body := rec.Body.String()
     if false == strings.Contains(body, "something went wrong") {
         t.Fatalf("expected error message in body, got: %s", body)
+    }
+}
+
+func TestContentTypeByExtension_ResolvesIcoAndIsCaseInsensitive(t *testing.T) {
+    icoType := contentTypeByExtension(".ico")
+    if false == strings.HasPrefix(icoType, "image/") {
+        t.Fatalf("expected an image content type for .ico, got %q", icoType)
+    }
+
+    if contentTypeByExtension(".ICO") != icoType {
+        t.Fatalf("expected case-insensitive resolution for .ICO, got %q want %q", contentTypeByExtension(".ICO"), icoType)
+    }
+
+    if "" == contentTypeByExtension(".svg") {
+        t.Fatalf("expected a content type for .svg, got empty")
     }
 }

@@ -190,6 +190,198 @@ func TestContainer_Close_ClosesDependentsBeforeDependencies_ByTypeResolution(t *
     }
 }
 
+type valueCloser struct {
+    counter *int
+    lock    *sync.Mutex
+}
+
+func (instance valueCloser) Close() error {
+    instance.lock.Lock()
+    defer instance.lock.Unlock()
+
+    *instance.counter++
+
+    return nil
+}
+
+func TestContainer_Close_ValueTypeServiceClosedOnce(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var lock sync.Mutex
+    count := 0
+
+    MustRegister[valueCloser](
+        serviceContainer,
+        "value.closer",
+        func(resolver containercontract.Resolver) (valueCloser, error) {
+            return valueCloser{counter: &count, lock: &lock}, nil
+        },
+    )
+
+    _ = MustFromResolver[valueCloser](serviceContainer, "value.closer")
+    _ = MustFromResolverByType[valueCloser](serviceContainer)
+
+    if err := serviceContainer.Close(); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    lock.Lock()
+    defer lock.Unlock()
+
+    if 1 != count {
+        t.Fatalf("expected value-type service Close to be called once, got %d", count)
+    }
+}
+
+type unhashableValueCloser struct {
+    counter *int
+    lock    *sync.Mutex
+    payload any
+}
+
+func (instance unhashableValueCloser) Close() error {
+    instance.lock.Lock()
+    defer instance.lock.Unlock()
+
+    *instance.counter++
+
+    return nil
+}
+
+func TestContainer_Close_ValueTypeServiceWithUnhashableContentDoesNotPanicAndClosesOnce(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var lock sync.Mutex
+    count := 0
+
+    MustRegister[unhashableValueCloser](
+        serviceContainer,
+        "unhashable.value.closer",
+        func(resolver containercontract.Resolver) (unhashableValueCloser, error) {
+            return unhashableValueCloser{counter: &count, lock: &lock, payload: []int{1, 2, 3}}, nil
+        },
+    )
+
+    _ = MustFromResolver[unhashableValueCloser](serviceContainer, "unhashable.value.closer")
+    _ = MustFromResolverByType[unhashableValueCloser](serviceContainer)
+
+    if err := serviceContainer.Close(); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    lock.Lock()
+    defer lock.Unlock()
+
+    if 1 != count {
+        t.Fatalf("expected value-type service Close to be called once, got %d", count)
+    }
+}
+
+type nonComparableValueCloser struct {
+    counter *int
+    lock    *sync.Mutex
+    tags    []string
+}
+
+func (instance nonComparableValueCloser) Close() error {
+    instance.lock.Lock()
+    defer instance.lock.Unlock()
+
+    *instance.counter++
+
+    return nil
+}
+
+func TestContainer_Close_NonComparableValueTypeServiceClosedOnce(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var lock sync.Mutex
+    count := 0
+
+    MustRegister[nonComparableValueCloser](
+        serviceContainer,
+        "non.comparable.value.closer",
+        func(resolver containercontract.Resolver) (nonComparableValueCloser, error) {
+            return nonComparableValueCloser{counter: &count, lock: &lock, tags: []string{"a", "b"}}, nil
+        },
+    )
+
+    _ = MustFromResolver[nonComparableValueCloser](serviceContainer, "non.comparable.value.closer")
+    _ = MustFromResolverByType[nonComparableValueCloser](serviceContainer)
+
+    if err := serviceContainer.Close(); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    lock.Lock()
+    defer lock.Unlock()
+
+    if 1 != count {
+        t.Fatalf("expected non-comparable value-type service Close to be called once, got %d", count)
+    }
+}
+
+func TestContainer_Close_ClosesDependentsBeforeDependencies_NamedServiceDependsByTypeOnTypeRegisteredService(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    err := Register(
+        serviceContainer,
+        "service.b",
+        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+            return &closeOrderServiceB{recorder: recorder}, nil
+        },
+        WithTypeRegistration(true),
+    )
+    if nil != err {
+        t.Fatalf("unexpected register error: %v", err)
+    }
+
+    err = Register(
+        serviceContainer,
+        "service.a",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            _, dependencyErr := FromResolverByType[*closeOrderServiceB](resolver)
+            if nil != dependencyErr {
+                return nil, dependencyErr
+            }
+
+            return &closeOrderServiceA{recorder: recorder}, nil
+        },
+    )
+    if nil != err {
+        t.Fatalf("unexpected register error: %v", err)
+    }
+
+    _, err = serviceContainer.Get("service.a")
+    if nil != err {
+        t.Fatalf("unexpected get error: %v", err)
+    }
+
+    err = serviceContainer.Close()
+    if nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    if 2 != len(closeSequence) {
+        t.Fatalf("expected 2 close calls, got %d", len(closeSequence))
+    }
+
+    if "a" != closeSequence[0] {
+        t.Fatalf("expected dependent a to close first, got %s", closeSequence[0])
+    }
+
+    if "b" != closeSequence[1] {
+        t.Fatalf("expected dependency b to close second, got %s", closeSequence[1])
+    }
+}
+
 type circularServiceA struct{}
 type circularServiceB struct{}
 

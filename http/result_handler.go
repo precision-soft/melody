@@ -41,6 +41,10 @@ func NormalizeResultToResponse(
 
     responseInstance, ok := value.(*Response)
     if true == ok {
+        if nil == responseInstance {
+            return nil, nil
+        }
+
         return responseInstance, nil
     }
 

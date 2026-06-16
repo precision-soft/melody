@@ -29,7 +29,11 @@ func StaticMiddleware(
 
                 if nil != headers {
                     for key, values := range headers {
-                        for _, value := range values {
+                        for index, value := range values {
+                            if 0 == index {
+                                response.Headers().Set(key, value)
+                                continue
+                            }
                             response.Headers().Add(key, value)
                         }
                     }

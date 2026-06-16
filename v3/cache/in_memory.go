@@ -248,7 +248,7 @@ func (instance *InMemoryBackend) DeleteMultiple(keys []string) error {
 }
 
 func (instance *InMemoryBackend) Increment(key string, delta int64) (int64, error) {
-    return instance.incrementWithTtl(key, delta, 0)
+    return instance.incrementValue(key, delta)
 }
 
 func (instance *InMemoryBackend) Decrement(key string, delta int64) (int64, error) {
@@ -262,7 +262,7 @@ func (instance *InMemoryBackend) Decrement(key string, delta int64) (int64, erro
         )
     }
 
-    return instance.incrementWithTtl(key, -delta, 0)
+    return instance.incrementValue(key, -delta)
 }
 
 func (instance *InMemoryBackend) Close() error {
@@ -281,10 +281,9 @@ func (instance *InMemoryBackend) stopCleanupLoop() {
     )
 }
 
-func (instance *InMemoryBackend) incrementWithTtl(
+func (instance *InMemoryBackend) incrementValue(
     key string,
     delta int64,
-    ttl time.Duration,
 ) (int64, error) {
     now := instance.clock.Now()
 
@@ -329,11 +328,16 @@ func (instance *InMemoryBackend) incrementWithTtl(
         )
     }
 
-    instance.upsertLocked(
+    var preservedExpiresAt *time.Time
+    if true == exists && nil != entry && nil != entry.item {
+        preservedExpiresAt = entry.item.ExpiresAt()
+    }
+
+    instance.upsertItemLocked(
         key,
         []byte(strconv.FormatInt(newValue, 10)),
         now,
-        ttl,
+        preservedExpiresAt,
     )
 
     return newValue, nil
@@ -410,16 +414,25 @@ func (instance *InMemoryBackend) upsertLocked(
     now time.Time,
     ttl time.Duration,
 ) {
-    entry, exists := instance.entries[key]
-
-    if 0 < instance.maxItems && len(instance.entries) >= instance.maxItems && false == exists {
-        instance.evictOneLocked(now)
-    }
-
     var expiresAt *time.Time
     if 0 < ttl {
         expiration := now.Add(ttl)
         expiresAt = &expiration
+    }
+
+    instance.upsertItemLocked(key, payload, now, expiresAt)
+}
+
+func (instance *InMemoryBackend) upsertItemLocked(
+    key string,
+    payload []byte,
+    now time.Time,
+    expiresAt *time.Time,
+) {
+    entry, exists := instance.entries[key]
+
+    if 0 < instance.maxItems && len(instance.entries) >= instance.maxItems && false == exists {
+        instance.evictOneLocked(now)
     }
 
     item := NewItem(

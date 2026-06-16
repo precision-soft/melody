@@ -1,8 +1,6 @@
 package security
 
 import (
-    "strings"
-
     eventcontract "github.com/precision-soft/melody/v3/event/contract"
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
@@ -290,51 +288,16 @@ func matchAccessControlRule(accessControl *AccessControl, path string, source So
         return nil, nil, false
     }
 
-    normalizedPath := strings.TrimSpace(path)
-    if "" == normalizedPath {
-        normalizedPath = "/"
-    }
-
-    bestIndex := -1
-    bestPrefixLength := -1
-
-    fallbackIndex := -1
-
-    for index, rule := range accessControl.Rules() {
-        if "" == rule.pathPrefix {
-            if -1 == fallbackIndex {
-                fallbackIndex = index
-            }
-            continue
-        }
-
-        if true == strings.HasPrefix(normalizedPath, rule.pathPrefix) {
-            currentLength := len(rule.pathPrefix)
-
-            if bestPrefixLength < currentLength {
-                bestPrefixLength = currentLength
-                bestIndex = index
-            }
-
-            continue
-        }
-    }
-
-    matchedIndex := bestIndex
-    if -1 == matchedIndex {
-        matchedIndex = fallbackIndex
-    }
-
-    if -1 == matchedIndex {
+    matchedIndex, matched := accessControl.matchRuleIndex(path)
+    if false == matched {
         return nil, nil, false
     }
 
-    rules := accessControl.Rules()
-    matched := rules[matchedIndex]
+    matchedRuleValue := accessControl.Rules()[matchedIndex]
 
     matchedRule := NewMatchedAccessControlRule(
-        matched.pathPrefix,
-        matched.attributes,
+        matchedRuleValue.pathPrefix,
+        matchedRuleValue.attributes,
         source,
         matchedIndex,
         firewallName,

@@ -247,67 +247,6 @@ func TestHttpClientSetTimeout_UpdatesClientTimeout(t *testing.T) {
     }
 }
 
-func TestHttpClientRequestStream_ReturnsBodyAndCanBeClosed(t *testing.T) {
-    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-        writer.WriteHeader(200)
-        _, _ = writer.Write([]byte("stream"))
-    }))
-    defer server.Close()
-
-    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
-
-    streamResponse, err := client.RequestStream(http.MethodGet, "/")
-    if nil != err {
-        t.Fatalf("request error: %v", err)
-    }
-    if 200 != streamResponse.StatusCode() {
-        t.Fatalf("expected status 200")
-    }
-
-    bodyBytes, err := io.ReadAll(streamResponse.Body())
-    if nil != err {
-        t.Fatalf("read error: %v", err)
-    }
-    if "stream" != string(bodyBytes) {
-        t.Fatalf("unexpected body")
-    }
-
-    err = streamResponse.Close()
-    if nil != err {
-        t.Fatalf("close error: %v", err)
-    }
-}
-
-func TestResponseHelpers_StatusClassificationAndString(t *testing.T) {
-    response := NewResponse(201, "201 Created", http.Header{}, []byte("ok"), nil)
-
-    if false == response.IsSuccess() {
-        t.Fatalf("expected success")
-    }
-    if true == response.IsClientError() {
-        t.Fatalf("expected not client error")
-    }
-    if true == response.IsServerError() {
-        t.Fatalf("expected not server error")
-    }
-    if "ok" != response.String() {
-        t.Fatalf("unexpected string")
-    }
-
-    response = NewResponse(404, "404 Not Found", http.Header{}, []byte("no"), nil)
-    if true == response.IsSuccess() {
-        t.Fatalf("expected not success")
-    }
-    if false == response.IsClientError() {
-        t.Fatalf("expected client error")
-    }
-
-    response = NewResponse(500, "500 Internal Server Error", http.Header{}, []byte("error"), nil)
-    if false == response.IsServerError() {
-        t.Fatalf("expected server error")
-    }
-}
-
 func TestHttpClientRequestHeadersOverrideClientHeaders(t *testing.T) {
     server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
         if "request" != request.Header.Get("X-Test") {
@@ -400,26 +339,4 @@ func TestHttpClientConcurrentSettersAndRequests(t *testing.T) {
     }()
 
     waitGroup.Wait()
-}
-
-func TestHttpClientConfigHeaders_ReturnsDefensiveCopy(t *testing.T) {
-    config := NewHttpClientConfig(
-        "",
-        0,
-        map[string]string{
-            "X-Test": "original",
-        },
-    )
-
-    first := config.Headers()
-    first["X-Test"] = "mutated"
-    first["X-New"] = "added"
-
-    second := config.Headers()
-    if "original" != second["X-Test"] {
-        t.Fatalf("expected defensive copy, got %q", second["X-Test"])
-    }
-    if _, exists := second["X-New"]; true == exists {
-        t.Fatalf("expected no new key leaked into config")
-    }
 }

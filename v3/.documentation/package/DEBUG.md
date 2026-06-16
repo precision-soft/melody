@@ -42,14 +42,14 @@ package main
 import (
 	"context"
 
-	"github.com/precision-soft/melody/v2/cli"
-	clicontract "github.com/precision-soft/melody/v2/cli/contract"
-	"github.com/precision-soft/melody/v2/container"
-	"github.com/precision-soft/melody/v2/debug"
-	"github.com/precision-soft/melody/v2/exception"
-	httpcontract "github.com/precision-soft/melody/v2/http/contract"
-	"github.com/precision-soft/melody/v2/runtime"
-	runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
+	"github.com/precision-soft/melody/v3/cli"
+	clicontract "github.com/precision-soft/melody/v3/cli/contract"
+	"github.com/precision-soft/melody/v3/container"
+	"github.com/precision-soft/melody/v3/debug"
+	"github.com/precision-soft/melody/v3/exception"
+	httpcontract "github.com/precision-soft/melody/v3/http/contract"
+	"github.com/precision-soft/melody/v3/runtime"
+	runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
 func main() {

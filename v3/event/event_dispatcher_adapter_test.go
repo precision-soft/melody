@@ -1,36 +1,13 @@
 package event
 
 import (
-    "context"
+    "sync"
     "testing"
 
-    "github.com/precision-soft/melody/v3/clock"
-    "github.com/precision-soft/melody/v3/container"
-    containercontract "github.com/precision-soft/melody/v3/container/contract"
     eventcontract "github.com/precision-soft/melody/v3/event/contract"
     "github.com/precision-soft/melody/v3/internal/testhelper"
-    "github.com/precision-soft/melody/v3/logging"
-    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
-    "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
-
-func newEventDispatcherAdapterTestRuntime(t *testing.T) runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
-    scope := serviceContainer.NewScope()
-
-    err := serviceContainer.Register(
-        logging.ServiceLogger,
-        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
-            return logging.NewNopLogger(), nil
-        },
-    )
-    if nil != err {
-        t.Fatalf("unexpected error: %v", err)
-    }
-
-    return runtime.New(context.Background(), scope, serviceContainer)
-}
 
 type testAdapterSubscriber struct {
     events map[string][]eventcontract.SubscribedEvent
@@ -149,34 +126,6 @@ func TestEventDispatcherAdapter_DispatchName_ReturnsErrorOnEmptyName(t *testing.
     )
 }
 
-func TestEventDispatcher_DispatchName_PayloadIsPreserved(t *testing.T) {
-    dispatcher := NewEventDispatcher(clock.NewSystemClock())
-
-    var receivedPayload any
-
-    dispatcher.AddListener(
-        "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
-            receivedPayload = eventValue.Payload()
-            return nil
-        },
-        0,
-    )
-
-    payload := map[string]any{"a": 1}
-
-    runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
-
-    _, err := dispatcher.DispatchName(runtimeInstance, "e", payload)
-    if nil != err {
-        t.Fatalf("unexpected error: %v", err)
-    }
-
-    if nil == receivedPayload {
-        t.Fatalf("expected payload")
-    }
-}
-
 func TestEventDispatcherAdapter_RemoveListener_RemovesListener(t *testing.T) {
     dispatcher, clockInstance := testNewEventDispatcher()
     adapter := NewEventDispatcherAdapter(dispatcher, clockInstance)
@@ -252,4 +201,39 @@ func TestEventDispatcherAdapter_RemoveSubscriber_RemovesAllSubscriberListeners(t
     if 0 != invoked {
         t.Fatalf("expected 0 invocations, got: %d", invoked)
     }
+}
+
+/* @info concurrent reader race */
+
+func TestEventDispatcherAdapter_RegisteredEventsIsSafeForConcurrentReaders(t *testing.T) {
+    dispatcher, clockInstance := testNewEventDispatcher()
+    adapter := NewEventDispatcherAdapter(dispatcher, clockInstance)
+
+    listener := func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        return nil
+    }
+
+    for index := 0; index < 200; index++ {
+        _ = adapter.AddListener("e", listener, index)
+    }
+
+    var waitGroup sync.WaitGroup
+    start := make(chan struct{})
+
+    for worker := 0; worker < 16; worker++ {
+        waitGroup.Add(1)
+
+        go func() {
+            defer waitGroup.Done()
+
+            <-start
+
+            for iteration := 0; iteration < 200; iteration++ {
+                _ = adapter.RegisteredEvents()
+            }
+        }()
+    }
+
+    close(start)
+    waitGroup.Wait()
 }

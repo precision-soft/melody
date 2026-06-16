@@ -1,12 +1,22 @@
 package security
 
 import (
+    "crypto/subtle"
+
     "github.com/precision-soft/melody/v2/exception"
     httpcontract "github.com/precision-soft/melody/v2/http/contract"
     securitycontract "github.com/precision-soft/melody/v2/security/contract"
 )
 
 func NewApiKeyHeaderRule(matcher securitycontract.Matcher, headerName string, expectedValue string) *ApiKeyHeaderRule {
+    if "" == headerName {
+        exception.Panic(exception.NewError("api key header rule header name is empty", nil, nil))
+    }
+
+    if "" == expectedValue {
+        exception.Panic(exception.NewError("api key header rule expected value is empty", nil, nil))
+    }
+
     return &ApiKeyHeaderRule{
         matcher:       matcher,
         headerName:    headerName,
@@ -38,7 +48,11 @@ func (instance *ApiKeyHeaderRule) Check(request httpcontract.Request) error {
     }
 
     headerValue := request.HttpRequest().Header.Get(instance.headerName)
-    if instance.expectedValue == headerValue {
+
+    expectedBytes := []byte(instance.expectedValue)
+    headerBytes := []byte(headerValue)
+
+    if 1 == subtle.ConstantTimeCompare(expectedBytes, headerBytes) {
         return nil
     }
 

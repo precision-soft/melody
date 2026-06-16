@@ -7,6 +7,9 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet"/>
     <link href="/assets/app.css" rel="stylesheet"/>
     <title>Users (admin)</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg"/>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico"/>
+    <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png"/>
 </head>
 <body class="bg-light" data-page="users">
 <div class="container py-4">
@@ -113,7 +116,7 @@
                 );
 
                 render(result?.payload ?? []);
-                window.melodyExample.ui.setStatus('Ready.');
+                window.melodyExample.ui.setStatus('');
             } catch (err) {
                 window.melodyExample.ui.setStatus(String(err?.message ?? err), 'danger');
             }

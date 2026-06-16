@@ -9,6 +9,13 @@ import (
     melodycachecontract "github.com/precision-soft/melody/v3/cache/contract"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     melodyevent "github.com/precision-soft/melody/v3/event"
+    melodymailer "github.com/precision-soft/melody/v3/mailer"
+    melodymailercontract "github.com/precision-soft/melody/v3/mailer/contract"
+    melodymessagebus "github.com/precision-soft/melody/v3/messagebus"
+    melodymessagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
+    melodyopenapi "github.com/precision-soft/melody/v3/openapi"
+    melodytranslation "github.com/precision-soft/melody/v3/translation"
+    melodytranslationcontract "github.com/precision-soft/melody/v3/translation/contract"
 )
 
 func (instance *Module) RegisterServices(registrar melodyapplicationcontract.ServiceRegistrar) {
@@ -18,6 +25,37 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
             return cache.NewGobSerializer(), nil
         },
     )
+
+    registrar.RegisterService(
+        melodymessagebus.ServiceBus,
+        func(resolver melodycontainercontract.Resolver) (melodymessagebuscontract.Bus, error) {
+            return instance.messageBusDispatch, nil
+        },
+    )
+
+    registrar.RegisterService(
+        melodytranslation.ServiceTranslator,
+        func(resolver melodycontainercontract.Resolver) (melodytranslationcontract.Translator, error) {
+            return instance.translator, nil
+        },
+    )
+
+    registrar.RegisterService(
+        melodymailer.ServiceMailer,
+        func(resolver melodycontainercontract.Resolver) (melodymailercontract.Mailer, error) {
+            return instance.mailer, nil
+        },
+    )
+
+    registrar.RegisterService(
+        melodyopenapi.ServiceOpenApiRegistry,
+        func(resolver melodycontainercontract.Resolver) (*melodyopenapi.Registry, error) {
+            return instance.openApiRegistry, nil
+        },
+    )
+
+    instance.registerStorageService(registrar)
+    instance.registerLockerService(registrar)
 
     registrar.RegisterService(
         repository.ServiceCategoryRepository,

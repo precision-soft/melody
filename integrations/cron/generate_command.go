@@ -56,28 +56,6 @@ func (instance *GenerateCommand) RegisterTemplate(template Template) {
     instance.templates[template.Name()] = template
 }
 
-func (instance *GenerateCommand) resolveTemplate(name string) (Template, error) {
-    template, ok := instance.templates[name]
-    if false == ok {
-        registered := make([]string, 0, len(instance.templates))
-        for templateName := range instance.templates {
-            registered = append(registered, templateName)
-        }
-        sort.Strings(registered)
-
-        return nil, exception.NewError(
-            fmt.Sprintf("cron: no template registered with name %q (registered: %s); call GenerateCommand.RegisterTemplate before running", name, strings.Join(registered, ", ")),
-            exceptioncontract.Context{
-                "requestedTemplate":   name,
-                "registeredTemplates": registered,
-            },
-            ErrTemplateNotFound,
-        )
-    }
-
-    return template, nil
-}
-
 func (instance *GenerateCommand) Name() string {
     return "melody:cron:generate"
 }
@@ -133,6 +111,28 @@ func (instance *GenerateCommand) Run(
     }
 
     return instance.runWithConfiguration(commandContext, configuration)
+}
+
+func (instance *GenerateCommand) resolveTemplate(name string) (Template, error) {
+    template, ok := instance.templates[name]
+    if false == ok {
+        registered := make([]string, 0, len(instance.templates))
+        for templateName := range instance.templates {
+            registered = append(registered, templateName)
+        }
+        sort.Strings(registered)
+
+        return nil, exception.NewError(
+            fmt.Sprintf("cron: no template registered with name %q (registered: %s); call GenerateCommand.RegisterTemplate before running", name, strings.Join(registered, ", ")),
+            exceptioncontract.Context{
+                "requestedTemplate":   name,
+                "registeredTemplates": registered,
+            },
+            ErrTemplateNotFound,
+        )
+    }
+
+    return template, nil
 }
 
 type runOptions struct {

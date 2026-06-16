@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.2.0] - 2026-06-16 - Plug-and-Play Module Registration
+
+### Added
+
+- `module.go` — `cron.NewModule(ModuleConfig{Configuration | ConfigurationFactory, WithDefaultParameters})` self-registering application module that registers the crontab-generation command and, opt-in, the default parameters, replacing hand-written `RegisterDefaultParameters` / `NewGenerateCommand` wiring. `ConfigurationFactory func(kernel) *Configuration` is evaluated at command-registration time (when the kernel/container exists) and takes precedence over the eager `Configuration` when both are set.
+
 ## [v1.1.0] - 2026-05-19 - Auto-Derive Heartbeat Path and Auto-Create Logs Directory
 
 ### Added
@@ -21,14 +27,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `--heartbeat-path` flag help text now also mentions the `melody.cron.heartbeat.enabled` opt-in so `melody:cron:generate --help` surfaces the new behavior
 - `README.md` — parameter table extended with the `ParameterHeartbeatAutoEnabled` row; a new section under "Configuration parameters" documents the auto-derive opt-in, its precedence, and the accepted truthy values. Footguns section documents the new auto-mkdir behavior on `--logs-dir`
-
-## [v2.1.0] - 2026-05-19 - Auto-Derive Heartbeat Path and Auto-Create Logs Directory
-
-Identical to `v1.1.0` except: module path is `github.com/precision-soft/melody/integrations/cron/v2`; dependency pinned to `github.com/precision-soft/melody/v2`. See [`v1.1.0`](#v110---2026-05-19---auto-derive-heartbeat-path-and-auto-create-logs-directory) for the full change list.
-
-## [v3.1.0] - 2026-05-19 - Auto-Derive Heartbeat Path and Auto-Create Logs Directory
-
-Identical to `v1.1.0` except: module path is `github.com/precision-soft/melody/integrations/cron/v3`; dependency pinned to `github.com/precision-soft/melody/v3`. See [`v1.1.0`](#v110---2026-05-19---auto-derive-heartbeat-path-and-auto-create-logs-directory) for the full change list.
 
 ## [v1.0.0] - 2026-05-16 - Initial Release — Cron Integration
 
@@ -82,23 +80,9 @@ Identical to `v1.1.0` except: module path is `github.com/precision-soft/melody/i
 - `cli/contract/type.go` (root + v2/ + v3/) gains `type StringSliceFlag = urfavecli.StringSliceFlag` so the cron command (which uses repeatable string-slice flags for `--heartbeat-command` and `--heartbeat-destination`) consumes `clicontract.StringSliceFlag` like every other flag in the integration, without an extra `urfavecli` import in `generate_command.go`
 - `README.md` — added a "Cron expression validation" section that documents which checks the generator runs at generation time and which it deliberately leaves to the cron daemon at install time, with `crontab -T` recommended as the post-generation gate. Clarified the `EntryConfig.DestinationFile`-absolute-path semantics, documented the hardcoded `0644`/`0755` file modes, and added a new "Package surface" section listing every exported identifier. `v2/README.md` and `v3/README.md` now reference that section uniformly so they no longer cross-reference each other asymmetrically.
 
-## [v2.0.0] - 2026-05-16 - Initial Release — Cron Integration
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.2.0...HEAD
 
-Identical to `v1.0.0` except: module path is `github.com/precision-soft/melody/integrations/cron/v2`; dependency pinned to `github.com/precision-soft/melody/v2`. See [`v1.0.0`](#v100---2026-05-16---initial-release--cron-integration) for the full change list.
-
-## [v3.0.0] - 2026-05-16 - Initial Release — Cron Integration
-
-Identical to `v1.0.0` except: module path is `github.com/precision-soft/melody/integrations/cron/v3`; dependency pinned to `github.com/precision-soft/melody/v3`. See [`v1.0.0`](#v100---2026-05-16---initial-release--cron-integration) for the full change list.
-
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.1.0...HEAD
-
-[v3.1.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.0.0...integrations/cron/v3.1.0
-
-[v3.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations/cron/v3.0.0
-
-[v2.1.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.0.0...integrations/cron/v2.1.0
-
-[v2.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations/cron/v2.0.0
+[v1.2.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.1.0...integrations/cron/v1.2.0
 
 [v1.1.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.0.0...integrations/cron/v1.1.0
 

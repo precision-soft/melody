@@ -15,7 +15,7 @@ The [`validation`](../../validation) package provides tag-driven struct validati
 ## Responsibilities
 
 - Provide the [`Validator`](../../validation/validator.go) type that validates exported struct fields based on the `validate` tag.
-- Provide built-in constraints (for example `notBlank`, `email`, `min`, `max`, `regex`, `greaterThan`, `notEmpty`).
+- Provide built-in constraints (for example `notBlank`, `email`, `min`, `max`, `regex`, `greaterThan`, `lessThan`, `notEmpty`).
 - Provide a standard `ValidationError` implementation and an aggregate error type (`ValidationErrors`).
 - Provide container helpers to resolve a validator instance.
 
@@ -40,13 +40,13 @@ package main
 import (
 	"fmt"
 
-	"github.com/precision-soft/melody/v2/validation"
+	"github.com/precision-soft/melody/v3/validation"
 )
 
 type CreateUserInput struct {
 	Email string `json:"email" validate:"notBlank,email"`
 	Name  string `json:"name" validate:"notBlank,min(value=3),max(value=64)"`
-	Age   int    `json:"age" validate:"min(value=1),max(value=130)"`
+	Age   int    `json:"age" validate:"greaterThan(value=0),lessThan(value=131)"`
 }
 
 func validateInput(input CreateUserInput) error {
@@ -75,6 +75,8 @@ func validateInput(input CreateUserInput) error {
 - Only exported struct fields are validated.
 - `json:"name"` influences the error field name when a non-empty json name is present.
 - `validate:"-"` disables validation for a field.
+- `min`/`max` are **string byte-length** constraints (`MinLength`/`MaxLength`), not numeric range and not rune count. They stringify the value and compare `len()`, so on a numeric field they bound the number of digits, not the value — `max(value=130)` on an `int` accepts any value up to 130 bytes long. Use `greaterThan`/`lessThan` for a numeric range (as the `Age` field above does).
+- `greaterThan`/`lessThan` operate on numeric fields only and reject a non-numeric value; a floating-point `NaN` is rejected rather than silently passing the bound (`NaN` compares false against every threshold). The bound is an integer (a fractional bound is truncated toward zero), and the `openapi` generator emits the same truncated integer so the published spec matches what the server enforces.
 
 ## Userland API
 
@@ -106,8 +108,7 @@ func validateInput(input CreateUserInput) error {
 
 ### Constants
 
-- Constraints: [`ConstraintNotBlank`, `ConstraintEmail`, `ConstraintMinLength`, `ConstraintMaxLength`, `ConstraintRegex`, `ConstraintNumeric`, `ConstraintAlpha`, `ConstraintAlphanumeric`, `ConstraintGreaterThan`, `ConstraintNotEmpty`](../../validation)
-- Deprecated constraint aliases (kept for compatibility): [`ConstraintMin`, `ConstraintMax`](../../validation/const.go)
+- Constraints: [`ConstraintNotBlank`, `ConstraintEmail`, `ConstraintMinLength`, `ConstraintMaxLength`, `ConstraintRegex`, `ConstraintNumeric`, `ConstraintAlpha`, `ConstraintAlphanumeric`, `ConstraintGreaterThan`, `ConstraintLessThan`, `ConstraintNotEmpty`](../../validation)
 - Error codes (core): [`ErrorInvalidRuleSyntax`, `ErrorUnknownRule`](../../validation/const.go)
 - Error codes (per-constraint):
     - `notBlank`: [`ConstraintNotBlankErrorIsBlank`](../../validation/constraint_not_blank.go)
@@ -119,8 +120,8 @@ func validateInput(input CreateUserInput) error {
     - `alpha`: [`ConstraintAlphaErrorNotAlpha`](../../validation/constraint_alpha.go)
     - `alphanumeric`: [`ConstraintAlphanumericErrorNotAlphanumeric`](../../validation/constraint_alphanumeric.go)
     - `greaterThan`: [`ConstraintGreaterThanErrorSmallerThan`](../../validation/constraint_greater_than.go)
+    - `lessThan`: [`ConstraintLessThanErrorGreaterThan`](../../validation/constraint_less_than.go)
     - `notEmpty`: [`ConstraintNotEmptyErrorEmpty`](../../validation/constraint_not_empty.go)
-- Deprecated error code aliases (kept for compatibility): [`ErrorNotBlank`, `ErrorInvalidEmail`, `ErrorMinLength`, `ErrorMaxLength`, `ErrorInvalidPattern`, `ErrorRegexMismatch`, `ErrorNotNumeric`, `ErrorNotAlpha`, `ErrorNotAlphanumeric`, `ErrorEmpty`](../../validation/const.go)
 
 ### Constraint implementations
 
@@ -133,5 +134,6 @@ func validateInput(input CreateUserInput) error {
 - [`NewMaxLength(value int)` / `MaxLength`](../../validation/constraint_max_length.go)
 - [`NewRegex(pattern string)` / `Regex`](../../validation/constraint_regex.go)
 - [`NewGreaterThan(min int)` / `GreaterThan`](../../validation/constraint_greater_than.go)
+- [`NewLessThan(max int)` / `LessThan`](../../validation/constraint_less_than.go)
 - [`NewNotEmpty()` / `NotEmpty`](../../validation/constraint_not_empty.go)
 

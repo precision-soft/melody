@@ -18,12 +18,21 @@ const (
     rueidisBackendDefaultMaxKeyLength = 1024
 )
 
+type BackendOption func(*Backend)
+
+func WithMaxKeyLength(maxKeyLength int) BackendOption {
+    return func(instance *Backend) {
+        instance.maxKeyLength = maxKeyLength
+    }
+}
+
 func NewBackend(
     client rueidis.Client,
     ctx context.Context,
     prefix string,
     scanCount int,
     deleteBatch int,
+    options ...BackendOption,
 ) (*Backend, error) {
     if nil == client {
         return nil, exception.NewError(
@@ -52,21 +61,33 @@ func NewBackend(
         normalizedDeleteBatch = rueidisBackendDefaultDeleteBatch
     }
 
-    return &Backend{
-        client:      client,
-        ctx:         ctx,
-        prefix:      normalizedPrefix,
-        scanCount:   normalizedScanCount,
-        deleteBatch: normalizedDeleteBatch,
-    }, nil
+    instance := &Backend{
+        client:       client,
+        ctx:          ctx,
+        prefix:       normalizedPrefix,
+        scanCount:    normalizedScanCount,
+        deleteBatch:  normalizedDeleteBatch,
+        maxKeyLength: rueidisBackendDefaultMaxKeyLength,
+    }
+
+    for _, option := range options {
+        option(instance)
+    }
+
+    if 0 >= instance.maxKeyLength {
+        instance.maxKeyLength = rueidisBackendDefaultMaxKeyLength
+    }
+
+    return instance, nil
 }
 
 type Backend struct {
-    client      rueidis.Client
-    ctx         context.Context
-    prefix      string
-    scanCount   int
-    deleteBatch int
+    client       rueidis.Client
+    ctx          context.Context
+    prefix       string
+    scanCount    int
+    deleteBatch  int
+    maxKeyLength int
 }
 
 func (instance *Backend) GetCtx(ctx context.Context, key string) ([]byte, bool, error) {
@@ -95,7 +116,7 @@ func (instance *Backend) GetCtx(ctx context.Context, key string) ([]byte, bool, 
     return payload, true, nil
 }
 
-// Deprecated: prefer GetCtx, which takes ctx per call.
+/* Deprecated: prefer GetCtx, which takes ctx per call. */
 func (instance *Backend) Get(key string) ([]byte, bool, error) {
     return instance.GetCtx(instance.ctx, key)
 }
@@ -108,7 +129,7 @@ func (instance *Backend) SetCtx(ctx context.Context, key string, payload []byte,
 
     var command rueidis.Completed
     if 0 < ttl {
-        command = instance.client.B().Set().Key(normalizedKey).Value(rueidis.BinaryString(payload)).Px(ttl).Build()
+        command = instance.client.B().Set().Key(normalizedKey).Value(rueidis.BinaryString(payload)).Px(floorPositiveExpiry(ttl)).Build()
     } else {
         command = instance.client.B().Set().Key(normalizedKey).Value(rueidis.BinaryString(payload)).Build()
     }
@@ -119,7 +140,7 @@ func (instance *Backend) SetCtx(ctx context.Context, key string, payload []byte,
     ).Error()
 }
 
-// Deprecated: prefer SetCtx, which takes ctx per call.
+/* Deprecated: prefer SetCtx, which takes ctx per call. */
 func (instance *Backend) Set(key string, payload []byte, ttl time.Duration) error {
     return instance.SetCtx(instance.ctx, key, payload, ttl)
 }
@@ -136,7 +157,7 @@ func (instance *Backend) DeleteCtx(ctx context.Context, key string) error {
     ).Error()
 }
 
-// Deprecated: prefer DeleteCtx, which takes ctx per call.
+/* Deprecated: prefer DeleteCtx, which takes ctx per call. */
 func (instance *Backend) Delete(key string) error {
     return instance.DeleteCtx(instance.ctx, key)
 }
@@ -163,13 +184,13 @@ func (instance *Backend) HasCtx(ctx context.Context, key string) (bool, error) {
     return 0 != count, nil
 }
 
-// Deprecated: prefer HasCtx, which takes ctx per call.
+/* Deprecated: prefer HasCtx, which takes ctx per call. */
 func (instance *Backend) Has(key string) (bool, error) {
     return instance.HasCtx(instance.ctx, key)
 }
 
 func (instance *Backend) ClearCtx(ctx context.Context) error {
-    pattern := instance.prefix + "*"
+    pattern := escapeRedisGlobMeta(instance.prefix) + "*"
     keys, scanErr := instance.scanKeys(ctx, pattern)
     if nil != scanErr {
         return scanErr
@@ -182,7 +203,7 @@ func (instance *Backend) ClearCtx(ctx context.Context) error {
     return instance.deleteKeysInBatches(ctx, keys)
 }
 
-// Deprecated: prefer ClearCtx, which takes ctx per call.
+/* Deprecated: prefer ClearCtx, which takes ctx per call. */
 func (instance *Backend) Clear() error {
     return instance.ClearCtx(instance.ctx)
 }
@@ -197,7 +218,7 @@ func (instance *Backend) ClearByPrefixCtx(ctx context.Context, prefix string) er
         return normalizeErr
     }
 
-    pattern := normalizedPrefix + "*"
+    pattern := escapeRedisGlobMeta(normalizedPrefix) + "*"
     keys, scanErr := instance.scanKeys(ctx, pattern)
     if nil != scanErr {
         return scanErr
@@ -210,7 +231,7 @@ func (instance *Backend) ClearByPrefixCtx(ctx context.Context, prefix string) er
     return instance.deleteKeysInBatches(ctx, keys)
 }
 
-// Deprecated: prefer ClearByPrefixCtx, which takes ctx per call.
+/* Deprecated: prefer ClearByPrefixCtx, which takes ctx per call. */
 func (instance *Backend) ClearByPrefix(prefix string) error {
     return instance.ClearByPrefixCtx(instance.ctx, prefix)
 }
@@ -257,7 +278,7 @@ func (instance *Backend) ManyCtx(ctx context.Context, keys []string) (map[string
     return result, nil
 }
 
-// Deprecated: prefer ManyCtx, which takes ctx per call.
+/* Deprecated: prefer ManyCtx, which takes ctx per call. */
 func (instance *Backend) Many(keys []string) (map[string][]byte, error) {
     return instance.ManyCtx(instance.ctx, keys)
 }
@@ -276,7 +297,7 @@ func (instance *Backend) SetMultipleCtx(ctx context.Context, items map[string][]
 
         var command rueidis.Completed
         if 0 < ttl {
-            command = instance.client.B().Set().Key(normalizedKey).Value(rueidis.BinaryString(payload)).Px(ttl).Build()
+            command = instance.client.B().Set().Key(normalizedKey).Value(rueidis.BinaryString(payload)).Px(floorPositiveExpiry(ttl)).Build()
         } else {
             command = instance.client.B().Set().Key(normalizedKey).Value(rueidis.BinaryString(payload)).Build()
         }
@@ -293,9 +314,17 @@ func (instance *Backend) SetMultipleCtx(ctx context.Context, items map[string][]
     return nil
 }
 
-// Deprecated: prefer SetMultipleCtx, which takes ctx per call.
+/* Deprecated: prefer SetMultipleCtx, which takes ctx per call. */
 func (instance *Backend) SetMultiple(items map[string][]byte, ttl time.Duration) error {
     return instance.SetMultipleCtx(instance.ctx, items, ttl)
+}
+
+func floorPositiveExpiry(ttl time.Duration) time.Duration {
+    if 0 < ttl && ttl < time.Millisecond {
+        return time.Millisecond
+    }
+
+    return ttl
 }
 
 func (instance *Backend) DeleteMultipleCtx(ctx context.Context, keys []string) error {
@@ -327,7 +356,7 @@ func (instance *Backend) DeleteMultipleCtx(ctx context.Context, keys []string) e
     return nil
 }
 
-// Deprecated: prefer DeleteMultipleCtx, which takes ctx per call.
+/* Deprecated: prefer DeleteMultipleCtx, which takes ctx per call. */
 func (instance *Backend) DeleteMultiple(keys []string) error {
     return instance.DeleteMultipleCtx(instance.ctx, keys)
 }
@@ -354,7 +383,7 @@ func (instance *Backend) IncrementCtx(ctx context.Context, key string, delta int
     return value, nil
 }
 
-// Deprecated: prefer IncrementCtx, which takes ctx per call.
+/* Deprecated: prefer IncrementCtx, which takes ctx per call. */
 func (instance *Backend) Increment(key string, delta int64) (int64, error) {
     return instance.IncrementCtx(instance.ctx, key, delta)
 }
@@ -381,13 +410,12 @@ func (instance *Backend) DecrementCtx(ctx context.Context, key string, delta int
     return value, nil
 }
 
-// Deprecated: prefer DecrementCtx, which takes ctx per call.
+/* Deprecated: prefer DecrementCtx, which takes ctx per call. */
 func (instance *Backend) Decrement(key string, delta int64) (int64, error) {
     return instance.DecrementCtx(instance.ctx, key, delta)
 }
 
 func (instance *Backend) Close() error {
-    instance.client.Close()
     return nil
 }
 
@@ -416,11 +444,11 @@ func (instance *Backend) normalizeKey(key string) (string, error) {
         )
     }
 
-    if rueidisBackendDefaultMaxKeyLength < len(key) {
+    if instance.maxKeyLength < len(key) {
         return "", exception.NewError(
             "cache key is too long",
             exceptioncontract.Context{
-                "maxKeyLength": rueidisBackendDefaultMaxKeyLength,
+                "maxKeyLength": instance.maxKeyLength,
                 "keyLength":    len(key),
             },
             nil,
@@ -432,6 +460,19 @@ func (instance *Backend) normalizeKey(key string) (string, error) {
 
 func (instance *Backend) stripPrefix(fullKey string) string {
     return strings.TrimPrefix(fullKey, instance.prefix)
+}
+
+func escapeRedisGlobMeta(value string) string {
+    var builder strings.Builder
+    for index := 0; index < len(value); index++ {
+        switch value[index] {
+        case '*', '?', '[', ']', '\\':
+            builder.WriteByte('\\')
+        }
+        builder.WriteByte(value[index])
+    }
+
+    return builder.String()
 }
 
 func (instance *Backend) scanKeys(ctx context.Context, pattern string) ([]string, error) {

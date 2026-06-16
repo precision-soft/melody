@@ -306,6 +306,84 @@ func (instance *EventDispatcher) DispatchName(runtimeInstance runtimecontract.Ru
     )
 }
 
+func (instance *EventDispatcher) RegisteredEvents() []eventcontract.RegisteredEvent {
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
+
+    ownerByEventNameAndId := make(map[string]map[uint64]string)
+
+    for _, registrationList := range instance.subscriberRegistrations {
+        for _, registration := range registrationList {
+            byId, exists := ownerByEventNameAndId[registration.eventName]
+            if false == exists {
+                byId = make(map[uint64]string)
+                ownerByEventNameAndId[registration.eventName] = byId
+            }
+
+            byId[registration.listenerId] = registration.subscriberType
+        }
+    }
+
+    eventNameList := make([]string, 0, len(instance.listeners))
+    for eventName := range instance.listeners {
+        eventNameList = append(eventNameList, eventName)
+    }
+
+    sort.Strings(eventNameList)
+
+    registeredEvents := make([]eventcontract.RegisteredEvent, 0, len(eventNameList))
+
+    for _, eventName := range eventNameList {
+        listenerList := instance.listeners[eventName]
+
+        registeredListenerList := make([]eventcontract.RegisteredListener, 0, len(listenerList))
+
+        for _, entry := range listenerList {
+            source := eventcontract.RegisteredListenerSourceListener
+            owner := "-"
+
+            byId, exists := ownerByEventNameAndId[eventName]
+            if true == exists {
+                ownerValue, exists := byId[entry.listenerId]
+                if true == exists {
+                    source = eventcontract.RegisteredListenerSourceSubscriber
+                    owner = ownerValue
+                }
+            }
+
+            listenerId := fmt.Sprintf("%d", entry.listenerId)
+
+            listenerName := "-"
+            listenerProgramCounter := reflect.ValueOf(entry.listener).Pointer()
+            function := runtime.FuncForPC(listenerProgramCounter)
+            if nil != function {
+                listenerName = function.Name()
+            }
+
+            registeredListenerList = append(
+                registeredListenerList,
+                eventcontract.RegisteredListener{
+                    Priority:     entry.priority,
+                    Source:       source,
+                    Owner:        owner,
+                    ListenerId:   listenerId,
+                    ListenerName: listenerName,
+                },
+            )
+        }
+
+        registeredEvents = append(
+            registeredEvents,
+            eventcontract.RegisteredEvent{
+                EventName: eventName,
+                Listeners: registeredListenerList,
+            },
+        )
+    }
+
+    return registeredEvents
+}
+
 func (instance *EventDispatcher) dispatchSafely(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) (eventcontract.Event, error) {
     defer func() {
         recoveredValue := recover()
@@ -520,84 +598,6 @@ func (instance *EventDispatcher) callListenerSafely(
     )
 
     return exceptionErr
-}
-
-func (instance *EventDispatcher) RegisteredEvents() []eventcontract.RegisteredEvent {
-    instance.mutex.RLock()
-    defer instance.mutex.RUnlock()
-
-    ownerByEventNameAndId := make(map[string]map[uint64]string)
-
-    for _, registrationList := range instance.subscriberRegistrations {
-        for _, registration := range registrationList {
-            byId, exists := ownerByEventNameAndId[registration.eventName]
-            if false == exists {
-                byId = make(map[uint64]string)
-                ownerByEventNameAndId[registration.eventName] = byId
-            }
-
-            byId[registration.listenerId] = registration.subscriberType
-        }
-    }
-
-    eventNameList := make([]string, 0, len(instance.listeners))
-    for eventName := range instance.listeners {
-        eventNameList = append(eventNameList, eventName)
-    }
-
-    sort.Strings(eventNameList)
-
-    registeredEvents := make([]eventcontract.RegisteredEvent, 0, len(eventNameList))
-
-    for _, eventName := range eventNameList {
-        listenerList := instance.listeners[eventName]
-
-        registeredListenerList := make([]eventcontract.RegisteredListener, 0, len(listenerList))
-
-        for _, entry := range listenerList {
-            source := eventcontract.RegisteredListenerSourceListener
-            owner := "-"
-
-            byId, exists := ownerByEventNameAndId[eventName]
-            if true == exists {
-                ownerValue, exists := byId[entry.listenerId]
-                if true == exists {
-                    source = eventcontract.RegisteredListenerSourceSubscriber
-                    owner = ownerValue
-                }
-            }
-
-            listenerId := fmt.Sprintf("%d", entry.listenerId)
-
-            listenerName := "-"
-            listenerProgramCounter := reflect.ValueOf(entry.listener).Pointer()
-            function := runtime.FuncForPC(listenerProgramCounter)
-            if nil != function {
-                listenerName = function.Name()
-            }
-
-            registeredListenerList = append(
-                registeredListenerList,
-                eventcontract.RegisteredListener{
-                    Priority:     entry.priority,
-                    Source:       source,
-                    Owner:        owner,
-                    ListenerId:   listenerId,
-                    ListenerName: listenerName,
-                },
-            )
-        }
-
-        registeredEvents = append(
-            registeredEvents,
-            eventcontract.RegisteredEvent{
-                EventName: eventName,
-                Listeners: registeredListenerList,
-            },
-        )
-    }
-
-    return registeredEvents
 }
 
 func (instance *EventDispatcher) removeListenerById(eventName string, listenerId uint64) int {

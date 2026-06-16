@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Melody">
+    <defs>
+        <radialGradient id="melodyBg" gradientUnits="userSpaceOnUse" cx="512" cy="512" r="640">
+            <stop offset="0%" stop-color="#06523e"/>
+            <stop offset="100%" stop-color="#021a14"/>
+        </radialGradient>
+        <linearGradient id="melodyLyre" gradientUnits="userSpaceOnUse" x1="512" y1="206" x2="512" y2="393">
+            <stop offset="0%" stop-color="#6ee7b7"/>
+            <stop offset="100%" stop-color="#0d7490"/>
+        </linearGradient>
+    </defs>
+    <rect width="1024" height="1024" rx="225" fill="url(#melodyBg)"/>
+    <path d="M338 690 L338 372 L512 565 L686 372 L686 690" fill="none" stroke="#f0fdfa" stroke-width="78" stroke-linejoin="round" stroke-linecap="butt"/>
+    <g fill="none" stroke="url(#melodyLyre)" stroke-width="15" stroke-linecap="butt">
+        <path d="M487.5 213 Q416.8 300 487.5 387"/>
+        <path d="M536.5 213 Q607.2 300 536.5 387"/>
+    </g>
+    <g fill="url(#melodyLyre)">
+        <rect x="474.6" y="206.8" width="74.8" height="18.4" rx="8"/>
+        <rect x="474.6" y="374.8" width="74.8" height="18.4" rx="8"/>
+    </g>
+    <g stroke="#e0f2fe" stroke-width="5" stroke-linecap="butt">
+        <line x1="500.4" y1="232" x2="500.4" y2="368"/>
+        <line x1="512" y1="232" x2="512" y2="368"/>
+        <line x1="523.6" y1="232" x2="523.6" y2="368"/>
+    </g>
+</svg>

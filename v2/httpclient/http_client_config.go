@@ -26,9 +26,20 @@ func NewHttpClientConfig(
 }
 
 type HttpClientConfig struct {
-    baseUrl string
-    timeout time.Duration
-    headers map[string]string
+    baseUrl   string
+    timeout   time.Duration
+    headers   map[string]string
+    transport *TransportConfig
+}
+
+func (instance *HttpClientConfig) WithTransport(transport *TransportConfig) *HttpClientConfig {
+    instance.transport = transport
+
+    return instance
+}
+
+func (instance *HttpClientConfig) Transport() *TransportConfig {
+    return instance.transport
 }
 
 func (instance *HttpClientConfig) BaseUrl() string {

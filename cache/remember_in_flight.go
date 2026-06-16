@@ -79,6 +79,14 @@ func (instance *rememberInFlightCall) Context() context.Context {
     return instance.context
 }
 
+func (instance *rememberInFlightCall) IsCanceled() bool {
+    if false == instance.isCancelable {
+        return false
+    }
+
+    return nil != instance.context.Err()
+}
+
 func (instance *rememberInFlightCall) Wait(waitTimeout time.Duration, key string) (any, error) {
     if 0 == waitTimeout {
         return nil, exception.NewError(

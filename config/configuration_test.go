@@ -1,42 +1,9 @@
 package config
 
 import (
-    "io"
-    "log"
-    "os"
     "path/filepath"
     "testing"
-
-    configcontract "github.com/precision-soft/melody/config/contract"
-    "github.com/precision-soft/melody/logging"
 )
-
-func TestMain(mainInstance *testing.M) {
-    log.SetOutput(io.Discard)
-    os.Exit(mainInstance.Run())
-}
-
-type testEnvironmentSource struct {
-    values map[string]string
-    err    error
-}
-
-func (instance *testEnvironmentSource) Load() (map[string]string, error) {
-    if nil != instance.err {
-        return nil, instance.err
-    }
-
-    copied := make(map[string]string, len(instance.values))
-    for key, value := range instance.values {
-        copied[key] = value
-    }
-
-    return copied, nil
-}
-
-func TestEnvironmentContractIsUsed(t *testing.T) {
-    var _ configcontract.EnvironmentSource = (*testEnvironmentSource)(nil)
-}
 
 func TestConfigurationDefaultsAndTemplateResolution(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{}}
@@ -165,36 +132,27 @@ func TestConfigurationRegisterRuntimeValidationPanics(t *testing.T) {
     }()
 }
 
-func TestConfiguration_AddAliasedParameterFromEnvironment_SharesSinglePointerAcrossAliases(t *testing.T) {
-    configuration := &Configuration{
-        environment: nil,
-        parameters:  make(ParameterMap),
-        logger:      logging.NewDefaultLogger(),
-    }
+func TestRegisterRuntimeAddsValue(t *testing.T) {
+    source := &testEnvironmentSource{values: map[string]string{}}
 
-    err := configuration.addAliasedParameterFromEnvironment(
-        []string{
-            "primaryKey",
-            "aliasKey",
-        },
-        "ENV_KEY",
-        "ENV_VALUE",
-    )
+    environment, err := NewEnvironment(source)
     if nil != err {
-        t.Fatalf("unexpected error: %v", err)
+        t.Fatalf("new environment error: %v", err)
     }
 
-    primary := configuration.parameters["primaryKey"]
-    alias := configuration.parameters["aliasKey"]
-
-    if nil == primary || nil == alias {
-        t.Fatalf("expected both parameters to exist")
+    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    if nil != err {
+        t.Fatalf("new configuration error: %v", err)
     }
 
-    if primary != alias {
-        t.Fatalf("expected alias to point to the same parameter instance")
+    configuration.RegisterRuntime("runtime.test", "x")
+
+    if "x" != configuration.MustGet("runtime.test").String() {
+        t.Fatalf("expected runtime value to be visible")
     }
 }
+
+/* @info placeholder patterns */
 
 func TestEnvPlaceholderPattern_RejectsIdentifiersStartingWithDigit(t *testing.T) {
     if true == envPlaceholderPattern.MatchString("%env(1INVALID)%") {

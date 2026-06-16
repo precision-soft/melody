@@ -5,8 +5,8 @@ This directory contains **optional Bun ORM integrations** for Melody.
 The integration is split into independent Go modules so consumers can depend only on what they need:
 
 * Core (dialect-agnostic): [`./`](./)
-* MySQL provider: [`../mysql/`](../mysql/)
-* PostgreSQL provider: [`../pgsql/`](../pgsql/)
+* MySQL provider: [`./mysql/`](./mysql/)
+* PostgreSQL provider: [`./pgsql/`](./pgsql/)
 
 ## What you get
 
@@ -176,8 +176,8 @@ func main() {
 
 ## Dialect providers
 
-* MySQL provider: [`../mysql/`](../mysql/)
-* PostgreSQL provider: [`../pgsql/`](../pgsql/)
+* MySQL provider: [`./mysql/`](./mysql/)
+* PostgreSQL provider: [`./pgsql/`](./pgsql/)
 
 Each dialect module implements [`bunorm.Provider`](./provider.go) and is responsible for:
 
@@ -192,7 +192,56 @@ The dialect providers expose an optional *post-build hook* that allows userland 
 
 The hook is configured via a provider option passed to the provider constructor:
 
-* MySQL: [`mysql.WithPostBuildHook`](../mysql/provider_option.go) using [`mysql.PostBuildHook`](../mysql/post_build_hook.go)
-* PostgreSQL: [`pgsql.WithPostBuildHook`](../pgsql/provider_option.go) using [`pgsql.PostBuildHook`](../pgsql/post_build_hook.go)
+* MySQL: [`mysql.WithPostBuildHook`](./mysql/provider_option.go) using [`mysql.PostBuildHook`](./mysql/post_build_hook.go)
+* PostgreSQL: [`pgsql.WithPostBuildHook`](./pgsql/provider_option.go) using [`pgsql.PostBuildHook`](./pgsql/post_build_hook.go)
 
 The hook is executed during provider open, after Melody defaults and typed configs are applied, and before establishing the SQL connection.
+
+## Enhancements
+
+The core `bunorm` module ships three optional, dependency-free enhancements (standard library + Bun only). Paths below reference the v3 binding.
+
+### Read/write split
+
+[`ReadWriteSplitter`](v3/split.go) routes reads to replica managers and writes to the primary manager, resolving named managers from a [`ManagerRegistry`](v3/manager_registry.go). It is explicit: call `Writer()` for writes and `Reader()` for reads (replicas are chosen round-robin; with no replicas, the reader falls back to the primary).
+
+```go
+splitter := bunorm.NewReadWriteSplitter(registry, "primary", "replica-a", "replica-b")
+
+writeDatabase, _ := splitter.Writer()
+readDatabase, _ := splitter.Reader()
+```
+
+### Field encryption
+
+The [`encrypt`](v3/encrypt) subpackage encrypts column values at rest with AES-256-GCM. Declare a field as [`encrypt.EncryptedString`](v3/encrypt/encrypted_string.go) (it implements `driver.Valuer`/`sql.Scanner`) and configure a process-wide cipher once at boot via [`encrypt.UseCipher`](v3/encrypt/encrypted_string.go). Keys are resolved by id through a [`KeyProvider`](v3/encrypt/key_provider.go), so ciphertext carries its key id for rotation.
+
+```go
+encrypt.UseCipher(encrypt.NewCipher(
+	encrypt.NewStaticKeyProvider("v1", map[string][]byte{"v1": key32}),
+))
+
+type Customer struct {
+	Email encrypt.EncryptedString `bun:"email,type:varchar(255)"`
+}
+```
+
+The value is stored as `<keyId>:<base64(nonce||ciphertext)>` and is not searchable in encrypted form. `EncryptedString` masks its decrypted plaintext in `fmt`/`slog`/error output (its `String`/`LogValue` return `<redacted>`); use an explicit `string(value)` conversion when the real value is needed.
+
+### Audit trail
+
+The [`audit`](v3/audit) subpackage records a **per-field before/after change-set** for entity writes into a separate audit database via a [`Recorder`](v3/audit/recorder.go). Recording is explicit (called from the repository/service layer with the `before`/`after` entity values): Bun has no Doctrine-style unit-of-work, so the original row is not available to a transparent hook — passing both states is the robust, exact approach.
+
+```go
+recorder := audit.NewRecorder(auditDatabase, "melody_audit")
+
+ctx := audit.WithActor(requestContext, "user-42")
+
+recorder.RecordInsert(ctx, "order", order.Id, order)
+recorder.RecordUpdate(ctx, "order", order.Id, before, after)
+recorder.RecordDelete(ctx, "order", order.Id, before)
+```
+
+[`ChangeSet`](v3/audit/change.go) diffs two struct values field by field (using `bun` column names, skipping relations and the embedded base model): `INSERT` records new values, `DELETE` records old values, `UPDATE` records only the changed fields as `{field, old, new}`. Each [`audit.Entry`](v3/audit/entry.go) stores the entity name, entity id, operation, the change-set as JSON, the actor (from context), and a timestamp — in a distinct audit `*bun.DB`.
+
+Sensitive fields are recorded as changed but with their values masked to `<redacted>`: tag a field with `audit:"redact"`, or use an [`encrypt.EncryptedString`](v3/encrypt/encrypted_string.go) field (auto-redacted). A field tagged `bun:"-"` is excluded from the change-set entirely.

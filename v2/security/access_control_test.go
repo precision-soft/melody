@@ -181,6 +181,25 @@ func TestMatchAccessControlRule_FallbackRuleSelectedOnce(t *testing.T) {
     }
 }
 
+func TestAccessControl_Match_ExactRuleMatchesMultipleTrailingSlashes(t *testing.T) {
+    control := NewAccessControl(
+        NewAccessControlExactRule("/admin", "ROLE_ADMIN"),
+    )
+
+    attributes, matched := control.Match("/admin//")
+    if false == matched {
+        t.Fatalf("auth bypass: /admin// did not match the exact /admin rule (router collapses all trailing slashes)")
+    }
+    if 1 != len(attributes) || "ROLE_ADMIN" != attributes[0] {
+        t.Fatalf("unexpected attributes %v", attributes)
+    }
+
+    attributes, matched = control.Match("/admin///")
+    if false == matched {
+        t.Fatalf("auth bypass: /admin/// did not match the exact /admin rule")
+    }
+}
+
 func TestAccessControlMatch_ExactWinsBeforePrefixAndRegex(t *testing.T) {
     accessControl := NewAccessControl(
         NewAccessControlRegexRule("^/", "ROLE_USER"),
@@ -354,4 +373,28 @@ func TestNewAccessControlExactRule_EmptyPathPanics(t *testing.T) {
     }()
 
     _ = NewAccessControlExactRule("", "PUBLIC_ACCESS")
+}
+
+func TestNewAccessControlRule_PublicAccessCombinedWithOtherAttributesPanics(t *testing.T) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected panic when PUBLIC_ACCESS is combined with another attribute")
+        }
+    }()
+
+    _ = NewAccessControlRule("/admin", "PUBLIC_ACCESS", "ROLE_ADMIN")
+}
+
+func TestNewAccessControlRule_LonePublicAccessIsAllowed(t *testing.T) {
+    defer func() {
+        if nil != recover() {
+            t.Fatalf("a lone PUBLIC_ACCESS attribute must not panic")
+        }
+    }()
+
+    rule := NewAccessControlRule("/health", "PUBLIC_ACCESS")
+    if 1 != len(rule.attributes) {
+        t.Fatalf("expected exactly one attribute, got %v", rule.attributes)
+    }
 }

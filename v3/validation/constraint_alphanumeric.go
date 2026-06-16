@@ -22,8 +22,13 @@ func (instance *Alphanumeric) Validate(value any, field string) validationcontra
         return nil
     }
 
-    stringValue, ok := value.(string)
+    resolved, ok := dereferenceValue(value)
     if false == ok {
+        return nil
+    }
+
+    stringValue, isString := resolved.(string)
+    if false == isString {
         return nil
     }
 

@@ -2,6 +2,7 @@ package config
 
 import (
     "github.com/precision-soft/melody/v2/security"
+    securitycontract "github.com/precision-soft/melody/v2/security/contract"
 )
 
 func NewAccessControlBuilder() *AccessControlBuilder {
@@ -18,7 +19,7 @@ func (instance *AccessControlBuilder) Require(pathPrefix string, attributes ...s
 }
 
 func (instance *AccessControlBuilder) AllowAnonymous(pathPrefix string) *AccessControlBuilder {
-    instance.rules = append(instance.rules, security.NewAccessControlRule(pathPrefix))
+    instance.rules = append(instance.rules, security.NewAccessControlRule(pathPrefix, securitycontract.AttributePublicAccess))
     return instance
 }
 

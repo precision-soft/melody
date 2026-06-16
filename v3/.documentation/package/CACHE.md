@@ -44,8 +44,8 @@ Melody’s default wiring uses [`cache.NewInMemoryBackend`](../../cache/in_memor
 package main
 
 import (
-	"github.com/precision-soft/melody/v2/cache"
-	"github.com/precision-soft/melody/v2/clock"
+	"github.com/precision-soft/melody/v3/cache"
+	"github.com/precision-soft/melody/v3/clock"
 )
 
 func main() {
@@ -103,12 +103,12 @@ import (
 	"context"
 	"time"
 
-	"github.com/precision-soft/melody/v2/cache"
-	cachecontract "github.com/precision-soft/melody/v2/cache/contract"
-	"github.com/precision-soft/melody/v2/clock"
-	containercontract "github.com/precision-soft/melody/v2/container/contract"
-	"github.com/precision-soft/melody/v2/exception"
-	runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
+	"github.com/precision-soft/melody/v3/cache"
+	cachecontract "github.com/precision-soft/melody/v3/cache/contract"
+	"github.com/precision-soft/melody/v3/clock"
+	containercontract "github.com/precision-soft/melody/v3/container/contract"
+	"github.com/precision-soft/melody/v3/exception"
+	runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
 const userProfileCacheKey = "example.userProfile:42"
@@ -200,6 +200,7 @@ func loadUserProfile(
 - `Manager.Get` returns `exists == false` when deserialization fails (and returns the deserialization error). See [`cache/manager.go`](../../cache/manager.go).
 - `Remember` uses a single-flight mechanism when stampede protection is enabled (default). See [`cache/remember.go`](../../cache/remember.go).
 - `Remember` groups in-flight calls by cache instance, key, and cancelability (cancelable callers are isolated from non-cancelable callers). See [`cache/remember.go`](../../cache/remember.go).
+- A cancelable in-flight call whose waiters have all timed out is abandoned: a caller that joins afterwards does not inherit the cancellation error — it starts a fresh computation. See [`cache/remember.go`](../../cache/remember.go).
 
 ## Userland API
 

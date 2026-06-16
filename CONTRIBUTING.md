@@ -2,6 +2,26 @@
 
 This document describes local development, testing, and contribution rules for Melody.
 
+## Versioning and where to make changes
+
+Melody ships as three parallel Go module lines (see the [`README.md`](./README.md#versions--project-status)):
+
+- **v3** (`./v3/`) — stable, actively maintained. **All new features go here.**
+- **v2** (`./v2/`) and **v1** (repository root) — maintenance mode.
+
+Rules for contributions:
+
+- **New features:** v3 only. Do not add features to v1 or v2.
+- **Bug fixes:** apply to v3. **Back-port to v1 and v2 only when the fix is security-related or a critical
+  correctness issue.** Other fixes stay on v3.
+- **Breaking changes:** instead of changing a v3 API in place, mark the old form with a `/* Deprecated: ... */`
+  doc comment and keep it working; breaking changes accumulate toward a future v4.
+- The three versions are **intentionally duplicated** so each binds to one framework version. Do not try to
+  consolidate or de-duplicate them — such pull requests will not be accepted.
+
+When a change touches multiple version lines, keep each line's edit self-contained and update each line's
+`CHANGELOG.md`.
+
 ## Development setup
 
 Prerequisites:
@@ -9,6 +29,17 @@ Prerequisites:
 - Go (this repository is a Go module; see [`go.mod`](./go.mod))
 - Make (optional; used only if you rely on repository scripts)
 - Docker (optional; used only for the repository development shell under [`.dev/`](./.dev/))
+
+The quickest way into the development shell is the [`./dc`](./dc) wrapper, which also installs the
+repository git hooks:
+
+```bash
+./dc up:minimal   # core development shell
+./dc up:all       # plus integration services (Redis, RabbitMQ, MySQL, MinIO)
+```
+
+Inside the shell, the convenience functions described under
+[Development shell aliases](#development-shell-aliases) run the full verification matrix.
 
 ## Build tags and verification matrix
 
@@ -135,8 +166,9 @@ The repository enforces a strict, opinionated style. Contributions are expected 
 #### Comments
 
 - All comments must be in **English**.
-- Use `/** ... */` for comments; do not use `//` (except for Go build tags).
-- Permanent comments should be used only exceptionally. Annotation comments (`@todo`, `@important`, etc.) must also use `/** ... */`.
+- Use `/* ... */` for comments; do not use `//` (except for Go build/tool directives such as `//go:build` and `//go:embed`).
+- Permanent comments should be used only exceptionally. Annotation comments (`@todo`, `@important`, etc.) must also use `/* ... */`.
+- Deprecations use the Go-standard marker as a `/* ... */` block — a doc comment whose first paragraph begins with `Deprecated:` (for example `/* Deprecated: use NewThing instead. */`). This is machine-recognized by `go doc`, `gopls`, and `staticcheck`, and renders correctly on `pkg.go.dev`.
 
 #### Function/method formatting
 
@@ -152,7 +184,7 @@ When submitting a bug report, include:
 - The observed behavior and the expected behavior
 - Relevant logs and stack traces (redact secrets)
 
-If the issue is security-sensitive, do not file it publicly; follow the security reporting guidance below.
+If the issue is security-sensitive, do not file it publicly; follow [`SECURITY.md`](./SECURITY.md).
 
 ## Submitting pull requests
 
@@ -163,5 +195,6 @@ If the issue is security-sensitive, do not file it publicly; follow the security
 
 ## Security and support
 
-- For security issues, report privately with a minimal reproduction and impact assessment.
+- For security issues, follow [`SECURITY.md`](./SECURITY.md): report privately through GitHub's private
+  vulnerability reporting with a minimal reproduction and impact assessment. Do not open a public issue.
 - For non-security questions, use the standard issue tracker and include context (version, steps, logs).

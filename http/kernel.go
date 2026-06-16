@@ -94,19 +94,21 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
     return nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
         scope := serviceContainer.NewScope()
 
+        /* @important close the scope before anything that can fail, so a panic during request-logger setup cannot leak it; the logger is captured by reference and nil-guarded for the pre-setup failure path */
+        var requestLogger loggingcontract.Logger
+        defer func() {
+            scopeCloseErr := scope.Close()
+            if nil != scopeCloseErr && nil != requestLogger {
+                requestLogger.Error("failed to close service container scope", exception.LogContext(scopeCloseErr))
+            }
+        }()
+
         requestLogger, requestId, requestIdLoggerErr := instance.requestIdLogger(serviceContainer, scope)
         if nil != requestIdLoggerErr {
             exception.Panic(
                 exception.NewError("failed to create request logger", nil, requestIdLoggerErr),
             )
         }
-
-        defer func() {
-            scopeCloseErr := scope.Close()
-            if nil != scopeCloseErr {
-                requestLogger.Error("failed to close service container scope", exception.LogContext(scopeCloseErr))
-            }
-        }()
 
         requestContext := NewRequestContext(requestId, time.Now())
         serviceRequestContextErr := scope.OverrideProtectedInstance(ServiceRequestContext, requestContext)
@@ -614,6 +616,17 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
             return
         }
+
+        writeResponse(
+            runtimeInstance,
+            melodyRequest,
+            writer,
+            nil,
+            sessionManager,
+            sessionInstance,
+            instance.options.ForwardedHeadersPolicy,
+            instance.options.SessionCookiePolicy,
+        )
     })
 }
 

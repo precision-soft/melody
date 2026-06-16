@@ -17,6 +17,10 @@ ENV GONOSUMDB=github.com/precision-soft
 
 RUN apk add --update --no-cache git shadow bash
 
+ENV GOBIN=/usr/local/bin
+ENV PATH="/usr/local/go/bin:/usr/local/bin:${PATH}"
+RUN go install github.com/cespare/reflex@v0.3.1
+
 RUN mkdir -p "${HOME}"
 RUN mkdir -p /go/cache/go-build
 

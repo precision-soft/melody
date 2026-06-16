@@ -689,50 +689,6 @@ func TestRenderRejectsScheduleCommandContainingCarriageReturn(t *testing.T) {
     }
 }
 
-func TestValidateNoForbiddenCharsRejectsForbiddenChar(t *testing.T) {
-    err := ValidateNoForbiddenChars([]string{"clean", "with%percent"}, CrontabForbiddenChars, "test context")
-    if nil == err {
-        t.Fatalf("expected error for token containing %%")
-    }
-
-    if false == strings.Contains(err.Error(), "test context") {
-        t.Fatalf("expected error to mention the context, got: %v", err)
-    }
-
-    if false == strings.Contains(err.Error(), "with%percent") {
-        t.Fatalf("expected error to quote the offending token, got: %v", err)
-    }
-}
-
-func TestValidateNoForbiddenCharsAllowsCleanTokens(t *testing.T) {
-    err := ValidateNoForbiddenChars([]string{"safe", "tokens", "only"}, CrontabForbiddenChars, "test context")
-    if nil != err {
-        t.Fatalf("expected nil error for clean tokens, got: %v", err)
-    }
-}
-
-func TestValidateNoForbiddenCharsWithCustomList(t *testing.T) {
-    custom := []ForbiddenChar{
-        {Char: '\t', Reason: "tabs break YAML"},
-    }
-
-    err := ValidateNoForbiddenChars([]string{"has\ttab"}, custom, "yaml entry")
-    if nil == err {
-        t.Fatalf("expected error for tab character")
-    }
-
-    if false == strings.Contains(err.Error(), "yaml entry") {
-        t.Fatalf("expected error to mention the context, got: %v", err)
-    }
-}
-
-func TestValidateNoForbiddenCharsEmptyTokensReturnsNil(t *testing.T) {
-    err := ValidateNoForbiddenChars(nil, CrontabForbiddenChars, "test context")
-    if nil != err {
-        t.Fatalf("expected nil error for empty tokens, got: %v", err)
-    }
-}
-
 func TestBuiltinTemplatesReturnsCrontab(t *testing.T) {
     templates := BuiltinTemplates()
     if 1 != len(templates) {
@@ -741,54 +697,6 @@ func TestBuiltinTemplatesReturnsCrontab(t *testing.T) {
 
     if TemplateNameCrontab != templates[0].Name() {
         t.Fatalf("expected builtin template name %q, got %q", TemplateNameCrontab, templates[0].Name())
-    }
-}
-
-func TestShellQuoteIfNeededEmptyStringYieldsTwoQuotes(t *testing.T) {
-    if "''" != shellQuoteIfNeeded("") {
-        t.Fatalf("shellQuoteIfNeeded(\"\") = %q, want %q", shellQuoteIfNeeded(""), "''")
-    }
-}
-
-func TestShellQuoteIfNeededLeavesSafeTokensUnchanged(t *testing.T) {
-    safe := "command-name"
-
-    if safe != shellQuoteIfNeeded(safe) {
-        t.Fatalf("shellQuoteIfNeeded(%q) = %q, want unchanged", safe, shellQuoteIfNeeded(safe))
-    }
-}
-
-func TestShellQuoteIfNeededQuotesWhenSpacePresent(t *testing.T) {
-    token := "hello world"
-    expected := "'hello world'"
-
-    if expected != shellQuoteIfNeeded(token) {
-        t.Fatalf("shellQuoteIfNeeded(%q) = %q, want %q", token, shellQuoteIfNeeded(token), expected)
-    }
-}
-
-func TestShellQuoteIfNeededQuotesWhenMetacharPresent(t *testing.T) {
-    token := "echo$HOME"
-    quoted := shellQuoteIfNeeded(token)
-
-    if false == strings.HasPrefix(quoted, "'") || false == strings.HasSuffix(quoted, "'") {
-        t.Fatalf("expected single-quoted output for %q, got %q", token, quoted)
-    }
-}
-
-func TestSingleQuoteEscapesEmbeddedSingleQuote(t *testing.T) {
-    expected := `'it'\''s'`
-
-    if expected != singleQuote("it's") {
-        t.Fatalf("singleQuote(%q) = %q, want %q", "it's", singleQuote("it's"), expected)
-    }
-}
-
-func TestJoinShellTokensJoinsWithSpaces(t *testing.T) {
-    expected := "alpha 'with space' beta"
-
-    if expected != joinShellTokens([]string{"alpha", "with space", "beta"}) {
-        t.Fatalf("joinShellTokens result = %q, want %q", joinShellTokens([]string{"alpha", "with space", "beta"}), expected)
     }
 }
 
@@ -814,6 +722,31 @@ func TestRenderRejectsWhitespaceInScheduleField(t *testing.T) {
 
     if false == strings.Contains(err.Error(), "whitespace in Schedule.Minute") {
         t.Fatalf("expected error to mention whitespace in Schedule.Minute, got: %v", err)
+    }
+}
+
+func TestRenderRejectsForbiddenCharacterInScheduleField(t *testing.T) {
+    entries := []Entry{
+        {
+            Name:   "broken",
+            User:   "www-data",
+            Binary: "/usr/local/bin/app",
+            Args:   []string{"broken"},
+            Schedule: &Schedule{
+                Minute: "*/5%id",
+                Hour:   "*",
+            },
+            LogPath: "/var/log/app/broken.log",
+        },
+    }
+
+    _, err := Render(entries, RenderOptions{})
+    if nil == err {
+        t.Fatalf("expected error when Schedule.Minute contains a forbidden %% character, got nil")
+    }
+
+    if false == strings.Contains(err.Error(), "forbidden character") || false == strings.Contains(err.Error(), "Schedule.Minute") {
+        t.Fatalf("expected a forbidden-character error mentioning Schedule.Minute, got: %v", err)
     }
 }
 

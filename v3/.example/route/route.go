@@ -13,8 +13,6 @@ const (
     RoutesName    = "example.routes"
     RoutesPattern = "/routes/"
 
-    /** @info products start */
-
     ProductsPrefix = "/products"
 
     ProductsListPageName    = "example.products.list.page"
@@ -41,21 +39,15 @@ const (
     ProductsApiDeleteName    = "example.products.api.delete"
     ProductsApiDeletePattern = ProductsPrefix + "/api/delete/:id/"
 
-    /** @info categories start */
-
     CategoriesPrefix = "/categories"
 
     CategoriesApiReadAllName    = "example.categories.api.read.all"
     CategoriesApiReadAllPattern = CategoriesPrefix + "/api/read/"
 
-    /** @info currencies start */
-
     CurrenciesPrefix = "/currencies"
 
     CurrenciesApiReadAllName    = "example.currencies.api.read.all"
     CurrenciesApiReadAllPattern = CurrenciesPrefix + "/api/read/"
-
-    /** @info users start */
 
     UsersPrefix = "/users"
 
@@ -82,4 +74,22 @@ const (
 
     UsersApiDeleteName    = "example.users.api.delete"
     UsersApiDeletePattern = UsersPrefix + "/api/delete/:id/"
+
+    SecurePrefix = "/secure"
+
+    SecureMeName    = "example.secure.me"
+    SecureMePattern = SecurePrefix + "/me/"
+
+    I18nPrefix = "/i18n"
+
+    I18nGreetingName    = "example.i18n.greeting"
+    I18nGreetingPattern = I18nPrefix + "/greeting/"
+
+    EventsPrefix = "/events"
+
+    EventsStreamName    = "example.events.stream"
+    EventsStreamPattern = EventsPrefix + "/stream/"
+
+    EventsPublishName    = "example.events.publish"
+    EventsPublishPattern = EventsPrefix + "/publish/"
 )

@@ -34,8 +34,8 @@ The example below demonstrates selecting a serializer from an `Accept` header an
 package main
 
 import (
-	"github.com/precision-soft/melody/v2/serializer"
-	serializercontract "github.com/precision-soft/melody/v2/serializer/contract"
+	"github.com/precision-soft/melody/v3/serializer"
+	serializercontract "github.com/precision-soft/melody/v3/serializer/contract"
 )
 
 func serializeByAcceptHeader(acceptHeader string, value any) ([]byte, error) {

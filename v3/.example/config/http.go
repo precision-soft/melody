@@ -4,11 +4,15 @@ import (
     "github.com/precision-soft/melody/v3/.example/handler"
     handlercategory "github.com/precision-soft/melody/v3/.example/handler/category"
     handlercurrency "github.com/precision-soft/melody/v3/.example/handler/currency"
+    handlerevents "github.com/precision-soft/melody/v3/.example/handler/events"
+    handleri18n "github.com/precision-soft/melody/v3/.example/handler/i18n"
     handlerproduct "github.com/precision-soft/melody/v3/.example/handler/product"
+    handlersecure "github.com/precision-soft/melody/v3/.example/handler/secure"
     handleruser "github.com/precision-soft/melody/v3/.example/handler/user"
     "github.com/precision-soft/melody/v3/.example/route"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodykernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
+    melodyopenapi "github.com/precision-soft/melody/v3/openapi"
 )
 
 func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.Kernel) {
@@ -18,11 +22,39 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     router.HandleNamed("example.health", "GET", "/health", handler.HealthHandler())
 
+    router.HandleNamed("example.openapi", "GET", "/openapi.json", melodyopenapi.SpecHandler(instance.openApiInfo, instance.openApiRegistry))
+
+    router.HandleNamed("example.platform.demo", "GET", "/platform/demo", handler.PlatformDemoHandler())
+
+    router.HandleNamed("example.messagebus.demo", "POST", "/messagebus/demo", handler.MessageBusDemoHandler())
+
+    /* @info the example.metrics and example.websocket routes are contributed by the opentelemetry and websocket modules (see configure.go). */
+
+    router.HandleNamed("example.cache.demo", "GET", "/cache/demo", handler.CacheDemoHandler())
+
+    router.HandleNamed("example.encrypt.demo", "GET", "/encrypt/demo", handler.EncryptDemoHandler(instance.cipher))
+
+    if nil != instance.redisClient {
+        router.HandleNamed("example.redis.token.demo", "GET", "/redis/token/demo", handler.RedisTokenDemoHandler())
+    }
+
+    if nil != instance.database {
+        router.HandleNamed("example.database.demo", "GET", "/database/demo", handler.DatabaseDemoHandler(instance.database))
+        router.HandleNamed("example.database.audit.demo", "GET", "/database/audit/demo", handler.AuditDemoHandler(instance.database))
+    }
+
     router.HandleNamed(route.LoginPageName, "GET", route.LoginPagePattern, handler.LoginPageHandler())
     router.HandleNamed(route.LoginSubmitName, "POST", route.LoginSubmitPattern, handler.LoginHandler())
     router.HandleNamed(route.LogoutName, "GET", route.LogoutPattern, handler.LogoutHandler())
 
     router.HandleNamed(route.RoutesName, "GET", route.RoutesPattern, handler.RoutesHandler())
+
+    router.HandleNamed(route.SecureMeName, "GET", route.SecureMePattern, handlersecure.MeHandler())
+
+    router.HandleNamed(route.I18nGreetingName, "GET", route.I18nGreetingPattern, handleri18n.GreetingHandler())
+
+    router.HandleNamed(route.EventsStreamName, "GET", route.EventsStreamPattern, handlerevents.StreamHandler(instance.serverSentEventHub))
+    router.HandleNamed(route.EventsPublishName, "GET", route.EventsPublishPattern, handlerevents.PublishHandler(instance.messageBusDispatch))
 
     router.HandleNamed(route.CategoriesApiReadAllName, "GET", route.CategoriesApiReadAllPattern, handlercategory.ApiReadAllHandler())
 

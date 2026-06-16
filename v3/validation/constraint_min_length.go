@@ -20,11 +20,12 @@ type MinLength struct {
 }
 
 func (instance *MinLength) Validate(value any, field string) validationcontract.ValidationError {
-    if nil == value {
+    resolved, ok := dereferenceValue(value)
+    if false == ok {
         return nil
     }
 
-    stringValue := fmt.Sprintf("%v", value)
+    stringValue := fmt.Sprintf("%v", resolved)
     if len(stringValue) < instance.min {
         return NewValidationError(
             field,

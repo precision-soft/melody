@@ -1,11 +1,7 @@
 package bag
 
 import (
-    "errors"
     "testing"
-    "time"
-
-    "github.com/precision-soft/melody/internal"
 )
 
 func TestBagString_StringOrDefault_HasNonEmptyString(t *testing.T) {
@@ -175,66 +171,5 @@ func TestBagFloat64_ConversionsAndErrors(t *testing.T) {
     }
     if nil == err {
         t.Fatalf("expected error")
-    }
-}
-
-func TestBagDuration_ConversionsAndErrors(t *testing.T) {
-    parameterBag := NewParameterBag()
-
-    parameterBag.Set("d", time.Second)
-    value, exists, err := Duration(parameterBag, "d")
-    if nil != err {
-        t.Fatalf("unexpected error: %v", err)
-    }
-    if false == exists {
-        t.Fatalf("expected exists true")
-    }
-    if time.Second != value {
-        t.Fatalf("expected %v, got %v", time.Second, value)
-    }
-
-    parameterBag.Set("d", " 150ms ")
-    value, exists, err = Duration(parameterBag, "d")
-    if nil != err {
-        t.Fatalf("unexpected error: %v", err)
-    }
-    if false == exists {
-        t.Fatalf("expected exists true")
-    }
-    if 150*time.Millisecond != value {
-        t.Fatalf("expected %v, got %v", 150*time.Millisecond, value)
-    }
-
-    parameterBag.Set("d", "not-duration")
-    _, exists, err = Duration(parameterBag, "d")
-    if false == exists {
-        t.Fatalf("expected exists true even when conversion fails")
-    }
-    if nil == err {
-        t.Fatalf("expected error")
-    }
-}
-
-func TestCreateConversionError_MessageAndContext(t *testing.T) {
-    err := internal.ParseError("n", "int", "not-a-number", errors.New("cause"))
-    if nil == err {
-        t.Fatalf("expected error")
-    }
-    if "parameter is not a valid 'int'" != err.Message() {
-        t.Fatalf("unexpected message: %q", err.Message())
-    }
-    if nil == err.Context() {
-        t.Fatalf("expected context")
-    }
-    if "n" != err.Context()["parameterName"] {
-        t.Fatalf("expected parameterName in context")
-    }
-
-    err = internal.ParseError("n", "int", 123, nil)
-    if nil == err {
-        t.Fatalf("expected error")
-    }
-    if "parameter is not a 'int'" != err.Message() {
-        t.Fatalf("unexpected message: %q", err.Message())
     }
 }

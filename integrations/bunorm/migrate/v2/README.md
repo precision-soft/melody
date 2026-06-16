@@ -1,6 +1,6 @@
 # Melody Bun ORM migration commands
 
-This package exposes Bun migrations as Melody CLI commands (`clicontract.Command` in [`cli/contract/command.go`](../../../cli/contract/command.go)).
+This package exposes Bun migrations as Melody CLI commands (`clicontract.Command` in [`cli/contract/command.go`](../../../../v2/cli/contract/command.go)).
 
 It intentionally contains only:
 
@@ -9,7 +9,7 @@ It intentionally contains only:
 
 Your application is responsible for:
 
-* registering a `*bunorm.ManagerRegistry` service and choosing the default manager (see [`integrations/bunorm/manager_registry.go`](../manager_registry.go))
+* registering a `*bunorm.ManagerRegistry` service and choosing the default manager (see [`integrations/bunorm/v2/manager_registry.go`](../../v2/manager_registry.go))
 * providing a `*migrate.Migrations` collection (your app-owned migrations package)
 * choosing the migrations directory layout
 
@@ -37,7 +37,7 @@ var Migrations = migrate.NewMigrations()
 
 ### 2) Register commands via a CliModule
 
-Register the commands from a module that implements [`application/contract.CliModule`](../../../application/contract/module.go):
+Register the commands from a module that implements [`application/contract.CliModule`](../../../../v2/application/contract/module.go):
 
 ```go
 package main

@@ -72,9 +72,9 @@ package main
 import (
 	"context"
 
-	containercontract "github.com/precision-soft/melody/v2/container/contract"
-	"github.com/precision-soft/melody/v2/logging"
-	"github.com/precision-soft/melody/v2/runtime"
+	containercontract "github.com/precision-soft/melody/v3/container/contract"
+	"github.com/precision-soft/melody/v3/logging"
+	"github.com/precision-soft/melody/v3/runtime"
 )
 
 func runWithScopedLogger(

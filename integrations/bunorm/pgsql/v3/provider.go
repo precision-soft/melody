@@ -12,6 +12,7 @@ import (
 
     "github.com/precision-soft/melody/integrations/bunorm/v3"
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/pgdialect"
@@ -53,10 +54,12 @@ func (instance *Provider) Open(params bunorm.ConnectionParams, logger loggingcon
 }
 
 func (instance *Provider) openWithRetry(params bunorm.ConnectionParams, logger loggingcontract.Logger) (*bun.DB, error) {
+    logger = logging.EnsureLogger(logger)
+
     attempt := uint32(0)
     maxAttempts := instance.retryConfig.MaxAttempts
     if 0 == maxAttempts {
-        maxAttempts = 3
+        maxAttempts = DefaultRetryConfig().MaxAttempts
     }
 
     for {
@@ -177,10 +180,14 @@ func (instance *Provider) open(params bunorm.ConnectionParams) (*bun.DB, error) 
         },
     )
 
-    ctx, cancel := context.WithTimeout(context.Background(), timeoutConfig.ConnectTimeout)
-    defer cancel()
+    pingContext := context.Background()
+    pingCancel := func() {}
+    if 0 < timeoutConfig.ConnectTimeout {
+        pingContext, pingCancel = context.WithTimeout(context.Background(), timeoutConfig.ConnectTimeout)
+    }
+    defer pingCancel()
 
-    pingErr := database.PingContext(ctx)
+    pingErr := database.PingContext(pingContext)
     if nil != pingErr {
         _ = database.Close()
 
@@ -195,19 +202,21 @@ func (instance *Provider) open(params bunorm.ConnectionParams) (*bun.DB, error) 
 }
 
 func (instance *Provider) computeBackoffDelay(attempt uint32) time.Duration {
+    defaults := DefaultRetryConfig()
+
     initialDelay := instance.retryConfig.InitialDelay
     if 0 == initialDelay {
-        initialDelay = 500 * time.Millisecond
+        initialDelay = defaults.InitialDelay
     }
 
     maxDelay := instance.retryConfig.MaxDelay
     if 0 == maxDelay {
-        maxDelay = 5 * time.Second
+        maxDelay = defaults.MaxDelay
     }
 
     backoffMultiplier := instance.retryConfig.BackoffMultiplier
     if 0.0 == backoffMultiplier {
-        backoffMultiplier = 2.0
+        backoffMultiplier = defaults.BackoffMultiplier
     }
 
     multiplier := 1.0

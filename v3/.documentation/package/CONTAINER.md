@@ -49,6 +49,14 @@ Registration options (see [`RegisterOptions`](../../container/contract/registrar
 - [`WithoutTypeRegistration()`](../../container/register_option.go)  
   Explicitly disables type registration for that registration call.
 
+Type registration is **on by default** (strict) for `RegisterService`/`MustRegisterType`, so every registered service is also resolvable by its concrete return type — no extra option needed. Resolve a service by type with the generic [`MustFromResolverByType[T]`](../../container/resolver.go) / [`FromResolverByType[T]`](../../container/resolver.go):
+
+```go
+bus := container.MustFromResolverByType[messagebuscontract.Bus](resolver)
+```
+
+For a service with a **single** implementation this removes the need to invent a string service-name constant and a per-type `MustGetX` accessor — register it and resolve it by type. Keep the **named** path (`RegisterService(ServiceX, ...)` + `XMustFromResolver`) when a contract has more than one implementation that must coexist: because type registration is strict, registering two services under the same contract type fails at registration (the string name is then the only disambiguator).
+
 ## Usage
 
 The example below demonstrates:
@@ -64,9 +72,9 @@ package main
 import (
 	"fmt"
 
-	"github.com/precision-soft/melody/v2/container"
-	containercontract "github.com/precision-soft/melody/v2/container/contract"
-	"github.com/precision-soft/melody/v2/exception"
+	"github.com/precision-soft/melody/v3/container"
+	containercontract "github.com/precision-soft/melody/v3/container/contract"
+	"github.com/precision-soft/melody/v3/exception"
 )
 
 type Logger interface {
@@ -152,7 +160,7 @@ func example() {
 - Typed resolution by type is delegated to the underlying name registration when the type maps to a single service name, ensuring that resolving by name and by type returns the same instance (see [`container/resolver_context.go`](../../container/resolver_context.go)).
 - Circular dependency detection is scoped to a single resolver context (see [`Resolver`](../../container/contract/resolver.go) and the resolver context stack logic in [`container/container_resolver.go`](../../container/container_resolver.go)).
 - Closing is deterministic and dependency-aware: dependents are closed before dependencies (see [`container/container_close.go`](../../container/container_close.go)).
-- `Close()` does not prevent subsequent resolutions; a container (or scope) must not be used after it is closed. Do not call `Close()` concurrently with service resolution (see [`container/container_close.go`](../../container/container_close.go) and the locking behavior in [`container/resolver_context.go`](../../container/resolver_context.go)).
+- After `Close()`, already-created instances can still be looked up, but resolving a service that has not been created yet fails with a `container is closed` error instead of creating an instance that would never be closed; a creation that races `Close()` is closed best-effort and the resolution fails the same way (see [`container/container_resolver.go`](../../container/container_resolver.go)). A container (or scope) should still not be used after it is closed.
 - `OverrideInstance` rejects service names with the `service.` prefix (protected services). If you must override a protected service in userland tests, use `OverrideProtectedInstance` (see [`OverrideService`](../../container/contract/override.go) and its implementations in [`container/container.go`](../../container/container.go) and [`container/scope.go`](../../container/scope.go)).
 
 ## Userland API

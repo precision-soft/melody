@@ -93,91 +93,22 @@ func TestAccessControl_Match_EmptyPathNormalizedToRoot(t *testing.T) {
     }
 }
 
-func TestMatchAccessControlRule_SetsMetadataCorrectly(t *testing.T) {
+func TestAccessControl_Match_ExactRuleMatchesMultipleTrailingSlashes(t *testing.T) {
     control := NewAccessControl(
-        NewAccessControlRule("/admin", "ROLE_ADMIN"),
-        NewAccessControlRule("/admin/settings", "ROLE_SETTINGS"),
+        NewAccessControlExactRule("/admin", "ROLE_ADMIN"),
     )
 
-    matchedRule, attributes, matched := matchAccessControlRule(control, "/admin/settings/users", SourceFirewall, "main")
+    attributes, matched := control.Match("/admin//")
     if false == matched {
-        t.Fatalf("expected matched")
+        t.Fatalf("auth bypass: /admin// did not match the exact /admin rule (router collapses all trailing slashes)")
     }
-    if nil == matchedRule {
-        t.Fatalf("expected matched rule")
-    }
-
-    if "/admin/settings" != matchedRule.PathPrefix() {
-        t.Fatalf("unexpected path prefix")
-    }
-    if SourceFirewall != matchedRule.Source() {
-        t.Fatalf("unexpected source")
-    }
-    if "main" != matchedRule.Firewall() {
-        t.Fatalf("unexpected firewall")
-    }
-    if 1 != matchedRule.RuleIndex() {
-        t.Fatalf("unexpected rule index")
+    if 1 != len(attributes) || "ROLE_ADMIN" != attributes[0] {
+        t.Fatalf("unexpected attributes %v", attributes)
     }
 
-    if 1 != len(attributes) {
-        t.Fatalf("expected one attribute")
-    }
-    if "ROLE_SETTINGS" != attributes[0] {
-        t.Fatalf("unexpected attribute")
-    }
-}
-
-func TestMatchAccessControlRule_NormalizesEmptyPathToRoot(t *testing.T) {
-    control := NewAccessControl(
-        NewAccessControlRule("/", "ROLE_ROOT"),
-    )
-
-    matchedRule, attributes, matched := matchAccessControlRule(control, "", SourceGlobal, "")
+    attributes, matched = control.Match("/admin///")
     if false == matched {
-        t.Fatalf("expected matched")
-    }
-    if nil == matchedRule {
-        t.Fatalf("expected matched rule")
-    }
-    if "/" != matchedRule.PathPrefix() {
-        t.Fatalf("unexpected path prefix")
-    }
-    if 0 != matchedRule.RuleIndex() {
-        t.Fatalf("unexpected rule index")
-    }
-    if 1 != len(attributes) {
-        t.Fatalf("expected one attribute")
-    }
-    if "ROLE_ROOT" != attributes[0] {
-        t.Fatalf("unexpected attribute")
-    }
-}
-
-func TestMatchAccessControlRule_FallbackRuleSelectedOnce(t *testing.T) {
-    control := NewAccessControl(
-        NewAccessControlRule("", "ROLE_ANY"),
-        NewAccessControlRule("/admin", "ROLE_ADMIN"),
-    )
-
-    matchedRule, attributes, matched := matchAccessControlRule(control, "/public", SourceGlobal, "")
-    if false == matched {
-        t.Fatalf("expected matched")
-    }
-    if nil == matchedRule {
-        t.Fatalf("expected matched rule")
-    }
-    if "" != matchedRule.PathPrefix() {
-        t.Fatalf("unexpected path prefix")
-    }
-    if 0 != matchedRule.RuleIndex() {
-        t.Fatalf("unexpected rule index")
-    }
-    if 1 != len(attributes) {
-        t.Fatalf("expected one attribute")
-    }
-    if "ROLE_ANY" != attributes[0] {
-        t.Fatalf("unexpected attribute")
+        t.Fatalf("auth bypass: /admin/// did not match the exact /admin rule")
     }
 }
 
@@ -354,4 +285,28 @@ func TestNewAccessControlExactRule_EmptyPathPanics(t *testing.T) {
     }()
 
     _ = NewAccessControlExactRule("", "PUBLIC_ACCESS")
+}
+
+func TestNewAccessControlRule_PublicAccessCombinedWithOtherAttributesPanics(t *testing.T) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected panic when PUBLIC_ACCESS is combined with another attribute")
+        }
+    }()
+
+    _ = NewAccessControlRule("/admin", "PUBLIC_ACCESS", "ROLE_ADMIN")
+}
+
+func TestNewAccessControlRule_LonePublicAccessIsAllowed(t *testing.T) {
+    defer func() {
+        if nil != recover() {
+            t.Fatalf("a lone PUBLIC_ACCESS attribute must not panic")
+        }
+    }()
+
+    rule := NewAccessControlRule("/health", "PUBLIC_ACCESS")
+    if 1 != len(rule.attributes) {
+        t.Fatalf("expected exactly one attribute, got %v", rule.attributes)
+    }
 }

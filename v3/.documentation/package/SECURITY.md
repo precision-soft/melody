@@ -55,7 +55,7 @@ When a firewall defines both global and local access control, `security/config` 
 
 The package defines the firewall manager service id:
 
-- [`security.ServiceFirewallManager`](../../security/service_resolver.go) (`"service.security.firewallManager"`)
+- [`security.ServiceFirewallManager`](../../security/service_resolver.go) (`"service.security.firewall_manager"`)
 
 Resolution helpers:
 
@@ -112,12 +112,12 @@ package main
 import (
 	"errors"
 
-	applicationcontract "github.com/precision-soft/melody/v2/application/contract"
-	httpcontract "github.com/precision-soft/melody/v2/http/contract"
-	kernelcontract "github.com/precision-soft/melody/v2/kernel/contract"
-	"github.com/precision-soft/melody/v2/security"
-	securityconfig "github.com/precision-soft/melody/v2/security/config"
-	securitycontract "github.com/precision-soft/melody/v2/security/contract"
+	applicationcontract "github.com/precision-soft/melody/v3/application/contract"
+	httpcontract "github.com/precision-soft/melody/v3/http/contract"
+	kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
+	"github.com/precision-soft/melody/v3/security"
+	securityconfig "github.com/precision-soft/melody/v3/security/config"
+	securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
 type apiKeyLoginHandler struct{}
@@ -241,10 +241,68 @@ func (instance *adminSecurityModule) RegisterSecurity(builder *securityconfig.Bu
 var _ applicationcontract.HttpModule = (*adminSecurityModule)(nil)
 ```
 
+### Token authentication (stateless Bearer)
+
+For stateless APIs, [`BearerTokenSource`](../../security/bearer_token_source.go) extracts an `Authorization: Bearer <token>` header and delegates validation to a pluggable [`TokenValidator`](../../security/contract/token_validator.go). Two validators ship in the package:
+
+- [`JwtTokenValidator`](../../security/jwt_token_validator.go) — verifies HS256 JWTs with a shared secret (stdlib only, no external dependency), checks `exp`/`nbf`, and maps the subject and roles claims to [`Claims`](../../security/contract/token_validator.go). The `exp` (expiry) claim is **required by default** — a token without `exp` is rejected unless `JwtConfig{AllowWithoutExpiry: true}` is set, so a missing expiry never silently yields a non-expiring token. Out-of-range or non-finite `exp`/`nbf`/`iat` `NumericDate` values are rejected as malformed rather than saturating on the int64 conversion. A token with an empty, absent, or non-string subject is rejected (it must never authenticate as the empty principal `""`). A future `iat` is accepted by default (RFC 7519 treats `iat` as informational); set `JwtConfig.RejectFutureIssuedAt` to reject it instead. Self-contained; no per-request lookup.
+- [`OpaqueTokenValidator`](../../security/opaque_token_validator.go) — looks the token up in a [`TokenStore`](../../security/contract/token_store.go), so tokens are revocable (a stored token with an empty subject is rejected). [`InMemoryTokenStore`](../../security/in_memory_token_store.go) ships for tests/dev; the `integrations/rueidis` `NewTokenStore` is a production Redis-backed [`RevocableTokenStore`](../../security/contract/token_store.go) (the `TokenStore` lookup interface plus `Put`/`PutWithTtl`/`Delete`/`DeleteByUser`/`PurgeExpired`), keeping the full revocation surface behind the interface so the firewall wiring is identical. Behind a load balancer use the Redis store: the in-memory store is per-process, so a token issued or revoked on one instance is invisible to the others (revocation would not take effect cluster-wide). Run `PurgeExpired` on a schedule from a single instance (e.g. a cron command) rather than from every instance — Redis expires the token keys natively; the
+  purge only reconciles the user index. Roles enrichment runs only via the bearer source's enricher, not the validator.
+
+A failed or missing token resolves to an anonymous token, so the firewall's entry point decides the response. [`JsonEntryPoint`](../../security/json_entry_point.go) (401) and [`JsonAccessDeniedHandler`](../../security/json_access_denied_handler.go) (403) return JSON instead of redirecting — set them globally for pure-API apps.
+
+```go
+func (instance *apiSecurityModule) RegisterSecurity(builder *securityconfig.Builder) {
+	validator := security.NewJwtTokenValidator(security.JwtConfig{
+		Secret: []byte(jwtSecret),
+	})
+
+	builder.SetGlobal(
+		accessControl,
+		roleHierarchy,
+		accessDecisionManager,
+		security.NewJsonEntryPoint(),
+		security.NewJsonAccessDeniedHandler(),
+	)
+
+	builder.AddStatelessFirewall(
+		"api",
+		security.NewPathPrefixMatcher("/api"),
+		[]securitycontract.Rule{},
+		security.NewBearerTokenSource(validator),
+		securityconfig.NewFirewallOverrideConfiguration(),
+	)
+}
+```
+
+The example application wires a stateless `/secure` firewall (`config/security.go`), a protected handler (`handler/secure/me_handler.go`), and a demo JWT minting command (`cli/auth_token_command.go`, `auth:token`). A stateless firewall must be registered before a broader catch-all firewall, since the first matching firewall wins.
+
+#### Resolving roles after validation (enrichment hook)
+
+When the token only carries an opaque scope (e.g. a tenant/application identifier) and the real roles live in a database, implement the generic [`TokenEnricher`](../../security/contract/token_enricher.go) and wire it with [`NewBearerTokenSourceWithEnricher`](../../security/bearer_token_source.go). It runs **after** the signature is validated and turns the token's `Claims.Scope` into the final roles/attributes. The library ships only the interface and the wiring — any tenant- or product-specific resolution lives in your enricher, keeping the security package generic. An enrichment error falls back to an anonymous token (the firewall then decides the response); the error is logged at INFO level so operators can observe the failure and is not propagated to the handler.
+
+The enriched [`AuthenticatedToken`](../../security/authenticated_token.go) carries the resolved `Scope()` and `Attributes()` alongside `Roles()` (both accessors return defensive copies), so attribute-based access control downstream can read the tenant/attribute data the enricher attached — not only the roles.
+
+To feed the enricher, the JWT validator can copy an object claim into `Claims.Scope` via `JwtConfig.ScopeClaim`:
+
+```go
+validator := security.NewJwtTokenValidator(security.JwtConfig{
+	Secret:     []byte(jwtSecret),
+	ScopeClaim: "scope", // copies the `scope` object claim into Claims.Scope
+})
+
+// scopeRoleEnricher resolves roles from the token scope (here, a static map;
+// in a real app this would be a database lookup keyed by Claims.Scope).
+source := security.NewBearerTokenSourceWithEnricher(validator, scopeRoleEnricher{})
+```
+
+`Claims` exposes generic `Scope` and `Attributes` maps for this purpose; the library assigns no meaning to their keys.
+
 ## Footguns & caveats
 
 - `AccessControl` uses a deterministic match priority: exact match first, then longest prefix match (including segment-prefix rules), then regex rules in the order they were registered, then the empty-prefix fallback. See [`(*AccessControl).Match`](../../security/access_control.go).
 - `SecurityContextSetOnRuntime` stores the context in the runtime scope under `security/contract.ServiceSecurityContext`.
+- `JwtTokenValidator` requires the `exp` claim by default: a signed token without `exp` is rejected unless you set `JwtConfig{AllowWithoutExpiry: true}`. This differs from RFC 7519, which treats registered claims as optional — so a token that looks valid but omits `exp` resolves to an anonymous token, not an authenticated one.
 
 ## Userland API
 
@@ -257,6 +315,10 @@ var _ applicationcontract.HttpModule = (*adminSecurityModule)(nil)
 - [`Token`](../../security/contract/token.go)
 - [`TokenSource`](../../security/contract/token_source.go)
 - [`Authenticator`](../../security/contract/authenticator.go)
+- [`TokenValidator`](../../security/contract/token_validator.go)
+- [`TokenEnricher`](../../security/contract/token_enricher.go)
+- [`Claims`](../../security/contract/token_validator.go)
+- [`TokenStore`](../../security/contract/token_store.go)
 - [`Firewall`](../../security/contract/firewall.go)
 - [`FirewallManager`](../../security/contract/firewall_manager.go)
 - [`AccessDecisionManager`](../../security/contract/access_decision_manager.go)
@@ -279,9 +341,12 @@ var _ applicationcontract.HttpModule = (*adminSecurityModule)(nil)
 - [`RoleHierarchy`](../../security/role_hierarchy.go)
 - Tokens: [`AnonymousToken`](../../security/anonymous_token.go), [`AuthenticatedToken`](../../security/authenticated_token.go), [`Token`](../../security/token.go)
 - Auth: [`ApiKeyHeaderRule`](../../security/rule.go), [`ApiKeyHeaderAuthenticator`](../../security/api_key_authenticator.go), [`AuthenticatorManager`](../../security/authenticator_manager.go), [`AuthenticatorTokenSource`](../../security/token_source.go)
+- Token auth: [`BearerTokenSource`](../../security/bearer_token_source.go), [`JwtTokenValidator`](../../security/jwt_token_validator.go), [`JwtConfig`](../../security/jwt_token_validator.go), [`OpaqueTokenValidator`](../../security/opaque_token_validator.go), [`InMemoryTokenStore`](../../security/in_memory_token_store.go), [`JsonEntryPoint`](../../security/json_entry_point.go), [`JsonAccessDeniedHandler`](../../security/json_access_denied_handler.go)
 - Matchers: [`PathPrefixMatcher`](../../security/matcher.go)
-- Authorization: [`AccessDecisionManager`, `RoleVoter`](../../security/voter.go)
-- Configuration: [`CompiledConfiguration`, `CompiledFirewall`, `CompiledSource`](../../security/compiled_configuration.go)
+- Authorization: [`AccessDecisionManager`](../../security/access_decision_manager.go), [`RoleVoter`](../../security/voter.go), [`RoleHierarchyVoter`](../../security/role_hierarchy_voter.go)
+- Token source: [`ResolverTokenSource`](../../security/token_source.go)
+- Events: [`AuthorizationGrantedEvent`](../../security/authorization_granted_event.go), [`AuthorizationDeniedEvent`](../../security/authorization_denied_event.go), [`LoginSuccessEvent`](../../security/login_success_event.go), [`LoginFailureEvent`](../../security/login_failure_event.go), [`LogoutSuccessEvent`](../../security/logout_success_event.go), [`LogoutFailureEvent`](../../security/logout_failure_event.go)
+- Configuration: [`CompiledConfiguration`, `CompiledFirewall`](../../security/compiled_configuration.go)
 - Context: [`SecurityContext`](../../security/security_context.go)
 
 ### Constructors
@@ -300,8 +365,19 @@ var _ applicationcontract.HttpModule = (*adminSecurityModule)(nil)
 - [`NewApiKeyHeaderAuthenticator(headerName string, expectedValue string, userId string, roles []string)`](../../security/api_key_authenticator.go)
 - [`NewAuthenticatorManager(authenticators ...securitycontract.Authenticator)`](../../security/authenticator_manager.go)
 - [`NewAuthenticatorTokenSource(authenticatorManager *AuthenticatorManager)`](../../security/token_source.go)
+- [`NewBearerTokenSource(validator securitycontract.TokenValidator)`](../../security/bearer_token_source.go)
+- [`NewBearerTokenSourceWithEnricher(validator securitycontract.TokenValidator, enricher securitycontract.TokenEnricher)`](../../security/bearer_token_source.go)
+- [`NewJwtTokenValidator(config JwtConfig)`](../../security/jwt_token_validator.go)
+- [`NewOpaqueTokenValidator(store securitycontract.TokenStore)`](../../security/opaque_token_validator.go)
+- [`NewInMemoryTokenStore()`](../../security/in_memory_token_store.go)
+- [`NewInMemoryTokenStoreWithClock(clockInstance clockcontract.Clock)`](../../security/in_memory_token_store.go)
+- [`NewResolverTokenSource(resolver securitycontract.TokenResolver)`](../../security/token_source.go)
+- [`NewJsonEntryPoint()`](../../security/json_entry_point.go)
+- [`NewJsonAccessDeniedHandler()`](../../security/json_access_denied_handler.go)
 - [`NewAccessDecisionManager(strategy securitycontract.DecisionStrategy, voters ...securitycontract.Voter)`](../../security/access_decision_manager.go)
+- [`NewAccessDecisionManagerWithVoters(strategy securitycontract.DecisionStrategy, voters []securitycontract.Voter)`](../../security/access_decision_manager.go)
 - [`NewRoleVoter()`](../../security/voter.go)
+- [`NewRoleHierarchyVoter(roleHierarchy *RoleHierarchy, delegate *RoleVoter)`](../../security/role_hierarchy_voter.go)
 - [`NewSecurityContext(firewall *CompiledFirewall, token securitycontract.Token)`](../../security/security_context.go)
 - [`NewCompiledFirewall(...)`](../../security/compiled_configuration.go)
 - [`NewCompiledConfiguration(...)`](../../security/compiled_configuration.go)

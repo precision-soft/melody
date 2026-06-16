@@ -9,6 +9,170 @@ import (
     "time"
 )
 
+func TestRemember_ReturnsCachedValueWithoutCallingCallback(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    backend := NewInMemoryBackend(
+        10,
+        time.Hour,
+        clockInstance,
+    )
+    defer backend.Close()
+
+    cacheInstance := NewManager(backend, NewJsonSerializer())
+
+    setErr := cacheInstance.Set("k", "v", 0)
+    if nil != setErr {
+        t.Fatalf("set error: %v", setErr)
+    }
+
+    called := false
+    value, rememberErr := Remember(
+        cacheInstance,
+        "k",
+        time.Second,
+        func(ctx context.Context) (any, error) {
+            called = true
+            return "new", nil
+        },
+        nil,
+    )
+    if nil != rememberErr {
+        t.Fatalf("remember error: %v", rememberErr)
+    }
+    if true == called {
+        t.Fatalf("expected callback not to be called on cache hit")
+    }
+    if "v" != value.(string) {
+        t.Fatalf("expected cached value")
+    }
+}
+
+func TestRemember_CallsCallbackAndStoresValue(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    backend := NewInMemoryBackend(
+        10,
+        time.Hour,
+        clockInstance,
+    )
+    defer backend.Close()
+
+    cacheInstance := NewManager(backend, NewJsonSerializer())
+
+    called := false
+    value, rememberErr := Remember(
+        cacheInstance,
+        "k",
+        time.Second,
+        func(ctx context.Context) (any, error) {
+            called = true
+            return "computed", nil
+        },
+        nil,
+    )
+    if nil != rememberErr {
+        t.Fatalf("remember error: %v", rememberErr)
+    }
+    if false == called {
+        t.Fatalf("expected callback to be called on cache miss")
+    }
+    if "computed" != value.(string) {
+        t.Fatalf("unexpected value")
+    }
+
+    storedValue, exists, getErr := cacheInstance.Get("k")
+    if nil != getErr {
+        t.Fatalf("get error: %v", getErr)
+    }
+    if false == exists {
+        t.Fatalf("expected value to be stored")
+    }
+    if "computed" != storedValue.(string) {
+        t.Fatalf("expected stored value")
+    }
+}
+
+func TestRemember_PropagatesCallbackErrorAndDoesNotStore(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    backend := NewInMemoryBackend(
+        10,
+        time.Hour,
+        clockInstance,
+    )
+    defer backend.Close()
+
+    cacheInstance := NewManager(backend, NewJsonSerializer())
+
+    expectedErr := errors.New("callback error")
+
+    _, rememberErr := Remember(
+        cacheInstance,
+        "k",
+        time.Second,
+        func(ctx context.Context) (any, error) {
+            return nil, expectedErr
+        },
+        nil,
+    )
+    if nil == rememberErr {
+        t.Fatalf("expected error")
+    }
+    if expectedErr.Error() != rememberErr.Error() {
+        t.Fatalf("expected callback error to propagate")
+    }
+
+    _, exists, getErr := cacheInstance.Get("k")
+    if nil != getErr {
+        t.Fatalf("get error: %v", getErr)
+    }
+    if true == exists {
+        t.Fatalf("expected value not to be stored")
+    }
+}
+
+func TestRemember_ZeroTtlActsAsForever(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    backend := NewInMemoryBackend(
+        10,
+        time.Hour,
+        clockInstance,
+    )
+    defer backend.Close()
+
+    cacheInstance := NewManager(backend, NewJsonSerializer())
+
+    _, rememberErr := Remember(
+        cacheInstance,
+        "k",
+        0,
+        func(ctx context.Context) (any, error) {
+            return "v", nil
+        },
+        nil,
+    )
+    if nil != rememberErr {
+        t.Fatalf("remember error: %v", rememberErr)
+    }
+
+    clockInstance.now = time.Unix(10+3600, 0)
+
+    value, exists, getErr := cacheInstance.Get("k")
+    if nil != getErr {
+        t.Fatalf("get error: %v", getErr)
+    }
+    if false == exists {
+        t.Fatalf("expected value to still exist with ttl=0")
+    }
+    if "v" != value.(string) {
+        t.Fatalf("unexpected value")
+    }
+}
+
+/* @info stampede protection */
+
 func TestRemember_ProtectAgainstStampede_ExecutesCallbackOnce(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -268,6 +432,98 @@ func TestRemember_WaitTimeoutIsPerCaller_DoesNotPoisonInFlightCall(t *testing.T)
 
     if 1 != atomic.LoadInt64(&callbackCalls) {
         t.Fatalf("expected callback to be called once, got %d", atomic.LoadInt64(&callbackCalls))
+    }
+}
+
+func TestRemember_CancelableLateJoinerIsNotPoisonedByCanceledCall(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    backend := NewInMemoryBackend(
+        100,
+        time.Hour,
+        clockInstance,
+    )
+    defer backend.Close()
+
+    cacheManager := NewManager(
+        backend,
+        NewJsonSerializer(),
+    )
+
+    callbackStarted := make(chan struct{})
+    callbackCanceled := make(chan struct{})
+    holdLeader := make(chan struct{})
+
+    var callbackCalls int64
+    callback := func(ctx context.Context) (any, error) {
+        call := atomic.AddInt64(&callbackCalls, 1)
+        if 1 == call {
+            close(callbackStarted)
+            <-ctx.Done()
+            close(callbackCanceled)
+            <-holdLeader
+
+            return nil, ctx.Err()
+        }
+
+        return "fresh", nil
+    }
+
+    timedOutChannel := make(chan error, 1)
+    go func() {
+        _, err := Remember(
+            cacheManager,
+            "product.late-joiner",
+            time.Minute,
+            callback,
+            NewDefaultRememberOption().
+                WithWaitTimeout(30*time.Millisecond).
+                WithCancelable(true),
+        )
+        timedOutChannel <- err
+    }()
+
+    <-callbackStarted
+
+    timedOutErr := <-timedOutChannel
+    if nil == timedOutErr {
+        t.Fatalf("expected the only waiter to time out")
+    }
+
+    <-callbackCanceled
+
+    joinerValueChannel := make(chan any, 1)
+    joinerErrChannel := make(chan error, 1)
+    go func() {
+        value, err := Remember(
+            cacheManager,
+            "product.late-joiner",
+            time.Minute,
+            callback,
+            NewDefaultRememberOption().
+                WithWaitTimeout(2*time.Second).
+                WithCancelable(true),
+        )
+        joinerValueChannel <- value
+        joinerErrChannel <- err
+    }()
+
+    time.Sleep(20 * time.Millisecond)
+    close(holdLeader)
+
+    joinerValue := <-joinerValueChannel
+    joinerErr := <-joinerErrChannel
+
+    if nil != joinerErr {
+        t.Fatalf("late joiner inherited the canceled call's poison: %v", joinerErr)
+    }
+
+    if "fresh" != joinerValue {
+        t.Fatalf("unexpected late joiner value: %v", joinerValue)
+    }
+
+    if 2 != atomic.LoadInt64(&callbackCalls) {
+        t.Fatalf("expected the late joiner to lead a fresh computation, callback calls: %d", atomic.LoadInt64(&callbackCalls))
     }
 }
 

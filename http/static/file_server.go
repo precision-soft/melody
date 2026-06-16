@@ -259,7 +259,7 @@ func (instance *FileServer) Serve(
 
     extension := path.Ext(relativePath)
     if "" != extension {
-        contentType := mime.TypeByExtension(extension)
+        contentType := contentTypeByExtension(extension)
         if "" != contentType {
             headers.Set("Content-Type", contentType)
         }
@@ -417,7 +417,7 @@ func (instance *FileServer) serveForStreaming(
 
     extension := path.Ext(relativePath)
     if "" != extension {
-        contentType := mime.TypeByExtension(extension)
+        contentType := contentTypeByExtension(extension)
         if "" != contentType {
             headers.Set("Content-Type", contentType)
         }
@@ -457,4 +457,29 @@ func (instance *FileServer) serveForStreaming(
     }
 
     return nethttp.StatusOK, headers, file, fileInfo, true
+}
+
+func contentTypeByExtension(extension string) string {
+    contentType := mime.TypeByExtension(extension)
+    if "" != contentType {
+        return contentType
+    }
+
+    return fallbackContentTypeByExtension[strings.ToLower(extension)]
+}
+
+var fallbackContentTypeByExtension = map[string]string{
+    ".css":   "text/css; charset=utf-8",
+    ".ico":   "image/x-icon",
+    ".js":    "text/javascript; charset=utf-8",
+    ".json":  "application/json",
+    ".map":   "application/json",
+    ".mjs":   "text/javascript; charset=utf-8",
+    ".otf":   "font/otf",
+    ".svg":   "image/svg+xml",
+    ".ttf":   "font/ttf",
+    ".wasm":  "application/wasm",
+    ".webp":  "image/webp",
+    ".woff":  "font/woff",
+    ".woff2": "font/woff2",
 }

@@ -6,3 +6,9 @@
 /melody_melody_env_embedded
 /melody_melody_env_embedded_melody_static_embedded
 /melody_melody_static_embedded
+
+# shared assets (single source: <root>/.assets) synced into public/ at container startup
+/public/favicon.ico
+/public/assets/favicon.svg
+/public/assets/logo.png
+/public/assets/apple-touch-icon.png

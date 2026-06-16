@@ -203,4 +203,16 @@ func TestFromResolverByType_TypeMismatch(t *testing.T) {
     }
 }
 
+func TestContainer_MustFromResolver_PanicsWhenMissing(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    defer func() {
+        if nil == recover() {
+            t.Fatalf("expected panic")
+        }
+    }()
+
+    _ = MustFromResolver[*testService](serviceContainer, "service.missing")
+}
+
 var _ containercontract.Resolver = (*resolverTestResolver)(nil)

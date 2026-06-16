@@ -23,4 +23,12 @@ func (instance *AnonymousToken) Roles() []string {
     return []string{}
 }
 
+func (instance *AnonymousToken) Scope() map[string]any {
+    return map[string]any{}
+}
+
+func (instance *AnonymousToken) Attributes() map[string]any {
+    return map[string]any{}
+}
+
 var _ securitycontract.Token = (*AnonymousToken)(nil)

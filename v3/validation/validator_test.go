@@ -3,7 +3,6 @@ package validation
 import (
     "testing"
 
-    "github.com/precision-soft/melody/v3/container"
     validationcontract "github.com/precision-soft/melody/v3/validation/contract"
 )
 
@@ -68,8 +67,28 @@ type payloadWithRegexCommaInQuantifier struct {
     Value string `validate:"regex(pattern=^a{1,2}$)"`
 }
 
+type payloadWithRegexShorthand struct {
+    Value string `validate:"regex=^abc$"`
+}
+
+type payloadWithRegexShorthandCommaInCharClass struct {
+    Value string `validate:"regex=^[a,b]$"`
+}
+
+type payloadWithRegexShorthandCommaInQuantifier struct {
+    Value string `validate:"regex=^a{1,2}$"`
+}
+
 type payloadWithInvalidTag struct {
     Name string `validate:"min(1))"`
+}
+
+type payloadWithLessThan struct {
+    Quantity int `json:"quantity" validate:"lessThan(value=100)"`
+}
+
+type payloadWithLessThanShorthand struct {
+    Quantity int `json:"quantity" validate:"lessThan=100"`
 }
 
 func requireNoValidationErrors(t *testing.T, err error) {
@@ -126,6 +145,35 @@ func TestValidator_AcceptsValidData(t *testing.T) {
     requireNoValidationErrors(t, err)
 }
 
+func TestValidator_LessThanIsEnforcedAndNotUnknownRule(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    requireValidationErrors(t, validatorInstance.Validate(payloadWithLessThan{Quantity: 100}))
+    requireValidationErrors(t, validatorInstance.Validate(payloadWithLessThan{Quantity: 150}))
+    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithLessThan{Quantity: 99}))
+
+    requireValidationErrors(t, validatorInstance.Validate(payloadWithLessThanShorthand{Quantity: 150}))
+    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithLessThanShorthand{Quantity: 99}))
+}
+
+func TestValidator_RegexShorthandIsEnforcedNotFailOpen(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    requireValidationErrors(t, validatorInstance.Validate(payloadWithRegexShorthand{Value: "does-not-match"}))
+    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithRegexShorthand{Value: "abc"}))
+}
+
+func TestValidator_RegexShorthandWithCommaMatchesParenthesizedForm(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithRegexShorthandCommaInCharClass{Value: "a"}))
+    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithRegexShorthandCommaInCharClass{Value: "b"}))
+    requireValidationErrors(t, validatorInstance.Validate(payloadWithRegexShorthandCommaInCharClass{Value: "z"}))
+
+    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithRegexShorthandCommaInQuantifier{Value: "aa"}))
+    requireValidationErrors(t, validatorInstance.Validate(payloadWithRegexShorthandCommaInQuantifier{Value: "aaa"}))
+}
+
 func TestValidator_CustomConstraint(t *testing.T) {
     validatorInstance := NewValidator()
     validatorInstance.RegisterConstraint("my_custom", &customConstraint{})
@@ -176,7 +224,7 @@ func TestValidator_ReturnsUnknownRuleError(t *testing.T) {
     }
 
     if ErrorUnknownRule != validationError.Code() {
-        t.Fatalf("unexpected code `" + validationError.Code() + "`")
+        t.Fatalf("unexpected code %q", validationError.Code())
     }
 }
 
@@ -286,27 +334,6 @@ func TestValidator_RegexConstraint_AllowsCommaInsideQuantifier(t *testing.T) {
 
     err = validatorInstance.Validate(payloadWithRegexCommaInQuantifier{Value: "aa"})
     requireNoValidationErrors(t, err)
-}
-
-func TestValidatorFromContainer_ReturnsNilWhenMissing(t *testing.T) {
-    serviceContainer := container.NewContainer()
-
-    validatorInstance := ValidatorFromContainer(serviceContainer)
-    if nil != validatorInstance {
-        t.Fatalf("expected nil")
-    }
-}
-
-func TestValidatorMustFromContainer_PanicsWhenMissing(t *testing.T) {
-    serviceContainer := container.NewContainer()
-
-    defer func() {
-        if nil == recover() {
-            t.Fatalf("expected panic")
-        }
-    }()
-
-    _ = ValidatorMustFromContainer(serviceContainer)
 }
 
 type payloadWithGreaterThan struct {

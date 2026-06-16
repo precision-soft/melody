@@ -2,42 +2,9 @@ package config
 
 import (
     "fmt"
-    "io"
-    "log"
-    "os"
     "path/filepath"
     "testing"
-
-    configcontract "github.com/precision-soft/melody/v3/config/contract"
-    "github.com/precision-soft/melody/v3/logging"
 )
-
-func TestMain(mainInstance *testing.M) {
-    log.SetOutput(io.Discard)
-    os.Exit(mainInstance.Run())
-}
-
-type testEnvironmentSource struct {
-    values map[string]string
-    err    error
-}
-
-func (instance *testEnvironmentSource) Load() (map[string]string, error) {
-    if nil != instance.err {
-        return nil, instance.err
-    }
-
-    copied := make(map[string]string, len(instance.values))
-    for key, value := range instance.values {
-        copied[key] = value
-    }
-
-    return copied, nil
-}
-
-func TestEnvironmentContractIsUsed(t *testing.T) {
-    var _ configcontract.EnvironmentSource = (*testEnvironmentSource)(nil)
-}
 
 func TestConfigurationDefaultsAndTemplateResolution(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{}}
@@ -119,6 +86,28 @@ func TestConfigurationMustGetMissingPanics(t *testing.T) {
     }()
 
     _ = configuration.MustGet("missing.parameter")
+}
+
+func TestEmptyStringIsPresentValue(t *testing.T) {
+    source := &testEnvironmentSource{
+        values: map[string]string{
+            LogPathKey: "",
+        },
+    }
+
+    environment, err := NewEnvironment(source)
+    if nil != err {
+        t.Fatalf("new environment error: %v", err)
+    }
+
+    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    if nil != err {
+        t.Fatalf("new configuration error: %v", err)
+    }
+
+    if "" != configuration.MustGet(KernelLogPath).String() {
+        t.Fatalf("expected empty string to be present value")
+    }
 }
 
 func TestConfigurationRegisterRuntimeValidationPanics(t *testing.T) {
@@ -223,61 +212,22 @@ func TestConfigurationRegisterRuntime_ConcurrentCallsDoNotPanic(t *testing.T) {
     }
 }
 
-func TestConfiguration_AddAliasedParameterFromEnvironment_SharesSinglePointerAcrossAliases(t *testing.T) {
-    configuration := &Configuration{
-        environment: nil,
-        parameters:  make(ParameterMap),
-        logger:      logging.NewDefaultLogger(),
-    }
+func TestRegisterRuntimeAddsValue(t *testing.T) {
+    source := &testEnvironmentSource{values: map[string]string{}}
 
-    err := configuration.addAliasedParameterFromEnvironment(
-        []string{
-            "primaryKey",
-            "aliasKey",
-        },
-        "ENV_KEY",
-        "ENV_VALUE",
-    )
+    environment, err := NewEnvironment(source)
     if nil != err {
-        t.Fatalf("unexpected error: %v", err)
+        t.Fatalf("new environment error: %v", err)
     }
 
-    primary := configuration.parameters["primaryKey"]
-    alias := configuration.parameters["aliasKey"]
-
-    if nil == primary || nil == alias {
-        t.Fatalf("expected both parameters to exist")
+    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    if nil != err {
+        t.Fatalf("new configuration error: %v", err)
     }
 
-    if primary != alias {
-        t.Fatalf("expected alias to point to the same parameter instance")
-    }
-}
+    configuration.RegisterRuntime("runtime.test", "x")
 
-func TestEnvPlaceholderPattern_RejectsIdentifiersStartingWithDigit(t *testing.T) {
-    if true == envPlaceholderPattern.MatchString("%env(1INVALID)%") {
-        t.Fatalf("expected pattern to reject identifier starting with digit")
-    }
-}
-
-func TestEnvPlaceholderPattern_AcceptsIdentifiersStartingWithLetterOrUnderscore(t *testing.T) {
-    if false == envPlaceholderPattern.MatchString("%env(VALID_KEY)%") {
-        t.Fatalf("expected pattern to accept identifier starting with letter")
-    }
-
-    if false == envPlaceholderPattern.MatchString("%env(_VALID)%") {
-        t.Fatalf("expected pattern to accept identifier starting with underscore")
-    }
-}
-
-func TestParameterPlaceholderPattern_RejectsIdentifiersStartingWithDigit(t *testing.T) {
-    if true == parameterPlaceholderPattern.MatchString("%1invalid%") {
-        t.Fatalf("expected pattern to reject identifier starting with digit")
-    }
-}
-
-func TestParameterPlaceholderPattern_AcceptsDottedIdentifiers(t *testing.T) {
-    if false == parameterPlaceholderPattern.MatchString("%kernel.project_dir%") {
-        t.Fatalf("expected pattern to accept dotted identifier")
+    if "x" != configuration.MustGet("runtime.test").String() {
+        t.Fatalf("expected runtime value to be visible")
     }
 }

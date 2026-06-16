@@ -324,3 +324,85 @@ func TestContainer_Close_ClosesDiamondDependencyInDeterministicOrder(t *testing.
         }
     }
 }
+
+/* @info value-type close */
+
+type valueCloser struct {
+    counter *int
+    lock    *sync.Mutex
+}
+
+func (instance valueCloser) Close() error {
+    instance.lock.Lock()
+    defer instance.lock.Unlock()
+
+    *instance.counter++
+
+    return nil
+}
+
+func TestContainer_Close_ValueTypeServiceClosedOnce(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var lock sync.Mutex
+    count := 0
+
+    MustRegister[valueCloser](
+        serviceContainer,
+        "value.closer",
+        func(resolver containercontract.Resolver) (valueCloser, error) {
+            return valueCloser{counter: &count, lock: &lock}, nil
+        },
+    )
+
+    _ = MustFromResolver[valueCloser](serviceContainer, "value.closer")
+    _ = MustFromResolverByType[valueCloser](serviceContainer)
+
+    if err := serviceContainer.Close(); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    lock.Lock()
+    defer lock.Unlock()
+
+    if 1 != count {
+        t.Fatalf("expected value-type service Close to be called once, got %d", count)
+    }
+}
+
+type cr40UnhashableValueCloser struct {
+    counter *int
+    lock    *sync.Mutex
+    payload any
+}
+
+func (instance cr40UnhashableValueCloser) Close() error {
+    instance.lock.Lock()
+    defer instance.lock.Unlock()
+
+    *instance.counter++
+
+    return nil
+}
+
+func TestContainer_Close_ValueTypeServiceWithUnhashableContentDoesNotPanic(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var lock sync.Mutex
+    count := 0
+
+    MustRegister[cr40UnhashableValueCloser](
+        serviceContainer,
+        "cr40.unhashable.value.closer",
+        func(resolver containercontract.Resolver) (cr40UnhashableValueCloser, error) {
+            return cr40UnhashableValueCloser{counter: &count, lock: &lock, payload: []int{1, 2, 3}}, nil
+        },
+    )
+
+    _ = MustFromResolver[cr40UnhashableValueCloser](serviceContainer, "cr40.unhashable.value.closer")
+    _ = MustFromResolverByType[cr40UnhashableValueCloser](serviceContainer)
+
+    if err := serviceContainer.Close(); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+}

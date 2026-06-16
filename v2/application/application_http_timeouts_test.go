@@ -87,3 +87,29 @@ func TestApplyHttpServerTimeoutsOverrides(t *testing.T) {
         t.Fatalf("expected override MaxHeaderBytes %v, got %v", overrides.maxHeaderBytes, server.MaxHeaderBytes)
     }
 }
+
+type shutdownOverridingConfig struct {
+    shutdownTimeout time.Duration
+}
+
+func (instance *shutdownOverridingConfig) GetShutdownTimeout() time.Duration {
+    return instance.shutdownTimeout
+}
+
+func TestResolveHttpShutdownTimeoutDefaultsWhenNotImplemented(t *testing.T) {
+    if defaultHttpShutdownTimeout != resolveHttpShutdownTimeout(&timeoutNonImplementingConfig{}) {
+        t.Fatalf("expected the default shutdown timeout for a non-implementing configuration")
+    }
+}
+
+func TestResolveHttpShutdownTimeoutOverride(t *testing.T) {
+    if 12*time.Second != resolveHttpShutdownTimeout(&shutdownOverridingConfig{shutdownTimeout: 12 * time.Second}) {
+        t.Fatalf("expected the overridden shutdown timeout")
+    }
+}
+
+func TestResolveHttpShutdownTimeoutZeroFallsBackToDefault(t *testing.T) {
+    if defaultHttpShutdownTimeout != resolveHttpShutdownTimeout(&shutdownOverridingConfig{shutdownTimeout: 0}) {
+        t.Fatalf("expected a zero override to fall back to the default shutdown timeout")
+    }
+}
