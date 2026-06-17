@@ -78,7 +78,7 @@ func validateScheduleFields(entry Entry, forbidden []ForbiddenChar) error {
     for _, field := range fields {
         if true == strings.ContainsAny(field.value, " \t\n\r") {
             return exception.NewError(
-                fmt.Sprintf("cron: entry %q has whitespace in Schedule.%s (%q); crontab fields must be single tokens", entry.Name, field.name, field.value),
+                fmt.Sprintf("cron: entry %q has whitespace in Schedule.%s (%q); schedule fields must be single tokens", entry.Name, field.name, field.value),
                 exceptioncontract.Context{
                     "entry": entry.Name,
                     "field": field.name,

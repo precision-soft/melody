@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   non-printable byte can never break the document.
 - `v3/generate_command.go` — `--image` / `--namespace` / `--restart-policy` flags, cascading through the `melody.cron.k8s.image` / `melody.cron.k8s.namespace` / `melody.cron.k8s.restart_policy` container parameters (not registered by `RegisterDefaultParameters` — the crontab template needs none of them). The k8s template requires a non-empty image and fails generation otherwise. The heartbeat options remain crontab-only and are ignored by the k8s template; selecting `--template=k8s` with heartbeat options configured now prints a warning so the dropped liveness entry is not silent. Because the k8s template logs to container stdout and never reads a per-entry log path, a `--template=k8s` run no longer inherits the crontab-only requirements: it does not demand a `--logs-dir` (it never auto-derives or auto-enables a heartbeat either) and a heartbeat left configured does not force a `--user` — the heartbeat is simply ignored with the warning above.
 
+### Fixed
+
+- `v3/validation.go` — the schedule-field whitespace error message is now template-agnostic ("schedule fields must be single tokens" rather than "crontab fields ..."), since `validateScheduleFields` is shared by both the crontab and the k8s template.
+
 ## [v3.2.0] - 2026-06-16 - Plug-and-Play Command Registration
 
 ### Added
