@@ -8,6 +8,9 @@ const (
     ParameterHeartbeatPath        = "melody.cron.heartbeat_path"
     ParameterHeartbeatAutoEnabled = "melody.cron.heartbeat.enabled"
     ParameterTemplate             = "melody.cron.template"
+    ParameterImage                = "melody.cron.k8s.image"
+    ParameterNamespace            = "melody.cron.k8s.namespace"
+    ParameterRestartPolicy        = "melody.cron.k8s.restart_policy"
 )
 
 type ParameterRegistrar interface {

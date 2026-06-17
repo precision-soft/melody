@@ -4,7 +4,9 @@ import (
     "bufio"
     "bytes"
     "encoding/base64"
+    "io"
     "mime"
+    "mime/multipart"
     "net/textproto"
     "regexp"
     "strings"
@@ -265,6 +267,234 @@ func TestRenderMessage_AttachmentIsBase64InMixed(t *testing.T) {
     }
 }
 
+func TestRenderMessage_InlineImageUsesMultipartRelatedWithContentId(t *testing.T) {
+    logo := []byte("png-bytes")
+
+    payload, renderErr := RenderMessage(mailercontract.Message{
+        From:    mailercontract.Address{Email: "shop@example.com"},
+        To:      []mailercontract.Address{{Email: "ada@example.com"}},
+        Subject: "Branded",
+        Html:    "<img src=\"cid:logo\">",
+        Attachments: []mailercontract.Attachment{
+            {Filename: "logo.png", ContentType: "image/png", Content: logo, ContentId: "logo"},
+        },
+    })
+    if nil != renderErr {
+        t.Fatalf("render: %v", renderErr)
+    }
+
+    rendered := string(payload)
+
+    for _, expected := range []string{
+        "Content-Type: multipart/related; type=\"text/html\";",
+        "Content-ID: <logo>",
+        "Content-Disposition: inline",
+        "Content-Type: image/png",
+        base64.StdEncoding.EncodeToString(logo),
+    } {
+        if false == strings.Contains(rendered, expected) {
+            t.Fatalf("rendered message missing %q\n---\n%s", expected, rendered)
+        }
+    }
+
+    if true == strings.Contains(rendered, "multipart/mixed") {
+        t.Fatalf("an inline-only message must not be wrapped in multipart/mixed\n---\n%s", rendered)
+    }
+
+    if true == strings.Contains(rendered, "Content-Disposition: attachment") {
+        t.Fatalf("an inline attachment must not use Content-Disposition: attachment\n---\n%s", rendered)
+    }
+}
+
+func TestRenderMessage_InlineAttachmentCarriesFilenameOnDisposition(t *testing.T) {
+    payload, renderErr := RenderMessage(mailercontract.Message{
+        From:    mailercontract.Address{Email: "shop@example.com"},
+        To:      []mailercontract.Address{{Email: "ada@example.com"}},
+        Subject: "Branded",
+        Html:    "<img src=\"cid:logo\">",
+        Attachments: []mailercontract.Attachment{
+            {Filename: "logo.png", ContentType: "image/png", Content: []byte("png"), ContentId: "logo"},
+        },
+    })
+    if nil != renderErr {
+        t.Fatalf("render: %v", renderErr)
+    }
+
+    rendered := string(payload)
+
+    /* @info a Filename on an inline attachment is preserved as the disposition filename (RFC 2183 allows it on inline) so clients that list inline parts show a name, while the inline disposition and Content-ID stay intact */
+    if false == strings.Contains(rendered, "Content-Disposition: inline; filename=\"logo.png\"") {
+        t.Fatalf("expected the inline attachment to carry its filename on the disposition\n---\n%s", rendered)
+    }
+
+    if false == strings.Contains(rendered, "Content-ID: <logo>") {
+        t.Fatalf("expected the inline attachment to keep its Content-ID\n---\n%s", rendered)
+    }
+
+    if true == strings.Contains(rendered, "Content-Disposition: attachment") {
+        t.Fatalf("an inline attachment must not use Content-Disposition: attachment\n---\n%s", rendered)
+    }
+}
+
+func TestRenderMessage_InlineAttachmentWithoutFilenameKeepsBareInlineDisposition(t *testing.T) {
+    payload, renderErr := RenderMessage(mailercontract.Message{
+        From:    mailercontract.Address{Email: "shop@example.com"},
+        To:      []mailercontract.Address{{Email: "ada@example.com"}},
+        Subject: "Branded",
+        Html:    "<img src=\"cid:logo\">",
+        Attachments: []mailercontract.Attachment{
+            {ContentType: "image/png", Content: []byte("png"), ContentId: "logo"},
+        },
+    })
+    if nil != renderErr {
+        t.Fatalf("render: %v", renderErr)
+    }
+
+    rendered := string(payload)
+
+    if false == strings.Contains(rendered, "Content-Disposition: inline"+lineBreak) {
+        t.Fatalf("expected a bare inline disposition when the inline attachment has no filename\n---\n%s", rendered)
+    }
+
+    if true == strings.Contains(rendered, "Content-Disposition: inline; filename") {
+        t.Fatalf("an inline attachment without a filename must not emit a filename parameter\n---\n%s", rendered)
+    }
+}
+
+func TestRenderMessage_InlineImageRelatedTypeMatchesAlternativeRoot(t *testing.T) {
+    payload, renderErr := RenderMessage(mailercontract.Message{
+        From:    mailercontract.Address{Email: "shop@example.com"},
+        To:      []mailercontract.Address{{Email: "ada@example.com"}},
+        Subject: "Branded",
+        Text:    "plain fallback",
+        Html:    "<img src=\"cid:logo\"> hello",
+        Attachments: []mailercontract.Attachment{
+            {Filename: "logo.png", ContentType: "image/png", Content: []byte("png"), ContentId: "logo"},
+        },
+    })
+    if nil != renderErr {
+        t.Fatalf("render: %v", renderErr)
+    }
+
+    rendered := string(payload)
+
+    /* @info with both Text and Html the related root is a multipart/alternative, so the related type parameter must say so (RFC 2387) */
+    if false == strings.Contains(rendered, "multipart/related; type=\"multipart/alternative\";") {
+        t.Fatalf("expected related type to match the multipart/alternative root\n---\n%s", rendered)
+    }
+
+    if true == strings.Contains(rendered, "type=\"text/html\"") {
+        t.Fatalf("related type must not claim text/html when the root is multipart/alternative\n---\n%s", rendered)
+    }
+}
+
+func TestRenderMessage_ContentIdAlreadyBracketedIsNotDoubleWrapped(t *testing.T) {
+    payload, renderErr := RenderMessage(mailercontract.Message{
+        From: mailercontract.Address{Email: "shop@example.com"},
+        To:   []mailercontract.Address{{Email: "ada@example.com"}},
+        Html: "<img src=\"cid:logo@host\">",
+        Attachments: []mailercontract.Attachment{
+            {Filename: "logo.png", ContentType: "image/png", Content: []byte("x"), ContentId: "<logo@host>"},
+        },
+    })
+    if nil != renderErr {
+        t.Fatalf("render: %v", renderErr)
+    }
+
+    rendered := string(payload)
+
+    if false == strings.Contains(rendered, "Content-ID: <logo@host>") {
+        t.Fatalf("expected a single set of angle brackets around the content id\n---\n%s", rendered)
+    }
+
+    if true == strings.Contains(rendered, "<<") || true == strings.Contains(rendered, ">>") {
+        t.Fatalf("content id must not be double-wrapped\n---\n%s", rendered)
+    }
+}
+
+func TestRenderMessage_InlineAndRegularAttachmentNestRelatedInsideMixed(t *testing.T) {
+    payload, renderErr := RenderMessage(mailercontract.Message{
+        From:    mailercontract.Address{Email: "shop@example.com"},
+        To:      []mailercontract.Address{{Email: "ada@example.com"}},
+        Subject: "Invoice",
+        Html:    "<img src=\"cid:logo\"> see attached",
+        Attachments: []mailercontract.Attachment{
+            {Filename: "logo.png", ContentType: "image/png", Content: []byte("png"), ContentId: "logo"},
+            {Filename: "invoice.pdf", ContentType: "application/pdf", Content: []byte("pdf")},
+        },
+    })
+    if nil != renderErr {
+        t.Fatalf("render: %v", renderErr)
+    }
+
+    topHeader, bodyReader := splitMimeHeaderAndBody(t, payload)
+
+    topMediaType, topParams, parseErr := mime.ParseMediaType(topHeader.Get("Content-Type"))
+    if nil != parseErr {
+        t.Fatalf("parse top content-type: %v", parseErr)
+    }
+    if "multipart/mixed" != topMediaType {
+        t.Fatalf("expected top-level multipart/mixed, got %q", topMediaType)
+    }
+
+    mixedReader := multipart.NewReader(bodyReader, topParams["boundary"])
+
+    relatedPart, relatedErr := mixedReader.NextPart()
+    if nil != relatedErr {
+        t.Fatalf("read first mixed part: %v", relatedErr)
+    }
+    relatedMediaType, relatedParams, relatedParseErr := mime.ParseMediaType(relatedPart.Header.Get("Content-Type"))
+    if nil != relatedParseErr {
+        t.Fatalf("parse first part content-type: %v", relatedParseErr)
+    }
+    if "multipart/related" != relatedMediaType {
+        t.Fatalf("expected first mixed part to be multipart/related, got %q", relatedMediaType)
+    }
+
+    relatedReader := multipart.NewReader(relatedPart, relatedParams["boundary"])
+
+    bodyPart, bodyPartErr := relatedReader.NextPart()
+    if nil != bodyPartErr {
+        t.Fatalf("read related body part: %v", bodyPartErr)
+    }
+    if false == strings.HasPrefix(bodyPart.Header.Get("Content-Type"), "text/html") {
+        t.Fatalf("expected related body part to be text/html, got %q", bodyPart.Header.Get("Content-Type"))
+    }
+
+    imagePart, imagePartErr := relatedReader.NextPart()
+    if nil != imagePartErr {
+        t.Fatalf("read related image part: %v", imagePartErr)
+    }
+    if "<logo>" != imagePart.Header.Get("Content-Id") {
+        t.Fatalf("expected inline image Content-ID <logo>, got %q", imagePart.Header.Get("Content-Id"))
+    }
+
+    pdfPart, pdfPartErr := mixedReader.NextPart()
+    if nil != pdfPartErr {
+        t.Fatalf("read second mixed part: %v", pdfPartErr)
+    }
+    if false == strings.HasPrefix(pdfPart.Header.Get("Content-Disposition"), "attachment") {
+        t.Fatalf("expected the regular attachment to keep Content-Disposition: attachment, got %q", pdfPart.Header.Get("Content-Disposition"))
+    }
+}
+
+func splitMimeHeaderAndBody(t *testing.T, payload []byte) (textproto.MIMEHeader, *bytes.Reader) {
+    t.Helper()
+
+    reader := bufio.NewReader(bytes.NewReader(payload))
+    header, parseErr := textproto.NewReader(reader).ReadMIMEHeader()
+    if nil != parseErr {
+        t.Fatalf("parse mime header: %v", parseErr)
+    }
+
+    remaining, readErr := io.ReadAll(reader)
+    if nil != readErr {
+        t.Fatalf("read mime body: %v", readErr)
+    }
+
+    return header, bytes.NewReader(remaining)
+}
+
 func TestRenderMessage_QuotedPrintableKeepsLinesWithinSmtpLimit(t *testing.T) {
     payload, renderErr := RenderMessage(mailercontract.Message{
         From:    mailercontract.Address{Email: "shop@example.com"},
@@ -321,6 +551,75 @@ func TestRenderMessage_FoldsOverlongSpacelessHeaderToken(t *testing.T) {
     for _, line := range strings.Split(string(payload), "\r\n") {
         if 998 < len(line) {
             t.Fatalf("rendered header line exceeds the RFC 5322 limit: %d", len(line))
+        }
+    }
+}
+
+func TestRenderMessage_RejectsOverlongInlineContentId(t *testing.T) {
+    /* @info a Content-ID is an unbreakable msg-id token; folding it would inject whitespace and corrupt the identifier on unfold, so an id too long to fit on a single header line is rejected rather than silently mangled */
+    overlongContentId := strings.Repeat("a", 1200)
+
+    _, renderErr := RenderMessage(mailercontract.Message{
+        From: mailercontract.Address{Email: "shop@example.com"},
+        To:   []mailercontract.Address{{Email: "ada@example.com"}},
+        Html: "<img src=\"cid:logo\">",
+        Attachments: []mailercontract.Attachment{
+            {Filename: "logo.png", ContentType: "image/png", Content: []byte("png"), ContentId: overlongContentId},
+        },
+    })
+    if nil == renderErr {
+        t.Fatalf("expected an error for an overlong inline Content-ID, got nil")
+    }
+
+    if false == strings.Contains(renderErr.Error(), "Content-ID") {
+        t.Fatalf("expected the error to mention the Content-ID, got: %v", renderErr)
+    }
+}
+
+func TestRenderMessage_RejectsInlineContentIdWithWhitespace(t *testing.T) {
+    /* @info a Content-ID is a single msg-id token; an embedded space would make the emitted Content-ID header invalid, so it is rejected rather than passed through */
+    _, renderErr := RenderMessage(mailercontract.Message{
+        From: mailercontract.Address{Email: "shop@example.com"},
+        To:   []mailercontract.Address{{Email: "ada@example.com"}},
+        Html: "<img src=\"cid:logo\">",
+        Attachments: []mailercontract.Attachment{
+            {Filename: "logo.png", ContentType: "image/png", Content: []byte("png"), ContentId: "bad id"},
+        },
+    })
+    if nil == renderErr {
+        t.Fatalf("expected an error for a Content-ID containing whitespace, got nil")
+    }
+
+    if false == strings.Contains(renderErr.Error(), "Content-ID") {
+        t.Fatalf("expected the error to mention the Content-ID, got: %v", renderErr)
+    }
+}
+
+func TestRenderMessage_AcceptsLongButFoldableInlineContentId(t *testing.T) {
+    /* @info a long-but-not-overlong id soft-folds onto a continuation line without a hard split, so the value round-trips intact and every line stays within the 998-octet limit */
+    longContentId := strings.Repeat("a", 600)
+
+    payload, renderErr := RenderMessage(mailercontract.Message{
+        From: mailercontract.Address{Email: "shop@example.com"},
+        To:   []mailercontract.Address{{Email: "ada@example.com"}},
+        Html: "<img src=\"cid:logo\">",
+        Attachments: []mailercontract.Attachment{
+            {Filename: "logo.png", ContentType: "image/png", Content: []byte("png"), ContentId: longContentId},
+        },
+    })
+    if nil != renderErr {
+        t.Fatalf("render: %v", renderErr)
+    }
+
+    rendered := string(payload)
+
+    if false == strings.Contains(rendered, "Content-Disposition: inline") {
+        t.Fatalf("expected the attachment to render as inline\n---\n%s", rendered)
+    }
+
+    for _, line := range strings.Split(rendered, "\r\n") {
+        if 998 < len(line) {
+            t.Fatalf("rendered Content-ID line exceeds the RFC 5322 limit: %d", len(line))
         }
     }
 }

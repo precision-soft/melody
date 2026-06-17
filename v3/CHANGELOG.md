@@ -5,6 +5,18 @@ All notable changes to `precision-soft/melody/v3` will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `mailer/log_transport.go` — `LogTransport` (`NewLogTransport(logger)`) implements `mailer/contract.Transport` and logs each message's recipients (To, Cc, Bcc), subject, both the text and HTML bodies, and per-attachment metadata (filename, content type, Content-ID, inline flag, and byte size — never the raw content) at info level instead of delivering it, for local development. When constructed with a `nil` logger it resolves the request-scoped logger from the runtime quietly (a runtime without a logger service yields a safe no-op rather than an emergency log on every send), and is a safe no-op when neither is available.
+- `mailer/contract/mailer.go` — `Attachment.ContentId`. A non-empty `ContentId` marks the attachment as inline so an HTML body can reference it as `<img src="cid:...">`.
+
+### Changed
+
+- `mailer/message.go` — `RenderMessage` now embeds inline attachments (those with a `ContentId`) inside a `multipart/related` entity (each carrying `Content-ID: <id>` and `Content-Disposition: inline`); a `ContentId` supplied without angle brackets is wrapped automatically. The `multipart/related` `type` parameter mirrors the media type of the root body part (`multipart/alternative` for text+HTML, `text/html` or `text/plain` otherwise) per RFC 2387. When regular (non-inline) attachments also exist, the related entity becomes the first part of the existing `multipart/mixed` wrapper. An inline attachment with a `Filename` carries it on its `Content-Disposition: inline` line (RFC 2183 permits it, so clients that list inline parts show a name); an inline attachment without a filename keeps the bare `Content-Disposition: inline`. An inline `ContentId` that contains whitespace or a control character, or one too long to fit on a single 998-octet header line, is rejected (a `Content-ID` is a
+  single msg-id token that either would corrupt) rather than silently mangled. Messages without inline attachments render byte-for-byte as before.
+
 ## [v3.7.0] - 2026-06-16 - Platform Extensions: Messaging, Realtime, Auth, i18n, OpenAPI, Lock, Mailer, and Storage
 
 ### Added
@@ -384,6 +396,8 @@ Lock-step release — no `v3/` changes this cycle. Tag SHA differs from `v3.0.0`
 - Introduce Melody v3 module (`github.com/precision-soft/melody/v3`)
 - `application/application.go`, `application/application_new.go` — application context in constructor; `New(ctx context.Context, ...)` takes a caller-supplied context used for the full application lifecycle
 - `application/contract/service_module.go` — `ServiceModule` simplification; single `Register(container)` method replacing split register/configure lifecycle
+
+[Unreleased]: https://github.com/precision-soft/melody/compare/v3.7.0...HEAD
 
 [v3.7.0]: https://github.com/precision-soft/melody/compare/v3.6.0...v3.7.0
 

@@ -59,7 +59,7 @@ func validateUserField(label string, value string) error {
     )
 }
 
-func validateScheduleFields(entry Entry) error {
+func validateScheduleFields(entry Entry, forbidden []ForbiddenChar) error {
     if nil == entry.Schedule {
         return nil
     }
@@ -90,7 +90,7 @@ func validateScheduleFields(entry Entry) error {
 
         forbiddenErr := ValidateNoForbiddenChars(
             []string{field.value},
-            CrontabForbiddenChars,
+            forbidden,
             fmt.Sprintf("entry %q Schedule.%s", entry.Name, field.name),
         )
         if nil != forbiddenErr {
