@@ -29,6 +29,19 @@ func TestNewReconnectConfig(t *testing.T) {
     }
 }
 
+func TestNextReconnectBackoff_ClampsZeroMaxBackoff(t *testing.T) {
+    config := ReconnectConfig{InitialBackoff: time.Second, MaxBackoff: 0, BackoffFactor: 2}
+
+    if next := nextReconnectBackoff(config, time.Second); 0 >= next {
+        t.Fatalf("expected a positive backoff when MaxBackoff is non-positive, got %v", next)
+    }
+
+    /* @info a huge current still caps at the default max instead of returning the zero cap */
+    if next := nextReconnectBackoff(config, time.Hour); DefaultReconnectConfig().MaxBackoff != next {
+        t.Fatalf("expected the zero MaxBackoff to fall back to the default cap, got %v", next)
+    }
+}
+
 func TestResolveReconnectConfig_NilNilFallsBackToDefault(t *testing.T) {
     resolved := resolveReconnectConfig(nil, nil)
     defaults := DefaultReconnectConfig()

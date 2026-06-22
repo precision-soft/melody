@@ -143,7 +143,7 @@ func (instance *Transport) Send(
 func (instance *Transport) Receive(
     runtimeInstance runtimecontract.Runtime,
 ) (<-chan messagebuscontract.Envelope, error) {
-    channel, deliveries, subscribeErr := instance.subscribe()
+    channel, deliveries, subscribeErr := instance.subscribeWithRetry(runtimeInstance)
     if nil != subscribeErr {
         return nil, subscribeErr
     }
@@ -153,6 +153,14 @@ func (instance *Transport) Receive(
     go instance.consumeLoop(runtimeInstance, channel, deliveries, out)
 
     return out, nil
+}
+
+func (instance *Transport) subscribeWithRetry(
+    runtimeInstance runtimecontract.Runtime,
+) (*amqp091.Channel, <-chan amqp091.Delivery, error) {
+    backoff := clampedInitialBackoff(instance.reconnect)
+
+    return instance.retrySubscribe(runtimeInstance, &backoff, true, "amqp initial subscribe failed, retrying")
 }
 
 func (instance *Transport) Ack(
@@ -456,19 +464,6 @@ func (instance *Transport) resetConsumeChannel() {
     }
 }
 
-func (instance *Transport) nextBackoff(current time.Duration) time.Duration {
-    next := time.Duration(float64(current) * instance.reconnect.BackoffFactor)
-    if next > instance.reconnect.MaxBackoff {
-        return instance.reconnect.MaxBackoff
-    }
-
-    return next
-}
-
-func (instance *Transport) shouldResetReconnectBackoff(subscriptionDuration time.Duration) bool {
-    return instance.reconnect.InitialBackoff <= subscriptionDuration
-}
-
 func (instance *Transport) subscribe() (*amqp091.Channel, <-chan amqp091.Delivery, error) {
     channel, channelErr := instance.ensureConsumeChannel()
     if nil != channelErr {
@@ -491,7 +486,7 @@ func (instance *Transport) consumeLoop(
 ) {
     defer close(out)
 
-    backoff := instance.reconnect.InitialBackoff
+    backoff := clampedInitialBackoff(instance.reconnect)
 
     for {
         startedAt := time.Now()
@@ -521,18 +516,14 @@ func (instance *Transport) consumeLoop(
 
         instance.resetConsumeChannel()
 
-        if true == instance.shouldResetReconnectBackoff(time.Since(startedAt)) {
-            backoff = instance.reconnect.InitialBackoff
+        if true == reconnectBackoffShouldReset(instance.reconnect, time.Since(startedAt)) {
+            backoff = clampedInitialBackoff(instance.reconnect)
         } else {
-            select {
-            case <-time.After(backoff):
-            case <-runtimeInstance.Context().Done():
-                return
-            case <-instance.closeSignal:
+            if false == instance.waitForRetry(runtimeInstance, backoff) {
                 return
             }
 
-            backoff = instance.nextBackoff(backoff)
+            backoff = nextReconnectBackoff(instance.reconnect, backoff)
         }
 
         reopenedChannel, reopenedDeliveries, reopenErr := instance.reopenConsume(runtimeInstance, &backoff)
@@ -554,32 +545,59 @@ func delayExpirationMilliseconds(delay time.Duration) int64 {
     return milliseconds
 }
 
-func (instance *Transport) reopenConsume(
+func (instance *Transport) waitForRetry(
+    runtimeInstance runtimecontract.Runtime,
+    backoff time.Duration,
+) bool {
+    select {
+    case <-time.After(backoff):
+        return true
+    case <-runtimeInstance.Context().Done():
+        return false
+    case <-instance.closeSignal:
+        return false
+    }
+}
+
+func (instance *Transport) retrySubscribe(
     runtimeInstance runtimecontract.Runtime,
     backoff *time.Duration,
+    resetEachAttempt bool,
+    logMessage string,
 ) (*amqp091.Channel, <-chan amqp091.Delivery, error) {
     for {
-        if nil != runtimeInstance.Context().Err() || true == instance.isClosing() {
-            return nil, nil, exception.NewError("amqp transport is closing", nil, nil)
-        }
-
         channel, deliveries, subscribeErr := instance.subscribe()
         if nil == subscribeErr {
             return channel, deliveries, nil
         }
 
-        instance.logError(runtimeInstance, "amqp reconnect attempt failed, backing off", subscribeErr)
-
-        select {
-        case <-time.After(*backoff):
-        case <-runtimeInstance.Context().Done():
-            return nil, nil, exception.NewError("amqp transport is closing", nil, nil)
-        case <-instance.closeSignal:
-            return nil, nil, exception.NewError("amqp transport is closing", nil, nil)
+        if nil != runtimeInstance.Context().Err() || true == instance.isClosing() {
+            return nil, nil, subscribeErr
         }
 
-        *backoff = instance.nextBackoff(*backoff)
+        if nil == instance.dialer {
+            return nil, nil, subscribeErr
+        }
+
+        instance.logError(runtimeInstance, logMessage, subscribeErr)
+
+        if true == resetEachAttempt {
+            instance.resetConsumeChannel()
+        }
+
+        if false == instance.waitForRetry(runtimeInstance, *backoff) {
+            return nil, nil, subscribeErr
+        }
+
+        *backoff = nextReconnectBackoff(instance.reconnect, *backoff)
     }
+}
+
+func (instance *Transport) reopenConsume(
+    runtimeInstance runtimecontract.Runtime,
+    backoff *time.Duration,
+) (*amqp091.Channel, <-chan amqp091.Delivery, error) {
+    return instance.retrySubscribe(runtimeInstance, backoff, true, "amqp reconnect attempt failed, backing off")
 }
 
 func (instance *Transport) republish(

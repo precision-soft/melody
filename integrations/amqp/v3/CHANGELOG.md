@@ -5,6 +5,26 @@ All notable changes to `precision-soft/melody/integrations/amqp` will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- `transport.go` — `Receive` now retries the **initial** subscribe with bounded exponential backoff when a `Dialer` is configured, instead of returning on the first error.
+  - Fixes a boot-ordering race: if the broker is not yet reachable when the consumer starts (common behind a load balancer or in a container stack), `Receive` previously failed immediately and the consumer never came up. It now re-dials and re-subscribes until the broker accepts the subscription, reusing the same reconnect machinery as the in-flight delivery loop.
+  - The backoff wait honours context cancellation and `Close`, so a shutdown during the initial retry is not held hostage to the backoff.
+  - When no `Dialer` is configured, the previous behaviour is preserved (the first subscribe error is returned).
+  - **Behavioural note:** `Receive` can now block until the first successful subscription or until the context/transport is cancelled.
+  - The shared retry/backoff-wait logic (`retrySubscribe`, `waitForRetry`) is now used uniformly by the initial subscribe, the delivery-loop reconnect, and the consume loop. Covered by broker-free unit tests in `transport_test.go`.
+- `server_sent_event_backplane.go` — the backplane listen loop now **stops** instead of retrying forever when the connection is lost and no `Dialer` is configured.
+  - Previously, a dropped connection with no dialer left the listen goroutine backing off up to `MaxBackoff` and logging a subscribe failure indefinitely, even though re-subscribing could never recover. It now detects this terminal condition and exits cleanly.
+  - A transient channel loss on a live static connection is still recoverable and is unaffected (it re-subscribes on the same connection).
+  - The initial-backoff seed is also clamped defensively (a non-positive `InitialBackoff` falls back to the default), matching the transport. Covered by a broker-free unit test in `server_sent_event_backplane_test.go`.
+- The backoff helpers (`nextReconnectBackoff`, `reconnectBackoffShouldReset`, `clampedInitialBackoff`) are now shared package functions used by both the transport and the SSE backplane, removing duplicated per-type methods and per-call-site guards.
+  - The non-positive-`InitialBackoff` clamp is now applied uniformly through `clampedInitialBackoff` at every backoff seed and reset — including the consume loop, which previously lacked it. A direct-construction `Transport` with a zero `InitialBackoff` can no longer busy-loop its reconnect path. Covered by `TestConsumeLoop_ZeroBackoffDoesNotBusyLoop`.
+  - `nextReconnectBackoff` now clamps a non-positive `MaxBackoff` to the default cap through `clampedMaxBackoff` (symmetric with `clampedInitialBackoff`), so a direct-construction `Transport`/`ServerSentEventBackplane` with a zero `MaxBackoff` can no longer collapse the backoff to `0` and busy-loop its reconnect path. Covered by `TestNextReconnectBackoff_ClampsZeroMaxBackoff`.
+- `reconnect_config.go` — `resolveReconnectConfig` now rejects a `BackoffFactor` below `1` (in addition to the existing non-positive check), falling back to the default factor. A sub-unit factor would otherwise *shrink* the backoff on every attempt (1s → 0.5s → 0.25s → …) and degenerate into a reconnect storm, since `MaxBackoff` only caps the upper bound. Covered by `TestResolveReconnectConfig_RejectsSubUnitBackoffFactor`.
+- `transport.go` — the consume-loop reconnect (`reopenConsume`) now drops the cached consume channel between failed retries, so a `Consume` that keeps failing on an otherwise-live connection (for example a queue that became exclusive) no longer reuses the same stale channel on every attempt.
+
 ## [v3.0.0] - 2026-06-16 - Initial Release — RabbitMQ Message-Bus Transport, Auto-Reconnect, and Server-Sent Events Backplane
 
 ### Added

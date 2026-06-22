@@ -28,6 +28,38 @@ type ReconnectConfig struct {
     BackoffFactor  float64
 }
 
+func clampedInitialBackoff(config ReconnectConfig) time.Duration {
+    if 0 >= config.InitialBackoff {
+        return DefaultReconnectConfig().InitialBackoff
+    }
+
+    return config.InitialBackoff
+}
+
+func clampedMaxBackoff(config ReconnectConfig) time.Duration {
+    if 0 >= config.MaxBackoff {
+        return DefaultReconnectConfig().MaxBackoff
+    }
+
+    return config.MaxBackoff
+}
+
+func nextReconnectBackoff(config ReconnectConfig, current time.Duration) time.Duration {
+    maxBackoff := clampedMaxBackoff(config)
+
+    next := time.Duration(float64(current) * config.BackoffFactor)
+    if next > maxBackoff {
+        return maxBackoff
+    }
+
+    return next
+}
+
+/* @important only treat a subscription as healthy enough to reset the backoff when it actually lived at least the initial backoff: a subscribe that succeeds but loses its channel immediately must keep backing off, otherwise it becomes a no-delay reconnect storm against the broker. */
+func reconnectBackoffShouldReset(config ReconnectConfig, subscriptionDuration time.Duration) bool {
+    return config.InitialBackoff <= subscriptionDuration
+}
+
 func resolveReconnectConfig(general *ReconnectConfig, override *ReconnectConfig) ReconnectConfig {
     defaults := DefaultReconnectConfig()
 
@@ -46,7 +78,7 @@ func resolveReconnectConfig(general *ReconnectConfig, override *ReconnectConfig)
             resolved.MaxBackoff = general.MaxBackoff
         }
 
-        if 0 < general.BackoffFactor {
+        if 1 <= general.BackoffFactor {
             resolved.BackoffFactor = general.BackoffFactor
         }
     }
@@ -60,7 +92,7 @@ func resolveReconnectConfig(general *ReconnectConfig, override *ReconnectConfig)
             resolved.MaxBackoff = override.MaxBackoff
         }
 
-        if 0 < override.BackoffFactor {
+        if 1 <= override.BackoffFactor {
             resolved.BackoffFactor = override.BackoffFactor
         }
     }
