@@ -47,17 +47,18 @@ func clampedMaxBackoff(config ReconnectConfig) time.Duration {
 func nextReconnectBackoff(config ReconnectConfig, current time.Duration) time.Duration {
     maxBackoff := clampedMaxBackoff(config)
 
-    next := time.Duration(float64(current) * config.BackoffFactor)
-    if next > maxBackoff {
+    /* @important clamp in float64 before the time.Duration conversion: a large BackoffFactor or MaxBackoff can push the product past the int64 nanosecond range, where the float-to-Duration conversion wraps to a negative duration that slips past a post-conversion `next > maxBackoff` check and drives time.After into the no-delay reconnect storm the cap exists to prevent */
+    nextFloat := float64(current) * config.BackoffFactor
+    if 0 >= nextFloat || nextFloat >= float64(maxBackoff) {
         return maxBackoff
     }
 
-    return next
+    return time.Duration(nextFloat)
 }
 
-/* @important only treat a subscription as healthy enough to reset the backoff when it actually lived at least the initial backoff: a subscribe that succeeds but loses its channel immediately must keep backing off, otherwise it becomes a no-delay reconnect storm against the broker. */
+/* @important only treat a subscription as healthy enough to reset the backoff when it actually lived at least the initial backoff: a subscribe that succeeds but loses its channel immediately must keep backing off, otherwise it becomes a no-delay reconnect storm against the broker. The threshold is the clamped initial backoff, symmetric with every seed/reset site, so a directly-constructed config with a zero InitialBackoff still measures against the default rather than letting a 0 threshold reset on every instantly-dying subscription. */
 func reconnectBackoffShouldReset(config ReconnectConfig, subscriptionDuration time.Duration) bool {
-    return config.InitialBackoff <= subscriptionDuration
+    return clampedInitialBackoff(config) <= subscriptionDuration
 }
 
 func resolveReconnectConfig(general *ReconnectConfig, override *ReconnectConfig) ReconnectConfig {

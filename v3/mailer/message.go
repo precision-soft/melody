@@ -78,6 +78,9 @@ func RenderMessage(message mailercontract.Message) ([]byte, error) {
             continue
         }
         if _, structured := structuredIdentifierHeaders[normalizedKey]; true == structured {
+            if identifierErr := validateStructuredIdentifierHeader(key, value); nil != identifierErr {
+                return nil, identifierErr
+            }
             writeHeader(&builder, key, value)
             continue
         }
@@ -480,12 +483,38 @@ func writeAttachment(builder *strings.Builder, attachment mailercontract.Attachm
     builder.WriteString(lineBreak)
 }
 
+/* @important the Message-ID, In-Reply-To, References and Content-ID headers a caller supplies through the Headers map are sequences of msg-id tokens emitted intact (RFC 2047 §5 forbids Q-encoding them). Two corruption channels are rejected here, mirroring validateInlineContentId for inline Content-IDs. First, any control character: writeHeader strips CR and LF but leaves TAB, DEL and the other C0 bytes, which survive into the value and either invalidate it or get re-read as folding whitespace that splits a token on unfold; the only legitimate whitespace is the single space that separates tokens, so every other whitespace/control rune is refused. Second, length: foldHeaderLine wraps at the spaces between tokens, but a single token longer than a continuation line is hard-split mid-token, injecting whitespace that corrupts the identifier on unfold and silently breaks mail threading, so a token too long to fit on a continuation line (one leading space plus the token) is rejected rather than mangled. */
+func validateStructuredIdentifierHeader(name string, value string) error {
+    for _, runeValue := range value {
+        if '\t' == runeValue || '\r' == runeValue || '\n' == runeValue || runeValue < 0x20 || 0x7F == runeValue {
+            return exception.NewError(name+" header contains a control character; a structured identifier header must contain only msg-id tokens separated by single spaces", nil, nil)
+        }
+    }
+
+    for _, token := range strings.Split(value, " ") {
+        if 1+len(token) > maxHardHeaderLineLength {
+            return exception.NewError(name+" header has an identifier token too long to encode on a single header line without corrupting it", nil, nil)
+        }
+    }
+
+    return nil
+}
+
 /* @info a Content-ID is a single msg-id token: it may carry no whitespace or control character (either would make the emitted Content-ID header invalid), and folding it would inject whitespace that corrupts the identifier on unfold (RFC 2047 §5 also forbids Q-encoding it), so an id too long to fit on a single 998-octet header line is rejected rather than silently mangled. A continuation line carries one leading space, so the limit is reached when the bracketed value plus that space exceeds maxHardHeaderLineLength */
 func validateInlineContentId(contentId string) error {
     for _, runeValue := range contentId {
         if ' ' == runeValue || '\t' == runeValue || '\r' == runeValue || '\n' == runeValue || runeValue < 0x20 || 0x7F == runeValue {
             return exception.NewError("mailer inline attachment Content-ID contains whitespace or a control character; a Content-ID must be a single msg-id token", nil, nil)
         }
+    }
+
+    /* @info angle brackets are valid only as a single matched leading-'<'/trailing-'>' pair the caller may already have applied; an interior, unmatched or empty-bracket value would make bracketContentId emit a malformed Content-ID such as <>x<>, so it is rejected rather than wrapped */
+    unbracketed := contentId
+    if true == strings.HasPrefix(unbracketed, "<") && true == strings.HasSuffix(unbracketed, ">") && 2 <= len(unbracketed) {
+        unbracketed = unbracketed[1 : len(unbracketed)-1]
+    }
+    if "" == unbracketed || true == strings.ContainsAny(unbracketed, "<>") {
+        return exception.NewError("mailer inline attachment Content-ID is empty or contains an unmatched or embedded angle bracket; a Content-ID must be a single msg-id token", nil, nil)
     }
 
     if 1+len(bracketContentId(contentId)) > maxHardHeaderLineLength {

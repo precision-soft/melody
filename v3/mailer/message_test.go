@@ -206,6 +206,79 @@ func TestRenderMessage_StructuredIdentifierHeadersAreNotEncoded(t *testing.T) {
     }
 }
 
+func TestRenderMessage_RejectsOverlongStructuredIdentifierHeader(t *testing.T) {
+    /* @info a caller-supplied structured-identifier header (In-Reply-To/References/Message-ID/Content-ID) is a sequence of unbreakable msg-id tokens; a single token too long to fit on a header line would be hard-split mid-token by folding, injecting whitespace that corrupts the identifier on unfold, so it is rejected rather than silently mangled (mirrors the inline Content-ID guard) */
+    overlongMessageId := "<" + strings.Repeat("a", 1000) + "@example.com>"
+
+    _, renderErr := RenderMessage(mailercontract.Message{
+        From:    mailercontract.Address{Email: "shop@example.com"},
+        To:      []mailercontract.Address{{Email: "ada@example.com"}},
+        Subject: "Hello",
+        Text:    "body",
+        Headers: map[string]string{
+            "In-Reply-To": overlongMessageId,
+        },
+    })
+    if nil == renderErr {
+        t.Fatalf("expected an error for an overlong structured-identifier header, got nil")
+    }
+
+    if false == strings.Contains(renderErr.Error(), "In-Reply-To") {
+        t.Fatalf("expected the error to name the offending header, got: %v", renderErr)
+    }
+}
+
+func TestRenderMessage_RejectsControlCharacterInStructuredIdentifierHeader(t *testing.T) {
+    /* @info writeHeader strips only CR and LF; a TAB, NUL or other C0 byte a caller embeds in a structured-identifier header would survive into the emitted value and either invalidate it or be re-read as folding whitespace that splits a token on unfold, so it is rejected up front (mirrors the inline Content-ID control-character guard) */
+    _, renderErr := RenderMessage(mailercontract.Message{
+        From:    mailercontract.Address{Email: "shop@example.com"},
+        To:      []mailercontract.Address{{Email: "ada@example.com"}},
+        Subject: "Hello",
+        Text:    "body",
+        Headers: map[string]string{
+            "In-Reply-To": "<a\tb\x00c@example.com>",
+        },
+    })
+    if nil == renderErr {
+        t.Fatalf("expected an error for a control character in a structured-identifier header, got nil")
+    }
+
+    if false == strings.Contains(renderErr.Error(), "In-Reply-To") {
+        t.Fatalf("expected the error to name the offending header, got: %v", renderErr)
+    }
+}
+
+func TestRenderMessage_AcceptsMultiTokenStructuredIdentifierHeaderWithinLimit(t *testing.T) {
+    /* @info a References header carries several msg-id tokens; folding wraps at the spaces between them, so a value whose every individual token fits on a continuation line round-trips intact and every emitted line stays within the 998-octet limit, even when the joined value is far longer */
+    first := "<" + strings.Repeat("a", 600) + "@example.com>"
+    second := "<" + strings.Repeat("b", 600) + "@example.com>"
+
+    payload, renderErr := RenderMessage(mailercontract.Message{
+        From:    mailercontract.Address{Email: "shop@example.com"},
+        To:      []mailercontract.Address{{Email: "ada@example.com"}},
+        Subject: "Hello",
+        Text:    "body",
+        Headers: map[string]string{
+            "References": first + " " + second,
+        },
+    })
+    if nil != renderErr {
+        t.Fatalf("render: %v", renderErr)
+    }
+
+    rendered := string(payload)
+
+    if false == strings.Contains(rendered, first) || false == strings.Contains(rendered, second) {
+        t.Fatalf("expected both References tokens to be emitted intact:\n%s", rendered)
+    }
+
+    for _, line := range strings.Split(rendered, "\r\n") {
+        if maxHardHeaderLineLength < len(line) {
+            t.Fatalf("rendered References line exceeds the RFC 5322 limit: %d", len(line))
+        }
+    }
+}
+
 func TestRenderMessage_FiltersReservedCallerHeaders(t *testing.T) {
     payload, renderErr := RenderMessage(mailercontract.Message{
         From:    mailercontract.Address{Email: "shop@example.com"},
@@ -592,6 +665,27 @@ func TestRenderMessage_RejectsInlineContentIdWithWhitespace(t *testing.T) {
 
     if false == strings.Contains(renderErr.Error(), "Content-ID") {
         t.Fatalf("expected the error to mention the Content-ID, got: %v", renderErr)
+    }
+}
+
+func TestRenderMessage_RejectsInlineContentIdWithUnmatchedAngleBracket(t *testing.T) {
+    /* @info bracketContentId wraps a bare id and leaves an already-matched <...> pair untouched; an interior or unmatched angle bracket such as >x< would otherwise be emitted as a malformed Content-ID like <>x<>, so it is rejected rather than wrapped */
+    for _, contentId := range []string{">x<", "a<b>c", "<a><b>", "<>"} {
+        _, renderErr := RenderMessage(mailercontract.Message{
+            From: mailercontract.Address{Email: "shop@example.com"},
+            To:   []mailercontract.Address{{Email: "ada@example.com"}},
+            Html: "<img src=\"cid:logo\">",
+            Attachments: []mailercontract.Attachment{
+                {Filename: "logo.png", ContentType: "image/png", Content: []byte("png"), ContentId: contentId},
+            },
+        })
+        if nil == renderErr {
+            t.Fatalf("expected an error for a malformed Content-ID %q, got nil", contentId)
+        }
+
+        if false == strings.Contains(renderErr.Error(), "Content-ID") {
+            t.Fatalf("expected the error to mention the Content-ID for %q, got: %v", contentId, renderErr)
+        }
     }
 }
 

@@ -42,6 +42,38 @@ func TestNextReconnectBackoff_ClampsZeroMaxBackoff(t *testing.T) {
     }
 }
 
+func TestNextReconnectBackoff_ClampsOverflowingProduct(t *testing.T) {
+    /* @info a BackoffFactor large enough to push the float product past the int64 nanosecond range used to wrap the time.Duration conversion negative, skip the cap, and feed time.After a no-delay backoff; the result must stay clamped to MaxBackoff */
+    config := ReconnectConfig{InitialBackoff: time.Second, MaxBackoff: 30 * time.Second, BackoffFactor: 1e10}
+
+    next := nextReconnectBackoff(config, time.Second)
+
+    if 0 >= next {
+        t.Fatalf("expected a positive backoff, got %v (overflow defeated the cap)", next)
+    }
+
+    if next > config.MaxBackoff {
+        t.Fatalf("expected the backoff clamped to MaxBackoff %s, got %v", config.MaxBackoff, next)
+    }
+}
+
+func TestReconnectBackoffShouldReset_ClampsZeroInitialBackoff(t *testing.T) {
+    /* @info a directly-constructed config with a zero InitialBackoff must measure the reset threshold against the clamped default, not the raw 0: a 0 threshold would reset on every instantly-dying subscription and defeat the no-delay-storm guard the seed/reset sites already clamp for */
+    config := ReconnectConfig{InitialBackoff: 0, MaxBackoff: time.Second, BackoffFactor: 2}
+
+    if true == reconnectBackoffShouldReset(config, 0) {
+        t.Fatalf("expected a zero-lived subscription not to reset the backoff under the clamped default threshold")
+    }
+
+    if true == reconnectBackoffShouldReset(config, clampedInitialBackoff(config)-1) {
+        t.Fatalf("expected a sub-threshold subscription not to reset the backoff")
+    }
+
+    if false == reconnectBackoffShouldReset(config, clampedInitialBackoff(config)) {
+        t.Fatalf("expected a subscription that lived at least the clamped initial backoff to reset")
+    }
+}
+
 func TestResolveReconnectConfig_NilNilFallsBackToDefault(t *testing.T) {
     resolved := resolveReconnectConfig(nil, nil)
     defaults := DefaultReconnectConfig()
