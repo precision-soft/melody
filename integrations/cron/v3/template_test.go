@@ -689,14 +689,23 @@ func TestRenderRejectsScheduleCommandContainingCarriageReturn(t *testing.T) {
     }
 }
 
-func TestBuiltinTemplatesReturnsCrontab(t *testing.T) {
+func TestBuiltinTemplatesReturnsCrontabAndK8s(t *testing.T) {
     templates := BuiltinTemplates()
-    if 1 != len(templates) {
-        t.Fatalf("expected exactly one builtin template, got %d", len(templates))
+    if 2 != len(templates) {
+        t.Fatalf("expected exactly two builtin templates, got %d", len(templates))
     }
 
-    if TemplateNameCrontab != templates[0].Name() {
-        t.Fatalf("expected builtin template name %q, got %q", TemplateNameCrontab, templates[0].Name())
+    names := make(map[string]bool, len(templates))
+    for _, template := range templates {
+        names[template.Name()] = true
+    }
+
+    if false == names[TemplateNameCrontab] {
+        t.Fatalf("expected builtin templates to include %q, got %v", TemplateNameCrontab, names)
+    }
+
+    if false == names[TemplateNameK8s] {
+        t.Fatalf("expected builtin templates to include %q, got %v", TemplateNameK8s, names)
     }
 }
 

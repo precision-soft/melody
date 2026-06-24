@@ -382,7 +382,7 @@ func TestNextBackoff_GrowsAndCaps(t *testing.T) {
 
     current := instance.reconnect.InitialBackoff
     for index, want := range expected {
-        current = instance.nextBackoff(current)
+        current = nextReconnectBackoff(instance.reconnect, current)
         if want != current {
             t.Fatalf("step %d: expected %s, got %s", index, want, current)
         }
@@ -419,6 +419,116 @@ func TestConnect_DialFailureIsWrapped(t *testing.T) {
 
     if true == instance.reconnecting {
         t.Fatalf("expected the reconnecting flag to be cleared after a failed dial")
+    }
+}
+
+func TestSubscribeWithRetry_NoDialerDoesNotLoop(t *testing.T) {
+    instance := &Transport{queue: "orders", closeSignal: make(chan struct{})}
+
+    _, _, subscribeErr := instance.subscribeWithRetry(newReconnectRuntime(context.Background()))
+    if nil == subscribeErr {
+        t.Fatalf("expected an error when no connection and no dialer are configured")
+    }
+}
+
+func TestSubscribeWithRetry_RetriesThenStopsOnContextCancel(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+
+    calls := 0
+    instance := &Transport{
+        queue:       "orders",
+        closeSignal: make(chan struct{}),
+        reconnect:   ReconnectConfig{InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond, BackoffFactor: 2},
+        dialer: func() (*amqp091.Connection, error) {
+            calls++
+            if 3 <= calls {
+                cancel()
+            }
+
+            return nil, exception.NewError("dial refused", nil, nil)
+        },
+    }
+
+    _, _, subscribeErr := instance.subscribeWithRetry(newReconnectRuntime(ctx))
+    if nil == subscribeErr {
+        t.Fatalf("expected an error after the context is cancelled")
+    }
+
+    if 3 > calls {
+        t.Fatalf("expected the initial subscribe to be retried, got %d calls", calls)
+    }
+}
+
+func TestSubscribeWithRetry_ZeroBackoffDoesNotBusyLoop(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+
+    calls := 0
+    instance := &Transport{
+        queue:       "orders",
+        closeSignal: make(chan struct{}),
+        reconnect:   ReconnectConfig{InitialBackoff: 0, MaxBackoff: time.Second, BackoffFactor: 2},
+        dialer: func() (*amqp091.Connection, error) {
+            calls++
+
+            return nil, exception.NewError("dial refused", nil, nil)
+        },
+    }
+
+    go func() {
+        time.Sleep(50 * time.Millisecond)
+        cancel()
+    }()
+
+    _, _, subscribeErr := instance.subscribeWithRetry(newReconnectRuntime(ctx))
+    if nil == subscribeErr {
+        t.Fatalf("expected an error after the context is cancelled")
+    }
+
+    if 100 < calls {
+        t.Fatalf("expected the zero initial backoff to be clamped, got %d dial attempts in 50ms", calls)
+    }
+}
+
+func TestConsumeLoop_ZeroBackoffDoesNotBusyLoop(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+
+    calls := 0
+    instance := &Transport{
+        queue:       "orders",
+        closeSignal: make(chan struct{}),
+        reconnect:   ReconnectConfig{InitialBackoff: 0, MaxBackoff: time.Second, BackoffFactor: 2},
+        dialer: func() (*amqp091.Connection, error) {
+            calls++
+
+            return nil, exception.NewError("dial refused", nil, nil)
+        },
+    }
+
+    deliveries := make(chan amqp091.Delivery)
+    close(deliveries)
+
+    out := make(chan messagebuscontract.Envelope)
+    done := make(chan struct{})
+
+    go func() {
+        instance.consumeLoop(newReconnectRuntime(ctx), nil, deliveries, out)
+        close(done)
+    }()
+
+    go func() {
+        time.Sleep(50 * time.Millisecond)
+        cancel()
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(2 * time.Second):
+        cancel()
+        t.Fatalf("consumeLoop did not return after context cancellation")
+    }
+
+    if 100 < calls {
+        t.Fatalf("expected the zero initial backoff to be clamped, got %d reconnect attempts in 50ms", calls)
     }
 }
 

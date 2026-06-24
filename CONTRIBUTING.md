@@ -41,6 +41,26 @@ repository git hooks:
 Inside the shell, the convenience functions described under
 [Development shell aliases](#development-shell-aliases) run the full verification matrix.
 
+### Overriding host ports
+
+The committed [`.dev/docker/.env`](./.dev/docker/.env) maps each container to a default host port
+(the HTTP load balancer to `80`, the example app to `8180`, and the `up:all` services to `5673`,
+`15673`, `6380`, `3307`, `4566`). Every one of these is a `${VAR:-default}` lookup, so you can move
+any of them without editing the committed file: create an uncommitted `.dev/docker/.env.local`
+(gitignored, loaded after `.env` so it wins) and set only the ports you need to change. This is the
+supported way to run the melody dev stack alongside other local stacks that already use those ports.
+
+```bash
+# .dev/docker/.env.local  (gitignored, per-developer)
+LOAD_BALANCER_HTTP_HOST_PORT=8095
+DEV_HTTP_HOST_PORT=8185
+RABBITMQ_HOST_PORT=5674
+RABBITMQ_MANAGEMENT_HOST_PORT=15674
+REDIS_HOST_PORT=6381
+MYSQL_HOST_PORT=3308
+LOCALSTACK_HOST_PORT=4567
+```
+
 ## Build tags and verification matrix
 
 Melody supports two independent embedding modes controlled by build tags:

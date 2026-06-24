@@ -5,6 +5,33 @@ All notable changes to `precision-soft/melody/integrations/amqp` will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [v3.1.0] - 2026-06-24 - Reconnect Hardening and Initial-Subscribe Retry
+
+### Changed
+
+- `transport.go` — `Receive` now retries the **initial** subscribe with bounded exponential backoff when a `Dialer` is configured, instead of returning on the first error.
+  - Fixes a boot-ordering race: if the broker is not yet reachable when the consumer starts (common behind a load balancer or in a container stack), `Receive` previously failed immediately and the consumer never came up. It now re-dials and re-subscribes until the broker accepts the subscription, reusing the same reconnect machinery as the in-flight delivery loop.
+  - The backoff wait honours context cancellation and `Close`, so a shutdown during the initial retry is not held hostage to the backoff.
+  - When no `Dialer` is configured, the previous behaviour is preserved (the first subscribe error is returned).
+  - **Behavioural note:** `Receive` can now block until the first successful subscription or until the context/transport is cancelled.
+  - The shared retry/backoff-wait logic (`retrySubscribe`, `waitForRetry`) is now used uniformly by the initial subscribe, the delivery-loop reconnect, and the consume loop. Covered by broker-free unit tests in `transport_test.go`.
+- `server_sent_event_backplane.go` — the backplane listen loop now **stops** instead of retrying forever when the connection is lost and no `Dialer` is configured.
+  - Previously, a dropped connection with no dialer left the listen goroutine backing off up to `MaxBackoff` and logging a subscribe failure indefinitely, even though re-subscribing could never recover. It now detects this terminal condition and exits cleanly.
+  - A transient channel loss on a live static connection is still recoverable and is unaffected (it re-subscribes on the same connection).
+  - The initial-backoff seed is also clamped defensively (a non-positive `InitialBackoff` falls back to the default), matching the transport. Covered by a broker-free unit test in `server_sent_event_backplane_test.go`.
+- The backoff helpers (`nextReconnectBackoff`, `reconnectBackoffShouldReset`, `clampedInitialBackoff`) are now shared package functions used by both the transport and the SSE backplane, removing duplicated per-type methods and per-call-site guards.
+  - The non-positive-`InitialBackoff` clamp is now applied uniformly through `clampedInitialBackoff` at every backoff seed — including the consume loop, which previously lacked it. Covered by `TestConsumeLoop_ZeroBackoffDoesNotBusyLoop`.
+  - `nextReconnectBackoff` now clamps a non-positive `MaxBackoff` to the default cap through `clampedMaxBackoff` (symmetric with `clampedInitialBackoff`), so a direct-construction `Transport`/`ServerSentEventBackplane` with a zero `MaxBackoff` can no longer collapse the backoff to `0` and busy-loop its reconnect path. Covered by `TestNextReconnectBackoff_ClampsZeroMaxBackoff`.
+- `reconnect_config.go` — `resolveReconnectConfig` now rejects a `BackoffFactor` below `1` (in addition to the existing non-positive check), falling back to the default factor. A sub-unit factor would otherwise *shrink* the backoff on every attempt (1s → 0.5s → 0.25s → …) and degenerate into a reconnect storm, since `MaxBackoff` only caps the upper bound. Covered by `TestResolveReconnectConfig_RejectsSubUnitBackoffFactor`.
+- `transport.go` — the consume-loop reconnect (`reopenConsume`) now drops the cached consume channel between failed retries, so a `Consume` that keeps failing on an otherwise-live connection (for example a queue that became exclusive) no longer reuses the same stale channel on every attempt.
+
+### Fixed
+
+- `reconnect_config.go` — `nextReconnectBackoff` now clamps the next backoff in `float64` space *before* converting to `time.Duration`, instead of computing `time.Duration(float64(current) * BackoffFactor)` and only then comparing against `MaxBackoff`. With a large `BackoffFactor` (or a near-`math.MaxInt64` `MaxBackoff` reached after enough escalations), the float-to-`Duration` conversion overflowed the int64 nanosecond range and wrapped to a large *negative* duration; that negative value was not `> MaxBackoff`, so it slipped past the cap and was handed to `time.After`, which fires immediately — degenerating into the no-delay reconnect storm the cap exists to prevent. The result is now bounded to `[0, MaxBackoff]` for any validation-accepted configuration. Covered by `TestNextReconnectBackoff_ClampsOverflowingProduct`.
+- `reconnect_config.go` — `reconnectBackoffShouldReset` now measures the subscription-lifetime threshold against `clampedInitialBackoff(config)` instead of the raw `InitialBackoff`. Every backoff *seed* was already clamped, but the *reset decision* still read the raw field, so a directly-constructed config with a zero `InitialBackoff` produced a `0` threshold that treated every subscription — even one whose channel dies instantly — as long-lived and reset the backoff, re-`Consume`-ing a live-but-failing channel with no delay: the no-delay reconnect storm the surrounding guard exists to prevent. The threshold is now symmetric with the seed/reset sites, so a sub-`InitialBackoff` subscription keeps backing off. Covered by `TestReconnectBackoffShouldReset_ClampsZeroInitialBackoff`.
+
 ## [v3.0.0] - 2026-06-16 - Initial Release — RabbitMQ Message-Bus Transport, Auto-Reconnect, and Server-Sent Events Backplane
 
 ### Added
@@ -46,5 +73,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `server_sent_event_backplane.go` — `ensurePublishChannel` now applies the same `IsClosed()` guard the message-bus `Transport` already carries, on both its fast path and its post-lock double-check. The backplane reused a broker-closed publish channel (it returned the cached channel whenever it was non-nil), so a channel-level exception that left the connection alive forced one failed publish before the existing reset-and-retry recovered; the guard replaces the stale channel up front.
 - `transport.go` — a positive but sub-millisecond requeue `DelayStamp` no longer collapses to a `"0"` message TTL. `republish` formatted the delay with `time.Duration.Milliseconds()`, which truncates any delay below 1ms to `0`; a `RetryPolicy{BaseDelay: 200µs}` therefore routed the message to the delay queue with `expiration = "0"`, and RabbitMQ treats a `0` TTL as immediate expiry — so the message dead-lettered straight back with no spacing and the intended backoff was silently lost. A positive delay is now floored to 1ms.
 - `transport.go`, `server_sent_event_backplane.go` — `resetPublishChannel` is now identity-aware: it closes the cached publish channel only when it is still the one the failing caller used. Two publishers that both failed on the same dead channel could otherwise have the second caller's reset close the healthy channel the first caller had just reopened, turning a recoverable single-retry into a spurious publish error on an otherwise-healthy broker. `publishOnce` now returns the channel it used and `resetPublishChannel` compares identity before closing.
+
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.1.0...HEAD
+
+[v3.1.0]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.0.0...integrations/amqp/v3.1.0
 
 [v3.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations/amqp/v3.0.0

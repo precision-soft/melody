@@ -1,6 +1,7 @@
 package amqp
 
 import (
+    "context"
     "errors"
     "os"
     "testing"
@@ -208,19 +209,61 @@ func TestServerSentEventBackplane_DoesNotEchoToOriginInstanceTwice(t *testing.T)
 /* @info reconnect backoff reset */
 
 func TestShouldResetReconnectBackoff(t *testing.T) {
-    instance := &ServerSentEventBackplane{reconnect: resolveReconnectConfig(nil, nil)}
-    initialBackoff := instance.reconnect.InitialBackoff
+    config := resolveReconnectConfig(nil, nil)
+    initialBackoff := config.InitialBackoff
 
-    if true == instance.shouldResetReconnectBackoff(initialBackoff-time.Nanosecond) {
+    if true == reconnectBackoffShouldReset(config, initialBackoff-time.Nanosecond) {
         t.Fatalf("expected no backoff reset for a subscription that died sooner than the initial backoff")
     }
 
-    if false == instance.shouldResetReconnectBackoff(initialBackoff) {
+    if false == reconnectBackoffShouldReset(config, initialBackoff) {
         t.Fatalf("expected a backoff reset for a subscription that lived at least the initial backoff")
     }
 
-    if false == instance.shouldResetReconnectBackoff(2*initialBackoff) {
+    if false == reconnectBackoffShouldReset(config, 2*initialBackoff) {
         t.Fatalf("expected a backoff reset for a long-lived subscription")
+    }
+}
+
+func TestResolveReconnectConfig_RejectsSubUnitBackoffFactor(t *testing.T) {
+    defaultFactor := DefaultReconnectConfig().BackoffFactor
+
+    if resolved := resolveReconnectConfig(nil, &ReconnectConfig{BackoffFactor: 0.5}); defaultFactor != resolved.BackoffFactor {
+        t.Fatalf("expected a sub-unit override backoff factor to fall back to the default %v, got %v", defaultFactor, resolved.BackoffFactor)
+    }
+
+    if resolved := resolveReconnectConfig(&ReconnectConfig{BackoffFactor: 0.5}, nil); defaultFactor != resolved.BackoffFactor {
+        t.Fatalf("expected a sub-unit general backoff factor to fall back to the default %v, got %v", defaultFactor, resolved.BackoffFactor)
+    }
+
+    if resolved := resolveReconnectConfig(nil, &ReconnectConfig{BackoffFactor: 3}); 3 != resolved.BackoffFactor {
+        t.Fatalf("expected a valid override backoff factor to be honoured, got %v", resolved.BackoffFactor)
+    }
+}
+
+func TestServerSentEventBackplane_ListenStopsWhenConnectionGoneAndNoDialer(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    instance := &ServerSentEventBackplane{
+        reconnect: resolveReconnectConfig(nil, nil),
+        ctx:       ctx,
+        cancel:    cancel,
+    }
+
+    instance.wait.Add(1)
+
+    done := make(chan struct{})
+    go func() {
+        instance.listen()
+        close(done)
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(2 * time.Second):
+        cancel()
+        t.Fatalf("listen kept backing off instead of stopping when the connection is gone and no dialer is configured")
     }
 }
 

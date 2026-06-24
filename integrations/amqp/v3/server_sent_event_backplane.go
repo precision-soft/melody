@@ -5,6 +5,7 @@ import (
     "crypto/rand"
     "encoding/hex"
     "encoding/json"
+    "errors"
     "sync"
     "time"
 
@@ -15,6 +16,9 @@ import (
 )
 
 const defaultServerSentEventBackplaneExchange = "melody.sse"
+
+/* @important sentinel returned when the connection is gone and no dialer is configured: the listen loop treats this as terminal (re-subscribing can never recover) instead of backing off forever. */
+var errServerSentEventBackplaneConnectionGone = exception.NewError("amqp sse backplane connection is closed and no dialer is configured", nil, nil)
 
 type serverSentEventWireEvent struct {
     Origin string                     `json:"origin"`
@@ -165,7 +169,7 @@ func (instance *ServerSentEventBackplane) publishOnce(payload []byte) (*amqp091.
 func (instance *ServerSentEventBackplane) listen() {
     defer instance.wait.Done()
 
-    backoff := instance.reconnect.InitialBackoff
+    backoff := clampedInitialBackoff(instance.reconnect)
 
     for {
         if nil != instance.ctx.Err() || true == instance.isClosing() {
@@ -174,13 +178,20 @@ func (instance *ServerSentEventBackplane) listen() {
 
         deliveries, subscribeErr := instance.subscribe()
         if nil != subscribeErr {
+            /* @important the connection is gone and no dialer is configured, so re-subscribing can never recover: stop instead of backing off forever and spamming the log. A transient channel loss on a live static connection is recoverable and does not reach here, because liveConnection still hands back the live connection. */
+            if true == errors.Is(subscribeErr, errServerSentEventBackplaneConnectionGone) {
+                instance.logError("amqp sse backplane connection lost and no dialer is configured, stopping", subscribeErr)
+
+                return
+            }
+
             instance.logError("amqp sse backplane subscribe failed, backing off", subscribeErr)
 
             if false == instance.sleep(backoff) {
                 return
             }
 
-            backoff = instance.nextBackoff(backoff)
+            backoff = nextReconnectBackoff(instance.reconnect, backoff)
 
             continue
         }
@@ -188,9 +199,8 @@ func (instance *ServerSentEventBackplane) listen() {
         startedAt := time.Now()
         instance.forward(deliveries)
 
-        /* @important only reset the backoff when the subscription actually lived: a subscribe that succeeds but loses its channel immediately must keep backing off, otherwise it becomes a no-delay reconnect storm against the broker */
-        if true == instance.shouldResetReconnectBackoff(time.Since(startedAt)) {
-            backoff = instance.reconnect.InitialBackoff
+        if true == reconnectBackoffShouldReset(instance.reconnect, time.Since(startedAt)) {
+            backoff = clampedInitialBackoff(instance.reconnect)
 
             continue
         }
@@ -199,21 +209,8 @@ func (instance *ServerSentEventBackplane) listen() {
             return
         }
 
-        backoff = instance.nextBackoff(backoff)
+        backoff = nextReconnectBackoff(instance.reconnect, backoff)
     }
-}
-
-func (instance *ServerSentEventBackplane) nextBackoff(current time.Duration) time.Duration {
-    next := time.Duration(float64(current) * instance.reconnect.BackoffFactor)
-    if next > instance.reconnect.MaxBackoff {
-        return instance.reconnect.MaxBackoff
-    }
-
-    return next
-}
-
-func (instance *ServerSentEventBackplane) shouldResetReconnectBackoff(subscriptionDuration time.Duration) bool {
-    return instance.reconnect.InitialBackoff <= subscriptionDuration
 }
 
 func (instance *ServerSentEventBackplane) forward(deliveries <-chan amqp091.Delivery) {
@@ -399,7 +396,7 @@ func (instance *ServerSentEventBackplane) liveConnection() (*amqp091.Connection,
     if nil == instance.dialer {
         instance.mutex.Unlock()
 
-        return nil, exception.NewError("amqp sse backplane connection is closed and no dialer is configured", nil, nil)
+        return nil, errServerSentEventBackplaneConnectionGone
     }
 
     if true == instance.reconnecting {

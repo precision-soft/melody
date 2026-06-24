@@ -26,6 +26,9 @@ const (
     flagNameHeartbeatCommand     = "heartbeat-command"
     flagNameHeartbeatDestination = "heartbeat-destination"
     flagNameTemplate             = "template"
+    flagNameImage                = "image"
+    flagNameNamespace            = "namespace"
+    flagNameRestartPolicy        = "restart-policy"
 )
 
 const heartbeatDestinationDefault = "default"
@@ -96,7 +99,19 @@ func (instance *GenerateCommand) Flags() []clicontract.Flag {
         },
         &clicontract.StringFlag{
             Name:  flagNameTemplate,
-            Usage: "name of the registered template that will render the entries; overrides the melody.cron.template parameter (default: crontab)",
+            Usage: "name of the registered template that will render the entries; overrides the melody.cron.template parameter (default: crontab). Built-in templates: crontab, k8s",
+        },
+        &clicontract.StringFlag{
+            Name:  flagNameImage,
+            Usage: "container image used by the k8s template; overrides the melody.cron.k8s.image parameter (required by the k8s template)",
+        },
+        &clicontract.StringFlag{
+            Name:  flagNameNamespace,
+            Usage: "namespace set on the k8s CronJob manifests; overrides the melody.cron.k8s.namespace parameter (omitted when empty)",
+        },
+        &clicontract.StringFlag{
+            Name:  flagNameRestartPolicy,
+            Usage: "restartPolicy set on the k8s CronJob pod template; overrides the melody.cron.k8s.restart_policy parameter (default: OnFailure)",
         },
     }
 }
@@ -145,6 +160,9 @@ type runOptions struct {
     heartbeatCommand   []string
     heartbeatRequested []string
     heartbeatEnabled   bool
+    image              string
+    namespace          string
+    restartPolicy      string
 }
 
 func (instance *GenerateCommand) runWithConfiguration(
@@ -180,6 +198,9 @@ func (instance *GenerateCommand) resolveRunOptions(
         return nil, templateLookupErr
     }
     options.template = template
+
+    /* @info the k8s template ignores the heartbeat (it logs to stdout and models liveness with a dedicated CronJob), so neither auto-enable a heartbeat nor demand a user for it here; an explicitly requested heartbeat still flows through so writeDestinations can warn that it is dropped */
+    isK8s := TemplateNameK8s == template.Name()
 
     outputPath := resolveDefault(commandContext, configuration, flagNameOutput, ParameterDestinationFile)
     if "" == outputPath {
@@ -229,7 +250,7 @@ func (instance *GenerateCommand) resolveRunOptions(
     options.defaultUserName = resolveDefault(commandContext, configuration, flagNameDefaultUser, ParameterUser)
 
     heartbeatPath := resolveDefault(commandContext, configuration, flagNameHeartbeatPath, ParameterHeartbeatPath)
-    if "" == heartbeatPath && "" != logsDir && true == isHeartbeatAutoEnabled(configuration) {
+    if "" == heartbeatPath && "" != logsDir && false == isK8s && true == isHeartbeatAutoEnabled(configuration) {
         heartbeatPath = filepath.Join(logsDir, "heartbeat.crontab")
     }
     if "" != heartbeatPath {
@@ -249,7 +270,11 @@ func (instance *GenerateCommand) resolveRunOptions(
     options.heartbeatRequested = commandContext.StringSlice(flagNameHeartbeatDestination)
     options.heartbeatEnabled = 0 < len(options.heartbeatCommand) || "" != options.heartbeatPath
 
-    if true == options.heartbeatEnabled && "" == options.defaultUserName {
+    options.image = resolveDefault(commandContext, configuration, flagNameImage, ParameterImage)
+    options.namespace = resolveDefault(commandContext, configuration, flagNameNamespace, ParameterNamespace)
+    options.restartPolicy = resolveDefault(commandContext, configuration, flagNameRestartPolicy, ParameterRestartPolicy)
+
+    if true == options.heartbeatEnabled && false == isK8s && "" == options.defaultUserName {
         return nil, exception.NewError(
             "cron: heartbeat is configured but no user is set; pass --user, register the melody.cron.user parameter, or remove the heartbeat",
             exceptioncontract.Context{
@@ -289,6 +314,9 @@ func (instance *GenerateCommand) collectScheduledEntries(options *runOptions) ([
     }
     options.binary = binary
 
+    /* @info only the crontab template redirects each entry's output to a log file; the k8s template logs to container stdout and never reads Entry.LogPath, so it must not inherit the crontab-only logs-dir requirement */
+    requiresLogPath := TemplateNameK8s != options.template.Name()
+
     entries := make([]Entry, 0, len(scheduledCommands))
     for _, scheduled := range scheduledCommands {
         config := scheduled.Config
@@ -296,7 +324,7 @@ func (instance *GenerateCommand) collectScheduledEntries(options *runOptions) ([
             config = &EntryConfig{}
         }
 
-        expanded, expandErr := expandEntriesForCommand(scheduled.CommandName, config, binary, options.defaultUserName, options.logsDir)
+        expanded, expandErr := expandEntriesForCommand(scheduled.CommandName, config, binary, options.defaultUserName, options.logsDir, requiresLogPath)
         if nil != expandErr {
             return nil, expandErr
         }
@@ -314,17 +342,34 @@ func (instance *GenerateCommand) writeDestinations(
 ) error {
     writer := commandContext.Writer
 
+    if true == options.heartbeatEnabled && TemplateNameK8s == options.template.Name() {
+        _, _ = fmt.Fprintln(writer, "cron: heartbeat options are set but the k8s template ignores them; no liveness CronJob will be generated — model cluster liveness with a dedicated scheduled command instead")
+    }
+
+    /* @info the k8s namespace is a single global option, so resource-name collisions span every destination file; catch them across the whole set before any manifest is rendered or written */
+    if TemplateNameK8s == options.template.Name() {
+        if uniqueErr := ensureK8sNamesUnique(entries); nil != uniqueErr {
+            return uniqueErr
+        }
+    }
+
     entriesByDestination, groupErr := groupEntriesByDestination(entries, options.outputPath)
     if nil != groupErr {
         return groupErr
     }
 
-    if 0 == len(entriesByDestination) && false == options.heartbeatEnabled {
-        _, _ = fmt.Fprintln(writer, "the cron Configuration is empty and no --heartbeat-path or --heartbeat-command was provided; nothing to write")
-        return nil
-    }
+    if 0 == len(entriesByDestination) {
+        if false == options.heartbeatEnabled {
+            _, _ = fmt.Fprintln(writer, "the cron Configuration is empty and no --heartbeat-path or --heartbeat-command was provided; nothing to write")
+            return nil
+        }
 
-    if 0 == len(entriesByDestination) && true == options.heartbeatEnabled {
+        /* @info heartbeat is crontab-only; the k8s template never synthesizes a heartbeat CronJob, so an empty Configuration leaves nothing to render */
+        if TemplateNameK8s == options.template.Name() {
+            _, _ = fmt.Fprintln(writer, "the cron Configuration is empty and the k8s template does not emit heartbeat CronJobs; nothing to write")
+            return nil
+        }
+
         entriesByDestination[options.outputPath] = nil
     }
 
@@ -334,8 +379,14 @@ func (instance *GenerateCommand) writeDestinations(
     }
     sort.Strings(destinationPaths)
 
+    /* @info the k8s template ignores heartbeat options entirely (see the warning above and the crontab-only render); resolving a --heartbeat-destination against the written destinations would hard-fail the command on a setting it just declared ignored, so the requested destinations are dropped for k8s */
+    heartbeatRequested := options.heartbeatRequested
+    if TemplateNameK8s == options.template.Name() {
+        heartbeatRequested = nil
+    }
+
     heartbeatDestinations, heartbeatDestinationsErr := resolveHeartbeatDestinations(
-        options.heartbeatRequested,
+        heartbeatRequested,
         options.outputPath,
         destinationPaths,
     )
@@ -346,7 +397,11 @@ func (instance *GenerateCommand) writeDestinations(
     for _, destination := range destinationPaths {
         destinationEntries := entriesByDestination[destination]
 
-        renderOptions := RenderOptions{}
+        renderOptions := RenderOptions{
+            Image:         options.image,
+            Namespace:     options.namespace,
+            RestartPolicy: options.restartPolicy,
+        }
         if true == options.heartbeatEnabled && true == heartbeatDestinations[destination] {
             renderOptions.HeartbeatUser = options.defaultUserName
             renderOptions.HeartbeatPath = options.heartbeatPath
@@ -378,7 +433,7 @@ func (instance *GenerateCommand) writeDestinations(
         }
 
         if 0 == len(destinationEntries) && true == options.heartbeatEnabled {
-            _, _ = fmt.Fprintf(writer, "wrote heartbeat-only crontab to %s\n", destination)
+            _, _ = fmt.Fprintf(writer, "wrote heartbeat-only file to %s\n", destination)
         } else {
             _, _ = fmt.Fprintf(writer, "wrote %d entries to %s\n", len(destinationEntries), destination)
         }
@@ -391,7 +446,7 @@ func atomicWriteFile(destination string, content []byte, mode os.FileMode) error
     tmpFile, createErr := os.CreateTemp(filepath.Dir(destination), filepath.Base(destination)+".*.tmp")
     if nil != createErr {
         return exception.NewError(
-            "cron: could not create temporary crontab next to destination",
+            "cron: could not create temporary file next to destination",
             exceptioncontract.Context{"destination": destination},
             createErr,
         )
@@ -408,7 +463,7 @@ func atomicWriteFile(destination string, content []byte, mode os.FileMode) error
     if _, writeErr := tmpFile.Write(content); nil != writeErr {
         _ = tmpFile.Close()
         return exception.NewError(
-            "cron: could not write temporary crontab",
+            "cron: could not write temporary file",
             exceptioncontract.Context{"path": tmpPath},
             writeErr,
         )
@@ -417,7 +472,7 @@ func atomicWriteFile(destination string, content []byte, mode os.FileMode) error
     if syncErr := tmpFile.Sync(); nil != syncErr {
         _ = tmpFile.Close()
         return exception.NewError(
-            "cron: could not fsync temporary crontab",
+            "cron: could not fsync temporary file",
             exceptioncontract.Context{"path": tmpPath},
             syncErr,
         )
@@ -425,7 +480,7 @@ func atomicWriteFile(destination string, content []byte, mode os.FileMode) error
 
     if closeErr := tmpFile.Close(); nil != closeErr {
         return exception.NewError(
-            "cron: could not close temporary crontab",
+            "cron: could not close temporary file",
             exceptioncontract.Context{"path": tmpPath},
             closeErr,
         )
@@ -433,7 +488,7 @@ func atomicWriteFile(destination string, content []byte, mode os.FileMode) error
 
     if chmodErr := os.Chmod(tmpPath, mode); nil != chmodErr {
         return exception.NewError(
-            "cron: could not chmod temporary crontab",
+            "cron: could not chmod temporary file",
             exceptioncontract.Context{
                 "path": tmpPath,
                 "mode": fmt.Sprintf("%#o", mode),
@@ -444,7 +499,7 @@ func atomicWriteFile(destination string, content []byte, mode os.FileMode) error
 
     if renameErr := os.Rename(tmpPath, destination); nil != renameErr {
         return exception.NewError(
-            "cron: could not rename temporary crontab over destination",
+            "cron: could not rename temporary file over destination",
             exceptioncontract.Context{
                 "source":      tmpPath,
                 "destination": destination,
@@ -651,6 +706,7 @@ func expandEntriesForCommand(
     binary string,
     defaultUserName string,
     logsDir string,
+    requiresLogPath bool,
 ) ([]Entry, error) {
     user := config.User
     if "" == user {
@@ -664,7 +720,7 @@ func expandEntriesForCommand(
 
     entries := make([]Entry, 0, instances)
     for index := 1; index <= instances; index++ {
-        logPath, logPathErr := resolveEntryLogPath(commandName, config, logsDir, instances, index)
+        logPath, logPathErr := resolveEntryLogPath(commandName, config, logsDir, instances, index, requiresLogPath)
         if nil != logPathErr {
             return nil, logPathErr
         }
@@ -676,6 +732,8 @@ func expandEntriesForCommand(
             Command:         config.Command,
             LogPath:         logPath,
             DestinationFile: config.DestinationFile,
+            InstanceIndex:   index,
+            InstanceCount:   instances,
         }
 
         if 0 == len(config.Command) {
@@ -703,8 +761,14 @@ func resolveEntryLogPath(
     logsDir string,
     instances int,
     index int,
+    requiresLogPath bool,
 ) (string, error) {
     if true == config.LogDisabled {
+        return "", nil
+    }
+
+    /* @info the active template does not redirect output to a log file (k8s), so there is no log path to resolve and no logs-dir to demand */
+    if false == requiresLogPath {
         return "", nil
     }
 

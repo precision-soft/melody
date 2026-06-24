@@ -1,6 +1,7 @@
 package cron
 
 import (
+    "errors"
     "fmt"
     "os"
     "path/filepath"
@@ -22,8 +23,8 @@ func TestNewGenerateCommandIdentity(t *testing.T) {
     }
 
     flags := command.Flags()
-    if 8 != len(flags) {
-        t.Fatalf("expected 8 flags, got %d", len(flags))
+    if 11 != len(flags) {
+        t.Fatalf("expected 11 flags, got %d", len(flags))
     }
 }
 
@@ -1837,7 +1838,7 @@ func TestRunHeartbeatOnlyMessageInStdout(t *testing.T) {
         t.Fatalf("Run returned unexpected error: %v", err)
     }
 
-    if false == strings.Contains(stdout, "heartbeat-only crontab") {
+    if false == strings.Contains(stdout, "heartbeat-only file") {
         t.Fatalf("expected heartbeat-only message in stdout, got: %q", stdout)
     }
 }
@@ -1957,6 +1958,377 @@ func TestRunErrorsWhenTemplateNameUnknown(t *testing.T) {
     }
     if false == strings.Contains(runErr.Error(), "k8s_cronjob") {
         t.Fatalf("expected error to mention requested template name, got: %v", runErr)
+    }
+}
+
+func TestRunRendersK8sTemplateWithImageAndNamespaceFlags(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "cron.yaml")
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("outbox:dispatch", &testSchedule{Minute: "*/5"}),
+    }
+
+    _, runErr := runGenerateCommand(
+        t,
+        commands,
+        []string{
+            "--out", outputPath,
+            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "deploy",
+            "--template", "k8s",
+            "--image", "registry/curatorium:latest",
+            "--namespace", "curatorium",
+            "--restart-policy", "Never",
+        },
+    )
+    if nil != runErr {
+        t.Fatalf("Run returned unexpected error: %v", runErr)
+    }
+
+    body, readErr := os.ReadFile(outputPath)
+    if nil != readErr {
+        t.Fatalf("failed to read output: %v", readErr)
+    }
+
+    content := string(body)
+    expectedFragments := []string{
+        "kind: CronJob",
+        "name: \"outbox-dispatch\"",
+        "namespace: \"curatorium\"",
+        "schedule: \"*/5 * * * *\"",
+        "image: \"registry/curatorium:latest\"",
+        "restartPolicy: \"Never\"",
+        "- \"outbox:dispatch\"",
+    }
+    for _, fragment := range expectedFragments {
+        if false == strings.Contains(content, fragment) {
+            t.Fatalf("expected rendered k8s manifest to contain %q, got:\n%s", fragment, content)
+        }
+    }
+}
+
+func TestRunK8sTemplateRejectsResourceNameCollisionAcrossDestinationFiles(t *testing.T) {
+    /* @info the namespace is one global flag, so two commands that sanitize to the same resource name collide on kubectl apply even when split across distinct destination files; Render only sees one destination, so the CLI must reject the clash across the whole set */
+    tempDir := t.TempDir()
+    defaultOutputPath := filepath.Join(tempDir, "cron.yaml")
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("outbox:dispatch", &testSchedule{Minute: "0"}),
+        newFakeCommandWithSchedule("outbox-dispatch", &testSchedule{
+            Minute:          "0",
+            DestinationFile: "other.yaml",
+        }),
+    }
+
+    _, runErr := runGenerateCommand(
+        t,
+        commands,
+        []string{
+            "--out", defaultOutputPath,
+            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "deploy",
+            "--template", "k8s",
+            "--image", "registry/curatorium:latest",
+        },
+    )
+    if nil == runErr {
+        t.Fatalf("expected an error when two commands map to the same k8s resource name across destination files, got nil")
+    }
+
+    if false == errors.Is(runErr, ErrK8sDuplicateName) {
+        t.Fatalf("expected ErrK8sDuplicateName, got: %v", runErr)
+    }
+
+    if false == strings.Contains(runErr.Error(), "outbox-dispatch") {
+        t.Fatalf("expected the error to name the colliding resource, got: %v", runErr)
+    }
+}
+
+func TestRunK8sTemplateWarnsWhenHeartbeatConfigured(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "cron.yaml")
+    heartbeatPath := filepath.Join(tempDir, "heartbeat.crontab")
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("outbox:dispatch", &testSchedule{Minute: "*/5"}),
+    }
+
+    stdout, runErr := runGenerateCommand(
+        t,
+        commands,
+        []string{
+            "--out", outputPath,
+            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "deploy",
+            "--template", "k8s",
+            "--image", "registry/curatorium:latest",
+            "--heartbeat-path", heartbeatPath,
+        },
+    )
+    if nil != runErr {
+        t.Fatalf("Run returned unexpected error: %v", runErr)
+    }
+
+    if false == strings.Contains(stdout, "heartbeat options are set but the k8s template ignores them") {
+        t.Fatalf("expected a heartbeat-ignored warning for the k8s template, got: %q", stdout)
+    }
+}
+
+func TestRunK8sTemplateIgnoresUnmatchedHeartbeatDestination(t *testing.T) {
+    /* @info the k8s template declares heartbeat options ignored (it never emits a heartbeat CronJob), so a --heartbeat-destination that matches no written destination must not hard-fail the command the way it does for the crontab template */
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "cron.yaml")
+    heartbeatPath := filepath.Join(tempDir, "heartbeat.crontab")
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("outbox:dispatch", &testSchedule{Minute: "*/5"}),
+    }
+
+    stdout, runErr := runGenerateCommand(
+        t,
+        commands,
+        []string{
+            "--out", outputPath,
+            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "deploy",
+            "--template", "k8s",
+            "--image", "registry/curatorium:latest",
+            "--heartbeat-path", heartbeatPath,
+            "--heartbeat-destination", "missing-crontab",
+        },
+    )
+    if nil != runErr {
+        t.Fatalf("k8s template must not fail on an unmatched --heartbeat-destination it declares ignored, got: %v", runErr)
+    }
+
+    if false == strings.Contains(stdout, "heartbeat options are set but the k8s template ignores them") {
+        t.Fatalf("expected the heartbeat-ignored warning for the k8s template, got: %q", stdout)
+    }
+
+    body, readErr := os.ReadFile(outputPath)
+    if nil != readErr {
+        t.Fatalf("expected the k8s manifest to be written, got: %v", readErr)
+    }
+    if false == strings.Contains(string(body), "kind: CronJob") {
+        t.Fatalf("expected a k8s CronJob manifest, got:\n%s", string(body))
+    }
+}
+
+func TestRunK8sTemplateWithHeartbeatAndEmptyConfigurationWritesNothing(t *testing.T) {
+    /* @info heartbeat is crontab-only; with the k8s template an empty Configuration must not synthesize a heartbeat-only destination, so no file is written and the missing image is never demanded */
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "cron.yaml")
+    heartbeatPath := filepath.Join(tempDir, "heartbeat.crontab")
+
+    commands := []clicontract.Command{
+        newFakePlainCommand("debug:router"),
+    }
+
+    stdout, runErr := runGenerateCommand(
+        t,
+        commands,
+        []string{
+            "--out", outputPath,
+            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "deploy",
+            "--template", "k8s",
+            "--heartbeat-path", heartbeatPath,
+        },
+    )
+    if nil != runErr {
+        t.Fatalf("Run returned unexpected error: %v", runErr)
+    }
+
+    if _, statErr := os.Stat(outputPath); false == os.IsNotExist(statErr) {
+        t.Fatalf("expected no file at %s for k8s template with an empty configuration; statErr=%v", outputPath, statErr)
+    }
+
+    if true == strings.Contains(stdout, "crontab") {
+        t.Fatalf("k8s template output must not mention crontab, got: %q", stdout)
+    }
+
+    if false == strings.Contains(stdout, "heartbeat options are set but the k8s template ignores them") {
+        t.Fatalf("expected the heartbeat-ignored warning for the k8s template, got: %q", stdout)
+    }
+
+    if false == strings.Contains(stdout, "nothing to write") {
+        t.Fatalf("expected a 'nothing to write' message for the k8s template with an empty configuration, got: %q", stdout)
+    }
+}
+
+func TestRunCrontabTemplateDoesNotWarnAboutHeartbeat(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+    heartbeatPath := filepath.Join(tempDir, "heartbeat.crontab")
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("outbox:dispatch", &testSchedule{Minute: "*/5"}),
+    }
+
+    stdout, runErr := runGenerateCommand(
+        t,
+        commands,
+        []string{
+            "--out", outputPath,
+            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "deploy",
+            "--heartbeat-path", heartbeatPath,
+        },
+    )
+    if nil != runErr {
+        t.Fatalf("Run returned unexpected error: %v", runErr)
+    }
+
+    if true == strings.Contains(stdout, "the k8s template ignores them") {
+        t.Fatalf("crontab template must not emit the k8s heartbeat warning, got: %q", stdout)
+    }
+}
+
+func TestRunK8sTemplateErrorsWhenImageMissing(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "cron.yaml")
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("outbox:dispatch", &testSchedule{Minute: "*/5"}),
+    }
+
+    _, runErr := runGenerateCommand(
+        t,
+        commands,
+        []string{
+            "--out", outputPath,
+            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "deploy",
+            "--template", "k8s",
+        },
+    )
+    if nil == runErr {
+        t.Fatalf("expected error when k8s template runs without an image, got nil")
+    }
+    if false == strings.Contains(runErr.Error(), "image") {
+        t.Fatalf("expected error to mention the missing image, got: %v", runErr)
+    }
+}
+
+func TestRunK8sTemplateSuffixesNamesForMultiInstanceCommand(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "cron.yaml")
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("outbox:dispatch", &testSchedule{Minute: "*/5", Instances: 2}),
+    }
+
+    _, runErr := runGenerateCommand(
+        t,
+        commands,
+        []string{
+            "--out", outputPath,
+            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "deploy",
+            "--template", "k8s",
+            "--image", "registry/curatorium:latest",
+        },
+    )
+    if nil != runErr {
+        t.Fatalf("Run returned unexpected error for a multi-instance command: %v", runErr)
+    }
+
+    body, readErr := os.ReadFile(outputPath)
+    if nil != readErr {
+        t.Fatalf("failed to read output: %v", readErr)
+    }
+
+    content := string(body)
+    for _, fragment := range []string{"name: \"outbox-dispatch-1\"", "name: \"outbox-dispatch-2\""} {
+        if false == strings.Contains(content, fragment) {
+            t.Fatalf("expected per-instance suffixed CronJob name %q, got:\n%s", fragment, content)
+        }
+    }
+
+    if 2 != strings.Count(content, "kind: CronJob") {
+        t.Fatalf("expected two CronJob documents for a two-instance command, got:\n%s", content)
+    }
+}
+
+func TestRunK8sTemplateWithHeartbeatAndNoUserSucceedsAndWarns(t *testing.T) {
+    /* @info the k8s template ignores the heartbeat, so a heartbeat-configured k8s run with no --user must not fail with ErrHeartbeatUserMissing (a crontab-only requirement); it succeeds and warns that the heartbeat is dropped */
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "cron.yaml")
+    heartbeatPath := filepath.Join(tempDir, "heartbeat.crontab")
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("outbox:dispatch", &testSchedule{Minute: "*/5"}),
+    }
+
+    stdout, runErr := runGenerateCommand(
+        t,
+        commands,
+        []string{
+            "--out", outputPath,
+            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--binary", "/usr/local/bin/fakeapp",
+            "--template", "k8s",
+            "--image", "registry/curatorium:latest",
+            "--heartbeat-path", heartbeatPath,
+        },
+    )
+    if nil != runErr {
+        t.Fatalf("Run returned unexpected error for a heartbeat-configured k8s run without a user: %v", runErr)
+    }
+
+    if true == errors.Is(runErr, ErrHeartbeatUserMissing) {
+        t.Fatalf("k8s ignores the heartbeat; it must not demand a user, got: %v", runErr)
+    }
+
+    if false == strings.Contains(stdout, "heartbeat options are set but the k8s template ignores them") {
+        t.Fatalf("expected the heartbeat-ignored warning for the k8s template, got: %q", stdout)
+    }
+}
+
+func TestRunK8sTemplateSucceedsWithoutLogsDir(t *testing.T) {
+    /* @info the k8s template logs to container stdout and never reads Entry.LogPath, so a k8s run must not inherit the crontab-only logs-dir requirement (ErrNoLogsDir) */
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "cron.yaml")
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("outbox:dispatch", &testSchedule{Minute: "*/5"}),
+    }
+
+    _, runErr := runGenerateCommand(
+        t,
+        commands,
+        []string{
+            "--out", outputPath,
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "deploy",
+            "--template", "k8s",
+            "--image", "registry/curatorium:latest",
+        },
+    )
+    if nil != runErr {
+        t.Fatalf("Run returned unexpected error for a k8s run without --logs-dir: %v", runErr)
+    }
+
+    if true == errors.Is(runErr, ErrNoLogsDir) {
+        t.Fatalf("k8s does not redirect to log files; it must not demand a logs dir, got: %v", runErr)
+    }
+
+    body, readErr := os.ReadFile(outputPath)
+    if nil != readErr {
+        t.Fatalf("failed to read output: %v", readErr)
+    }
+
+    if false == strings.Contains(string(body), "kind: CronJob") {
+        t.Fatalf("expected a CronJob manifest, got:\n%s", string(body))
     }
 }
 

@@ -251,7 +251,7 @@ Accepted values: `default` (the `--out` destination), an absolute path, or a rel
 
 ## Customizing the template
 
-The generator dispatches rendering to a registered `Template` whose `Name()` matches `--template` (or, if unset, the `melody.cron.template` container parameter; default `"crontab"`). The crontab template ships in-tree and is registered automatically. You can plug in your own (Kubernetes CronJob, Supervisor, custom YAML/INI, etc.) without forking the cron integration.
+The generator dispatches rendering to a registered `Template` whose `Name()` matches `--template` (or, if unset, the `melody.cron.template` container parameter; default `"crontab"`). Two templates ship in-tree and are registered automatically — `crontab` and `k8s` (Kubernetes `CronJob` manifests). You can also plug in your own (Supervisor, custom YAML/INI, etc.) without forking the cron integration.
 
 ### `Template` interface
 
@@ -266,7 +266,35 @@ type Template interface {
 
 ### Built-in templates
 
-`cron.BuiltinTemplates()` returns the list of templates shipped with the integration (currently only `*CrontabTemplate{}` under the name `cron.TemplateNameCrontab == "crontab"`). `NewGenerateCommand` iterates this slice on construction, so you never register the built-ins by hand — they are always available even after you add your own.
+`cron.BuiltinTemplates()` returns the list of templates shipped with the integration: `*CrontabTemplate{}` (`cron.TemplateNameCrontab == "crontab"`) and `*K8sTemplate{}` (`cron.TemplateNameK8s == "k8s"`). `NewGenerateCommand` iterates this slice on construction, so you never register the built-ins by hand — they are always available even after you add your own.
+
+### Built-in `k8s` template
+
+`--template=k8s` renders the same `cron.Configuration` as a multi-document YAML stream — one `batch/v1` `CronJob` per scheduled command (`---`-separated) — suitable for `kubectl apply -f`. The same registry drives both the on-VPS crontab and the in-cluster CronJobs.
+
+```bash
+melody:cron:generate \
+    --template=k8s \
+    --image=registry.example.com/myapp:latest \
+    --namespace=production \
+    --restart-policy=OnFailure \
+    --out=generated_conf/cron/cronjobs.yaml
+```
+
+Per `CronJob`:
+
+* `metadata.name` is the command name sanitized to an RFC 1123 DNS label (lowercased; non-alphanumeric runs collapse to `-`; trimmed; capped at 52 octets so the generated job/pod suffixes stay within 63). `outbox:dispatch` → `outbox-dispatch`. Two commands that sanitize to the same name are a collision and fail generation rather than emitting CronJobs that would silently overwrite each other.
+* `spec.schedule` is `Schedule.Expression()` (the same five-field expression the crontab template emits).
+* The container runs the application image's entrypoint with `args: [<command-name>, …]`; the application enters CLI mode from those arguments (the same way the binary dispatches a command on the command line). A per-command `EntryConfig.Command` override instead replaces the entrypoint via the k8s `command:` field.
+* `restartPolicy` defaults to `OnFailure`.
+
+| Flag               | Parameter                        | Notes                                                                   |
+|--------------------|----------------------------------|-------------------------------------------------------------------------|
+| `--image`          | `melody.cron.k8s.image`          | **required** by the `k8s` template; the container image to run          |
+| `--namespace`      | `melody.cron.k8s.namespace`      | optional; omitted from the manifest when empty                          |
+| `--restart-policy` | `melody.cron.k8s.restart_policy` | optional; default `OnFailure`; only `OnFailure` or `Never` are accepted |
+
+These parameters are **not** registered by `RegisterDefaultParameters` (the crontab template needs none of them); set them via the flags or register them yourself. The heartbeat options (`--heartbeat-path` / `--heartbeat-command`) are crontab-only and are ignored by the `k8s` template (which prints a warning when they are set, so the dropped liveness entry is not silent) — model cluster liveness with a dedicated scheduled command instead.
 
 ### Registering a custom template
 

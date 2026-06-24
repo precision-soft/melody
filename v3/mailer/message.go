@@ -78,6 +78,9 @@ func RenderMessage(message mailercontract.Message) ([]byte, error) {
             continue
         }
         if _, structured := structuredIdentifierHeaders[normalizedKey]; true == structured {
+            if identifierErr := validateStructuredIdentifierHeader(key, value); nil != identifierErr {
+                return nil, identifierErr
+            }
             writeHeader(&builder, key, value)
             continue
         }
@@ -90,16 +93,35 @@ func RenderMessage(message mailercontract.Message) ([]byte, error) {
         return []byte(builder.String()), nil
     }
 
+    inlineAttachments, regularAttachments := partitionAttachments(message.Attachments)
+
+    for _, attachment := range inlineAttachments {
+        if contentIdErr := validateInlineContentId(attachment.ContentId); nil != contentIdErr {
+            return nil, contentIdErr
+        }
+    }
+
+    if 0 == len(regularAttachments) {
+        /* @info only inline attachments: the multipart/related part is the whole message body */
+        writeRelatedEntity(&builder, message, inlineAttachments)
+
+        return []byte(builder.String()), nil
+    }
+
     boundary := newBoundary()
     writeHeader(&builder, "Content-Type", "multipart/mixed; boundary=\""+boundary+"\"")
     builder.WriteString(lineBreak)
 
-    if true == hasBody(message) {
+    if true == hasBody(message) || 0 < len(inlineAttachments) {
         builder.WriteString("--" + boundary + lineBreak)
-        writeBodyEntity(&builder, message)
+        if 0 < len(inlineAttachments) {
+            writeRelatedEntity(&builder, message, inlineAttachments)
+        } else {
+            writeBodyEntity(&builder, message)
+        }
     }
 
-    for _, attachment := range message.Attachments {
+    for _, attachment := range regularAttachments {
         builder.WriteString("--" + boundary + lineBreak)
         writeAttachment(&builder, attachment)
     }
@@ -109,8 +131,58 @@ func RenderMessage(message mailercontract.Message) ([]byte, error) {
     return []byte(builder.String()), nil
 }
 
+func partitionAttachments(attachments []mailercontract.Attachment) ([]mailercontract.Attachment, []mailercontract.Attachment) {
+    inline := make([]mailercontract.Attachment, 0, len(attachments))
+    regular := make([]mailercontract.Attachment, 0, len(attachments))
+
+    for _, attachment := range attachments {
+        if "" != attachment.ContentId {
+            inline = append(inline, attachment)
+
+            continue
+        }
+
+        regular = append(regular, attachment)
+    }
+
+    return inline, regular
+}
+
+/* @info writes a multipart/related entity (RFC 2387) wrapping the message body followed by the inline attachments; the Content-Type line doubles as the message header when this entity is the top-level body, or as the part header when nested inside multipart/mixed. The required type parameter mirrors the media type of the root (first) part so it matches what writeBodyEntity actually emits */
+func writeRelatedEntity(builder *strings.Builder, message mailercontract.Message, inlineAttachments []mailercontract.Attachment) {
+    boundary := newBoundary()
+    builder.WriteString("Content-Type: multipart/related; type=\"" + bodyEntityRootType(message) + "\"; boundary=\"" + boundary + "\"" + lineBreak)
+    builder.WriteString(lineBreak)
+
+    builder.WriteString("--" + boundary + lineBreak)
+    writeBodyEntity(builder, message)
+
+    for _, attachment := range inlineAttachments {
+        builder.WriteString("--" + boundary + lineBreak)
+        writeAttachment(builder, attachment)
+    }
+
+    builder.WriteString("--" + boundary + "--" + lineBreak)
+}
+
 func hasBody(message mailercontract.Message) bool {
     return "" != message.Text || "" != message.Html
+}
+
+/* @info the media type of the entity writeBodyEntity emits, used as the multipart/related root type parameter */
+func bodyEntityRootType(message mailercontract.Message) string {
+    hasHtml := "" != message.Html
+    hasText := "" != message.Text
+
+    if true == hasHtml && true == hasText {
+        return "multipart/alternative"
+    }
+
+    if true == hasHtml {
+        return "text/html"
+    }
+
+    return "text/plain"
 }
 
 func writeBodyEntity(builder *strings.Builder, message mailercontract.Message) {
@@ -392,27 +464,95 @@ func writeAttachment(builder *strings.Builder, attachment mailercontract.Attachm
 
     builder.WriteString("Content-Type: " + headerSanitizer.Replace(contentType) + lineBreak)
     builder.WriteString("Content-Transfer-Encoding: base64" + lineBreak)
-    builder.WriteString(dispositionHeaderLine(attachment.Filename))
-    builder.WriteString(lineBreak)
+
+    if "" != attachment.ContentId {
+        writeHeader(builder, "Content-ID", bracketContentId(attachment.ContentId))
+        if "" != attachment.Filename {
+            builder.WriteString(dispositionHeaderLine("inline", attachment.Filename))
+        } else {
+            builder.WriteString("Content-Disposition: inline")
+        }
+        builder.WriteString(lineBreak)
+    } else {
+        builder.WriteString(dispositionHeaderLine("attachment", attachment.Filename))
+        builder.WriteString(lineBreak)
+    }
+
     builder.WriteString(lineBreak)
     builder.WriteString(encodeBase64Lines(attachment.Content))
     builder.WriteString(lineBreak)
 }
 
-func dispositionHeaderLine(filename string) string {
-    plain := "Content-Disposition: attachment; " + filenameParameter(filename)
+/* @important the Message-ID, In-Reply-To, References and Content-ID headers a caller supplies through the Headers map are sequences of msg-id tokens emitted intact (RFC 2047 §5 forbids Q-encoding them). Two corruption channels are rejected here, mirroring validateInlineContentId for inline Content-IDs. First, any control character: writeHeader strips CR and LF but leaves TAB, DEL and the other C0 bytes, which survive into the value and either invalidate it or get re-read as folding whitespace that splits a token on unfold; the only legitimate whitespace is the single space that separates tokens, so every other whitespace/control rune is refused. Second, length: foldHeaderLine wraps at the spaces between tokens, but a single token longer than a continuation line is hard-split mid-token, injecting whitespace that corrupts the identifier on unfold and silently breaks mail threading, so a token too long to fit on a continuation line (one leading space plus the token) is rejected rather than mangled. */
+func validateStructuredIdentifierHeader(name string, value string) error {
+    for _, runeValue := range value {
+        if '\t' == runeValue || '\r' == runeValue || '\n' == runeValue || runeValue < 0x20 || 0x7F == runeValue {
+            return exception.NewError(name+" header contains a control character; a structured identifier header must contain only msg-id tokens separated by single spaces", nil, nil)
+        }
+    }
+
+    for _, token := range strings.Split(value, " ") {
+        if 1+len(token) > maxHardHeaderLineLength {
+            return exception.NewError(name+" header has an identifier token too long to encode on a single header line without corrupting it", nil, nil)
+        }
+    }
+
+    return nil
+}
+
+/* @info a Content-ID is a single msg-id token: it may carry no whitespace or control character (either would make the emitted Content-ID header invalid), and folding it would inject whitespace that corrupts the identifier on unfold (RFC 2047 §5 also forbids Q-encoding it), so an id too long to fit on a single 998-octet header line is rejected rather than silently mangled. A continuation line carries one leading space, so the limit is reached when the bracketed value plus that space exceeds maxHardHeaderLineLength */
+func validateInlineContentId(contentId string) error {
+    for _, runeValue := range contentId {
+        if ' ' == runeValue || '\t' == runeValue || '\r' == runeValue || '\n' == runeValue || runeValue < 0x20 || 0x7F == runeValue {
+            return exception.NewError("mailer inline attachment Content-ID contains whitespace or a control character; a Content-ID must be a single msg-id token", nil, nil)
+        }
+    }
+
+    /* @info angle brackets are valid only as a single matched leading-'<'/trailing-'>' pair the caller may already have applied; an interior, unmatched or empty-bracket value would make bracketContentId emit a malformed Content-ID such as <>x<>, so it is rejected rather than wrapped */
+    unbracketed := contentId
+    if true == strings.HasPrefix(unbracketed, "<") && true == strings.HasSuffix(unbracketed, ">") && 2 <= len(unbracketed) {
+        unbracketed = unbracketed[1 : len(unbracketed)-1]
+    }
+    if "" == unbracketed || true == strings.ContainsAny(unbracketed, "<>") {
+        return exception.NewError("mailer inline attachment Content-ID is empty or contains an unmatched or embedded angle bracket; a Content-ID must be a single msg-id token", nil, nil)
+    }
+
+    if 1+len(bracketContentId(contentId)) > maxHardHeaderLineLength {
+        return exception.NewError("mailer inline attachment Content-ID is too long to encode on a single header line without corrupting the identifier", nil, nil)
+    }
+
+    return nil
+}
+
+/* @info Content-ID values are msg-id tokens and must be wrapped in angle brackets; a caller-supplied value that already carries them is left untouched */
+func bracketContentId(contentId string) string {
+    bracketed := contentId
+
+    if false == strings.HasPrefix(bracketed, "<") {
+        bracketed = "<" + bracketed
+    }
+
+    if false == strings.HasSuffix(bracketed, ">") {
+        bracketed = bracketed + ">"
+    }
+
+    return bracketed
+}
+
+func dispositionHeaderLine(disposition string, filename string) string {
+    plain := "Content-Disposition: " + disposition + "; " + filenameParameter(filename)
     if len(plain) <= maxHardHeaderLineLength {
         return plain
     }
 
-    return foldDispositionFilename(filename)
+    return foldDispositionFilename(disposition, filename)
 }
 
-func foldDispositionFilename(filename string) string {
+func foldDispositionFilename(disposition string, filename string) string {
     encoded := encodeRfc2231(filename)
 
     var builder strings.Builder
-    builder.WriteString("Content-Disposition: attachment;")
+    builder.WriteString("Content-Disposition: " + disposition + ";")
 
     segmentIndex := 0
     remaining := encoded

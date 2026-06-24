@@ -129,7 +129,7 @@ func buildCrontabLine(entry Entry) (string, error) {
         return "", userValidationErr
     }
 
-    if scheduleValidationErr := validateScheduleFields(entry); nil != scheduleValidationErr {
+    if scheduleValidationErr := validateScheduleFields(entry, CrontabForbiddenChars); nil != scheduleValidationErr {
         return "", scheduleValidationErr
     }
 
