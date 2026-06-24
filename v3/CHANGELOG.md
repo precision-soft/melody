@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.8.0] - 2026-06-24 - Mailer Log Transport and Inline Images
+
 ### Added
 
 - `mailer/log_transport.go` — `LogTransport` (`NewLogTransport(logger)`) implements `mailer/contract.Transport` and logs each message's recipients (To, Cc, Bcc), subject, both the text and HTML bodies, and per-attachment metadata (filename, content type, Content-ID, inline flag, and byte size — never the raw content) at info level instead of delivering it, for local development. When constructed with a `nil` logger it resolves the request-scoped logger from the runtime quietly (a runtime without a logger service yields a safe no-op rather than an emergency log on every send), and is a safe no-op when neither is available.
@@ -397,7 +399,9 @@ Lock-step release — no `v3/` changes this cycle. Tag SHA differs from `v3.0.0`
 - `application/application.go`, `application/application_new.go` — application context in constructor; `New(ctx context.Context, ...)` takes a caller-supplied context used for the full application lifecycle
 - `application/contract/service_module.go` — `ServiceModule` simplification; single `Register(container)` method replacing split register/configure lifecycle
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v3.7.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/v3.8.0...HEAD
+
+[v3.8.0]: https://github.com/precision-soft/melody/compare/v3.7.0...v3.8.0
 
 [v3.7.0]: https://github.com/precision-soft/melody/compare/v3.6.0...v3.7.0
 

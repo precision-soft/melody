@@ -379,8 +379,14 @@ func (instance *GenerateCommand) writeDestinations(
     }
     sort.Strings(destinationPaths)
 
+    /* @info the k8s template ignores heartbeat options entirely (see the warning above and the crontab-only render); resolving a --heartbeat-destination against the written destinations would hard-fail the command on a setting it just declared ignored, so the requested destinations are dropped for k8s */
+    heartbeatRequested := options.heartbeatRequested
+    if TemplateNameK8s == options.template.Name() {
+        heartbeatRequested = nil
+    }
+
     heartbeatDestinations, heartbeatDestinationsErr := resolveHeartbeatDestinations(
-        options.heartbeatRequested,
+        heartbeatRequested,
         options.outputPath,
         destinationPaths,
     )

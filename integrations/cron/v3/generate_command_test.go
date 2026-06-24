@@ -2078,6 +2078,47 @@ func TestRunK8sTemplateWarnsWhenHeartbeatConfigured(t *testing.T) {
     }
 }
 
+func TestRunK8sTemplateIgnoresUnmatchedHeartbeatDestination(t *testing.T) {
+    /* @info the k8s template declares heartbeat options ignored (it never emits a heartbeat CronJob), so a --heartbeat-destination that matches no written destination must not hard-fail the command the way it does for the crontab template */
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "cron.yaml")
+    heartbeatPath := filepath.Join(tempDir, "heartbeat.crontab")
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("outbox:dispatch", &testSchedule{Minute: "*/5"}),
+    }
+
+    stdout, runErr := runGenerateCommand(
+        t,
+        commands,
+        []string{
+            "--out", outputPath,
+            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "deploy",
+            "--template", "k8s",
+            "--image", "registry/curatorium:latest",
+            "--heartbeat-path", heartbeatPath,
+            "--heartbeat-destination", "missing-crontab",
+        },
+    )
+    if nil != runErr {
+        t.Fatalf("k8s template must not fail on an unmatched --heartbeat-destination it declares ignored, got: %v", runErr)
+    }
+
+    if false == strings.Contains(stdout, "heartbeat options are set but the k8s template ignores them") {
+        t.Fatalf("expected the heartbeat-ignored warning for the k8s template, got: %q", stdout)
+    }
+
+    body, readErr := os.ReadFile(outputPath)
+    if nil != readErr {
+        t.Fatalf("expected the k8s manifest to be written, got: %v", readErr)
+    }
+    if false == strings.Contains(string(body), "kind: CronJob") {
+        t.Fatalf("expected a k8s CronJob manifest, got:\n%s", string(body))
+    }
+}
+
 func TestRunK8sTemplateWithHeartbeatAndEmptyConfigurationWritesNothing(t *testing.T) {
     /* @info heartbeat is crontab-only; with the k8s template an empty Configuration must not synthesize a heartbeat-only destination, so no file is written and the missing image is never demanded */
     tempDir := t.TempDir()

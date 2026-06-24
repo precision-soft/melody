@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.3.0] - 2026-06-24 - Kubernetes CronJob Template
+
 ### Added
 
 - `v3/template_k8s.go` — built-in `k8s` template (`cron.TemplateNameK8s == "k8s"`, registered automatically by `BuiltinTemplates()`) that renders the same `cron.Configuration` as a multi-document YAML stream of `batch/v1` `CronJob` manifests (one per scheduled command, `---`-separated), selectable with `--template=k8s`. Each manifest derives `metadata.name` from the command name sanitized to an RFC 1123 DNS label (lowercased; non-alphanumeric runs collapse to `-`; trimmed; capped at 52 octets), sets `spec.schedule` to `Schedule.Expression()`, and runs the container image's entrypoint with `args: [<command-name>, …]` so the application enters CLI mode from those arguments (a per-command `EntryConfig.Command` override replaces the entrypoint via the k8s `command:` field instead). A command with `EntryConfig.Instances > 1` emits one `CronJob` per instance, each with a `-<index>` suffix on `metadata.name` (the sanitized base is shortened so the suffixed name stays within the 52-octet cap).
@@ -17,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `v3/validation.go` — the schedule-field whitespace error message is now template-agnostic ("schedule fields must be single tokens" rather than "crontab fields ..."), since `validateScheduleFields` is shared by both the crontab and the k8s template.
+- `v3/generate_command.go` — `--template=k8s` no longer hard-fails on a `--heartbeat-destination` value, which the k8s template explicitly ignores. The heartbeat-destination resolution (which rejects a value that matches none of the written destinations with `cron.ErrHeartbeatDestinationUnmatched`) was run unconditionally, so a k8s run that passed `--heartbeat-destination` could fail on the very setting the preceding warning declared ignored — even though the k8s template never emits a heartbeat CronJob. The requested heartbeat destinations are now dropped for the k8s template, so the generation succeeds with no behavioural change to the rendered manifests.
 
 ## [v3.2.0] - 2026-06-16 - Plug-and-Play Command Registration
 
@@ -38,7 +41,9 @@ Identical to the corresponding v1 release except: module path is `github.com/pre
 
 Identical to the corresponding v1 release except: module path is `github.com/precision-soft/melody/integrations/cron/v3`; dependency pinned to `github.com/precision-soft/melody/v3`. See the [v1 changelog](../CHANGELOG.md#v100---2026-05-16---initial-release--cron-integration) for the full change list.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.2.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.3.0...HEAD
+
+[v3.3.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.2.0...integrations/cron/v3.3.0
 
 [v3.2.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.1.0...integrations/cron/v3.2.0
 
