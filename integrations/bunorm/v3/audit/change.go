@@ -48,7 +48,7 @@ func collectChanges(changes *[]Change, beforeValue reflect.Value, afterValue ref
 
     for index := 0; index < structType.NumField(); index++ {
         field := structType.Field(index)
-        if false == field.IsExported() {
+        if false == field.IsExported() && false == field.Anonymous {
             continue
         }
 

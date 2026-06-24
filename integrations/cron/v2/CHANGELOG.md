@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v2.2.1] - 2026-06-24 - Forbid Control-Character Injection in User and Schedule Fields
+
+### Fixed
+
+- Identical to the corresponding v1 entry (`validation.go` — reject `CrontabForbiddenChars` in the user and schedule fields). See the [v1 changelog](../CHANGELOG.md#v121---2026-06-24---forbid-control-character-injection-in-user-and-schedule-fields) for the full description.
+
 ## [v2.2.0] - 2026-06-16 - Plug-and-Play Module Registration
 
 Identical to the corresponding v1 release except: module path is `github.com/precision-soft/melody/integrations/cron/v2`; dependency pinned to `github.com/precision-soft/melody/v2`. See the [v1 changelog](../CHANGELOG.md#v120---2026-06-15---plug-and-play-module-registration) for the full change list.
@@ -19,7 +25,9 @@ Identical to the corresponding v1 release except: module path is `github.com/pre
 
 Identical to the corresponding v1 release except: module path is `github.com/precision-soft/melody/integrations/cron/v2`; dependency pinned to `github.com/precision-soft/melody/v2`. See the [v1 changelog](../CHANGELOG.md#v100---2026-05-16---initial-release--cron-integration) for the full change list.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.2.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.2.1...HEAD
+
+[v2.2.1]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.2.0...integrations/cron/v2.2.1
 
 [v2.2.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.1.0...integrations/cron/v2.2.0
 

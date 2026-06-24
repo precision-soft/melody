@@ -119,6 +119,92 @@ func TestBuildSchema_ParenthesizedValidationConstraintsEmitted(t *testing.T) {
     }
 }
 
+/* @info character-class and non-empty constraints must reach the spec (CR #66) */
+
+func TestBuildSchema_CharacterClassConstraintsEmitPattern(t *testing.T) {
+    components := map[string]*Schema{}
+    names := map[reflect.Type]string{}
+    visited := map[reflect.Type]bool{}
+
+    stringType := reflect.TypeOf("")
+    requestType := reflect.StructOf([]reflect.StructField{
+        {Name: "Letters", Type: stringType, Tag: `json:"letters" validate:"alpha"`},
+        {Name: "Digits", Type: stringType, Tag: `json:"digits" validate:"numeric"`},
+        {Name: "Mixed", Type: stringType, Tag: `json:"mixed" validate:"alphanumeric"`},
+    })
+
+    schema := buildSchema(requestType, components, names, visited)
+
+    if "^[a-zA-Z]+$" != schema.Properties["letters"].Pattern {
+        t.Fatalf("expected alpha to advertise pattern ^[a-zA-Z]+$ (the validator enforces it), got %q", schema.Properties["letters"].Pattern)
+    }
+    if "^[0-9]+$" != schema.Properties["digits"].Pattern {
+        t.Fatalf("expected numeric to advertise pattern ^[0-9]+$, got %q", schema.Properties["digits"].Pattern)
+    }
+    if "^[a-zA-Z0-9]+$" != schema.Properties["mixed"].Pattern {
+        t.Fatalf("expected alphanumeric to advertise pattern ^[a-zA-Z0-9]+$, got %q", schema.Properties["mixed"].Pattern)
+    }
+}
+
+func TestBuildSchema_NotBlankAndNotEmptyEmitMinLength(t *testing.T) {
+    components := map[string]*Schema{}
+    names := map[reflect.Type]string{}
+    visited := map[reflect.Type]bool{}
+
+    stringType := reflect.TypeOf("")
+    requestType := reflect.StructOf([]reflect.StructField{
+        {Name: "Name", Type: stringType, Tag: `json:"name" validate:"notBlank"`},
+        {Name: "Title", Type: stringType, Tag: `json:"title" validate:"notEmpty"`},
+        {Name: "Code", Type: stringType, Tag: `json:"code" validate:"notBlank,min(value=4)"`},
+    })
+
+    schema := buildSchema(requestType, components, names, visited)
+
+    if name := schema.Properties["name"]; nil == name.MinLength || 1 != *name.MinLength {
+        t.Fatalf("expected notBlank to advertise minLength 1 so the spec rejects \"\" like the validator does, got %v", name.MinLength)
+    }
+    if title := schema.Properties["title"]; nil == title.MinLength || 1 != *title.MinLength {
+        t.Fatalf("expected notEmpty to advertise minLength 1, got %v", title.MinLength)
+    }
+
+    /* @important an explicit min must win over the notBlank floor regardless of tag order */
+    if code := schema.Properties["code"]; nil == code.MinLength || 4 != *code.MinLength {
+        t.Fatalf("expected an explicit min(value=4) to override the notBlank minLength floor, got %v", code.MinLength)
+    }
+}
+
+func TestBuildSchema_NotEmptyEmitsCollectionFloors(t *testing.T) {
+    components := map[string]*Schema{}
+    names := map[reflect.Type]string{}
+    visited := map[reflect.Type]bool{}
+
+    sliceType := reflect.TypeOf([]string{})
+    mapType := reflect.TypeOf(map[string]string{})
+    requestType := reflect.StructOf([]reflect.StructField{
+        {Name: "Tags", Type: sliceType, Tag: `json:"tags" validate:"notEmpty"`},
+        {Name: "Labels", Type: mapType, Tag: `json:"labels" validate:"notEmpty"`},
+        {Name: "Plain", Type: sliceType, Tag: `json:"plain"`},
+    })
+
+    schema := buildSchema(requestType, components, names, visited)
+
+    /* @important the validator rejects an empty slice/map, so the spec must advertise the matching collection floor rather than the string-only minLength */
+    if tags := schema.Properties["tags"]; nil == tags.MinItems || 1 != *tags.MinItems {
+        t.Fatalf("expected notEmpty on an array field to advertise minItems 1, got %v", tags.MinItems)
+    }
+    if tags := schema.Properties["tags"]; nil != tags.MinLength {
+        t.Fatalf("expected notEmpty on an array field not to advertise a string minLength, got %v", tags.MinLength)
+    }
+    if labels := schema.Properties["labels"]; nil == labels.MinProperties || 1 != *labels.MinProperties {
+        t.Fatalf("expected notEmpty on a map field to advertise minProperties 1, got %v", labels.MinProperties)
+    }
+
+    /* @important an untagged collection keeps no floor, proving the minItems comes from notEmpty and not from the array shape itself */
+    if plain := schema.Properties["plain"]; nil != plain.MinItems {
+        t.Fatalf("expected an untagged array field to advertise no minItems, got %v", plain.MinItems)
+    }
+}
+
 func TestBuildSchema_RegexCharacterClassBracketPreserved(t *testing.T) {
     components := map[string]*Schema{}
     names := map[reflect.Type]string{}
@@ -489,5 +575,75 @@ func TestApplyValidation_ValuedConstraintsStillHonourTheirValue(t *testing.T) {
     applyValidation(greaterThanSchema, "greaterThan(value=5)")
     if nil == greaterThanSchema.Minimum || 5 != *greaterThanSchema.Minimum {
         t.Fatalf("expected greaterThan(value=5) to advertise minimum 5, got %v", greaterThanSchema.Minimum)
+    }
+}
+/* @info malformed min/max bound must mirror the validator default (CR #64) */
+
+type malformedBoundRequestCR64 struct {
+    Name string `json:"name" validate:"max=abc"`
+    Code string `json:"code" validate:"min=xyz"`
+}
+
+func TestBuildSchema_MalformedMinMaxBoundMirrorsValidatorDefault(t *testing.T) {
+    components := map[string]*Schema{}
+    buildSchema(reflect.TypeOf(malformedBoundRequestCR64{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    schema := components["malformedBoundRequestCR64"]
+    if nil == schema {
+        t.Fatalf("expected the request schema to be registered in components")
+    }
+
+    name := schema.Properties["name"]
+    if nil == name || nil == name.MaxLength || 100 != *name.MaxLength {
+        t.Fatalf("expected an unparseable max value to advertise the validator default maxLength 100, got: %+v", name)
+    }
+
+    code := schema.Properties["code"]
+    if nil == code || nil == code.MinLength || 0 != *code.MinLength {
+        t.Fatalf("expected an unparseable min value to advertise the validator default minLength 0, got: %+v", code)
+    }
+}
+
+type malformedNumericBoundRequestCR65 struct {
+    Floor   int `json:"floor" validate:"greaterThan=abc"`
+    Ceiling int `json:"ceiling" validate:"lessThan=xyz"`
+}
+
+func TestBuildSchema_MalformedGreaterLessThanBoundMirrorsValidatorDefault(t *testing.T) {
+    components := map[string]*Schema{}
+    buildSchema(reflect.TypeOf(malformedNumericBoundRequestCR65{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    schema := components["malformedNumericBoundRequestCR65"]
+    if nil == schema {
+        t.Fatalf("expected the request schema to be registered in components")
+    }
+
+    floor := schema.Properties["floor"]
+    if nil == floor || nil == floor.Minimum || 0 != *floor.Minimum || nil == floor.ExclusiveMinimum || false == *floor.ExclusiveMinimum {
+        t.Fatalf("expected an unparseable greaterThan value to advertise the validator default exclusive minimum 0, got: %+v", floor)
+    }
+
+    ceiling := schema.Properties["ceiling"]
+    if nil == ceiling || nil == ceiling.Maximum || 0 != *ceiling.Maximum || nil == ceiling.ExclusiveMaximum || false == *ceiling.ExclusiveMaximum {
+        t.Fatalf("expected an unparseable lessThan value to advertise the validator default exclusive maximum 0, got: %+v", ceiling)
+    }
+}
+
+type byteEmailRequestCR65 struct {
+    Blob []byte `json:"blob" validate:"email"`
+}
+
+func TestBuildSchema_EmailDoesNotClobberStructuralByteFormat(t *testing.T) {
+    components := map[string]*Schema{}
+    buildSchema(reflect.TypeOf(byteEmailRequestCR65{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    schema := components["byteEmailRequestCR65"]
+    if nil == schema {
+        t.Fatalf("expected the request schema to be registered in components")
+    }
+
+    blob := schema.Properties["blob"]
+    if nil == blob || "string" != blob.Type || "byte" != blob.Format {
+        t.Fatalf("expected a []byte field to keep format byte even with validate:email, got: %+v", blob)
     }
 }

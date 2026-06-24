@@ -16,14 +16,19 @@ type validationRule struct {
 func splitByTopLevelComma(valueString string) []string {
     var parts []string
 
+    bracketsBalanced := hasBalancedBrackets(valueString)
+
     current := strings.Builder{}
     parenDepth := 0
+    curlyDepth := 0
     wasEscaped := false
+    classScanner := charClassScanner{}
 
     for _, character := range valueString {
         if true == wasEscaped {
             current.WriteRune(character)
             wasEscaped = false
+            classScanner.noteEscaped()
             continue
         }
 
@@ -33,22 +38,43 @@ func splitByTopLevelComma(valueString string) []string {
             continue
         }
 
-        if '(' == character {
-            parenDepth++
-            current.WriteRune(character)
-            continue
-        }
-
-        if ')' == character {
-            if 0 < parenDepth {
-                parenDepth--
+        if true == bracketsBalanced {
+            if true == classScanner.step(character) {
+                current.WriteRune(character)
+                continue
             }
-            current.WriteRune(character)
-            continue
+
+            if '(' == character {
+                parenDepth++
+                current.WriteRune(character)
+                continue
+            }
+
+            if ')' == character {
+                if 0 < parenDepth {
+                    parenDepth--
+                }
+                current.WriteRune(character)
+                continue
+            }
+
+            if '{' == character {
+                curlyDepth++
+                current.WriteRune(character)
+                continue
+            }
+
+            if '}' == character {
+                if 0 < curlyDepth {
+                    curlyDepth--
+                }
+                current.WriteRune(character)
+                continue
+            }
         }
 
         if ',' == character {
-            if 0 == parenDepth {
+            if 0 == parenDepth && 0 == curlyDepth {
                 parts = append(parts, current.String())
                 current.Reset()
                 continue

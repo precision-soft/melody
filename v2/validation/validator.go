@@ -226,6 +226,9 @@ func (instance *Validator) createConstraintWithParams(name string, params map[st
         if patternString, exists := params["pattern"]; true == exists {
             return NewRegex(patternString)
         }
+        if patternString, exists := params["value"]; true == exists {
+            return NewRegex(patternString)
+        }
         return NewRegex(".*")
 
     case ConstraintGreaterThan:

@@ -6,6 +6,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/exception"
+    "github.com/precision-soft/melody/internal"
 )
 
 func NewInMemoryStorage() *InMemoryStorage {
@@ -76,7 +77,7 @@ func (instance *InMemoryStorage) Load(sessionId string) (map[string]any, bool, e
         return nil, false, nil
     }
 
-    result := copyAnyMap(entry.data)
+    result := internal.CopyAnyMap(entry.data)
     instance.mutex.RUnlock()
 
     return result, true, nil
@@ -87,7 +88,7 @@ func (instance *InMemoryStorage) Save(sessionId string, data map[string]any, ttl
         return exception.NewError("session id is required in save session", nil, nil)
     }
 
-    copyValue := copyAnyMap(data)
+    copyValue := internal.CopyAnyMap(data)
 
     var expiresAt *time.Time
     if 0 < ttl {

@@ -168,7 +168,7 @@ func TestErrorsIsErrFieldContainsWhitespaceFromSchedule(t *testing.T) {
         Schedule: &Schedule{Minute: "0 5"},
     }
 
-    err := validateScheduleFields(entry)
+    err := validateScheduleFields(entry, CrontabForbiddenChars)
     if nil == err {
         t.Fatalf("expected error when schedule field contains whitespace, got nil")
     }

@@ -1,9 +1,20 @@
 package cron
 
 import (
+    "errors"
     "strings"
     "testing"
 )
+
+func TestValidateUserFieldRejectsForbiddenCharacter(t *testing.T) {
+    if false == errors.Is(validateUserField("user", "svc%role"), ErrForbiddenCharacter) {
+        t.Fatalf("expected ErrForbiddenCharacter for a user token containing a crontab line-continuation %%")
+    }
+
+    if nil != validateUserField("user", "deploy") {
+        t.Fatalf("expected a normal user token to validate")
+    }
+}
 
 func TestValidateNoForbiddenCharsRejectsForbiddenChar(t *testing.T) {
     err := ValidateNoForbiddenChars([]string{"clean", "with%percent"}, CrontabForbiddenChars, "test context")

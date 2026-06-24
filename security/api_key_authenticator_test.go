@@ -5,6 +5,16 @@ import (
     "testing"
 )
 
+func TestNewApiKeyHeaderAuthenticator_EmptyExpectedValuePanics(t *testing.T) {
+    defer func() {
+        if nil == recover() {
+            t.Fatalf("expected panic when the expected api key is empty (would never authenticate)")
+        }
+    }()
+
+    _ = NewApiKeyHeaderAuthenticator("X-Api-Key", "", "u1", []string{"ROLE_API"})
+}
+
 func TestApiKeyHeaderAuthenticator_SupportsReturnsFalseWhenHeaderMissing(t *testing.T) {
     auth := NewApiKeyHeaderAuthenticator("X-Api-Key", "expected", "u1", []string{"ROLE_API"})
 

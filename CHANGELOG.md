@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.14.1] - 2026-06-24 - Cross-Version Security and Correctness Back-ports
+
+### Fixed
+
+- `security/config/access_control_builder.go` — `AllowAnonymous` matched its path prefix with a plain string prefix, so `AllowAnonymous("/api/public")` also opened sibling paths that merely share the string prefix (`/api/public-data`, `/api/publicXYZ/secret`) to unauthenticated access. It now builds the public-access rule with `NewAccessControlRuleWithSegmentPrefix`, matching only on a path-segment boundary (the declared prefix itself and its children). Ported from the `v3` fix.
+- `security/api_key_authenticator.go` — `NewApiKeyHeaderAuthenticator` validated only the header name; an empty expected value constructed successfully even though it can never authenticate (a non-empty header never `ConstantTimeCompare`-equals `""`), a defensive gap relative to the sibling `ApiKeyHeaderRule`. It now panics on an empty expected value as well. Ported from the `v3` fix.
+- `session/file_storage.go`, `session/in_memory_storage.go`, `internal/copy.go` — the session deep-copy recursed only into `map[string]any` and `[]any`, so any other typed collection stored in a session (e.g. `[]string`, `map[string]int`, `[][]string`) was copied by reference and could be mutated across loads/saves, leaking state between requests. The copy now lives in `internal.CopyAnyMap`/`CopyAnySlice` and deep-copies typed slices and maps reflectively. Ported from the `v3` fix.
+- `validation/validator.go` — the `regex=<pattern>` shorthand form stores the pattern under the `value` key, but `createConstraintWithParams` only consulted the `pattern` key and otherwise fell back to `NewRegex(".*")`, which matches anything — a fail-open validation bypass for every shorthand regex rule. It now also honors the `value` key. Ported from the `v3` fix.
+- `validation/validation_rule.go` — `splitByTopLevelComma` tracked only parenthesis depth, so a top-level comma inside a regex character class (`regex=^[a,b]$`) or quantifier (`regex=^a{1,2}$`) was mistaken for a rule separator, turning a valid tag into a broken regex plus a bogus "unknown validation rule". It now also tracks character-class and curly-brace state, matching the parenthesized form. Ported from the `v3` fix.
+- `container/container.go` — `OverrideProtectedInstance` wrote the overridden value into the by-type instance map even for a service registered `WithoutTypeRegistration()`, creating a phantom type alias that caused a non-comparable value-type service with a value-receiver `Close` to be closed twice at shutdown. The by-type write is now gated on the type actually being registered. Fixed in lockstep with `v3`.
+- `container/container_close.go` — `Close` still used the older per-node-key dependency/dedup algorithm that never collapsed the two node keys pointing at the same instance (a type-registered service lives under both `service:<name>` and `type:<T>`). This closed a non-comparable value-type service twice, and closed a type-registered dependency before the named service that depends on it by type (a dependent-after-dependency ordering violation at shutdown). It now uses the representative/alias-collapse algorithm already present in `v2`/`v3`. Ported from the `v2`/`v3` fix.
+- `event/event_dispatcher_adapter.go` — `RegisteredEvents` sorted the map-owned listener slice in place while holding only a read lock, so two concurrent callers raced on the same backing array (a data race, with possible slice corruption or a sort panic). It now sorts a per-call copy. Ported from the `v2`/`v3` fix.
+- `http/request_body.go` — `BindJson` reported an over-limit body as `400 Bad Request` instead of `413 Request Entity Too Large`: the kernel's `MaxBytesReader` returns its error before the local `LimitReader` cap is reached, so the oversize branch never fired on the normal request path. It now detects `*http.MaxBytesError` and returns `413`. Fixed in lockstep with `v2`/`v3`.
+- `config/configuration.go` — `RegisterRuntime` performed an unguarded check-then-write on the shared `parameters` map, so two goroutines registering runtime parameters concurrently (or one registering while `Names()`/`Parameters()` iterated the map) raced on the map and could trigger Go's fatal "concurrent map writes". The read-modify-write is now serialized with a `sync.Mutex`, matching the `v3` field. Ported from the `v3` fix.
+- `validation/constraint_greater_than.go` — the non-numeric fallback of `GreaterThan.Validate` reported `"value must be an integer"`, but the constraint accepts integer, unsigned, and floating-point values, so the message misled callers passing a valid float. It now reports `"value must be numeric"`, matching the `v3` wording. Ported from the `v3` fix.
+
 ## [v1.14.0] - 2026-06-16 - Configurable Transport & Shutdown Tunables + v3 Security and Correctness Back-ports
 
 ### Security
@@ -413,7 +429,9 @@ Lock-step release — no `v1/` changes this cycle. Tag published to keep the cor
 - `session/` — session management with file-based and in-memory storage backends
 - `validation/` — validation framework with `greaterThan`, `notEmpty`, `notBlank`, `alpha`, `alphanumeric`, `email`, `numeric`, `regex`, `minLength`, `maxLength` constraints
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v1.14.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/v1.14.1...HEAD
+
+[v1.14.1]: https://github.com/precision-soft/melody/compare/v1.14.0...v1.14.1
 
 [v1.14.0]: https://github.com/precision-soft/melody/compare/v1.13.0...v1.14.0
 

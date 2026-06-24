@@ -145,7 +145,7 @@ func TestGreaterThan_StringValue_ReturnsTypeError(t *testing.T) {
         t.Fatalf("expected error for unsupported string type")
     }
 
-    if "value must be an integer" != validationError.Message() {
+    if "value must be numeric" != validationError.Message() {
         t.Fatalf("unexpected message: %s", validationError.Message())
     }
 }

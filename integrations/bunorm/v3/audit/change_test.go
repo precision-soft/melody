@@ -163,6 +163,37 @@ func TestChangeSet_CapturesPromotedEmbeddedStructFields(t *testing.T) {
     }
 }
 
+type unexportedEmbed struct {
+    Status string `bun:"status"`
+    Secret string `audit:"redact" bun:"secret"`
+}
+
+type unexportedEmbedRow struct {
+    bun.BaseModel `bun:"table:unexported_embed_rows"`
+    unexportedEmbed
+    Id int64 `bun:"id,pk"`
+}
+
+func TestChangeSet_CapturesFieldsPromotedFromUnexportedTypedEmbed(t *testing.T) {
+    before := unexportedEmbedRow{unexportedEmbed: unexportedEmbed{Status: "open", Secret: "old-secret"}, Id: 1}
+    after := unexportedEmbedRow{unexportedEmbed: unexportedEmbed{Status: "closed", Secret: "new-secret"}, Id: 1}
+
+    changes := ChangeSet(before, after)
+
+    statusChange, found := findChange(changes, "status")
+    if false == found || "open" != statusChange.Old || "closed" != statusChange.New {
+        t.Fatalf("expected the status field promoted from an unexported-typed embed to be captured: %+v", changes)
+    }
+
+    secretChange, found := findChange(changes, "secret")
+    if false == found {
+        t.Fatalf("expected the redacted secret field promoted from an unexported-typed embed to be captured: %+v", changes)
+    }
+    if "old-secret" == secretChange.Old || "new-secret" == secretChange.New {
+        t.Fatalf("expected the redact-tagged embedded field value to be redacted: %+v", secretChange)
+    }
+}
+
 func TestChangeSet_RedactsTaggedAndEncryptedFields(t *testing.T) {
     before := account{Id: 1, Email: "a@example.com", ApiKey: "old-key", Password: "old-secret", LookupEmail: "old@example.com"}
     after := account{Id: 1, Email: "b@example.com", ApiKey: "new-key", Password: "new-secret", LookupEmail: "new@example.com"}

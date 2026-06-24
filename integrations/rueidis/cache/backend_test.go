@@ -5,6 +5,8 @@ import (
     "reflect"
     "testing"
     "time"
+
+    "github.com/redis/rueidis"
 )
 
 func reflectFieldNames(value any) []string {
@@ -144,6 +146,57 @@ func TestEscapeRedisGlobMeta(t *testing.T) {
             result := escapeRedisGlobMeta(testCase.input)
             if testCase.expected != result {
                 t.Fatalf("escapeRedisGlobMeta(%q) = %q, want %q (an unescaped glob metacharacter in the literal prefix makes SCAN MATCH miss or over-match keys)", testCase.input, result, testCase.expected)
+            }
+        })
+    }
+}
+
+/* @info backend close must not close the caller-owned client (CR #66 back-port from v2/v3) */
+
+type closeTrackingClientCR66 struct {
+    rueidis.Client
+    closed bool
+}
+
+func (instance *closeTrackingClientCR66) Close() {
+    instance.closed = true
+}
+
+func TestBackendCloseDoesNotCloseCallerOwnedClient(t *testing.T) {
+    client := &closeTrackingClientCR66{}
+
+    backend, backendErr := NewBackend(client, nil, "", 0, 0)
+    if nil != backendErr {
+        t.Fatalf("NewBackend returned an error: %v", backendErr)
+    }
+
+    if closeErr := backend.Close(); nil != closeErr {
+        t.Fatalf("Backend.Close returned an error: %v", closeErr)
+    }
+
+    if true == client.closed {
+        t.Fatalf("Backend.Close closed the caller-owned rueidis client; the client lifecycle is owned by the provider, so the backend closing it too double-closes the shared client at shutdown")
+    }
+}
+
+func TestFloorPositiveExpiry(t *testing.T) {
+    cases := []struct {
+        name     string
+        ttl      time.Duration
+        expected time.Duration
+    }{
+        {name: "zero stays zero (no expiry)", ttl: 0, expected: 0},
+        {name: "negative stays negative (no expiry)", ttl: -5 * time.Second, expected: -5 * time.Second},
+        {name: "sub-millisecond floors to one millisecond", ttl: 500 * time.Microsecond, expected: time.Millisecond},
+        {name: "one nanosecond floors to one millisecond", ttl: time.Nanosecond, expected: time.Millisecond},
+        {name: "exactly one millisecond is unchanged", ttl: time.Millisecond, expected: time.Millisecond},
+        {name: "above one millisecond is unchanged", ttl: 1500 * time.Millisecond, expected: 1500 * time.Millisecond},
+    }
+
+    for _, testCase := range cases {
+        t.Run(testCase.name, func(t *testing.T) {
+            if floored := floorPositiveExpiry(testCase.ttl); testCase.expected != floored {
+                t.Fatalf("floorPositiveExpiry(%v) = %v, expected %v", testCase.ttl, floored, testCase.expected)
             }
         })
     }

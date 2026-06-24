@@ -11,8 +11,9 @@ const (
     StampNameSent       = "sent"
     StampNameReceived   = "received"
     StampNameHandled    = "handled"
-    StampNameRedelivery = "redelivery"
-    StampNameDelay      = "delay"
+    StampNameRedelivery       = "redelivery"
+    StampNameDelay            = "delay"
+    StampNameDeadLetterAttempt = "dead_letter_attempt"
 )
 
 type BusNameStamp struct {
@@ -63,8 +64,25 @@ func (instance DelayStamp) StampName() string {
     return StampNameDelay
 }
 
+type DeadLetterAttemptStamp struct {
+    Count int
+}
+
+func (instance DeadLetterAttemptStamp) StampName() string {
+    return StampNameDeadLetterAttempt
+}
+
 func RedeliveryCount(envelopeInstance messagebuscontract.Envelope) int {
     stamp, found := LastStampOfType[RedeliveryStamp](envelopeInstance)
+    if false == found {
+        return 0
+    }
+
+    return stamp.Count
+}
+
+func DeadLetterAttemptCount(envelopeInstance messagebuscontract.Envelope) int {
+    stamp, found := LastStampOfType[DeadLetterAttemptStamp](envelopeInstance)
     if false == found {
         return 0
     }

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.8.1] - 2026-06-24 - OpenAPI Spec Fidelity, Container Close, HTTP Status, Atomic Local Storage, and Message-Bus Dead-Letter Bound
+
+### Added
+
+- `messagebus/consume_command.go`, `messagebus/stamp.go` — `RetryPolicy.MaxDeadLetterAttempts` bounds how many times an exhausted message is requeued to the source after the configured `FailureTransport.Send` itself fails. When both the handler and the failure transport are down, the previous behavior requeued the exhausted message to the source indefinitely (throttled by `failureRequeueDelay`), because the requeued envelope kept its `RedeliveryStamp{Count: MaxRetries}` and re-entered the exhausted branch on every redelivery — an infinite loop for the duration of the dual outage. The default (`0`) preserves that no-loss behavior; a positive value gives up after that many failed dead-letter routings and `Nack`s without requeue so a transport-native dead-letter (e.g. the AMQP DLX) can claim the message instead. A new `DeadLetterAttemptStamp`/`DeadLetterAttemptCount` track the attempts, mirroring `RedeliveryStamp`/`RedeliveryCount`.
+
+### Fixed
+
+- `container/container.go` — `OverrideProtectedInstance` unconditionally wrote the overridden value into the by-type instance map even for a service registered `WithoutTypeRegistration()`, creating a phantom type alias. At shutdown a non-comparable value-type service (a struct with a slice/map field and a value-receiver `Close`) was then enumerated under both its name node and the phantom type node, and de-duplication could not collapse them, so `Close()` ran twice. The by-type write is now gated on the type actually being registered.
+- `openapi/schema.go` — a `min`/`max` validation tag carrying a non-numeric value (e.g. `validate:"max=abc"`) is enforced by the validator with its default bound (`max` → 100, `min` → 0), but the generated OpenAPI schema omitted the bound entirely, so a client trusting the spec could send a value the server then rejects. `applyValidation` now advertises the same default the validator falls back to.
+- `openapi/schema.go` — a `greaterThan`/`lessThan` validation tag carrying a non-numeric value (e.g. `validate:"greaterThan=abc"`) is enforced by the validator with its default bound (`> 0` / `< 0`), but `applyValidation` emitted no `minimum`/`maximum` for the parse-failure case, under-advertising the enforced constraint (the same fix class already applied to `min`/`max`). It now advertises the validator's default exclusive bound.
+- `openapi/schema.go` — the `email` validation tag overwrote any structural `format` already present on a string schema, so a `[]byte` field (rendered as `format: byte`) tagged `validate:"email"` became `format: email` — advertising an email constraint the validator never enforces on a non-string value and losing the `byte` marker. `applyValidation` now only sets `format: email` when the format slot is empty.
+- `openapi/schema.go` — the `alpha`, `numeric`, and `alphanumeric` validation tags are enforced by the validator with anchored patterns (`^[a-zA-Z]+$` / `^[0-9]+$` / `^[a-zA-Z0-9]+$`), but `applyValidation` emitted no `pattern`, so a `validate:"numeric"` string rendered as a bare `{"type":"string"}` that a client believes accepts any text the server then rejects. It now advertises the same anchored pattern the validator enforces.
+- `openapi/schema.go` — the `notBlank`/`notEmpty` validation tags were mapped only to the OpenAPI `required` list, but `required` means the key is present, not that its value is non-empty, so a payload `{"name": ""}` satisfied the spec yet the validator rejected it. A string field carrying either tag now also advertises `minLength: 1` (an explicit `min` still wins, in either tag order). `notBlank` additionally rejects a whitespace-only value, which `minLength` cannot express.
+- `openapi/schema.go`, `openapi/document.go` — the `notEmpty` validation tag also rejects an empty array, slice, or map (`NotEmpty.Validate` checks `Len() == 0` for those kinds), but `applyValidation` advertised a floor only for the string case, so a `[]string`/map field tagged `validate:"notEmpty"` (rendered as `type: array` / `type: object`) carried no minimum and a client trusting the spec could send `[]`/`{}` and then be rejected by the validator — the same advertise-vs-enforce gap the string fix closed. `notEmpty` now advertises `minItems: 1` on an array schema and `minProperties: 1` on a map schema (an object with `additionalProperties`), in addition to the existing `minLength: 1` on a string; a new `Schema.MinProperties` field carries the object floor. A struct-typed object is left untouched (`notEmpty` does not apply to a struct, and `minProperties` would mis-advertise its fixed property set), and `notBlank` remains string-only.
+- `storage/local.go` — `LocalStorage.Put` opened the target with `O_TRUNC` and, on a mid-stream reader error or size mismatch, removed it — so a failed overwrite destroyed or truncated the previously stored object (diverging from the atomic `awss3` backend that shares the `storagecontract.Storage` contract). `Put` now writes to a uniquely named temporary object inside the pinned `os.Root`, `Sync`s and closes it, then atomically renames it over the key; a failure only removes the temporary, never the live object. An existing symlink leaf is still rejected (the rename never traverses it, but the no-symlink contract is kept explicit).
+- `http/request_body.go` — `BindJson` reported an over-limit body as `400 Bad Request` instead of `413 Request Entity Too Large`: the kernel's `MaxBytesReader` returns its error before the local `LimitReader` cap is reached, so the oversize branch never fired on the normal request path. It now detects `*http.MaxBytesError` and returns `413`. Fixed in lockstep with `v1`/`v2`.
+
 ## [v3.8.0] - 2026-06-24 - Mailer Log Transport and Inline Images
 
 ### Added
@@ -399,7 +417,9 @@ Lock-step release — no `v3/` changes this cycle. Tag SHA differs from `v3.0.0`
 - `application/application.go`, `application/application_new.go` — application context in constructor; `New(ctx context.Context, ...)` takes a caller-supplied context used for the full application lifecycle
 - `application/contract/service_module.go` — `ServiceModule` simplification; single `Register(container)` method replacing split register/configure lifecycle
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v3.8.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/v3.8.1...HEAD
+
+[v3.8.1]: https://github.com/precision-soft/melody/compare/v3.8.0...v3.8.1
 
 [v3.8.0]: https://github.com/precision-soft/melody/compare/v3.7.0...v3.8.0
 

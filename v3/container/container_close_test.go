@@ -516,3 +516,53 @@ func TestContainer_Close_ClosesDiamondDependencyInDeterministicOrder(t *testing.
         }
     }
 }
+/* @info OverrideProtectedInstance on a WithoutTypeRegistration value service must close once (CR #64) */
+
+type overrideValueCloserCR64 struct {
+    counter *int
+    lock    *sync.Mutex
+    tags    []string
+}
+
+func (instance overrideValueCloserCR64) Close() error {
+    instance.lock.Lock()
+    defer instance.lock.Unlock()
+
+    *instance.counter++
+
+    return nil
+}
+
+func TestContainer_Close_OverrideProtectedInstanceWithoutTypeRegistrationClosesOnce(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var lock sync.Mutex
+    count := 0
+
+    MustRegister[overrideValueCloserCR64](
+        serviceContainer,
+        "override.no.type.value.closer",
+        func(resolver containercontract.Resolver) (overrideValueCloserCR64, error) {
+            return overrideValueCloserCR64{counter: &count, lock: &lock, tags: []string{"a", "b"}}, nil
+        },
+        WithoutTypeRegistration(),
+    )
+
+    if overrideErr := serviceContainer.OverrideProtectedInstance(
+        "override.no.type.value.closer",
+        overrideValueCloserCR64{counter: &count, lock: &lock, tags: []string{"x", "y"}},
+    ); nil != overrideErr {
+        t.Fatalf("unexpected override error: %v", overrideErr)
+    }
+
+    if err := serviceContainer.Close(); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    lock.Lock()
+    defer lock.Unlock()
+
+    if 1 != count {
+        t.Fatalf("expected overridden non-type-registered value-type service Close to be called once, got %d", count)
+    }
+}

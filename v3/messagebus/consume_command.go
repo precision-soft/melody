@@ -30,6 +30,8 @@ type RetryPolicy struct {
     FailureTransport    messagebuscontract.Transport
     MaxDelay            time.Duration
     FailureRequeueDelay time.Duration
+    /* @important bound on how many times an exhausted message is requeued to the source after the FailureTransport itself rejects it; 0 keeps the default unbounded, no-loss behavior (requeue until the failure transport recovers), while a positive value gives up after that many failed dead-letter routings and nacks without requeue so a transport-native dead-letter (e.g. the AMQP DLX) can claim it instead of looping forever while both the handler and the failure transport are down */
+    MaxDeadLetterAttempts int
 }
 
 func NewConsumeCommand(
@@ -54,6 +56,10 @@ func NewConsumeCommandWithRetry(
 
     if 0 >= retryPolicy.FailureRequeueDelay {
         retryPolicy.FailureRequeueDelay = defaultFailureRequeueDelay
+    }
+
+    if 0 > retryPolicy.MaxDeadLetterAttempts {
+        retryPolicy.MaxDeadLetterAttempts = 0
     }
 
     return &ConsumeCommand{
@@ -249,7 +255,20 @@ func (instance *ConsumeCommand) consume(
         if sendErr := instance.retryPolicy.FailureTransport.Send(runtimeInstance, envelopeInstance); nil != sendErr {
             instance.logError(runtimeInstance, "could not route the exhausted message to the failure transport", sendErr)
 
-            requeued := envelopeInstance.WithStamp(DelayStamp{Delay: instance.failureRequeueDelay()})
+            deadLetterAttempts := DeadLetterAttemptCount(envelopeInstance)
+            if 0 < instance.retryPolicy.MaxDeadLetterAttempts && deadLetterAttempts+1 >= instance.retryPolicy.MaxDeadLetterAttempts {
+                instance.logError(runtimeInstance, "exhausted message dead-letter attempts; giving up requeue", sendErr)
+
+                if nackErr := transport.Nack(runtimeInstance, envelopeInstance, false); nil != nackErr {
+                    instance.logError(runtimeInstance, "message dead-letter failed", nackErr)
+                }
+
+                return
+            }
+
+            requeued := envelopeInstance.
+                WithStamp(DeadLetterAttemptStamp{Count: deadLetterAttempts + 1}).
+                WithStamp(DelayStamp{Delay: instance.failureRequeueDelay()})
             if nackErr := transport.Nack(runtimeInstance, requeued, true); nil != nackErr {
                 instance.logError(runtimeInstance, "message requeue failed after failure transport rejection", nackErr)
             }

@@ -417,7 +417,8 @@ func applyValidation(schema *Schema, validateTag string) {
 
         switch name {
         case "email":
-            if "string" == schema.Type {
+            /* @important only set the email format on a genuine string whose format slot is free, so a structural format such as byte (for a []byte field) is preserved and the spec does not advertise an email constraint the validator cannot enforce on non-string values */
+            if "string" == schema.Type && "" == schema.Format {
                 schema.Format = "email"
             }
         case "min":
@@ -426,6 +427,10 @@ func applyValidation(schema *Schema, validateTag string) {
                     if parsed, parsedOk := parseLeadingInt(valueString); true == parsedOk {
                         value := int(parsed)
                         schema.MinLength = &value
+                    } else {
+                        /* @important an unparseable min value is enforced as minLength 0 by the validator, so the spec must advertise the same bound */
+                        defaultMinLength := 0
+                        schema.MinLength = &defaultMinLength
                     }
                 } else {
                     /* @important a value-less min constraint is enforced as minLength 1 by the validator, so the spec must advertise the same bound */
@@ -439,6 +444,10 @@ func applyValidation(schema *Schema, validateTag string) {
                     if parsed, parsedOk := parseLeadingInt(valueString); true == parsedOk {
                         value := int(parsed)
                         schema.MaxLength = &value
+                    } else {
+                        /* @important an unparseable max value is enforced as maxLength 100 by the validator, so the spec must advertise the same bound */
+                        defaultMaxLength := 100
+                        schema.MaxLength = &defaultMaxLength
                     }
                 } else {
                     /* @important a value-less max constraint is enforced as maxLength 100 by the validator, so the spec must advertise the same bound */
@@ -450,6 +459,44 @@ func applyValidation(schema *Schema, validateTag string) {
             if "string" == schema.Type {
                 schema.Pattern = patternParam(params)
             }
+        case "alpha":
+            /* @important the validator enforces these character classes with a fixed anchored pattern, so the spec must advertise the same pattern rather than a bare string the client believes accepts anything */
+            if "string" == schema.Type {
+                schema.Pattern = "^[a-zA-Z]+$"
+            }
+        case "numeric":
+            if "string" == schema.Type {
+                schema.Pattern = "^[0-9]+$"
+            }
+        case "alphanumeric":
+            if "string" == schema.Type {
+                schema.Pattern = "^[a-zA-Z0-9]+$"
+            }
+        case "notBlank":
+            /* @important notBlank rejects an empty (or whitespace-only) string, but the OpenAPI required list only means the key is present (an empty value still satisfies it); advertise minLength 1 so a client cannot send "" against the spec and then be rejected by the validator. An explicit min constraint, in either tag order, still wins because it is only skipped when a length floor is already set. notBlank additionally rejects a whitespace-only value, which minLength cannot express. notBlank is a string-only constraint, so no array/object floor is advertised */
+            if "string" == schema.Type && nil == schema.MinLength {
+                minLength := 1
+                schema.MinLength = &minLength
+            }
+        case "notEmpty":
+            /* @important notEmpty rejects a zero-length string, array, slice, or map, so the spec must advertise the matching length floor for whichever shape the field generated — minLength 1 for a string, minItems 1 for an array, minProperties 1 for a map (object with additionalProperties) — otherwise a client trusting the spec sends an empty value and is then rejected by the validator. Each floor is only set when not already present, so an explicit min/length constraint in either tag order still wins. A struct-typed object is left untouched: notEmpty does not apply to a struct and minProperties would mis-advertise its fixed property set */
+            switch schema.Type {
+            case "string":
+                if nil == schema.MinLength {
+                    minLength := 1
+                    schema.MinLength = &minLength
+                }
+            case "array":
+                if nil == schema.MinItems {
+                    minItems := 1
+                    schema.MinItems = &minItems
+                }
+            case "object":
+                if nil != schema.AdditionalProperties && nil == schema.MinProperties {
+                    minProperties := 1
+                    schema.MinProperties = &minProperties
+                }
+            }
         case "greaterThan":
             if "integer" == schema.Type || "number" == schema.Type {
                 /* @important the validator rejects a null pointer for greaterThan/lessThan, so the spec must not advertise the field as nullable */
@@ -458,6 +505,11 @@ func applyValidation(schema *Schema, validateTag string) {
                 if valueString, exists := params["value"]; true == exists {
                     if parsed, parsedOk := parseLeadingInt(valueString); true == parsedOk {
                         value := float64(parsed)
+                        schema.Minimum = &value
+                        schema.ExclusiveMinimum = &exclusive
+                    } else {
+                        /* @important an unparseable greaterThan value is enforced as > 0 by the validator, so the spec must advertise the same bound */
+                        value := float64(0)
                         schema.Minimum = &value
                         schema.ExclusiveMinimum = &exclusive
                     }
@@ -476,6 +528,11 @@ func applyValidation(schema *Schema, validateTag string) {
                 if valueString, exists := params["value"]; true == exists {
                     if parsed, parsedOk := parseLeadingInt(valueString); true == parsedOk {
                         value := float64(parsed)
+                        schema.Maximum = &value
+                        schema.ExclusiveMaximum = &exclusive
+                    } else {
+                        /* @important an unparseable lessThan value is enforced as < 0 by the validator, so the spec must advertise the same bound */
+                        value := float64(0)
                         schema.Maximum = &value
                         schema.ExclusiveMaximum = &exclusive
                     }

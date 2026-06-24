@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.0.2] - 2026-06-24 - Floor Sub-Millisecond Set TTL
+
+### Fixed
+
+- `cache/backend.go` — `SetCtx`/`SetMultipleCtx` passed a positive sub-millisecond TTL straight to `PX`, which rueidis truncates to `PX 0` (Redis rejects it with `ERR invalid expire time`), so the value was never stored. A sub-millisecond TTL is now floored to one millisecond via `floorPositiveExpiry`, matching the `v2`/`v3` fix.
+- `cache/backend.go` — `Backend.Close` closed the `rueidis.Client`, but that client is owned by the `Provider` (which closes it in `Provider.Close`) and is shared with the backend, so at shutdown the container closed the same client twice — once through `BackendService.Close` → `Backend.Close`, once through the provider. `Backend.Close` is now a no-op (`return nil`); the backend does not own the client. Ported from the `v2`/`v3` fix.
+
 ## [v1.0.1] - 2026-06-16 - Glob-Escape the Cache Clear Prefix
 
 ### Fixed
@@ -25,7 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `cache/backend.go` — `cache.Backend` wrapper around `rueidis.Client` with `Get()`, `Set()`, `Delete()`, `Has()`, `ClearByPrefix()`, `Many()`, `SetMultiple()`, `DeleteMultiple()`, `Increment()`, `Decrement()`
 - `cache/backend_service.go` — `cache.BackendService` wrapper; `WithContext()` binds a backend to a specific context; `BackendFromRuntime()` obtains a backend from the Melody runtime with bound context
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v1.0.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v1.0.2...HEAD
+
+[v1.0.2]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v1.0.1...integrations/rueidis/v1.0.2
 
 [v1.0.1]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v1.0.0...integrations/rueidis/v1.0.1
 

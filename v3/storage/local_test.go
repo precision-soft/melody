@@ -236,6 +236,44 @@ func TestLocalStorage_PutRemovesPartialObjectOnReaderError(t *testing.T) {
     }
 }
 
+/* @info a failed overwrite must not destroy the previously stored object (CR #66 atomic put) */
+
+func TestLocalStorage_FailedOverwritePreservesPriorObject(t *testing.T) {
+    base := t.TempDir()
+    local := NewLocalStorage(base)
+    runtimeInstance := testRuntime()
+
+    key := "labels/awb-999.txt"
+    original := "ORIGINAL-GOOD-CONTENT"
+
+    if putErr := local.Put(runtimeInstance, key, strings.NewReader(original), int64(len(original)), storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("initial put: %v", putErr)
+    }
+
+    failing := &readerFailingAfterData{data: []byte("overwrite-that-fails-midway")}
+    if overwriteErr := local.Put(runtimeInstance, key, failing, -1, storagecontract.PutOptions{}); nil == overwriteErr {
+        t.Fatalf("expected the overwrite to fail when the source reader errors mid-stream")
+    }
+
+    reader, getErr := local.Get(runtimeInstance, key)
+    if nil != getErr {
+        t.Fatalf("the prior object must survive a failed overwrite, but Get failed: %v", getErr)
+    }
+    loaded, _ := io.ReadAll(reader)
+    reader.Close()
+
+    if original != string(loaded) {
+        t.Fatalf("a failed overwrite destroyed or truncated the prior object: got %q, want %q", string(loaded), original)
+    }
+
+    entries, _ := os.ReadDir(filepath.Join(base, "labels"))
+    for _, entry := range entries {
+        if true == strings.Contains(entry.Name(), ".tmp-") {
+            t.Fatalf("a failed overwrite left a temporary object behind: %s", entry.Name())
+        }
+    }
+}
+
 func TestLocalStorage_Get_ErrorOnDirectoryKey(t *testing.T) {
     base := t.TempDir()
     local := NewLocalStorage(base)

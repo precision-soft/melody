@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.2.1] - 2026-06-24 - Forbid Control-Character Injection in User and Schedule Fields
+
+### Fixed
+
+- `validation.go` — `validateUserField` and `validateScheduleFields` checked only for whitespace, so a user or schedule-field token containing `%` (which crontab translates to a newline) or a bare carriage return passed validation and was written verbatim into the generated crontab line, splitting one entry into multiple injected lines. Both now also reject `CrontabForbiddenChars` via `ValidateNoForbiddenChars`, matching the guard already applied to the command tokens and log path. Ported from the `v3` fix.
+
 ## [v1.2.0] - 2026-06-16 - Plug-and-Play Module Registration
 
 ### Added
@@ -80,7 +86,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `cli/contract/type.go` (root + v2/ + v3/) gains `type StringSliceFlag = urfavecli.StringSliceFlag` so the cron command (which uses repeatable string-slice flags for `--heartbeat-command` and `--heartbeat-destination`) consumes `clicontract.StringSliceFlag` like every other flag in the integration, without an extra `urfavecli` import in `generate_command.go`
 - `README.md` — added a "Cron expression validation" section that documents which checks the generator runs at generation time and which it deliberately leaves to the cron daemon at install time, with `crontab -T` recommended as the post-generation gate. Clarified the `EntryConfig.DestinationFile`-absolute-path semantics, documented the hardcoded `0644`/`0755` file modes, and added a new "Package surface" section listing every exported identifier. `v2/README.md` and `v3/README.md` now reference that section uniformly so they no longer cross-reference each other asymmetrically.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.2.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.2.1...HEAD
+
+[v1.2.1]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.2.0...integrations/cron/v1.2.1
 
 [v1.2.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.1.0...integrations/cron/v1.2.0
 

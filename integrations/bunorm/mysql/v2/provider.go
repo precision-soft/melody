@@ -12,6 +12,7 @@ import (
     driver "github.com/go-sql-driver/mysql"
     "github.com/precision-soft/melody/integrations/bunorm/v2"
     "github.com/precision-soft/melody/v2/exception"
+    "github.com/precision-soft/melody/v2/logging"
     loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/mysqldialect"
@@ -66,6 +67,8 @@ func (instance *Provider) Open(params bunorm.ConnectionParams, logger loggingcon
 }
 
 func (instance *Provider) openWithRetry(params bunorm.ConnectionParams, logger loggingcontract.Logger) (*bun.DB, error) {
+    logger = logging.EnsureLogger(logger)
+
     attempt := uint32(0)
     maxAttempts := instance.retryConfig.MaxAttempts
     if 0 == maxAttempts {

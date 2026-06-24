@@ -1,6 +1,8 @@
 package storage
 
 import (
+    "crypto/rand"
+    "encoding/hex"
     "io"
     "os"
     "path/filepath"
@@ -55,7 +57,13 @@ func (instance *LocalStorage) Put(
         }
     }
 
-    file, createErr := root.OpenFile(relativeKey, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o640)
+    /* @important reject a key whose leaf is an existing symlink rather than replacing it through the rename below; os.Root never traverses the link so nothing escapes, but refusing keeps the backend's no-symlink contract explicit, matching the prior O_CREATE-on-Root behavior */
+    if info, lstatErr := root.Lstat(relativeKey); nil == lstatErr && 0 != info.Mode()&os.ModeSymlink {
+        return exception.NewError("storage key resolves to a symlink", map[string]any{"key": key}, nil)
+    }
+
+    /* @important write to a temporary object first and rename it over the key only once it is fully flushed, so a failed or partial write never destroys or truncates a previously stored object; the rename is atomic within the pinned root, matching the awss3 backend's all-or-nothing Put */
+    tempKey, file, createErr := createStorageTempFile(root, relativeKey)
     if nil != createErr {
         return exception.NewError("could not create the storage object", map[string]any{"key": key}, createErr)
     }
@@ -63,22 +71,59 @@ func (instance *LocalStorage) Put(
     written, copyErr := io.Copy(file, reader)
     if nil != copyErr {
         _ = file.Close()
-        _ = root.Remove(relativeKey)
+        _ = root.Remove(tempKey)
         return exception.NewError("could not write the storage object", map[string]any{"key": key}, copyErr)
     }
 
     if 0 <= size && written != size {
         _ = file.Close()
-        _ = root.Remove(relativeKey)
+        _ = root.Remove(tempKey)
         return exception.NewError("storage object size does not match the declared size", map[string]any{"key": key, "declared": size, "written": written}, nil)
     }
 
+    if syncErr := file.Sync(); nil != syncErr {
+        _ = file.Close()
+        _ = root.Remove(tempKey)
+        return exception.NewError("could not flush the storage object", map[string]any{"key": key}, syncErr)
+    }
+
     if closeErr := file.Close(); nil != closeErr {
-        _ = root.Remove(relativeKey)
+        _ = root.Remove(tempKey)
         return exception.NewError("could not flush the storage object", map[string]any{"key": key}, closeErr)
     }
 
+    if renameErr := root.Rename(tempKey, relativeKey); nil != renameErr {
+        _ = root.Remove(tempKey)
+        return exception.NewError("could not store the storage object", map[string]any{"key": key}, renameErr)
+    }
+
     return nil
+}
+
+/* @important allocate a uniquely named temporary object in the same directory as the target so the final rename stays within the pinned root and on the same filesystem; O_EXCL guarantees we never clobber a concurrent writer's temp or the live key */
+func createStorageTempFile(root *os.Root, relativeKey string) (string, *os.File, error) {
+    directory := filepath.Dir(relativeKey)
+    base := filepath.Base(relativeKey)
+
+    for attempt := 0; attempt < 10; attempt++ {
+        suffix := make([]byte, 8)
+        if _, randErr := rand.Read(suffix); nil != randErr {
+            return "", nil, randErr
+        }
+
+        tempKey := filepath.Join(directory, base+".tmp-"+hex.EncodeToString(suffix))
+
+        file, openErr := root.OpenFile(tempKey, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o640)
+        if nil == openErr {
+            return tempKey, file, nil
+        }
+
+        if false == os.IsExist(openErr) {
+            return "", nil, openErr
+        }
+    }
+
+    return "", nil, exception.NewError("could not allocate a unique storage temp object", nil, nil)
 }
 
 func (instance *LocalStorage) Get(

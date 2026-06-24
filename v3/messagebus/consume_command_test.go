@@ -182,6 +182,121 @@ func TestConsume_ExhaustedWithoutFailureTransportDropsMessage(t *testing.T) {
     }
 }
 
+/* @info configurable dead-letter bound: requeue forever by default, give up after N when set (CR #66) */
+
+type recordingNackTransport struct {
+    nackCount    int
+    nackRequeue  bool
+    nackEnvelope messagebuscontract.Envelope
+}
+
+func (instance *recordingNackTransport) Send(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope) error {
+    return nil
+}
+
+func (instance *recordingNackTransport) Receive(runtimeInstance runtimecontract.Runtime) (<-chan messagebuscontract.Envelope, error) {
+    return nil, nil
+}
+
+func (instance *recordingNackTransport) Ack(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope) error {
+    return nil
+}
+
+func (instance *recordingNackTransport) Nack(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope, requeue bool) error {
+    instance.nackCount++
+    instance.nackRequeue = requeue
+    instance.nackEnvelope = envelope
+    return nil
+}
+
+func (instance *recordingNackTransport) Close(runtimeInstance runtimecontract.Runtime) error {
+    return nil
+}
+
+type alwaysFailingTransport struct{}
+
+func (instance *alwaysFailingTransport) Send(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope) error {
+    return exception.NewError("failure transport is down", nil, nil)
+}
+
+func (instance *alwaysFailingTransport) Receive(runtimeInstance runtimecontract.Runtime) (<-chan messagebuscontract.Envelope, error) {
+    return nil, nil
+}
+
+func (instance *alwaysFailingTransport) Ack(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope) error {
+    return nil
+}
+
+func (instance *alwaysFailingTransport) Nack(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope, requeue bool) error {
+    return nil
+}
+
+func (instance *alwaysFailingTransport) Close(runtimeInstance runtimecontract.Runtime) error {
+    return nil
+}
+
+func newAlwaysFailingConsumeCommand(t *testing.T, policy RetryPolicy) (*ConsumeCommand, runtimecontract.Runtime) {
+    t.Helper()
+
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    locator := NewHandlerLocator()
+    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage) error {
+        return exception.NewError("handler always fails", nil, nil)
+    })
+
+    return NewConsumeCommandWithRetry(NewManager("default", NewHandleMessageMiddleware(locator)), nil, policy), runtimeInstance
+}
+
+func TestConsume_BoundedDeadLetterStopsRequeueAfterMax(t *testing.T) {
+    command, runtimeInstance := newAlwaysFailingConsumeCommand(t, RetryPolicy{
+        MaxRetries:            0,
+        FailureTransport:      &alwaysFailingTransport{},
+        MaxDeadLetterAttempts: 2,
+    })
+
+    source := &recordingNackTransport{}
+
+    /* @important still under the bound: the failed dead-letter routing must requeue and bump the attempt counter */
+    command.consume(runtimeInstance, source, NewEnvelope(consumeTestMessage{Value: 1}).WithStamp(DeadLetterAttemptStamp{Count: 0}))
+    if 1 != source.nackCount || false == source.nackRequeue {
+        t.Fatalf("expected the first failed dead-letter routing to requeue, got nackCount=%d requeue=%v", source.nackCount, source.nackRequeue)
+    }
+    if 1 != DeadLetterAttemptCount(source.nackEnvelope) {
+        t.Fatalf("expected the requeued envelope to carry dead-letter attempt 1, got %d", DeadLetterAttemptCount(source.nackEnvelope))
+    }
+
+    /* @important at the bound: stop requeueing and nack without requeue so a transport-native dead-letter can claim it instead of looping forever */
+    source.nackCount = 0
+    command.consume(runtimeInstance, source, NewEnvelope(consumeTestMessage{Value: 1}).WithStamp(DeadLetterAttemptStamp{Count: 1}))
+    if 1 != source.nackCount || true == source.nackRequeue {
+        t.Fatalf("expected a nack without requeue once the dead-letter bound is reached, got nackCount=%d requeue=%v", source.nackCount, source.nackRequeue)
+    }
+}
+
+func TestConsume_UnboundedDeadLetterRequeuesByDefault(t *testing.T) {
+    command, runtimeInstance := newAlwaysFailingConsumeCommand(t, RetryPolicy{
+        MaxRetries:       0,
+        FailureTransport: &alwaysFailingTransport{},
+    })
+
+    source := &recordingNackTransport{}
+
+    /* @important the default policy (MaxDeadLetterAttempts 0) keeps requeueing regardless of how many attempts have accrued, preserving the documented no-loss behavior */
+    command.consume(runtimeInstance, source, NewEnvelope(consumeTestMessage{Value: 1}).WithStamp(DeadLetterAttemptStamp{Count: 99}))
+    if 1 != source.nackCount || false == source.nackRequeue {
+        t.Fatalf("expected the default policy to keep requeueing (no message loss), got nackCount=%d requeue=%v", source.nackCount, source.nackRequeue)
+    }
+}
+
+func TestNewConsumeCommandWithRetry_ClampsNegativeMaxDeadLetterAttempts(t *testing.T) {
+    command := NewConsumeCommandWithRetry(nil, nil, RetryPolicy{MaxRetries: 1, MaxDeadLetterAttempts: -5})
+    if 0 != command.retryPolicy.MaxDeadLetterAttempts {
+        t.Fatalf("expected a negative MaxDeadLetterAttempts to clamp to 0 (unbounded), got %d", command.retryPolicy.MaxDeadLetterAttempts)
+    }
+}
+
 func TestConsumeFrom_AbnormalChannelCloseReturnsError(t *testing.T) {
     serviceContainer := container.NewContainer()
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)

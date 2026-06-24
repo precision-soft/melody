@@ -216,7 +216,9 @@ func (instance *container) OverrideProtectedInstance(serviceName string, value a
         )
     }
 
-    instance.typeInstances[canonicalType] = value
+    if _, typeRegistered := instance.typeRegistrationNamesByType[canonicalType]; true == typeRegistered {
+        instance.typeInstances[canonicalType] = value
+    }
 
     for registeredType, registeredServiceNames := range instance.typeRegistrationNamesByType {
         for _, registeredServiceName := range registeredServiceNames {

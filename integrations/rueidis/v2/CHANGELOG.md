@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v2.0.2] - 2026-06-24 - Keep the Caller-Owned Client Open and Floor Sub-Millisecond TTL
+
+### Fixed
+
+- `v2/cache/backend.go` — `Backend.Close` called `client.Close()` on the rueidis client it does not own (the client lifecycle is owned by the application and shared with the provider, locker, and token store), so closing the cache backend tore down the shared connection for every other consumer. `Close` is now a no-op, matching the `v3` behavior.
+- `v2/cache/backend.go` — `Set`/`SetMultiple` passed a positive sub-millisecond TTL straight to `PX`, which truncates to `PX 0` (an invalid expiry); a positive TTL below 1ms is now floored to 1ms via `floorPositiveExpiry`. Ported from the `v3` fix.
+
 ## [v2.0.1] - 2026-06-16 - Glob-Escape the Cache Clear Prefix
 
 ### Fixed
@@ -26,7 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `v2/README.md` — documentation examples reformatted to be copy-paste runnable (wrapped in `main()` functions)
 - `Provider.Open()` signature unchanged in v2 (still accepts `containercontract.Resolver`) — contrast with v3 where it changes
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v2.0.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v2.0.2...HEAD
+
+[v2.0.2]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v2.0.1...integrations/rueidis/v2.0.2
 
 [v2.0.1]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v2.0.0...integrations/rueidis/v2.0.1
 

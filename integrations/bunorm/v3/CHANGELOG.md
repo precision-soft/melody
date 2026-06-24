@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.1.1] - 2026-06-24 - Audit Unexported-Typed Embedded Struct Fields
+
+### Fixed
+
+- `audit/change.go` — `collectChanges` skipped every field of an anonymous embedded struct whose **type name is unexported** (e.g. `type timestamps struct{...}` embedded into a bun model), because the exported-field guard ran before the embed-recursion branch and `reflect.StructField.IsExported()` is false for such a synthetic field. bun/json still promote and persist that embed's exported columns, so their changes — including any `audit:"redact"` or `encrypt.Encrypted*` field declared inside the embed — were silently absent from the audit trail (an incomplete trail for a compliance feature). The exported-field skip no longer applies to anonymous fields, so columns promoted from an unexported-typed embed are audited and redacted like any other.
+
 ## [v3.1.0] - 2026-06-16 - Column Encryption, Field-Level Audit Trail, and Read/Write Split
 
 ### Added
@@ -71,7 +77,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dependencies pinned to `github.com/precision-soft/melody/v3` and other v3 module paths
 - README relative path links updated to reflect v3 directory structure
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.1.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.1.1...HEAD
+
+[v3.1.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.1.0...integrations/bunorm/v3.1.1
 
 [v3.1.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.0.1...integrations/bunorm/v3.1.0
 

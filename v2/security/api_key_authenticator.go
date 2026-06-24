@@ -15,6 +15,12 @@ func NewApiKeyHeaderAuthenticator(headerName string, expectedValue string, userI
         )
     }
 
+    if "" == expectedValue {
+        exception.Panic(
+            exception.NewError("the expected value is empty in api key header authenticator", nil, nil),
+        )
+    }
+
     return &ApiKeyHeaderAuthenticator{
         headerName:    headerName,
         expectedValue: expectedValue,

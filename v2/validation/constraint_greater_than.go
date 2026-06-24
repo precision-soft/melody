@@ -108,7 +108,7 @@ func (instance *GreaterThan) Validate(value any, field string) validationcontrac
         return nil
 
     default:
-        return NewValidationError(field, "value must be an integer", ConstraintGreaterThanErrorSmallerThan, nil)
+        return NewValidationError(field, "value must be numeric", ConstraintGreaterThanErrorSmallerThan, nil)
     }
 }
 

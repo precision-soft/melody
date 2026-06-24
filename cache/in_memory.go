@@ -134,7 +134,7 @@ func (instance *InMemoryBackend) Set(
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    instance.upsertLocked(
+    instance.saveLocked(
         key,
         payload,
         now,
@@ -225,7 +225,7 @@ func (instance *InMemoryBackend) SetMultiple(items map[string][]byte, ttl time.D
     defer instance.mutex.Unlock()
 
     for key, payload := range items {
-        instance.upsertLocked(
+        instance.saveLocked(
             key,
             payload,
             now,
@@ -333,7 +333,7 @@ func (instance *InMemoryBackend) incrementValue(
         preservedExpiresAt = entry.item.ExpiresAt()
     }
 
-    instance.upsertItemLocked(
+    instance.saveItemLocked(
         key,
         []byte(strconv.FormatInt(newValue, 10)),
         now,
@@ -408,7 +408,7 @@ func (instance *InMemoryBackend) getEntryLocked(key string, now time.Time) (*lru
     return entry, true
 }
 
-func (instance *InMemoryBackend) upsertLocked(
+func (instance *InMemoryBackend) saveLocked(
     key string,
     payload []byte,
     now time.Time,
@@ -420,10 +420,10 @@ func (instance *InMemoryBackend) upsertLocked(
         expiresAt = &expiration
     }
 
-    instance.upsertItemLocked(key, payload, now, expiresAt)
+    instance.saveItemLocked(key, payload, now, expiresAt)
 }
 
-func (instance *InMemoryBackend) upsertItemLocked(
+func (instance *InMemoryBackend) saveItemLocked(
     key string,
     payload []byte,
     now time.Time,
