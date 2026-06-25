@@ -283,6 +283,44 @@ func TestBuildSchema_NotEmptyOnScalarIsUnsatisfiable(t *testing.T) {
     }
 }
 
+func TestBuildSchema_NotEmptyOnTimeFieldIsUnsatisfiable(t *testing.T) {
+    components := map[string]*Schema{}
+    names := map[reflect.Type]string{}
+    visited := map[reflect.Type]bool{}
+
+    timeFieldType := reflect.TypeOf(time.Time{})
+    requestType := reflect.StructOf([]reflect.StructField{
+        {Name: "CreatedAt", Type: timeFieldType, Tag: `json:"createdAt" validate:"notEmpty"`},
+        {Name: "UpdatedAt", Type: timeFieldType, Tag: `json:"updatedAt" validate:"notBlank"`},
+        {Name: "DeletedAt", Type: timeFieldType, Tag: `json:"deletedAt"`},
+    })
+
+    schema := buildSchema(requestType, components, names, visited)
+
+    /* @important a time.Time renders as {type:string, format:date-time}, but notEmpty's validator reflects on the value whose kind is Struct (not string/array/slice/map) and rejects every value via its default branch (constraint_not_empty.go); the spec must advertise the same impossible length window (minLength 1, maxLength 0) instead of a satisfiable date-time string a client would trust */
+    createdAt := schema.Properties["createdAt"]
+    if "date-time" != createdAt.Format ||
+        nil == createdAt.MinLength || 1 != *createdAt.MinLength ||
+        nil == createdAt.MaxLength || 0 != *createdAt.MaxLength {
+        t.Fatalf("expected notEmpty on a time.Time field to advertise an unsatisfiable date-time string (minLength 1, maxLength 0), got %+v", createdAt)
+    }
+    if true == createdAt.Nullable {
+        t.Fatalf("expected notEmpty to clear nullable on a time.Time field, got %+v", createdAt)
+    }
+
+    /* @important notBlank's validator stringifies via fmt.Sprintf (constraint_not_blank.go), so a time.Time renders to a non-blank value and is accepted; the satisfiable date-time string with minLength 1 matches the validator and must NOT be marked unsatisfiable */
+    updatedAt := schema.Properties["updatedAt"]
+    if "date-time" != updatedAt.Format || nil == updatedAt.MinLength || 1 != *updatedAt.MinLength || nil != updatedAt.MaxLength {
+        t.Fatalf("expected notBlank on a time.Time field to stay a satisfiable date-time string (minLength 1, no maxLength), got %+v", updatedAt)
+    }
+
+    /* @important an untagged time.Time keeps a plain date-time string, proving the unsatisfiable window comes from notEmpty and not the time.Time shape itself */
+    deletedAt := schema.Properties["deletedAt"]
+    if "date-time" != deletedAt.Format || nil != deletedAt.MinLength || nil != deletedAt.MaxLength {
+        t.Fatalf("expected an untagged time.Time field to advertise an unconstrained date-time string, got %+v", deletedAt)
+    }
+}
+
 func TestBuildSchema_RegexCharacterClassBracketPreserved(t *testing.T) {
     components := map[string]*Schema{}
     names := map[reflect.Type]string{}

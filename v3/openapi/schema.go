@@ -499,7 +499,10 @@ func applyValidation(schema *Schema, validateTag string) {
             schema.Nullable = false
             switch schema.Type {
             case "string":
-                if nil == schema.MinLength || 1 > *schema.MinLength {
+                if "date-time" == schema.Format {
+                    /* @important a time.Time field is rendered as a date-time string (buildSchema), but notEmpty's validator reflects on the concrete value whose kind is Struct, not String, so it falls into the default branch and rejects every value outright (constraint_not_empty.go); advertise the field unsatisfiable like the int/number/bool scalars below rather than as a satisfiable date-time string a client would trust */
+                    rejectsAll = true
+                } else if nil == schema.MinLength || 1 > *schema.MinLength {
                     minLength := 1
                     schema.MinLength = &minLength
                 }
