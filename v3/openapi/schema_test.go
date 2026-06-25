@@ -839,3 +839,97 @@ func TestBuildSchema_DegenerateMinZeroDoesNotSuppressNotEmptyFloor(t *testing.T)
         t.Fatalf("expected an explicit min=5 to win over the notEmpty floor, got %+v", e)
     }
 }
+
+/* @info CR #74 — a constraint whose validator rejects the field's underlying kind outright (notEmpty on a struct, greaterThan/lessThan on a non-numeric) must advertise the field unsatisfiable, mirroring the scalar/time.Time handling closed in CR #72/#73 */
+
+type cr74InnerStruct struct {
+    Value string `json:"value"`
+}
+
+type cr74NotEmptyOnStructRequest struct {
+    Named    cr74InnerStruct  `json:"named" validate:"notEmpty"`
+    NamedPtr *cr74InnerStruct `json:"namedPtr" validate:"notEmpty"`
+    Inline   struct {
+        Field string `json:"field"`
+    } `json:"inline" validate:"notEmpty"`
+}
+
+func isImpossibleObject(schema *Schema) bool {
+    return nil != schema && nil != schema.MinProperties && 1 == *schema.MinProperties &&
+        nil != schema.MaxProperties && 0 == *schema.MaxProperties
+}
+
+func TestBuildSchema_NotEmptyOnStructIsUnsatisfiable(t *testing.T) {
+    components := map[string]*Schema{}
+    buildSchema(reflect.TypeOf(cr74NotEmptyOnStructRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    schema := components["cr74NotEmptyOnStructRequest"]
+    if nil == schema {
+        t.Fatalf("expected the request schema to be registered in components")
+    }
+
+    /* @important a named struct field renders as a $ref; notEmpty's validator rejects a struct value outright, so the $ref must be wrapped in a contradictory object constraint under allOf rather than advertised as a satisfiable object */
+    named := schema.Properties["named"]
+    if nil == named || "" != named.Ref || 2 != len(named.AllOf) {
+        t.Fatalf("expected named struct notEmpty to wrap the $ref in a contradictory allOf, got %+v", named)
+    }
+    if "#/components/schemas/cr74InnerStruct" != named.AllOf[0].Ref || false == isImpossibleObject(named.AllOf[1]) {
+        t.Fatalf("expected allOf of [$ref, impossible object], got %+v", named)
+    }
+    if true == named.Nullable {
+        t.Fatalf("expected the unsatisfiable struct field to not be advertised as nullable, got %+v", named)
+    }
+
+    /* @important a *struct field is also rejected (notEmpty rejects a null pointer and a struct value), so its nullable allOf-wrapped $ref must gain the same contradiction and lose nullable */
+    namedPtr := schema.Properties["namedPtr"]
+    if nil == namedPtr || true == namedPtr.Nullable || 0 == len(namedPtr.AllOf) || false == isImpossibleObject(namedPtr.AllOf[len(namedPtr.AllOf)-1]) {
+        t.Fatalf("expected pointer-to-struct notEmpty to be an unsatisfiable, non-nullable allOf, got %+v", namedPtr)
+    }
+
+    /* @important an inline struct renders as an object with no additionalProperties; the validator rejects the struct value, so advertise an impossible object */
+    inline := schema.Properties["inline"]
+    if false == isImpossibleObject(inline) {
+        t.Fatalf("expected inline struct notEmpty to advertise an impossible object (minProperties 1, maxProperties 0), got %+v", inline)
+    }
+}
+
+type cr74NumericOnNonNumericRequest struct {
+    Code  string            `json:"code" validate:"greaterThan=0"`
+    Flag  bool              `json:"flag" validate:"lessThan=1"`
+    Items []string          `json:"items" validate:"greaterThan=0"`
+    Bag   map[string]int    `json:"bag" validate:"lessThan=0"`
+}
+
+func TestBuildSchema_GreaterLessThanOnNonNumericIsUnsatisfiable(t *testing.T) {
+    components := map[string]*Schema{}
+    buildSchema(reflect.TypeOf(cr74NumericOnNonNumericRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    schema := components["cr74NumericOnNonNumericRequest"]
+    if nil == schema {
+        t.Fatalf("expected the request schema to be registered in components")
+    }
+
+    /* @important greaterThan/lessThan's validator rejects a non-numeric value outright ("value must be numeric"), so a string field is unsatisfiable: an impossible length window */
+    code := schema.Properties["code"]
+    if nil == code || nil == code.MinLength || 1 != *code.MinLength || nil == code.MaxLength || 0 != *code.MaxLength {
+        t.Fatalf("expected greaterThan on a string to advertise an unsatisfiable string (minLength 1, maxLength 0), got %+v", code)
+    }
+
+    /* @important a boolean carries no length/numeric facet, so unsatisfiability is two contradictory single-value enums under allOf */
+    flag := schema.Properties["flag"]
+    if nil == flag || 2 != len(flag.AllOf) || nil == flag.AllOf[0].Enum || nil == flag.AllOf[1].Enum {
+        t.Fatalf("expected lessThan on a boolean to advertise contradictory enums under allOf, got %+v", flag)
+    }
+
+    /* @important an array field is unsatisfiable: minItems 1 with maxItems 0 */
+    items := schema.Properties["items"]
+    if nil == items || nil == items.MinItems || 1 != *items.MinItems || nil == items.MaxItems || 0 != *items.MaxItems {
+        t.Fatalf("expected greaterThan on an array to advertise an impossible array (minItems 1, maxItems 0), got %+v", items)
+    }
+
+    /* @important a map renders as an object; it is unsatisfiable: minProperties 1 with maxProperties 0 */
+    bag := schema.Properties["bag"]
+    if false == isImpossibleObject(bag) {
+        t.Fatalf("expected lessThan on a map to advertise an impossible object (minProperties 1, maxProperties 0), got %+v", bag)
+    }
+}

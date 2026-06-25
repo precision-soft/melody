@@ -409,6 +409,10 @@ func parseLeadingInt(valueString string) (int64, bool) {
 
 func applyValidation(schema *Schema, validateTag string) {
     if "" != schema.Ref || nil != schema.AllOf {
+        /* @important a $ref (or a nullable allOf-wrapped $ref) always denotes a struct component, and the validator rejects a struct value outright for notEmpty (constraint_not_empty.go default branch) and for greaterThan/lessThan ("value must be numeric", constraint_greater_than.go/constraint_less_than.go default branch); such a tag makes the field unsatisfiable server-side, so advertise it as such rather than as a satisfiable object a client would trust. No length/numeric facet otherwise attaches to a $ref, so there is nothing else to apply here. */
+        if true == tagRejectsStruct(validateTag) {
+            markFieldUnsatisfiable(schema)
+        }
         return
     }
 
@@ -495,7 +499,7 @@ func applyValidation(schema *Schema, validateTag string) {
                 }
             }
         case "notEmpty":
-            /* @important notEmpty rejects a zero-length string, array, slice, or map and rejects a null pointer, so the spec must neither advertise the field as nullable nor accept an empty value. Advertise the matching length floor for whichever shape the field generated — minLength 1 for a string, minItems 1 for an array, minProperties 1 for a map (object with additionalProperties) — and clear nullable so a *string/*[]T/*map field is not advertised as accepting null; otherwise a client trusting the spec sends a null or empty value and is then rejected by the validator. An explicit min >= 1 in either tag order still wins, but a degenerate min=0 is raised to 1 because notEmpty forbids the empty value. A struct-typed object is left untouched: notEmpty does not apply to a struct and minProperties would mis-advertise its fixed property set */
+            /* @important notEmpty rejects a zero-length string, array, slice, or map and rejects a null pointer, so the spec must neither advertise the field as nullable nor accept an empty value. Advertise the matching length floor for whichever shape the field generated — minLength 1 for a string, minItems 1 for an array, minProperties 1 for a map (object with additionalProperties) — and clear nullable so a *string/*[]T/*map field is not advertised as accepting null; otherwise a client trusting the spec sends a null or empty value and is then rejected by the validator. An explicit min >= 1 in either tag order still wins, but a degenerate min=0 is raised to 1 because notEmpty forbids the empty value. A struct value (an inline struct object, a named-struct $ref, or any non string/array/slice/map kind) is instead advertised unsatisfiable, because the validator rejects it outright (constraint_not_empty.go default branch) rather than ignoring it */
             schema.Nullable = false
             switch schema.Type {
             case "string":
@@ -512,12 +516,18 @@ func applyValidation(schema *Schema, validateTag string) {
                     schema.MinItems = &minItems
                 }
             case "object":
-                if nil != schema.AdditionalProperties && nil == schema.MinProperties {
-                    minProperties := 1
-                    schema.MinProperties = &minProperties
+                if nil != schema.AdditionalProperties {
+                    /* @important a map renders as an object with additionalProperties; the validator accepts a non-empty map (its kind is Map), so advertise the matching floor minProperties 1 */
+                    if nil == schema.MinProperties {
+                        minProperties := 1
+                        schema.MinProperties = &minProperties
+                    }
+                } else {
+                    /* @important an inline (anonymous) struct renders as an object with no additionalProperties; the validator reflects on the concrete value whose kind is Struct and rejects it outright (constraint_not_empty.go default branch), so advertise the field unsatisfiable rather than as a satisfiable object whose fixed property set a client would trust */
+                    rejectsAll = true
                 }
             default:
-                /* @important notEmpty's validator rejects any value whose kind is not string/array/slice/map outright (constraint_not_empty.go default branch), so an integer/number/boolean field carrying notEmpty is unsatisfiable server-side; advertise it as such — an empty exclusive number range or, for a boolean, two contradictory enums under allOf — instead of an unconstrained scalar a client would trust. A struct-typed object (type object with no additionalProperties) is left untouched by the case above, matching the existing struct exemption */
+                /* @important notEmpty's validator rejects any value whose kind is not string/array/slice/map outright (constraint_not_empty.go default branch), so an integer/number/boolean field carrying notEmpty is unsatisfiable server-side; advertise it as such — an empty exclusive number range or, for a boolean, two contradictory enums under allOf — instead of an unconstrained scalar a client would trust */
                 rejectsAll = true
             }
         case "greaterThan":
@@ -540,6 +550,9 @@ func applyValidation(schema *Schema, validateTag string) {
                     schema.Minimum = &value
                     schema.ExclusiveMinimum = &exclusive
                 }
+            } else {
+                /* @important greaterThan's validator rejects a non-numeric value outright ("value must be numeric", constraint_greater_than.go default branch), so a string/boolean/array/object field carrying greaterThan is unsatisfiable server-side; advertise it as such rather than as an unconstrained value a client would trust */
+                rejectsAll = true
             }
         case "lessThan":
             if "integer" == schema.Type || "number" == schema.Type {
@@ -561,6 +574,9 @@ func applyValidation(schema *Schema, validateTag string) {
                     schema.Maximum = &value
                     schema.ExclusiveMaximum = &exclusive
                 }
+            } else {
+                /* @important lessThan's validator rejects a non-numeric value outright ("value must be numeric", constraint_less_than.go default branch), so a string/boolean/array/object field carrying lessThan is unsatisfiable server-side; advertise it as such rather than as an unconstrained value a client would trust */
+                rejectsAll = true
             }
         }
     }
@@ -579,8 +595,10 @@ func applyValidation(schema *Schema, validateTag string) {
     }
 }
 
-/* @important markFieldUnsatisfiable advertises a schema no value can satisfy, mirroring a validator that rejects the field outright for a malformed numeric/length tag or a negative max (both fail the field closed post-CR70). A string gets an impossible length window (minLength 1, maxLength 0); a number an empty exclusive range (greater than 0 and less than 0). */
+/* @important markFieldUnsatisfiable advertises a schema no value can satisfy, mirroring a validator that rejects the field outright for a malformed numeric/length tag, a negative max (both fail the field closed post-CR70), or a constraint applied to a kind the validator rejects (notEmpty on a struct, greaterThan/lessThan on a non-numeric — CR #74). A string gets an impossible length window (minLength 1, maxLength 0); a number an empty exclusive range (greater than 0 and less than 0); an array minItems 1 with maxItems 0; an object minProperties 1 with maxProperties 0; a $ref the same impossible object constraint under allOf so the documented shape is preserved. Nullable is cleared because the validator rejects a null value too, so an unsatisfiable field must not advertise null as valid. */
 func markFieldUnsatisfiable(schema *Schema) {
+    schema.Nullable = false
+
     switch schema.Type {
     case "string":
         minLength := 1
@@ -600,7 +618,42 @@ func markFieldUnsatisfiable(schema *Schema) {
             {Enum: &[]any{true}},
             {Enum: &[]any{false}},
         }
+    case "array":
+        minItems := 1
+        maxItems := 0
+        schema.MinItems = &minItems
+        schema.MaxItems = &maxItems
+    case "object":
+        /* @important a map (object with additionalProperties) or an inline struct (object with a fixed property set) is contradicted at the object level: a value cannot have both at least one and at most zero properties */
+        minProperties := 1
+        maxProperties := 0
+        schema.MinProperties = &minProperties
+        schema.MaxProperties = &maxProperties
+    case "":
+        /* @important a $ref (or a nullable allOf-wrapped $ref) carries no Type; it denotes a struct component, so contradict it at the object level under allOf — the documented $ref is preserved as a member, but the impossible minProperties/maxProperties sibling means no value satisfies the conjunction */
+        minProperties := 1
+        maxProperties := 0
+        contradiction := &Schema{MinProperties: &minProperties, MaxProperties: &maxProperties}
+        if "" != schema.Ref {
+            schema.AllOf = []*Schema{{Ref: schema.Ref}, contradiction}
+            schema.Ref = ""
+        } else if nil != schema.AllOf {
+            schema.AllOf = append(schema.AllOf, contradiction)
+        }
     }
+}
+
+/* @important reports whether a validate tag carries a constraint the runtime validator rejects outright for a struct value: notEmpty falls into constraint_not_empty.go's default branch, and greaterThan/lessThan into their "value must be numeric" default branch. A $ref/allOf schema (always a struct component) carrying any of these is therefore unsatisfiable server-side. notBlank is excluded because it stringifies any value with %v and only rejects a blank or nil one, so it does not reject a struct outright. */
+func tagRejectsStruct(validateTag string) bool {
+    for _, rule := range splitRules(validateTag) {
+        name, _ := splitRule(rule)
+        switch name {
+        case "notEmpty", "greaterThan", "lessThan":
+            return true
+        }
+    }
+
+    return false
 }
 
 func patternParam(params map[string]string) string {

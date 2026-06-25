@@ -94,6 +94,7 @@ type Schema struct {
     MinItems             *int               `json:"minItems,omitempty"`
     MaxItems             *int               `json:"maxItems,omitempty"`
     MinProperties        *int               `json:"minProperties,omitempty"`
+    MaxProperties        *int               `json:"maxProperties,omitempty"`
     Minimum              *float64           `json:"minimum,omitempty"`
     Maximum              *float64           `json:"maximum,omitempty"`
     ExclusiveMinimum     *bool              `json:"exclusiveMinimum,omitempty"`
