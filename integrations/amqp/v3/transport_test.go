@@ -636,6 +636,33 @@ func TestDecode_StampsCurrentGeneration(t *testing.T) {
     }
 }
 
+func TestTransport_RequeuePersistsDeadLetterAttemptCount(t *testing.T) {
+    registry := NewMessageRegistry()
+    RegisterMessage[reconnectMessage](registry, "amqp.test.deadletter")
+
+    serializer := melodyserializer.NewJsonSerializer()
+    instance := &Transport{queue: "orders", registry: registry, serializer: serializer}
+
+    envelope := melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}).
+        WithStamp(melodymessagebus.DeadLetterAttemptStamp{Count: 2})
+
+    publishing, buildErr := instance.buildPublishing(envelope, "")
+    if nil != buildErr {
+        t.Fatalf("build publishing: %v", buildErr)
+    }
+
+    /* @important a requeued exhausted message must carry its dead-letter attempt count across the broker round-trip; MaxDeadLetterAttempts re-reads the count on every consume, so dropping it resets the counter to 0 on each requeue and the bound is never reached for a value >= 2, looping forever — the very loop the feature was added to break */
+    delivery := amqp091.Delivery{Headers: publishing.Headers, Body: publishing.Body}
+    decoded, decodeErr := instance.decode(delivery, 1)
+    if nil != decodeErr {
+        t.Fatalf("decode: %v", decodeErr)
+    }
+
+    if 2 != melodymessagebus.DeadLetterAttemptCount(decoded) {
+        t.Fatalf("expected the decoded envelope to keep dead-letter attempt count 2, got %d", melodymessagebus.DeadLetterAttemptCount(decoded))
+    }
+}
+
 func TestAckNack_StaleGenerationIsNoOp(t *testing.T) {
     runtimeInstance := newReconnectRuntime(context.Background())
 

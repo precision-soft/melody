@@ -95,7 +95,7 @@ func newHttpTestContainerWithSessionStorage(storage sessioncontract.Storage) con
     return serviceContainer
 }
 
-/** @info fakes */
+/* @info fakes */
 
 type closeRecordingScope struct {
     containercontract.Scope

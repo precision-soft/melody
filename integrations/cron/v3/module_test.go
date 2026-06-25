@@ -6,7 +6,7 @@ import (
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
 )
 
-/** @info spies */
+/* @info spies */
 
 type spyParameterRegistrar struct {
     names []string
@@ -16,7 +16,7 @@ func (instance *spyParameterRegistrar) RegisterParameter(name string, value any)
     instance.names = append(instance.names, name)
 }
 
-/** @info tests */
+/* @info tests */
 
 func TestModule_NameAndDescription(t *testing.T) {
     module := NewModule(ModuleConfig{})

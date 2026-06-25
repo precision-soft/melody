@@ -7,7 +7,7 @@ import (
     amqp091 "github.com/rabbitmq/amqp091-go"
 )
 
-/** @info spies */
+/* @info spies */
 
 type spyServiceRegistrar struct {
     names []string
@@ -35,7 +35,7 @@ func containsName(names []string, want string) bool {
     return false
 }
 
-/** @info tests */
+/* @info tests */
 
 func TestModule_NameAndDescription(t *testing.T) {
     module := NewModule(ModuleConfig{})

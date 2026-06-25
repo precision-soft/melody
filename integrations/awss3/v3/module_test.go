@@ -9,7 +9,7 @@ import (
     melodystorage "github.com/precision-soft/melody/v3/storage"
 )
 
-/** @info spies */
+/* @info spies */
 
 type spyServiceRegistrar struct {
     names []string
@@ -19,7 +19,7 @@ func (instance *spyServiceRegistrar) RegisterService(serviceName string, provide
     instance.names = append(instance.names, serviceName)
 }
 
-/** @info tests */
+/* @info tests */
 
 func TestModule_NameAndDescription(t *testing.T) {
     module := NewModule(ModuleConfig{})

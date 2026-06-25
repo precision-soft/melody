@@ -513,6 +513,9 @@ func applyValidation(schema *Schema, validateTag string) {
                     minProperties := 1
                     schema.MinProperties = &minProperties
                 }
+            default:
+                /* @important notEmpty's validator rejects any value whose kind is not string/array/slice/map outright (constraint_not_empty.go default branch), so an integer/number/boolean field carrying notEmpty is unsatisfiable server-side; advertise it as such — an empty exclusive number range or, for a boolean, two contradictory enums under allOf — instead of an unconstrained scalar a client would trust. A struct-typed object (type object with no additionalProperties) is left untouched by the case above, matching the existing struct exemption */
+                rejectsAll = true
             }
         case "greaterThan":
             if "integer" == schema.Type || "number" == schema.Type {
@@ -588,6 +591,12 @@ func markFieldUnsatisfiable(schema *Schema) {
         schema.Maximum = &zero
         schema.ExclusiveMinimum = &exclusive
         schema.ExclusiveMaximum = &exclusive
+    case "boolean":
+        /* @important a boolean carries no numeric or length facet to contradict, and an empty enum is invalid under the OpenAPI 3.0 meta-schema (enum requires minItems 1), so advertise two contradictory single-value enums under allOf: a value cannot be both true and false, yet each enum is non-empty and spec-valid */
+        schema.AllOf = []*Schema{
+            {Enum: &[]any{true}},
+            {Enum: &[]any{false}},
+        }
     }
 }
 

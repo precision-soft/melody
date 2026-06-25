@@ -9,7 +9,7 @@ import (
     containercontract "github.com/precision-soft/melody/v3/container/contract"
 )
 
-/** @info fakes */
+/* @info fakes */
 
 type fakeClient struct {
     rueidis.Client
@@ -23,7 +23,7 @@ func (instance *spyServiceRegistrar) RegisterService(serviceName string, provide
     instance.names = append(instance.names, serviceName)
 }
 
-/** @info tests */
+/* @info tests */
 
 func TestModule_NameAndDescription(t *testing.T) {
     module := NewModule(ModuleConfig{})

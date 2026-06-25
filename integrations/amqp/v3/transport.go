@@ -18,8 +18,9 @@ import (
 )
 
 const (
-    headerMessageType     = "x-message-type"
-    headerRedeliveryCount = "x-redelivery-count"
+    headerMessageType            = "x-message-type"
+    headerRedeliveryCount        = "x-redelivery-count"
+    headerDeadLetterAttemptCount = "x-dead-letter-attempt-count"
 
     defaultPublishReturnBuffer = 16
 )
@@ -359,8 +360,9 @@ func (instance *Transport) buildPublishing(
         DeliveryMode: amqp091.Persistent,
         Expiration:   expiration,
         Headers: amqp091.Table{
-            headerMessageType:     typeName,
-            headerRedeliveryCount: int64(melodymessagebus.RedeliveryCount(envelopeInstance)),
+            headerMessageType:            typeName,
+            headerRedeliveryCount:        int64(melodymessagebus.RedeliveryCount(envelopeInstance)),
+            headerDeadLetterAttemptCount: int64(melodymessagebus.DeadLetterAttemptCount(envelopeInstance)),
         },
         Body: body,
     }, nil
@@ -738,11 +740,23 @@ func (instance *Transport) decode(delivery amqp091.Delivery, generation uint64) 
         stamps = append(stamps, melodymessagebus.RedeliveryStamp{Count: count})
     }
 
+    if count := deadLetterAttemptCountFromHeader(delivery.Headers); 0 < count {
+        stamps = append(stamps, melodymessagebus.DeadLetterAttemptStamp{Count: count})
+    }
+
     return melodymessagebus.NewEnvelope(message, stamps...), nil
 }
 
 func redeliveryCountFromHeader(headers amqp091.Table) int {
-    raw, exists := headers[headerRedeliveryCount]
+    return intFromHeader(headers, headerRedeliveryCount)
+}
+
+func deadLetterAttemptCountFromHeader(headers amqp091.Table) int {
+    return intFromHeader(headers, headerDeadLetterAttemptCount)
+}
+
+func intFromHeader(headers amqp091.Table, key string) int {
+    raw, exists := headers[key]
     if false == exists {
         return 0
     }

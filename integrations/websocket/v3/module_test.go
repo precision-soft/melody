@@ -8,7 +8,7 @@ import (
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
 )
 
-/** @info spies */
+/* @info spies */
 
 type spyRouter struct {
     httpcontract.Router
@@ -28,7 +28,7 @@ func (instance *spyKernel) HttpRouter() httpcontract.Router {
     return instance.router
 }
 
-/** @info tests */
+/* @info tests */
 
 func TestModule_NameAndDescription(t *testing.T) {
     module := NewModule(ModuleConfig{})

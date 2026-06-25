@@ -236,6 +236,53 @@ func TestBuildSchema_NotEmptyEmitsCollectionFloors(t *testing.T) {
     }
 }
 
+func TestBuildSchema_NotEmptyOnScalarIsUnsatisfiable(t *testing.T) {
+    components := map[string]*Schema{}
+    names := map[reflect.Type]string{}
+    visited := map[reflect.Type]bool{}
+
+    intType := reflect.TypeOf(0)
+    floatType := reflect.TypeOf(float64(0))
+    boolType := reflect.TypeOf(false)
+    requestType := reflect.StructOf([]reflect.StructField{
+        {Name: "Count", Type: intType, Tag: `json:"count" validate:"notEmpty"`},
+        {Name: "Ratio", Type: floatType, Tag: `json:"ratio" validate:"notEmpty"`},
+        {Name: "Flag", Type: boolType, Tag: `json:"flag" validate:"notEmpty"`},
+        {Name: "Plain", Type: intType, Tag: `json:"plain"`},
+    })
+
+    schema := buildSchema(requestType, components, names, visited)
+
+    /* @important notEmpty's validator rejects any non string/array/slice/map kind outright (constraint_not_empty.go default branch), so an integer/number field carrying it is unsatisfiable server-side; the spec must advertise the same impossible exclusive range (> 0 and < 0) instead of an unconstrained scalar a client would trust */
+    count := schema.Properties["count"]
+    if nil == count.Minimum || 0 != *count.Minimum || nil == count.Maximum || 0 != *count.Maximum ||
+        nil == count.ExclusiveMinimum || false == *count.ExclusiveMinimum || nil == count.ExclusiveMaximum || false == *count.ExclusiveMaximum {
+        t.Fatalf("expected notEmpty on an integer field to advertise an unsatisfiable exclusive range (> 0 and < 0), got %+v", count)
+    }
+    ratio := schema.Properties["ratio"]
+    if nil == ratio.Minimum || nil == ratio.Maximum || nil == ratio.ExclusiveMinimum || nil == ratio.ExclusiveMaximum {
+        t.Fatalf("expected notEmpty on a number field to advertise an unsatisfiable exclusive range, got %+v", ratio)
+    }
+
+    /* @important a boolean has no numeric or length facet to contradict, and an empty enum is invalid under the OpenAPI 3.0 meta-schema (enum requires minItems 1), so notEmpty advertises two contradictory single-value enums under allOf — a value can be neither both true and false, yet each enum is non-empty and spec-valid */
+    flag := schema.Properties["flag"]
+    if 2 != len(flag.AllOf) {
+        t.Fatalf("expected notEmpty on a boolean field to advertise two contradictory allOf enums (unsatisfiable), got %+v", flag)
+    }
+    if nil == flag.AllOf[0].Enum || 1 != len(*flag.AllOf[0].Enum) || true != (*flag.AllOf[0].Enum)[0] ||
+        nil == flag.AllOf[1].Enum || 1 != len(*flag.AllOf[1].Enum) || false != (*flag.AllOf[1].Enum)[0] {
+        t.Fatalf("expected the boolean allOf to require both true and false (each a non-empty enum, so spec-valid), got %+v and %+v", flag.AllOf[0], flag.AllOf[1])
+    }
+    if nil != flag.Enum {
+        t.Fatalf("expected no empty top-level enum on the boolean schema (invalid under OAS 3.0), got %+v", flag.Enum)
+    }
+
+    /* @important an untagged scalar keeps no constraint, proving the unsatisfiable markers come from notEmpty and not the scalar shape itself */
+    if plain := schema.Properties["plain"]; nil != plain.Minimum || nil != plain.Maximum {
+        t.Fatalf("expected an untagged integer field to advertise no numeric bound, got %+v", plain)
+    }
+}
+
 func TestBuildSchema_RegexCharacterClassBracketPreserved(t *testing.T) {
     components := map[string]*Schema{}
     names := map[reflect.Type]string{}

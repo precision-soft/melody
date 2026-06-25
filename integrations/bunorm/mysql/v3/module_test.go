@@ -13,7 +13,7 @@ import (
     "github.com/uptrace/bun/dialect/mysqldialect"
 )
 
-/** @info fakes */
+/* @info fakes */
 
 type fakeConnector struct{}
 
@@ -43,7 +43,7 @@ func (instance *spyServiceRegistrar) RegisterService(serviceName string, provide
     instance.names = append(instance.names, serviceName)
 }
 
-/** @info tests */
+/* @info tests */
 
 func TestModule_NameAndDescription(t *testing.T) {
     module := NewModule(ModuleConfig{})
