@@ -7,10 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v3.1.1] - 2026-06-25 - Audit Unexported-Typed Embedded Struct Fields
+## [v3.1.1] - 2026-06-25 - Audit Redaction Completeness
 
 ### Fixed
 
+- `audit/change.go` — `valueContainsRedactTagReflect` deduplicated visited slices by their backing-array start pointer alone, so two slices sharing that start but differing in length (e.g. `full` and `full[:1]`) collided: when the shorter, benign view was walked first and recorded the pointer, the longer slice carrying a redact-tagged (or `encrypt.Encrypted*`) element past the shorter view's length was treated as already-visited and skipped, leaking the secret as plaintext into the audit changes. The visit key now combines the pointer with the slice length, so a different-length view of the same array is still traversed while a self-referential slice (identical pointer and length) is still caught as a cycle.
 - `audit/change.go` — `collectChanges` skipped every field of an anonymous embedded struct whose **type name is unexported** (e.g. `type timestamps struct{...}` embedded into a bun model), because the exported-field guard ran before the embed-recursion branch and `reflect.StructField.IsExported()` is false for such a synthetic field. bun/json still promote and persist that embed's exported columns, so their changes — including any `audit:"redact"` or `encrypt.Encrypted*` field declared inside the embed — were silently absent from the audit trail (an incomplete trail for a compliance feature). The exported-field skip no longer applies to anonymous fields, so columns promoted from an unexported-typed embed are audited and redacted like any other.
 
 ## [v3.1.0] - 2026-06-16 - Column Encryption, Field-Level Audit Trail, and Read/Write Split

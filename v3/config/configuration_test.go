@@ -3,6 +3,7 @@ package config
 import (
     "fmt"
     "path/filepath"
+    "sync"
     "testing"
 )
 
@@ -210,6 +211,50 @@ func TestConfigurationRegisterRuntime_ConcurrentCallsDoNotPanic(t *testing.T) {
     for i := 0; i < 10; i++ {
         <-done
     }
+}
+
+func TestConfiguration_ConcurrentRegisterAndReadIsRaceFree(t *testing.T) {
+    source := &testEnvironmentSource{values: map[string]string{}}
+
+    environment, err := NewEnvironment(source)
+    if nil != err {
+        t.Fatalf("new environment error: %v", err)
+    }
+
+    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    if nil != err {
+        t.Fatalf("new configuration error: %v", err)
+    }
+
+    var waitGroup sync.WaitGroup
+
+    /* @important RegisterRuntime mutates the shared parameters map at runtime, so the readers (Get/Names/Parameters) must take the read lock: under -race an unguarded reader racing the writer reports a data race, and without -race it is Go's non-recoverable "fatal error: concurrent map read and map write" */
+    for writerIndex := 0; writerIndex < 8; writerIndex++ {
+        waitGroup.Add(1)
+        go func(index int) {
+            defer waitGroup.Done()
+            for iteration := 0; iteration < 50; iteration++ {
+                func() {
+                    defer func() { _ = recover() }()
+                    configuration.RegisterRuntime(fmt.Sprintf("app.runtime_%d_%d", index, iteration), index)
+                }()
+            }
+        }(writerIndex)
+    }
+
+    for readerIndex := 0; readerIndex < 8; readerIndex++ {
+        waitGroup.Add(1)
+        go func() {
+            defer waitGroup.Done()
+            for iteration := 0; iteration < 200; iteration++ {
+                _ = configuration.Get("app.runtime_0_0")
+                _ = configuration.Names()
+                _ = configuration.Parameters()
+            }
+        }()
+    }
+
+    waitGroup.Wait()
 }
 
 func TestRegisterRuntimeAddsValue(t *testing.T) {

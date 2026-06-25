@@ -111,3 +111,24 @@ func TestNormalizeObjectKey_RejectsEmptyAndDotKeys(t *testing.T) {
         }
     }
 }
+
+func TestReaderHasTrailingBytes_DetectsBodyLongerThanDeclaredSize(t *testing.T) {
+    /* @important mirrors the Put over-read guard: after minio consumes the declared size, a body exactly that size yields no more bytes while a longer body still yields one (which minio would silently truncate and store), so the guard must flag the latter to match LocalStorage's size-mismatch rejection */
+    declaredSize := 3
+
+    exhausted := strings.NewReader("abc")
+    if _, err := io.ReadFull(exhausted, make([]byte, declaredSize)); nil != err {
+        t.Fatalf("unexpected read error: %s", err.Error())
+    }
+    if true == readerHasTrailingBytes(exhausted) {
+        t.Fatalf("a body exactly the declared size must report no trailing bytes")
+    }
+
+    oversize := strings.NewReader("abcd")
+    if _, err := io.ReadFull(oversize, make([]byte, declaredSize)); nil != err {
+        t.Fatalf("unexpected read error: %s", err.Error())
+    }
+    if false == readerHasTrailingBytes(oversize) {
+        t.Fatalf("a body longer than the declared size must report a trailing byte so Put can reject it")
+    }
+}

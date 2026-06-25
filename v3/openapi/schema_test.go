@@ -135,14 +135,45 @@ func TestBuildSchema_CharacterClassConstraintsEmitPattern(t *testing.T) {
 
     schema := buildSchema(requestType, components, names, visited)
 
-    if "^[a-zA-Z]+$" != schema.Properties["letters"].Pattern {
-        t.Fatalf("expected alpha to advertise pattern ^[a-zA-Z]+$ (the validator enforces it), got %q", schema.Properties["letters"].Pattern)
+    /* @important the validator short-circuits on an empty string (it accepts ""), so the advertised class uses a * quantifier (which also matches "") rather than + which would reject the "" the validator accepts */
+    if "^[a-zA-Z]*$" != schema.Properties["letters"].Pattern {
+        t.Fatalf("expected alpha to advertise pattern ^[a-zA-Z]*$ (the validator accepts \"\"), got %q", schema.Properties["letters"].Pattern)
     }
-    if "^[0-9]+$" != schema.Properties["digits"].Pattern {
-        t.Fatalf("expected numeric to advertise pattern ^[0-9]+$, got %q", schema.Properties["digits"].Pattern)
+    if "^[0-9]*$" != schema.Properties["digits"].Pattern {
+        t.Fatalf("expected numeric to advertise pattern ^[0-9]*$, got %q", schema.Properties["digits"].Pattern)
     }
-    if "^[a-zA-Z0-9]+$" != schema.Properties["mixed"].Pattern {
-        t.Fatalf("expected alphanumeric to advertise pattern ^[a-zA-Z0-9]+$, got %q", schema.Properties["mixed"].Pattern)
+    if "^[a-zA-Z0-9]*$" != schema.Properties["mixed"].Pattern {
+        t.Fatalf("expected alphanumeric to advertise pattern ^[a-zA-Z0-9]*$, got %q", schema.Properties["mixed"].Pattern)
+    }
+}
+
+func TestBuildSchema_MultiplePatternRulesEmittedAsAllOf(t *testing.T) {
+    stringType := reflect.TypeOf("")
+    requestType := reflect.StructOf([]reflect.StructField{
+        {Name: "Code", Type: stringType, Tag: `json:"code" validate:"regex=^[a-z]+$,alpha"`},
+    })
+
+    schema := buildSchema(requestType, map[string]*Schema{}, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    code := schema.Properties["code"]
+    if nil == code {
+        t.Fatalf("expected a code property")
+    }
+
+    /* @important the validator enforces BOTH the regex and the alpha pattern; a single OpenAPI `pattern` can hold only one (RE2 has no lookahead to AND them), so both must be advertised as allOf members rather than silently dropping all but the last */
+    if 2 != len(code.AllOf) {
+        t.Fatalf("expected two pattern rules to be advertised as two allOf members, got %d: %+v", len(code.AllOf), code)
+    }
+
+    advertised := map[string]bool{}
+    for _, member := range code.AllOf {
+        advertised[member.Pattern] = true
+    }
+    if false == advertised["^[a-z]+$"] || false == advertised["^[a-zA-Z]*$"] {
+        t.Fatalf("expected both the regex and the alpha pattern to be advertised as allOf members, got %#v", advertised)
+    }
+    if "" != code.Pattern {
+        t.Fatalf("expected the single pattern slot to stay empty when multiple patterns are emitted via allOf, got %q", code.Pattern)
     }
 }
 
@@ -241,7 +272,7 @@ func TestBuildSchema_MaxLengthAcceptsNonIntegerPrefix(t *testing.T) {
     }
 }
 
-func TestBuildSchema_NegativeMinMaxClampedToZero(t *testing.T) {
+func TestBuildSchema_NegativeMinClampedNegativeMaxUnsatisfiable(t *testing.T) {
     components := map[string]*Schema{}
     names := map[reflect.Type]string{}
     visited := map[reflect.Type]bool{}
@@ -254,14 +285,16 @@ func TestBuildSchema_NegativeMinMaxClampedToZero(t *testing.T) {
 
     schema := buildSchema(requestType, components, names, visited)
 
+    /* @important a negative min imposes no floor (MinLength.Validate uses len < min, never true for a negative bound, so the validator accepts every value); it stays clamped to a spec-valid minLength 0 advertising the same "no minimum" */
     low := schema.Properties["low"]
     if nil == low.MinLength || 0 != *low.MinLength {
         t.Fatalf("expected a negative min=-5 to be clamped to a spec-valid minLength 0, got %v", low.MinLength)
     }
 
+    /* @important a negative max makes MaxLength.Validate (len > max) reject every value including "", so the field is unsatisfiable and the schema advertises an impossible length window (minLength 1, maxLength 0) rather than maxLength 0 which would advertise "" as valid */
     high := schema.Properties["high"]
-    if nil == high.MaxLength || 0 != *high.MaxLength {
-        t.Fatalf("expected a negative max=-10 to be clamped to a spec-valid maxLength 0, got %v", high.MaxLength)
+    if nil == high.MinLength || 1 != *high.MinLength || nil == high.MaxLength || 0 != *high.MaxLength {
+        t.Fatalf("expected a negative max=-10 to advertise an unsatisfiable string schema (minLength 1, maxLength 0), got: %+v", high)
     }
 }
 
@@ -601,14 +634,14 @@ func TestApplyValidation_ValuedConstraintsStillHonourTheirValue(t *testing.T) {
         t.Fatalf("expected greaterThan(value=5) to advertise minimum 5, got %v", greaterThanSchema.Minimum)
     }
 }
-/* @info malformed min/max bound must mirror the validator default (CR #64) */
+/* @info a malformed numeric/length tag makes the validator fail the field closed (post-CR70), so the spec advertises an unsatisfiable schema rather than a passable default (CR #71 supersedes CR #64/#65) */
 
 type malformedBoundRequestCR64 struct {
     Name string `json:"name" validate:"max=abc"`
     Code string `json:"code" validate:"min=xyz"`
 }
 
-func TestBuildSchema_MalformedMinMaxBoundMirrorsValidatorDefault(t *testing.T) {
+func TestBuildSchema_MalformedMinMaxBoundIsUnsatisfiable(t *testing.T) {
     components := map[string]*Schema{}
     buildSchema(reflect.TypeOf(malformedBoundRequestCR64{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
 
@@ -617,14 +650,12 @@ func TestBuildSchema_MalformedMinMaxBoundMirrorsValidatorDefault(t *testing.T) {
         t.Fatalf("expected the request schema to be registered in components")
     }
 
-    name := schema.Properties["name"]
-    if nil == name || nil == name.MaxLength || 100 != *name.MaxLength {
-        t.Fatalf("expected an unparseable max value to advertise the validator default maxLength 100, got: %+v", name)
-    }
-
-    code := schema.Properties["code"]
-    if nil == code || nil == code.MinLength || 0 != *code.MinLength {
-        t.Fatalf("expected an unparseable min value to advertise the validator default minLength 0, got: %+v", code)
+    /* @important the validator rejects every value of a field whose numeric tag cannot be parsed, so the string schema must reject every value too (an impossible length window) rather than advertise a passable default a client would trust */
+    for _, fieldName := range []string{"name", "code"} {
+        property := schema.Properties[fieldName]
+        if nil == property || nil == property.MinLength || 1 != *property.MinLength || nil == property.MaxLength || 0 != *property.MaxLength {
+            t.Fatalf("expected a malformed numeric tag to advertise an unsatisfiable string schema (minLength 1, maxLength 0), field %q got: %+v", fieldName, property)
+        }
     }
 }
 
@@ -633,7 +664,7 @@ type malformedNumericBoundRequestCR65 struct {
     Ceiling int `json:"ceiling" validate:"lessThan=xyz"`
 }
 
-func TestBuildSchema_MalformedGreaterLessThanBoundMirrorsValidatorDefault(t *testing.T) {
+func TestBuildSchema_MalformedGreaterLessThanBoundIsUnsatisfiable(t *testing.T) {
     components := map[string]*Schema{}
     buildSchema(reflect.TypeOf(malformedNumericBoundRequestCR65{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
 
@@ -642,14 +673,14 @@ func TestBuildSchema_MalformedGreaterLessThanBoundMirrorsValidatorDefault(t *tes
         t.Fatalf("expected the request schema to be registered in components")
     }
 
-    floor := schema.Properties["floor"]
-    if nil == floor || nil == floor.Minimum || 0 != *floor.Minimum || nil == floor.ExclusiveMinimum || false == *floor.ExclusiveMinimum {
-        t.Fatalf("expected an unparseable greaterThan value to advertise the validator default exclusive minimum 0, got: %+v", floor)
-    }
-
-    ceiling := schema.Properties["ceiling"]
-    if nil == ceiling || nil == ceiling.Maximum || 0 != *ceiling.Maximum || nil == ceiling.ExclusiveMaximum || false == *ceiling.ExclusiveMaximum {
-        t.Fatalf("expected an unparseable lessThan value to advertise the validator default exclusive maximum 0, got: %+v", ceiling)
+    /* @important the validator rejects every value of a field whose greaterThan/lessThan tag cannot be parsed, so the number schema must be unsatisfiable: an empty exclusive range that is both > 0 and < 0 */
+    for _, fieldName := range []string{"floor", "ceiling"} {
+        property := schema.Properties[fieldName]
+        if nil == property ||
+            nil == property.Minimum || 0 != *property.Minimum || nil == property.ExclusiveMinimum || false == *property.ExclusiveMinimum ||
+            nil == property.Maximum || 0 != *property.Maximum || nil == property.ExclusiveMaximum || false == *property.ExclusiveMaximum {
+            t.Fatalf("expected a malformed numeric bound to advertise an unsatisfiable number schema (>0 and <0), field %q got: %+v", fieldName, property)
+        }
     }
 }
 
@@ -669,5 +700,57 @@ func TestBuildSchema_EmailDoesNotClobberStructuralByteFormat(t *testing.T) {
     blob := schema.Properties["blob"]
     if nil == blob || "string" != blob.Type || "byte" != blob.Format {
         t.Fatalf("expected a []byte field to keep format byte even with validate:email, got: %+v", blob)
+    }
+}
+
+/* @info notBlank/notEmpty reject a null pointer, so the spec must not advertise the field nullable (CR #71) */
+
+func TestApplyValidation_NotBlankNotEmptyPointerFieldNotNullable(t *testing.T) {
+    structType := reflect.StructOf([]reflect.StructField{
+        {Name: "Name", Type: reflect.TypeOf((*string)(nil)), Tag: `json:"name" validate:"notBlank"`},
+        {Name: "Title", Type: reflect.TypeOf((*string)(nil)), Tag: `json:"title" validate:"notEmpty"`},
+        {Name: "Tags", Type: reflect.TypeOf((*[]string)(nil)), Tag: `json:"tags" validate:"notEmpty"`},
+        {Name: "Labels", Type: reflect.TypeOf((*map[string]string)(nil)), Tag: `json:"labels" validate:"notEmpty"`},
+    })
+
+    schema := buildSchema(structType, map[string]*Schema{}, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    /* @important the validator rejects a null pointer for notBlank/notEmpty (NotBlank.Validate fails the deref, NotEmpty.Validate rejects a nil pointer), so a pointer field carrying either must not be advertised nullable, otherwise a client trusting the spec sends null and is then rejected — the same fix already applied to greaterThan/lessThan */
+    for _, name := range []string{"name", "title", "tags", "labels"} {
+        property := schema.Properties[name]
+        if nil == property {
+            t.Fatalf("expected a %q property schema", name)
+        }
+        if true == property.Nullable {
+            t.Fatalf("expected the pointer field %q with notBlank/notEmpty not to be advertised nullable (the validator rejects null), got nullable=true", name)
+        }
+    }
+}
+
+/* @info a degenerate min=0 must not suppress the notEmpty/notBlank non-empty floor, in either tag order (CR #71) */
+
+func TestBuildSchema_DegenerateMinZeroDoesNotSuppressNotEmptyFloor(t *testing.T) {
+    stringType := reflect.TypeOf("")
+    structType := reflect.StructOf([]reflect.StructField{
+        {Name: "A", Type: stringType, Tag: `json:"a" validate:"min=0,notEmpty"`},
+        {Name: "B", Type: stringType, Tag: `json:"b" validate:"notEmpty,min=0"`},
+        {Name: "C", Type: stringType, Tag: `json:"c" validate:"min=0,notBlank"`},
+        {Name: "D", Type: stringType, Tag: `json:"d" validate:"notBlank,min=0"`},
+        {Name: "E", Type: stringType, Tag: `json:"e" validate:"min=5,notEmpty"`},
+    })
+
+    schema := buildSchema(structType, map[string]*Schema{}, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    /* @important the validator rejects "" for notEmpty/notBlank, so a degenerate min=0 (whose minLength 0 floor advertises "" as valid) must be raised to 1 regardless of which side of the tag it sits on */
+    for _, name := range []string{"a", "b", "c", "d"} {
+        property := schema.Properties[name]
+        if nil == property || nil == property.MinLength || 1 != *property.MinLength {
+            t.Fatalf("expected a degenerate min=0 combined with notEmpty/notBlank to advertise minLength 1, field %q got %+v", name, property)
+        }
+    }
+
+    /* @important an explicit min >= 1 still wins over the notEmpty floor */
+    if e := schema.Properties["e"]; nil == e || nil == e.MinLength || 5 != *e.MinLength {
+        t.Fatalf("expected an explicit min=5 to win over the notEmpty floor, got %+v", e)
     }
 }

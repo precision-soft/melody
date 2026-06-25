@@ -236,3 +236,106 @@ func TestFileStorage_ConcurrentLoadSaveIsRaceFree(t *testing.T) {
 
     waitGroup.Wait()
 }
+
+func TestFileStorage_Save_FailedEncodeDoesNotDestroyPersistedSessions(t *testing.T) {
+    fileInstance, err := os.CreateTemp("", "melody_session_dataloss_*.json")
+    if nil != err {
+        t.Fatalf("unexpected create temp error: %s", err.Error())
+    }
+
+    defer func() {
+        _ = fileInstance.Close()
+        _ = os.Remove(fileInstance.Name())
+    }()
+
+    storage, err := NewFileStorageFromFile(fileInstance)
+    if nil != err {
+        t.Fatalf("unexpected storage error: %s", err.Error())
+    }
+
+    saveErr := storage.Save("keep", map[string]any{"k": "v"}, 0)
+    if nil != saveErr {
+        t.Fatalf("unexpected save error: %s", saveErr.Error())
+    }
+
+    info, statErr := os.Stat(fileInstance.Name())
+    if nil != statErr {
+        t.Fatalf("unexpected stat error: %s", statErr.Error())
+    }
+    if 0 == info.Size() {
+        t.Fatalf("expected the persisted session file to be non-empty after a successful save")
+    }
+
+    /* @important a Save whose value cannot be JSON-encoded (here a channel) must fail without truncating the live file and destroying the already-persisted "keep" session — the in-place writer must encode before it truncates, mirroring the atomic writer */
+    badSaveErr := storage.Save("bad", map[string]any{"ch": make(chan int)}, 0)
+    if nil == badSaveErr {
+        t.Fatalf("expected a non-marshalable session value to fail the save")
+    }
+
+    info, statErr = os.Stat(fileInstance.Name())
+    if nil != statErr {
+        t.Fatalf("unexpected stat error: %s", statErr.Error())
+    }
+    if 0 == info.Size() {
+        t.Fatalf("a failed save truncated the session file to 0 bytes, destroying the previously-persisted sessions")
+    }
+
+    reader, err := NewFileStorageFromFile(fileInstance)
+    if nil != err {
+        t.Fatalf("unexpected storage error: %s", err.Error())
+    }
+
+    data, exists, loadErr := reader.Load("keep")
+    if nil != loadErr {
+        t.Fatalf("unexpected load error: %s", loadErr.Error())
+    }
+    if false == exists {
+        t.Fatalf("the previously-persisted \"keep\" session was lost from disk after an unrelated failed save")
+    }
+    if "v" != data["k"].(string) {
+        t.Fatalf("the previously-persisted session value was corrupted after a failed save")
+    }
+}
+
+func TestFileStorage_Save_RollsBackInMemoryEntryWhenFlushFails(t *testing.T) {
+    fileInstance, err := os.CreateTemp("", "melody_session_rollback_*.json")
+    if nil != err {
+        t.Fatalf("unexpected create temp error: %s", err.Error())
+    }
+
+    defer func() {
+        _ = fileInstance.Close()
+        _ = os.Remove(fileInstance.Name())
+    }()
+
+    storage, err := NewFileStorageFromFile(fileInstance)
+    if nil != err {
+        t.Fatalf("unexpected storage error: %s", err.Error())
+    }
+
+    if saveErr := storage.Save("existing", map[string]any{"v": "old"}, 0); nil != saveErr {
+        t.Fatalf("unexpected save error: %s", saveErr.Error())
+    }
+
+    /* @important a failed Save of a NEW id must roll the in-memory entry back so Load does not surface a session that was never persisted */
+    if newErr := storage.Save("fresh", map[string]any{"ch": make(chan int)}, 0); nil == newErr {
+        t.Fatalf("expected the non-marshalable save to fail")
+    }
+    if _, exists, loadErr := storage.Load("fresh"); nil != loadErr {
+        t.Fatalf("unexpected load error: %s", loadErr.Error())
+    } else if true == exists {
+        t.Fatalf("a failed Save of a new id must not be observable via Load")
+    }
+
+    /* @important a failed Save that updates an EXISTING id must restore the previous in-memory value */
+    if updErr := storage.Save("existing", map[string]any{"ch": make(chan int)}, 0); nil == updErr {
+        t.Fatalf("expected the non-marshalable update to fail")
+    }
+    data, exists, loadErr := storage.Load("existing")
+    if nil != loadErr {
+        t.Fatalf("unexpected load error: %s", loadErr.Error())
+    }
+    if false == exists || "old" != data["v"].(string) {
+        t.Fatalf("a failed update must restore the previous in-memory value, got exists=%v data=%v", exists, data)
+    }
+}

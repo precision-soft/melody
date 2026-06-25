@@ -69,7 +69,26 @@ func (instance *Storage) Put(
         return exception.NewError("object storage put failed", map[string]any{"key": key}, putErr)
     }
 
+    /* @important minio reads exactly `size` bytes when size >= 0 and silently ignores any trailing bytes, storing a truncated object and reporting success; LocalStorage rejects a reader longer than its declared size, so detect the over-read here and fail — removing the truncated object — to keep the two backends' Put contract identical. A negative size means "unknown length" and is streamed whole with no size check on both backends. */
+    if 0 <= size && true == readerHasTrailingBytes(reader) {
+        _ = instance.client.RemoveObject(runtimeInstance.Context(), instance.bucket, normalizedKey, minio.RemoveObjectOptions{})
+
+        return exception.NewError(
+            "storage object size does not match the declared size",
+            map[string]any{"key": key, "declared": size},
+            nil,
+        )
+    }
+
     return nil
+}
+
+/* @important readerHasTrailingBytes reports whether the reader still yields data; called after minio has consumed the declared size to detect a body longer than its declared size (which minio silently truncates to size). */
+func readerHasTrailingBytes(reader io.Reader) bool {
+    var probe [1]byte
+    read, _ := reader.Read(probe[:])
+
+    return 0 < read
 }
 
 func (instance *Storage) Get(

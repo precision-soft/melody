@@ -80,7 +80,7 @@ func NewConfiguration(
 }
 
 type Configuration struct {
-    mutex       sync.Mutex
+    mutex       sync.RWMutex
     environment *Environment
     parameters  ParameterMap
     logger      loggingcontract.Logger
@@ -102,14 +102,22 @@ func (instance *Configuration) Http() configcontract.HttpConfiguration {
 }
 
 func (instance *Configuration) Parameters() ParameterMap {
+    /* @important read under the read lock because RegisterRuntime mutates the shared parameters map at runtime; an unguarded range here races the writer and trips Go's fatal "concurrent map read and map write" */
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
+
     return internal.CopyStringMap[*Parameter](
         instance.parameters,
     )
 }
 
 func (instance *Configuration) Get(name string) configcontract.Parameter {
-    parameter, exists := instance.parameters[name]
-    if false == exists || nil == parameter {
+    /* @important read under the read lock because RegisterRuntime mutates the shared parameters map at runtime; an unguarded read here races the writer and trips Go's fatal "concurrent map read and map write" */
+    instance.mutex.RLock()
+    parameter := instance.getInternalParameter(name)
+    instance.mutex.RUnlock()
+
+    if nil == parameter {
         return nil
     }
 
@@ -155,7 +163,8 @@ func (instance *Configuration) RegisterRuntime(name string, value any) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    existingParameter := instance.Get(name)
+    /* @important use the lock-free lookup here, not Get: Get now takes the read lock and sync.RWMutex is non-reentrant, so self-calling it while holding the write lock would deadlock */
+    existingParameter := instance.getInternalParameter(name)
     if nil != existingParameter {
         exception.Panic(
             exception.NewError(
@@ -172,11 +181,16 @@ func (instance *Configuration) RegisterRuntime(name string, value any) {
 }
 
 func (instance *Configuration) Names() []string {
+    /* @important read under the read lock because RegisterRuntime mutates the shared parameters map at runtime; an unguarded range here races the writer and trips Go's fatal "concurrent map read and map write" */
+    instance.mutex.RLock()
+
     names := make([]string, 0, len(instance.parameters))
 
     for name := range instance.parameters {
         names = append(names, name)
     }
+
+    instance.mutex.RUnlock()
 
     sort.Strings(names)
 
@@ -370,6 +384,7 @@ func (instance *Configuration) unescapePercents(value string) string {
     return strings.ReplaceAll(value, escapedPercentPlaceholder, "%")
 }
 
+/* @important getInternalParameter is the lock-free map lookup primitive; it must NOT take the lock because it is called both at single-threaded construction (placeholder resolution) and while the write lock is already held (RegisterRuntime). Concurrent readers go through Get/Parameters/Names, which take the read lock around it. */
 func (instance *Configuration) getInternalParameter(name string) *Parameter {
     parameter, exists := instance.parameters[name]
     if false == exists || nil == parameter {

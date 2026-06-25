@@ -98,11 +98,17 @@ func (instance *scope) GetByType(targetType reflect.Type) (any, error) {
 func (instance *scope) MustGetByType(targetType reflect.Type) any {
     value, getByTypeErr := instance.GetByType(targetType)
     if nil != getByTypeErr {
+        /* @important a nil targetType yields a clean GetByType error, so guard the type string here too rather than dereferencing a nil reflect.Type (whose String() panics with an obscure nil-pointer error and discards the wrapped cause), matching resolverContext.MustGetByType */
+        targetTypeString := ""
+        if nil != targetType {
+            targetTypeString = targetType.String()
+        }
+
         exception.Panic(
             exception.NewError(
                 "failed to get service from scope by type",
                 map[string]any{
-                    "targetType": targetType.String(),
+                    "targetType": targetTypeString,
                 },
                 getByTypeErr,
             ),

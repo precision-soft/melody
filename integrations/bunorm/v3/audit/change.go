@@ -223,20 +223,26 @@ func valueContainsRedactTag(value any) bool {
         return false
     }
 
-    return valueContainsRedactTagReflect(reflect.ValueOf(value), map[uintptr]struct{}{})
+    return valueContainsRedactTagReflect(reflect.ValueOf(value), map[redactVisitKey]struct{}{})
 }
 
-func valueContainsRedactTagReflect(value reflect.Value, seen map[uintptr]struct{}) bool {
+/* @important the visit key combines the pointer with a length discriminator so two distinct re-slices that share a backing-array start (full and full[:1]) are not collapsed into the same already-visited value — that false dedup would skip a redact-tagged element living past the shorter slice's length and leak it as plaintext. A *T or map header is identified by its pointer alone (length stays 0); a slice adds its length + 1, so a self-referential slice (same pointer, same length) is still caught as a cycle while a different-length view of the same array is traversed, and a slice key never collides with a length-0 pointer/map key. */
+type redactVisitKey struct {
+    pointer uintptr
+    length  uintptr
+}
+
+func valueContainsRedactTagReflect(value reflect.Value, seen map[redactVisitKey]struct{}) bool {
     for reflect.Ptr == value.Kind() || reflect.Interface == value.Kind() {
         if true == value.IsNil() {
             return false
         }
         if reflect.Ptr == value.Kind() {
-            pointer := value.Pointer()
-            if _, visited := seen[pointer]; true == visited {
+            key := redactVisitKey{pointer: value.Pointer()}
+            if _, visited := seen[key]; true == visited {
                 return false
             }
-            seen[pointer] = struct{}{}
+            seen[key] = struct{}{}
         }
         value = value.Elem()
     }
@@ -255,10 +261,12 @@ func valueContainsRedactTagReflect(value reflect.Value, seen map[uintptr]struct{
         /* @important guard self-referential slices reached through an interface element (slice -> any -> same slice), which carry no pointer node for the deref loop to catch and would otherwise recurse until the stack overflows. */
         pointer := value.Pointer()
         if 0 != pointer {
-            if _, visited := seen[pointer]; true == visited {
+            /* @important key on pointer AND length so a re-slice sharing the backing-array start but with a different length (full vs full[:1]) is not mistaken for an already-visited value, which would skip a redact-tagged element past the shorter view and leak it */
+            key := redactVisitKey{pointer: pointer, length: uintptr(value.Len()) + 1}
+            if _, visited := seen[key]; true == visited {
                 return false
             }
-            seen[pointer] = struct{}{}
+            seen[key] = struct{}{}
         }
         for index := 0; index < value.Len(); index++ {
             if true == valueContainsRedactTagReflect(value.Index(index), seen) {
@@ -276,11 +284,11 @@ func valueContainsRedactTagReflect(value reflect.Value, seen map[uintptr]struct{
         return false
 
     case reflect.Map:
-        pointer := value.Pointer()
-        if _, visited := seen[pointer]; true == visited {
+        mapKey := redactVisitKey{pointer: value.Pointer()}
+        if _, visited := seen[mapKey]; true == visited {
             return false
         }
-        seen[pointer] = struct{}{}
+        seen[mapKey] = struct{}{}
         for _, key := range value.MapKeys() {
             if true == valueContainsRedactTagReflect(key, seen) {
                 return true

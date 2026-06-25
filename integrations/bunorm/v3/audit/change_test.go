@@ -541,3 +541,21 @@ func TestChangeSet_SelfReferentialSliceDoesNotStackOverflow(t *testing.T) {
         t.Fatalf("expected a change for the data field")
     }
 }
+
+func TestValueContainsRedactTag_SharedBackingArraySliceNotFalseDeduped(t *testing.T) {
+    type secretHolder struct {
+        Secret string `audit:"redact"`
+    }
+    type carrier struct {
+        Head []any
+        Full []any
+    }
+
+    /* @important Head and Full share one backing array; Head[:1] is benign and is walked first, recording the backing-array pointer. Full carries the redact-tagged secretHolder at index 1, past Head's length. A pointer-only visit key would dedup Full against Head and skip the secret (leaking it); the pointer+length key must let Full be traversed so the redact tag is detected. */
+    backing := []any{"benign", secretHolder{Secret: "leak-me"}}
+    value := carrier{Head: backing[:1], Full: backing}
+
+    if false == valueContainsRedactTag(value) {
+        t.Fatalf("expected the redact-tagged secretHolder at Full[1] to be detected; the longer slice shares a backing array with the shorter Head[:1] and was falsely deduped, skipping the secret")
+    }
+}

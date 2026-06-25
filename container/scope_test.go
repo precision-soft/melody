@@ -2,6 +2,7 @@ package container
 
 import (
     "reflect"
+    "runtime"
     "sync"
     "sync/atomic"
     "testing"
@@ -311,4 +312,22 @@ func TestScope_ConcurrentHasAndClose(t *testing.T) {
     }()
 
     waitGroup.Wait()
+}
+
+func TestScope_MustGetByTypeNilTypePanicsDescriptively(t *testing.T) {
+    serviceContainer := NewContainer()
+    scope := serviceContainer.NewScope()
+
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected MustGetByType(nil) to panic")
+        }
+        /* @important the panic must carry the descriptive wrapped GetByType error, not an obscure nil-pointer dereference from calling String() on a nil reflect.Type */
+        if _, isRuntimeError := recoveredValue.(runtime.Error); true == isRuntimeError {
+            t.Fatalf("expected a descriptive panic carrying the GetByType cause, got a runtime error: %v", recoveredValue)
+        }
+    }()
+
+    _ = scope.MustGetByType(nil)
 }

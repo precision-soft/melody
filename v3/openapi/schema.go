@@ -412,6 +412,9 @@ func applyValidation(schema *Schema, validateTag string) {
         return
     }
 
+    patterns := []string{}
+    rejectsAll := false
+
     for _, rule := range splitRules(validateTag) {
         name, params := splitRule(rule)
 
@@ -430,11 +433,13 @@ func applyValidation(schema *Schema, validateTag string) {
                         if 0 > value {
                             value = 0
                         }
-                        schema.MinLength = &value
+                        /* @important raise-only so a degenerate min=0 cannot lower a notEmpty/notBlank floor of 1 that was applied earlier in tag order (the validator still rejects the empty value); a real min still wins because it is larger */
+                        if nil == schema.MinLength || value > *schema.MinLength {
+                            schema.MinLength = &value
+                        }
                     } else {
-                        /* @important an unparseable min value is enforced as minLength 0 by the validator, so the spec must advertise the same bound */
-                        defaultMinLength := 0
-                        schema.MinLength = &defaultMinLength
+                        /* @important a malformed min value (e.g. min=abc) makes the validator fail the whole field closed (parseIntStrict rejects it, post-CR70), so the field accepts no value — flag it unsatisfiable rather than advertise a passable default the client would trust */
+                        rejectsAll = true
                     }
                 } else {
                     /* @important a value-less min constraint is enforced as minLength 1 by the validator, so the spec must advertise the same bound */
@@ -447,15 +452,15 @@ func applyValidation(schema *Schema, validateTag string) {
                 if valueString, exists := params["value"]; true == exists {
                     if parsed, parsedOk := parseLeadingInt(valueString); true == parsedOk {
                         value := int(parsed)
-                        /* @important OpenAPI requires maxLength to be non-negative; a negative bound (a nonsensical tag such as max=-10) is clamped to 0 so the generated document stays spec-valid. */
                         if 0 > value {
-                            value = 0
+                            /* @important a negative max makes MaxLength.Validate (len > max) reject every value including the empty string, so the field accepts nothing — flag it unsatisfiable rather than advertise maxLength 0 (which would advertise "" as valid) */
+                            rejectsAll = true
+                        } else {
+                            schema.MaxLength = &value
                         }
-                        schema.MaxLength = &value
                     } else {
-                        /* @important an unparseable max value is enforced as maxLength 100 by the validator, so the spec must advertise the same bound */
-                        defaultMaxLength := 100
-                        schema.MaxLength = &defaultMaxLength
+                        /* @important a malformed max value makes the validator fail the whole field closed (post-CR70), so flag it unsatisfiable */
+                        rejectsAll = true
                     }
                 } else {
                     /* @important a value-less max constraint is enforced as maxLength 100 by the validator, so the spec must advertise the same bound */
@@ -465,32 +470,36 @@ func applyValidation(schema *Schema, validateTag string) {
             }
         case "regex", "pattern":
             if "string" == schema.Type {
-                schema.Pattern = patternParam(params)
+                patterns = append(patterns, patternParam(params))
             }
         case "alpha":
-            /* @important the validator enforces these character classes with a fixed anchored pattern, so the spec must advertise the same pattern rather than a bare string the client believes accepts anything */
+            /* @important the validator enforces these character classes with an anchored pattern but short-circuits on an empty string (it accepts ""), so advertise the class with a * quantifier — which also matches "" — rather than + which would reject the "" the validator accepts */
             if "string" == schema.Type {
-                schema.Pattern = "^[a-zA-Z]+$"
+                patterns = append(patterns, "^[a-zA-Z]*$")
             }
         case "numeric":
             if "string" == schema.Type {
-                schema.Pattern = "^[0-9]+$"
+                patterns = append(patterns, "^[0-9]*$")
             }
         case "alphanumeric":
             if "string" == schema.Type {
-                schema.Pattern = "^[a-zA-Z0-9]+$"
+                patterns = append(patterns, "^[a-zA-Z0-9]*$")
             }
         case "notBlank":
-            /* @important notBlank rejects an empty (or whitespace-only) string, but the OpenAPI required list only means the key is present (an empty value still satisfies it); advertise minLength 1 so a client cannot send "" against the spec and then be rejected by the validator. An explicit min constraint, in either tag order, still wins because it is only skipped when a length floor is already set. notBlank additionally rejects a whitespace-only value, which minLength cannot express. notBlank is a string-only constraint, so no array/object floor is advertised */
-            if "string" == schema.Type && nil == schema.MinLength {
-                minLength := 1
-                schema.MinLength = &minLength
+            /* @important notBlank rejects an empty (or whitespace-only) string and rejects a null pointer, so the spec must neither advertise the field as nullable nor accept an empty value. The OpenAPI required list only means the key is present (an empty value still satisfies it); advertise minLength 1 so a client cannot send "" against the spec and then be rejected by the validator, and clear nullable so a *string field is not advertised as accepting null. An explicit min >= 1 in either tag order still wins, but a degenerate min=0 (whose minLength 0 floor would advertise "" as valid) is raised to 1 because notBlank forbids the empty value. notBlank additionally rejects a whitespace-only value, which minLength cannot express. notBlank is a string-only constraint, so no array/object floor is advertised */
+            if "string" == schema.Type {
+                schema.Nullable = false
+                if nil == schema.MinLength || 1 > *schema.MinLength {
+                    minLength := 1
+                    schema.MinLength = &minLength
+                }
             }
         case "notEmpty":
-            /* @important notEmpty rejects a zero-length string, array, slice, or map, so the spec must advertise the matching length floor for whichever shape the field generated — minLength 1 for a string, minItems 1 for an array, minProperties 1 for a map (object with additionalProperties) — otherwise a client trusting the spec sends an empty value and is then rejected by the validator. Each floor is only set when not already present, so an explicit min/length constraint in either tag order still wins. A struct-typed object is left untouched: notEmpty does not apply to a struct and minProperties would mis-advertise its fixed property set */
+            /* @important notEmpty rejects a zero-length string, array, slice, or map and rejects a null pointer, so the spec must neither advertise the field as nullable nor accept an empty value. Advertise the matching length floor for whichever shape the field generated — minLength 1 for a string, minItems 1 for an array, minProperties 1 for a map (object with additionalProperties) — and clear nullable so a *string/*[]T/*map field is not advertised as accepting null; otherwise a client trusting the spec sends a null or empty value and is then rejected by the validator. An explicit min >= 1 in either tag order still wins, but a degenerate min=0 is raised to 1 because notEmpty forbids the empty value. A struct-typed object is left untouched: notEmpty does not apply to a struct and minProperties would mis-advertise its fixed property set */
+            schema.Nullable = false
             switch schema.Type {
             case "string":
-                if nil == schema.MinLength {
+                if nil == schema.MinLength || 1 > *schema.MinLength {
                     minLength := 1
                     schema.MinLength = &minLength
                 }
@@ -516,10 +525,8 @@ func applyValidation(schema *Schema, validateTag string) {
                         schema.Minimum = &value
                         schema.ExclusiveMinimum = &exclusive
                     } else {
-                        /* @important an unparseable greaterThan value is enforced as > 0 by the validator, so the spec must advertise the same bound */
-                        value := float64(0)
-                        schema.Minimum = &value
-                        schema.ExclusiveMinimum = &exclusive
+                        /* @important a malformed greaterThan value makes the validator fail the whole field closed (post-CR70), so flag it unsatisfiable rather than advertise the > 0 default */
+                        rejectsAll = true
                     }
                 } else {
                     /* @important a value-less greaterThan constraint is enforced as > 0 by the validator, so the spec must advertise the same bound */
@@ -539,10 +546,8 @@ func applyValidation(schema *Schema, validateTag string) {
                         schema.Maximum = &value
                         schema.ExclusiveMaximum = &exclusive
                     } else {
-                        /* @important an unparseable lessThan value is enforced as < 0 by the validator, so the spec must advertise the same bound */
-                        value := float64(0)
-                        schema.Maximum = &value
-                        schema.ExclusiveMaximum = &exclusive
+                        /* @important a malformed lessThan value makes the validator fail the whole field closed (post-CR70), so flag it unsatisfiable rather than advertise the < 0 default */
+                        rejectsAll = true
                     }
                 } else {
                     /* @important a value-less lessThan constraint is enforced as < 0 by the validator, so the spec must advertise the same bound */
@@ -552,6 +557,37 @@ func applyValidation(schema *Schema, validateTag string) {
                 }
             }
         }
+    }
+
+    if 1 == len(patterns) {
+        schema.Pattern = patterns[0]
+    } else if 1 < len(patterns) {
+        /* @important the validator enforces every pattern rule on the field, but a single OpenAPI `pattern` holds only one (RE2 has no lookahead to AND them), so emit each as an allOf member the client must satisfy together instead of silently dropping all but the last */
+        for _, pattern := range patterns {
+            schema.AllOf = append(schema.AllOf, &Schema{Pattern: pattern})
+        }
+    }
+
+    if true == rejectsAll {
+        markFieldUnsatisfiable(schema)
+    }
+}
+
+/* @important markFieldUnsatisfiable advertises a schema no value can satisfy, mirroring a validator that rejects the field outright for a malformed numeric/length tag or a negative max (both fail the field closed post-CR70). A string gets an impossible length window (minLength 1, maxLength 0); a number an empty exclusive range (greater than 0 and less than 0). */
+func markFieldUnsatisfiable(schema *Schema) {
+    switch schema.Type {
+    case "string":
+        minLength := 1
+        maxLength := 0
+        schema.MinLength = &minLength
+        schema.MaxLength = &maxLength
+    case "integer", "number":
+        zero := float64(0)
+        exclusive := true
+        schema.Minimum = &zero
+        schema.Maximum = &zero
+        schema.ExclusiveMinimum = &exclusive
+        schema.ExclusiveMaximum = &exclusive
     }
 }
 

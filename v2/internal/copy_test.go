@@ -195,3 +195,35 @@ func TestCopyAnyMap_DeepCopiesTypedSliceOfTypedSlices(t *testing.T) {
         t.Fatalf("mutating the nested typed slice leaked into the original: got %q, want %q", originalMatrix[0][0], "a")
     }
 }
+
+func TestCopyAnyMap_CyclicValueDoesNotStackOverflow(t *testing.T) {
+    /* @important a self-referential value reached through the deep copy must terminate via the depth bound rather than recurse until the goroutine stack overflows (a fatal error no recover() can catch); the test completing is the assertion. */
+    cyclic := map[string]any{}
+    cyclic["self"] = cyclic
+    cyclic["name"] = "value"
+
+    copied := CopyAnyMap(cyclic)
+
+    if "value" != copied["name"].(string) {
+        t.Fatalf("expected the non-cyclic entry to be deep-copied, got %v", copied["name"])
+    }
+    if nil == copied["self"] {
+        t.Fatalf("expected the cyclic entry to be present in the copy")
+    }
+}
+
+func TestCopyAnySlice_CyclicValueDoesNotStackOverflow(t *testing.T) {
+    /* @important same bound for a self-referential slice reached through an interface element. */
+    cyclic := make([]any, 2)
+    cyclic[0] = cyclic
+    cyclic[1] = "value"
+
+    copied := CopyAnySlice(cyclic)
+
+    if 2 != len(copied) {
+        t.Fatalf("expected the cyclic slice to be copied with both elements, got %d", len(copied))
+    }
+    if "value" != copied[1].(string) {
+        t.Fatalf("expected the non-cyclic element to be copied, got %v", copied[1])
+    }
+}

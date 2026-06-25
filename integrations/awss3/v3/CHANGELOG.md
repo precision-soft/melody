@@ -5,6 +5,14 @@ All notable changes to `precision-soft/melody/integrations/awss3` will be docume
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [v3.0.1] - 2026-06-25 - Put Size-Mismatch Rejection
+
+### Fixed
+
+- `storage.go` — `Put` forwarded `(reader, size)` straight to `minio.PutObject`, which reads exactly `size` bytes when `size >= 0` and silently ignores any trailing bytes, storing a **truncated** object and reporting success; the core `LocalStorage` backend (`written != size`) rejects a reader longer than its declared size. `Put` now detects the over-read after the upload, removes the truncated object, and returns a size-mismatch error, so the two backends sharing the `storage/contract.Storage` contract behave identically for a body longer than its declared size (a negative size still streams the whole reader with no check on both backends).
+
 ## [v3.0.0] - 2026-06-16 - Initial Release — S3-Compatible Object Storage
 
 ### Added
@@ -19,5 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `storage.go` — object keys are now normalized the same way the core `LocalStorage` backend normalizes them (backslash to forward slash, clean `.`/`..` segments, strip the leading slash) before every `Put`/`Get`/`Delete`/`Exists`/`PresignedUrl` call. Keys were passed to S3 verbatim while `LocalStorage` cleaned them, so the same key string addressed different objects depending on the backend, and `PresignedUrl("a/../f.txt")` signed a path the browser collapses before sending (yielding `SignatureDoesNotMatch`). An empty or `.`/`..`-only key is now rejected, matching the `LocalStorage` contract.
+
+[v3.0.1]: https://github.com/precision-soft/melody/releases/tag/integrations/awss3/v3.0.1
 
 [v3.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations/awss3/v3.0.0

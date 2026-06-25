@@ -130,6 +130,56 @@ func TestKernel_ClosesHandlerReturnedBodyWhenHandlerAlreadyStreamed(t *testing.T
     }
 }
 
+func TestKernel_ClosesDiscardedResponseBodyWhenResponseListenerSwapsResponse(t *testing.T) {
+    body := &closeRecordingReadCloser{}
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/file-then-swap",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return &Response{
+                statusCode: nethttp.StatusOK,
+                headers:    make(nethttp.Header),
+                bodyReader: body,
+            }, nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainer()
+
+    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher.AddListener(
+        kernelcontract.EventKernelResponse,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            responseEvent, ok := eventValue.Payload().(*KernelResponseEvent)
+            if false == ok {
+                return nil
+            }
+
+            responseEvent.SetResponse(TextResponse(nethttp.StatusAccepted, "replaced"))
+            return nil
+        },
+        0,
+    )
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/file-then-swap", nil)
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, request)
+
+    /* @important an EventKernelResponse listener swapped the response, so the original file-backed body must be closed rather than leaked */
+    if 1 != body.closeCount {
+        t.Fatalf("expected the discarded original response body to be closed exactly once after a response listener swapped the response, got %d", body.closeCount)
+    }
+
+    if nethttp.StatusAccepted != recorder.Code {
+        t.Fatalf("expected the listener-replaced status %d, got %d", nethttp.StatusAccepted, recorder.Code)
+    }
+}
+
 func TestKernel_DoesNotWriteDefaultResponseWhenHandlerAlreadyStreamed(t *testing.T) {
     router := NewRouter()
     router.Handle(

@@ -1,6 +1,7 @@
 package session
 
 import (
+    "bytes"
     "encoding/json"
     "io"
     "os"
@@ -140,9 +141,22 @@ func (instance *FileStorage) Save(sessionId string, data map[string]any, ttl tim
         return exception.NewError("session storage is closed", nil, nil)
     }
 
+    previousEntry, hadPrevious := instance.sessionById[sessionId]
     instance.sessionById[sessionId] = entry
 
-    return instance.flushLocked()
+    flushErr := instance.flushLocked()
+    if nil != flushErr {
+        /* @important roll the in-memory entry back on a flush failure so a Save that returns an error is not observable through a later Load — the in-memory state must not diverge from what was persisted */
+        if true == hadPrevious {
+            instance.sessionById[sessionId] = previousEntry
+        } else {
+            delete(instance.sessionById, sessionId)
+        }
+
+        return flushErr
+    }
+
+    return nil
 }
 
 func (instance *FileStorage) Delete(sessionId string) error {
@@ -161,9 +175,18 @@ func (instance *FileStorage) Delete(sessionId string) error {
         return nil
     }
 
+    previousEntry := instance.sessionById[sessionId]
     delete(instance.sessionById, sessionId)
 
-    return instance.flushLocked()
+    flushErr := instance.flushLocked()
+    if nil != flushErr {
+        /* @important restore the entry on a flush failure so a Delete that returns an error does not drop the session from the in-memory state while it is still persisted */
+        instance.sessionById[sessionId] = previousEntry
+
+        return flushErr
+    }
+
+    return nil
 }
 
 func (instance *FileStorage) Close() error {
@@ -320,7 +343,17 @@ func writeSessionFileAtomically(path string, snapshot map[string]fileSessionEntr
 }
 
 func writeSessionFileInPlace(fileInstance *os.File, snapshot map[string]fileSessionEntry) error {
-    _, err := fileInstance.Seek(0, io.SeekStart)
+    /* @important encode into an in-memory buffer first so a failed encode (for example a session value that is not JSON-marshalable) never truncates the live file and destroys the previously-persisted sessions; the file is only seeked, truncated and rewritten once the encode has succeeded, mirroring the validate-before-commit guarantee of writeSessionFileAtomically */
+    var buffer bytes.Buffer
+
+    encoder := json.NewEncoder(&buffer)
+
+    err := encoder.Encode(snapshot)
+    if nil != err {
+        return exception.NewError("failed to encode session storage file", nil, err)
+    }
+
+    _, err = fileInstance.Seek(0, io.SeekStart)
     if nil != err {
         return exception.NewError("failed to seek session storage file", nil, err)
     }
@@ -330,11 +363,9 @@ func writeSessionFileInPlace(fileInstance *os.File, snapshot map[string]fileSess
         return exception.NewError("failed to truncate session storage file", nil, err)
     }
 
-    encoder := json.NewEncoder(fileInstance)
-
-    err = encoder.Encode(snapshot)
+    _, err = fileInstance.Write(buffer.Bytes())
     if nil != err {
-        return exception.NewError("failed to encode session storage file", nil, err)
+        return exception.NewError("failed to write session storage file", nil, err)
     }
 
     err = fileInstance.Sync()
