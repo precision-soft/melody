@@ -99,6 +99,13 @@ func NewAccessControlRegexRule(pattern string, attributes ...string) AccessContr
 func NewAccessControlRuleWithSegmentPrefix(pathPrefix string, attributes ...string) AccessControlRule {
     normalizedPrefix := normalizePathPrefix(pathPrefix)
 
+    /* @important reject an empty segment prefix the way the exact and regex constructors reject empty input: an empty prefix would otherwise normalize to "" and become a catch-all fallback rule, so AllowAnonymous("") would silently open every unmatched path to anonymous access. A genuinely public service declares an explicit "/" prefix. */
+    if "" == normalizedPrefix {
+        exception.Panic(
+            exception.NewError("access control segment prefix may not be empty", nil, nil),
+        )
+    }
+
     if "/" != normalizedPrefix && true == strings.HasSuffix(normalizedPrefix, "/") {
         normalizedPrefix = strings.TrimSuffix(normalizedPrefix, "/")
     }

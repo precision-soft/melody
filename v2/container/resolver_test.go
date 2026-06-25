@@ -160,6 +160,25 @@ func TestMustFromResolver_PanicsOnError(t *testing.T) {
     _ = MustFromResolver[*resolverTestService](resolver, "service.missing")
 }
 
+func TestMustFromResolverByType_PanicsOnNilValue(t *testing.T) {
+    targetType := reflect.TypeOf(&resolverTestService{})
+    resolver := &resolverTestResolver{
+        servicesByName: map[string]any{},
+        servicesByType: map[reflect.Type]any{
+            targetType: (*resolverTestService)(nil),
+        },
+    }
+
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected panic when the resolver returns a nil value by type")
+        }
+    }()
+
+    _ = MustFromResolverByType[*resolverTestService](resolver)
+}
+
 func TestFromResolverByType_HappyPath(t *testing.T) {
     targetType := reflect.TypeOf(&resolverTestService{})
     resolver := &resolverTestResolver{

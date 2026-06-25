@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v3.1.0] - 2026-06-24 - Reconnect Hardening and Initial-Subscribe Retry
+## [v3.1.0] - 2026-06-25 - Reconnect Hardening and Initial-Subscribe Retry
 
 ### Changed
 
@@ -73,6 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `server_sent_event_backplane.go` — `ensurePublishChannel` now applies the same `IsClosed()` guard the message-bus `Transport` already carries, on both its fast path and its post-lock double-check. The backplane reused a broker-closed publish channel (it returned the cached channel whenever it was non-nil), so a channel-level exception that left the connection alive forced one failed publish before the existing reset-and-retry recovered; the guard replaces the stale channel up front.
 - `transport.go` — a positive but sub-millisecond requeue `DelayStamp` no longer collapses to a `"0"` message TTL. `republish` formatted the delay with `time.Duration.Milliseconds()`, which truncates any delay below 1ms to `0`; a `RetryPolicy{BaseDelay: 200µs}` therefore routed the message to the delay queue with `expiration = "0"`, and RabbitMQ treats a `0` TTL as immediate expiry — so the message dead-lettered straight back with no spacing and the intended backoff was silently lost. A positive delay is now floored to 1ms.
 - `transport.go`, `server_sent_event_backplane.go` — `resetPublishChannel` is now identity-aware: it closes the cached publish channel only when it is still the one the failing caller used. Two publishers that both failed on the same dead channel could otherwise have the second caller's reset close the healthy channel the first caller had just reopened, turning a recoverable single-retry into a spurious publish error on an otherwise-healthy broker. `publishOnce` now returns the channel it used and `resetPublishChannel` compares identity before closing.
+- `transport.go` — `consumeChannelForAck` now applies the same `IsClosed()` guard as `ensureConsumeChannel`/`ensurePublishChannel`. It returned the cached consume channel without checking whether the broker had closed it, so when a channel-level loss occurred between a delivery and its `Ack`/`Nack` — before the consume loop reset the channel — the acknowledgement was attempted on the already-closed channel. It now treats a non-nil but closed channel as absent and returns the clean `"amqp consume channel is not open"` error, letting the still-unacknowledged message redeliver on the next consume generation (at-least-once preserved).
 
 [Unreleased]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.1.0...HEAD
 

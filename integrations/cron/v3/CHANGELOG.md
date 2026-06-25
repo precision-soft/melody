@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v3.3.0] - 2026-06-24 - Kubernetes CronJob Template
+## [v3.3.0] - 2026-06-25 - Kubernetes CronJob Template
 
 ### Added
 

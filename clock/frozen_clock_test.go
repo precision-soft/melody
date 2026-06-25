@@ -74,12 +74,16 @@ func TestFrozenClockNewTicker_ReflectsTravelToOnNextTick(t *testing.T) {
 
     clockInstance.TravelTo(targetTime)
 
-    select {
-    case tickTime := <-tickerInstance.Channel():
-        if false == tickTime.Equal(targetTime) {
+    /* @info a tick fired before TravelTo can already sit in the buffered ticker channel carrying the pre-travel time, so drain any stale ticks and assert the ticker eventually reflects the traveled time instead of reading exactly one tick, which races the 1ms interval. */
+    deadline := time.After(250 * time.Millisecond)
+    for {
+        select {
+        case tickTime := <-tickerInstance.Channel():
+            if true == tickTime.Equal(targetTime) {
+                return
+            }
+        case <-deadline:
             t.Fatalf("expected ticker to send traveled time")
         }
-    case <-time.After(250 * time.Millisecond):
-        t.Fatalf("expected ticker to tick")
     }
 }

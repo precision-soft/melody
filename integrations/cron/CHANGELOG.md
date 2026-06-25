@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v1.2.1] - 2026-06-24 - Forbid Control-Character Injection in User and Schedule Fields
+## [v1.2.1] - 2026-06-25 - Forbid Control-Character Injection in User and Schedule Fields
 
 ### Fixed
 

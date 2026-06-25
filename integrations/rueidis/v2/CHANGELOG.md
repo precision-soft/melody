@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v2.0.2] - 2026-06-24 - Keep the Caller-Owned Client Open and Floor Sub-Millisecond TTL
+## [v2.0.2] - 2026-06-25 - Keep the Caller-Owned Client Open and Floor Sub-Millisecond TTL
 
 ### Fixed
 

@@ -8,6 +8,7 @@ import (
     "strings"
     "sync"
     "testing"
+    "time"
 
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
@@ -358,5 +359,13 @@ func TestJsonLogger_FallbackOnMarshalError(t *testing.T) {
     }
     if "error" != level {
         t.Fatalf("unexpected level: %s", level)
+    }
+
+    timeValue, ok := data["time"].(string)
+    if false == ok {
+        t.Fatalf("missing time in fallback payload")
+    }
+    if _, parseErr := time.Parse(time.RFC3339, timeValue); nil != parseErr {
+        t.Fatalf("fallback time is not valid RFC3339: %v", parseErr)
     }
 }

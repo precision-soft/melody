@@ -108,6 +108,16 @@ func MustFromResolverByType[T any](resolver containercontract.Resolver) T {
         )
     }
 
+    if true == internal.IsNilInterface(castValue) {
+        exception.Panic(
+            exception.NewError(
+                "resolver returned nil value",
+                map[string]any{"type": reflect.TypeOf((*T)(nil)).Elem().String()},
+                nil,
+            ),
+        )
+    }
+
     return castValue
 }
 

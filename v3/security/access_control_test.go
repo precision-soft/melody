@@ -287,6 +287,17 @@ func TestNewAccessControlExactRule_EmptyPathPanics(t *testing.T) {
     _ = NewAccessControlExactRule("", "PUBLIC_ACCESS")
 }
 
+func TestNewAccessControlRuleWithSegmentPrefix_EmptyPrefixPanics(t *testing.T) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected panic when the segment prefix is empty")
+        }
+    }()
+
+    _ = NewAccessControlRuleWithSegmentPrefix("", "PUBLIC_ACCESS")
+}
+
 func TestNewAccessControlRule_PublicAccessCombinedWithOtherAttributesPanics(t *testing.T) {
     defer func() {
         recoveredValue := recover()

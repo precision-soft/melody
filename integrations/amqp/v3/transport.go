@@ -639,6 +639,11 @@ func (instance *Transport) consumeChannelForAck() (*amqp091.Channel, uint64) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
+    /* @important treat a non-nil but already-closed consume channel as absent, matching ensureConsumeChannel and ensurePublishChannel: when the broker closes the channel between delivery and Ack/Nack but before the consume loop resets it, returning the closed channel would attempt an Ack on it; returning nil instead surfaces a clean "channel not open" error and lets the message redeliver on the next generation. */
+    if nil != instance.consumeChannel && true == instance.consumeChannel.IsClosed() {
+        return nil, instance.consumeGeneration
+    }
+
     return instance.consumeChannel, instance.consumeGeneration
 }
 

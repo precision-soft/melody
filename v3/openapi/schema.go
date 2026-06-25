@@ -426,6 +426,10 @@ func applyValidation(schema *Schema, validateTag string) {
                 if valueString, exists := params["value"]; true == exists {
                     if parsed, parsedOk := parseLeadingInt(valueString); true == parsedOk {
                         value := int(parsed)
+                        /* @important OpenAPI requires minLength to be non-negative; a negative bound (a nonsensical tag such as min=-5) is clamped to 0 so the generated document stays spec-valid, and the validator enforces no minimum for a negative bound either. */
+                        if 0 > value {
+                            value = 0
+                        }
                         schema.MinLength = &value
                     } else {
                         /* @important an unparseable min value is enforced as minLength 0 by the validator, so the spec must advertise the same bound */
@@ -443,6 +447,10 @@ func applyValidation(schema *Schema, validateTag string) {
                 if valueString, exists := params["value"]; true == exists {
                     if parsed, parsedOk := parseLeadingInt(valueString); true == parsedOk {
                         value := int(parsed)
+                        /* @important OpenAPI requires maxLength to be non-negative; a negative bound (a nonsensical tag such as max=-10) is clamped to 0 so the generated document stays spec-valid. */
+                        if 0 > value {
+                            value = 0
+                        }
                         schema.MaxLength = &value
                     } else {
                         /* @important an unparseable max value is enforced as maxLength 100 by the validator, so the spec must advertise the same bound */

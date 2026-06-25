@@ -189,7 +189,18 @@ func (instance *Validator) validateRule(value any, fieldName string, rule valida
         )
     }
 
-    constraint := instance.createConstraintWithParams(rule.name, rule.params)
+    constraint, paramsOk := instance.createConstraintWithParams(rule.name, rule.params)
+    if false == paramsOk {
+        return NewValidationError(
+            fieldName,
+            "invalid validation rule parameter",
+            ErrorInvalidRuleSyntax,
+            map[string]any{
+                "rule":   rule.name,
+                "params": rule.params,
+            },
+        )
+    }
 
     err := constraint.Validate(value, fieldName)
     if nil == err {
@@ -208,40 +219,52 @@ func (instance *Validator) validateRule(value any, fieldName string, rule valida
     )
 }
 
-func (instance *Validator) createConstraintWithParams(name string, params map[string]string) validationcontract.Constraint {
+func (instance *Validator) createConstraintWithParams(name string, params map[string]string) (validationcontract.Constraint, bool) {
     switch name {
     case ConstraintMinLength:
         if valueString, exists := params["value"]; true == exists {
-            return NewMinLength(parseInt(valueString, 0))
+            parsed, ok := parseIntStrict(valueString)
+            if false == ok {
+                return nil, false
+            }
+            return NewMinLength(parsed), true
         }
-        return NewMinLength(1)
+        return NewMinLength(1), true
 
     case ConstraintMaxLength:
         if valueString, exists := params["value"]; true == exists {
-            return NewMaxLength(parseInt(valueString, 100))
+            parsed, ok := parseIntStrict(valueString)
+            if false == ok {
+                return nil, false
+            }
+            return NewMaxLength(parsed), true
         }
-        return NewMaxLength(100)
+        return NewMaxLength(100), true
 
     case ConstraintRegex:
         if patternString, exists := params["pattern"]; true == exists {
-            return NewRegex(patternString)
+            return NewRegex(patternString), true
         }
         if patternString, exists := params["value"]; true == exists {
-            return NewRegex(patternString)
+            return NewRegex(patternString), true
         }
-        return NewRegex(".*")
+        return NewRegex(".*"), true
 
     case ConstraintGreaterThan:
         if valueString, exists := params["value"]; true == exists {
-            return NewGreaterThan(parseInt(valueString, 0))
+            parsed, ok := parseIntStrict(valueString)
+            if false == ok {
+                return nil, false
+            }
+            return NewGreaterThan(parsed), true
         }
-        return NewGreaterThan(0)
+        return NewGreaterThan(0), true
 
     default:
         instance.mutex.RLock()
         constraint := instance.constraints[name]
         instance.mutex.RUnlock()
 
-        return constraint
+        return constraint, true
     }
 }

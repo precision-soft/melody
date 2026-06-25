@@ -7,11 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v2.2.1] - 2026-06-24 - Forbid Control-Character Injection in User and Schedule Fields
+## [v2.2.1] - 2026-06-25 - Forbid Control-Character Injection in User and Schedule Fields
 
 ### Fixed
 
-- Identical to the corresponding v1 entry (`validation.go` — reject `CrontabForbiddenChars` in the user and schedule fields). See the [v1 changelog](../CHANGELOG.md#v121---2026-06-24---forbid-control-character-injection-in-user-and-schedule-fields) for the full description.
+- Identical to the corresponding v1 entry (`validation.go` — reject `CrontabForbiddenChars` in the user and schedule fields). See the [v1 changelog](../CHANGELOG.md#v121---2026-06-25---forbid-control-character-injection-in-user-and-schedule-fields) for the full description.
 
 ## [v2.2.0] - 2026-06-16 - Plug-and-Play Module Registration
 

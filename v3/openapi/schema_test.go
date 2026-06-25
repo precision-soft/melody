@@ -241,6 +241,30 @@ func TestBuildSchema_MaxLengthAcceptsNonIntegerPrefix(t *testing.T) {
     }
 }
 
+func TestBuildSchema_NegativeMinMaxClampedToZero(t *testing.T) {
+    components := map[string]*Schema{}
+    names := map[reflect.Type]string{}
+    visited := map[reflect.Type]bool{}
+
+    stringType := reflect.TypeOf("")
+    requestType := reflect.StructOf([]reflect.StructField{
+        {Name: "Low", Type: stringType, Tag: `json:"low" validate:"min=-5"`},
+        {Name: "High", Type: stringType, Tag: `json:"high" validate:"max=-10"`},
+    })
+
+    schema := buildSchema(requestType, components, names, visited)
+
+    low := schema.Properties["low"]
+    if nil == low.MinLength || 0 != *low.MinLength {
+        t.Fatalf("expected a negative min=-5 to be clamped to a spec-valid minLength 0, got %v", low.MinLength)
+    }
+
+    high := schema.Properties["high"]
+    if nil == high.MaxLength || 0 != *high.MaxLength {
+        t.Fatalf("expected a negative max=-10 to be clamped to a spec-valid maxLength 0, got %v", high.MaxLength)
+    }
+}
+
 func TestBuildSchema_ParenthesizedRegexCommaInGroupPreserved(t *testing.T) {
     components := map[string]*Schema{}
     names := map[reflect.Type]string{}

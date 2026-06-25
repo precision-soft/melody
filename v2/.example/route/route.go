@@ -13,8 +13,6 @@ const (
     RoutesName    = "example.routes"
     RoutesPattern = "/routes/"
 
-    /* @info products start */
-
     ProductsPrefix = "/products"
 
     ProductsListPageName    = "example.products.list.page"
@@ -41,21 +39,15 @@ const (
     ProductsApiDeleteName    = "example.products.api.delete"
     ProductsApiDeletePattern = ProductsPrefix + "/api/delete/:id/"
 
-    /* @info categories start */
-
     CategoriesPrefix = "/categories"
 
     CategoriesApiReadAllName    = "example.categories.api.read.all"
     CategoriesApiReadAllPattern = CategoriesPrefix + "/api/read/"
 
-    /* @info currencies start */
-
     CurrenciesPrefix = "/currencies"
 
     CurrenciesApiReadAllName    = "example.currencies.api.read.all"
     CurrenciesApiReadAllPattern = CurrenciesPrefix + "/api/read/"
-
-    /* @info users start */
 
     UsersPrefix = "/users"
 

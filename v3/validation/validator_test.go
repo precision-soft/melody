@@ -42,6 +42,18 @@ type payloadWithUnknownRule struct {
     Name string `json:"name" validate:"unknownRule"`
 }
 
+type payloadWithMalformedGreaterThan struct {
+    Quantity int `json:"quantity" validate:"greaterThan(value=abc)"`
+}
+
+type payloadWithMalformedMinLength struct {
+    Name string `json:"name" validate:"min(value=notanumber)"`
+}
+
+type payloadWithFractionalMaxLength struct {
+    Name string `json:"name" validate:"max(value=3.9)"`
+}
+
 type payloadWithJsonName struct {
     Value string `json:"my_value" validate:"notBlank"`
 }
@@ -226,6 +238,31 @@ func TestValidator_ReturnsUnknownRuleError(t *testing.T) {
     if ErrorUnknownRule != validationError.Code() {
         t.Fatalf("unexpected code %q", validationError.Code())
     }
+}
+
+func TestValidator_MalformedNumericParameterFailsClosed(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    /* a non-numeric constraint parameter must be rejected, not silently degraded to a default bound */
+    for _, payload := range []any{
+        payloadWithMalformedGreaterThan{Quantity: 5},
+        payloadWithMalformedMinLength{Name: "anything"},
+    } {
+        validationErrors := requireValidationErrors(t, validatorInstance.Validate(payload))
+
+        validationError, ok := validationErrors[0].(*ValidationError)
+        if false == ok {
+            t.Fatalf("expected *ValidationError, got %T", validationErrors[0])
+        }
+
+        if ErrorInvalidRuleSyntax != validationError.Code() {
+            t.Fatalf("expected a malformed numeric parameter to fail closed with code %q, got %q", ErrorInvalidRuleSyntax, validationError.Code())
+        }
+    }
+
+    /* a valid leading integer (3.9 -> 3) is still accepted, so the field is enforced rather than rejected as malformed */
+    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithFractionalMaxLength{Name: "abc"}))
+    requireValidationErrors(t, validatorInstance.Validate(payloadWithFractionalMaxLength{Name: "abcd"}))
 }
 
 func TestValidator_MapsJsonTagNameAsField(t *testing.T) {

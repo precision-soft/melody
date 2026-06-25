@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v2.0.2] - 2026-06-24 - Guard openWithRetry Against a Nil Logger
+## [v2.0.2] - 2026-06-25 - Guard openWithRetry Against a Nil Logger
 
 ### Fixed
 

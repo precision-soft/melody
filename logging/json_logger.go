@@ -57,10 +57,12 @@ func (instance *jsonLogger) Log(level loggingcontract.Level, message string, con
     label := instance.levelLabels.LabelFor(level)
     normalizedContext := normalizeJsonContext(context)
 
+    timestamp := time.Now().Format(time.RFC3339)
+
     entry := logEntry{
         Message: message,
         Level:   label,
-        Time:    time.Now().Format(time.RFC3339),
+        Time:    timestamp,
         Context: normalizedContext,
     }
 
@@ -69,7 +71,7 @@ func (instance *jsonLogger) Log(level loggingcontract.Level, message string, con
         fallback := map[string]any{
             "message":      message,
             "level":        label,
-            "time":         time.Now().Format(time.RFC3339),
+            "time":         timestamp,
             "marshalError": err.Error(),
         }
 

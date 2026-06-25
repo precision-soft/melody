@@ -272,14 +272,14 @@ func splitByCommaOutsideRegexMeta(valueString string) []string {
     return parts
 }
 
-func parseInt(valueString string, defaultValue int) int {
+/* @important parseIntStrict reports a parse failure instead of silently falling back to a default, so a malformed numeric constraint parameter (for example min=notanumber) is rejected at constraint creation rather than degrading to a default bound the caller never asked for. A valid leading integer is still accepted (Sscanf stops at the first non-digit), so a fractional bound such as 99.5 keeps truncating to 99. Ported from the v3 fix. */
+func parseIntStrict(valueString string) (int, bool) {
     var result int
-    _, err := fmt.Sscanf(valueString, "%d", &result)
-    if nil != err {
-        return defaultValue
+    if _, err := fmt.Sscanf(valueString, "%d", &result); nil != err {
+        return 0, false
     }
 
-    return result
+    return result, true
 }
 
 func parseValidationTag(tag string) ([]validationRule, error) {

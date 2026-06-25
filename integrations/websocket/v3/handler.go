@@ -25,6 +25,9 @@ type Options struct {
     BinaryWrites    bool
 
     ReadLimit int64
+
+    /* @info when greater than zero, the handler sends a websocket ping every IdleTimeout and closes the connection if the peer does not pong within that window, so an idle or half-open client cannot hold a goroutine and connection indefinitely (the hijacked connection is not covered by http.Server read timeouts). Zero (the default) disables keepalive and preserves the previous behavior; an actively-subscribed client that only receives stays connected because it answers the pings. */
+    IdleTimeout time.Duration
 }
 
 func NewStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpcontract.Handler {
@@ -54,6 +57,10 @@ func NewStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpc
         defer cancel()
 
         go readLoop(connectionContext, cancel, connection, runtimeInstance, options)
+
+        if 0 < options.IdleTimeout {
+            go pingLoop(connectionContext, cancel, connection, options.IdleTimeout)
+        }
 
         for {
             select {
@@ -94,6 +101,27 @@ func readLoop(
 
         if nil != options.OnMessage {
             if true == dispatchOnMessage(runtimeInstance, options, messageType, payload) {
+                cancel()
+                return
+            }
+        }
+    }
+}
+
+/* @important keepalive ping loop: a half-open or silently-stalled client cannot be detected by reads alone on a broadcast stream that never expects client frames, so without this an idle connection would pin a goroutine forever. Each tick sends a ping bounded by the same interval; the read loop delivers the pong, so a still-connected client keeps the connection alive while an unresponsive one trips the timeout and cancels the connection context, unwinding the handler and read loop. */
+func pingLoop(ctx context.Context, cancel context.CancelFunc, connection *coderwebsocket.Conn, interval time.Duration) {
+    ticker := time.NewTicker(interval)
+    defer ticker.Stop()
+
+    for {
+        select {
+        case <-ctx.Done():
+            return
+        case <-ticker.C:
+            pingContext, pingCancel := context.WithTimeout(ctx, interval)
+            pingErr := connection.Ping(pingContext)
+            pingCancel()
+            if nil != pingErr {
                 cancel()
                 return
             }

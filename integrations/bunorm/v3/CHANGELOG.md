@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v3.1.1] - 2026-06-24 - Audit Unexported-Typed Embedded Struct Fields
+## [v3.1.1] - 2026-06-25 - Audit Unexported-Typed Embedded Struct Fields
 
 ### Fixed
 

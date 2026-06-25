@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.1.1] - 2026-06-25 - Clean Error on Unknown Migration Manager Name
+
+### Fixed
+
+- `base_command.go` — `resolveDatabase` resolved a named manager with `registry.MustManager`, which panics (`exception.Panic`) when the `--manager` flag names a manager that is not registered, so any migration command (`db:migrate`, `db:rollback`, `db:status`, …) invoked with an unknown manager name aborted with an uncaught panic instead of the clean "provider definition not found" error. The named-manager branch now calls `registry.Manager` and returns the error, matching the sibling default-manager branch and the `v2`/`v3` behavior. Ported from the `v2`/`v3` fix.
+
 ## [v1.1.0] - 2026-06-16 - Lock Concurrent Migrations and Plug-and-Play Module Registration
 
 ### Added
@@ -27,7 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `migrate.go` — `migrate.Up()` / `UpWithOption()` — forward-migration convenience; `Down()` / `DownWithOption()` — rollback convenience
 - `README.md` — migration workflow documentation; CLI commands introduced in the v2 binding
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v1.1.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v1.1.1...HEAD
+
+[v1.1.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v1.1.0...integrations/bunorm/migrate/v1.1.1
 
 [v1.1.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v1.0.0...integrations/bunorm/migrate/v1.1.0
 

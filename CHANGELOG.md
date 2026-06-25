@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v1.14.1] - 2026-06-24 - Cross-Version Security and Correctness Back-ports
+## [v1.14.1] - 2026-06-25 - Cross-Version Security and Correctness Back-ports
 
 ### Fixed
 
@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `http/request_body.go` — `BindJson` reported an over-limit body as `400 Bad Request` instead of `413 Request Entity Too Large`: the kernel's `MaxBytesReader` returns its error before the local `LimitReader` cap is reached, so the oversize branch never fired on the normal request path. It now detects `*http.MaxBytesError` and returns `413`. Fixed in lockstep with `v2`/`v3`.
 - `config/configuration.go` — `RegisterRuntime` performed an unguarded check-then-write on the shared `parameters` map, so two goroutines registering runtime parameters concurrently (or one registering while `Names()`/`Parameters()` iterated the map) raced on the map and could trigger Go's fatal "concurrent map writes". The read-modify-write is now serialized with a `sync.Mutex`, matching the `v3` field. Ported from the `v3` fix.
 - `validation/constraint_greater_than.go` — the non-numeric fallback of `GreaterThan.Validate` reported `"value must be an integer"`, but the constraint accepts integer, unsigned, and floating-point values, so the message misled callers passing a valid float. It now reports `"value must be numeric"`, matching the `v3` wording. Ported from the `v3` fix.
+- `logging/json_logger.go` — the `Log` marshal-failure fallback recomputed `time.Now()` for its `time` field instead of reusing the timestamp already captured for the primary entry, so a context value that fails to JSON-encode (for example a channel or function) produced a fallback line whose timestamp could drift from the moment the entry was created. The timestamp is now captured once and reused by both the primary entry and the fallback. Fixed in lockstep with `v2`/`v3`.
+- `container/resolver.go` — `MustFromResolverByType` returned a nil value instead of panicking when a `Resolver` resolved the requested type to a nil pointer/interface, violating the `Must*` non-nil contract that the sibling `MustFromResolver` already enforces (a custom `containercontract.Resolver` whose `GetByType` returns `(typed-nil, nil)` slipped a nil through to the caller). It now applies the same `internal.IsNilInterface` guard and panics. Fixed in lockstep with `v2`/`v3`.
+- `security/access_control.go` — `NewAccessControlRuleWithSegmentPrefix` (used by `AccessControlBuilder.AllowAnonymous`) accepted an empty path prefix, which normalized to `""` and became a catch-all fallback rule — so `AllowAnonymous("")` silently granted `PUBLIC_ACCESS` to every otherwise-unmatched path (fail-open). It now panics on an empty prefix, matching the existing empty-input guards on the exact and regex rule constructors; a fully public service declares an explicit `"/"` prefix. Fixed in lockstep with `v2`/`v3`.
+- `validation/validator.go`, `validation/validation_rule.go` — a malformed numeric constraint parameter (for example `validate:"greaterThan(value=abc)"` or `validate:"min(value=notanumber)"`) silently degraded to the constraint's default bound instead of being reported, so a typo'd tag enforced a bound the author never specified (a fail-open configuration). Constraint creation now parses the value strictly (`parseIntStrict`) and a field whose numeric parameter cannot be parsed fails validation with the `invalidRuleSyntax` code instead. A valid leading integer is still accepted, so `max(value=3.9)` keeps truncating to `3`. **Behavioral note:** a previously-silent bad numeric tag now surfaces as a validation error. Ported from the `v3` fix.
 
 ## [v1.14.0] - 2026-06-16 - Configurable Transport & Shutdown Tunables + v3 Security and Correctness Back-ports
 
