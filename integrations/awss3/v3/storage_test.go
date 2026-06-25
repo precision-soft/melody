@@ -132,3 +132,45 @@ func TestReaderHasTrailingBytes_DetectsBodyLongerThanDeclaredSize(t *testing.T) 
         t.Fatalf("a body longer than the declared size must report a trailing byte so Put can reject it")
     }
 }
+
+func TestBoundedPutReader_StripsReaderAtAndDetectsOverReadAtCorrectSize(t *testing.T) {
+    /* @important regression for the v3.0.1 over-read guard mis-firing on io.ReaderAt+io.Seeker readers (bytes.Reader/strings.Reader/os.File): minio's single-shot putObject wraps such a reader in an io.SectionReader and uploads via ReadAt without advancing the caller's sequential cursor, so probing the original afterward reported trailing bytes on every valid Put and deleted the stored object. boundedPutReader must hand minio a reader that is neither io.ReaderAt nor io.Seeker so the sequential path is forced and the original cursor advances by exactly the consumed size. */
+    exactBody := "exactly-sized-body"
+    original := strings.NewReader(exactBody)
+    putReader := boundedPutReader(original, int64(len(exactBody)))
+
+    if _, isReaderAt := putReader.(io.ReaderAt); true == isReaderAt {
+        t.Fatalf("the reader handed to minio must not be an io.ReaderAt, or minio's SectionReader/ReadAt path leaves the caller's cursor at 0")
+    }
+    if _, isSeeker := putReader.(io.Seeker); true == isSeeker {
+        t.Fatalf("the reader handed to minio must not be an io.Seeker, or minio takes the SectionReader optimization")
+    }
+
+    /* @important consuming the put reader (as minio's sequential path does, reading exactly the declared size) must advance the ORIGINAL reader's cursor, so an exact-size body reports no trailing byte — no manual pre-read of the original, unlike the older helper test */
+    consumed, _ := io.Copy(io.Discard, putReader)
+    if int64(len(exactBody)) != consumed {
+        t.Fatalf("expected minio to read exactly %d bytes through the bounded reader, got %d", len(exactBody), consumed)
+    }
+    if true == readerHasTrailingBytes(original) {
+        t.Fatalf("an exact-size body must report no trailing bytes after the bounded reader is consumed, so a valid Put is not wrongly rejected")
+    }
+
+    /* @important a body longer than the declared size: minio reads only `declared` bytes through the cap, leaving the rest on the original for the over-read probe to catch */
+    longerBody := "declared-short-but-body-is-actually-longer"
+    overOriginal := strings.NewReader(longerBody)
+    declared := int64(9)
+    overPutReader := boundedPutReader(overOriginal, declared)
+    overConsumed, _ := io.Copy(io.Discard, overPutReader)
+    if declared != overConsumed {
+        t.Fatalf("expected the bounded reader to cap minio's read at the declared %d bytes, got %d", declared, overConsumed)
+    }
+    if false == readerHasTrailingBytes(overOriginal) {
+        t.Fatalf("a body longer than the declared size must report a trailing byte so Put rejects it")
+    }
+
+    /* @important a negative size means unknown length: stream the reader whole with no cap, so the same reader instance is returned */
+    streamed := strings.NewReader("whole")
+    if streamed != boundedPutReader(streamed, -1) {
+        t.Fatalf("expected a negative size to stream the original reader unwrapped")
+    }
+}

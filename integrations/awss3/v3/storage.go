@@ -57,11 +57,12 @@ func (instance *Storage) Put(
         return keyErr
     }
 
+    /* @important minio's single-shot putObject wraps an io.ReaderAt+io.Seeker reader (which *bytes.Reader, *strings.Reader and a non-stdio *os.File all satisfy) in an io.SectionReader and uploads the body via ReadAt, which does NOT advance the caller's sequential Read cursor — so probing the original reader afterward would report trailing bytes on every valid Put and wrongly delete the object. Hand minio an io.LimitReader instead: it is neither an io.ReaderAt nor an io.Seeker, so minio takes the sequential path and consumes exactly `size` bytes from `reader`, leaving its cursor advanced by exactly `size`; the cap also guarantees minio can never store more than the declared size on any path (single-shot or multipart). A negative size means "unknown length" and is streamed whole with no cap. */
     _, putErr := instance.client.PutObject(
         runtimeInstance.Context(),
         instance.bucket,
         normalizedKey,
-        reader,
+        boundedPutReader(reader, size),
         size,
         minio.PutObjectOptions{ContentType: options.ContentType},
     )
@@ -69,7 +70,7 @@ func (instance *Storage) Put(
         return exception.NewError("object storage put failed", map[string]any{"key": key}, putErr)
     }
 
-    /* @important minio reads exactly `size` bytes when size >= 0 and silently ignores any trailing bytes, storing a truncated object and reporting success; LocalStorage rejects a reader longer than its declared size, so detect the over-read here and fail — removing the truncated object — to keep the two backends' Put contract identical. A negative size means "unknown length" and is streamed whole with no size check on both backends. */
+    /* @important after minio has consumed exactly `size` bytes through the io.LimitReader above, any byte still readable from the original `reader` means the caller declared a size shorter than the body; minio silently ignores the trailing bytes and stores a truncated object reporting success, whereas LocalStorage rejects a reader longer than its declared size, so detect the over-read here and fail — removing the truncated object — to keep the two backends' Put contract identical. */
     if 0 <= size && true == readerHasTrailingBytes(reader) {
         _ = instance.client.RemoveObject(runtimeInstance.Context(), instance.bucket, normalizedKey, minio.RemoveObjectOptions{})
 
@@ -81,6 +82,15 @@ func (instance *Storage) Put(
     }
 
     return nil
+}
+
+/* @important boundedPutReader wraps the body handed to minio in an io.LimitReader capped at the declared size. The wrapper is neither an io.ReaderAt nor an io.Seeker, so it defeats minio's single-shot SectionReader/ReadAt optimization (which would upload via ReadAt without advancing the caller's sequential cursor) and forces the sequential path that consumes exactly `size` bytes straight from the caller's reader — leaving any over-read byte readable from the original for readerHasTrailingBytes. The cap also bounds what minio can store at exactly `size`. A negative size means "unknown length" and is streamed whole with no cap. */
+func boundedPutReader(reader io.Reader, size int64) io.Reader {
+    if 0 <= size {
+        return io.LimitReader(reader, size)
+    }
+
+    return reader
 }
 
 /* @important readerHasTrailingBytes reports whether the reader still yields data; called after minio has consumed the declared size to detect a body longer than its declared size (which minio silently truncates to size). */

@@ -412,12 +412,16 @@ func applyValidation(schema *Schema, validateTag string) {
         /* @important a $ref (or a nullable allOf-wrapped $ref) always denotes a struct component, and the validator rejects a struct value outright for notEmpty (constraint_not_empty.go default branch) and for greaterThan/lessThan ("value must be numeric", constraint_greater_than.go/constraint_less_than.go default branch); such a tag makes the field unsatisfiable server-side, so advertise it as such rather than as a satisfiable object a client would trust. No length/numeric facet otherwise attaches to a $ref, so there is nothing else to apply here. */
         if true == tagRejectsStruct(validateTag) {
             markFieldUnsatisfiable(schema)
+        } else if true == tagForbidsNullStruct(validateTag) {
+            /* @important notBlank on a pointer-to-struct field (rendered as a nullable allOf-wrapped $ref): the validator rejects a nil pointer (dereferenceValue returns ok=false) but stringifies a non-nil struct via %v and accepts it, so the field is satisfiable with a non-null value — clear only the nullable advertisement so the spec does not offer a null the validator rejects, rather than marking the whole field unsatisfiable. */
+            schema.Nullable = false
         }
         return
     }
 
     patterns := []string{}
     rejectsAll := false
+    emptyValueSpace := false
 
     for _, rule := range splitRules(validateTag) {
         name, params := splitRule(rule)
@@ -471,6 +475,29 @@ func applyValidation(schema *Schema, validateTag string) {
                     defaultMaxLength := 100
                     schema.MaxLength = &defaultMaxLength
                 }
+            } else if "integer" == schema.Type || "number" == schema.Type || "boolean" == schema.Type {
+                /* @important MaxLength.Validate is not string-only: it stringifies any dereferenced value with %v and rejects it when len > max, so `max` is enforced on integer/number/boolean fields too. The shortest possible stringification is 1 character for an integer/number (e.g. "0") and 4 for a boolean ("true"), so a bound below that minimum — or a negative or malformed bound, which fails the field closed — admits no non-null value. There is no exact OpenAPI numeric facet for a stringified-length ceiling, so a satisfiable bound (at or above the minimum) is left unconstrained rather than mis-advertised; only the empty-value-space corner is advertised. A nil pointer passes MaxLength (dereferenceValue returns ok=false, Validate returns nil), so for a nullable field null stays valid and only the non-null space is empty (emptyValueSpace); a non-nullable field accepts nothing at all (rejectsAll). */
+                minStringLength := 1
+                if "boolean" == schema.Type {
+                    minStringLength = 4
+                }
+                tooSmall := false
+                if valueString, exists := params["value"]; true == exists {
+                    if parsed, parsedOk := parseLeadingInt(valueString); true == parsedOk {
+                        if int(parsed) < minStringLength {
+                            tooSmall = true
+                        }
+                    } else {
+                        tooSmall = true
+                    }
+                }
+                if true == tooSmall {
+                    if true == schema.Nullable {
+                        emptyValueSpace = true
+                    } else {
+                        rejectsAll = true
+                    }
+                }
             }
         case "regex", "pattern":
             if "string" == schema.Type {
@@ -490,9 +517,9 @@ func applyValidation(schema *Schema, validateTag string) {
                 patterns = append(patterns, "^[a-zA-Z0-9]*$")
             }
         case "notBlank":
-            /* @important notBlank rejects an empty (or whitespace-only) string and rejects a null pointer, so the spec must neither advertise the field as nullable nor accept an empty value. The OpenAPI required list only means the key is present (an empty value still satisfies it); advertise minLength 1 so a client cannot send "" against the spec and then be rejected by the validator, and clear nullable so a *string field is not advertised as accepting null. An explicit min >= 1 in either tag order still wins, but a degenerate min=0 (whose minLength 0 floor would advertise "" as valid) is raised to 1 because notBlank forbids the empty value. notBlank additionally rejects a whitespace-only value, which minLength cannot express. notBlank is a string-only constraint, so no array/object floor is advertised */
+            /* @important notBlank rejects a null pointer for a field of any kind (dereferenceValue returns ok=false), so the spec must never advertise the field as nullable regardless of its generated type — clear nullable unconditionally (mirroring notEmpty), not only on the string path, so a *int/*bool/*float64/*[]T/*map/*struct field is not advertised as accepting null the validator rejects. The length floor is string-only: for a string, notBlank also rejects an empty (or whitespace-only) value, so advertise minLength 1 (the OpenAPI required list only means the key is present, so an empty value would still satisfy it; a client must not send "" against the spec and then be rejected). An explicit min >= 1 in either tag order still wins, but a degenerate min=0 is raised to 1 because notBlank forbids the empty value. The whitespace-only rejection cannot be expressed by minLength. For non-string kinds notBlank accepts any non-null value (its %v stringification is non-blank), so no length/items/properties floor is advertised. */
+            schema.Nullable = false
             if "string" == schema.Type {
-                schema.Nullable = false
                 if nil == schema.MinLength || 1 > *schema.MinLength {
                     minLength := 1
                     schema.MinLength = &minLength
@@ -592,13 +619,20 @@ func applyValidation(schema *Schema, validateTag string) {
 
     if true == rejectsAll {
         markFieldUnsatisfiable(schema)
+    } else if true == emptyValueSpace {
+        /* @important the field's non-null value space is empty (e.g. a nullable scalar with a max bound below the shortest possible stringification) but the validator still accepts null, so contradict only the value while preserving the nullable advertisement */
+        applyEmptyValueSpace(schema)
     }
 }
 
-/* @important markFieldUnsatisfiable advertises a schema no value can satisfy, mirroring a validator that rejects the field outright for a malformed numeric/length tag, a negative max (both fail the field closed post-CR70), or a constraint applied to a kind the validator rejects (notEmpty on a struct, greaterThan/lessThan on a non-numeric — CR #74). A string gets an impossible length window (minLength 1, maxLength 0); a number an empty exclusive range (greater than 0 and less than 0); an array minItems 1 with maxItems 0; an object minProperties 1 with maxProperties 0; a $ref the same impossible object constraint under allOf so the documented shape is preserved. Nullable is cleared because the validator rejects a null value too, so an unsatisfiable field must not advertise null as valid. */
+/* @important markFieldUnsatisfiable advertises a schema no value — null included — can satisfy, mirroring a validator that rejects the field outright for a malformed numeric/length tag, a negative max (both fail the field closed post-CR70), or a constraint applied to a kind the validator rejects (notEmpty on a struct, greaterThan/lessThan on a non-numeric — CR #74). It clears Nullable (the validator rejects null too, so an unsatisfiable field must not advertise null as valid) and then contradicts the value space via applyEmptyValueSpace. */
 func markFieldUnsatisfiable(schema *Schema) {
     schema.Nullable = false
+    applyEmptyValueSpace(schema)
+}
 
+/* @important applyEmptyValueSpace advertises a non-null value space no value can satisfy (the impossible facets of markFieldUnsatisfiable) WITHOUT touching Nullable, for a validator that rejects every non-null value yet still accepts null — e.g. a nullable scalar carrying a `max` bound below its shortest stringification, where MaxLength.Validate passes a nil pointer. markFieldUnsatisfiable layers a Nullable clear on top for the stricter constraints (notEmpty/greaterThan/lessThan, malformed/negative tags) whose validator rejects null as well. A string gets an impossible length window (minLength 1, maxLength 0); a number an empty exclusive range (greater than 0 and less than 0); an array minItems 1 with maxItems 0; an object minProperties 1 with maxProperties 0; a $ref the same impossible object constraint under allOf so the documented shape is preserved. */
+func applyEmptyValueSpace(schema *Schema) {
     switch schema.Type {
     case "string":
         minLength := 1
@@ -649,6 +683,18 @@ func tagRejectsStruct(validateTag string) bool {
         name, _ := splitRule(rule)
         switch name {
         case "notEmpty", "greaterThan", "lessThan":
+            return true
+        }
+    }
+
+    return false
+}
+
+/* @important reports whether a validate tag forbids a null value while still accepting a non-null struct — only notBlank qualifies: it rejects a nil pointer (dereferenceValue returns ok=false) yet stringifies a non-nil struct with %v and accepts it, so a pointer-to-struct field carrying notBlank is satisfiable but must not advertise null. notEmpty/greaterThan/lessThan also reject null but additionally reject the struct outright, so they are handled by tagRejectsStruct/markFieldUnsatisfiable rather than here. */
+func tagForbidsNullStruct(validateTag string) bool {
+    for _, rule := range splitRules(validateTag) {
+        name, _ := splitRule(rule)
+        if "notBlank" == name {
             return true
         }
     }

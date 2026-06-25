@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.8.1] - 2026-06-25 - OpenAPI notBlank Nullability and Numeric `max` Spec Fidelity
+
+### Fixed
+
+- `openapi/schema.go` — `notBlank` on a non-string pointer field advertised `nullable: true` while the validator rejects a null pointer for a field of any kind (`NotBlank.Validate` returns "this field is required" for a nil pointer regardless of the element type, via `dereferenceValue`). `applyValidation` cleared `nullable` only on the string path, so `*int`/`*bool`/`*float64`/`*[]T`/`*map`/`*struct` fields carrying `notBlank` advertised a null value the validator rejects. `notBlank` now clears `nullable` for every generated field shape, including the `allOf`-wrapped `$ref` of a pointer-to-struct — which stays satisfiable (the validator accepts a non-nil struct, whose `%v` is non-blank), so only the null advertisement is removed rather than the whole field marked unsatisfiable. Residual corner of the v3.7.0/v3.8.0 `notBlank`/`notEmpty`-nullable work, which covered only the string path.
+- `openapi/schema.go` — a `max=N` (string-length) constraint on a non-string scalar field (`integer`/`number`/`boolean`) advertised an unconstrained schema while `MaxLength.Validate` is not string-only: it stringifies any value with `%v` and rejects it when the length exceeds `N`. A bound below the shortest possible stringification (1 character for an integer/number, 4 for a boolean — `"true"`) — or a negative or malformed bound, which fails the field closed — now advertises an unsatisfiable value space: a non-nullable field is marked fully unsatisfiable, while a nullable field keeps `nullable` (a nil pointer passes `MaxLength`, which returns nil for an absent value) and contradicts only its non-null value space. A satisfiable bound is left unconstrained, as no exact OpenAPI facet expresses a stringified-length ceiling on a number.
+
 ## [v3.8.0] - 2026-06-25 - Mailer Log Transport & Inline Images, OpenAPI Spec Fidelity, Atomic Local Storage, and Message-Bus Dead-Letter Bound
 
 ### Added
@@ -430,7 +437,9 @@ Lock-step release — no `v3/` changes this cycle. Tag SHA differs from `v3.0.0`
 - `application/application.go`, `application/application_new.go` — application context in constructor; `New(ctx context.Context, ...)` takes a caller-supplied context used for the full application lifecycle
 - `application/contract/service_module.go` — `ServiceModule` simplification; single `Register(container)` method replacing split register/configure lifecycle
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v3.8.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/v3.8.1...HEAD
+
+[v3.8.1]: https://github.com/precision-soft/melody/compare/v3.8.0...v3.8.1
 
 [v3.8.0]: https://github.com/precision-soft/melody/compare/v3.7.0...v3.8.0
 

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.0.2] - 2026-06-25 - Put Over-Read Guard Reader-Type Fix
+
+### Fixed
+
+- `storage.go` — the v3.0.1 `Put` over-read guard probed the caller's `reader` after `minio.PutObject` to detect a body longer than its declared `size`, but misfired on every valid `Put` of an `io.ReaderAt`+`io.Seeker` reader (`*bytes.Reader`, `*strings.Reader`, a non-stdio `*os.File` — the dominant callers). minio's single-shot `putObject` wraps such a reader in an `io.SectionReader` and uploads the body via `ReadAt`, which does **not** advance the caller's sequential `Read` cursor; the post-upload probe therefore read byte 0 of a correctly-sized body, returned a spurious "size does not match the declared size" error, **and `RemoveObject`-deleted the object it had just stored** — silent data loss for valid input. `Put` now hands minio the body through `boundedPutReader` — an `io.LimitReader` that is neither an `io.ReaderAt` nor an `io.Seeker` — forcing minio's sequential path to consume exactly `size` bytes straight from the caller's reader (and bounding what it stores at the declared size), so the trailing-byte probe is accurate for every reader type. A negative size still streams the whole reader.
+
 ## [v3.0.1] - 2026-06-25 - Put Size-Mismatch Rejection
 
 ### Fixed
@@ -27,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `storage.go` — object keys are now normalized the same way the core `LocalStorage` backend normalizes them (backslash to forward slash, clean `.`/`..` segments, strip the leading slash) before every `Put`/`Get`/`Delete`/`Exists`/`PresignedUrl` call. Keys were passed to S3 verbatim while `LocalStorage` cleaned them, so the same key string addressed different objects depending on the backend, and `PresignedUrl("a/../f.txt")` signed a path the browser collapses before sending (yielding `SignatureDoesNotMatch`). An empty or `.`/`..`-only key is now rejected, matching the `LocalStorage` contract.
+
+[v3.0.2]: https://github.com/precision-soft/melody/releases/tag/integrations/awss3/v3.0.2
 
 [v3.0.1]: https://github.com/precision-soft/melody/releases/tag/integrations/awss3/v3.0.1
 

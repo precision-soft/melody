@@ -933,3 +933,120 @@ func TestBuildSchema_GreaterLessThanOnNonNumericIsUnsatisfiable(t *testing.T) {
         t.Fatalf("expected lessThan on a map to advertise an impossible object (minProperties 1, maxProperties 0), got %+v", bag)
     }
 }
+
+type notBlankNullableInner struct {
+    Value string `json:"value"`
+}
+
+func TestBuildSchema_NotBlankClearsNullableOnNonStringPointers(t *testing.T) {
+    components := map[string]*Schema{}
+    names := map[reflect.Type]string{}
+    visited := map[reflect.Type]bool{}
+
+    intPtr := reflect.TypeOf((*int)(nil))
+    boolPtr := reflect.TypeOf((*bool)(nil))
+    slicePtr := reflect.TypeOf((*[]int)(nil))
+    mapPtr := reflect.TypeOf((*map[string]string)(nil))
+    structPtr := reflect.TypeOf((*notBlankNullableInner)(nil))
+    requestType := reflect.StructOf([]reflect.StructField{
+        {Name: "Count", Type: intPtr, Tag: `json:"count" validate:"notBlank"`},
+        {Name: "Flag", Type: boolPtr, Tag: `json:"flag" validate:"notBlank"`},
+        {Name: "Tags", Type: slicePtr, Tag: `json:"tags" validate:"notBlank"`},
+        {Name: "Labels", Type: mapPtr, Tag: `json:"labels" validate:"notBlank"`},
+        {Name: "Obj", Type: structPtr, Tag: `json:"obj" validate:"notBlank"`},
+        {Name: "Plain", Type: intPtr, Tag: `json:"plain"`},
+    })
+
+    schema := buildSchema(requestType, components, names, visited)
+
+    /* @important notBlank rejects a nil pointer for a field of any kind (dereferenceValue returns ok=false), so a non-string pointer field must not advertise null as valid — but it stays satisfiable because the validator accepts any non-null value (%v is non-blank), so no length/items/properties floor and no unsatisfiable marker is added */
+    count := schema.Properties["count"]
+    if true == count.Nullable || nil != count.MinLength || nil != count.Minimum || nil != count.Maximum {
+        t.Fatalf("expected notBlank on a *int to clear nullable and add no bound, got %+v", count)
+    }
+    flag := schema.Properties["flag"]
+    if true == flag.Nullable || nil != flag.AllOf {
+        t.Fatalf("expected notBlank on a *bool to clear nullable and stay satisfiable (no contradictory allOf), got %+v", flag)
+    }
+    tags := schema.Properties["tags"]
+    if true == tags.Nullable || nil != tags.MinItems {
+        t.Fatalf("expected notBlank on a *[]int to clear nullable and add no minItems, got %+v", tags)
+    }
+    labels := schema.Properties["labels"]
+    if true == labels.Nullable || nil != labels.MinProperties {
+        t.Fatalf("expected notBlank on a *map to clear nullable and add no minProperties, got %+v", labels)
+    }
+
+    /* @important a *struct renders as a nullable allOf-wrapped $ref; notBlank rejects null but accepts a non-nil struct, so clear only nullable and keep the $ref satisfiable (no impossible-object contradiction sibling) */
+    obj := schema.Properties["obj"]
+    if true == obj.Nullable {
+        t.Fatalf("expected notBlank on a *struct to clear nullable, got %+v", obj)
+    }
+    if true == isImpossibleObject(obj) {
+        t.Fatalf("expected notBlank on a *struct to stay satisfiable (validator accepts a non-nil struct), got %+v", obj)
+    }
+
+    /* @important an untagged pointer keeps nullable, proving the clear comes from notBlank and not the pointer shape itself */
+    if plain := schema.Properties["plain"]; false == plain.Nullable {
+        t.Fatalf("expected an untagged *int field to stay nullable, got %+v", plain)
+    }
+}
+
+func TestBuildSchema_MaxOnNonStringScalar(t *testing.T) {
+    components := map[string]*Schema{}
+    names := map[reflect.Type]string{}
+    visited := map[reflect.Type]bool{}
+
+    intType := reflect.TypeOf(0)
+    boolType := reflect.TypeOf(false)
+    intPtr := reflect.TypeOf((*int)(nil))
+    requestType := reflect.StructOf([]reflect.StructField{
+        {Name: "Zero", Type: intType, Tag: `json:"zero" validate:"max(value=0)"`},
+        {Name: "Bad", Type: intType, Tag: `json:"bad" validate:"max(value=abc)"`},
+        {Name: "Flag", Type: boolType, Tag: `json:"flag" validate:"max(value=3)"`},
+        {Name: "Ok", Type: intType, Tag: `json:"ok" validate:"max(value=5)"`},
+        {Name: "NullableZero", Type: intPtr, Tag: `json:"nullableZero" validate:"max(value=0)"`},
+        {Name: "Plain", Type: intType, Tag: `json:"plain"`},
+    })
+
+    schema := buildSchema(requestType, components, names, visited)
+
+    /* @important MaxLength stringifies any value via %v and rejects len > max; the shortest integer stringification is 1 character, so max=0 admits no non-null value — a non-nullable integer field is fully unsatisfiable (impossible exclusive range and nullable cleared) */
+    zero := schema.Properties["zero"]
+    if nil == zero.Minimum || 0 != *zero.Minimum || nil == zero.Maximum || 0 != *zero.Maximum ||
+        nil == zero.ExclusiveMinimum || nil == zero.ExclusiveMaximum || true == zero.Nullable {
+        t.Fatalf("expected max=0 on an int to advertise an unsatisfiable exclusive range (> 0 and < 0), got %+v", zero)
+    }
+
+    /* @important a malformed max fails the field closed at the validator (parseIntStrict), so the scalar is unsatisfiable too */
+    bad := schema.Properties["bad"]
+    if nil == bad.Minimum || nil == bad.Maximum {
+        t.Fatalf("expected a malformed max on an int to advertise an unsatisfiable range, got %+v", bad)
+    }
+
+    /* @important the shortest boolean stringification is "true" (4 characters), so max=3 admits neither true nor false — unsatisfiable via two contradictory allOf enums */
+    flag := schema.Properties["flag"]
+    if 2 != len(flag.AllOf) {
+        t.Fatalf("expected max=3 on a boolean to advertise two contradictory allOf enums, got %+v", flag)
+    }
+
+    /* @important max=5 admits at least one integer ("0".."9" are 1 character); there is no exact OpenAPI facet for a stringified-length ceiling, so the field is left unconstrained rather than mis-advertised as unsatisfiable */
+    ok := schema.Properties["ok"]
+    if nil != ok.Minimum || nil != ok.Maximum || nil != ok.AllOf {
+        t.Fatalf("expected a satisfiable max=5 on an int to add no numeric/allOf constraint, got %+v", ok)
+    }
+
+    /* @important a nil pointer passes MaxLength (Validate returns nil for ok=false), so a nullable scalar with max=0 still accepts null: contradict only the non-null value space while keeping nullable advertised */
+    nullableZero := schema.Properties["nullableZero"]
+    if false == nullableZero.Nullable {
+        t.Fatalf("expected max=0 on a *int to keep nullable (the validator accepts null), got %+v", nullableZero)
+    }
+    if nil == nullableZero.Minimum || nil == nullableZero.Maximum || nil == nullableZero.ExclusiveMinimum || nil == nullableZero.ExclusiveMaximum {
+        t.Fatalf("expected max=0 on a *int to advertise an impossible non-null exclusive range, got %+v", nullableZero)
+    }
+
+    /* @important an untagged scalar keeps no bound, proving the markers come from max and not the scalar shape itself */
+    if plain := schema.Properties["plain"]; nil != plain.Minimum || nil != plain.Maximum {
+        t.Fatalf("expected an untagged int field to advertise no numeric bound, got %+v", plain)
+    }
+}
