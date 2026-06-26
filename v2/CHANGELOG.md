@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v2.8.2] - 2026-06-25 - Firewall Matcher Nil-Request Guard
+
+### Fixed
+
+- `security/matcher.go` — `PathPrefixMatcher.Matches` dereferenced the request (`request.HttpRequest()`) without first checking that the `httpcontract.Request` interface itself is non-nil, so a nil request triggered a nil-pointer dereference panic. Both `Firewall.Check` and `ApiKeyHeaderRule.Check` reach the matcher through `Applies` *before* any request nil-check (the `nil == request` guards inside `ApiKeyHeaderRule.Check` run only after `Applies`, leaving them unreachable dead code for a nil request), so a nil request reaching the firewall crashed the request rather than being treated as non-matching. `Matches` now returns `false` for a nil request, mirroring its existing `nil == request.HttpRequest()` guard, so the rule cleanly does not apply. Latent hardening: the request is always non-nil through the normal request-event flow, so this was not reachable in production. Fixed in lockstep with `v1`/`v3`.
+
 ## [v2.8.1] - 2026-06-25 - Cross-Version Security and Correctness Back-ports
 
 ### Fixed

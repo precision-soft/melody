@@ -118,6 +118,17 @@ func cloneClaims(claims securitycontract.Claims) securitycontract.Claims {
         cloned.Attributes = internal.CopyAnyMap(claims.Attributes)
     }
 
+    if nil != claims.OriginatingActor {
+        actorCopy := *claims.OriginatingActor
+        if nil != claims.OriginatingActor.Roles {
+            actorCopy.Roles = append([]string{}, claims.OriginatingActor.Roles...)
+        }
+        if nil != claims.OriginatingActor.Attributes {
+            actorCopy.Attributes = internal.CopyStringMap(claims.OriginatingActor.Attributes)
+        }
+        cloned.OriginatingActor = &actorCopy
+    }
+
     return cloned
 }
 

@@ -17,6 +17,40 @@ func tokenStoreRuntime() runtimecontract.Runtime {
     return runtime.New(context.Background(), c.NewScope(), c)
 }
 
+/* regression: the originating actor must survive the store's claim clone (Put + Lookup), otherwise the opaque-token path silently drops F1 propagation. */
+func TestInMemoryTokenStore_PreservesOriginatingActor(t *testing.T) {
+    store := NewInMemoryTokenStore()
+
+    store.Put("opaque-actor", securitycontract.Claims{
+        UserIdentifier: "billing-service",
+        Roles:          []string{"ROLE_SERVICE"},
+        OriginatingActor: &securitycontract.ActorData{
+            Identifier: "client-42",
+            Type:       securitycontract.ActorTypeApiClient,
+            Roles:      []string{"ROLE_CLIENT"},
+            Attributes: map[string]string{"region": "eu"},
+        },
+    })
+
+    claims, found, lookupErr := store.Lookup(testRuntime(), "opaque-actor")
+    if nil != lookupErr || false == found {
+        t.Fatalf("expected the token to be found: found=%v err=%v", found, lookupErr)
+    }
+
+    if nil == claims.OriginatingActor {
+        t.Fatal("expected the originating actor to survive the store round-trip")
+    }
+
+    if "client-42" != claims.OriginatingActor.Identifier || "eu" != claims.OriginatingActor.Attributes["region"] {
+        t.Fatalf("unexpected actor after round-trip: %+v", claims.OriginatingActor)
+    }
+
+    token := NewAuthenticatedTokenFromClaims(claims)
+    if _, present := token.OnBehalfOf(); false == present {
+        t.Fatal("expected the rebuilt token to carry the actor")
+    }
+}
+
 func TestInMemoryTokenStore_TtlExpiresToken(t *testing.T) {
     frozen := clock.NewFrozenClock(time.Unix(1000, 0))
     store := NewInMemoryTokenStoreWithClock(frozen)

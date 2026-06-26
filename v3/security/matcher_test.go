@@ -40,3 +40,11 @@ func TestPathPrefixMatcher_DoesNotMatch(t *testing.T) {
         t.Fatalf("expected matcher to not match")
     }
 }
+
+func TestPathPrefixMatcher_NilRequestDoesNotMatch(t *testing.T) {
+    matcher := NewPathPrefixMatcher("/admin")
+
+    if true == matcher.Matches(nil) {
+        t.Fatalf("expected matcher to not match a nil request")
+    }
+}

@@ -13,4 +13,6 @@ const (
     EventSecurityLogoutFailure = "security.logout.failure"
 
     AttributePublicAccess = "PUBLIC_ACCESS"
+
+    RoleAllowedToSwitch = "ROLE_ALLOWED_TO_SWITCH"
 )
