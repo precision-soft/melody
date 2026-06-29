@@ -232,6 +232,42 @@ func TestRelay_UndecodableMessageIsDeadLettered(t *testing.T) {
     }
 }
 
+/* a row claimed more times than the delivery cap without ever resolving (it keeps crashing or hanging the relay between claim and resolve, so its send-failure Attempts never advances to MaxAttempts) is dead-lettered as poison instead of re-surfacing forever. */
+func TestRelay_DeadLettersPoisonExceedingMaxDeliveryAttempts(t *testing.T) {
+    repository := &fakeRepository{due: []Pending{{Id: 5, TypeName: "string", Payload: []byte("x"), Attempts: 0, DeliveryAttempts: 5}}}
+    transport := &fakeTransport{}
+
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: transport, Codec: &stringCodec{}, MaxAttempts: 2})
+
+    relay.RunOnce(relayTestRuntime())
+
+    if 0 != len(transport.sent) {
+        t.Fatal("expected nothing published for a poison row over the delivery cap")
+    }
+
+    if 1 != len(repository.calls) || "dead" != repository.calls[0].kind {
+        t.Fatalf("expected the row over the delivery cap to be dead-lettered, got %+v", repository.calls)
+    }
+}
+
+/* positive control: a row at the delivery cap (not yet over it) is still delivered normally, so the cap dead-letters only genuinely stuck rows. */
+func TestRelay_DeliversRowAtDeliveryCapBoundary(t *testing.T) {
+    repository := &fakeRepository{due: []Pending{{Id: 6, TypeName: "string", Payload: []byte("ok"), Attempts: 0, DeliveryAttempts: 4}}}
+    transport := &fakeTransport{}
+
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: transport, Codec: &stringCodec{}, MaxAttempts: 2})
+
+    published, _ := relay.RunOnce(relayTestRuntime())
+
+    if 1 != published || 1 != len(transport.sent) {
+        t.Fatalf("expected the row at the cap boundary to be delivered, published %d", published)
+    }
+
+    if 1 != len(repository.calls) || "sent" != repository.calls[0].kind {
+        t.Fatalf("expected the boundary row to be marked sent, got %+v", repository.calls)
+    }
+}
+
 func TestRelay_SkipsWorkWhenLeaseNotAcquired(t *testing.T) {
     repository := &fakeRepository{due: []Pending{{Id: 1, TypeName: "string", Payload: []byte("x")}}}
     transport := &fakeTransport{}
@@ -265,7 +301,7 @@ func TestRelay_NextBackoffDoesNotOverflowWithLargeMax(t *testing.T) {
         if 0 >= got {
             t.Fatalf("attempts=%d produced a non-positive backoff %v (overflow)", attempts, got)
         }
-        if got > time.Duration(math.MaxInt64) {
+        if time.Duration(math.MaxInt64) < got {
             t.Fatalf("attempts=%d exceeded the configured max, got %v", attempts, got)
         }
     }

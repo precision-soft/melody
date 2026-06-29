@@ -54,7 +54,7 @@ func NewHmacEnvelopeSigner(config HmacEnvelopeSignerConfig) *HmacEnvelopeSigner 
     }
 
     ttl := config.Ttl
-    if ttl <= 0 {
+    if 0 >= ttl {
         ttl = defaultHmacSignerTtl
     }
 

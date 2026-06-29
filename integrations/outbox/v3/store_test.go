@@ -155,6 +155,33 @@ func TestStore_StaleResolveDoesNotClobberResolvedRow(t *testing.T) {
     }
 }
 
+/* every claim increments delivery_attempts atomically and the claim reports the post-claim count, so the relay's crash-poison cap can bound a row that keeps re-surfacing (claimed but never resolved) even though its send-failure attempts never advance. */
+func TestStore_ClaimIncrementsDeliveryAttempts(t *testing.T) {
+    store := outboxTestStore(t)
+    ctx := context.Background()
+
+    enqueueOutboxRows(t, store, 1)
+
+    first, firstErr := store.ClaimDueMessages(ctx, 10, 50*time.Millisecond)
+    if nil != firstErr || 1 != len(first) {
+        t.Fatalf("first claim: %v (got %d)", firstErr, len(first))
+    }
+    if 1 != first[0].DeliveryAttempts {
+        t.Fatalf("expected the first claim to report delivery attempt 1, got %d", first[0].DeliveryAttempts)
+    }
+
+    /* let the visibility lapse so the unresolved row re-surfaces (the crash-between-claim-and-resolve case) */
+    time.Sleep(120 * time.Millisecond)
+
+    second, secondErr := store.ClaimDueMessages(ctx, 10, time.Minute)
+    if nil != secondErr || 1 != len(second) {
+        t.Fatalf("second claim: %v (got %d)", secondErr, len(second))
+    }
+    if 2 != second[0].DeliveryAttempts {
+        t.Fatalf("expected the re-claim to report delivery attempt 2, got %d", second[0].DeliveryAttempts)
+    }
+}
+
 /* a row claimed by an instance that crashed before resolving it must become claimable again once its visibility timeout lapses. */
 func TestStore_InFlightRowResurfacesAfterVisibility(t *testing.T) {
     store := outboxTestStore(t)

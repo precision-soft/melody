@@ -36,7 +36,7 @@ func (instance *MemoryNonceGuard) Remember(
         return true, nil
     }
 
-    if ttl <= 0 {
+    if 0 >= ttl {
         return false, nil
     }
 

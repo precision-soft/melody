@@ -79,6 +79,19 @@ func TestTotpSecondFactor_EnrolledWithoutCodeIsPending(t *testing.T) {
     }
 }
 
+/* the replay-guard validity window must stay strictly positive even for a pathological period/skew: a window of zero or less makes the NonceGuard skip recording the accepted code (it ignores a ttl <= 0), silently disabling replay protection. The window saturates instead. With Period=3333333334, Skew=1 the un-guarded `time.Duration(period*(2*skew+1)) * time.Second` overflows int64 to a negative duration. */
+func TestTotpSecondFactor_ReplayWindowStaysPositiveOnOverflow(t *testing.T) {
+    authenticator := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
+        Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"})},
+        Enrollments: &fixedEnrollmentStore{enrolled: false},
+        Totp:        totp.Config{Period: 3333333334, Skew: 1},
+    })
+
+    if window := authenticator.codeValidityWindow(); 0 >= window {
+        t.Fatalf("expected a strictly positive replay window, got %v", window)
+    }
+}
+
 func TestTotpSecondFactor_ValidCodeAuthenticates(t *testing.T) {
     secret, _ := totp.GenerateSecret()
     code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})

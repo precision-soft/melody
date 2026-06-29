@@ -1,6 +1,7 @@
 package security
 
 import (
+    "math"
     "time"
 
     "github.com/precision-soft/melody/v3/exception"
@@ -135,17 +136,29 @@ func (instance *TotpSecondFactorAuthenticator) codeAlreadyUsed(
 
 func (instance *TotpSecondFactorAuthenticator) codeValidityWindow() time.Duration {
     resolved := instance.totpConfig
-    period := resolved.Period
+
+    period := uint64(resolved.Period)
     if 0 == period {
         period = 30
     }
 
-    skew := resolved.Skew
+    skew := uint64(resolved.Skew)
     if 0 == skew {
         skew = 1
     }
 
-    return time.Duration(period*(2*skew+1)) * time.Second
+    /* the window must cover the whole span a code verifies — (2*skew+1) periods — so a replayed code stays blocked for as long as it would still be accepted. Compute in uint64 and saturate to the maximum duration on any overflow: a pathological period/skew that wrapped time.Duration to a non-positive value would make the replay guard skip recording (a NonceGuard ignores a ttl <= 0) and silently disable replay protection. */
+    const maxSeconds = uint64(math.MaxInt64 / int64(time.Second))
+    if skew > (maxSeconds-1)/2 {
+        return time.Duration(math.MaxInt64)
+    }
+
+    steps := 2*skew + 1
+    if period > maxSeconds/steps {
+        return time.Duration(math.MaxInt64)
+    }
+
+    return time.Duration(period*steps) * time.Second
 }
 
 var _ securitycontract.Authenticator = (*TotpSecondFactorAuthenticator)(nil)

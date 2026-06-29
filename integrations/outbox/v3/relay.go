@@ -22,6 +22,9 @@ const (
     defaultBackoffFactor  = 2.0
 )
 
+/* defaultMaxDeliveryAttemptsFactor multiplies the resolved MaxAttempts to derive the default MaxDeliveryAttempts when one is not configured, leaving generous head-room above the send-failure retry path so only a genuinely stuck (crash-poison) row trips the claim cap. */
+const defaultMaxDeliveryAttemptsFactor = 2
+
 /* RelayConfig configures the outbox relay — the loop that drains pending rows to the message transport with retry, exponential backoff and a dead-letter terminal state. Every batch is claimed atomically (FOR UPDATE SKIP LOCKED), so two instances never publish the same row even without a Locker; this requires a backend that supports SELECT … FOR UPDATE SKIP LOCKED (PostgreSQL, or MySQL 8+). A Locker is still useful as an additional optimization: supply one (for example the Redis locker) so only one instance does any work at a time in a multi-instance deployment. */
 type RelayConfig struct {
     Repository Repository
@@ -42,6 +45,9 @@ type RelayConfig struct {
     BatchSize int
 
     MaxAttempts int
+
+    /* MaxDeliveryAttempts caps how many times a single row may be claimed before it is dead-lettered as poison, regardless of whether its sends ever returned an error. It is the safety net for a row that crashes (or hangs past the visibility timeout) the relay between claim and resolve: such a row's send-failure attempt count never advances, so without this cap it would re-surface forever and never reach MaxAttempts. It must exceed MaxAttempts because every claim — including a normal retry's re-claim — counts toward it; defaults to defaultMaxDeliveryAttemptsFactor * MaxAttempts. */
+    MaxDeliveryAttempts int
 
     InitialBackoff time.Duration
 
@@ -79,13 +85,16 @@ func NewRelay(config RelayConfig) *Relay {
     if 0 >= resolved.MaxAttempts {
         resolved.MaxAttempts = defaultMaxAttempts
     }
+    if 0 >= resolved.MaxDeliveryAttempts {
+        resolved.MaxDeliveryAttempts = defaultMaxDeliveryAttemptsFactor * resolved.MaxAttempts
+    }
     if 0 >= resolved.InitialBackoff {
         resolved.InitialBackoff = defaultInitialBackoff
     }
     if 0 >= resolved.MaxBackoff {
         resolved.MaxBackoff = defaultMaxBackoff
     }
-    if resolved.BackoffFactor < 1 {
+    if 1 > resolved.BackoffFactor {
         resolved.BackoffFactor = defaultBackoffFactor
     }
 
@@ -146,6 +155,11 @@ func (instance *Relay) RunOnce(runtimeInstance runtimecontract.Runtime) (int, er
 
 func (instance *Relay) deliver(runtimeInstance runtimecontract.Runtime, pending Pending) (bool, error) {
     ctx := runtimeInstance.Context()
+
+    if pending.DeliveryAttempts > instance.config.MaxDeliveryAttempts {
+        /* the row has been claimed more times than the delivery cap without ever resolving. A row that merely fails to send is dead-lettered by the send-failure path at MaxAttempts, so exceeding the (larger) claim cap means it keeps crashing or hanging the relay between claim and resolve — its send-failure attempts never advance. Dead-letter it as poison so it cannot re-surface forever. */
+        return false, instance.config.Repository.MarkDead(ctx, pending.Id, pending.Attempts, "exceeded max delivery attempts (poison crashing the relay between claim and resolve)")
+    }
 
     message, decodeErr := instance.config.Codec.Decode(pending.TypeName, pending.Payload)
     if nil != decodeErr {

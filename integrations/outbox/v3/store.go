@@ -8,18 +8,19 @@ import (
     bun "github.com/uptrace/bun"
 )
 
-/* Message is the outbox table row. The relay-facing fields (status, attempts, available_at) drive retry scheduling; payload + type_name are what the codec needs to rebuild the message. */
+/* Message is the outbox table row. The relay-facing fields (status, attempts, delivery_attempts, available_at) drive retry scheduling; payload + type_name are what the codec needs to rebuild the message. Attempts counts send failures (drives backoff and the MaxAttempts dead-letter); delivery_attempts counts every claim (drives the MaxDeliveryAttempts crash-poison cap). */
 type Message struct {
     bun.BaseModel `bun:"table:melody_outbox"`
 
-    Id          int64     `bun:"id,pk,autoincrement"`
-    TypeName    string    `bun:"type_name,notnull"`
-    Payload     []byte    `bun:"payload,notnull"`
-    Status      string    `bun:"status,notnull"`
-    Attempts    int       `bun:"attempts,notnull"`
-    AvailableAt time.Time `bun:"available_at,notnull"`
-    CreatedAt   time.Time `bun:"created_at,notnull"`
-    LastError   string    `bun:"last_error,nullzero"`
+    Id               int64     `bun:"id,pk,autoincrement"`
+    TypeName         string    `bun:"type_name,notnull"`
+    Payload          []byte    `bun:"payload,notnull"`
+    Status           string    `bun:"status,notnull"`
+    Attempts         int       `bun:"attempts,notnull"`
+    DeliveryAttempts int       `bun:"delivery_attempts,notnull"`
+    AvailableAt      time.Time `bun:"available_at,notnull"`
+    CreatedAt        time.Time `bun:"created_at,notnull"`
+    LastError        string    `bun:"last_error,nullzero"`
 }
 
 func NewStore(database *bun.DB, codec MessageCodec) *Store {
@@ -62,12 +63,13 @@ func (instance *Store) Enqueue(ctx context.Context, executor bun.IDB, message an
     now := time.Now()
 
     row := &Message{
-        TypeName:    typeName,
-        Payload:     payload,
-        Status:      StatusPending,
-        Attempts:    0,
-        AvailableAt: now,
-        CreatedAt:   now,
+        TypeName:         typeName,
+        Payload:          payload,
+        Status:           StatusPending,
+        Attempts:         0,
+        DeliveryAttempts: 0,
+        AvailableAt:      now,
+        CreatedAt:        now,
     }
 
     if _, insertErr := executor.NewInsert().Model(row).Exec(ctx); nil != insertErr {
@@ -108,6 +110,7 @@ func (instance *Store) ClaimDueMessages(ctx context.Context, limit int, visibili
         _, updateErr := tx.NewUpdate().
             Model((*Message)(nil)).
             Set("status = ?", StatusInFlight).
+            Set("delivery_attempts = delivery_attempts + 1").
             Set("available_at = ?", now.Add(visibility)).
             Where("id IN (?)", bun.In(ids)).
             Exec(ctx)
@@ -125,6 +128,8 @@ func (instance *Store) ClaimDueMessages(ctx context.Context, limit int, visibili
             TypeName: row.TypeName,
             Payload:  row.Payload,
             Attempts: row.Attempts,
+            /* rows were scanned before the in-flight UPDATE incremented delivery_attempts, so add this claim to report the post-claim count the relay's crash-poison cap checks. */
+            DeliveryAttempts: row.DeliveryAttempts + 1,
         })
     }
 

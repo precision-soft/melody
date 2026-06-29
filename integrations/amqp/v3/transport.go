@@ -2,6 +2,7 @@ package amqp
 
 import (
     "context"
+    "math"
     "reflect"
     "strconv"
     "sync"
@@ -310,20 +311,27 @@ func (instance *Transport) nackChannel(channel *amqp091.Channel, tag uint64, req
     return channel.Nack(tag, false, requeue)
 }
 
+/* drainPublishReturn removes every return currently queued on the channel, reporting the last one seen and whether any were drained. It drains the whole buffer rather than a single return so that an unroutable publish is still detected when more than one return has accumulated (and so a stale return from an earlier publish cannot be left behind to be misattributed to the next one). */
 func drainPublishReturn(returns <-chan amqp091.Return) (amqp091.Return, bool) {
     if nil == returns {
         return amqp091.Return{}, false
     }
 
-    select {
-    case returned, open := <-returns:
-        if false == open {
-            return amqp091.Return{}, false
-        }
+    var lastReturned amqp091.Return
+    drained := false
 
-        return returned, true
-    default:
-        return amqp091.Return{}, false
+    for {
+        select {
+        case returned, open := <-returns:
+            if false == open {
+                return lastReturned, drained
+            }
+
+            lastReturned = returned
+            drained = true
+        default:
+            return lastReturned, drained
+        }
     }
 }
 
@@ -545,10 +553,17 @@ func (instance *Transport) consumeLoop(
     }
 }
 
+/* maxDelayExpirationMilliseconds caps a delayed-retry message's expiration. The AMQP per-message expiration is a string RabbitMQ parses as a 32-bit millisecond count, so a delay whose milliseconds exceed this would wrap and could collapse to a tiny ttl — expiring the message almost immediately instead of after the intended delay. ~49.7 days is far beyond any realistic retry delay. */
+const maxDelayExpirationMilliseconds = int64(math.MaxUint32)
+
 func delayExpirationMilliseconds(delay time.Duration) int64 {
     milliseconds := delay.Milliseconds()
     if 0 >= milliseconds {
-        milliseconds = 1
+        return 1
+    }
+
+    if milliseconds > maxDelayExpirationMilliseconds {
+        return maxDelayExpirationMilliseconds
     }
 
     return milliseconds

@@ -39,15 +39,20 @@ func (instance *ImpersonationToken) UserIdentifier() string {
 }
 
 func (instance *ImpersonationToken) Roles() []string {
-    return instance.impersonated.Roles()
+    roles := instance.impersonated.Roles()
+    if nil == roles {
+        return nil
+    }
+
+    return append([]string{}, roles...)
 }
 
 func (instance *ImpersonationToken) Scope() map[string]any {
-    return instance.impersonated.Scope()
+    return internal.CopyAnyMap(instance.impersonated.Scope())
 }
 
 func (instance *ImpersonationToken) Attributes() map[string]any {
-    return instance.impersonated.Attributes()
+    return internal.CopyAnyMap(instance.impersonated.Attributes())
 }
 
 func (instance *ImpersonationToken) Impersonator() (securitycontract.Token, bool) {

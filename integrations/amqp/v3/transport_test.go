@@ -4,6 +4,7 @@ import (
     "context"
     "encoding/json"
     "errors"
+    "math"
     "os"
     "testing"
     "time"
@@ -1029,6 +1030,44 @@ func TestDelayExpirationMilliseconds_ClampsSubMillisecondToOne(t *testing.T) {
 
     if 5 != delayExpirationMilliseconds(5*time.Millisecond) {
         t.Fatalf("expected 5ms to stay 5, got %d", delayExpirationMilliseconds(5*time.Millisecond))
+    }
+}
+
+/* a delay whose milliseconds exceed RabbitMQ's 32-bit expiration must clamp to the cap rather than be passed through to wrap to a tiny ttl that would expire the message almost immediately. */
+func TestDelayExpirationMilliseconds_ClampsHugeDelayToCap(t *testing.T) {
+    huge := time.Duration(math.MaxUint32+1000) * time.Millisecond
+    if maxDelayExpirationMilliseconds != delayExpirationMilliseconds(huge) {
+        t.Fatalf("expected a huge delay to clamp to %d, got %d", maxDelayExpirationMilliseconds, delayExpirationMilliseconds(huge))
+    }
+
+    atCap := time.Duration(maxDelayExpirationMilliseconds) * time.Millisecond
+    if maxDelayExpirationMilliseconds != delayExpirationMilliseconds(atCap) {
+        t.Fatalf("expected a delay at the cap to stay %d, got %d", maxDelayExpirationMilliseconds, delayExpirationMilliseconds(atCap))
+    }
+}
+
+/* drainPublishReturn must remove every queued return, not just one, so a publish is reported unroutable even when more than one return has accumulated and so no stale return is left behind to be misattributed to the next publish. */
+func TestDrainPublishReturn_DrainsEveryQueuedReturn(t *testing.T) {
+    returns := make(chan amqp091.Return, 8)
+    returns <- amqp091.Return{ReplyCode: 312, ReplyText: "first"}
+    returns <- amqp091.Return{ReplyCode: 312, ReplyText: "second"}
+    returns <- amqp091.Return{ReplyCode: 312, ReplyText: "third"}
+
+    last, drained := drainPublishReturn(returns)
+    if false == drained {
+        t.Fatal("expected drained to report the accumulated returns")
+    }
+
+    if "third" != last.ReplyText {
+        t.Fatalf("expected the last return reported, got %q", last.ReplyText)
+    }
+
+    if 0 != len(returns) {
+        t.Fatalf("expected every queued return drained, %d left", len(returns))
+    }
+
+    if _, stillDrained := drainPublishReturn(returns); true == stillDrained {
+        t.Fatal("expected an empty channel to report nothing drained")
     }
 }
 

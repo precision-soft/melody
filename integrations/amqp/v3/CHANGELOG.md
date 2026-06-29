@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `transport.go` — the transport now round-trips a producer-assigned message id. `buildPublishing` copies a `messagebus.MessageIdStamp` into the AMQP `Publishing.MessageId`, and `decode` reads `delivery.MessageId` back into a `MessageIdStamp` on the consumed envelope. This lets a consumer read the id for deduplication (e.g. the outbox relay's `melody-outbox-<id>`) and, just as importantly, makes an application-driven requeue (`Nack` with requeue, including the delayed-retry path) re-publish under the **same** message id instead of an empty one — without the decode round-trip the republish path silently dropped the id. Covered by `TestTransport_BuildPublishingCarriesMessageId` and `TestTransport_MessageIdSurvivesDecodeAndRepublish`.
 
+### Fixed
+
+- `transport.go` — `drainPublishReturn` now drains every queued unroutable return rather than a single one. The publish path drains returns both before publishing (to clear any stale return) and after the broker confirm (to detect that this publish was returned as unroutable); reading only one return could leave a stale return behind to be misattributed to the next publish, or miss a return when more than one had accumulated on the buffered `NotifyReturn` channel. Covered by `TestDrainPublishReturn_DrainsEveryQueuedReturn`.
+- `transport.go` — `delayExpirationMilliseconds` now clamps a delayed-retry message's expiration to a 32-bit millisecond ceiling (`math.MaxUint32`, ~49.7 days). RabbitMQ parses the per-message `expiration` as a 32-bit value, so a pathologically large `DelayStamp` could wrap to a tiny ttl and expire the message almost immediately instead of after the intended delay. Covered by `TestDelayExpirationMilliseconds_ClampsHugeDelayToCap`.
+
 ## [v3.1.0] - 2026-06-25 - Reconnect Hardening and Initial-Subscribe Retry
 
 ### Changed
