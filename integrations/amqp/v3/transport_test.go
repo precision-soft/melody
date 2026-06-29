@@ -663,6 +663,88 @@ func TestTransport_RequeuePersistsDeadLetterAttemptCount(t *testing.T) {
     }
 }
 
+/* a message id stamped by a producer (for example the outbox relay) is carried as the AMQP message id so a consumer can deduplicate at-least-once redeliveries. */
+func TestTransport_BuildPublishingCarriesMessageId(t *testing.T) {
+    registry := NewMessageRegistry()
+    RegisterMessage[reconnectMessage](registry, "amqp.test.messageid")
+
+    serializer := melodyserializer.NewJsonSerializer()
+    instance := &Transport{queue: "orders", registry: registry, serializer: serializer}
+
+    envelope := melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}).
+        WithStamp(melodymessagebus.MessageIdStamp{MessageId: "melody-outbox-42"})
+
+    publishing, buildErr := instance.buildPublishing(envelope, "")
+    if nil != buildErr {
+        t.Fatalf("build publishing: %v", buildErr)
+    }
+
+    if "melody-outbox-42" != publishing.MessageId {
+        t.Fatalf("expected the stamped message id on the publishing, got %q", publishing.MessageId)
+    }
+}
+
+/* the producer-assigned message id must survive a broker round-trip and an application requeue: decode reads delivery.MessageId back into a stamp so a consumer can read it and a republish (Nack-with-requeue / delayed retry) re-emits the SAME id rather than an empty one. */
+func TestTransport_MessageIdSurvivesDecodeAndRepublish(t *testing.T) {
+    registry := NewMessageRegistry()
+    RegisterMessage[reconnectMessage](registry, "amqp.test.messageid.roundtrip")
+
+    serializer := melodyserializer.NewJsonSerializer()
+    instance := &Transport{queue: "orders", registry: registry, serializer: serializer}
+
+    /* first publish carries the producer id */
+    sent := melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}).
+        WithStamp(melodymessagebus.MessageIdStamp{MessageId: "melody-outbox-42"})
+    published, buildErr := instance.buildPublishing(sent, "")
+    if nil != buildErr {
+        t.Fatalf("build publishing: %v", buildErr)
+    }
+
+    /* the broker delivers it back; decode must expose the id as a stamp */
+    delivery := amqp091.Delivery{
+        Headers:   published.Headers,
+        Body:      published.Body,
+        MessageId: published.MessageId,
+    }
+    decoded, decodeErr := instance.decode(delivery, 1)
+    if nil != decodeErr {
+        t.Fatalf("decode: %v", decodeErr)
+    }
+
+    roundTripped, present := melodymessagebus.MessageId(decoded)
+    if false == present || "melody-outbox-42" != roundTripped {
+        t.Fatalf("expected decode to surface the message id, got %q present=%v", roundTripped, present)
+    }
+
+    /* a requeue re-publishes the decoded envelope; the id must not be lost */
+    republished, republishErr := instance.buildPublishing(decoded, "")
+    if nil != republishErr {
+        t.Fatalf("rebuild publishing: %v", republishErr)
+    }
+
+    if "melody-outbox-42" != republished.MessageId {
+        t.Fatalf("expected the republished message to keep its id, got %q", republished.MessageId)
+    }
+}
+
+/* negative control: without a message id stamp the publishing leaves MessageId empty rather than inventing one. */
+func TestTransport_BuildPublishingWithoutMessageIdStampLeavesItEmpty(t *testing.T) {
+    registry := NewMessageRegistry()
+    RegisterMessage[reconnectMessage](registry, "amqp.test.nomessageid")
+
+    serializer := melodyserializer.NewJsonSerializer()
+    instance := &Transport{queue: "orders", registry: registry, serializer: serializer}
+
+    publishing, buildErr := instance.buildPublishing(melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}), "")
+    if nil != buildErr {
+        t.Fatalf("build publishing: %v", buildErr)
+    }
+
+    if "" != publishing.MessageId {
+        t.Fatalf("expected no message id without a stamp, got %q", publishing.MessageId)
+    }
+}
+
 func TestAckNack_StaleGenerationIsNoOp(t *testing.T) {
     runtimeInstance := newReconnectRuntime(context.Background())
 

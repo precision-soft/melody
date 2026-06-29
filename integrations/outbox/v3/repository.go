@@ -7,7 +7,7 @@ import (
 
 /* Repository is the persistence the relay drives. The bun-backed Store implements it; abstracting it keeps the relay's retry/dead-letter logic unit-testable without a database. */
 type Repository interface {
-    DueMessages(ctx context.Context, limit int) ([]Pending, error)
+    ClaimDueMessages(ctx context.Context, limit int, visibility time.Duration) ([]Pending, error)
 
     MarkSent(ctx context.Context, id int64) error
 

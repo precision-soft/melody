@@ -4,9 +4,10 @@ package outbox
 const TableName = "melody_outbox"
 
 const (
-    StatusPending = "pending"
-    StatusSent    = "sent"
-    StatusDead    = "dead"
+    StatusPending  = "pending"
+    StatusInFlight = "inflight"
+    StatusSent     = "sent"
+    StatusDead     = "dead"
 )
 
 /* Pending is a stored outbox row ready to be relayed: the codec type name and payload needed to rebuild the message, plus how many delivery attempts have already been made. */

@@ -121,6 +121,24 @@ func TestTotpSecondFactor_ReplayedCodeIsRejected(t *testing.T) {
     }
 }
 
+/* negative control: with no ReplayGuard configured the source defaults to an in-process guard, so a captured code still cannot be replayed out of the box. */
+func TestTotpSecondFactor_ReplayedCodeIsRejectedByDefaultGuard(t *testing.T) {
+    secret, _ := totp.GenerateSecret()
+    code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
+
+    authenticator := totpAuthenticator(secret, true, nil)
+
+    first, _ := authenticator.Authenticate(totpRequest(code))
+    if false == first.IsAuthenticated() {
+        t.Fatal("expected the first use of a valid code to authenticate")
+    }
+
+    second, _ := authenticator.Authenticate(totpRequest(code))
+    if true == second.IsAuthenticated() {
+        t.Fatal("expected a replayed code to be rejected by the default in-process guard")
+    }
+}
+
 func TestTotpSecondFactor_AnonymousPrimaryPassesThrough(t *testing.T) {
     authenticator := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
         Primary:     &fixedAuthenticator{token: NewAnonymousToken()},

@@ -102,7 +102,8 @@ func TestGenerateRecoveryCodes_UniqueAndFormatted(t *testing.T) {
         }
         seen[code] = true
 
-        if 9 != len(code) || '-' != code[5] {
+        /* the documented format is xxxxx-xxxxx: five base32 chars, a dash, five base32 chars (eleven runes total). */
+        if 11 != len(code) || '-' != code[5] {
             t.Fatalf("unexpected recovery code format %q", code)
         }
     }

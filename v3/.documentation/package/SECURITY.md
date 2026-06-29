@@ -298,9 +298,20 @@ source := security.NewBearerTokenSourceWithEnricher(validator, scopeRoleEnricher
 
 `Claims` exposes generic `Scope` and `Attributes` maps for this purpose; the library assigns no meaning to their keys.
 
+### Internal service-to-service authentication (HMAC)
+
+For machine-to-machine calls between trusted services, [`HmacTokenSource`](../../security/hmac_token_source.go) verifies an HMAC-signed envelope carried on the `X-Melody-Internal-Auth` header and resolves it to the *calling service* as the principal. The matching client helper is [`HmacEnvelopeSigner`](../../security/hmac_signer.go). The envelope binds the call to its method, path and query string, an issued/expiry window, a single-use nonce, and a hash of the request body, so a captured envelope cannot be replayed against another route, after expiry, twice, or with a tampered body or query. Replay is rejected by a pluggable [`NonceGuard`](../../security/contract/nonce_guard.go) (defaults to an in-process [`MemoryNonceGuard`](../../security/memory_nonce_guard.go); supply a shared guard such as the rueidis Redis nonce guard for multi-instance deployments).
+
+The signed payload optionally carries an **originating actor** (F1) via [`Actor`](../../security/actor.go) / [`Token.OnBehalfOf()`](../../security/contract/token.go), so service B authorizes and audits the call as the upstream user/client that started it, without that user re-authenticating to B. Read it back with [`ActorFromToken`](../../security/actor.go).
+
+**Key-id ↔ app binding (trust model).** Each key id is issued to **exactly one application**. The secret provider ([`NewStaticHmacSecretProvider`](../../security/hmac_secret_provider.go), entries are `HmacKey{App, Secret}`) records that binding, the [`HmacAppRegistry`](../../security/hmac_app_registry.go) maps an app to the roles its verified principal receives, and the verifier **refuses an envelope whose key id is not bound to the app it claims**. This is what stops a holder of one valid secret from claiming a higher-privileged app (and forging an arbitrary actor): a secret is only ever as privileged as the single app its key id is issued to. Because the key id is attacker-visible, the binding only isolates apps when their secret material is distinct, so `NewStaticHmacSecretProvider` rejects the same secret bytes registered under key ids belonging to different apps. The signer fails fast at construction if its current key id is not bound to the app it signs for. Rotate by issuing a second key id bound to the same app, rolling `CurrentKeyId` to it, then retiring the old key id once every caller has moved.
+
+The embedded actor stays self-asserted: an *authenticated* app is trusted to state who it acts on behalf of, exactly as it is trusted with its own secret. Binding the app identity bounds actor forgery to what each app is already trusted to assert — keep one key id per app and rotate the shared secrets like any other credential.
+
 ## Footguns & caveats
 
 - `AccessControl` uses a deterministic match priority: exact match first, then longest prefix match (including segment-prefix rules), then regex rules in the order they were registered, then the empty-prefix fallback. See [`(*AccessControl).Match`](../../security/access_control.go).
+- Internal-auth HMAC key ids are bound to a single app: do not share one key id (or its secret) across applications — the verifier rejects any envelope whose key id is not bound to its claimed app, and a shared secret would otherwise let one service impersonate another. Supply a shared [`NonceGuard`](../../security/contract/nonce_guard.go) behind a load balancer; the default in-process guard only prevents replay within one instance.
 - `SecurityContextSetOnRuntime` stores the context in the runtime scope under `security/contract.ServiceSecurityContext`.
 - `JwtTokenValidator` requires the `exp` claim by default: a signed token without `exp` is rejected unless you set `JwtConfig{AllowWithoutExpiry: true}`. This differs from RFC 7519, which treats registered claims as optional — so a token that looks valid but omits `exp` resolves to an anonymous token, not an authenticated one.
 

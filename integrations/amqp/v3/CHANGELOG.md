@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `transport.go` — the transport now round-trips a producer-assigned message id. `buildPublishing` copies a `messagebus.MessageIdStamp` into the AMQP `Publishing.MessageId`, and `decode` reads `delivery.MessageId` back into a `MessageIdStamp` on the consumed envelope. This lets a consumer read the id for deduplication (e.g. the outbox relay's `melody-outbox-<id>`) and, just as importantly, makes an application-driven requeue (`Nack` with requeue, including the delayed-retry path) re-publish under the **same** message id instead of an empty one — without the decode round-trip the republish path silently dropped the id. Covered by `TestTransport_BuildPublishingCarriesMessageId` and `TestTransport_MessageIdSurvivesDecodeAndRepublish`.
+
 ## [v3.1.0] - 2026-06-25 - Reconnect Hardening and Initial-Subscribe Retry
 
 ### Changed

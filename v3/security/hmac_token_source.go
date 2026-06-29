@@ -74,9 +74,22 @@ func (instance *HmacTokenSource) Resolve(
         return NewAnonymousToken(), nil
     }
 
-    envelope, decodeErr := decodeHmacHeaderValue(headerValue, instance.secrets)
+    envelope, keyId, decodeErr := decodeHmacHeaderValue(headerValue, instance.secrets)
     if nil != decodeErr {
         return instance.reject(runtimeInstance, decodeErr)
+    }
+
+    /* the signature only proves the holder of the key id's secret signed the envelope — not that the claimed app owns that key. Without binding the key id to the app, anyone holding any valid secret could claim a higher-privileged app (and forge its actor). Refuse an envelope whose key id is not issued to the app it claims, so a shared or leaked secret cannot be used to impersonate another app. */
+    boundApp, keyBound := instance.secrets.AppForKeyId(keyId)
+    if false == keyBound || boundApp != envelope.App {
+        return instance.reject(
+            runtimeInstance,
+            exception.NewError(
+                "internal-auth key id is not authorized for the claimed app",
+                map[string]any{"keyId": keyId, "claimedApp": envelope.App, "boundApp": boundApp},
+                nil,
+            ),
+        )
     }
 
     roles, appKnown := instance.apps.RolesForApp(envelope.App)
@@ -134,6 +147,14 @@ func (instance *HmacTokenSource) verifyEndpoint(envelope hmacEnvelope, request h
         )
     }
 
+    if envelope.Query != httpRequest.URL.RawQuery {
+        return exception.NewError(
+            "internal-auth query does not match the request",
+            map[string]any{"signed": envelope.Query, "request": httpRequest.URL.RawQuery},
+            nil,
+        )
+    }
+
     return nil
 }
 
@@ -181,6 +202,10 @@ func (instance *HmacTokenSource) guardNonce(runtimeInstance runtimecontract.Runt
     }
 
     ttl := time.Until(time.Unix(envelope.ExpiresAt, 0).Add(instance.leeway))
+    if 0 >= ttl {
+        /* the nonce guard does not record a non-positive ttl, so an envelope at the very edge of the acceptance window would be admitted without ever being remembered — and thus replayable. verifyTimeWindow treats that edge as still valid, so reject it here to keep the recorded window exactly as wide as the accepted one. */
+        return exception.NewError("internal-auth envelope is too close to expiry to guard against replay", nil, nil)
+    }
 
     seen, rememberErr := instance.nonceGuard.Remember(runtimeInstance, envelope.Nonce, ttl)
     if nil != rememberErr {

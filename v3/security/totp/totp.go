@@ -184,7 +184,8 @@ func decodeSecret(secret string) ([]byte, error) {
 }
 
 func newRecoveryCode() (string, error) {
-    raw := make([]byte, 5)
+    /* six random bytes base32-encode (unpadded) to exactly ten characters, so the [:5]+"-"+[5:] split yields the documented xxxxx-xxxxx layout (50 bits of entropy); five bytes would only produce eight characters (xxxxx-xxx). */
+    raw := make([]byte, 6)
     if _, readErr := rand.Read(raw); nil != readErr {
         return "", exception.NewError("could not generate a recovery code", nil, readErr)
     }

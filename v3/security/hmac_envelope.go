@@ -18,11 +18,12 @@ const (
     DefaultHmacHeaderName = "X-Melody-Internal-Auth"
 )
 
-/* hmacEnvelope is the signed payload of the internal-auth header. Every field that matters for authorization is inside the envelope so the single HMAC signature covers all of it — there is no separate-header canonicalization to get wrong. Method/Path bind the envelope to one endpoint (a captured envelope cannot be replayed against another route), IssuedAt/ExpiresAt/Nonce bound its lifetime and single use, BodyHash makes the request body tamper-evident, and Actor optionally carries the originating actor (F1) so the callee authorizes/audits as the upstream principal. */
+/* hmacEnvelope is the signed payload of the internal-auth header. Every field that matters for authorization is inside the envelope so the single HMAC signature covers all of it — there is no separate-header canonicalization to get wrong. Method/Path/Query bind the envelope to one endpoint (a captured envelope cannot be replayed against another route, nor have its query parameters tampered with), IssuedAt/ExpiresAt/Nonce bound its lifetime and single use, BodyHash makes the request body tamper-evident, and Actor optionally carries the originating actor (F1) so the callee authorizes/audits as the upstream principal. */
 type hmacEnvelope struct {
     App       string                      `json:"app"`
     Method    string                      `json:"method"`
     Path      string                      `json:"path"`
+    Query     string                      `json:"query,omitempty"`
     IssuedAt  int64                       `json:"iat"`
     ExpiresAt int64                       `json:"exp"`
     Nonce     string                      `json:"nonce"`
@@ -61,25 +62,25 @@ func encodeHmacHeaderValue(keyId string, envelope hmacEnvelope, secret []byte) (
     return part0 + "." + part1 + "." + part2, nil
 }
 
-/* decodeHmacHeaderValue verifies the signature against the secret resolved for the envelope's key id and returns the decoded envelope. It fails closed on any structural, key-lookup or signature problem. */
-func decodeHmacHeaderValue(headerValue string, secrets HmacSecretProvider) (hmacEnvelope, error) {
+/* decodeHmacHeaderValue verifies the signature against the secret resolved for the envelope's key id and returns the decoded envelope together with the verified key id, so the caller can check the key id is authorized for the envelope's claimed app. It fails closed on any structural, key-lookup or signature problem. */
+func decodeHmacHeaderValue(headerValue string, secrets HmacSecretProvider) (hmacEnvelope, string, error) {
     parts := strings.Split(headerValue, ".")
     if 3 != len(parts) {
-        return hmacEnvelope{}, exception.NewError("internal-auth header has an invalid structure", nil, nil)
+        return hmacEnvelope{}, "", exception.NewError("internal-auth header has an invalid structure", nil, nil)
     }
 
     headerBytes, headerErr := base64.RawURLEncoding.DecodeString(parts[0])
     if nil != headerErr {
-        return hmacEnvelope{}, exception.NewError("internal-auth header is not valid base64url", nil, headerErr)
+        return hmacEnvelope{}, "", exception.NewError("internal-auth header is not valid base64url", nil, headerErr)
     }
 
     var header hmacEnvelopeHeader
     if unmarshalErr := json.Unmarshal(headerBytes, &header); nil != unmarshalErr {
-        return hmacEnvelope{}, exception.NewError("internal-auth header is not valid json", nil, unmarshalErr)
+        return hmacEnvelope{}, "", exception.NewError("internal-auth header is not valid json", nil, unmarshalErr)
     }
 
     if hmacEnvelopeAlgorithm != header.Algorithm {
-        return hmacEnvelope{}, exception.NewError(
+        return hmacEnvelope{}, "", exception.NewError(
             "internal-auth algorithm is not supported",
             map[string]any{"algorithm": header.Algorithm},
             nil,
@@ -88,7 +89,7 @@ func decodeHmacHeaderValue(headerValue string, secrets HmacSecretProvider) (hmac
 
     secret, secretExists := secrets.Secret(header.KeyId)
     if false == secretExists {
-        return hmacEnvelope{}, exception.NewError(
+        return hmacEnvelope{}, "", exception.NewError(
             "internal-auth key id is not known",
             map[string]any{"keyId": header.KeyId},
             nil,
@@ -97,23 +98,23 @@ func decodeHmacHeaderValue(headerValue string, secrets HmacSecretProvider) (hmac
 
     signature, signatureErr := base64.RawURLEncoding.DecodeString(parts[2])
     if nil != signatureErr {
-        return hmacEnvelope{}, exception.NewError("internal-auth signature is not valid base64url", nil, signatureErr)
+        return hmacEnvelope{}, "", exception.NewError("internal-auth signature is not valid base64url", nil, signatureErr)
     }
 
     expectedSignature := signHmacSha256(parts[0]+"."+parts[1], secret)
     if false == hmac.Equal(signature, expectedSignature) {
-        return hmacEnvelope{}, exception.NewError("internal-auth signature mismatch", nil, nil)
+        return hmacEnvelope{}, "", exception.NewError("internal-auth signature mismatch", nil, nil)
     }
 
     payloadBytes, payloadErr := base64.RawURLEncoding.DecodeString(parts[1])
     if nil != payloadErr {
-        return hmacEnvelope{}, exception.NewError("internal-auth envelope is not valid base64url", nil, payloadErr)
+        return hmacEnvelope{}, "", exception.NewError("internal-auth envelope is not valid base64url", nil, payloadErr)
     }
 
     var envelope hmacEnvelope
     if unmarshalErr := json.Unmarshal(payloadBytes, &envelope); nil != unmarshalErr {
-        return hmacEnvelope{}, exception.NewError("internal-auth envelope is not valid json", nil, unmarshalErr)
+        return hmacEnvelope{}, "", exception.NewError("internal-auth envelope is not valid json", nil, unmarshalErr)
     }
 
-    return envelope, nil
+    return envelope, header.KeyId, nil
 }

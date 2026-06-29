@@ -3,6 +3,7 @@ package security
 import (
     "crypto/rand"
     "encoding/base64"
+    "strings"
     "time"
 
     "github.com/precision-soft/melody/v3/exception"
@@ -35,6 +36,18 @@ func NewHmacEnvelopeSigner(config HmacEnvelopeSignerConfig) *HmacEnvelopeSigner 
         exception.Panic(exception.NewError("hmac signer secrets provider is nil", nil, nil))
     }
 
+    /* the verifier refuses an envelope whose key id is not bound to its claimed app, so fail fast here rather than emit envelopes the callee will silently reject: the signer's current key must be issued to the app it signs for. */
+    currentKeyId := config.Secrets.CurrentKeyId()
+    if boundApp, keyBound := config.Secrets.AppForKeyId(currentKeyId); false == keyBound || boundApp != config.App {
+        exception.Panic(
+            exception.NewError(
+                "hmac signer current key id is not bound to the signer app",
+                map[string]any{"keyId": currentKeyId, "signerApp": config.App, "boundApp": boundApp},
+                nil,
+            ),
+        )
+    }
+
     headerName := config.HeaderName
     if "" == headerName {
         headerName = DefaultHmacHeaderName
@@ -64,7 +77,7 @@ func (instance *HmacEnvelopeSigner) HeaderName() string {
     return instance.headerName
 }
 
-/* Sign builds the internal-auth header value binding the call to method+path and the given body, optionally propagating an originating actor. The returned string is written to HeaderName() on the outgoing request. */
+/* Sign builds the internal-auth header value binding the call to method, path, query string and the given body, optionally propagating an originating actor. The path argument may carry a query string (everything after the first '?'); it is signed separately and matched against the request's raw query at the callee. The returned string is written to HeaderName() on the outgoing request. */
 func (instance *HmacEnvelopeSigner) Sign(
     method string,
     path string,
@@ -88,10 +101,13 @@ func (instance *HmacEnvelopeSigner) Sign(
 
     now := time.Now()
 
+    signedPath, signedQuery, _ := strings.Cut(path, "?")
+
     envelope := hmacEnvelope{
         App:       instance.app,
         Method:    method,
-        Path:      path,
+        Path:      signedPath,
+        Query:     signedQuery,
         IssuedAt:  now.Unix(),
         ExpiresAt: now.Add(instance.ttl).Unix(),
         Nonce:     nonce,

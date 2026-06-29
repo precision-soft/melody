@@ -4,8 +4,12 @@
  * hardcoding paths. Framework-owned reference helper; see v3/.example/assets for a
  * usage example.
  *
- * Patterns use melody's `:param` placeholder syntax (e.g. `/users/:id`). Parameters
- * not consumed by a placeholder are appended as query-string parameters.
+ * Patterns use melody's placeholder syntax, matched per path segment exactly as the
+ * server-side router and Go URL generator do: required `:param`, optional `:param?`
+ * (dropped when no value is given), single wildcard `*name`, and catch-all `*name...`
+ * (or a trailing `*name`, which may span multiple slash-separated segments). A colon or
+ * star only introduces a placeholder when it begins a segment. Parameters not consumed
+ * by a placeholder are appended as query-string parameters.
  */
 
 export interface RouteManifestEntry {
@@ -34,9 +38,10 @@ export class RouteGenerator {
         return this.byName.has(name);
     }
 
-    /* path builds the path (and query string) for a named route, substituting `:param`
-     * placeholders from params (falling back to the route's defaults) and appending any
-     * leftover params and the explicit query as query-string parameters. */
+    /* path builds the path (and query string) for a named route, substituting `:param`,
+     * `:param?`, `*name` and `*name...` placeholders per segment from params (falling back
+     * to the route's defaults) and appending any leftover params and the explicit query as
+     * query-string parameters. */
     path(name: string, params: RouteParams = {}, query: RouteParams = {}): string {
         const entry = this.byName.get(name);
         if (undefined === entry) {
@@ -45,16 +50,86 @@ export class RouteGenerator {
 
         const consumed = new Set<string>();
 
-        const path = entry.pattern.replace(/:([A-Za-z0-9_]+)/g, (_match, key: string) => {
+        const lookup = (key: string): string | undefined => {
             const value = params[key] ?? entry.defaults?.[key];
-            if (undefined === value) {
-                throw new Error(`missing route parameter "${key}" for route "${name}"`);
+            return undefined === value ? undefined : String(value);
+        };
+
+        const segments = entry.pattern.split("/");
+        const resultSegments: string[] = [];
+
+        for (let index = 1; index < segments.length; index++) {
+            const segment = segments[index];
+
+            if (true === segment.startsWith(":")) {
+                let key = segment.slice(1);
+                let optional = false;
+                if (true === key.endsWith("?")) {
+                    optional = true;
+                    key = key.slice(0, -1);
+                }
+
+                const value = lookup(key);
+                if (undefined === value) {
+                    if (true === optional) {
+                        continue;
+                    }
+                    throw new Error(`missing route parameter "${key}" for route "${name}"`);
+                }
+
+                consumed.add(key);
+                resultSegments.push(encodeURIComponent(value));
+
+                continue;
             }
 
-            consumed.add(key);
+            if (true === segment.startsWith("*")) {
+                let key = segment.slice(1);
+                let catchAll = index === segments.length - 1;
+                if (true === key.endsWith("...")) {
+                    catchAll = true;
+                    key = key.slice(0, -3);
+                }
 
-            return encodeURIComponent(String(value));
-        });
+                const value = "" === key ? undefined : lookup(key);
+                if ("" !== key) {
+                    consumed.add(key);
+                }
+
+                if (false === catchAll) {
+                    if ("" === key) {
+                        throw new Error(`wildcard segment must be named for route "${name}"`);
+                    }
+                    if (undefined === value) {
+                        throw new Error(`missing wildcard parameter "${key}" for route "${name}"`);
+                    }
+                    if (true === value.includes("/")) {
+                        throw new Error(`wildcard parameter "${key}" cannot contain a slash for route "${name}"`);
+                    }
+
+                    resultSegments.push(encodeURIComponent(value));
+
+                    continue;
+                }
+
+                if (undefined === value) {
+                    continue;
+                }
+
+                for (const part of value.split("/")) {
+                    if ("" === part) {
+                        continue;
+                    }
+                    resultSegments.push(encodeURIComponent(part));
+                }
+
+                continue;
+            }
+
+            resultSegments.push(segment);
+        }
+
+        const path = 0 === resultSegments.length ? "/" : `/${resultSegments.join("/")}`;
 
         const search = new URLSearchParams();
         for (const [key, value] of Object.entries(params)) {

@@ -355,7 +355,7 @@ func (instance *Transport) buildPublishing(
         return amqp091.Publishing{}, serializeErr
     }
 
-    return amqp091.Publishing{
+    publishing := amqp091.Publishing{
         ContentType:  instance.serializer.ContentType(),
         DeliveryMode: amqp091.Persistent,
         Expiration:   expiration,
@@ -365,7 +365,14 @@ func (instance *Transport) buildPublishing(
             headerDeadLetterAttemptCount: int64(melodymessagebus.DeadLetterAttemptCount(envelopeInstance)),
         },
         Body: body,
-    }, nil
+    }
+
+    /* carry a producer-assigned message id (for example the outbox row id) as the AMQP message id so a consumer can deduplicate redeliveries from an at-least-once producer. */
+    if messageId, hasMessageId := melodymessagebus.MessageId(envelopeInstance); true == hasMessageId {
+        publishing.MessageId = messageId
+    }
+
+    return publishing, nil
 }
 
 func (instance *Transport) publish(
@@ -742,6 +749,11 @@ func (instance *Transport) decode(delivery amqp091.Delivery, generation uint64) 
 
     if count := deadLetterAttemptCountFromHeader(delivery.Headers); 0 < count {
         stamps = append(stamps, melodymessagebus.DeadLetterAttemptStamp{Count: count})
+    }
+
+    /* round-trip a producer-assigned message id so a consumer can read it for deduplication and, just as importantly, so an application-driven requeue (Nack with requeue, including the delayed-retry path) re-publishes through buildPublishing under the SAME message id instead of an empty one. */
+    if "" != delivery.MessageId {
+        stamps = append(stamps, melodymessagebus.MessageIdStamp{MessageId: delivery.MessageId})
     }
 
     return melodymessagebus.NewEnvelope(message, stamps...), nil

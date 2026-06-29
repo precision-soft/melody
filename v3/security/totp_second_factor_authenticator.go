@@ -24,7 +24,7 @@ type TotpSecondFactorAuthenticatorConfig struct {
 
     Totp totp.Config
 
-    /* ReplayGuard, when supplied, enforces single use of an accepted code within its validity window (the same NonceGuard contract the HMAC source uses). Optional. */
+    /* ReplayGuard enforces single use of an accepted code within its validity window (the same NonceGuard contract the HMAC source uses). Optional: defaults to an in-process guard, so supply a shared one for multi-instance deployments. */
     ReplayGuard securitycontract.NonceGuard
 }
 
@@ -42,12 +42,18 @@ func NewTotpSecondFactorAuthenticator(config TotpSecondFactorAuthenticatorConfig
         codeHeaderName = DefaultTotpCodeHeaderName
     }
 
+    /* default to an in-process replay guard (as the HMAC source does) so an accepted code cannot be replayed within its validity window out of the box; multi-instance deployments supply a shared guard. */
+    var replayGuard securitycontract.NonceGuard = config.ReplayGuard
+    if true == internal.IsNilInterface(replayGuard) {
+        replayGuard = NewMemoryNonceGuard()
+    }
+
     return &TotpSecondFactorAuthenticator{
         primary:        config.Primary,
         enrollments:    config.Enrollments,
         codeHeaderName: codeHeaderName,
         totpConfig:     config.Totp,
-        replayGuard:    config.ReplayGuard,
+        replayGuard:    replayGuard,
     }
 }
 
