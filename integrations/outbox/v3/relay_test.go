@@ -268,6 +268,33 @@ func TestRelay_DeliversRowAtDeliveryCapBoundary(t *testing.T) {
     }
 }
 
+/* negative control: a misconfigured MaxDeliveryAttempts at or below MaxAttempts must be raised to safe head-room. Otherwise a row that only failed to send a couple of times (so its claim count sits just above the tiny cap) would be dead-lettered as poison, silently destroying a still-retriable message and defeating the MaxAttempts retry path. */
+func TestRelay_RaisesMisconfiguredMaxDeliveryAttempts(t *testing.T) {
+    repository := &fakeRepository{due: []Pending{{Id: 8, TypeName: "string", Payload: []byte("ok"), Attempts: 1, DeliveryAttempts: 2}}}
+    transport := &fakeTransport{}
+
+    relay := NewRelay(RelayConfig{
+        Repository:          repository,
+        Transport:           transport,
+        Codec:               &stringCodec{},
+        MaxAttempts:         5,
+        MaxDeliveryAttempts: 1,
+    })
+
+    published, runErr := relay.RunOnce(relayTestRuntime())
+    if nil != runErr {
+        t.Fatalf("run once: %v", runErr)
+    }
+
+    if 1 != published || 1 != len(transport.sent) {
+        t.Fatalf("expected the retriable row to be delivered, not poisoned; published %d", published)
+    }
+
+    if 1 != len(repository.calls) || "sent" != repository.calls[0].kind {
+        t.Fatalf("expected the row to be marked sent, got %+v", repository.calls)
+    }
+}
+
 func TestRelay_SkipsWorkWhenLeaseNotAcquired(t *testing.T) {
     repository := &fakeRepository{due: []Pending{{Id: 1, TypeName: "string", Payload: []byte("x")}}}
     transport := &fakeTransport{}

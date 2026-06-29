@@ -85,7 +85,8 @@ func NewRelay(config RelayConfig) *Relay {
     if 0 >= resolved.MaxAttempts {
         resolved.MaxAttempts = defaultMaxAttempts
     }
-    if 0 >= resolved.MaxDeliveryAttempts {
+    /* MaxDeliveryAttempts must exceed MaxAttempts: every send-failure retry re-claims the row and so counts toward it, so a value at or below MaxAttempts (including an unset zero) would dead-letter a normally-retrying row as poison after its first re-claim. Raise such a value to the default head-room rather than silently breaking the retry path. */
+    if resolved.MaxDeliveryAttempts <= resolved.MaxAttempts {
         resolved.MaxDeliveryAttempts = defaultMaxDeliveryAttemptsFactor * resolved.MaxAttempts
     }
     if 0 >= resolved.InitialBackoff {

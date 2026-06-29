@@ -16,13 +16,22 @@ import (
 
 const hmacTokenSourceName = "hmacInternal"
 
-/* HmacTokenSourceConfig configures the verifying side of the internal-auth scheme. Secrets resolves the shared key (supporting rotation through multiple resolvable key ids); Apps maps a verified caller to the roles its service principal receives; NonceGuard rejects replayed envelopes (defaults to an in-process guard — supply a shared one for multi-instance deployments); Leeway tolerates clock skew on the issued/expiry checks. */
+/* HmacVerifyBodyBeforeNonceAttribute is the request attribute (settable per route or, on demand, through SetHmacVerifyBodyBeforeNonce) that overrides the source's VerifyBodyBeforeNonce default for a single request. Its value must be a bool. */
+const HmacVerifyBodyBeforeNonceAttribute = "security.hmac.verifyBodyBeforeNonce"
+
+/* HmacTokenSourceConfig configures the verifying side of the internal-auth scheme. Secrets resolves the shared key (supporting rotation through multiple resolvable key ids); Apps maps a verified caller to the roles its service principal receives; NonceGuard rejects replayed envelopes (defaults to an in-process guard — supply a shared one for multi-instance deployments); Leeway tolerates clock skew on the issued/expiry checks; MaxFutureExpiry bounds how far ahead an envelope's expiry may sit. */
 type HmacTokenSourceConfig struct {
     Secrets    HmacSecretProvider
     Apps       HmacAppRegistry
     NonceGuard securitycontract.NonceGuard
     HeaderName string
     Leeway     time.Duration
+
+    /* MaxFutureExpiry caps how far in the future an envelope's ExpiresAt may sit (measured from the verifier's clock). The nonce guard remembers each nonce until its envelope expires, so without a cap a holder of a valid secret could issue far-future-expiry envelopes and pin unbounded memory in an in-process guard. Zero leaves the horizon unbounded (the previous behaviour) for callers that deliberately mint long-lived envelopes; set it (for example a few minutes above the signer's Ttl) on multi-instance deployments. */
+    MaxFutureExpiry time.Duration
+
+    /* VerifyBodyBeforeNonce selects the default order of the body and nonce checks. When false (the default) the nonce is consumed before the body is read, so a captured valid envelope can force at most one body buffering — but an on-path party who replays the header with a mutated body burns the nonce and fails the legitimate request as a replay. When true the body hash is verified first, so a body mismatch is rejected without consuming the nonce, at the cost of letting a captured envelope force body buffering until it expires. A per-request override (route attribute HmacVerifyBodyBeforeNonceAttribute, or SetHmacVerifyBodyBeforeNonce) takes precedence for routes/calls that need the opposite trade-off. */
+    VerifyBodyBeforeNonce bool
 }
 
 func NewHmacTokenSource(config HmacTokenSourceConfig) *HmacTokenSource {
@@ -45,20 +54,29 @@ func NewHmacTokenSource(config HmacTokenSourceConfig) *HmacTokenSource {
     }
 
     return &HmacTokenSource{
-        secrets:    config.Secrets,
-        apps:       config.Apps,
-        nonceGuard: nonceGuard,
-        headerName: headerName,
-        leeway:     config.Leeway,
+        secrets:               config.Secrets,
+        apps:                  config.Apps,
+        nonceGuard:            nonceGuard,
+        headerName:            headerName,
+        leeway:                config.Leeway,
+        maxFutureExpiry:       config.MaxFutureExpiry,
+        verifyBodyBeforeNonce: config.VerifyBodyBeforeNonce,
     }
 }
 
+/* SetHmacVerifyBodyBeforeNonce overrides, for the given request only, whether the HMAC source verifies the body before consuming the nonce. An application calls it on demand (for example in a route-scoped middleware that runs before the firewall) to flip the configured default for chosen routes or calls; setting the HmacVerifyBodyBeforeNonceAttribute route attribute has the same effect. */
+func SetHmacVerifyBodyBeforeNonce(request httpcontract.Request, value bool) {
+    request.Attributes().Set(HmacVerifyBodyBeforeNonceAttribute, value)
+}
+
 type HmacTokenSource struct {
-    secrets    HmacSecretProvider
-    apps       HmacAppRegistry
-    nonceGuard securitycontract.NonceGuard
-    headerName string
-    leeway     time.Duration
+    secrets               HmacSecretProvider
+    apps                  HmacAppRegistry
+    nonceGuard            securitycontract.NonceGuard
+    headerName            string
+    leeway                time.Duration
+    maxFutureExpiry       time.Duration
+    verifyBodyBeforeNonce bool
 }
 
 func (instance *HmacTokenSource) Name() string {
@@ -108,13 +126,8 @@ func (instance *HmacTokenSource) Resolve(
         return instance.reject(runtimeInstance, timeErr)
     }
 
-    /* the nonce is consumed before the body is read so a captured-but-valid envelope can force at most one body buffering: a replay is rejected here, before readAndRestoreBody runs. The signature has already been verified above, so only a legitimate envelope ever reaches this point. */
-    if replayErr := instance.guardNonce(runtimeInstance, envelope); nil != replayErr {
-        return instance.reject(runtimeInstance, replayErr)
-    }
-
-    if bodyErr := instance.verifyBody(envelope, request); nil != bodyErr {
-        return instance.reject(runtimeInstance, bodyErr)
+    if checkErr := instance.guardNonceAndBody(runtimeInstance, request, envelope); nil != checkErr {
+        return instance.reject(runtimeInstance, checkErr)
     }
 
     var actor securitycontract.Actor
@@ -163,7 +176,14 @@ func (instance *HmacTokenSource) verifyTimeWindow(envelope hmacEnvelope, now tim
         return exception.NewError("internal-auth envelope is missing an expiry", nil, nil)
     }
 
-    deadline := time.Unix(envelope.ExpiresAt, 0).Add(instance.leeway)
+    expiry := time.Unix(envelope.ExpiresAt, 0)
+
+    /* bound how far in the future the expiry may sit. guardNonce remembers the nonce until exp+leeway, so an unbounded expiry lets a holder of a valid secret pin unbounded memory in an in-process nonce guard. A zero maxFutureExpiry keeps the horizon unbounded for callers that deliberately mint long-lived envelopes. */
+    if 0 < instance.maxFutureExpiry && true == expiry.After(now.Add(instance.maxFutureExpiry)) {
+        return exception.NewError("internal-auth envelope expiry is too far in the future", nil, nil)
+    }
+
+    deadline := expiry.Add(instance.leeway)
     if true == now.After(deadline) {
         return exception.NewError("internal-auth envelope is expired", nil, nil)
     }
@@ -217,6 +237,38 @@ func (instance *HmacTokenSource) guardNonce(runtimeInstance runtimecontract.Runt
     }
 
     return nil
+}
+
+/* guardNonceAndBody runs the replay and body-hash checks in the order selected for this request. Nonce-first (the default) lets a captured-but-valid envelope force at most one body buffering, since a replay is rejected before readAndRestoreBody runs; body-first rejects a mismatched body without consuming the nonce, so an on-path party cannot burn a legitimate request's nonce by replaying its header with a mutated body. The signature has already been verified, so only a legitimate envelope ever reaches either check. */
+func (instance *HmacTokenSource) guardNonceAndBody(
+    runtimeInstance runtimecontract.Runtime,
+    request httpcontract.Request,
+    envelope hmacEnvelope,
+) error {
+    if true == instance.effectiveVerifyBodyBeforeNonce(request) {
+        if bodyErr := instance.verifyBody(envelope, request); nil != bodyErr {
+            return bodyErr
+        }
+
+        return instance.guardNonce(runtimeInstance, envelope)
+    }
+
+    if replayErr := instance.guardNonce(runtimeInstance, envelope); nil != replayErr {
+        return replayErr
+    }
+
+    return instance.verifyBody(envelope, request)
+}
+
+/* effectiveVerifyBodyBeforeNonce resolves the per-request override (a bool under HmacVerifyBodyBeforeNonceAttribute, set by a route attribute or SetHmacVerifyBodyBeforeNonce) and falls back to the source's configured default. */
+func (instance *HmacTokenSource) effectiveVerifyBodyBeforeNonce(request httpcontract.Request) bool {
+    if override, exists := request.Attributes().Get(HmacVerifyBodyBeforeNonceAttribute); true == exists {
+        if value, isBool := override.(bool); true == isBool {
+            return value
+        }
+    }
+
+    return instance.verifyBodyBeforeNonce
 }
 
 func (instance *HmacTokenSource) reject(

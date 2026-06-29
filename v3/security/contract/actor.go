@@ -23,10 +23,16 @@ type ActorAware interface {
     OnBehalfOf() (Actor, bool)
 }
 
-/* ActorData is the serializable carrier for an originating actor inside Claims. The Actor interface itself does not round-trip through JSON, so transports (JWT claims, the HMAC envelope) encode this struct and it is rebuilt into a concrete Actor when a token is constructed. */
+/* ActorImpersonating is implemented by an Actor an impersonator is acting behind. Consumers type-assert it (rather than widening Actor) to read the accountable impersonator a propagated originating actor carries, so an impersonation started in one service stays auditable in the next. */
+type ActorImpersonating interface {
+    Impersonator() (Actor, bool)
+}
+
+/* ActorData is the serializable carrier for an originating actor inside Claims. The Actor interface itself does not round-trip through JSON, so transports (JWT claims, the HMAC envelope) encode this struct and it is rebuilt into a concrete Actor when a token is constructed. Impersonator, when set, is the admin acting behind this actor, so an impersonation's accountable principal and its roles propagate across services. */
 type ActorData struct {
-    Identifier string            `json:"Identifier"`
-    Type       string            `json:"Type"`
-    Roles      []string          `json:"Roles,omitempty"`
-    Attributes map[string]string `json:"Attributes,omitempty"`
+    Identifier   string            `json:"Identifier"`
+    Type         string            `json:"Type"`
+    Roles        []string          `json:"Roles,omitempty"`
+    Attributes   map[string]string `json:"Attributes,omitempty"`
+    Impersonator *ActorData        `json:"Impersonator,omitempty"`
 }

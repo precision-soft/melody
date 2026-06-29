@@ -364,6 +364,100 @@ func TestHmacTokenSource_RestoresBodyForDownstreamHandler(t *testing.T) {
     }
 }
 
+/* an envelope whose expiry sits beyond the configured MaxFutureExpiry is rejected, so a holder of a valid secret can not mint a far-future-expiry envelope that pins unbounded memory in an in-process nonce guard (which remembers each nonce until its envelope expires). */
+func TestHmacTokenSource_RejectsExpiryBeyondMaxFutureExpiry(t *testing.T) {
+    signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "wms-service", Secrets: hmacTestSecrets(), Ttl: time.Hour})
+    headerValue, _ := signer.Sign("GET", "/internal/ping", nil, nil)
+
+    source := NewHmacTokenSource(HmacTokenSourceConfig{
+        Secrets:         hmacTestSecrets(),
+        Apps:            hmacTestApps(),
+        NonceGuard:      NewMemoryNonceGuard(),
+        MaxFutureExpiry: time.Minute,
+    })
+    token, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/ping", nil, signer.HeaderName(), headerValue))
+
+    if true == token.IsAuthenticated() {
+        t.Fatal("expected an envelope expiring beyond the max future horizon to be rejected")
+    }
+}
+
+/* positive control: with the horizon left unbounded (zero, the default) the same long-lived envelope authenticates, so MaxFutureExpiry is strictly opt-in and does not change the default behaviour. */
+func TestHmacTokenSource_AcceptsLongLivedEnvelopeWhenHorizonUnbounded(t *testing.T) {
+    signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "wms-service", Secrets: hmacTestSecrets(), Ttl: time.Hour})
+    headerValue, _ := signer.Sign("GET", "/internal/ping", nil, nil)
+
+    source := hmacTestSource(NewMemoryNonceGuard())
+    token, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/ping", nil, signer.HeaderName(), headerValue))
+
+    if false == token.IsAuthenticated() {
+        t.Fatal("expected a long-lived envelope to authenticate when the horizon is unbounded")
+    }
+}
+
+/* with body-before-nonce verification an on-path party who replays the cleartext envelope header with a mutated body is rejected WITHOUT consuming the nonce, so the genuine request that follows still authenticates instead of failing as a replay. */
+func TestHmacTokenSource_BodyBeforeNonceSurvivesNonceBurn(t *testing.T) {
+    signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "wms-service", Secrets: hmacTestSecrets()})
+    body := []byte(`{"sku":"X-1"}`)
+    headerValue, _ := signer.Sign("POST", "/internal/orders", body, nil)
+
+    source := NewHmacTokenSource(HmacTokenSourceConfig{
+        Secrets:               hmacTestSecrets(),
+        Apps:                  hmacTestApps(),
+        NonceGuard:            NewMemoryNonceGuard(),
+        VerifyBodyBeforeNonce: true,
+    })
+
+    burn, _ := source.Resolve(testRuntime(), hmacRequest("POST", "/internal/orders", []byte(`{"sku":"X-999"}`), signer.HeaderName(), headerValue))
+    if true == burn.IsAuthenticated() {
+        t.Fatal("expected the mutated-body replay to be rejected")
+    }
+
+    genuine, _ := source.Resolve(testRuntime(), hmacRequest("POST", "/internal/orders", body, signer.HeaderName(), headerValue))
+    if false == genuine.IsAuthenticated() {
+        t.Fatal("expected the genuine request to authenticate after a mutated-body replay attempt")
+    }
+}
+
+/* contrast/negative control: under the default nonce-first order the mutated-body replay burns the nonce, so the genuine request that follows is denied as a replay — the denial the body-before-nonce toggle exists to close. */
+func TestHmacTokenSource_NonceFirstBurnDeniesGenuineRequest(t *testing.T) {
+    signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "wms-service", Secrets: hmacTestSecrets()})
+    body := []byte(`{"sku":"X-1"}`)
+    headerValue, _ := signer.Sign("POST", "/internal/orders", body, nil)
+
+    source := hmacTestSource(NewMemoryNonceGuard())
+
+    source.Resolve(testRuntime(), hmacRequest("POST", "/internal/orders", []byte(`{"sku":"X-999"}`), signer.HeaderName(), headerValue))
+
+    genuine, _ := source.Resolve(testRuntime(), hmacRequest("POST", "/internal/orders", body, signer.HeaderName(), headerValue))
+    if true == genuine.IsAuthenticated() {
+        t.Fatal("expected the genuine request to be denied after the nonce was burned by a mutated-body replay")
+    }
+}
+
+/* the per-request override flips the order for a single request: the source defaults to nonce-first, but a route or middleware that calls SetHmacVerifyBodyBeforeNonce(request, true) gets body-first behaviour, so the genuine request survives a mutated-body nonce burn. */
+func TestHmacTokenSource_PerRequestBodyBeforeNonceOverride(t *testing.T) {
+    signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "wms-service", Secrets: hmacTestSecrets()})
+    body := []byte(`{"sku":"X-1"}`)
+    headerValue, _ := signer.Sign("POST", "/internal/orders", body, nil)
+
+    source := hmacTestSource(NewMemoryNonceGuard())
+
+    burnRequest := hmacRequest("POST", "/internal/orders", []byte(`{"sku":"X-999"}`), signer.HeaderName(), headerValue)
+    SetHmacVerifyBodyBeforeNonce(burnRequest, true)
+    burn, _ := source.Resolve(testRuntime(), burnRequest)
+    if true == burn.IsAuthenticated() {
+        t.Fatal("expected the mutated-body replay to be rejected under the per-request override")
+    }
+
+    genuineRequest := hmacRequest("POST", "/internal/orders", body, signer.HeaderName(), headerValue)
+    SetHmacVerifyBodyBeforeNonce(genuineRequest, true)
+    genuine, _ := source.Resolve(testRuntime(), genuineRequest)
+    if false == genuine.IsAuthenticated() {
+        t.Fatal("expected the genuine request to authenticate under the per-request override")
+    }
+}
+
 /* tamperHmacPayload flips a character in the signed payload (the middle base64 segment) so the HMAC over `header.payload` no longer matches the signature — a reliable corruption, unlike flipping the signature's trailing base64 character whose low bits are not significant and can decode to the same bytes. */
 func tamperHmacPayload(headerValue string) string {
     parts := strings.SplitN(headerValue, ".", 3)

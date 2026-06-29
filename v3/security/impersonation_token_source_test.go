@@ -119,6 +119,99 @@ func TestImpersonation_UnknownTargetStaysAdmin(t *testing.T) {
     }
 }
 
+/* under RoleModeImpersonator the admin keeps their own roles while still acting in the target's context (visible principal stays the impersonated user), so they can view as the user without losing their own rights. */
+func TestImpersonation_RoleModeImpersonatorKeepsAdminRoles(t *testing.T) {
+    admin := NewAuthenticatedToken("admin-1", []string{"ROLE_ADMIN", securitycontract.RoleAllowedToSwitch})
+
+    source := NewImpersonationTokenSource(ImpersonationTokenSourceConfig{
+        Inner: &fixedTokenSource{token: admin},
+        Users: &mapUserResolver{usersById: map[string]securitycontract.Token{
+            "user-7": NewAuthenticatedToken("user-7", []string{"ROLE_BUYER"}),
+        }},
+        RoleMode: RoleModeImpersonator,
+    })
+
+    token, resolveErr := source.Resolve(testRuntime(), switchRequest("user-7"))
+    if nil != resolveErr {
+        t.Fatalf("resolve: %v", resolveErr)
+    }
+
+    if "user-7" != token.UserIdentifier() {
+        t.Fatalf("expected to act in the target's context, got %q", token.UserIdentifier())
+    }
+
+    roles := token.Roles()
+    if false == hasRole(roles, "ROLE_ADMIN") || true == hasRole(roles, "ROLE_BUYER") {
+        t.Fatalf("expected the admin's own roles (not the target's) under RoleModeImpersonator, got %v", roles)
+    }
+}
+
+/* the impersonation token's originating actor names the impersonated user but carries the accountable admin (and the admin's roles) as its impersonator, so an impersonation stays auditable as it flows on. */
+func TestImpersonation_OnBehalfOfPropagatesImpersonator(t *testing.T) {
+    admin := NewAuthenticatedToken("admin-1", []string{"ROLE_ADMIN", securitycontract.RoleAllowedToSwitch})
+
+    token, _ := impersonationSource(admin).Resolve(testRuntime(), switchRequest("user-7"))
+
+    actor, present := ActorFromToken(token)
+    if false == present || "user-7" != actor.Identifier() {
+        t.Fatalf("expected the originating actor to be the impersonated user, present=%v", present)
+    }
+
+    impersonating, isImpersonating := actor.(securitycontract.ActorImpersonating)
+    if false == isImpersonating {
+        t.Fatal("expected the originating actor to expose its impersonator")
+    }
+
+    impersonator, hasImpersonator := impersonating.Impersonator()
+    if false == hasImpersonator || "admin-1" != impersonator.Identifier() {
+        t.Fatalf("expected the admin to propagate as the impersonator, present=%v", hasImpersonator)
+    }
+
+    if false == hasRole(impersonator.Roles(), "ROLE_ADMIN") {
+        t.Fatalf("expected the impersonator's roles to propagate, got %v", impersonator.Roles())
+    }
+}
+
+/* end-to-end: the impersonation's originating actor — impersonated user plus accountable admin — survives serialization into the HMAC envelope and rebuild at the callee, so the admin behind a switch stays auditable across a service boundary. */
+func TestImpersonation_PropagatesImpersonatorBetweenServicesOverHmac(t *testing.T) {
+    admin := NewAuthenticatedToken("admin-1", []string{"ROLE_ADMIN", securitycontract.RoleAllowedToSwitch})
+    upstream, _ := impersonationSource(admin).Resolve(testRuntime(), switchRequest("user-7"))
+
+    actor, present := ActorFromToken(upstream)
+    if false == present {
+        t.Fatal("expected the impersonation token to carry an originating actor")
+    }
+
+    signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "wms-service", Secrets: hmacTestSecrets()})
+    headerValue, signErr := signer.Sign("POST", "/internal/orders", nil, actor)
+    if nil != signErr {
+        t.Fatalf("sign: %v", signErr)
+    }
+
+    downstream, _ := hmacTestSource(NewMemoryNonceGuard()).Resolve(
+        testRuntime(),
+        hmacRequest("POST", "/internal/orders", nil, signer.HeaderName(), headerValue),
+    )
+    if false == downstream.IsAuthenticated() {
+        t.Fatal("expected the downstream service to authenticate")
+    }
+
+    propagated, hasActor := ActorFromToken(downstream)
+    if false == hasActor || "user-7" != propagated.Identifier() {
+        t.Fatalf("expected the impersonated user to propagate as the actor, present=%v", hasActor)
+    }
+
+    impersonating, isImpersonating := propagated.(securitycontract.ActorImpersonating)
+    if false == isImpersonating {
+        t.Fatal("expected the propagated actor to expose its impersonator across the boundary")
+    }
+
+    impersonator, hasImpersonator := impersonating.Impersonator()
+    if false == hasImpersonator || "admin-1" != impersonator.Identifier() || false == hasRole(impersonator.Roles(), "ROLE_ADMIN") {
+        t.Fatalf("expected the admin impersonator and roles to survive the HMAC round-trip, present=%v", hasImpersonator)
+    }
+}
+
 func TestImpersonation_AnonymousCanNotSwitch(t *testing.T) {
     token, _ := impersonationSource(NewAnonymousToken()).Resolve(testRuntime(), switchRequest("user-7"))
 

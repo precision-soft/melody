@@ -23,6 +23,9 @@ type ImpersonationTokenSourceConfig struct {
 
     /* SwitchRole is the role the admin must hold to be allowed to switch; defaults to contract.RoleAllowedToSwitch. */
     SwitchRole string
+
+    /* RoleMode selects whose roles the impersonation token authorizes with: RoleModeImpersonated (the default) takes on the target's roles for their full context, RoleModeImpersonator keeps the admin's own rights. The impersonator stays auditable and propagates between services in either mode. */
+    RoleMode ImpersonationRoleMode
 }
 
 func NewImpersonationTokenSource(config ImpersonationTokenSourceConfig) *ImpersonationTokenSource {
@@ -49,6 +52,7 @@ func NewImpersonationTokenSource(config ImpersonationTokenSourceConfig) *Imperso
         users:      config.Users,
         headerName: headerName,
         switchRole: switchRole,
+        roleMode:   config.RoleMode,
     }
 }
 
@@ -57,6 +61,7 @@ type ImpersonationTokenSource struct {
     users      securitycontract.ImpersonatedUserResolver
     headerName string
     switchRole string
+    roleMode   ImpersonationRoleMode
 }
 
 func (instance *ImpersonationTokenSource) Name() string {
@@ -102,7 +107,7 @@ func (instance *ImpersonationTokenSource) Resolve(
         return innerToken, nil
     }
 
-    return NewImpersonationToken(impersonatedToken, innerToken), nil
+    return NewImpersonationTokenWithRoleMode(impersonatedToken, innerToken, instance.roleMode), nil
 }
 
 func (instance *ImpersonationTokenSource) logDenied(
