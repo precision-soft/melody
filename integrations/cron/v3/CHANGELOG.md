@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.3.1] - 2026-07-02 - Standalone Module Resolution Fix
+
+### Fixed
+
+- `go.mod` — the module pinned `melody/v3 v3.0.0` while importing the `cli/contract.StringSliceFlag` symbol, which only exists from `v3.6.0`, so outside the repository workspace (`GOWORK=off`, or any consumer cloning just this module) the module did not resolve. The pin is raised to `v3.6.0` — the lowest framework version that provides every imported package — and the module-local `go.sum` is now complete for standalone builds.
+
+
 ## [v3.3.0] - 2026-06-25 - Kubernetes CronJob Template
 
 ### Added
@@ -41,7 +48,9 @@ Identical to the corresponding v1 release except: module path is `github.com/pre
 
 Identical to the corresponding v1 release except: module path is `github.com/precision-soft/melody/integrations/cron/v3`; dependency pinned to `github.com/precision-soft/melody/v3`. See the [v1 changelog](../CHANGELOG.md#v100---2026-05-16---initial-release--cron-integration) for the full change list.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.3.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.3.1...HEAD
+
+[v3.3.1]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.3.0...integrations/cron/v3.3.1
 
 [v3.3.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.2.0...integrations/cron/v3.3.0
 

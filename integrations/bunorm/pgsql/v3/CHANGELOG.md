@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `lock.go` — `NewLocker(database, ...)` returns a `lock/contract.Locker` backed by PostgreSQL session advisory locks, the Postgres counterpart of the MySQL `GET_LOCK` locker (which had no pgsql equivalent, blocking applications that use the locker — e.g. ERP WMS delivery-picking and reception-stock-in — from running on Postgres). `Acquire` runs a non-blocking `pg_try_advisory_lock` (try-lock, timeout 0) on a dedicated pinned `*sql.Conn` (a session advisory lock is held by the connection that took it); `Release` runs `pg_advisory_unlock` and `Refresh` verifies the pinned backend still holds the lock through a `pg_locks` query keyed on `pg_backend_pid()`. Arbitrary string lock names are hashed (FNV-1a 64-bit) into the two-int advisory key. Release/verify run on a fresh context so a canceled request context cannot leak the lock on the connection returned to the pool, mirroring the MySQL locker's semantics. `WithLockReleaseTimeout` tunes the release timeout (default 5s).
 
+### Fixed
+
+- `go.mod` — the framework pin is raised from `v3.0.0` to `v3.7.0`, the lowest version providing the newly imported `lock/contract` package, so the module resolves outside the repository workspace; the module-local `go.sum` is now complete for standalone builds.
+
 ## [v3.1.1] - 2026-06-16 - Honor Zero ConnectTimeout on the Connection Ping
 
 ### Added

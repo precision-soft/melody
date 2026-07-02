@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.0.3] - 2026-07-02 - Standalone Module Resolution Fix
+
+### Fixed
+
+- `go.mod` — the module pinned `melody/v3 v3.0.0` while importing the `storage`/`storage/contract` packages, which only exist from `v3.7.0`: outside the repository workspace the module did not resolve. The pin is raised to `v3.7.0` — the lowest framework version that provides every imported package — and the module-local `go.sum` is now complete for standalone builds.
+
+
 ## [v3.0.2] - 2026-06-25 - Put Over-Read Guard Reader-Type Fix
 
 ### Fixed
@@ -34,7 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `storage.go` — object keys are now normalized the same way the core `LocalStorage` backend normalizes them (backslash to forward slash, clean `.`/`..` segments, strip the leading slash) before every `Put`/`Get`/`Delete`/`Exists`/`PresignedUrl` call. Keys were passed to S3 verbatim while `LocalStorage` cleaned them, so the same key string addressed different objects depending on the backend, and `PresignedUrl("a/../f.txt")` signed a path the browser collapses before sending (yielding `SignatureDoesNotMatch`). An empty or `.`/`..`-only key is now rejected, matching the `LocalStorage` contract.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/awss3/v3.0.2...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/awss3/v3.0.3...HEAD
+
+[v3.0.3]: https://github.com/precision-soft/melody/compare/integrations/awss3/v3.0.2...integrations/awss3/v3.0.3
 
 [v3.0.2]: https://github.com/precision-soft/melody/compare/integrations/awss3/v3.0.1...integrations/awss3/v3.0.2
 

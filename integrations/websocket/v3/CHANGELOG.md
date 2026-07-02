@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.1.1] - 2026-07-02 - Standalone Module Resolution Fix
+
+### Fixed
+
+- `go.mod` — the module pinned `melody/v3 v3.0.0` while importing the `http.ServerSentEventHub` API, which only exists from `v3.7.0`, so outside the repository workspace (`GOWORK=off`, or any consumer cloning just this module) the module did not resolve. The pin is raised to `v3.7.0` — the lowest framework version that provides every imported package — and the module-local `go.sum` is now complete for standalone builds.
+
+
 ## [v3.1.0] - 2026-06-25 - Idle-Timeout Ping Keepalive
 
 ### Added
@@ -28,7 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `handler.go` — a panic in the user `OnMessage` callback no longer crashes the whole process. The callback runs on the connection's read goroutine, which is spawned outside the kernel's panic recovery, so a single malformed client frame that made `OnMessage` panic took the server down. The callback is now invoked through a recovering wrapper that logs the panic and closes the connection, matching how the kernel and event dispatcher recover user-code panics.
 - `handler.go` — a server-initiated termination (hub shutdown, subscriber unsubscribe, context cancellation) now performs the WebSocket close handshake (`Close(StatusNormalClosure, …)`) instead of only tearing down the socket with `CloseNow`, so a spec-conformant client sees a normal `1000` closure rather than abnormal `1006` — avoiding reconnect storms during a graceful rolling deploy. `CloseNow` remains the deferred backstop.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/websocket/v3.1.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/websocket/v3.1.1...HEAD
+
+[v3.1.1]: https://github.com/precision-soft/melody/compare/integrations/websocket/v3.1.0...integrations/websocket/v3.1.1
 
 [v3.1.0]: https://github.com/precision-soft/melody/compare/integrations/websocket/v3.0.0...integrations/websocket/v3.1.0
 

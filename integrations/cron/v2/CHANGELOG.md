@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v2.2.2] - 2026-07-02 - Standalone Module Resolution Fix
+
+### Fixed
+
+- `go.mod` — the module pinned `melody/v2 v2.0.0` while importing the `cli/contract.StringSliceFlag` symbol, which only exists from `v2.7.0`, so outside the repository workspace (`GOWORK=off`, or any consumer cloning just this module) the module did not resolve. The pin is raised to `v2.7.0` — the lowest framework version that provides every imported package — and the module-local `go.sum` is now complete for standalone builds.
+
+
 ## [v2.2.1] - 2026-06-25 - Forbid Control-Character Injection in User and Schedule Fields
 
 ### Fixed
@@ -25,7 +32,9 @@ Identical to the corresponding v1 release except: module path is `github.com/pre
 
 Identical to the corresponding v1 release except: module path is `github.com/precision-soft/melody/integrations/cron/v2`; dependency pinned to `github.com/precision-soft/melody/v2`. See the [v1 changelog](../CHANGELOG.md#v100---2026-05-16---initial-release--cron-integration) for the full change list.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.2.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.2.2...HEAD
+
+[v2.2.2]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.2.1...integrations/cron/v2.2.2
 
 [v2.2.1]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.2.0...integrations/cron/v2.2.1
 
