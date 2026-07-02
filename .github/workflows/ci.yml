@@ -1,0 +1,105 @@
+name: ci
+
+on:
+    push:
+        branches: [ main ]
+    pull_request:
+
+jobs:
+    # vet + test for every workspace module, across the build-tag matrix the
+    # local `.dev/validate/all.sh` (mva) runs: no tags, env-embedded,
+    # static-embedded, and both.
+    matrix:
+        runs-on: ubuntu-latest
+        strategy:
+            fail-fast: false
+            matrix:
+                tags: [ '', 'melody_env_embedded', 'melody_static_embedded', 'melody_env_embedded,melody_static_embedded' ]
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-go@v5
+              with:
+                  go-version-file: go.work
+                  cache: true
+            - name: vet and test all workspace modules
+              env:
+                  GOFLAGS: ${{ matrix.tags != '' && format('-tags={0}', matrix.tags) || '' }}
+              run: |
+                  set -euo pipefail
+                  for module_directory in $(go list -m -f '{{.Dir}}' | sort); do
+                      echo "=== ${module_directory} (tags: '${{ matrix.tags }}') ==="
+                      (cd "${module_directory}" && go vet ./... && go test ./...)
+                  done
+
+    # the env-gated live suites the matrix job cannot exercise: real RabbitMQ,
+    # Redis, MySQL, PostgreSQL and S3 (localstack) service containers, -race on
+    # the concurrency-critical ones. Mirrors the manual container run.
+    live:
+        runs-on: ubuntu-latest
+        services:
+            rabbitmq:
+                image: rabbitmq:3.13
+                ports: [ '5672:5672' ]
+            redis:
+                image: redis:7-alpine
+                ports: [ '6379:6379' ]
+            mysql:
+                image: mysql:8.4
+                env:
+                    MYSQL_ROOT_PASSWORD: root
+                    MYSQL_DATABASE: melody_example
+                    MYSQL_USER: melody
+                    MYSQL_PASSWORD: melody
+                ports: [ '3306:3306' ]
+                options: >-
+                    --health-cmd="mysqladmin ping -h localhost -proot"
+                    --health-interval=5s --health-timeout=5s --health-retries=20
+            postgres:
+                image: postgres:16-alpine
+                env:
+                    POSTGRES_USER: melody
+                    POSTGRES_PASSWORD: melody
+                    POSTGRES_DB: melody_test
+                ports: [ '5432:5432' ]
+                options: >-
+                    --health-cmd="pg_isready -U melody"
+                    --health-interval=5s --health-timeout=5s --health-retries=20
+            localstack:
+                image: localstack/localstack:3.8
+                env:
+                    SERVICES: s3
+                ports: [ '4566:4566' ]
+        env:
+            AMQP_DSN: amqp://guest:guest@localhost:5672/
+            REDIS_ADDRESS: localhost:6379
+            MYSQL_DSN: melody:melody@tcp(localhost:3306)/melody_example
+            PGSQL_HOST: localhost
+            PGSQL_PORT: '5432'
+            PGSQL_DATABASE: melody_test
+            PGSQL_USER: melody
+            PGSQL_PASSWORD: melody
+            POSTGRES_DSN: postgres://melody:melody@localhost:5432/melody_test?sslmode=disable
+            MINIO_ENDPOINT: localhost:4566
+            MINIO_ACCESS_KEY: test
+            MINIO_SECRET_KEY: test
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-go@v5
+              with:
+                  go-version-file: go.work
+                  cache: true
+            - name: live suites (race on the concurrency-critical ones)
+              run: |
+                  set -euo pipefail
+                  (cd integrations/amqp/v3 && go test -race -count=1 ./...)
+                  (cd integrations/rueidis/v3 && go test -race -count=1 ./...)
+                  (cd integrations/rueidis/v2 && go test -count=1 ./...)
+                  (cd integrations/rueidis && go test -count=1 ./...)
+                  (cd integrations/bunorm/mysql/v3 && go test -count=1 ./...)
+                  (cd integrations/bunorm/mysql/v2 && go test -count=1 ./...)
+                  (cd integrations/bunorm/mysql && go test -count=1 ./...)
+                  (cd integrations/bunorm/pgsql/v3 && go test -race -count=1 ./...)
+                  (cd integrations/bunorm/pgsql/v2 && go test -count=1 ./...)
+                  (cd integrations/bunorm/pgsql && go test -count=1 ./...)
+                  (cd integrations/outbox/v3 && go test -race -count=1 ./...)
+                  (cd integrations/awss3/v3 && go test -count=1 ./...)

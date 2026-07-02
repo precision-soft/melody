@@ -7,12 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.2.0] - 2026-07-02 - Message-Id Round-Trip and Bucketed Delay Topology
+
 ### Added
 
+- `transport.go` — bucketed delayed-redelivery topology: `TransportConfig.DelayBuckets` (default `5s/1m/10m/1h`, validated ascending, at most 8) declares one `<queue>.delay.<ms>ms` queue per tier with a queue-level `x-message-ttl` and a dead-letter route back to the main queue; a delayed message parks in the largest bucket not exceeding its requested delay (the delay quantizes down to the bucket). Delays below the smallest bucket keep the legacy per-message-ttl `<queue>.delay` queue, which stays declared so messages parked by older deployments drain.
 - `transport.go` — the transport now round-trips a producer-assigned message id. `buildPublishing` copies a `messagebus.MessageIdStamp` into the AMQP `Publishing.MessageId`, and `decode` reads `delivery.MessageId` back into a `MessageIdStamp` on the consumed envelope. This lets a consumer read the id for deduplication (e.g. the outbox relay's `melody-outbox-<id>`) and, just as importantly, makes an application-driven requeue (`Nack` with requeue, including the delayed-retry path) re-publish under the **same** message id instead of an empty one — without the decode round-trip the republish path silently dropped the id. Covered by `TestTransport_BuildPublishingCarriesMessageId` and `TestTransport_MessageIdSurvivesDecodeAndRepublish`.
 
 ### Fixed
 
+- `transport.go` — delayed retries no longer suffer head-of-line blocking: the single `<queue>.delay` queue relied on per-message expirations, but RabbitMQ expires only the head of a queue, so one long-delayed message (retry delays grow with the attempt count, up to the consumer's `MaxDelay`, default 1h) stalled every shorter delay parked behind it for its full ttl. With the bucketed topology every message in a delay queue shares one ttl, so nothing can be stalled by a longer delay; residual head-of-line waiting exists only below the smallest bucket and is bounded by it.
 - `transport.go` — `drainPublishReturn` now drains every queued unroutable return rather than a single one. The publish path drains returns both before publishing (to clear any stale return) and after the broker confirm (to detect that this publish was returned as unroutable); reading only one return could leave a stale return behind to be misattributed to the next publish, or miss a return when more than one had accumulated on the buffered `NotifyReturn` channel. Covered by `TestDrainPublishReturn_DrainsEveryQueuedReturn`.
 - `transport.go` — `delayExpirationMilliseconds` now clamps a delayed-retry message's expiration to a 32-bit millisecond ceiling (`math.MaxUint32`, ~49.7 days). RabbitMQ parses the per-message `expiration` as a 32-bit value, so a pathologically large `DelayStamp` could wrap to a tiny ttl and expire the message almost immediately instead of after the intended delay. Covered by `TestDelayExpirationMilliseconds_ClampsHugeDelayToCap`.
 
@@ -85,7 +89,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `transport.go`, `server_sent_event_backplane.go` — `resetPublishChannel` is now identity-aware: it closes the cached publish channel only when it is still the one the failing caller used. Two publishers that both failed on the same dead channel could otherwise have the second caller's reset close the healthy channel the first caller had just reopened, turning a recoverable single-retry into a spurious publish error on an otherwise-healthy broker. `publishOnce` now returns the channel it used and `resetPublishChannel` compares identity before closing.
 - `transport.go` — `consumeChannelForAck` now applies the same `IsClosed()` guard as `ensureConsumeChannel`/`ensurePublishChannel`. It returned the cached consume channel without checking whether the broker had closed it, so when a channel-level loss occurred between a delivery and its `Ack`/`Nack` — before the consume loop reset the channel — the acknowledgement was attempted on the already-closed channel. It now treats a non-nil but closed channel as absent and returns the clean `"amqp consume channel is not open"` error, letting the still-unacknowledged message redeliver on the next consume generation (at-least-once preserved).
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.1.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.2.0...HEAD
+
+[v3.2.0]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.1.0...integrations/amqp/v3.2.0
 
 [v3.1.0]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.0.0...integrations/amqp/v3.1.0
 

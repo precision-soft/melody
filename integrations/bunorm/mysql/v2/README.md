@@ -21,10 +21,9 @@ Notes
 
 If you need driver options that are not exposed by [`mysql.TimeoutConfig`](./timeout_config.go) or other typed configs, use a post-build hook.
 
-Provider constructors accept optional provider options:
+The provider constructor accepts optional provider options:
 
 - [`mysql.NewProvider`](./provider.go)
-- [`mysql.NewProviderWithConfig`](./provider.go)
 
 Configure a hook via [`mysql.WithPostBuildHook`](./provider_option.go) using the [`mysql.PostBuildHook`](./post_build_hook.go) signature.
 
@@ -34,14 +33,8 @@ Example:
 
 ```go
 provider := mysql.NewProvider(
-"DB_HOST",
-"DB_PORT",
-"DB_DATABASE",
-"DB_USER",
-"DB_PASSWORD",
-mysql.WithPostBuildHook(func(ctx context.Context, resolver containercontract.Resolver, driverConfig *driver.Config) error {
+mysql.WithPostBuildHook(func(ctx context.Context, driverConfig *driver.Config) error {
 _ = ctx
-_ = resolver
 driverConfig.TLSConfig = "custom"
 return nil
 }),

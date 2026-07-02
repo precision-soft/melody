@@ -11,6 +11,7 @@ import (
     handleruser "github.com/precision-soft/melody/v3/.example/handler/user"
     "github.com/precision-soft/melody/v3/.example/route"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
+    melodyhttp "github.com/precision-soft/melody/v3/http"
     melodykernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     melodyopenapi "github.com/precision-soft/melody/v3/openapi"
 )
@@ -20,9 +21,18 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     kernelInstance.HttpKernel().SetNotFoundHandler(handler.NotFoundHandler())
 
-    router.HandleNamed("example.health", "GET", "/health", handler.HealthHandler())
+    /* @info the health and openapi routes opt into the frontend route manifest (melody:routes:manifest) as a working demo of the export: exposed + zoned public, so the TypeScript RouteGenerator can build their URLs by name */
+    router.HandleWithOptions(
+        "/health",
+        handler.HealthHandler(),
+        melodyhttp.NewRouteOptions("example.health", []string{"GET"}, "", nil, nil, nil, nil, 0, melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)),
+    )
 
-    router.HandleNamed("example.openapi", "GET", "/openapi.json", melodyopenapi.SpecHandler(instance.openApiInfo, instance.openApiRegistry))
+    router.HandleWithOptions(
+        "/openapi.json",
+        melodyopenapi.SpecHandler(instance.openApiInfo, instance.openApiRegistry),
+        melodyhttp.NewRouteOptions("example.openapi", []string{"GET"}, "", nil, nil, nil, nil, 0, melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)),
+    )
 
     router.HandleNamed("example.platform.demo", "GET", "/platform/demo", handler.PlatformDemoHandler())
 

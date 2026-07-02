@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.2.0] - 2026-07-02 - PostgreSQL Advisory-Lock Locker
+
 ### Added
 
 - `lock.go` — `NewLocker(database, ...)` returns a `lock/contract.Locker` backed by PostgreSQL session advisory locks, the Postgres counterpart of the MySQL `GET_LOCK` locker (which had no pgsql equivalent, blocking applications that use the locker — e.g. ERP WMS delivery-picking and reception-stock-in — from running on Postgres). `Acquire` runs a non-blocking `pg_try_advisory_lock` (try-lock, timeout 0) on a dedicated pinned `*sql.Conn` (a session advisory lock is held by the connection that took it); `Release` runs `pg_advisory_unlock` and `Refresh` verifies the pinned backend still holds the lock through a `pg_locks` query keyed on `pg_backend_pid()`. Arbitrary string lock names are hashed (FNV-1a 64-bit) into the two-int advisory key. Release/verify run on a fresh context so a canceled request context cannot leak the lock on the connection returned to the pool, mirroring the MySQL locker's semantics. `WithLockReleaseTimeout` tunes the release timeout (default 5s).
@@ -60,7 +62,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Code duplicated into `integrations/bunorm/pgsql/v3/`; v2 and v3 implementations maintained in parallel
 - Dependencies pinned to `bunorm/v3` and `melody/v3`
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v3.1.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v3.2.0...HEAD
+
+[v3.2.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v3.1.1...integrations/bunorm/pgsql/v3.2.0
 
 [v3.1.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v3.1.0...integrations/bunorm/pgsql/v3.1.1
 

@@ -3,12 +3,15 @@ package messagebus
 import (
     "context"
     "strings"
+    "sync"
     "sync/atomic"
     "testing"
     "time"
 
     "github.com/precision-soft/melody/v3/container"
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/logging"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     messagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -407,5 +410,174 @@ func TestFailureRequeueDelay_Override(t *testing.T) {
 
     if 7*time.Second != command.failureRequeueDelay() {
         t.Fatalf("expected the overridden failure requeue delay 7s, got %v", command.failureRequeueDelay())
+    }
+}
+
+func TestConsume_PanickingHandlerFlowsIntoRetryPipeline(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    source := NewInMemoryTransport(8)
+    failure := NewInMemoryTransport(8)
+
+    if sendErr := source.Send(runtimeInstance, NewEnvelope(consumeTestMessage{Value: 13})); nil != sendErr {
+        t.Fatalf("unexpected send error: %v", sendErr)
+    }
+
+    var attempts int
+    locator := NewHandlerLocator()
+    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage) error {
+        attempts++
+        panic("poison message handler")
+    })
+
+    bus := NewManager("default", NewHandleMessageMiddleware(locator))
+    command := NewConsumeCommandWithRetry(bus, nil, RetryPolicy{MaxRetries: 2, FailureTransport: failure})
+
+    if consumeErr := command.consumeFrom(runtimeInstance, source, 3, 1); nil != consumeErr {
+        t.Fatalf("unexpected consume error: %v", consumeErr)
+    }
+
+    if 3 != attempts {
+        t.Fatalf("expected the panicking handler to be retried like an erroring one (three attempts), got %d", attempts)
+    }
+
+    failureQueue, _ := failure.Receive(runtimeInstance)
+    select {
+    case deadLettered := <-failureQueue:
+        if 2 != RedeliveryCount(deadLettered) {
+            t.Fatalf("expected the dead-lettered envelope to carry a redelivery count of 2, got %d", RedeliveryCount(deadLettered))
+        }
+    default:
+        t.Fatalf("expected the poison message to reach the failure transport instead of crashing the consumer")
+    }
+}
+
+func TestDispatchSafely_ConvertsErrorPanicIntoDispatchError(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    locator := NewHandlerLocator()
+    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage) error {
+        panic(exception.NewError("handler exploded", nil, nil))
+    })
+
+    bus := NewManager("default", NewHandleMessageMiddleware(locator))
+    command := NewConsumeCommand(bus, nil)
+
+    dispatchErr := command.dispatchSafely(runtimeInstance, NewEnvelope(consumeTestMessage{Value: 1}))
+    if nil == dispatchErr {
+        t.Fatalf("expected the panic to surface as a dispatch error")
+    }
+
+    if false == strings.Contains(dispatchErr.Error(), "message handler panicked") {
+        t.Fatalf("expected the dispatch error to identify the handler panic, got %v", dispatchErr)
+    }
+}
+
+func TestConsume_MessagesGetIsolatedScopes(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    transport := NewInMemoryTransport(8)
+
+    if sendErr := transport.Send(runtimeInstance, NewEnvelope(consumeTestMessage{Value: 1})); nil != sendErr {
+        t.Fatalf("unexpected send error: %v", sendErr)
+    }
+    if sendErr := transport.Send(runtimeInstance, NewEnvelope(consumeTestMessage{Value: 2})); nil != sendErr {
+        t.Fatalf("unexpected send error: %v", sendErr)
+    }
+
+    var leaked int64
+    locator := NewHandlerLocator()
+    RegisterHandler(locator, func(handlerRuntime runtimecontract.Runtime, message consumeTestMessage) error {
+        /* @important each delivery must see its own scope: an override written for one message must not be visible while handling another */
+        if true == handlerRuntime.Scope().Has("service.ambient") {
+            atomic.AddInt64(&leaked, 1)
+        }
+
+        handlerRuntime.Scope().MustOverrideProtectedInstance("service.ambient", &consumeTestMessage{Value: message.Value})
+
+        return nil
+    })
+
+    bus := NewManager("default", NewHandleMessageMiddleware(locator))
+    command := NewConsumeCommand(bus, nil)
+
+    if consumeErr := command.consumeFrom(runtimeInstance, transport, 2, 1); nil != consumeErr {
+        t.Fatalf("unexpected consume error: %v", consumeErr)
+    }
+
+    if 0 != atomic.LoadInt64(&leaked) {
+        t.Fatalf("expected scope-based ambient state not to leak across messages, got %d leaks", atomic.LoadInt64(&leaked))
+    }
+}
+
+type contextCapturingLogger struct {
+    mutex    sync.Mutex
+    contexts []loggingcontract.Context
+}
+
+func (instance *contextCapturingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+}
+
+func (instance *contextCapturingLogger) Debug(message string, context loggingcontract.Context) {}
+
+func (instance *contextCapturingLogger) Info(message string, context loggingcontract.Context) {
+    instance.mutex.Lock()
+    instance.contexts = append(instance.contexts, context)
+    instance.mutex.Unlock()
+}
+
+func (instance *contextCapturingLogger) Warning(message string, context loggingcontract.Context) {}
+
+func (instance *contextCapturingLogger) Error(message string, context loggingcontract.Context) {}
+
+func (instance *contextCapturingLogger) Emergency(message string, context loggingcontract.Context) {
+}
+
+func TestConsume_MessageScopeCarriesMessageIdLogger(t *testing.T) {
+    serviceContainer := container.NewContainer()
+
+    capturing := &contextCapturingLogger{}
+
+    baseScope := serviceContainer.NewScope()
+    baseScope.MustOverrideProtectedInstance(logging.ServiceLogger, capturing)
+
+    runtimeInstance := runtime.New(context.Background(), baseScope, serviceContainer)
+
+    transport := NewInMemoryTransport(8)
+
+    envelope := NewEnvelope(consumeTestMessage{Value: 9}, MessageIdStamp{MessageId: "msg-e2e-9"})
+    if sendErr := transport.Send(runtimeInstance, envelope); nil != sendErr {
+        t.Fatalf("unexpected send error: %v", sendErr)
+    }
+
+    locator := NewHandlerLocator()
+    RegisterHandler(locator, func(handlerRuntime runtimecontract.Runtime, message consumeTestMessage) error {
+        handlerLogger := logging.LoggerFromRuntime(handlerRuntime)
+        if nil != handlerLogger {
+            handlerLogger.Info("handled", nil)
+        }
+
+        return nil
+    })
+
+    bus := NewManager("default", NewHandleMessageMiddleware(locator))
+    command := NewConsumeCommand(bus, nil)
+
+    if consumeErr := command.consumeFrom(runtimeInstance, transport, 1, 1); nil != consumeErr {
+        t.Fatalf("unexpected consume error: %v", consumeErr)
+    }
+
+    capturing.mutex.Lock()
+    defer capturing.mutex.Unlock()
+
+    if 1 != len(capturing.contexts) {
+        t.Fatalf("expected exactly one handler log line, got %d", len(capturing.contexts))
+    }
+
+    if "msg-e2e-9" != capturing.contexts[0]["messageId"] {
+        t.Fatalf("expected the handler log context to carry the message id, got %v", capturing.contexts[0])
     }
 }

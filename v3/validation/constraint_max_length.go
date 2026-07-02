@@ -3,6 +3,8 @@ package validation
 import (
     "fmt"
 
+    "github.com/precision-soft/melody/v3/exception"
+    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     validationcontract "github.com/precision-soft/melody/v3/validation/contract"
 )
 
@@ -45,4 +47,25 @@ func (instance *MaxLength) Max() int {
     return instance.max
 }
 
+func (instance *MaxLength) WithParams(params map[string]string) (validationcontract.Constraint, error) {
+    valueString, exists := params["value"]
+    if false == exists {
+        return NewMaxLength(instance.max), nil
+    }
+
+    parsed, ok := parseIntStrict(valueString)
+    if false == ok {
+        return nil, exception.NewError(
+            "invalid max length parameter",
+            exceptioncontract.Context{
+                "value": valueString,
+            },
+            nil,
+        )
+    }
+
+    return NewMaxLength(parsed), nil
+}
+
 var _ validationcontract.Constraint = (*MaxLength)(nil)
+var _ validationcontract.ParameterizedConstraint = (*MaxLength)(nil)

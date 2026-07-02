@@ -4,7 +4,7 @@ This integration provides:
 
 * A small `Provider` that opens a `rueidis.Client` from Melody config parameters.
 * A Redis-backed Melody cache backend implemented on top of Rueidis.
-* A Redis-backed revocable token store for the core `security` package.
+* A Redis-backed revocable token store for the core `security` package (v3 binding only).
 
 ## Provider
 
@@ -199,9 +199,9 @@ func (instance *MyController) Handle(
 }
 ```
 
-## Token store
+## Token store (v3)
 
-Entry point: [`NewTokenStore`](./v3/token_store.go)
+Entry point: [`NewTokenStore`](./v3/token_store.go) — ships in the v3 binding only (`github.com/precision-soft/melody/integrations/rueidis/v3`).
 
 A Redis-backed implementation of the core [`security/contract.RevocableTokenStore`](../../v3/security/contract/token_store.go). It is a drop-in replacement for `security.NewInMemoryTokenStore` behind an `OpaqueTokenValidator`, so revocation survives restarts and is shared across instances.
 

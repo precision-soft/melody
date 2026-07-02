@@ -409,8 +409,8 @@ func parseLeadingInt(valueString string) (int64, bool) {
 
 func applyValidation(schema *Schema, validateTag string) {
     if "" != schema.Ref || nil != schema.AllOf {
-        /* @important a $ref (or a nullable allOf-wrapped $ref) always denotes a struct component, and the validator rejects a struct value outright for notEmpty (constraint_not_empty.go default branch) and for greaterThan/lessThan ("value must be numeric", constraint_greater_than.go/constraint_less_than.go default branch); such a tag makes the field unsatisfiable server-side, so advertise it as such rather than as a satisfiable object a client would trust. No length/numeric facet otherwise attaches to a $ref, so there is nothing else to apply here. */
-        if true == tagRejectsStruct(validateTag) {
+        /* @important a $ref (or a nullable allOf-wrapped $ref) always denotes a struct component, and the validator rejects a struct value outright for notEmpty (constraint_not_empty.go default branch) and for greaterThan/lessThan ("value must be numeric", constraint_greater_than.go/constraint_less_than.go default branch); such a tag makes the field unsatisfiable server-side, so advertise it as such rather than as a satisfiable object a client would trust. The same holds when a tag carries parameters a non-parameterizable constraint cannot consume (createConstraintWithParams fails the rule closed before Validate ever runs, so the field kind is irrelevant). No length/numeric facet otherwise attaches to a $ref, so there is nothing else to apply here. */
+        if true == tagRejectsStruct(validateTag) || true == tagHasParamsOnNonParameterizable(validateTag) {
             markFieldUnsatisfiable(schema)
         } else if true == tagForbidsNullStruct(validateTag) {
             /* @important notBlank on a pointer-to-struct field (rendered as a nullable allOf-wrapped $ref): the validator rejects a nil pointer (dereferenceValue returns ok=false) but stringifies a non-nil struct via %v and accepts it, so the field is satisfiable with a non-null value — clear only the nullable advertisement so the spec does not offer a null the validator rejects, rather than marking the whole field unsatisfiable. */
@@ -428,6 +428,12 @@ func applyValidation(schema *Schema, validateTag string) {
 
         switch name {
         case "email":
+            if 0 != len(params) {
+                /* @important the validator fails closed when a tag carries parameters a non-parameterizable constraint cannot consume (createConstraintWithParams returns invalid-rule), so the field accepts no value — advertise it unsatisfiable rather than as a satisfiable field a client would trust */
+                rejectsAll = true
+
+                continue
+            }
             /* @important only set the email format on a genuine string whose format slot is free, so a structural format such as byte (for a []byte field) is preserved and the spec does not advertise an email constraint the validator cannot enforce on non-string values */
             if "string" == schema.Type && "" == schema.Format {
                 schema.Format = "email"
@@ -504,19 +510,43 @@ func applyValidation(schema *Schema, validateTag string) {
                 patterns = append(patterns, patternParam(params))
             }
         case "alpha":
+            if 0 != len(params) {
+                /* @important the validator fails closed when a tag carries parameters a non-parameterizable constraint cannot consume (createConstraintWithParams returns invalid-rule), so the field accepts no value — advertise it unsatisfiable rather than as a satisfiable field a client would trust */
+                rejectsAll = true
+
+                continue
+            }
             /* @important the validator enforces these character classes with an anchored pattern but short-circuits on an empty string (it accepts ""), so advertise the class with a * quantifier — which also matches "" — rather than + which would reject the "" the validator accepts */
             if "string" == schema.Type {
                 patterns = append(patterns, "^[a-zA-Z]*$")
             }
         case "numeric":
+            if 0 != len(params) {
+                /* @important the validator fails closed when a tag carries parameters a non-parameterizable constraint cannot consume (createConstraintWithParams returns invalid-rule), so the field accepts no value — advertise it unsatisfiable rather than as a satisfiable field a client would trust */
+                rejectsAll = true
+
+                continue
+            }
             if "string" == schema.Type {
                 patterns = append(patterns, "^[0-9]*$")
             }
         case "alphanumeric":
+            if 0 != len(params) {
+                /* @important the validator fails closed when a tag carries parameters a non-parameterizable constraint cannot consume (createConstraintWithParams returns invalid-rule), so the field accepts no value — advertise it unsatisfiable rather than as a satisfiable field a client would trust */
+                rejectsAll = true
+
+                continue
+            }
             if "string" == schema.Type {
                 patterns = append(patterns, "^[a-zA-Z0-9]*$")
             }
         case "notBlank":
+            if 0 != len(params) {
+                /* @important the validator fails closed when a tag carries parameters a non-parameterizable constraint cannot consume (createConstraintWithParams returns invalid-rule), so the field accepts no value — advertise it unsatisfiable rather than as a satisfiable field a client would trust */
+                rejectsAll = true
+
+                continue
+            }
             /* @important notBlank rejects a null pointer for a field of any kind (dereferenceValue returns ok=false), so the spec must never advertise the field as nullable regardless of its generated type — clear nullable unconditionally (mirroring notEmpty), not only on the string path, so a *int/*bool/*float64/*[]T/*map/*struct field is not advertised as accepting null the validator rejects. The length floor is string-only: for a string, notBlank also rejects an empty (or whitespace-only) value, so advertise minLength 1 (the OpenAPI required list only means the key is present, so an empty value would still satisfy it; a client must not send "" against the spec and then be rejected). An explicit min >= 1 in either tag order still wins, but a degenerate min=0 is raised to 1 because notBlank forbids the empty value. The whitespace-only rejection cannot be expressed by minLength. For non-string kinds notBlank accepts any non-null value (its %v stringification is non-blank), so no length/items/properties floor is advertised. */
             schema.Nullable = false
             if "string" == schema.Type {
@@ -526,6 +556,12 @@ func applyValidation(schema *Schema, validateTag string) {
                 }
             }
         case "notEmpty":
+            if 0 != len(params) {
+                /* @important the validator fails closed when a tag carries parameters a non-parameterizable constraint cannot consume (createConstraintWithParams returns invalid-rule), so the field accepts no value — advertise it unsatisfiable rather than as a satisfiable field a client would trust */
+                rejectsAll = true
+
+                continue
+            }
             /* @important notEmpty rejects a zero-length string, array, slice, or map and rejects a null pointer, so the spec must neither advertise the field as nullable nor accept an empty value. Advertise the matching length floor for whichever shape the field generated — minLength 1 for a string, minItems 1 for an array, minProperties 1 for a map (object with additionalProperties) — and clear nullable so a *string/*[]T/*map field is not advertised as accepting null; otherwise a client trusting the spec sends a null or empty value and is then rejected by the validator. An explicit min >= 1 in either tag order still wins, but a degenerate min=0 is raised to 1 because notEmpty forbids the empty value. A struct value (an inline struct object, a named-struct $ref, or any non string/array/slice/map kind) is instead advertised unsatisfiable, because the validator rejects it outright (constraint_not_empty.go default branch) rather than ignoring it */
             schema.Nullable = false
             switch schema.Type {
@@ -675,6 +711,23 @@ func applyEmptyValueSpace(schema *Schema) {
             schema.AllOf = append(schema.AllOf, contradiction)
         }
     }
+}
+
+/* @important reports whether a validate tag carries parameters on a constraint that cannot consume them: the validator fails such a rule closed (createConstraintWithParams returns invalid-rule before Constraint.Validate runs), so the field accepts no value of any kind — including a struct behind a $ref/allOf, which the in-switch guards below never see because applyValidation returns early for those schemas. */
+func tagHasParamsOnNonParameterizable(validateTag string) bool {
+    for _, rule := range splitRules(validateTag) {
+        name, params := splitRule(rule)
+        if 0 == len(params) {
+            continue
+        }
+
+        switch name {
+        case "email", "alpha", "numeric", "alphanumeric", "notBlank", "notEmpty":
+            return true
+        }
+    }
+
+    return false
 }
 
 /* @important reports whether a validate tag carries a constraint the runtime validator rejects outright for a struct value: notEmpty falls into constraint_not_empty.go's default branch, and greaterThan/lessThan into their "value must be numeric" default branch. A $ref/allOf schema (always a struct component) carrying any of these is therefore unsatisfiable server-side. notBlank is excluded because it stringifies any value with %v and only rejects a blank or nil one, so it does not reject a struct outright. */

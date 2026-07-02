@@ -257,6 +257,9 @@ Each package below links to its source folder and its package documentation.
 * **HTTPCLIENT** — [code](./httpclient/) | [docs](.documentation/package/HTTPCLIENT.md)  
   Outbound HTTP client contracts and helpers.
 
+* **INTERNAL** — [code](./internal/) | [docs](.documentation/package/INTERNAL.md)  
+  Framework-internal helper utilities, not intended for userland consumption; APIs may change without notice.
+
 * **KERNEL** — [code](./kernel/) | [docs](.documentation/package/KERNEL.md)  
   Kernel integration points that connect application, runtime, and HTTP/CLI wiring.
 

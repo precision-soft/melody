@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.3.0] - 2026-07-02 - Redis-Backed Nonce Guard
+
 ### Added
 
 - `v3/nonce_guard.go` — `NonceGuard` (`NewNonceGuard(client)` / `NewNonceGuardWithPrefix(client, prefix)`) is a Redis-backed implementation of the core `security/contract.NonceGuard`, the replay-protection guard for the internal-auth HMAC token source. `Remember` runs a single atomic `SET NX PX` Lua script that records a nonce only when absent and returns whether it already existed, so a nonce replayed against any application instance is detected (which the core in-process `MemoryNonceGuard` cannot do across instances). A non-positive ttl reports unseen without storing. Requires the core `melody/v3` version that introduces `security/contract.NonceGuard`.
@@ -72,7 +74,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `v3/connection_params.go` — `ConnectionConfig` renamed to `ConnectionParams` with value semantics
 - Dependencies pinned to `github.com/precision-soft/melody/v3 v3.0.0`
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.2.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.3.0...HEAD
+
+[v3.3.0]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.2.0...integrations/rueidis/v3.3.0
 
 [v3.2.0]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.1.0...integrations/rueidis/v3.2.0
 

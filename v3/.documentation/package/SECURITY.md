@@ -300,13 +300,68 @@ source := security.NewBearerTokenSourceWithEnricher(validator, scopeRoleEnricher
 
 ### Internal service-to-service authentication (HMAC)
 
-For machine-to-machine calls between trusted services, [`HmacTokenSource`](../../security/hmac_token_source.go) verifies an HMAC-signed envelope carried on the `X-Melody-Internal-Auth` header and resolves it to the *calling service* as the principal. The matching client helper is [`HmacEnvelopeSigner`](../../security/hmac_signer.go). The envelope binds the call to its method, path and query string, an issued/expiry window, a single-use nonce, and a hash of the request body, so a captured envelope cannot be replayed against another route, after expiry, twice, or with a tampered body or query. Replay is rejected by a pluggable [`NonceGuard`](../../security/contract/nonce_guard.go) (defaults to an in-process [`MemoryNonceGuard`](../../security/memory_nonce_guard.go); supply a shared guard such as the rueidis Redis nonce guard for multi-instance deployments).
+For machine-to-machine calls between trusted services, [`HmacTokenSource`](../../security/hmac_token_source.go) verifies an HMAC-signed envelope carried on the `X-Melody-Internal-Auth` header and resolves it to the *calling service* as the principal. The matching client helper is [`HmacEnvelopeSigner`](../../security/hmac_signer.go). The envelope binds the call to its method, path and query string, an issued/expiry window, a single-use nonce, and a hash of the request body, so a captured envelope cannot be replayed against another route, after expiry, twice, or with a tampered body or query. Replay is rejected by a pluggable [`NonceGuard`](../../security/contract/nonce_guard.go) (defaults to an in-process [`MemoryNonceGuard`](../../security/memory_nonce_guard.go); supply a shared guard such as the Redis-backed [`rueidis.NewNonceGuard`](../../../integrations/rueidis/v3/nonce_guard.go) for multi-instance deployments, so a nonce replayed against a different instance is still detected).
+
+Two `HmacTokenSourceConfig` knobs tune the verifier; both are zero-value backwards-compatible. **`MaxFutureExpiry`** caps how far in the future an envelope's expiry may sit (measured from the verifier's clock): the nonce guard remembers each nonce until its envelope expires, so without a cap a holder of a valid secret could mint far-future-expiry envelopes and pin unbounded memory in an in-process guard. Zero (the default) leaves the horizon unbounded; set it (for example a few minutes above the signer's `Ttl`) on multi-instance deployments. **`VerifyBodyBeforeNonce`** selects the order of the body and nonce checks. When `false` (the default) the nonce is consumed before the body is read, so a captured valid envelope can force at most one body buffering — but an on-path party who replays the header with a mutated body burns the nonce and fails the legitimate request as a replay. When `true` the body hash is verified first, so a body mismatch is rejected without consuming the nonce, at the cost of letting a captured envelope force body buffering until it expires. Flip the configured default per route with the [`HmacVerifyBodyBeforeNonceAttribute`](../../security/hmac_token_source.go) route attribute, or on demand with [`SetHmacVerifyBodyBeforeNonce`](../../security/hmac_token_source.go).
 
 The signed payload optionally carries an **originating actor** (F1) via [`Actor`](../../security/actor.go) / [`Token.OnBehalfOf()`](../../security/contract/token.go), so service B authorizes and audits the call as the upstream user/client that started it, without that user re-authenticating to B. Read it back with [`ActorFromToken`](../../security/actor.go).
 
 **Key-id ↔ app binding (trust model).** Each key id is issued to **exactly one application**. The secret provider ([`NewStaticHmacSecretProvider`](../../security/hmac_secret_provider.go), entries are `HmacKey{App, Secret}`) records that binding, the [`HmacAppRegistry`](../../security/hmac_app_registry.go) maps an app to the roles its verified principal receives, and the verifier **refuses an envelope whose key id is not bound to the app it claims**. This is what stops a holder of one valid secret from claiming a higher-privileged app (and forging an arbitrary actor): a secret is only ever as privileged as the single app its key id is issued to. Because the key id is attacker-visible, the binding only isolates apps when their secret material is distinct, so `NewStaticHmacSecretProvider` rejects the same secret bytes registered under key ids belonging to different apps. The signer fails fast at construction if its current key id is not bound to the app it signs for. Rotate by issuing a second key id bound to the same app, rolling `CurrentKeyId` to it, then retiring the old key id once every caller has moved.
 
 The embedded actor stays self-asserted: an *authenticated* app is trusted to state who it acts on behalf of, exactly as it is trusted with its own secret. Binding the app identity bounds actor forgery to what each app is already trusted to assert — keep one key id per app and rotate the shared secrets like any other credential.
+
+### Two-factor authentication (TOTP)
+
+The [`security/totp`](../../security/totp) subpackage implements RFC 6238 TOTP with stdlib crypto only: [`GenerateSecret`](../../security/totp/totp.go) returns an unpadded base32 secret, [`Verify`](../../security/totp/totp.go) / [`VerifyAt`](../../security/totp/totp.go) check a code accepting the configured step skew on either side (the zero [`Config`](../../security/totp/totp.go) uses the interoperable defaults: 30-second period, 6 digits, ±1 step), [`OtpauthURI`](../../security/totp/totp.go) builds the `otpauth://` enrollment URI an authenticator app consumes (typically rendered as a QR code), and [`GenerateRecoveryCodes`](../../security/totp/totp.go) produces single-use recovery codes formatted `xxxxx-xxxxx` (the caller stores them encrypted and removes each on use).
+
+[`TotpSecondFactorAuthenticator`](../../security/totp_second_factor_authenticator.go) decorates any primary [`Authenticator`](../../security/contract/authenticator.go), so it slots into the existing `AuthenticatorManager` unchanged: when the primary credential is accepted and the user has an enrollment in the application-supplied [`TwoFactorEnrollmentStore`](../../security/contract/two_factor.go), a valid code on the `X-2FA-Code` header (configurable via `CodeHeaderName`) is additionally required. A missing, invalid, or replayed code yields a non-authenticated [`TwoFactorPendingToken`](../../security/two_factor_pending_token.go) — read the awaiting principal with [`PendingUserFromToken`](../../security/two_factor_pending_token.go) to prompt for a code instead of treating the request as anonymous. An accepted code is single-use within its validity window through the same [`NonceGuard`](../../security/contract/nonce_guard.go) contract the HMAC source uses (`ReplayGuard`, defaulting to an in-process guard — supply a shared one for multi-instance deployments).
+
+```go
+secondFactor := security.NewTotpSecondFactorAuthenticator(security.TotpSecondFactorAuthenticatorConfig{
+	Primary:     primaryAuthenticator,
+	Enrollments: enrollmentStore, // application-owned: FindTotpSecret(runtime, userIdentifier)
+})
+
+token, authenticateErr := secondFactor.Authenticate(request)
+
+if pendingUser, pending := security.PendingUserFromToken(token); true == pending {
+	// primary credential accepted — prompt pendingUser for a TOTP code
+}
+```
+
+### Impersonation (switch user)
+
+[`ImpersonationTokenSource`](../../security/impersonation_token_source.go) decorates any [`TokenSource`](../../security/contract/token_source.go): when the request carries the `X-Switch-User` header (configurable via `HeaderName`), the inner token is authenticated and holds the switch role (defaults to `securitycontract.RoleAllowedToSwitch`), and the application-supplied [`ImpersonatedUserResolver`](../../security/contract/impersonation.go) resolves the target to an authenticated token, the result is an [`ImpersonationToken`](../../security/impersonation_token.go) whose visible principal (identifier, scope, attributes) is the impersonated user. Any missing precondition leaves the admin's own token untouched, and the denial is logged.
+
+[`ImpersonationRoleMode`](../../security/impersonation_token.go) selects whose roles the token authorizes with: `RoleModeImpersonated` (the default, zero value) takes on the target's roles for their full context; `RoleModeImpersonator` keeps the admin's own rights while acting in the target's context. In either mode the admin stays readable through [`ImpersonatorFromToken`](../../security/impersonation_token.go) for auditing, and the token's `OnBehalfOf()` encodes both identities into the originating actor — the impersonated user (with the effective roles of the active mode) carrying the admin as its `Impersonator` — so an impersonation started in one service stays auditable in the next (transports round-trip it via `ActorData.Impersonator`).
+
+```go
+source := security.NewImpersonationTokenSource(security.ImpersonationTokenSourceConfig{
+	Inner:    innerTokenSource,
+	Users:    userResolver, // application-owned: ResolveImpersonatedUser(runtime, identifier)
+	RoleMode: security.RoleModeImpersonated,
+})
+
+if admin, impersonating := security.ImpersonatorFromToken(token); true == impersonating {
+	// audit admin.UserIdentifier() acting as token.UserIdentifier()
+}
+```
+
+### Originating-actor propagation
+
+An [`Actor`](../../security/contract/actor.go) is the originating principal that started an action upstream (for example the human user or client that called service A), distinct from the authenticated transport principal carrying the request now (service B). Actors have an identifier, a type (`ActorTypeUser`, `ActorTypeApiClient`, `ActorTypeSystem`), roles, and attributes. Tokens that can carry one implement [`ActorAware`](../../security/contract/actor.go) — consumers type-assert via [`ActorFromToken`](../../security/actor.go) rather than the core `Token` interface being widened, so existing implementations keep compiling. [`NewAuthenticatedTokenWithActor`](../../security/authenticated_token.go) builds an authenticated token that additionally carries an actor (a nil actor is equivalent to `NewAuthenticatedToken`).
+
+The `Actor` interface does not round-trip through JSON, so transports (JWT claims, the HMAC envelope) encode the serializable [`ActorData`](../../security/contract/actor.go) carrier ([`ActorToData`](../../security/actor.go) / [`NewActorFromData`](../../security/actor.go), also available as `Claims.OriginatingActor`). A nested `ActorData.Impersonator` is rebuilt too, so a propagated impersonation stays readable through [`ActorImpersonating`](../../security/contract/actor.go).
+
+```go
+actor := security.NewActor("user-17", securitycontract.ActorTypeUser, []string{"ROLE_USER"}, nil)
+
+token := security.NewAuthenticatedTokenWithActor("service-a", []string{"ROLE_INTERNAL"}, actor)
+
+if originating, present := security.ActorFromToken(token); true == present {
+	// authorize/audit as originating.Identifier(), not only the transport principal
+}
+```
 
 ## Footguns & caveats
 

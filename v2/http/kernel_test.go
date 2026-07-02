@@ -3,12 +3,17 @@ package http
 import (
     nethttp "net/http"
     "net/http/httptest"
+    "sync/atomic"
     "testing"
+    "time"
 
     "github.com/precision-soft/melody/v2/event"
     eventcontract "github.com/precision-soft/melody/v2/event/contract"
+    "github.com/precision-soft/melody/v2/exception"
     httpcontract "github.com/precision-soft/melody/v2/http/contract"
     kernelcontract "github.com/precision-soft/melody/v2/kernel/contract"
+    "github.com/precision-soft/melody/v2/logging"
+    loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
     "github.com/precision-soft/melody/v2/session"
     sessioncontract "github.com/precision-soft/melody/v2/session/contract"
@@ -386,4 +391,285 @@ func TestKernel_ServeHttpClosesScopeWhenRequestLoggerSetupFails(t *testing.T) {
     }()
 
     handler.ServeHTTP(recorder, request)
+}
+
+func TestKernel_FailsClosedWhenKernelRequestDispatchErrors(t *testing.T) {
+    handlerRan := false
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/guarded",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            handlerRan = true
+
+            return TextResponse(nethttp.StatusOK, "handled"), nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainer()
+
+    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+
+    dispatcher.AddListener(
+        kernelcontract.EventKernelRequest,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            return exception.NewError("resolution listener failed", nil, nil)
+        },
+        50,
+    )
+
+    accessControlRan := false
+    dispatcher.AddListener(
+        kernelcontract.EventKernelRequest,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            accessControlRan = true
+
+            return nil
+        },
+        20,
+    )
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    req := httptest.NewRequest(nethttp.MethodGet, "/guarded", nil)
+    rec := httptest.NewRecorder()
+
+    handler.ServeHTTP(rec, req)
+
+    if true == accessControlRan {
+        t.Fatalf("expected the lower-priority listener to be skipped by the dispatcher abort")
+    }
+
+    if true == handlerRan {
+        t.Fatalf("expected the handler not to run when the kernel.request dispatch aborted with partially-run listeners")
+    }
+
+    if nethttp.StatusInternalServerError != rec.Code {
+        t.Fatalf("expected a fail-closed 500 when the kernel.request dispatch errored, got %d", rec.Code)
+    }
+}
+
+func TestKernel_KernelRequestListenerResponseStillWinsOverDispatchError(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/denied",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(nethttp.StatusOK, "handled"), nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainer()
+
+    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+
+    dispatcher.AddListener(
+        kernelcontract.EventKernelRequest,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            requestEvent, ok := eventValue.Payload().(*KernelRequestEvent)
+            if false == ok {
+                return nil
+            }
+
+            requestEvent.SetResponse(JsonErrorResponse(nethttp.StatusUnauthorized, "denied"))
+
+            return exception.NewError("denied-event dispatch failed", nil, nil)
+        },
+        50,
+    )
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    req := httptest.NewRequest(nethttp.MethodGet, "/denied", nil)
+    rec := httptest.NewRecorder()
+
+    handler.ServeHTTP(rec, req)
+
+    if nethttp.StatusUnauthorized != rec.Code {
+        t.Fatalf("expected the listener-set 401 to win over the synthesized 500, got %d", rec.Code)
+    }
+}
+
+func TestKernel_ResponseListenerErrorDoesNotDropResponse(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/still-served",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(nethttp.StatusOK, "served"), nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainer()
+
+    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher.AddListener(
+        kernelcontract.EventKernelResponse,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            return exception.NewError("response listener failed", nil, nil)
+        },
+        0,
+    )
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    req := httptest.NewRequest(nethttp.MethodGet, "/still-served", nil)
+    rec := httptest.NewRecorder()
+
+    handler.ServeHTTP(rec, req)
+
+    if nethttp.StatusOK != rec.Code {
+        t.Fatalf("expected the response to be written despite the kernel.response dispatch error, got %d", rec.Code)
+    }
+
+    if "served" != rec.Body.String() {
+        t.Fatalf("expected the handler body to be written, got %q", rec.Body.String())
+    }
+}
+
+type failingSessionStorage struct{}
+
+func (instance *failingSessionStorage) Load(sessionId string) (map[string]any, bool, error) {
+    return nil, false, nil
+}
+
+func (instance *failingSessionStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+    return exception.NewError("session backend down", nil, nil)
+}
+
+func (instance *failingSessionStorage) Delete(sessionId string) error {
+    return exception.NewError("session backend down", nil, nil)
+}
+
+func (instance *failingSessionStorage) Close() error {
+    return nil
+}
+
+func TestKernel_SessionSaveFailureDegradesToResponseWithoutPanic(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/session-write",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            sessionValue, exists := request.Attributes().Get(RequestAttributeSession)
+            if false == exists {
+                t.Fatalf("expected the session request attribute to be present")
+            }
+
+            sessionInstance := sessionValue.(sessioncontract.Session)
+            sessionInstance.Set("key", "value")
+
+            return TextResponse(nethttp.StatusOK, "ok"), nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainerWithSessionStorage(&failingSessionStorage{})
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    req := httptest.NewRequest(nethttp.MethodGet, "/session-write", nil)
+    rec := httptest.NewRecorder()
+
+    handler.ServeHTTP(rec, req)
+
+    if nethttp.StatusOK != rec.Code {
+        t.Fatalf("expected the response to be delivered despite the session-store outage, got %d", rec.Code)
+    }
+
+    if "ok" != rec.Body.String() {
+        t.Fatalf("expected the handler body despite the session-store outage, got %q", rec.Body.String())
+    }
+
+    if "" != rec.Header().Get("Set-Cookie") {
+        t.Fatalf("expected no session cookie when the session could not be persisted, got %q", rec.Header().Get("Set-Cookie"))
+    }
+}
+
+func TestKernel_SessionSaveFailureOnPanicRecoveryPathStillDelivers500(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/session-write-boom",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            sessionValue, _ := request.Attributes().Get(RequestAttributeSession)
+            sessionInstance := sessionValue.(sessioncontract.Session)
+            sessionInstance.Set("key", "value")
+
+            panic("handler exploded after touching the session")
+        },
+    )
+
+    serviceContainer := newHttpTestContainerWithSessionStorage(&failingSessionStorage{})
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    req := httptest.NewRequest(nethttp.MethodGet, "/session-write-boom", nil)
+    rec := httptest.NewRecorder()
+
+    handler.ServeHTTP(rec, req)
+
+    if nethttp.StatusInternalServerError != rec.Code {
+        t.Fatalf("expected the recovered 500 to be delivered despite the session-store outage, got %d", rec.Code)
+    }
+}
+
+type errorCountingLogger struct {
+    errorCount int64
+}
+
+func (instance *errorCountingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+}
+
+func (instance *errorCountingLogger) Debug(message string, context loggingcontract.Context) {}
+
+func (instance *errorCountingLogger) Info(message string, context loggingcontract.Context) {}
+
+func (instance *errorCountingLogger) Warning(message string, context loggingcontract.Context) {}
+
+func (instance *errorCountingLogger) Error(message string, context loggingcontract.Context) {
+    atomic.AddInt64(&instance.errorCount, 1)
+}
+
+func (instance *errorCountingLogger) Emergency(message string, context loggingcontract.Context) {}
+
+func TestKernel_HandlerPathResponseDispatchErrorRespectsAlreadyLogged(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/logged-once",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(nethttp.StatusOK, "ok"), nil
+        },
+    )
+
+    countingLogger := &errorCountingLogger{}
+
+    serviceContainer := newHttpTestContainer()
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, countingLogger)
+
+    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher.AddListener(
+        kernelcontract.EventKernelResponse,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            return exception.NewError("response listener failure", nil, nil)
+        },
+        0,
+    )
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    req := httptest.NewRequest(nethttp.MethodGet, "/logged-once", nil)
+    rec := httptest.NewRecorder()
+
+    handler.ServeHTTP(rec, req)
+
+    if nethttp.StatusOK != rec.Code {
+        t.Fatalf("expected the response despite the dispatch error, got %d", rec.Code)
+    }
+
+    /* @important the dispatcher already logs "event listener error" once and marks the returned wrapper as logged; the handler-response finalization block must respect that mark (logEventDispatchError) instead of re-logging it — the pre-fix inline logging produced two error lines for one failure */
+    if 1 != atomic.LoadInt64(&countingLogger.errorCount) {
+        t.Fatalf("expected the dispatch error to be logged exactly once on the handler-response path, got %d error logs", atomic.LoadInt64(&countingLogger.errorCount))
+    }
 }

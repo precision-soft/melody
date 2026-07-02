@@ -2,7 +2,7 @@ module github.com/precision-soft/melody/integrations/opentelemetry/v3
 
 go 1.25.0
 
-require github.com/precision-soft/melody/v3 v3.0.0
+require github.com/precision-soft/melody/v3 v3.9.0
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect

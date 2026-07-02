@@ -91,7 +91,19 @@ func TestScope_OverrideInstance_IsolatedFromContainer(t *testing.T) {
     }
 }
 
-func TestScope_ClosePanicsOnGet(t *testing.T) {
+func TestScope_CloseReturnsErrorOnGet(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    scope := serviceContainer.NewScope()
+    _ = scope.Close()
+
+    _, getErr := scope.Get("service.test")
+    if nil == getErr {
+        t.Fatalf("expected closed-scope error")
+    }
+}
+
+func TestScope_CloseKeepsMustGetPanicking(t *testing.T) {
     serviceContainer := NewContainer()
 
     scope := serviceContainer.NewScope()
@@ -99,11 +111,11 @@ func TestScope_ClosePanicsOnGet(t *testing.T) {
 
     defer func() {
         if nil == recover() {
-            t.Fatalf("expected panic")
+            t.Fatalf("expected panic from MustGet on a closed scope")
         }
     }()
 
-    _, _ = scope.Get("service.test")
+    _ = scope.MustGet("service.test")
 }
 
 func TestScope_HasReturnsFalseWhenClosed(t *testing.T) {
@@ -137,13 +149,25 @@ func TestScope_OverrideAfterCloseReturnsError(t *testing.T) {
     scopeInstance := serviceContainer.NewScope()
     _ = scopeInstance.Close()
 
+    overrideErr := scopeInstance.OverrideProtectedInstance("service.after_close", &scopeTestService{value: "late"})
+    if nil == overrideErr {
+        t.Fatalf("expected closed-scope error on override after close")
+    }
+}
+
+func TestScope_OverrideAfterCloseKeepsMustPanicking(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    scopeInstance := serviceContainer.NewScope()
+    _ = scopeInstance.Close()
+
     defer func() {
         if nil == recover() {
-            t.Fatalf("expected panic on override after close")
+            t.Fatalf("expected panic from MustOverrideProtectedInstance on a closed scope")
         }
     }()
 
-    _ = scopeInstance.OverrideProtectedInstance("service.after_close", &scopeTestService{value: "late"})
+    scopeInstance.MustOverrideProtectedInstance("service.after_close", &scopeTestService{value: "late"})
 }
 
 func TestScope_GetByTypeAfterCloseReturnsError(t *testing.T) {
@@ -152,13 +176,25 @@ func TestScope_GetByTypeAfterCloseReturnsError(t *testing.T) {
     scopeInstance := serviceContainer.NewScope()
     _ = scopeInstance.Close()
 
+    _, getByTypeErr := scopeInstance.GetByType(reflect.TypeOf((*scopeTestService)(nil)))
+    if nil == getByTypeErr {
+        t.Fatalf("expected closed-scope error on get-by-type after close")
+    }
+}
+
+func TestScope_GetByTypeAfterCloseKeepsMustPanicking(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    scopeInstance := serviceContainer.NewScope()
+    _ = scopeInstance.Close()
+
     defer func() {
         if nil == recover() {
-            t.Fatalf("expected panic on get-by-type after close")
+            t.Fatalf("expected panic from MustGetByType on a closed scope")
         }
     }()
 
-    _, _ = scopeInstance.GetByType(reflect.TypeOf((*scopeTestService)(nil)))
+    _ = scopeInstance.MustGetByType(reflect.TypeOf((*scopeTestService)(nil)))
 }
 
 func TestScope_HasTypeReturnsFalseWhenClosed(t *testing.T) {

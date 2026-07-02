@@ -34,8 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `storage.go` — object keys are now normalized the same way the core `LocalStorage` backend normalizes them (backslash to forward slash, clean `.`/`..` segments, strip the leading slash) before every `Put`/`Get`/`Delete`/`Exists`/`PresignedUrl` call. Keys were passed to S3 verbatim while `LocalStorage` cleaned them, so the same key string addressed different objects depending on the backend, and `PresignedUrl("a/../f.txt")` signed a path the browser collapses before sending (yielding `SignatureDoesNotMatch`). An empty or `.`/`..`-only key is now rejected, matching the `LocalStorage` contract.
 
-[v3.0.2]: https://github.com/precision-soft/melody/releases/tag/integrations/awss3/v3.0.2
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/awss3/v3.0.2...HEAD
 
-[v3.0.1]: https://github.com/precision-soft/melody/releases/tag/integrations/awss3/v3.0.1
+[v3.0.2]: https://github.com/precision-soft/melody/compare/integrations/awss3/v3.0.1...integrations/awss3/v3.0.2
+
+[v3.0.1]: https://github.com/precision-soft/melody/compare/integrations/awss3/v3.0.0...integrations/awss3/v3.0.1
 
 [v3.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations/awss3/v3.0.0

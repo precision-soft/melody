@@ -4,6 +4,10 @@ An S3-compatible implementation of the Melody core [`storage`](https://github.co
 
 It implements `storage/contract.Storage`, so application code written against the core abstraction can use local disk in development and object storage in production without changes.
 
+## Version lines
+
+This integration is v3-only (`github.com/precision-soft/melody/integrations/awss3/v3`); no v1 or v2 bindings are currently planned.
+
 ## Installation
 
 ```sh

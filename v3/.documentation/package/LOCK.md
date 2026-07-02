@@ -4,7 +4,7 @@ The [`lock`](../../lock) package provides a distributed/named lock abstraction: 
 
 ## Scope
 
-Locking is opt-in. The core defines the contract and an in-memory `Locker` (single-process, useful for tests and single-instance deployments). For cross-process locking, use an integration-backed `Locker` — Redis via [`rueidis`](../../../integrations/rueidis) or MySQL `GET_LOCK` via [`bunorm/mysql`](../../../integrations/bunorm/mysql) — which implement the same contract.
+Locking is opt-in. The core defines the contract and an in-memory `Locker` (single-process, useful for tests and single-instance deployments). For cross-process locking, use an integration-backed `Locker` — Redis via [`rueidis`](../../../integrations/rueidis), MySQL `GET_LOCK` via [`bunorm/mysql`](../../../integrations/bunorm/mysql), or PostgreSQL session advisory locks via [`bunorm/pgsql`](../../../integrations/bunorm/pgsql) — which implement the same contract.
 
 ## Subpackages
 
@@ -29,7 +29,7 @@ Locking is opt-in. The core defines the contract and an in-memory `Locker` (sing
 - `Acquire` is a single, non-blocking attempt: it returns `(true, nil)` when the lock is taken and `(false, nil)` when it is already held by someone else.
 - A `Lock` value owns its acquisition via a per-instance token. `Release` and `Refresh` only affect the lock when this instance still holds it. Re-acquiring with the same `Lock` instance is reentrant.
 - `Release` is best-effort and idempotent: releasing a lock this instance no longer holds is a no-op and reports no error (the Redis convention). `Refresh` is the authoritative liveness check — it returns an error when the lease has been lost. Use `Refresh`, not `Release`, to detect a lost lock.
-- `ttl` is the lease duration. [`InMemoryLocker`](../../lock/in_memory.go) expires the holder after `ttl` (a `ttl` of `0` passed to `CreateLock` never expires); `Refresh` requires a **positive** `ttl` and returns an error otherwise, so a refresh cannot accidentally turn a leased lock into a permanent one. The in-memory locker opportunistically purges expired holders during `Acquire`; call `PurgeExpired()` (for example from a periodic task) to reclaim memory for locks that expire without an explicit `Release`. The Redis backend sets the key TTL; the MySQL backend has no TTL (user locks are held until release or connection close), so its `Refresh` has nothing to extend — it instead verifies the lock is still held on its connection and returns an error if it has been lost, matching the lost-lock signal of the other backends.
+- `ttl` is the lease duration. [`InMemoryLocker`](../../lock/in_memory.go) expires the holder after `ttl` (a `ttl` of `0` passed to `CreateLock` never expires); `Refresh` requires a **positive** `ttl` and returns an error otherwise, so a refresh cannot accidentally turn a leased lock into a permanent one. The in-memory locker opportunistically purges expired holders during `Acquire`; call `PurgeExpired()` (for example from a periodic task) to reclaim memory for locks that expire without an explicit `Release`. The Redis backend sets the key TTL; the MySQL and PostgreSQL backends have no TTL (their locks are held until release or connection close), so their `Refresh` has nothing to extend — it instead verifies the lock is still held on its connection and returns an error if it has been lost, matching the lost-lock signal of the other backends.
 
 ## Usage
 
@@ -62,12 +62,19 @@ MySQL-backed (`integrations/bunorm/mysql`):
 locker := mysql.NewLocker(database)
 ```
 
+PostgreSQL-backed (`integrations/bunorm/pgsql`), the Postgres counterpart of the MySQL locker, built on session advisory locks (`pg_try_advisory_lock` / `pg_advisory_unlock`); lock names are hashed (FNV-1a, 64-bit) onto PostgreSQL's integer advisory-lock keys:
+
+```go
+locker := pgsql.NewLocker(database)
+```
+
 ## Footguns & caveats
 
 - Locking is opt-in and userland-wired; the framework registers no default `Locker`.
 - [`InMemoryLocker`](../../lock/in_memory.go) is single-process only — it does not coordinate across instances. Use a Redis or MySQL backend for horizontal scaling.
 - MySQL `GET_LOCK` is per-session: the backend pins a dedicated connection for the lifetime of a held lock and releases it on `Release`. It has no lease expiry, so a crashed process releases the lock only when its connection closes.
 - A reentrant `Acquire` on a MySQL lock re-verifies that its pinned connection still holds the lock before returning `(true, nil)`; if that connection was dropped (so MySQL already released the lock), it transparently re-acquires on a fresh connection instead of falsely reporting the lost lock as still held.
+- PostgreSQL session advisory locks mirror the MySQL semantics: the backend pins a dedicated connection per held lock (released on `Release` or connection close, so a crashed process releases the lock when its connection closes) and a reentrant `Acquire` re-verifies the pinned connection still holds the lock before returning `(true, nil)`. Release always runs on a fresh context, so a cancelled request context cannot leave the advisory lock held on a connection returned to the pool. Names are FNV-1a-hashed to the 64-bit advisory key, so two distinct names can in principle collide onto the same lock.
 - `Acquire` does not block or retry; implement waiting in userland if needed.
 
 ## Userland API

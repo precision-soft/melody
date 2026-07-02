@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.15.0] - 2026-07-02 - Kernel Fail-Closed Dispatch, Non-Panicking Response Write and Closed-Scope Errors
+
+### Changed
+
+- `container/scope.go` — resolving from a closed scope through the error-returning methods (`Get`, `GetByType`, `OverrideProtectedInstance`) now returns the `scope is closed` error instead of panicking, aligning them with the package's Must/non-Must convention. The `Must*` variants keep panicking. A panic here was fatal in handler-spawned goroutines that outlive the request (the kernel closes the request scope when `ServeHttp` returns and no recover covers those goroutines). Aligned in lockstep with `v2`/`v3`.
+
+### Fixed
+
+- `http/kernel.go` — the kernel now fails closed when the `kernel.request` event dispatch aborts with an error and no listener produced a response: it synthesizes a 500 instead of proceeding to the handler with partially-run listeners (the dispatcher stops at the first failing listener — now documented on `event/contract.EventDispatcher` — so e.g. the access-control listener behind a failing higher-priority listener never ran, and the request continued fail-open). A response set by an earlier listener still wins. Fixed in lockstep with `v2`/`v3`.
+- `http/kernel.go` — the four response-finalization blocks now share one dispatch-error logging policy (`logEventDispatchError`, `AlreadyLogged`-aware): the controller-event and handler-response blocks logged the `EventKernelResponse` dispatch error inline, producing a duplicate log line for one listener failure. The not-found-handler error fallback also gains the `PrefersHtml` HTML branch the other error fallbacks already had. Fixed in lockstep with `v2`/`v3`.
+- `http/router_utility.go` — `writeResponse` no longer panics on session persistence or response-write failures: it also runs inside the kernel's already-consumed panic-recovery defer, where a second `SaveSession` panic escaped `ServeHttp` and reset the connection instead of delivering the built response — a session-backend outage degraded to connection aborts instead of 500s. Session failures now log once and send the response without the session cookie; a write failure logs instead of panicking. Fixed in lockstep with `v2`/`v3`.
+- `logging/recover.go` — a fatal non-zero exit now always leaves one final line on stderr (`melody: exiting with code N after unrecovered error: ...`), even when the error was already logged or the configured logger writes to a file: previously a startup failure such as an http bind error could terminate the process with no visible trace on the standard streams. Fixed in lockstep with `v2`/`v3`.
+
 ## [v1.14.2] - 2026-06-25 - Firewall Matcher Nil-Request Guard
 
 ### Fixed
@@ -445,7 +458,11 @@ Lock-step release — no `v1/` changes this cycle. Tag published to keep the cor
 - `session/` — session management with file-based and in-memory storage backends
 - `validation/` — validation framework with `greaterThan`, `notEmpty`, `notBlank`, `alpha`, `alphanumeric`, `email`, `numeric`, `regex`, `minLength`, `maxLength` constraints
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v1.14.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/v1.15.0...HEAD
+
+[v1.15.0]: https://github.com/precision-soft/melody/compare/v1.14.2...v1.15.0
+
+[v1.14.2]: https://github.com/precision-soft/melody/compare/v1.14.1...v1.14.2
 
 [v1.14.1]: https://github.com/precision-soft/melody/compare/v1.14.0...v1.14.1
 

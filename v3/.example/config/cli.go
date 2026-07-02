@@ -4,6 +4,7 @@ import (
     "github.com/precision-soft/melody/v3/.example/cli"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
+    melodyhttp "github.com/precision-soft/melody/v3/http"
     melodykernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     melodyopenapi "github.com/precision-soft/melody/v3/openapi"
 )
@@ -21,6 +22,7 @@ func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.
         ),
         cli.NewAuthTokenCommand(instance.jwtSecret),
         melodyopenapi.NewGenerateCommand(instance.openApiInfo, instance.openApiRegistry),
+        melodyhttp.NewRouteManifestCommand(),
         cli.NewMailSendCommand(instance.mailer),
     }
 }

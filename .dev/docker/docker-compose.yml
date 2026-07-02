@@ -74,3 +74,22 @@ services:
             - ${RELATIVE_PATH_TO_ROOT}/.dev-data/localstack:/var/lib/localstack
         ports:
             - "${LOCALSTACK_HOST_PORT:-4566}:4566"
+
+    postgres:
+        image: postgres:16-alpine
+        profiles: [ 'all' ]
+        restart: 'no'
+        environment:
+            POSTGRES_USER: melody
+            POSTGRES_PASSWORD: melody
+            POSTGRES_DB: melody_test
+        ports:
+            - "${POSTGRES_HOST_PORT:-5433}:5432"
+
+    mailpit:
+        image: axllent/mailpit
+        profiles: [ 'all' ]
+        restart: 'no'
+        ports:
+            - "${MAILPIT_SMTP_HOST_PORT:-1026}:1025"
+            - "${MAILPIT_UI_HOST_PORT:-8026}:8025"

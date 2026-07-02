@@ -5,6 +5,7 @@ Redis-backed building blocks for Melody v3, built on [`rueidis`](https://github.
 * a [`Provider`](./provider.go) that opens a `rueidis.Client` from connection parameters;
 * a distributed [`Locker`](./lock.go) implementing the core `lock/contract.Locker`;
 * a [`RedisTokenStore`](./token_store.go) implementing the security `RevocableTokenStore`;
+* a [`NonceGuard`](./nonce_guard.go) implementing the security `NonceGuard` replay guard;
 * a [`ServerSentEventBackplane`](./server_sent_event_backplane.go) that fans Server-Sent Events across instances;
 * a Redis [`cache`](./cache) backend implementing the core `cache/contract.Backend`.
 
@@ -41,6 +42,22 @@ Optional configuration:
 * `Delete` — revoke a single token.
 * `DeleteByUser(userIdentifier)` — revoke every token currently owned by a user; it re-reads each indexed member's owner so a recycled token string belonging to another user is never revoked. Returns the count removed.
 * `PurgeExpired` — prune index members whose tokens have expired.
+
+## Nonce guard
+
+[`NewNonceGuard(client)`](./nonce_guard.go) returns a `*NonceGuard` implementing the security `NonceGuard` contract — the shared replay guard for multi-instance HMAC deployments. `Remember(runtime, nonce, ttl)` records the nonce with a millisecond expiry in a single atomic round-trip (`SET NX PX` via a Lua script) and reports whether it was already seen, so there is no check-then-set race between instances. Because the recorded nonces live in Redis, a nonce replayed against **any** application instance is detected — something the in-process `security.MemoryNonceGuard` cannot do. [`NewNonceGuardWithPrefix(client, keyPrefix)`](./nonce_guard.go) overrides the default `melody:nonce` key prefix.
+
+```go
+nonceGuard := rueidis.NewNonceGuard(client)
+
+tokenSource := security.NewHmacTokenSource(security.HmacTokenSourceConfig{
+    Secrets:    secrets,
+    Apps:       apps,
+    NonceGuard: nonceGuard,
+})
+```
+
+The same guard fits any `security/contract.NonceGuard` slot, for example the TOTP authenticator's `ReplayGuard`.
 
 ## Server-Sent Event backplane
 

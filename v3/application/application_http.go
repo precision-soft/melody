@@ -5,6 +5,7 @@ import (
     "errors"
     nethttp "net/http"
 
+    applicationcontract "github.com/precision-soft/melody/v3/application/contract"
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
@@ -47,6 +48,19 @@ func (instance *Application) RegisterHttpMiddlewareFactories(
     instance.httpMiddlewares.UseFactories(factories...)
 }
 
+/* RegisterHttpHandlerDecorator adds an outermost wrapper around the nethttp.Handler the http kernel produces. Decorators observe the full request lifecycle — including security denials and other kernel.request short-circuits that never reach the middlewares — which is where observability wrappers belong. The first registered decorator is the outermost. */
+func (instance *Application) RegisterHttpHandlerDecorator(decorator applicationcontract.HttpHandlerDecorator) {
+    if true == instance.booted {
+        exception.Panic(exception.NewError("may not register http handler decorators after boot", nil, nil))
+    }
+
+    if nil == decorator {
+        exception.Panic(exception.NewError("http handler decorator may not be nil", nil, nil))
+    }
+
+    instance.httpHandlerDecorators = append(instance.httpHandlerDecorators, decorator)
+}
+
 func (instance *Application) bootHttp() {
     kernelInstance := instance.kernel
 
@@ -76,6 +90,11 @@ func (instance *Application) runHttp(
     )
 
     httpHandler := httpKernel.ServeHttp(instance.kernel.ServiceContainer())
+
+    /* wrap last-to-first so the first registered decorator ends up outermost */
+    for index := len(instance.httpHandlerDecorators) - 1; 0 <= index; index-- {
+        httpHandler = instance.httpHandlerDecorators[index](httpHandler)
+    }
 
     httpServer := &nethttp.Server{
         Addr:    configuration.Http().Address(),

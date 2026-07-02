@@ -1050,3 +1050,53 @@ func TestBuildSchema_MaxOnNonStringScalar(t *testing.T) {
         t.Fatalf("expected an untagged int field to advertise no numeric bound, got %+v", plain)
     }
 }
+
+type paramsOnNonParameterizableRequest struct {
+    Email string `json:"email" validate:"email(strict=yes)"`
+    Name  string `json:"name" validate:"notBlank(mode=hard)"`
+}
+
+func TestBuildSchema_ParamsOnNonParameterizableConstraintIsUnsatisfiable(t *testing.T) {
+    components := map[string]*Schema{}
+    buildSchema(reflect.TypeOf(paramsOnNonParameterizableRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    schema := components["paramsOnNonParameterizableRequest"]
+    if nil == schema {
+        t.Fatalf("expected the request schema to be registered in components")
+    }
+
+    /* @important the validator fails closed when a tag carries parameters a non-parameterizable constraint cannot consume (createConstraintWithParams rejects the rule), so the spec must advertise the field as unsatisfiable rather than as a satisfiable string a client would trust */
+    for _, fieldName := range []string{"email", "name"} {
+        property := schema.Properties[fieldName]
+        if nil == property || nil == property.MinLength || 1 != *property.MinLength || nil == property.MaxLength || 0 != *property.MaxLength {
+            t.Fatalf("expected params on a non-parameterizable constraint to advertise an unsatisfiable string schema, field %q got: %+v", fieldName, property)
+        }
+    }
+}
+
+type paramsOnNonParameterizableStructRequest struct {
+    Inline *paramsOnNonParameterizableRequest `json:"inline" validate:"notBlank(mode=hard)"`
+    Plain  paramsOnNonParameterizableRequest  `json:"plain" validate:"email(strict=yes)"`
+}
+
+func TestBuildSchema_ParamsOnNonParameterizableConstraintOnStructIsUnsatisfiable(t *testing.T) {
+    components := map[string]*Schema{}
+    buildSchema(reflect.TypeOf(paramsOnNonParameterizableStructRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    schema := components["paramsOnNonParameterizableStructRequest"]
+    if nil == schema {
+        t.Fatalf("expected the request schema to be registered in components")
+    }
+
+    /* @important the validator fails the rule closed before Constraint.Validate runs, so a struct field ($ref or nullable allOf-wrapped $ref) carrying params on a non-parameterizable constraint accepts no value either — the early-return branch of applyValidation must advertise it unsatisfiable (contradictory allOf, mirroring notEmpty-on-struct), not as a satisfiable object */
+    for _, fieldName := range []string{"inline", "plain"} {
+        property := schema.Properties[fieldName]
+        if nil == property {
+            t.Fatalf("expected the %q property to exist", fieldName)
+        }
+
+        if true == property.Nullable || 0 == len(property.AllOf) || false == isImpossibleObject(property.AllOf[len(property.AllOf)-1]) {
+            t.Fatalf("expected params on a non-parameterizable constraint over a struct field to advertise an unsatisfiable, non-nullable allOf, field %q got: %+v", fieldName, property)
+        }
+    }
+}

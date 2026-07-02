@@ -217,58 +217,62 @@ func writeResponse(
     sessionAlreadyPersisted := true == isPersistenceRecorder && true == persistenceRecorder.SessionPersisted()
 
     if false == sessionAlreadyPersisted && nil != sessionManager && nil != sessionInstance {
+        sessionPersistFailed := false
+
         if true == sessionInstance.IsCleared() {
             err := sessionManager.DeleteSession(sessionInstance.Id())
             if nil != err {
-                exception.Panic(
-                    exception.NewError("failed to delete session", nil, err),
-                )
-            }
+                /* @important a session-backend outage must degrade to a logged error and a response without session-cookie changes: writeResponse also runs inside the kernel's already-consumed panic-recovery defer, where a second panic would escape ServeHttp and abort the connection instead of delivering the built response */
+                sessionPersistFailed = true
 
-            cookiePath := sessionCookiePolicy.Path
-            if "" == cookiePath {
-                cookiePath = "/"
-            }
+                logSessionPersistenceError(runtimeInstance, "failed to delete session", err)
+            } else {
+                cookiePath := sessionCookiePolicy.Path
+                if "" == cookiePath {
+                    cookiePath = "/"
+                }
 
-            cookie := &nethttp.Cookie{
-                Name:     session.SessionCookieName,
-                Value:    "",
-                Path:     cookiePath,
-                Domain:   sessionCookiePolicy.Domain,
-                HttpOnly: true,
-                SameSite: sessionCookiePolicy.SameSite,
-                Secure:   "https" == detectSchemeWithForwardedHeadersPolicy(request.HttpRequest(), forwardedHeadersPolicy),
-                MaxAge:   -1,
-            }
+                cookie := &nethttp.Cookie{
+                    Name:     session.SessionCookieName,
+                    Value:    "",
+                    Path:     cookiePath,
+                    Domain:   sessionCookiePolicy.Domain,
+                    HttpOnly: true,
+                    SameSite: sessionCookiePolicy.SameSite,
+                    Secure:   "https" == detectSchemeWithForwardedHeadersPolicy(request.HttpRequest(), forwardedHeadersPolicy),
+                    MaxAge:   -1,
+                }
 
-            SetCookie(response, cookie)
+                SetCookie(response, cookie)
+            }
         } else if true == sessionInstance.IsModified() {
             err := sessionManager.SaveSession(sessionInstance)
             if nil != err {
-                exception.Panic(
-                    exception.NewError("failed to save session", nil, err),
-                )
-            }
+                /* @important same degradation as the delete path: log once and send the response without the session cookie; the session is intentionally not marked persisted so a later successful write could still commit it */
+                sessionPersistFailed = true
 
-            cookiePath := sessionCookiePolicy.Path
-            if "" == cookiePath {
-                cookiePath = "/"
-            }
+                logSessionPersistenceError(runtimeInstance, "failed to save session", err)
+            } else {
+                cookiePath := sessionCookiePolicy.Path
+                if "" == cookiePath {
+                    cookiePath = "/"
+                }
 
-            cookie := &nethttp.Cookie{
-                Name:     session.SessionCookieName,
-                Value:    sessionInstance.Id(),
-                Path:     cookiePath,
-                Domain:   sessionCookiePolicy.Domain,
-                HttpOnly: true,
-                SameSite: sessionCookiePolicy.SameSite,
-                Secure:   "https" == detectSchemeWithForwardedHeadersPolicy(request.HttpRequest(), forwardedHeadersPolicy),
-            }
+                cookie := &nethttp.Cookie{
+                    Name:     session.SessionCookieName,
+                    Value:    sessionInstance.Id(),
+                    Path:     cookiePath,
+                    Domain:   sessionCookiePolicy.Domain,
+                    HttpOnly: true,
+                    SameSite: sessionCookiePolicy.SameSite,
+                    Secure:   "https" == detectSchemeWithForwardedHeadersPolicy(request.HttpRequest(), forwardedHeadersPolicy),
+                }
 
-            SetCookie(response, cookie)
+                SetCookie(response, cookie)
+            }
         }
 
-        if true == isPersistenceRecorder {
+        if true == isPersistenceRecorder && false == sessionPersistFailed {
             persistenceRecorder.MarkSessionPersisted()
         }
     }
@@ -282,10 +286,31 @@ func writeResponse(
 
     err := WriteToHttpResponseWriter(runtimeInstance, request, writer, response)
     if nil != err {
-        exception.Panic(
-            exception.NewError("failed to write response", nil, err),
-        )
+        /* @important the headers (and part of the body) may already be committed by the failed write, so a panic cannot produce a better response — and on the panic-recovery path it would escape ServeHttp and reset the connection; log and return instead */
+        logger := logging.LoggerFromRuntime(runtimeInstance)
+        if nil != logger {
+            logger.Error(
+                "failed to write response",
+                exception.LogContext(err),
+            )
+        }
     }
+}
+
+func logSessionPersistenceError(
+    runtimeInstance runtimecontract.Runtime,
+    message string,
+    err error,
+) {
+    logger := logging.LoggerFromRuntime(runtimeInstance)
+    if nil == logger {
+        return
+    }
+
+    logger.Error(
+        message,
+        exception.LogContext(err),
+    )
 }
 
 func closeDiscardedResponseBody(response httpcontract.Response, logger loggingcontract.Logger) {

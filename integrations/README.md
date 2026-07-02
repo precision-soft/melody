@@ -19,6 +19,7 @@ only (see the repository [`CONTRIBUTING.md`](../CONTRIBUTING.md) and [`SECURITY.
 | **bunorm/pgsql**   | PostgreSQL driver wiring and distributed-lock backend.                                         | v1 / v2 / v3  | [README](./bunorm/pgsql/README.md)     |
 | **cron**           | Crontab generation from registered schedules (`melody:cron:generate`).                         | v1 / v2 / v3  | [README](./cron/README.md)             |
 | **opentelemetry**  | HTTP metrics/observability (Prometheus exposition) wiring.                                     | v3            | [README](./opentelemetry/v3/README.md) |
+| **outbox**         | Transactional outbox for the message bus (atomic enqueue, relay with retry and dead-letter).   | v3            | [README](./outbox/v3/README.md)        |
 | **rueidis**        | Redis-backed cache, distributed lock, token store, and SSE backplane.                          | v1 / v2 / v3  | [README](./rueidis/README.md)          |
 | **websocket**      | WebSocket support (connection hub, bound to the server-sent-event hub).                        | v3            | [README](./websocket/v3/README.md)     |
 

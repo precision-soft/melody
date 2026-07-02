@@ -10,7 +10,7 @@ The integration is published as independent Go modules so applications pull only
 * Melody v2 binding: [`./v2/`](./v2/) — `github.com/precision-soft/melody/integrations/cron/v2`
 * Melody v3 binding: [`./v3/`](./v3/) — `github.com/precision-soft/melody/integrations/cron/v3`
 
-The three bindings share the same exported API and behavior; they differ only in the melody version they import. The examples below use the v3 import path; for v2, replace `/v3` with `/v2`; for v1, drop the `/v3` suffix entirely (the v1 binding lives at the module root, following Go's no-suffix convention for v0/v1).
+The three bindings share the same exported API and behavior; they differ in the melody version they import, and the v3 binding additionally ships the built-in `k8s` template (see [Customizing the template](#customizing-the-template)). The examples below use the v3 import path; for v2, replace `/v3` with `/v2`; for v1, drop the `/v3` suffix entirely (the v1 binding lives at the module root, following Go's no-suffix convention for v0/v1).
 
 ## What you get
 
@@ -251,7 +251,7 @@ Accepted values: `default` (the `--out` destination), an absolute path, or a rel
 
 ## Customizing the template
 
-The generator dispatches rendering to a registered `Template` whose `Name()` matches `--template` (or, if unset, the `melody.cron.template` container parameter; default `"crontab"`). Two templates ship in-tree and are registered automatically — `crontab` and `k8s` (Kubernetes `CronJob` manifests). You can also plug in your own (Supervisor, custom YAML/INI, etc.) without forking the cron integration.
+The generator dispatches rendering to a registered `Template` whose `Name()` matches `--template` (or, if unset, the `melody.cron.template` container parameter; default `"crontab"`). The `crontab` template ships in-tree in all three bindings and is registered automatically; the v3 binding additionally ships a built-in `k8s` template (Kubernetes `CronJob` manifests). You can also plug in your own (Supervisor, custom YAML/INI, etc.) without forking the cron integration.
 
 ### `Template` interface
 
@@ -266,9 +266,9 @@ type Template interface {
 
 ### Built-in templates
 
-`cron.BuiltinTemplates()` returns the list of templates shipped with the integration: `*CrontabTemplate{}` (`cron.TemplateNameCrontab == "crontab"`) and `*K8sTemplate{}` (`cron.TemplateNameK8s == "k8s"`). `NewGenerateCommand` iterates this slice on construction, so you never register the built-ins by hand — they are always available even after you add your own.
+`cron.BuiltinTemplates()` returns the list of templates shipped with the binding: `*CrontabTemplate{}` (`cron.TemplateNameCrontab == "crontab"`) in all three bindings, plus `*K8sTemplate{}` (`cron.TemplateNameK8s == "k8s"`) in the v3 binding only. `NewGenerateCommand` iterates this slice on construction, so you never register the built-ins by hand — they are always available even after you add your own.
 
-### Built-in `k8s` template
+### Built-in `k8s` template (v3 binding only)
 
 `--template=k8s` renders the same `cron.Configuration` as a multi-document YAML stream — one `batch/v1` `CronJob` per scheduled command (`---`-separated) — suitable for `kubectl apply -f`. The same registry drives both the on-VPS crontab and the in-cluster CronJobs.
 
@@ -495,3 +495,5 @@ The three bindings expose the same identifiers. From any of `github.com/precisio
 * Parameter-name constants: `ParameterUser`, `ParameterLogsDir`, `ParameterBinary`, `ParameterDestinationFile`, `ParameterHeartbeatPath`, `ParameterHeartbeatAutoEnabled`, `ParameterTemplate`.
 * Template-name constants: `TemplateNameCrontab`.
 * Globals: `CrontabForbiddenChars`.
+
+The v3 binding additionally exposes the built-in `k8s` template: `K8sTemplate`, `TemplateNameK8s`, and the `ParameterImage`/`ParameterNamespace`/`ParameterRestartPolicy` parameter-name constants.

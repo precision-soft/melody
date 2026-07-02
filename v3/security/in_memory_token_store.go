@@ -118,18 +118,27 @@ func cloneClaims(claims securitycontract.Claims) securitycontract.Claims {
         cloned.Attributes = internal.CopyAnyMap(claims.Attributes)
     }
 
-    if nil != claims.OriginatingActor {
-        actorCopy := *claims.OriginatingActor
-        if nil != claims.OriginatingActor.Roles {
-            actorCopy.Roles = append([]string{}, claims.OriginatingActor.Roles...)
-        }
-        if nil != claims.OriginatingActor.Attributes {
-            actorCopy.Attributes = internal.CopyStringMap(claims.OriginatingActor.Attributes)
-        }
-        cloned.OriginatingActor = &actorCopy
-    }
+    cloned.OriginatingActor = cloneActorData(claims.OriginatingActor)
 
     return cloned
+}
+
+/* cloneActorData deep-copies an originating actor, including its nested Impersonator subtree, so a stored or returned actor never aliases the caller's mutable ActorData (its Roles, Attributes, or the accountable impersonator behind it). Recurses through the impersonator chain; a nil carrier clones to nil. */
+func cloneActorData(actor *securitycontract.ActorData) *securitycontract.ActorData {
+    if nil == actor {
+        return nil
+    }
+
+    actorCopy := *actor
+    if nil != actor.Roles {
+        actorCopy.Roles = append([]string{}, actor.Roles...)
+    }
+    if nil != actor.Attributes {
+        actorCopy.Attributes = internal.CopyStringMap(actor.Attributes)
+    }
+    actorCopy.Impersonator = cloneActorData(actor.Impersonator)
+
+    return &actorCopy
 }
 
 func (instance *InMemoryTokenStore) Lookup(

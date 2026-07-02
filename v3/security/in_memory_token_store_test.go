@@ -151,6 +151,74 @@ func TestInMemoryTokenStore_LookupDeepCopiesNestedAttributeMap(t *testing.T) {
     }
 }
 
+/* regression: the impersonator subtree carried on an originating actor must be deep-copied by the store clone, otherwise a Lookup caller (or a caller mutating its claims after Put) corrupts the stored impersonator's roles and concurrent Lookups race on the shared *ActorData. */
+func TestInMemoryTokenStore_LookupDeepCopiesImpersonatorSubtree(t *testing.T) {
+    store := NewInMemoryTokenStore()
+    rt := tokenStoreRuntime()
+
+    store.Put("tok-imp", securitycontract.Claims{
+        UserIdentifier: "billing-service",
+        OriginatingActor: &securitycontract.ActorData{
+            Identifier: "client-42",
+            Type:       securitycontract.ActorTypeUser,
+            Impersonator: &securitycontract.ActorData{
+                Identifier: "admin-7",
+                Type:       securitycontract.ActorTypeUser,
+                Roles:      []string{"ROLE_ADMIN"},
+                Attributes: map[string]string{"region": "eu"},
+            },
+        },
+    })
+
+    first, found, err := store.Lookup(rt, "tok-imp")
+    if nil != err || false == found {
+        t.Fatalf("lookup failed: found=%v err=%v", found, err)
+    }
+
+    first.OriginatingActor.Impersonator.Roles[0] = "ROLE_PWNED"
+    first.OriginatingActor.Impersonator.Attributes["region"] = "evil"
+
+    second, _, _ := store.Lookup(rt, "tok-imp")
+    if "ROLE_ADMIN" != second.OriginatingActor.Impersonator.Roles[0] {
+        t.Fatalf("mutating a returned impersonator role corrupted the stored entry, got %v", second.OriginatingActor.Impersonator.Roles)
+    }
+    if "eu" != second.OriginatingActor.Impersonator.Attributes["region"] {
+        t.Fatalf("mutating a returned impersonator attribute corrupted the stored entry, got %v", second.OriginatingActor.Impersonator.Attributes)
+    }
+}
+
+/* regression: mutating the caller's nested impersonator after Put must not reach the stored entry. */
+func TestInMemoryTokenStore_PutDeepCopiesImpersonatorSubtree(t *testing.T) {
+    store := NewInMemoryTokenStore()
+    rt := tokenStoreRuntime()
+
+    original := securitycontract.Claims{
+        UserIdentifier: "billing-service",
+        OriginatingActor: &securitycontract.ActorData{
+            Identifier: "client-42",
+            Type:       securitycontract.ActorTypeUser,
+            Impersonator: &securitycontract.ActorData{
+                Identifier: "admin-7",
+                Type:       securitycontract.ActorTypeUser,
+                Roles:      []string{"ROLE_ADMIN"},
+            },
+        },
+    }
+
+    store.Put("tok-imp-put", original)
+
+    original.OriginatingActor.Impersonator.Roles[0] = "ROLE_PWNED"
+
+    stored, found, err := store.Lookup(rt, "tok-imp-put")
+    if nil != err || false == found {
+        t.Fatalf("lookup failed: found=%v err=%v", found, err)
+    }
+
+    if "ROLE_ADMIN" != stored.OriginatingActor.Impersonator.Roles[0] {
+        t.Fatalf("mutating the caller's impersonator after Put corrupted the stored entry, got %v", stored.OriginatingActor.Impersonator.Roles)
+    }
+}
+
 func TestInMemoryTokenStore_PutDeepCopiesNestedScopeMap(t *testing.T) {
     store := NewInMemoryTokenStore()
     rt := tokenStoreRuntime()

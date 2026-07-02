@@ -29,6 +29,7 @@ type Application struct {
     cliCommands           []clicontract.Command
     httpRouteRegistrars   []RouteRegistrar
     httpMiddlewares       *HttpMiddleware
+    httpHandlerDecorators []applicationcontract.HttpHandlerDecorator
     securityConfiguration *security.CompiledConfiguration
     routeRegistry         httpcontract.RouteRegistry
     moduleConfigurations  map[string]any
