@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `version/version.go` — the ldflags-overridable `buildVersion` default is raised to `v1.15.0`; keeping it in step with the released tag is now a standing release-procedure step (builds without `-ldflags` previously reported a stale default).
 - `container/scope.go` — resolving from a closed scope through the error-returning methods (`Get`, `GetByType`, `OverrideProtectedInstance`) now returns the `scope is closed` error instead of panicking, aligning them with the package's Must/non-Must convention. The `Must*` variants keep panicking. A panic here was fatal in handler-spawned goroutines that outlive the request (the kernel closes the request scope when `ServeHttp` returns and no recover covers those goroutines). Aligned in lockstep with `v2`/`v3`.
 
 ### Fixed

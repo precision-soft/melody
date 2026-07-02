@@ -1100,3 +1100,179 @@ func TestBuildSchema_ParamsOnNonParameterizableConstraintOnStructIsUnsatisfiable
         }
     }
 }
+
+type malformedMinNonStringRequest struct {
+    Age     int      `json:"age" validate:"min=abc"`
+    Score   float64  `json:"score" validate:"min="`
+    Ok      bool     `json:"ok" validate:"min=xyz"`
+    Tags    []string `json:"tags" validate:"min=nan"`
+}
+
+func TestBuildSchema_MalformedMinOnNonStringFieldsIsUnsatisfiable(t *testing.T) {
+    components := map[string]*Schema{}
+    buildSchema(reflect.TypeOf(malformedMinNonStringRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    schema := components["malformedMinNonStringRequest"]
+    if nil == schema {
+        t.Fatalf("expected the request schema to be registered in components")
+    }
+
+    /* @important a malformed min value fails the rule closed for a field of ANY kind (createConstraintWithParams rejects it before Validate runs), so integer/number/boolean/array fields must be advertised unsatisfiable, not as satisfiable defaults — mirroring the malformed-max handling */
+    for _, fieldName := range []string{"age", "score", "ok", "tags"} {
+        property := schema.Properties[fieldName]
+        if nil == property {
+            t.Fatalf("expected the %q property to exist", fieldName)
+        }
+        if false == isUnsatisfiableSchema(property) {
+            t.Fatalf("expected a malformed min on %q to advertise an unsatisfiable field, got %+v", fieldName, property)
+        }
+    }
+}
+
+type uncompilableRegexRequest struct {
+    Code string `json:"code" validate:"regex(pattern=a{3,1})"`
+}
+
+func TestBuildSchema_UncompilableRegexIsUnsatisfiable(t *testing.T) {
+    components := map[string]*Schema{}
+    buildSchema(reflect.TypeOf(uncompilableRegexRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    schema := components["uncompilableRegexRequest"]
+    if nil == schema {
+        t.Fatalf("expected the request schema to be registered in components")
+    }
+
+    property := schema.Properties["code"]
+    if nil == property {
+        t.Fatalf("expected the code property to exist")
+    }
+
+    /* @important the validator accepts the empty string (and null for a pointer) even for an uncompilable pattern, rejecting only non-empty values; the spec must therefore advertise maxLength 0 (only the empty string) — not the uncompilable pattern verbatim, and not a fully unsatisfiable field that would also forbid the empty string */
+    if "" != property.Pattern {
+        t.Fatalf("expected an uncompilable pattern not to be advertised verbatim, got pattern %q", property.Pattern)
+    }
+    if nil == property.MaxLength || 0 != *property.MaxLength {
+        t.Fatalf("expected an uncompilable regex to advertise maxLength 0, got %+v", property)
+    }
+    if nil != property.MinLength {
+        t.Fatalf("expected no minLength floor (the empty string must stay valid), got %+v", property)
+    }
+}
+
+type uncompilableRegexNullableRequest struct {
+    Code *string `json:"code" validate:"regex(pattern=a{3,1})"`
+}
+
+func TestBuildSchema_UncompilableRegexOnPointerKeepsNullable(t *testing.T) {
+    components := map[string]*Schema{}
+    buildSchema(reflect.TypeOf(uncompilableRegexNullableRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    schema := components["uncompilableRegexNullableRequest"]
+    if nil == schema {
+        t.Fatalf("expected the request schema to be registered in components")
+    }
+
+    property := schema.Properties["code"]
+    if nil == property {
+        t.Fatalf("expected the code property to exist")
+    }
+
+    /* @important the validator accepts null for a *string with an uncompilable regex (Regex.Validate returns nil for a nil pointer), so the nullable advertisement must be preserved while non-empty strings are excluded via maxLength 0 */
+    if false == property.Nullable {
+        t.Fatalf("expected a nullable pointer field with an uncompilable regex to stay nullable, got %+v", property)
+    }
+    if nil == property.MaxLength || 0 != *property.MaxLength {
+        t.Fatalf("expected maxLength 0, got %+v", property)
+    }
+}
+
+type negativeMaxNullableRequest struct {
+    Count *int     `json:"count" validate:"max=-1"`
+    Ratio *float64 `json:"ratio" validate:"max=-3"`
+    Flag  *bool    `json:"flag" validate:"max=-2"`
+}
+
+func TestBuildSchema_NegativeMaxOnNullableKeepsNullable(t *testing.T) {
+    components := map[string]*Schema{}
+    buildSchema(reflect.TypeOf(negativeMaxNullableRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    schema := components["negativeMaxNullableRequest"]
+    if nil == schema {
+        t.Fatalf("expected the request schema to be registered in components")
+    }
+
+    /* @important a negative max parses fine, so MaxLength.Validate runs and accepts a nil pointer (dereferenceValue ok=false): the validator rejects only non-null values, so a nullable field must keep Nullable=true (emptyValueSpace), not be marked fully unsatisfiable */
+    for _, fieldName := range []string{"count", "ratio", "flag"} {
+        property := schema.Properties[fieldName]
+        if nil == property {
+            t.Fatalf("expected the %q property to exist", fieldName)
+        }
+        if false == property.Nullable {
+            t.Fatalf("expected nullable field %q with a negative max to keep Nullable=true, got %+v", fieldName, property)
+        }
+    }
+}
+
+func isUnsatisfiableSchema(schema *Schema) bool {
+    if "string" == schema.Type {
+        return nil != schema.MinLength && nil != schema.MaxLength && 1 == *schema.MinLength && 0 == *schema.MaxLength
+    }
+    if "integer" == schema.Type || "number" == schema.Type {
+        return nil != schema.Minimum && nil != schema.Maximum && 0 == *schema.Minimum && 0 == *schema.Maximum && nil != schema.ExclusiveMinimum && nil != schema.ExclusiveMaximum
+    }
+    if "array" == schema.Type {
+        return nil != schema.MinItems && nil != schema.MaxItems && 1 == *schema.MinItems && 0 == *schema.MaxItems
+    }
+    if "boolean" == schema.Type {
+        return 2 == len(schema.AllOf)
+    }
+    return false
+}
+
+type uncompilableRegexThenMaxRequest struct {
+    Code string `json:"code" validate:"regex(pattern=a{3,1}),max=5"`
+}
+
+func TestBuildSchema_UncompilableRegexNotLoosenedByLaterMax(t *testing.T) {
+    components := map[string]*Schema{}
+    buildSchema(reflect.TypeOf(uncompilableRegexThenMaxRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    schema := components["uncompilableRegexThenMaxRequest"]
+    if nil == schema {
+        t.Fatalf("expected the request schema to be registered in components")
+    }
+
+    property := schema.Properties["code"]
+    if nil == property {
+        t.Fatalf("expected the code property to exist")
+    }
+
+    /* @important the validator enforces both rules: the uncompilable regex rejects every non-empty value (only "" satisfies), so a later max=5 must not raise the advertised ceiling back to 5 and resurrect 1..5-char values the regex rejects — the tighter maxLength 0 must win */
+    if nil == property.MaxLength || 0 != *property.MaxLength {
+        t.Fatalf("expected maxLength 0 to survive a later max=5 (tighter bound wins), got %+v", property)
+    }
+}
+
+type uncompilableRegexThenValuelessMaxRequest struct {
+    Code string `json:"code" validate:"regex(pattern=a{3,1}),max"`
+}
+
+func TestBuildSchema_UncompilableRegexNotLoosenedByValuelessMax(t *testing.T) {
+    components := map[string]*Schema{}
+    buildSchema(reflect.TypeOf(uncompilableRegexThenValuelessMaxRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    schema := components["uncompilableRegexThenValuelessMaxRequest"]
+    if nil == schema {
+        t.Fatalf("expected the request schema to be registered in components")
+    }
+
+    property := schema.Properties["code"]
+    if nil == property {
+        t.Fatalf("expected the code property to exist")
+    }
+
+    /* @important a value-less max (default maxLength 100) must not raise the maxLength 0 an uncompilable regex set: the validator enforces both, so the tighter ceiling wins */
+    if nil == property.MaxLength || 0 != *property.MaxLength {
+        t.Fatalf("expected maxLength 0 to survive a later value-less max, got %+v", property)
+    }
+}
