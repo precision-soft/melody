@@ -157,8 +157,19 @@ func (instance *Relay) RunOnce(runtimeInstance runtimecontract.Runtime) (int, er
 func (instance *Relay) deliver(runtimeInstance runtimecontract.Runtime, pending Pending) (bool, error) {
     ctx := runtimeInstance.Context()
 
-    if pending.DeliveryAttempts > instance.config.MaxDeliveryAttempts {
-        /* the row has been claimed more times than the delivery cap without ever resolving. A row that merely fails to send is dead-lettered by the send-failure path at MaxAttempts, so exceeding the (larger) claim cap means it keeps crashing or hanging the relay between claim and resolve — its send-failure attempts never advance. Dead-letter it as poison so it cannot re-surface forever. */
+    /* record this delivery attempt — and persist it — before decoding or sending, both of which can crash or hang the relay. Charging the attempt per row at this point (rather than to the whole batch at claim time) means a row that keeps crashing advances only its own poison counter; a batch-mate the relay never reaches is never charged an attempt it never received, so it is never falsely dead-lettered. */
+    deliveryAttempts, claimed, recordErr := instance.config.Repository.RecordDeliveryAttempt(ctx, pending.Id)
+    if nil != recordErr {
+        return false, recordErr
+    }
+
+    if false == claimed {
+        /* the row's claim lapsed (visibility timeout) and another instance owns it now; skip it rather than publish alongside the new owner. */
+        return false, nil
+    }
+
+    if deliveryAttempts > instance.config.MaxDeliveryAttempts {
+        /* the row has been delivered more times than the delivery cap without ever resolving. A row that merely fails to send is dead-lettered by the send-failure path at MaxAttempts, so exceeding the (larger) delivery cap means it keeps crashing or hanging the relay between the recorded attempt and resolve — its send-failure attempts never advance. Dead-letter it as poison so it cannot re-surface forever. */
         return false, instance.config.Repository.MarkDead(ctx, pending.Id, pending.Attempts, "exceeded max delivery attempts (poison crashing the relay between claim and resolve)")
     }
 

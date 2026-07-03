@@ -98,13 +98,14 @@ func (instance *ImpersonationTokenSource) Resolve(
     if nil != userErr {
         instance.logDenied(runtimeInstance, "could not resolve the impersonated user", target)
 
-        return innerToken, nil
+        /* @important the caller already passed the switch-role check, so this request was meant to run narrowed to the target's identity. Refuse it closed with an anonymous token rather than silently continuing with the caller's own (broader, switch-privileged) roles: that fail-to-narrow would execute the request with privileges the operator believed were constrained to the target (a destructive write running with admin authority behind an impersonation UI). Access-control then denies the protected route. The earlier branches (no switch header, anonymous caller, caller without the switch role) carry no such footgun — no narrowing was ever going to happen — so they still pass the inner token through unchanged. */
+        return NewAnonymousToken(), nil
     }
 
     if true == internal.IsNilInterface(impersonatedToken) || false == impersonatedToken.IsAuthenticated() {
         instance.logDenied(runtimeInstance, "impersonated user is unknown or not authenticated", target)
 
-        return innerToken, nil
+        return NewAnonymousToken(), nil
     }
 
     return NewImpersonationTokenWithRoleMode(impersonatedToken, innerToken, instance.roleMode), nil

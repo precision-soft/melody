@@ -2,13 +2,15 @@ package outbox
 
 import (
     "context"
+    "database/sql"
+    "errors"
     "time"
 
     "github.com/precision-soft/melody/v3/exception"
     bun "github.com/uptrace/bun"
 )
 
-/* Message is the outbox table row. The relay-facing fields (status, attempts, delivery_attempts, available_at) drive retry scheduling; payload + type_name are what the codec needs to rebuild the message. Attempts counts send failures (drives backoff and the MaxAttempts dead-letter); delivery_attempts counts every claim (drives the MaxDeliveryAttempts crash-poison cap). */
+/* Message is the outbox table row. The relay-facing fields (status, attempts, delivery_attempts, available_at) drive retry scheduling; payload + type_name are what the codec needs to rebuild the message. Attempts counts send failures (drives backoff and the MaxAttempts dead-letter); delivery_attempts counts every delivery the relay actually attempts for this row (drives the MaxDeliveryAttempts crash-poison cap) — it is advanced per row at delivery time, not for the whole batch at claim time, so a batch-mate the relay never reached is never charged. */
 type Message struct {
     bun.BaseModel `bun:"table:melody_outbox"`
 
@@ -79,7 +81,7 @@ func (instance *Store) Enqueue(ctx context.Context, executor bun.IDB, message an
     return nil
 }
 
-/* ClaimDueMessages atomically claims a batch of due rows so that concurrent relay instances — even without a shared Locker — never grab the same row. It requires a backend that supports SELECT … FOR UPDATE SKIP LOCKED (PostgreSQL, or MySQL 8+). It selects due rows FOR UPDATE SKIP LOCKED inside a transaction (so a row another instance is claiming is skipped, not blocked on) and flips them to the in-flight state with available_at pushed out by the visibility timeout. A claimed row is therefore invisible to every other claimer until either the relay resolves it (sent/rescheduled/dead) or the visibility timeout lapses — which re-surfaces rows an instance claimed but crashed before resolving. A due row is one that is pending, or already in-flight but past its visibility deadline. */
+/* ClaimDueMessages atomically claims a batch of due rows so that concurrent relay instances — even without a shared Locker — never grab the same row. It requires a backend that supports SELECT … FOR UPDATE SKIP LOCKED (PostgreSQL, or MySQL 8+). It selects due rows FOR UPDATE SKIP LOCKED inside a transaction (so a row another instance is claiming is skipped, not blocked on) and flips them to the in-flight state with available_at pushed out by the visibility timeout. A claimed row is therefore invisible to every other claimer until either the relay resolves it (sent/rescheduled/dead) or the visibility timeout lapses — which re-surfaces rows an instance claimed but crashed before resolving. A due row is one that is pending, or already in-flight but past its visibility deadline. Claiming does NOT touch delivery_attempts — that counter is advanced per row when the relay actually attempts delivery (RecordDeliveryAttempt), so a row the relay never reaches (a batch-mate behind a crashing row) is not charged a delivery attempt it never received. */
 func (instance *Store) ClaimDueMessages(ctx context.Context, limit int, visibility time.Duration) ([]Pending, error) {
     rows := make([]Message, 0, limit)
 
@@ -110,7 +112,6 @@ func (instance *Store) ClaimDueMessages(ctx context.Context, limit int, visibili
         _, updateErr := tx.NewUpdate().
             Model((*Message)(nil)).
             Set("status = ?", StatusInFlight).
-            Set("delivery_attempts = delivery_attempts + 1").
             Set("available_at = ?", now.Add(visibility)).
             Where("id IN (?)", bun.In(ids)).
             Exec(ctx)
@@ -124,16 +125,59 @@ func (instance *Store) ClaimDueMessages(ctx context.Context, limit int, visibili
     pending := make([]Pending, 0, len(rows))
     for _, row := range rows {
         pending = append(pending, Pending{
-            Id:       row.Id,
-            TypeName: row.TypeName,
-            Payload:  row.Payload,
-            Attempts: row.Attempts,
-            /* rows were scanned before the in-flight UPDATE incremented delivery_attempts, so add this claim to report the post-claim count the relay's crash-poison cap checks. */
-            DeliveryAttempts: row.DeliveryAttempts + 1,
+            Id:               row.Id,
+            TypeName:         row.TypeName,
+            Payload:          row.Payload,
+            Attempts:         row.Attempts,
+            DeliveryAttempts: row.DeliveryAttempts,
         })
     }
 
     return pending, nil
+}
+
+/* RecordDeliveryAttempt increments a single in-flight row's delivery_attempts and returns the post-increment count. Called per row at delivery time (not for the batch at claim time), it charges a delivery attempt only to a row the relay actually reached: a batch-mate behind a row that crashes the relay is never incremented and so is never falsely dead-lettered as poison. The read and write run in one transaction with a row lock (FOR UPDATE) so a concurrent post-visibility claimer cannot lose an increment. A row that is no longer in-flight (its claim lapsed and another instance owns it now, or it was already resolved) returns claimed=false so the relay skips it instead of publishing alongside the new owner. */
+func (instance *Store) RecordDeliveryAttempt(ctx context.Context, id int64) (int, bool, error) {
+    deliveryAttempts := 0
+    claimed := false
+
+    recordErr := instance.database.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+        row := new(Message)
+
+        selectErr := tx.NewSelect().
+            Model(row).
+            Column("id", "status", "delivery_attempts").
+            Where("id = ?", id).
+            For("UPDATE").
+            Scan(ctx)
+        if true == errors.Is(selectErr, sql.ErrNoRows) {
+            return nil
+        }
+        if nil != selectErr {
+            return selectErr
+        }
+
+        if StatusInFlight != row.Status {
+            return nil
+        }
+
+        deliveryAttempts = row.DeliveryAttempts + 1
+        claimed = true
+
+        _, updateErr := tx.NewUpdate().
+            Model((*Message)(nil)).
+            Set("delivery_attempts = ?", deliveryAttempts).
+            Where("id = ?", id).
+            Where("status = ?", StatusInFlight).
+            Exec(ctx)
+
+        return updateErr
+    })
+    if nil != recordErr {
+        return 0, false, exception.NewError("could not record outbox delivery attempt", map[string]any{"id": id}, recordErr)
+    }
+
+    return deliveryAttempts, claimed, nil
 }
 
 /* the resolution writes are guarded on status = in-flight so only the run whose claim is still current can transition the row. If a slow run's claim lapsed (visibility timeout) and another instance re-claimed and already resolved the row, the stale write matches no row and is a harmless no-op, instead of clobbering the new owner's state (for example reviving a row another instance already marked sent). */

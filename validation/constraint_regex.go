@@ -70,4 +70,17 @@ func (instance *Regex) Error() error {
     return instance.err
 }
 
+func (instance *Regex) WithParams(params map[string]string) (validationcontract.Constraint, error) {
+    if patternString, exists := params["pattern"]; true == exists {
+        return NewRegex(patternString), nil
+    }
+
+    if patternString, exists := params["value"]; true == exists {
+        return NewRegex(patternString), nil
+    }
+
+    return NewRegex(instance.pattern), nil
+}
+
 var _ validationcontract.Constraint = (*Regex)(nil)
+var _ validationcontract.ParameterizedConstraint = (*Regex)(nil)

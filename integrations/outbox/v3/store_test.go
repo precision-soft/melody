@@ -155,30 +155,62 @@ func TestStore_StaleResolveDoesNotClobberResolvedRow(t *testing.T) {
     }
 }
 
-/* every claim increments delivery_attempts atomically and the claim reports the post-claim count, so the relay's crash-poison cap can bound a row that keeps re-surfacing (claimed but never resolved) even though its send-failure attempts never advance. */
-func TestStore_ClaimIncrementsDeliveryAttempts(t *testing.T) {
+/* claiming must NOT touch delivery_attempts; the relay charges an attempt per row at delivery time via RecordDeliveryAttempt, and the post-increment count drives the crash-poison cap. Charging per delivery (not per batch claim) keeps a batch-mate the relay never reached from being falsely climbed toward the poison cap. */
+func TestStore_RecordDeliveryAttemptIncrementsPerRowNotClaim(t *testing.T) {
     store := outboxTestStore(t)
     ctx := context.Background()
 
     enqueueOutboxRows(t, store, 1)
 
-    first, firstErr := store.ClaimDueMessages(ctx, 10, 50*time.Millisecond)
-    if nil != firstErr || 1 != len(first) {
-        t.Fatalf("first claim: %v (got %d)", firstErr, len(first))
+    claimed, claimErr := store.ClaimDueMessages(ctx, 10, time.Minute)
+    if nil != claimErr || 1 != len(claimed) {
+        t.Fatalf("claim: %v (got %d)", claimErr, len(claimed))
     }
-    if 1 != first[0].DeliveryAttempts {
-        t.Fatalf("expected the first claim to report delivery attempt 1, got %d", first[0].DeliveryAttempts)
+    if 0 != claimed[0].DeliveryAttempts {
+        t.Fatalf("expected the claim to leave delivery_attempts at 0, got %d", claimed[0].DeliveryAttempts)
+    }
+    id := claimed[0].Id
+
+    first, claimedOk, recordErr := store.RecordDeliveryAttempt(ctx, id)
+    if nil != recordErr {
+        t.Fatalf("record delivery attempt: %v", recordErr)
+    }
+    if false == claimedOk || 1 != first {
+        t.Fatalf("expected the first recorded attempt to return 1 and claimed, got %d claimed=%v", first, claimedOk)
     }
 
-    /* let the visibility lapse so the unresolved row re-surfaces (the crash-between-claim-and-resolve case) */
-    time.Sleep(120 * time.Millisecond)
-
-    second, secondErr := store.ClaimDueMessages(ctx, 10, time.Minute)
-    if nil != secondErr || 1 != len(second) {
-        t.Fatalf("second claim: %v (got %d)", secondErr, len(second))
+    second, _, secondErr := store.RecordDeliveryAttempt(ctx, id)
+    if nil != secondErr {
+        t.Fatalf("second record: %v", secondErr)
     }
-    if 2 != second[0].DeliveryAttempts {
-        t.Fatalf("expected the re-claim to report delivery attempt 2, got %d", second[0].DeliveryAttempts)
+    if 2 != second {
+        t.Fatalf("expected the second recorded attempt to return 2, got %d", second)
+    }
+}
+
+/* a row that is no longer in-flight (already resolved, or its claim lapsed and another instance owns it) must report claimed=false so the relay skips it instead of publishing alongside the new owner. */
+func TestStore_RecordDeliveryAttemptReportsUnclaimedWhenNotInFlight(t *testing.T) {
+    store := outboxTestStore(t)
+    ctx := context.Background()
+
+    enqueueOutboxRows(t, store, 1)
+
+    claimed, claimErr := store.ClaimDueMessages(ctx, 10, time.Minute)
+    if nil != claimErr || 1 != len(claimed) {
+        t.Fatalf("claim: %v (got %d)", claimErr, len(claimed))
+    }
+    id := claimed[0].Id
+
+    if sentErr := store.MarkSent(ctx, id); nil != sentErr {
+        t.Fatalf("mark sent: %v", sentErr)
+    }
+
+    _, claimedOk, recordErr := store.RecordDeliveryAttempt(ctx, id)
+    if nil != recordErr {
+        t.Fatalf("record delivery attempt: %v", recordErr)
+    }
+    if true == claimedOk {
+        t.Fatal("expected a resolved (no longer in-flight) row to report claimed=false")
     }
 }
 

@@ -11,21 +11,21 @@ import (
 )
 
 const (
-    ConstraintGreaterThan                 = "greaterThan"
-    ConstraintGreaterThanErrorSmallerThan = "smallerThan"
+    ConstraintLessThan                 = "lessThan"
+    ConstraintLessThanErrorGreaterThan = "greaterThanMax"
 )
 
-func NewGreaterThan(min int) *GreaterThan {
-    return &GreaterThan{
-        min: min,
+func NewLessThan(max int) *LessThan {
+    return &LessThan{
+        max: max,
     }
 }
 
-type GreaterThan struct {
-    min int
+type LessThan struct {
+    max int
 }
 
-func (instance *GreaterThan) Validate(value any, field string) validationcontract.ValidationError {
+func (instance *LessThan) Validate(value any, field string) validationcontract.ValidationError {
     if nil == value {
         return nil
     }
@@ -33,17 +33,17 @@ func (instance *GreaterThan) Validate(value any, field string) validationcontrac
     reflectedValue := reflect.ValueOf(value)
     for {
         if reflect.Invalid == reflectedValue.Kind() {
-            return NewValidationError(field, "value is invalid", ConstraintGreaterThanErrorSmallerThan, nil)
+            return NewValidationError(field, "value is invalid", ConstraintLessThanErrorGreaterThan, nil)
         }
 
         if (reflect.Pointer == reflectedValue.Kind()) || (reflect.Interface == reflectedValue.Kind()) {
             if true == reflectedValue.IsNil() {
                 return NewValidationError(
                     field,
-                    fmt.Sprintf("value must be greater than %d", instance.min),
-                    ConstraintGreaterThanErrorSmallerThan,
+                    fmt.Sprintf("value must be less than %d", instance.max),
+                    ConstraintLessThanErrorGreaterThan,
                     map[string]any{
-                        "min": instance.min,
+                        "max": instance.max,
                     },
                 )
             }
@@ -58,13 +58,13 @@ func (instance *GreaterThan) Validate(value any, field string) validationcontrac
     switch reflectedValue.Kind() {
     case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
         actual := reflectedValue.Int()
-        if actual <= int64(instance.min) {
+        if actual >= int64(instance.max) {
             return NewValidationError(
                 field,
-                fmt.Sprintf("value must be greater than %d", instance.min),
-                ConstraintGreaterThanErrorSmallerThan,
+                fmt.Sprintf("value must be less than %d", instance.max),
+                ConstraintLessThanErrorGreaterThan,
                 map[string]any{
-                    "min":    instance.min,
+                    "max":    instance.max,
                     "actual": actual,
                 },
             )
@@ -75,17 +75,25 @@ func (instance *GreaterThan) Validate(value any, field string) validationcontrac
     case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
         actual := reflectedValue.Uint()
 
-        if 0 > instance.min {
-            return nil
-        }
-
-        if actual <= uint64(instance.min) {
+        if 0 > instance.max {
             return NewValidationError(
                 field,
-                fmt.Sprintf("value must be greater than %d", instance.min),
-                ConstraintGreaterThanErrorSmallerThan,
+                fmt.Sprintf("value must be less than %d", instance.max),
+                ConstraintLessThanErrorGreaterThan,
                 map[string]any{
-                    "min":    instance.min,
+                    "max":    instance.max,
+                    "actual": actual,
+                },
+            )
+        }
+
+        if actual >= uint64(instance.max) {
+            return NewValidationError(
+                field,
+                fmt.Sprintf("value must be less than %d", instance.max),
+                ConstraintLessThanErrorGreaterThan,
+                map[string]any{
+                    "max":    instance.max,
                     "actual": actual,
                 },
             )
@@ -95,13 +103,13 @@ func (instance *GreaterThan) Validate(value any, field string) validationcontrac
 
     case reflect.Float32, reflect.Float64:
         actual := reflectedValue.Float()
-        if true == math.IsNaN(actual) || actual <= float64(instance.min) {
+        if true == math.IsNaN(actual) || actual >= float64(instance.max) {
             return NewValidationError(
                 field,
-                fmt.Sprintf("value must be greater than %d", instance.min),
-                ConstraintGreaterThanErrorSmallerThan,
+                fmt.Sprintf("value must be less than %d", instance.max),
+                ConstraintLessThanErrorGreaterThan,
                 map[string]any{
-                    "min":    instance.min,
+                    "max":    instance.max,
                     "actual": actual,
                 },
             )
@@ -110,24 +118,24 @@ func (instance *GreaterThan) Validate(value any, field string) validationcontrac
         return nil
 
     default:
-        return NewValidationError(field, "value must be numeric", ConstraintGreaterThanErrorSmallerThan, nil)
+        return NewValidationError(field, "value must be numeric", ConstraintLessThanErrorGreaterThan, nil)
     }
 }
 
-func (instance *GreaterThan) Min() int {
-    return instance.min
+func (instance *LessThan) Max() int {
+    return instance.max
 }
 
-func (instance *GreaterThan) WithParams(params map[string]string) (validationcontract.Constraint, error) {
+func (instance *LessThan) WithParams(params map[string]string) (validationcontract.Constraint, error) {
     valueString, exists := params["value"]
     if false == exists {
-        return NewGreaterThan(instance.min), nil
+        return NewLessThan(instance.max), nil
     }
 
     parsed, ok := parseIntStrict(valueString)
     if false == ok {
         return nil, exception.NewError(
-            "invalid greater than parameter",
+            "invalid less than parameter",
             exceptioncontract.Context{
                 "value": valueString,
             },
@@ -135,8 +143,8 @@ func (instance *GreaterThan) WithParams(params map[string]string) (validationcon
         )
     }
 
-    return NewGreaterThan(parsed), nil
+    return NewLessThan(parsed), nil
 }
 
-var _ validationcontract.Constraint = (*GreaterThan)(nil)
-var _ validationcontract.ParameterizedConstraint = (*GreaterThan)(nil)
+var _ validationcontract.Constraint = (*LessThan)(nil)
+var _ validationcontract.ParameterizedConstraint = (*LessThan)(nil)

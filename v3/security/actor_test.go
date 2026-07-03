@@ -112,6 +112,50 @@ func TestActorFromTokenOnAnonymousToken(t *testing.T) {
     }
 }
 
+/* @info a cyclic ActorData — an in-process caller can point Impersonator back into the chain through the exported field — must not recurse until the goroutine stack overflows; the depth bound truncates it. If unbounded this crashes the test binary rather than failing an assertion. */
+func TestNewActorFromDataBoundsCyclicImpersonatorChain(t *testing.T) {
+    data := &securitycontract.ActorData{
+        Identifier: "loop",
+        Type:       securitycontract.ActorTypeUser,
+    }
+    data.Impersonator = data
+
+    actor := security.NewActorFromData(data)
+    if nil == actor {
+        t.Fatal("expected a rebuilt actor")
+    }
+
+    if "loop" != actor.Identifier() {
+        t.Fatalf("expected the rebuilt actor identity, got %q", actor.Identifier())
+    }
+}
+
+type selfImpersonatingActor struct{}
+
+func (instance *selfImpersonatingActor) Identifier() string { return "loop" }
+
+func (instance *selfImpersonatingActor) Type() string { return securitycontract.ActorTypeSystem }
+
+func (instance *selfImpersonatingActor) Roles() []string { return nil }
+
+func (instance *selfImpersonatingActor) Attributes() map[string]string { return nil }
+
+func (instance *selfImpersonatingActor) Impersonator() (securitycontract.Actor, bool) {
+    return instance, true
+}
+
+/* @info a cyclic Actor whose Impersonator() returns itself must not recurse until the stack overflows when serialized; the depth bound truncates the chain. */
+func TestActorToDataBoundsCyclicImpersonatorChain(t *testing.T) {
+    data := security.ActorToData(&selfImpersonatingActor{})
+    if nil == data {
+        t.Fatal("expected serialized actor data")
+    }
+
+    if "loop" != data.Identifier {
+        t.Fatalf("expected the top-level identity, got %q", data.Identifier)
+    }
+}
+
 func TestActorDefensiveCopies(t *testing.T) {
     roles := []string{"ROLE_A"}
     attributes := map[string]string{"k": "v"}

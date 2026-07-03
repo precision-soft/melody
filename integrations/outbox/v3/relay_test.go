@@ -36,6 +36,19 @@ func (instance *fakeRepository) ClaimDueMessages(_ context.Context, _ int, _ tim
     return instance.due, nil
 }
 
+/* models the store: charges a delivery attempt to a single row (advancing its stored count) only when that row is actually reached, and reports the row missing (claimed=false) when it is not among the due rows. It does not append to calls so the exact resolution-call assertions elsewhere stay meaningful. */
+func (instance *fakeRepository) RecordDeliveryAttempt(_ context.Context, id int64) (int, bool, error) {
+    for index := range instance.due {
+        if id == instance.due[index].Id {
+            instance.due[index].DeliveryAttempts++
+
+            return instance.due[index].DeliveryAttempts, true, nil
+        }
+    }
+
+    return 0, false, nil
+}
+
 func (instance *fakeRepository) MarkSent(_ context.Context, id int64) error {
     instance.calls = append(instance.calls, repoCall{kind: "sent", id: id})
 
@@ -232,9 +245,9 @@ func TestRelay_UndecodableMessageIsDeadLettered(t *testing.T) {
     }
 }
 
-/* a row claimed more times than the delivery cap without ever resolving (it keeps crashing or hanging the relay between claim and resolve, so its send-failure Attempts never advances to MaxAttempts) is dead-lettered as poison instead of re-surfacing forever. */
+/* a row delivered more times than the delivery cap without ever resolving (it keeps crashing or hanging the relay between the recorded attempt and resolve, so its send-failure Attempts never advances to MaxAttempts) is dead-lettered as poison instead of re-surfacing forever. With MaxAttempts=2 the cap is 4; a stored count of 4 records the 5th attempt, which trips it. */
 func TestRelay_DeadLettersPoisonExceedingMaxDeliveryAttempts(t *testing.T) {
-    repository := &fakeRepository{due: []Pending{{Id: 5, TypeName: "string", Payload: []byte("x"), Attempts: 0, DeliveryAttempts: 5}}}
+    repository := &fakeRepository{due: []Pending{{Id: 5, TypeName: "string", Payload: []byte("x"), Attempts: 0, DeliveryAttempts: 4}}}
     transport := &fakeTransport{}
 
     relay := NewRelay(RelayConfig{Repository: repository, Transport: transport, Codec: &stringCodec{}, MaxAttempts: 2})
@@ -250,9 +263,9 @@ func TestRelay_DeadLettersPoisonExceedingMaxDeliveryAttempts(t *testing.T) {
     }
 }
 
-/* positive control: a row at the delivery cap (not yet over it) is still delivered normally, so the cap dead-letters only genuinely stuck rows. */
+/* positive control: a row whose recorded attempt lands exactly on the delivery cap (not over it) is still delivered normally, so the cap dead-letters only genuinely stuck rows. With MaxAttempts=2 the cap is 4; a stored count of 3 records the 4th attempt, which is at the cap, not over it. */
 func TestRelay_DeliversRowAtDeliveryCapBoundary(t *testing.T) {
-    repository := &fakeRepository{due: []Pending{{Id: 6, TypeName: "string", Payload: []byte("ok"), Attempts: 0, DeliveryAttempts: 4}}}
+    repository := &fakeRepository{due: []Pending{{Id: 6, TypeName: "string", Payload: []byte("ok"), Attempts: 0, DeliveryAttempts: 3}}}
     transport := &fakeTransport{}
 
     relay := NewRelay(RelayConfig{Repository: repository, Transport: transport, Codec: &stringCodec{}, MaxAttempts: 2})
@@ -265,6 +278,38 @@ func TestRelay_DeliversRowAtDeliveryCapBoundary(t *testing.T) {
 
     if 1 != len(repository.calls) || "sent" != repository.calls[0].kind {
         t.Fatalf("expected the boundary row to be marked sent, got %+v", repository.calls)
+    }
+}
+
+type markSentFailingRepository struct {
+    fakeRepository
+}
+
+func (instance *markSentFailingRepository) MarkSent(_ context.Context, _ int64) error {
+    return errors.New("mark sent failed")
+}
+
+/* regression for the batch-mate false-poison data-loss fix (CR #84): delivery_attempts is charged per row at delivery time, not for the whole batch at claim time. So a row the relay never reaches — here the second row, because the first row's delivery aborts the run — is not charged a delivery attempt it never received, and therefore never climbs toward the poison cap while merely waiting behind a crashing batch-mate. Pre-fix the claim incremented the whole batch, so the untouched second row would already sit at 1. */
+func TestRelay_UnreachedBatchMateIsNotChargedDeliveryAttempt(t *testing.T) {
+    repository := &markSentFailingRepository{fakeRepository{due: []Pending{
+        {Id: 1, TypeName: "string", Payload: []byte("a"), Attempts: 0, DeliveryAttempts: 0},
+        {Id: 2, TypeName: "string", Payload: []byte("b"), Attempts: 0, DeliveryAttempts: 0},
+    }}}
+    transport := &fakeTransport{}
+
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: transport, Codec: &stringCodec{}})
+
+    _, runErr := relay.RunOnce(relayTestRuntime())
+    if nil == runErr {
+        t.Fatal("expected the first row's failing resolution to abort the run")
+    }
+
+    if 1 != repository.due[0].DeliveryAttempts {
+        t.Fatalf("expected the reached row to be charged exactly one delivery attempt, got %d", repository.due[0].DeliveryAttempts)
+    }
+
+    if 0 != repository.due[1].DeliveryAttempts {
+        t.Fatalf("expected the unreached batch-mate to be charged no delivery attempt, got %d", repository.due[1].DeliveryAttempts)
     }
 }
 

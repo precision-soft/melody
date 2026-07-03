@@ -109,13 +109,18 @@ func TestImpersonation_NoHeaderReturnsInnerToken(t *testing.T) {
     }
 }
 
-func TestImpersonation_UnknownTargetStaysAdmin(t *testing.T) {
+/* a switch the caller WAS authorized to make (it holds the switch role) but that fails because the target is unknown must fail closed to an anonymous token, not silently keep the admin's own (broader) roles: the request was meant to run narrowed to the target, so continuing as the admin would execute it with privileges the operator believed were constrained to the target. This is distinct from the without-switch-role case above, where no narrowing was ever going to happen and the caller correctly passes through unchanged. */
+func TestImpersonation_UnknownTargetFailsClosedToAnonymous(t *testing.T) {
     admin := NewAuthenticatedToken("admin-1", []string{securitycontract.RoleAllowedToSwitch})
 
     token, _ := impersonationSource(admin).Resolve(testRuntime(), switchRequest("ghost"))
 
-    if "admin-1" != token.UserIdentifier() {
-        t.Fatalf("expected admin to stay when the target is unknown, got %q", token.UserIdentifier())
+    if true == token.IsAuthenticated() {
+        t.Fatalf("expected an unauthenticated token when the authorized switch target is unknown, got authenticated %q", token.UserIdentifier())
+    }
+
+    if "admin-1" == token.UserIdentifier() {
+        t.Fatal("expected the admin's identity not to pass through on a failed switch")
     }
 }
 

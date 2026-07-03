@@ -3,6 +3,8 @@ package validation
 import (
     "fmt"
 
+    "github.com/precision-soft/melody/exception"
+    exceptioncontract "github.com/precision-soft/melody/exception/contract"
     validationcontract "github.com/precision-soft/melody/validation/contract"
 )
 
@@ -45,4 +47,25 @@ func (instance *MinLength) Min() int {
     return instance.min
 }
 
+func (instance *MinLength) WithParams(params map[string]string) (validationcontract.Constraint, error) {
+    valueString, exists := params["value"]
+    if false == exists {
+        return NewMinLength(instance.min), nil
+    }
+
+    parsed, ok := parseIntStrict(valueString)
+    if false == ok {
+        return nil, exception.NewError(
+            "invalid min length parameter",
+            exceptioncontract.Context{
+                "value": valueString,
+            },
+            nil,
+        )
+    }
+
+    return NewMinLength(parsed), nil
+}
+
 var _ validationcontract.Constraint = (*MinLength)(nil)
+var _ validationcontract.ParameterizedConstraint = (*MinLength)(nil)
