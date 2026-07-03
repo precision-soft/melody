@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v3.3.0] - 2026-07-02 - Redis-Backed Nonce Guard
+## [v3.3.0] - 2026-07-03 - Redis-Backed Nonce Guard
 
 ### Added
 

@@ -10,6 +10,16 @@ import (
     "go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
+func TestTracingMiddleware_RequiresTracer(t *testing.T) {
+    defer func() {
+        if nil == recover() {
+            t.Fatalf("expected a nil tracer to panic at construction")
+        }
+    }()
+
+    NewTracingMiddleware(nil, nil)
+}
+
 func TestTracingMiddleware_RecordsServerSpan(t *testing.T) {
     recorder := tracetest.NewSpanRecorder()
     provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))

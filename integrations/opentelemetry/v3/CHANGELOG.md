@@ -7,12 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v3.1.0] - 2026-07-02 - Lifecycle Handler Decorator
+## [v3.1.0] - 2026-07-03 - Lifecycle Handler Decorator
 
 ### Added
 
 - `handler_decorator.go` — `NewHandlerDecorator(HandlerDecoratorConfig{Tracer, Propagator, Meter})` builds the outermost observability seam: registered through the new core `Application.RegisterHttpHandlerDecorator` (or `ModuleConfig.HandlerDecorators` on this module), it wraps the full `nethttp.Handler` the http kernel produces, so requests the middlewares never observe — security denials and other `kernel.request` short-circuits, listener-written responses, the panic-recovery path — now produce a lifecycle span (and, with a `Meter`, lifecycle count/duration metrics under distinct `http.server.lifecycle.request.*` instrument names, so routed requests are not double-counted). The routed tracing middleware's span becomes a child of the lifecycle span through the injected context. The status-recording writer keeps satisfying `http.Flusher`/`http.Hijacker` (mirroring the kernel's recording writer), so SSE and WebSocket upgrades pass through unchanged.
 - `module.go` — `ModuleConfig.HandlerDecorators`: the module now implements the core `HttpHandlerDecoratorModule` hook and registers the configured decorators as outermost wrappers.
+
+### Fixed
+
+- `tracing_middleware.go`, `metrics_middleware.go` — `NewTracingMiddleware` and `NewMetricsMiddleware` now reject a nil tracer/meter at construction instead of nil-panicking deep inside the middleware chain on the first request. `NewTracingMiddleware` has no error return, so it panics with a clear cause (matching the framework's constructor-of-a-required-dependency idiom); `NewMetricsMiddleware` returns an error. Aligns both with `NewHandlerDecorator`, which already rejected a nil `Tracer`.
 
 ## [v3.0.0] - 2026-06-16 - Initial Release — HTTP Tracing and Prometheus Metrics
 

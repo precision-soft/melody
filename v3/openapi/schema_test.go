@@ -720,6 +720,28 @@ func TestApplyValidation_ValuedConstraintsStillHonourTheirValue(t *testing.T) {
     }
 }
 
+/* @info a parenthesized parameter that lacks '=' (a stray-paren typo such as min(5)/notEmpty(foo)/email(x)) makes the validator's parseValidationTag reject the whole tag with a value-independent "invalid validation tag syntax" error, so the field accepts no value; the mirror's splitRule silently dropped the malformed pair and advertised a satisfiable schema, so this asserts the field is now advertised unsatisfiable (CR #83) */
+func TestApplyValidation_InvalidTagSyntaxIsUnsatisfiable(t *testing.T) {
+    for _, tag := range []string{"notEmpty(foo)", "min(x)", "min(5)", "email(x)"} {
+        schema := &Schema{Type: "string"}
+        applyValidation(schema, tag)
+
+        if nil == schema.MinLength || 1 != *schema.MinLength || nil == schema.MaxLength || 0 != *schema.MaxLength {
+            t.Fatalf("expected %q to advertise an unsatisfiable string (minLength 1, maxLength 0), got minLength=%v maxLength=%v", tag, schema.MinLength, schema.MaxLength)
+        }
+        if true == schema.Nullable {
+            t.Fatalf("expected %q to clear nullable on the unsatisfiable field", tag)
+        }
+    }
+
+    /* @important a well-formed parenthesized tag must NOT be swept up by the syntax guard: min(value=3) still advertises its real bound */
+    valid := &Schema{Type: "string"}
+    applyValidation(valid, "min(value=3)")
+    if nil == valid.MinLength || 3 != *valid.MinLength || nil != valid.MaxLength {
+        t.Fatalf("expected min(value=3) to stay satisfiable with minLength 3, got minLength=%v maxLength=%v", valid.MinLength, valid.MaxLength)
+    }
+}
+
 /* @info a malformed numeric/length tag makes the validator fail the field closed (post-CR70), so the spec advertises an unsatisfiable schema rather than a passable default (CR #71 supersedes CR #64/#65) */
 
 type malformedBoundRequestCR64 struct {

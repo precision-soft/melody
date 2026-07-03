@@ -14,6 +14,11 @@ import (
 )
 
 func NewMetricsMiddleware(meter metric.Meter) (httpcontract.Middleware, error) {
+    /* @important fail fast on a nil meter at construction rather than nil-panicking on the first meter.Int64Counter call, matching NewHandlerDecorator which requires a non-nil Meter for its lifecycle instruments. */
+    if nil == meter {
+        return nil, exception.NewError("metrics middleware meter is nil", nil, nil)
+    }
+
     requestCount, counterErr := meter.Int64Counter(
         "http.server.request.count",
         metric.WithDescription("number of handled http requests"),

@@ -9,6 +9,13 @@ type ListenerRegistration struct {
     ListenerId uint64
 }
 
+/* RequiredListenerRegistrar is an optional interface an EventDispatcher may implement to mark registered listeners as required. When a listener stops event propagation before a required listener behind it (lower priority) has run, Dispatch/DispatchName return an error instead of silently completing, so a caller such as the http kernel fails closed rather than proceeding as if the required listener — for example the security access-control listener — had run. A listener that legitimately short-circuits past required listeners opts out through MarkListenerMaySkipRequiredListeners. Both marks default off, so a dispatcher and its callers behave exactly as before unless a listener is explicitly marked; the first listener error already aborts dispatch regardless. */
+type RequiredListenerRegistrar interface {
+    MarkListenerRequired(registration ListenerRegistration)
+
+    MarkListenerMaySkipRequiredListeners(registration ListenerRegistration)
+}
+
 type EventDispatcher interface {
     AddListener(eventName string, listener EventListener, priority int) ListenerRegistration
 

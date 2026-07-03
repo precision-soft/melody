@@ -464,9 +464,12 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                             }
                         }
 
-                        allowedMethodsSet[nethttp.MethodOptions] = struct{}{}
+                        /* @important only advertise in Allow the synthetic methods the kernel actually honors under the configured MethodPolicy: OPTIONS is answered automatically only when AutomaticOptions is set (otherwise an OPTIONS request falls through to this 405), and a HEAD is served by falling back to GET only when HeadFallbackToGet is set — so listing either under the opposite configuration promises a method that in fact returns 405. A method the route declares explicitly is already added from allowedMethods above. */
+                        if true == instance.options.MethodPolicy.AutomaticOptions {
+                            allowedMethodsSet[nethttp.MethodOptions] = struct{}{}
+                        }
 
-                        if true == hasGet && false == hasHead {
+                        if true == instance.options.MethodPolicy.HeadFallbackToGet && true == hasGet && false == hasHead {
                             allowedMethodsSet[nethttp.MethodHead] = struct{}{}
                         }
 

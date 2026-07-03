@@ -219,6 +219,33 @@ func TestInMemoryTokenStore_PutDeepCopiesImpersonatorSubtree(t *testing.T) {
     }
 }
 
+/* @important a cyclic impersonator chain (reachable in-process through the exported ActorData.Impersonator field) must terminate via the depth bound rather than recurse until the goroutine stack overflows — a fatal error no recover() can catch. The test completing (Put and Lookup both return) is the assertion; without the bound cloneActorData would SIGSEGV. */
+func TestInMemoryTokenStore_CyclicImpersonatorChainTerminates(t *testing.T) {
+    store := NewInMemoryTokenStore()
+    rt := tokenStoreRuntime()
+
+    actor := &securitycontract.ActorData{
+        Identifier: "client-42",
+        Type:       securitycontract.ActorTypeUser,
+        Roles:      []string{"ROLE_USER"},
+    }
+    actor.Impersonator = actor
+
+    store.Put("tok-cycle", securitycontract.Claims{
+        UserIdentifier:   "billing-service",
+        OriginatingActor: actor,
+    })
+
+    stored, found, err := store.Lookup(rt, "tok-cycle")
+    if nil != err || false == found {
+        t.Fatalf("lookup failed: found=%v err=%v", found, err)
+    }
+
+    if nil == stored.OriginatingActor || "client-42" != stored.OriginatingActor.Identifier {
+        t.Fatalf("expected the cyclic actor to round-trip its top link, got %+v", stored.OriginatingActor)
+    }
+}
+
 func TestInMemoryTokenStore_PutDeepCopiesNestedScopeMap(t *testing.T) {
     store := NewInMemoryTokenStore()
     rt := tokenStoreRuntime()

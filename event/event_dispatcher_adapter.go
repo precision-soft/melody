@@ -265,6 +265,26 @@ func (instance *EventDispatcherAdapter) DispatchName(runtimeInstance runtimecont
     return instance.eventDispatcher.DispatchName(runtimeInstance, eventName, payload)
 }
 
+/* MarkListenerRequired forwards to the wrapped dispatcher when it supports required-listener registration; a no-op otherwise, so the adapter stays usable over a dispatcher that does not implement it. */
+func (instance *EventDispatcherAdapter) MarkListenerRequired(registration eventcontract.ListenerRegistration) {
+    registrar, ok := instance.eventDispatcher.(eventcontract.RequiredListenerRegistrar)
+    if false == ok {
+        return
+    }
+
+    registrar.MarkListenerRequired(registration)
+}
+
+/* MarkListenerMaySkipRequiredListeners forwards to the wrapped dispatcher when it supports required-listener registration; a no-op otherwise. */
+func (instance *EventDispatcherAdapter) MarkListenerMaySkipRequiredListeners(registration eventcontract.ListenerRegistration) {
+    registrar, ok := instance.eventDispatcher.(eventcontract.RequiredListenerRegistrar)
+    if false == ok {
+        return
+    }
+
+    registrar.MarkListenerMaySkipRequiredListeners(registration)
+}
+
 func (instance *EventDispatcherAdapter) RegisteredEvents() []eventcontract.RegisteredEvent {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
@@ -390,3 +410,4 @@ type adapterListenerRegistration struct {
 
 var _ eventcontract.EventDispatcher = (*EventDispatcherAdapter)(nil)
 var _ eventcontract.EventDispatcherInspector = (*EventDispatcherAdapter)(nil)
+var _ eventcontract.RequiredListenerRegistrar = (*EventDispatcherAdapter)(nil)

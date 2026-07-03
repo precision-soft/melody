@@ -82,6 +82,7 @@ func dispatchProductCreated(
 - Event names are validated for the empty string only. Whitespace-only names are not normalized by design.
 - Dispatching requires a runtime instance (`Dispatch` / `DispatchName`), because listeners execute in a runtime context.
 - Listener ordering is deterministic: listeners are sorted by priority, and dispatch uses a snapshot of listeners for the duration of the dispatch.
+- Stopping propagation (`Event.StopPropagation`) skips the remaining lower-priority listeners. On its own this is silent: a listener that stops the `kernel.request` phase without producing a response lets the request fall through to the handler with the listeners behind it — including the security access-control listener — never run. To close that, mark a critical listener *required* through [`RequiredListenerRegistrar`](../../event/contract/event_dispatcher.go): `MarkListenerRequired(registration)` makes `Dispatch`/`DispatchName` return an error when a listener stops propagation before that required listener has run, so the http kernel fails closed instead of proceeding as if it had run. The security firewall marks its access-control listener required automatically. A listener that deliberately short-circuits past required listeners opts back into plain stop-and-proceed with `MarkListenerMaySkipRequiredListeners(registration)`. Both marks default off — an unmarked dispatch behaves exactly as before, and the first listener error already aborts dispatch regardless.
 
 ## Userland API
 
@@ -93,6 +94,7 @@ func dispatchProductCreated(
 - [`type SubscribedEvent`](../../event/contract/event_subscriber.go)
 - [`type ListenerRegistration`](../../event/contract/event_dispatcher.go)
 - [`type EventDispatcher`](../../event/contract/event_dispatcher.go)
+- [`type RequiredListenerRegistrar`](../../event/contract/event_dispatcher.go)
 - [`type EventDispatcherInspector`](../../event/contract/event_dispatcher_inspector.go)
 - [`type RegisteredEvent`](../../event/contract/event_dispatcher_inspector.go)
 - [`type RegisteredListener`](../../event/contract/event_dispatcher_inspector.go)
@@ -105,6 +107,8 @@ func dispatchProductCreated(
     - [`NewEventFromEvent(eventcontract.Event) *Event`](../../event/event.go)
 - [`type EventDispatcher`](../../event/event_dispatcher.go)
     - [`NewEventDispatcher(clockcontract.Clock) *EventDispatcher`](../../event/event_dispatcher.go)
+    - [`MarkListenerRequired(eventcontract.ListenerRegistration)`](../../event/event_dispatcher.go)
+    - [`MarkListenerMaySkipRequiredListeners(eventcontract.ListenerRegistration)`](../../event/event_dispatcher.go)
 - [`type EventDispatcherAdapter`](../../event/event_dispatcher_adapter.go)
     - [`NewEventDispatcherAdapter(eventcontract.EventDispatcher) *EventDispatcherAdapter`](../../event/event_dispatcher_adapter.go)
 

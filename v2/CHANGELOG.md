@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v2.9.0] - 2026-07-02 - Kernel Fail-Closed Dispatch, Non-Panicking Response Write and Closed-Scope Errors
+## [v2.9.0] - 2026-07-03 - Kernel Fail-Closed Dispatch, Non-Panicking Response Write and Closed-Scope Errors
+
+### Added
+
+- `event/contract/event_dispatcher.go`, `event/event_dispatcher.go`, `security/access_control_listener.go` — `RequiredListenerRegistrar`: an optional event-dispatcher capability to mark a listener *required*. When a listener stops event propagation before a required listener behind it (lower priority) has run, `Dispatch`/`DispatchName` now return an error so the http kernel fails closed (its existing `kernel.request` error path) instead of proceeding as if that listener had run — closing a foot-gun where a custom `kernel.request` listener that stops propagation without producing a response could silently skip the access-control listener and reach the handler unauthenticated. The security firewall marks its access-control listener required automatically, so any application using it is protected with no code change. A listener that deliberately short-circuits past required listeners opts out via `MarkListenerMaySkipRequiredListeners`. Both marks default off and the first listener error already aborted dispatch, so an unmarked dispatch is byte-for-byte backward-compatible. Added in lockstep across `v1`/`v2`/`v3`.
 
 ### Changed
 
@@ -20,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `http/kernel.go` — the four response-finalization blocks now share one dispatch-error logging policy (`logEventDispatchError`, `AlreadyLogged`-aware): the controller-event and handler-response blocks logged the `EventKernelResponse` dispatch error inline, producing a duplicate log line for one listener failure. The not-found-handler error fallback also gains the `PrefersHtml` HTML branch the other error fallbacks already had. Fixed in lockstep with `v1`/`v3`.
 - `http/router_utility.go` — `writeResponse` no longer panics on session persistence or response-write failures: it also runs inside the kernel's already-consumed panic-recovery defer, where a second `SaveSession` panic escaped `ServeHttp` and reset the connection instead of delivering the built response — a session-backend outage degraded to connection aborts instead of 500s. Session failures now log once and send the response without the session cookie; a write failure logs instead of panicking. Fixed in lockstep with `v1`/`v3`.
 - `logging/recover.go` — a fatal non-zero exit now always leaves one final line on stderr (`melody: exiting with code N after unrecovered error: ...`), even when the error was already logged or the configured logger writes to a file: previously a startup failure such as an http bind error could terminate the process with no visible trace on the standard streams. Fixed in lockstep with `v1`/`v3`.
+- `http/kernel.go` — the synthetic `Allow` header on an automatic `405`/`OPTIONS` response now reflects the configured `MethodPolicy`: it advertises `OPTIONS` only when `AutomaticOptions` is enabled and the synthetic `HEAD` only when `HeadFallbackToGet` is enabled. Previously both were listed unconditionally, so under a non-default policy the `Allow` header promised `OPTIONS`/`HEAD` that in fact return `405`. A method the route declares explicitly is unaffected. Fixed in lockstep with `v1`/`v3`.
 
 ## [v2.8.2] - 2026-06-25 - Firewall Matcher Nil-Request Guard
 

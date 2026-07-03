@@ -409,6 +409,12 @@ func parseLeadingInt(valueString string) (int64, bool) {
 }
 
 func applyValidation(schema *Schema, validateTag string) {
+    if true == tagHasInvalidSyntax(validateTag) {
+        /* @important the validator's parseValidationTag rejects a malformed tag with a value-independent "invalid validation tag syntax" error before any value is examined (createConstraintWithParams never runs), so the field accepts no value of any kind — null included. The mirror's splitRule is lenient (it silently drops a malformed parameter pair and returns an empty-param rule), so without this guard applyValidation would advertise a satisfiable schema for a field the validator rejects outright — e.g. a stray paren token such as min(5)/notEmpty(foo)/email(x). Detect the syntax error up front and advertise the field unsatisfiable, mirroring the malformed-numeric-bound and uncompilable-regex reject-all cases. */
+        markFieldUnsatisfiable(schema)
+        return
+    }
+
     if "" != schema.Ref || nil != schema.AllOf {
         /* @important a $ref (or nullable allOf-wrapped $ref) denotes a struct, which the validator rejects outright for notEmpty and greaterThan/lessThan, and it fails closed on params a non-parameterizable constraint cannot consume — so advertise the field unsatisfiable rather than as a satisfiable object. No length/numeric facet otherwise attaches to a $ref. */
         if true == tagRejectsStruct(validateTag) || true == tagHasParamsOnNonParameterizable(validateTag) || true == tagRejectsAllViaNumericBound(validateTag) {
@@ -730,6 +736,65 @@ func applyEmptyValueSpace(schema *Schema) {
             schema.AllOf = append(schema.AllOf, contradiction)
         }
     }
+}
+
+/* @important reports whether a validate tag is malformed the way the runtime validator's parseValidationTag treats as a hard error: it returns "invalid validation tag syntax" — before any value is examined — for a parenthesized part that does not close with ')', has an empty constraint name, carries unbalanced parameter brackets, or contains a parameter pair without '=' or with an empty key; and for a '='-bearing part with an empty name. The mirror's splitRule tolerates all of these (it skips a malformed pair and returns an empty-param rule), so applyValidation would otherwise emit a satisfiable schema for a field the validator rejects for every value. This mirrors parseValidationTag exactly, reusing the same top-level (splitRules), parameter (splitRuleParameters) and bracket-balance (hasBalancedRuleBrackets) split helpers, so a valid tag never trips it. */
+func tagHasInvalidSyntax(validateTag string) bool {
+    for _, rule := range splitRules(validateTag) {
+        part := strings.TrimSpace(rule)
+        if "" == part {
+            continue
+        }
+
+        openIndex := strings.IndexByte(part, '(')
+        equalIndex := strings.IndexByte(part, '=')
+
+        isParenthesized := -1 != openIndex && (-1 == equalIndex || openIndex < equalIndex)
+
+        if true == isParenthesized {
+            if false == strings.HasSuffix(part, ")") {
+                return true
+            }
+
+            name := strings.TrimSpace(part[:openIndex])
+            if "" == name {
+                return true
+            }
+
+            paramsString := strings.TrimSpace(part[openIndex+1 : len(part)-1])
+            if false == hasBalancedRuleBrackets(paramsString) {
+                return true
+            }
+
+            if "" != paramsString {
+                for _, pair := range splitRuleParameters(paramsString) {
+                    pair = strings.TrimSpace(pair)
+                    if "" == pair {
+                        continue
+                    }
+
+                    separator := strings.IndexByte(pair, '=')
+                    if -1 == separator {
+                        return true
+                    }
+
+                    if "" == strings.TrimSpace(pair[:separator]) {
+                        return true
+                    }
+                }
+            }
+
+            continue
+        }
+
+        if true == strings.Contains(part, "=") {
+            if "" == strings.TrimSpace(part[:equalIndex]) {
+                return true
+            }
+        }
+    }
+
+    return false
 }
 
 /* @important reports whether a validate tag carries parameters on a constraint that cannot consume them: the validator fails such a rule closed (createConstraintWithParams returns invalid-rule before Constraint.Validate runs), so the field accepts no value of any kind — including a struct behind a $ref/allOf, which the in-switch guards below never see because applyValidation returns early for those schemas. */

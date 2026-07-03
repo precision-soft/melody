@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v3.0.0] - 2026-07-02 - Initial Release — Transactional Outbox with Relay Module and Command
+## [v3.0.0] - 2026-07-03 - Initial Release — Transactional Outbox with Relay Module and Command
 
 ### Added
 

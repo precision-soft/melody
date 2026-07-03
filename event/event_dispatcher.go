@@ -96,6 +96,57 @@ func (instance *EventDispatcher) AddListener(
     }
 }
 
+/* MarkListenerRequired flags the registered listener so that if another listener stops event propagation before it runs, dispatch returns an error and the caller can fail closed. A no-op if the registration is unknown (for example already removed). */
+func (instance *EventDispatcher) MarkListenerRequired(registration eventcontract.ListenerRegistration) {
+    instance.markListenerFlag(registration, func(entry *listenerWithPriority) {
+        entry.required = true
+    })
+}
+
+/* MarkListenerMaySkipRequiredListeners flags the registered listener so that when it stops propagation it is allowed to skip required listeners behind it without failing dispatch — the explicit opt-out that restores the plain stop-and-proceed behavior for a listener that knowingly short-circuits. */
+func (instance *EventDispatcher) MarkListenerMaySkipRequiredListeners(registration eventcontract.ListenerRegistration) {
+    instance.markListenerFlag(registration, func(entry *listenerWithPriority) {
+        entry.maySkipRequiredListeners = true
+    })
+}
+
+func (instance *EventDispatcher) markListenerFlag(
+    registration eventcontract.ListenerRegistration,
+    apply func(entry *listenerWithPriority),
+) {
+    eventName := registration.EventName
+    if "" == eventName {
+        exception.Panic(
+            exception.NewError("event name is required to mark a listener", nil, nil),
+        )
+    }
+
+    listenerId := registration.ListenerId
+    if 0 == listenerId {
+        exception.Panic(
+            exception.NewError(
+                "event listener id is required to mark a listener",
+                exceptioncontract.Context{
+                    "eventName": eventName,
+                },
+                nil,
+            ),
+        )
+    }
+
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    entries := instance.listeners[eventName]
+    for index := range entries {
+        if entries[index].listenerId == listenerId {
+            apply(&entries[index])
+
+            return
+        }
+    }
+}
+
 func (instance *EventDispatcher) RemoveListener(registration eventcontract.ListenerRegistration) bool {
     eventName := registration.EventName
     if "" == eventName {
@@ -461,7 +512,7 @@ func (instance *EventDispatcher) dispatch(runtimeInstance runtimecontract.Runtim
         },
     )
 
-    for _, entry := range listenerList {
+    for index, entry := range listenerList {
         listenerStartedAt := time.Now()
 
         listenerName := "-"
@@ -495,6 +546,22 @@ func (instance *EventDispatcher) dispatch(runtimeInstance runtimecontract.Runtim
         }
 
         if true == eventValue.IsPropagationStopped() {
+            /* @important a listener that stops propagation before a required listener behind it has run would silently skip that listener (for example the security access-control listener), so the caller would proceed as if it had run — fail closed by returning an error instead, unless the stopping listener is explicitly allowed to skip required listeners. Both marks default off, so an unmarked dispatch behaves exactly as before. */
+            if false == entry.maySkipRequiredListeners {
+                for _, laterEntry := range listenerList[index+1:] {
+                    if true == laterEntry.required {
+                        return eventValue, exception.NewError(
+                            "event propagation stopped before a required listener ran",
+                            exceptioncontract.Context{
+                                "eventName":         eventName,
+                                "stoppedByListener": listenerName,
+                            },
+                            nil,
+                        )
+                    }
+                }
+            }
+
             logger.Debug(
                 "event dispatch propagation stopped",
                 loggingcontract.Context{
@@ -632,9 +699,11 @@ func (instance *EventDispatcher) removeListenerById(eventName string, listenerId
 }
 
 type listenerWithPriority struct {
-    listener   eventcontract.EventListener
-    listenerId uint64
-    priority   int
+    listener                 eventcontract.EventListener
+    listenerId               uint64
+    priority                 int
+    required                 bool
+    maySkipRequiredListeners bool
 }
 
 type subscriberRegistration struct {
@@ -645,6 +714,7 @@ type subscriberRegistration struct {
 
 var _ eventcontract.EventDispatcher = (*EventDispatcher)(nil)
 var _ eventcontract.EventDispatcherInspector = (*EventDispatcher)(nil)
+var _ eventcontract.RequiredListenerRegistrar = (*EventDispatcher)(nil)
 
 func eventSubscriberPointer(subscriber eventcontract.EventSubscriber) uintptr {
     if nil == subscriber {

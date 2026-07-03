@@ -25,7 +25,7 @@ The [`security`](../../security) package provides Melody’s HTTP security build
 - Provide role/attribute authorization via `AccessDecisionManager` and `Voter` implementations.
 - Provide event types and standard kernel listeners for:
     - security context resolution (`RegisterKernelSecurityResolutionListener`)
-    - access control enforcement (`RegisterKernelAccessControlListener`)
+    - access control enforcement (`RegisterKernelAccessControlListener`) — registered as a **required** `kernel.request` listener (via the event package's [`RequiredListenerRegistrar`](../../event/contract/event_dispatcher.go)), so if another listener stops event propagation before it runs, the kernel fails closed rather than letting the request reach the handler with access control silently skipped.
 
 ## Configuration
 

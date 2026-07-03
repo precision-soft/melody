@@ -7,33 +7,13 @@ import (
     melodyhttp "github.com/precision-soft/melody/v3/http"
 )
 
-/* RoutesJsonFromContainer projects the named routes into the RouteManifest shape the frontend RouteGenerator (melody-routes.ts) consumes, injected into every page as window.melodyRoutes. Unlike the melody:routes:manifest export command it is not limited to the expose-opted-in routes, because the example's own pages reference their routes by name directly. */
+/* RoutesJsonFromContainer projects the exposed named routes into the RouteManifest shape the frontend RouteGenerator (melody-routes.ts) consumes, injected into every page as window.melodyRoutes. It reuses the framework BuildRouteManifest so it applies the same RouteAttributeExpose opt-in filter as the melody:routes:manifest export command: the example's frontend-facing routes already opt in via ExposedRouteAttributes (see config/http.go), and an example must model shipping only deliberately-exposed route metadata to the browser rather than dumping every route's pattern, requirements and defaults — internal routes stay server-side. */
 func RoutesJsonFromContainer(serviceContainer containercontract.Container) (string, error) {
     routeRegistry := melodyhttp.RouteRegistryMustFromContainer(serviceContainer)
-    definitions := routeRegistry.RouteDefinitions()
 
-    entries := make([]melodyhttp.RouteManifestEntry, 0, len(definitions))
+    manifest := melodyhttp.BuildRouteManifest(routeRegistry.RouteDefinitions())
 
-    for _, definition := range definitions {
-        if nil == definition {
-            continue
-        }
-
-        name := definition.Name()
-        if "" == name {
-            continue
-        }
-
-        entries = append(entries, melodyhttp.RouteManifestEntry{
-            Name:         name,
-            Pattern:      definition.Pattern(),
-            Methods:      definition.Methods(),
-            Requirements: definition.Requirements(),
-            Defaults:     definition.Defaults(),
-        })
-    }
-
-    payload, marshalErr := json.Marshal(melodyhttp.RouteManifest{Routes: entries})
+    payload, marshalErr := json.Marshal(manifest)
     if nil != marshalErr {
         return `{"routes":[]}`, marshalErr
     }
