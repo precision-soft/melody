@@ -152,6 +152,103 @@ func TestTotpSecondFactor_ReplayedCodeIsRejectedByDefaultGuard(t *testing.T) {
     }
 }
 
+/* recoveryEnrollmentStore also implements TwoFactorRecoveryStore, tracking each recovery code's unused state so a redeemed code cannot be redeemed a second time. */
+type recoveryEnrollmentStore struct {
+    secret   string
+    enrolled bool
+    unused   map[string]bool
+}
+
+func (instance *recoveryEnrollmentStore) FindTotpSecret(
+    _ runtimecontract.Runtime,
+    _ string,
+) (string, bool, error) {
+    return instance.secret, instance.enrolled, nil
+}
+
+func (instance *recoveryEnrollmentStore) RedeemRecoveryCode(
+    _ runtimecontract.Runtime,
+    _ string,
+    code string,
+) (bool, error) {
+    if true == instance.unused[code] {
+        instance.unused[code] = false
+
+        return true, nil
+    }
+
+    return false, nil
+}
+
+func totpRecoveryRequest(recoveryValue string) httpcontract.Request {
+    request := httptest.NewRequest("POST", "/login", nil)
+    request.Header.Set(DefaultTotpRecoveryHeaderName, recoveryValue)
+
+    return testhelper.NewHttpTestRequestFromHttpRequest(request)
+}
+
+func totpAuthenticatorFor(store securitycontract.TwoFactorEnrollmentStore) *TotpSecondFactorAuthenticator {
+    return NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
+        Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"})},
+        Enrollments: store,
+    })
+}
+
+func TestTotpSecondFactor_RecoveryCodeAuthenticatesAndIsSingleUse(t *testing.T) {
+    store := &recoveryEnrollmentStore{enrolled: true, unused: map[string]bool{"abcde-fghij": true}}
+    authenticator := totpAuthenticatorFor(store)
+
+    first, err := authenticator.Authenticate(totpRecoveryRequest("abcde-fghij"))
+    if nil != err {
+        t.Fatalf("authenticate: %v", err)
+    }
+
+    if false == first.IsAuthenticated() || "user-1" != first.UserIdentifier() {
+        t.Fatal("expected a valid recovery code to complete authentication")
+    }
+
+    second, _ := authenticator.Authenticate(totpRecoveryRequest("abcde-fghij"))
+    if true == second.IsAuthenticated() {
+        t.Fatal("expected a consumed recovery code to be rejected on reuse")
+    }
+}
+
+/* negative control: a recovery code that is not one of the user's unused codes keeps the request pending. */
+func TestTotpSecondFactor_UnknownRecoveryCodeIsPending(t *testing.T) {
+    store := &recoveryEnrollmentStore{enrolled: true, unused: map[string]bool{"abcde-fghij": true}}
+
+    token, _ := totpAuthenticatorFor(store).Authenticate(totpRecoveryRequest("zzzzz-zzzzz"))
+
+    if true == token.IsAuthenticated() {
+        t.Fatal("expected an unknown recovery code to stay pending")
+    }
+}
+
+/* an enrollment store that does not implement TwoFactorRecoveryStore makes recovery unavailable: a recovery header is ignored and the request stays pending rather than authenticating. */
+func TestTotpSecondFactor_RecoveryIgnoredWhenStoreUnsupported(t *testing.T) {
+    secret, _ := totp.GenerateSecret()
+
+    token, _ := totpAuthenticator(secret, true, nil).Authenticate(totpRecoveryRequest("abcde-fghij"))
+
+    if true == token.IsAuthenticated() {
+        t.Fatal("expected recovery to be unavailable when the store does not support it")
+    }
+}
+
+/* L1: the replay window must mirror exactly the skew Verify accepts. A misconfigured huge skew is clamped to maxSkew (10) by totp.Config.Resolve, so the window is (2*10+1)*period, not a ~centuries-long span computed from the raw skew that would pin the accepted-code entry in an in-process guard effectively forever. */
+func TestTotpSecondFactor_ReplayWindowMirrorsClampedSkew(t *testing.T) {
+    authenticator := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
+        Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"})},
+        Enrollments: &fixedEnrollmentStore{enrolled: false},
+        Totp:        totp.Config{Period: 30, Skew: 1_000_000},
+    })
+
+    expected := time.Duration(21*30) * time.Second
+    if window := authenticator.codeValidityWindow(); expected != window {
+        t.Fatalf("expected the window to mirror the maxSkew-clamped skew (%v), got %v", expected, window)
+    }
+}
+
 func TestTotpSecondFactor_AnonymousPrimaryPassesThrough(t *testing.T) {
     authenticator := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
         Primary:     &fixedAuthenticator{token: NewAnonymousToken()},

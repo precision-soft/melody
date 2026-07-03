@@ -399,6 +399,7 @@ func isRequired(validateTag string) bool {
     return false
 }
 
+/* parseLeadingInt must accept exactly the numeric bound strings the validator's parseIntStrict accepts (validation/validation_rule.go): the openapi mirror decides a field is unsatisfiable when a numeric bound is malformed, so if the two diverged the spec would advertise satisfiability the validator does not honour (or the reverse). Both use the same fmt.Sscanf("%d") acceptance; TestParseLeadingIntMatchesValidator locks the equivalence. Keep them in lockstep — change one only alongside the other and that test. */
 func parseLeadingInt(valueString string) (int64, bool) {
     var result int64
     if _, scanErr := fmt.Sscanf(valueString, "%d", &result); nil != scanErr {
@@ -475,9 +476,11 @@ func applyValidation(schema *Schema, validateTag string) {
                         rejectsAll = true
                     }
                 } else {
-                    /* @important a value-less min constraint is enforced as minLength 1 by the validator, so the spec must advertise the same bound */
+                    /* @important a value-less min constraint is enforced as minLength 1 by the validator, so the spec must advertise the same bound — but raise-only, matching the value-carrying branch and the value-less max branch: a higher floor already set by another rule (an earlier real min=5, a notEmpty/notBlank floor) must not be lowered back to 1, or the spec would advertise a minLength the validator rejects values below. */
                     defaultMinLength := 1
-                    schema.MinLength = &defaultMinLength
+                    if nil == schema.MinLength || defaultMinLength > *schema.MinLength {
+                        schema.MinLength = &defaultMinLength
+                    }
                 }
             }
         case "max":

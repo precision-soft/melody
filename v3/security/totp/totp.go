@@ -33,6 +33,11 @@ type Config struct {
     Skew   uint
 }
 
+/* Resolve returns the config the algorithm actually runs with: the zero-value defaults filled in and the skew clamped to the same maxSkew ceiling Verify enforces. A caller that must reason about the exact window Verify accepts (for example to size a replay-guard TTL) resolves the config through this method rather than reading the raw fields, so its view never diverges from what Verify honors. */
+func (instance Config) Resolve() Config {
+    return instance.withDefaults()
+}
+
 func (instance Config) withDefaults() Config {
     resolved := instance
     if 0 == resolved.Period {

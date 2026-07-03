@@ -2,6 +2,7 @@ package twofactor
 
 import (
     "context"
+    "crypto/subtle"
     "database/sql"
     "encoding/json"
     "errors"
@@ -111,4 +112,89 @@ func (instance *Store) FindTotpSecret(
     return string(enrollment.Secret), true, nil
 }
 
+/* RedeemRecoveryCode implements securitycontract.TwoFactorRecoveryStore. It atomically
+ * consumes a single-use recovery code: inside a transaction it loads the enrollment row FOR
+ * UPDATE, decrypts and unmarshals the stored codes, and — on a constant-time match — removes
+ * the code, re-encrypts the remaining set and writes it back, so the same code can never be
+ * redeemed twice even under concurrent requests. It reports redeemed=false (with a nil error)
+ * when the user has no enrollment or the code is not one of the currently-unused codes. */
+func (instance *Store) RedeemRecoveryCode(
+    runtimeInstance melodyruntimecontract.Runtime,
+    userIdentifier string,
+    code string,
+) (bool, error) {
+    if "" == code {
+        return false, nil
+    }
+
+    redeemed := false
+
+    txErr := instance.database.RunInTx(
+        runtimeInstance.Context(),
+        nil,
+        func(ctx context.Context, tx bun.Tx) error {
+            enrollment := &Enrollment{}
+
+            selectErr := tx.NewSelect().
+                Model(enrollment).
+                Where("user_identifier = ?", userIdentifier).
+                For("UPDATE").
+                Limit(1).
+                Scan(ctx)
+            if nil != selectErr {
+                /* a missing row means the user has no second factor; treat it as
+                 * nothing-to-redeem rather than an error, matching FindTotpSecret */
+                if true == errors.Is(selectErr, sql.ErrNoRows) {
+                    return nil
+                }
+
+                return selectErr
+            }
+
+            var codes []string
+            if unmarshalErr := json.Unmarshal([]byte(enrollment.RecoveryCodes), &codes); nil != unmarshalErr {
+                return unmarshalErr
+            }
+
+            remaining := make([]string, 0, len(codes))
+            for _, candidate := range codes {
+                /* constant-time compare so a redemption attempt does not leak, through
+                 * timing, how much of a recovery code matched */
+                if 1 == subtle.ConstantTimeCompare([]byte(candidate), []byte(code)) {
+                    redeemed = true
+
+                    continue
+                }
+
+                remaining = append(remaining, candidate)
+            }
+
+            if false == redeemed {
+                return nil
+            }
+
+            encodedCodes, marshalErr := json.Marshal(remaining)
+            if nil != marshalErr {
+                return marshalErr
+            }
+
+            enrollment.RecoveryCodes = melodyencrypt.EncryptedString(encodedCodes)
+
+            _, updateErr := tx.NewUpdate().
+                Model(enrollment).
+                Column("recovery_codes").
+                WherePK().
+                Exec(ctx)
+
+            return updateErr
+        },
+    )
+    if nil != txErr {
+        return false, txErr
+    }
+
+    return redeemed, nil
+}
+
 var _ melodysecuritycontract.TwoFactorEnrollmentStore = (*Store)(nil)
+var _ melodysecuritycontract.TwoFactorRecoveryStore = (*Store)(nil)

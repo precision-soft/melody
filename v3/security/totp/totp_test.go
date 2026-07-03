@@ -129,6 +129,23 @@ func TestVerifyAt_ClampsOutOfRangeDigits(t *testing.T) {
     }
 }
 
+/* Resolve must expose exactly the values Verify runs with: zero-value defaults filled in and the skew clamped to the same ceiling Verify enforces, so a caller sizing a replay window from Resolve never diverges from what Verify accepts. */
+func TestResolveFillsDefaultsAndClampsSkew(t *testing.T) {
+    resolved := totp.Config{}.Resolve()
+    if 30 != resolved.Period || 6 != resolved.Digits || 1 != resolved.Skew {
+        t.Fatalf("expected zero-value defaults (30/6/1), got %d/%d/%d", resolved.Period, resolved.Digits, resolved.Skew)
+    }
+
+    clamped := totp.Config{Period: 60, Digits: 8, Skew: 1_000_000}.Resolve()
+    if 10 != clamped.Skew {
+        t.Fatalf("expected a huge skew to clamp to 10, got %d", clamped.Skew)
+    }
+
+    if 60 != clamped.Period || 8 != clamped.Digits {
+        t.Fatalf("expected in-range period/digits preserved, got %d/%d", clamped.Period, clamped.Digits)
+    }
+}
+
 func containsAll(haystack string, needles ...string) bool {
     for _, needle := range needles {
         found := false

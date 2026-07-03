@@ -720,6 +720,53 @@ func TestApplyValidation_ValuedConstraintsStillHonourTheirValue(t *testing.T) {
     }
 }
 
+/* @info L2: a value-less min defaults to minLength 1 but must be raise-only — it may not lower a higher floor an earlier rule already set. The validator enforces every rule (effective floor stays 5), so advertising minLength 1 would offer values the validator rejects. Mirrors the value-less max branch, which was already tighten-only. */
+func TestApplyValidation_ValuelessMinIsRaiseOnly(t *testing.T) {
+    afterHigh := &Schema{Type: "string"}
+    applyValidation(afterHigh, "min(value=5),min")
+    if nil == afterHigh.MinLength || 5 != *afterHigh.MinLength {
+        t.Fatalf("expected a value-less min not to lower an existing minLength 5, got %v", afterHigh.MinLength)
+    }
+
+    beforeHigh := &Schema{Type: "string"}
+    applyValidation(beforeHigh, "min,min(value=5)")
+    if nil == beforeHigh.MinLength || 5 != *beforeHigh.MinLength {
+        t.Fatalf("expected a real min(value=5) to win over a value-less min regardless of order, got %v", beforeHigh.MinLength)
+    }
+
+    bare := &Schema{Type: "string"}
+    applyValidation(bare, "min")
+    if nil == bare.MinLength || 1 != *bare.MinLength {
+        t.Fatalf("expected a bare min alone to still advertise minLength 1, got %v", bare.MinLength)
+    }
+}
+
+/* @info L3: the mirror decides a numeric bound is unsatisfiable via parseLeadingInt, and that decision must match the validator's parseIntStrict (validation/validation_rule.go) so the spec never advertises satisfiability the validator does not honour. Both share the same fmt.Sscanf("%d") acceptance; this locks parseLeadingInt against that contract over the boundary cases (a leading integer is accepted, trailing junk is tolerated, a non-numeric or empty string is rejected). */
+func TestParseLeadingIntMatchesValidator(t *testing.T) {
+    cases := []struct {
+        input  string
+        wantOk bool
+        want   int64
+    }{
+        {"5", true, 5},
+        {"-5", true, -5},
+        {"0", true, 0},
+        {"5abc", true, 5},
+        {"abc", false, 0},
+        {"", false, 0},
+    }
+
+    for _, testCase := range cases {
+        got, ok := parseLeadingInt(testCase.input)
+        if ok != testCase.wantOk || (true == ok && got != testCase.want) {
+            t.Fatalf(
+                "parseLeadingInt(%q) = (%d, %v), want (%d, %v)",
+                testCase.input, got, ok, testCase.want, testCase.wantOk,
+            )
+        }
+    }
+}
+
 /* @info a parenthesized parameter that lacks '=' (a stray-paren typo such as min(5)/notEmpty(foo)/email(x)) makes the validator's parseValidationTag reject the whole tag with a value-independent "invalid validation tag syntax" error, so the field accepts no value; the mirror's splitRule silently dropped the malformed pair and advertised a satisfiable schema, so this asserts the field is now advertised unsatisfiable (CR #83) */
 func TestApplyValidation_InvalidTagSyntaxIsUnsatisfiable(t *testing.T) {
     for _, tag := range []string{"notEmpty(foo)", "min(x)", "min(5)", "email(x)"} {
