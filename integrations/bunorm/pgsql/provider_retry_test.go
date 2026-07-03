@@ -57,8 +57,6 @@ func (instance *wrappedError) Unwrap() error {
 var _ net.Error = (*stubTimeoutError)(nil)
 var _ net.Error = (*stubTemporaryError)(nil)
 
-/* @info backoff computation */
-
 func TestComputeBackoffDelayGrowsExponentiallyAndClampsAtMaxDelay(t *testing.T) {
     provider := newTestProvider().
         WithRetryConfig(NewRetryConfig(3, 100*time.Millisecond, 250*time.Millisecond, 2.0))
@@ -92,8 +90,6 @@ func TestComputeBackoffDelayZeroValuesFallBackToDefaults(t *testing.T) {
         t.Fatalf("expected the default max delay clamp of 5s, got %s", provider.computeBackoffDelay(10))
     }
 }
-
-/* @info transient-error classification */
 
 func TestIsTransientErrorClassification(t *testing.T) {
     provider := newTestProvider()

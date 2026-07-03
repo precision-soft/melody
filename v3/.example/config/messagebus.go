@@ -46,15 +46,6 @@ func (instance *Module) buildMessageBus() {
         "default.consume",
         melodymessagebus.NewHandleMessageMiddleware(locator),
     )
-    instance.messageBusConsumeCommand = melodymessagebus.NewConsumeCommandWithRetry(
-        instance.messageBusConsume,
-        map[string]melodymessagebuscontract.Transport{
-            messageBusTransportAsync: transport,
-        },
-        melodymessagebus.RetryPolicy{
-            MaxRetries: 3,
-        },
-    )
 }
 
 func (instance *Module) buildMessageBusTransport() melodymessagebuscontract.Transport {

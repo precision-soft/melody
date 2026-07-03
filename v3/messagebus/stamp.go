@@ -7,12 +7,12 @@ import (
 )
 
 const (
-    StampNameBusName    = "bus_name"
-    StampNameSent       = "sent"
-    StampNameReceived   = "received"
-    StampNameHandled    = "handled"
-    StampNameRedelivery       = "redelivery"
-    StampNameDelay            = "delay"
+    StampNameBusName           = "bus_name"
+    StampNameSent              = "sent"
+    StampNameReceived          = "received"
+    StampNameHandled           = "handled"
+    StampNameRedelivery        = "redelivery"
+    StampNameDelay             = "delay"
     StampNameDeadLetterAttempt = "dead_letter_attempt"
     StampNameMessageId         = "message_id"
 )

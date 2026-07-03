@@ -429,6 +429,7 @@ func TestValidator_GreaterThanFloat_RejectsNegative(t *testing.T) {
     err := validatorInstance.Validate(payloadWithGreaterThanFloat{Price: -1.5})
     _ = requireValidationErrors(t, err)
 }
+
 /* @info regex shorthand fail-open + comma-in-meta back-port (CR #64) */
 
 type payloadWithRegexShorthandCR64 struct {

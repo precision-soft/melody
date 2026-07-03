@@ -8,8 +8,6 @@ import (
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
 )
 
-/* @info spies */
-
 type spyMiddlewareRegistrar struct {
     count int
 }
@@ -43,8 +41,6 @@ func (instance *spyKernel) HttpRouter() httpcontract.Router {
 func passthroughMiddleware(next httpcontract.Handler) httpcontract.Handler {
     return next
 }
-
-/* @info tests */
 
 func TestModule_NameAndDescription(t *testing.T) {
     module := NewModule(ModuleConfig{})

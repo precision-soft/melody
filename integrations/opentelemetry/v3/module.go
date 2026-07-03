@@ -12,12 +12,12 @@ import (
 const defaultMetricsRouteName = "melody.metrics"
 
 type ModuleConfig struct {
-    Middlewares      []httpcontract.Middleware
+    Middlewares []httpcontract.Middleware
     /* HandlerDecorators are registered as outermost wrappers around the kernel's nethttp.Handler (Application.RegisterHttpHandlerDecorator), so short-circuited requests — security denials, listener-written responses — are traced and counted too; build one with NewHandlerDecorator. */
     HandlerDecorators []applicationcontract.HttpHandlerDecorator
-    MetricsHandler   nethttp.Handler
-    MetricsRouteName string
-    MetricsPath      string
+    MetricsHandler    nethttp.Handler
+    MetricsRouteName  string
+    MetricsPath       string
 }
 
 func NewModule(config ModuleConfig) *Module {

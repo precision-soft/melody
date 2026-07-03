@@ -13,7 +13,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `go.mod` — the module pinned `melody/v3 v3.0.0` while importing the `lock`/`lock/contract` packages, which only exist from `v3.7.0`: outside the repository workspace (`GOWORK=off`, or any consumer cloning just this module) the module did not resolve. The pin is raised to `v3.7.0` — the lowest framework version that provides every imported package — and the module-local `go.sum` is now complete for standalone builds.
 
-
 ## [v3.1.0] - 2026-06-16 - MySQL Advisory Lock (GET_LOCK)
 
 ### Added

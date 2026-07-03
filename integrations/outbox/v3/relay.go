@@ -16,10 +16,10 @@ const (
     defaultLockTtl           = 30 * time.Second
     defaultVisibilityTimeout = 5 * time.Minute
     defaultBatchSize         = 100
-    defaultMaxAttempts    = 12
-    defaultInitialBackoff = 15 * time.Second
-    defaultMaxBackoff     = 10 * time.Minute
-    defaultBackoffFactor  = 2.0
+    defaultMaxAttempts       = 12
+    defaultInitialBackoff    = 15 * time.Second
+    defaultMaxBackoff        = 10 * time.Minute
+    defaultBackoffFactor     = 2.0
 )
 
 /* defaultMaxDeliveryAttemptsFactor multiplies the resolved MaxAttempts to derive the default MaxDeliveryAttempts when one is not configured, leaving generous head-room above the send-failure retry path so only a genuinely stuck (crash-poison) row trips the claim cap. */

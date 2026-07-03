@@ -6,8 +6,6 @@ import (
     containercontract "github.com/precision-soft/melody/v3/container/contract"
 )
 
-/* @info spies */
-
 type spyServiceRegistrar struct {
     names []string
 }
@@ -33,8 +31,6 @@ func newModuleTestRelay() *Relay {
         Codec:      &stringCodec{},
     })
 }
-
-/* @info tests */
 
 func TestModule_NameAndDescription(t *testing.T) {
     module := NewModule(ModuleConfig{})

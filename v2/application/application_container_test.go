@@ -18,8 +18,6 @@ import (
     kernelcontract "github.com/precision-soft/melody/v2/kernel/contract"
 )
 
-/* @info shared test kernel */
-
 type testKernel struct {
     configuration    configcontract.Configuration
     serviceContainer containercontract.Container
@@ -75,8 +73,6 @@ func (instance *testKernel) Clock() clockcontract.Clock {
 }
 
 var _ kernelcontract.Kernel = (*testKernel)(nil)
-
-/* @info register service */
 
 func TestApplicationRegisterService_RegistersInContainerBeforeBoot(t *testing.T) {
     kernelInstance := newTestKernel()

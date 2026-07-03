@@ -40,8 +40,6 @@ func TestInMemoryTransport_CloseRejectsFurtherSendsAndIsIdempotent(t *testing.T)
     }
 }
 
-/* @info logger race */
-
 type raceTestLogger struct{}
 
 func (raceTestLogger) Log(loggingcontract.Level, string, loggingcontract.Context) {}

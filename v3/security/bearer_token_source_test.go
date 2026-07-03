@@ -96,8 +96,6 @@ func TestBearerTokenSource_RejectsEmptySubjectOpaqueToken(t *testing.T) {
     }
 }
 
-/* @info enricher */
-
 type scopeRoleEnricher struct{}
 
 func (instance scopeRoleEnricher) Enrich(runtimeInstance runtimecontract.Runtime, claims securitycontract.Claims) (securitycontract.Claims, error) {

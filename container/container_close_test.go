@@ -406,6 +406,7 @@ func TestContainer_Close_ValueTypeServiceWithUnhashableContentDoesNotPanic(t *te
         t.Fatalf("unexpected close error: %v", err)
     }
 }
+
 /* @info OverrideProtectedInstance on a WithoutTypeRegistration value service must close once (CR #64) */
 
 type overrideValueCloserCR64 struct {

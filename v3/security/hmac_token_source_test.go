@@ -8,9 +8,9 @@ import (
     "testing"
     "time"
 
-    "github.com/precision-soft/melody/v3/internal/testhelper"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal/testhelper"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 

@@ -11,8 +11,6 @@ import (
     "github.com/uptrace/bun/driver/pgdriver"
 )
 
-/* @info provider builder methods */
-
 func TestProviderBuilderMethodsSetConfigs(t *testing.T) {
     poolConfig := NewPoolConfig(10, 2, time.Minute, time.Second)
     timeoutConfig := NewTimeoutConfig(time.Second)
@@ -85,8 +83,6 @@ func TestProviderOpenBuildsConnectorAndAbortsOnPostBuildHookError(t *testing.T) 
         t.Fatalf("expected the resolved password to be passed to the driver, got %q", connectorConfig.Password)
     }
 }
-
-/* @info Open with zero connect timeout */
 
 func TestProviderOpenWithZeroConnectTimeoutConnects(t *testing.T) {
     host := os.Getenv("PGSQL_HOST")

@@ -719,6 +719,7 @@ func TestApplyValidation_ValuedConstraintsStillHonourTheirValue(t *testing.T) {
         t.Fatalf("expected greaterThan(value=5) to advertise minimum 5, got %v", greaterThanSchema.Minimum)
     }
 }
+
 /* @info a malformed numeric/length tag makes the validator fail the field closed (post-CR70), so the spec advertises an unsatisfiable schema rather than a passable default (CR #71 supersedes CR #64/#65) */
 
 type malformedBoundRequestCR64 struct {
@@ -894,10 +895,10 @@ func TestBuildSchema_NotEmptyOnStructIsUnsatisfiable(t *testing.T) {
 }
 
 type cr74NumericOnNonNumericRequest struct {
-    Code  string            `json:"code" validate:"greaterThan=0"`
-    Flag  bool              `json:"flag" validate:"lessThan=1"`
-    Items []string          `json:"items" validate:"greaterThan=0"`
-    Bag   map[string]int    `json:"bag" validate:"lessThan=0"`
+    Code  string         `json:"code" validate:"greaterThan=0"`
+    Flag  bool           `json:"flag" validate:"lessThan=1"`
+    Items []string       `json:"items" validate:"greaterThan=0"`
+    Bag   map[string]int `json:"bag" validate:"lessThan=0"`
 }
 
 func TestBuildSchema_GreaterLessThanOnNonNumericIsUnsatisfiable(t *testing.T) {
@@ -1102,10 +1103,10 @@ func TestBuildSchema_ParamsOnNonParameterizableConstraintOnStructIsUnsatisfiable
 }
 
 type malformedMinNonStringRequest struct {
-    Age     int      `json:"age" validate:"min=abc"`
-    Score   float64  `json:"score" validate:"min="`
-    Ok      bool     `json:"ok" validate:"min=xyz"`
-    Tags    []string `json:"tags" validate:"min=nan"`
+    Age   int      `json:"age" validate:"min=abc"`
+    Score float64  `json:"score" validate:"min="`
+    Ok    bool     `json:"ok" validate:"min=xyz"`
+    Tags  []string `json:"tags" validate:"min=nan"`
 }
 
 func TestBuildSchema_MalformedMinOnNonStringFieldsIsUnsatisfiable(t *testing.T) {

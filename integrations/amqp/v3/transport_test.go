@@ -80,8 +80,6 @@ func drainedToDeadLetter(t *testing.T, connection *amqp091.Connection, deadLette
     }
 }
 
-/* @info send/receive integration */
-
 func TestTransport_SendReceiveAck(t *testing.T) {
     dsn := os.Getenv("AMQP_DSN")
     if "" == dsn {
@@ -366,8 +364,6 @@ func TestTransport_ReconnectsAfterConnectionDrop(t *testing.T) {
         }
     }
 }
-
-/* @info reconnect and backoff */
 
 func TestNextBackoff_GrowsAndCaps(t *testing.T) {
     expected := []time.Duration{
@@ -793,8 +789,6 @@ func TestConsumeLoop_ContextDoneClosesOut(t *testing.T) {
     }
 }
 
-/* @info close unblocks parked goroutines */
-
 func TestForwardDeliveries_CloseUnblocksGoroutineParkedOnOutput(t *testing.T) {
     registry := NewMessageRegistry()
     RegisterMessage[closeUnblockMessage](registry, "amqp.test.close-unblock")
@@ -879,8 +873,6 @@ func TestReopenConsume_CloseUnblocksGoroutineParkedOnBackoff(t *testing.T) {
     }
 }
 
-/* @info publisher confirms */
-
 func TestTransport_SendSurfacesUnroutablePublishAfterQueueDelete(t *testing.T) {
     dsn := os.Getenv("AMQP_DSN")
     if "" == dsn {
@@ -932,8 +924,6 @@ func TestTransport_SendSurfacesUnroutablePublishAfterQueueDelete(t *testing.T) {
         t.Fatalf("expected Send to fail after the queue was deleted; the broker silently discarded the message")
     }
 }
-
-/* @info channel reopen */
 
 func TestEnsurePublishChannel_ReopensClosedChannelWithoutDialer(t *testing.T) {
     dsn := os.Getenv("AMQP_DSN")
@@ -1017,8 +1007,6 @@ func TestEnsureConsumeChannel_ReopensClosedChannelWithoutDialer(t *testing.T) {
     }
 }
 
-/* @info delay expiration */
-
 func TestDelayExpirationMilliseconds_ClampsSubMillisecondToOne(t *testing.T) {
     if 1 != delayExpirationMilliseconds(200*time.Microsecond) {
         t.Fatalf("expected a sub-millisecond delay to clamp to 1ms, got %d (a \"0\" TTL expires immediately and drops the backoff)", delayExpirationMilliseconds(200*time.Microsecond))
@@ -1071,8 +1059,6 @@ func TestDrainPublishReturn_DrainsEveryQueuedReturn(t *testing.T) {
     }
 }
 
-/* @info redelivery header */
-
 func TestRedeliveryCountFromHeader(t *testing.T) {
     cases := []struct {
         name     string
@@ -1099,8 +1085,6 @@ func TestRedeliveryCountFromHeader(t *testing.T) {
         })
     }
 }
-
-/* @info message type name */
 
 func TestMessageTypeName_NilDoesNotPanic(t *testing.T) {
     if "<nil>" != messageTypeName(nil) {

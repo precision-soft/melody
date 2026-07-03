@@ -292,8 +292,6 @@ func TestLocalStorage_Get_ErrorOnDirectoryKey(t *testing.T) {
     }
 }
 
-/* @info exists key resolution */
-
 func TestLocalStorage_ExistsReturnsFalseForDirectoryKey(t *testing.T) {
     local := NewLocalStorage(t.TempDir())
     runtimeInstance := testRuntime()
@@ -333,8 +331,6 @@ func TestLocalStorage_ExistsDoesNotFollowSymlinkToExternalTarget(t *testing.T) {
         t.Fatalf("Exists followed a symlink and reported an external target as existing")
     }
 }
-
-/* @info root confinement */
 
 func TestLocalStorage_RejectsIntermediateDirectorySymlinkEscapeOnPut(t *testing.T) {
     base := t.TempDir()

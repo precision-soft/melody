@@ -70,21 +70,37 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     router.HandleNamed(route.CurrenciesApiReadAllName, "GET", route.CurrenciesApiReadAllPattern, handlercurrency.ApiReadAllHandler())
 
-    router.HandleNamed(route.ProductsListPageName, "GET", route.ProductsListPagePattern, handlerproduct.ListPageHandler())
+    router.HandleWithOptions(
+        route.ProductsListPagePattern,
+        handlerproduct.ListPageHandler(),
+        melodyhttp.NewRouteOptions(route.ProductsListPageName, []string{"GET"}, "", nil, nil, nil, nil, 0, melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZoneFrontend)),
+    )
     router.HandleNamed(route.ProductsCreatePageName, "GET", route.ProductsCreatePagePattern, handlerproduct.CreatePageHandler())
     router.HandleNamed(route.ProductsUpdatePageName, "GET", route.ProductsUpdatePagePattern, handlerproduct.UpdatePageHandler())
     router.HandleNamed(route.ProductsApiCreateName, "POST", route.ProductsApiCreatePattern, handlerproduct.ApiCreateHandler())
     router.HandleNamed(route.ProductsApiReadAllName, "GET", route.ProductsApiReadAllPattern, handlerproduct.ApiReadAllHandler())
-    router.HandleNamed(route.ProductsApiReadName, "GET", route.ProductsApiReadPattern, handlerproduct.ApiReadHandler())
+    router.HandleWithOptions(
+        route.ProductsApiReadPattern,
+        handlerproduct.ApiReadHandler(),
+        melodyhttp.NewRouteOptions(route.ProductsApiReadName, []string{"GET"}, "", nil, nil, nil, nil, 0, melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZoneFrontend)),
+    )
     router.HandleNamed(route.ProductsApiUpdateName, "PUT", route.ProductsApiUpdatePattern, handlerproduct.ApiUpdateHandler())
     router.HandleNamed(route.ProductsApiDeleteName, "DELETE", route.ProductsApiDeletePattern, handlerproduct.ApiDeleteHandler())
 
-    router.HandleNamed(route.UsersListPageName, "GET", route.UsersListPagePattern, handleruser.ListPageHandler())
+    router.HandleWithOptions(
+        route.UsersListPagePattern,
+        handleruser.ListPageHandler(),
+        melodyhttp.NewRouteOptions(route.UsersListPageName, []string{"GET"}, "", nil, nil, nil, nil, 0, melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZoneFrontend)),
+    )
     router.HandleNamed(route.UsersCreatePageName, "GET", route.UsersCreatePagePattern, handleruser.CreatePageHandler())
     router.HandleNamed(route.UsersUpdatePageName, "GET", route.UsersUpdatePagePattern, handleruser.UpdatePageHandler())
     router.HandleNamed(route.UsersApiCreateName, "POST", route.UsersApiCreatePattern, handleruser.ApiCreateHandler())
     router.HandleNamed(route.UsersApiReadAllName, "GET", route.UsersApiReadAllPattern, handleruser.ApiReadAllHandler())
-    router.HandleNamed(route.UsersApiReadName, "GET", route.UsersApiReadPattern, handleruser.ApiReadHandler())
+    router.HandleWithOptions(
+        route.UsersApiReadPattern,
+        handleruser.ApiReadHandler(),
+        melodyhttp.NewRouteOptions(route.UsersApiReadName, []string{"GET"}, "", nil, nil, nil, nil, 0, melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZoneFrontend)),
+    )
     router.HandleNamed(route.UsersApiUpdateName, "PUT", route.UsersApiUpdatePattern, handleruser.ApiUpdateHandler())
     router.HandleNamed(route.UsersApiDeleteName, "DELETE", route.UsersApiDeletePattern, handleruser.ApiDeleteHandler())
 }

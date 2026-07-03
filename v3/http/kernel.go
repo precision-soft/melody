@@ -358,7 +358,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             )
             instance.logEventDispatchError(requestLogger, "kernel response error", eventKernelExceptionErr)
 
-            /* @important close the discarded response body when an EventKernelResponse listener swapped the response, so a file-backed body (an open *os.File from FileResponse/ServeReader) is not leaked; mirrors the discarded-response cleanup the error-handler path performs */
+            /* @important close the swapped-out response body so a file-backed body (FileResponse/ServeReader) is not leaked */
             if nil != finalResponse && finalResponse != kernelResponseEvent.Response() {
                 closeDiscardedResponseBody(finalResponse, requestLogger)
             }
@@ -405,7 +405,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             _, eventKernelResponseErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelResponse, kernelResponseEvent)
             instance.logEventDispatchError(requestLogger, "kernel response error", eventKernelResponseErr)
 
-            /* @important close the discarded response body when an EventKernelResponse listener swapped the response, so a file-backed body (an open *os.File from FileResponse/ServeReader) is not leaked; mirrors the discarded-response cleanup the error-handler path performs */
+            /* @important close the swapped-out response body so a file-backed body (FileResponse/ServeReader) is not leaked */
             if nil != finalResponse && finalResponse != kernelResponseEvent.Response() {
                 closeDiscardedResponseBody(finalResponse, requestLogger)
             }
@@ -555,7 +555,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             _, eventKernelResponseErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelResponse, kernelResponseEvent)
             instance.logEventDispatchError(requestLogger, "kernel response error", eventKernelResponseErr)
 
-            /* @important close the discarded response body when an EventKernelResponse listener swapped the response, so a file-backed body (an open *os.File from FileResponse/ServeReader) is not leaked; mirrors the discarded-response cleanup the error-handler path performs */
+            /* @important close the swapped-out response body so a file-backed body (FileResponse/ServeReader) is not leaked */
             if nil != finalResponse && finalResponse != kernelResponseEvent.Response() {
                 closeDiscardedResponseBody(finalResponse, requestLogger)
             }
@@ -639,7 +639,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             )
             instance.logEventDispatchError(requestLogger, "kernel response error", eventKernelResponseErr)
 
-            /* @important close the discarded response body when an EventKernelResponse listener swapped the response, so a file-backed body (an open *os.File from FileResponse/ServeReader) is not leaked; mirrors the discarded-response cleanup the error-handler path performs */
+            /* @important close the swapped-out response body so a file-backed body (FileResponse/ServeReader) is not leaked */
             if nil != finalResponse && finalResponse != kernelResponseEvent.Response() {
                 closeDiscardedResponseBody(finalResponse, requestLogger)
             }

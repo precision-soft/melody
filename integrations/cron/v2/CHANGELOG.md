@@ -13,7 +13,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `go.mod` — the module pinned `melody/v2 v2.0.0` while importing the `cli/contract.StringSliceFlag` symbol, which only exists from `v2.7.0`, so outside the repository workspace (`GOWORK=off`, or any consumer cloning just this module) the module did not resolve. The pin is raised to `v2.7.0` — the lowest framework version that provides every imported package — and the module-local `go.sum` is now complete for standalone builds.
 
-
 ## [v2.2.1] - 2026-06-25 - Forbid Control-Character Injection in User and Schedule Fields
 
 ### Fixed

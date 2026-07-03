@@ -13,12 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `go.mod` — the module pinned `melody/v3 v3.0.0` while importing the `storage`/`storage/contract` packages, which only exist from `v3.7.0`: outside the repository workspace the module did not resolve. The pin is raised to `v3.7.0` — the lowest framework version that provides every imported package — and the module-local `go.sum` is now complete for standalone builds.
 
-
 ## [v3.0.2] - 2026-06-25 - Put Over-Read Guard Reader-Type Fix
 
 ### Fixed
 
-- `storage.go` — the v3.0.1 `Put` over-read guard probed the caller's `reader` after `minio.PutObject` to detect a body longer than its declared `size`, but misfired on every valid `Put` of an `io.ReaderAt`+`io.Seeker` reader (`*bytes.Reader`, `*strings.Reader`, a non-stdio `*os.File` — the dominant callers). minio's single-shot `putObject` wraps such a reader in an `io.SectionReader` and uploads the body via `ReadAt`, which does **not** advance the caller's sequential `Read` cursor; the post-upload probe therefore read byte 0 of a correctly-sized body, returned a spurious "size does not match the declared size" error, **and `RemoveObject`-deleted the object it had just stored** — silent data loss for valid input. `Put` now hands minio the body through `boundedPutReader` — an `io.LimitReader` that is neither an `io.ReaderAt` nor an `io.Seeker` — forcing minio's sequential path to consume exactly `size` bytes straight from the caller's reader (and bounding what it stores at the declared size), so the trailing-byte probe is accurate for every reader type. A negative size still streams the whole reader.
+- `storage.go` — the v3.0.1 `Put` over-read guard probed the caller's `reader` after `minio.PutObject` to detect a body longer than its declared `size`, but misfired on every valid `Put` of an `io.ReaderAt`+`io.Seeker` reader (`*bytes.Reader`, `*strings.Reader`, a non-stdio `*os.File` — the dominant callers). minio's single-shot `putObject` wraps such a reader in an `io.SectionReader` and uploads the body via `ReadAt`, which does **not** advance the caller's sequential `Read` cursor; the post-upload probe therefore read byte 0 of a correctly-sized body, returned a spurious "size does not match the declared size" error, **and `RemoveObject`-deleted the object it had just stored** — silent data loss for valid input. `Put` now hands minio the body through `boundedPutReader` — an `io.LimitReader` that is neither an `io.ReaderAt` nor an `io.Seeker` — forcing minio's sequential path to consume exactly `size` bytes straight from the caller's reader (and bounding what it stores at the declared
+  size), so the trailing-byte probe is accurate for every reader type. A negative size still streams the whole reader.
 
 ## [v3.0.1] - 2026-06-25 - Put Size-Mismatch Rejection
 

@@ -103,8 +103,6 @@ func TestCipher_EncryptIsIdempotentOnAlreadyEncrypted(t *testing.T) {
     }
 }
 
-/* @info marker-shaped plaintext */
-
 func TestCipher_EncryptSealsMarkerShapedPlaintextInsteadOfStoringItRaw(t *testing.T) {
     provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
     cipher := NewCipher(provider)
@@ -247,8 +245,6 @@ func TestMigrator_EncryptThenReencryptRoundTripValues(t *testing.T) {
         t.Fatalf("rotation round-trip failed: %q (%v)", final, decryptErr)
     }
 }
-
-/* @info keyIdOf */
 
 func TestKeyIdOf_ReportsKeyForEncryptedValue(t *testing.T) {
     provider := NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2)})

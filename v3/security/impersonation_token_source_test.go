@@ -5,8 +5,8 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/v3/exception"
-    "github.com/precision-soft/melody/v3/internal/testhelper"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal/testhelper"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )

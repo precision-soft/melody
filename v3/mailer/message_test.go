@@ -865,8 +865,6 @@ func TestRenderMessage_LongAsciiAttachmentFilenameStaysUnderHardLineLimit(t *tes
     }
 }
 
-/* @info header folding */
-
 func TestRenderMessage_LongUnfoldableAddressStaysWithinHardLineLimit(t *testing.T) {
     longEmail := "user@" + strings.Repeat("x", 1200) + ".example.com"
 
@@ -913,8 +911,6 @@ func TestFoldHeaderLine_HardWrapPreservesValueBytes(t *testing.T) {
         t.Fatalf("hard-wrapping corrupted the value: rebuilt %d bytes, expected %d", rebuilt.Len(), len(word))
     }
 }
-
-/* @info phrase-context encoded-words */
 
 func TestRenderMessage_EncodesEspecialsInNonAsciiDisplayName(t *testing.T) {
     name := "Müller, Inc. (test); <x>"

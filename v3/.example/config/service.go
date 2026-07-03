@@ -7,6 +7,7 @@ import (
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodycache "github.com/precision-soft/melody/v3/cache"
     melodycachecontract "github.com/precision-soft/melody/v3/cache/contract"
+    melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     melodyevent "github.com/precision-soft/melody/v3/event"
     melodymailer "github.com/precision-soft/melody/v3/mailer"
@@ -34,6 +35,22 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
     )
 
     registrar.RegisterService(
+        melodymessagebus.ServiceConsumeBus,
+        func(resolver melodycontainercontract.Resolver) (melodymessagebuscontract.Bus, error) {
+            return instance.messageBusConsume, nil
+        },
+        /* @important the dispatch bus already claims the contract.Bus type; the consume bus is resolved by name only, so it must not also register under the shared type. */
+        melodycontainer.WithoutTypeRegistration(),
+    )
+
+    melodymessagebus.RegisterTransports(
+        registrar,
+        map[string]melodymessagebuscontract.Transport{
+            messageBusTransportAsync: instance.messageBusTransport,
+        },
+    )
+
+    registrar.RegisterService(
         melodytranslation.ServiceTranslator,
         func(resolver melodycontainercontract.Resolver) (melodytranslationcontract.Translator, error) {
             return instance.translator, nil
@@ -51,6 +68,13 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
         melodyopenapi.ServiceOpenApiRegistry,
         func(resolver melodycontainercontract.Resolver) (*melodyopenapi.Registry, error) {
             return instance.openApiRegistry, nil
+        },
+    )
+
+    registrar.RegisterService(
+        melodyopenapi.ServiceOpenApiInfo,
+        func(resolver melodycontainercontract.Resolver) (melodyopenapi.Info, error) {
+            return instance.openApiInfo, nil
         },
     )
 

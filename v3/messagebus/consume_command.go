@@ -32,7 +32,7 @@ type RetryPolicy struct {
     FailureTransport    messagebuscontract.Transport
     MaxDelay            time.Duration
     FailureRequeueDelay time.Duration
-    /* @important bound on how many times an exhausted message is requeued to the source after the FailureTransport itself rejects it; 0 keeps the default unbounded, no-loss behavior (requeue until the failure transport recovers), while a positive value gives up after that many failed dead-letter routings and nacks without requeue so a transport-native dead-letter (e.g. the AMQP DLX) can claim it instead of looping forever while both the handler and the failure transport are down */
+    /* @important bound on requeues of an exhausted message after the FailureTransport rejects it; 0 keeps the default no-loss behavior (requeue until it recovers), a positive value nacks without requeue after that many failed routings so a transport-native dead-letter (AMQP DLX) can claim it instead of looping forever */
     MaxDeadLetterAttempts int
 }
 
@@ -48,6 +48,24 @@ func NewConsumeCommandWithRetry(
     transports map[string]messagebuscontract.Transport,
     retryPolicy RetryPolicy,
 ) *ConsumeCommand {
+    return &ConsumeCommand{
+        bus:           bus,
+        transports:    transports,
+        retryPolicy:   normalizeRetryPolicy(retryPolicy),
+        shutdownGrace: defaultShutdownGrace,
+    }
+}
+
+/* NewConsumeCommandFromContainer builds the command so it resolves the bus, the transport map and an optional retry policy from the service container at run time, letting the framework auto-register melody:messagebus:consume once the application registers its transports. */
+func NewConsumeCommandFromContainer() *ConsumeCommand {
+    return &ConsumeCommand{
+        retryPolicy:          normalizeRetryPolicy(RetryPolicy{MaxRetries: defaultMaxRetries}),
+        shutdownGrace:        defaultShutdownGrace,
+        resolveFromContainer: true,
+    }
+}
+
+func normalizeRetryPolicy(retryPolicy RetryPolicy) RetryPolicy {
     if 0 > retryPolicy.MaxRetries {
         retryPolicy.MaxRetries = 0
     }
@@ -64,19 +82,15 @@ func NewConsumeCommandWithRetry(
         retryPolicy.MaxDeadLetterAttempts = 0
     }
 
-    return &ConsumeCommand{
-        bus:           bus,
-        transports:    transports,
-        retryPolicy:   retryPolicy,
-        shutdownGrace: defaultShutdownGrace,
-    }
+    return retryPolicy
 }
 
 type ConsumeCommand struct {
-    bus           messagebuscontract.Bus
-    transports    map[string]messagebuscontract.Transport
-    retryPolicy   RetryPolicy
-    shutdownGrace time.Duration
+    bus                  messagebuscontract.Bus
+    transports           map[string]messagebuscontract.Transport
+    retryPolicy          RetryPolicy
+    shutdownGrace        time.Duration
+    resolveFromContainer bool
 }
 
 func (instance *ConsumeCommand) WithShutdownGrace(grace time.Duration) *ConsumeCommand {
@@ -118,6 +132,10 @@ func (instance *ConsumeCommand) Run(
     runtimeInstance runtimecontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
+    if true == instance.resolveFromContainer {
+        instance.hydrateFromContainer(runtimeInstance)
+    }
+
     transportName := commandContext.String("transport")
     if "" == transportName {
         return exception.NewError("a transport name is required", nil, nil)
@@ -138,6 +156,17 @@ func (instance *ConsumeCommand) Run(
     }
 
     return instance.consumeFrom(runtimeInstance, transport, int64(commandContext.Int("limit")), concurrency)
+}
+
+func (instance *ConsumeCommand) hydrateFromContainer(runtimeInstance runtimecontract.Runtime) {
+    serviceContainer := runtimeInstance.Container()
+
+    instance.bus = ConsumeBusFromResolver(serviceContainer)
+    instance.transports = TransportsMustFromResolver(serviceContainer)
+
+    if resolvedPolicy, hasPolicy := RetryPolicyFromResolver(serviceContainer); true == hasPolicy {
+        instance.retryPolicy = normalizeRetryPolicy(resolvedPolicy)
+    }
 }
 
 func (instance *ConsumeCommand) consumeFrom(
@@ -302,7 +331,7 @@ func (instance *ConsumeCommand) consume(
     }
 }
 
-/* messageRuntime mirrors the http kernel's scope-per-request idiom at message granularity: each delivery gets its own container scope carrying a message-scoped logger (the MessageIdStamp value as the correlation key), so scope-based ambient state written by one handler — a security context, a logger override — cannot leak into other in-flight messages, and every log line of a delivery is correlatable. The parent runtime's context is kept as-is so shutdown/cancellation semantics are unchanged; without a resolvable container the shared runtime is returned untouched. */
+/* messageRuntime gives each delivery its own container scope and a message-scoped logger (keyed by MessageIdStamp), mirroring the http kernel's scope-per-request idiom so ambient scope state cannot leak between in-flight messages and every log line is correlatable. The parent context is kept as-is; without a resolvable container the shared runtime is returned untouched. */
 func (instance *ConsumeCommand) messageRuntime(
     runtimeInstance runtimecontract.Runtime,
     envelopeInstance messagebuscontract.Envelope,
@@ -358,7 +387,7 @@ func (instance *ConsumeCommand) dispatchSafely(
             return
         }
 
-        /* @important a panicking handler must flow into the retry/dead-letter pipeline exactly like a returned error: without this conversion the worker goroutine dies with the delivery unacked, the broker redelivers with an unchanged redelivery count, MaxRetries never trips and one poison message crash-loops every consumer replica; mirrors the recover-to-error contract the http kernel gives handlers */
+        /* @important a panicking handler must flow into the retry/dead-letter pipeline like a returned error; otherwise the worker dies with the delivery unacked, the broker redelivers with an unchanged count, MaxRetries never trips and one poison message crash-loops every replica. Mirrors the http kernel's recover-to-error contract. */
         recoveredErr, ok := recoveredValue.(error)
         if true == ok && nil != recoveredErr {
             dispatchErr = exception.NewError(

@@ -16,20 +16,20 @@ jobs:
             matrix:
                 tags: [ '', 'melody_env_embedded', 'melody_static_embedded', 'melody_env_embedded,melody_static_embedded' ]
         steps:
-            - uses: actions/checkout@v4
-            - uses: actions/setup-go@v5
-              with:
-                  go-version-file: go.work
-                  cache: true
-            - name: vet and test all workspace modules
-              env:
-                  GOFLAGS: ${{ matrix.tags != '' && format('-tags={0}', matrix.tags) || '' }}
-              run: |
-                  set -euo pipefail
-                  for module_directory in $(go list -m -f '{{.Dir}}' | sort); do
-                      echo "=== ${module_directory} (tags: '${{ matrix.tags }}') ==="
-                      (cd "${module_directory}" && go vet ./... && go test ./...)
-                  done
+            -   uses: actions/checkout@v4
+            -   uses: actions/setup-go@v5
+                with:
+                    go-version-file: go.work
+                    cache: true
+            -   name: vet and test all workspace modules
+                env:
+                    GOFLAGS: ${{ matrix.tags != '' && format('-tags={0}', matrix.tags) || '' }}
+                run: |
+                    set -euo pipefail
+                    for module_directory in $(go list -m -f '{{.Dir}}' | sort); do
+                        echo "=== ${module_directory} (tags: '${{ matrix.tags }}') ==="
+                        (cd "${module_directory}" && go vet ./... && go test ./...)
+                    done
 
     # the env-gated live suites the matrix job cannot exercise: real RabbitMQ,
     # Redis, MySQL, PostgreSQL and S3 (localstack) service containers, -race on
@@ -83,23 +83,23 @@ jobs:
             MINIO_ACCESS_KEY: test
             MINIO_SECRET_KEY: test
         steps:
-            - uses: actions/checkout@v4
-            - uses: actions/setup-go@v5
-              with:
-                  go-version-file: go.work
-                  cache: true
-            - name: live suites (race on the concurrency-critical ones)
-              run: |
-                  set -euo pipefail
-                  (cd integrations/amqp/v3 && go test -race -count=1 ./...)
-                  (cd integrations/rueidis/v3 && go test -race -count=1 ./...)
-                  (cd integrations/rueidis/v2 && go test -count=1 ./...)
-                  (cd integrations/rueidis && go test -count=1 ./...)
-                  (cd integrations/bunorm/mysql/v3 && go test -count=1 ./...)
-                  (cd integrations/bunorm/mysql/v2 && go test -count=1 ./...)
-                  (cd integrations/bunorm/mysql && go test -count=1 ./...)
-                  (cd integrations/bunorm/pgsql/v3 && go test -race -count=1 ./...)
-                  (cd integrations/bunorm/pgsql/v2 && go test -count=1 ./...)
-                  (cd integrations/bunorm/pgsql && go test -count=1 ./...)
-                  (cd integrations/outbox/v3 && go test -race -count=1 ./...)
-                  (cd integrations/awss3/v3 && go test -count=1 ./...)
+            -   uses: actions/checkout@v4
+            -   uses: actions/setup-go@v5
+                with:
+                    go-version-file: go.work
+                    cache: true
+            -   name: live suites (race on the concurrency-critical ones)
+                run: |
+                    set -euo pipefail
+                    (cd integrations/amqp/v3 && go test -race -count=1 ./...)
+                    (cd integrations/rueidis/v3 && go test -race -count=1 ./...)
+                    (cd integrations/rueidis/v2 && go test -count=1 ./...)
+                    (cd integrations/rueidis && go test -count=1 ./...)
+                    (cd integrations/bunorm/mysql/v3 && go test -count=1 ./...)
+                    (cd integrations/bunorm/mysql/v2 && go test -count=1 ./...)
+                    (cd integrations/bunorm/mysql && go test -count=1 ./...)
+                    (cd integrations/bunorm/pgsql/v3 && go test -race -count=1 ./...)
+                    (cd integrations/bunorm/pgsql/v2 && go test -count=1 ./...)
+                    (cd integrations/bunorm/pgsql && go test -count=1 ./...)
+                    (cd integrations/outbox/v3 && go test -race -count=1 ./...)
+                    (cd integrations/awss3/v3 && go test -count=1 ./...)

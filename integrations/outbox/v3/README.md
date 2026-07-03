@@ -20,16 +20,16 @@ Claiming is atomic through `SELECT ... FOR UPDATE SKIP LOCKED`, so the backing d
 
 `Store.EnsureSchema` creates the `melody_outbox` table for demos and tests (production schemas belong in `bunorm/migrate` migrations):
 
-| Column              | Purpose                                                                                     |
-|---------------------|---------------------------------------------------------------------------------------------|
-| `id`                | Row id; also the stable message id (`melody-outbox-<id>`) consumers deduplicate on.          |
-| `type_name`         | Codec type name used to rebuild the Go message.                                              |
-| `payload`           | Codec-encoded message body.                                                                  |
-| `status`            | `pending` → `inflight` → `sent` / `dead`.                                                    |
-| `attempts`          | Send failures — drives backoff and the `MaxAttempts` dead-letter.                            |
-| `delivery_attempts` | Every claim — drives the `MaxDeliveryAttempts` crash-poison cap.                             |
-| `available_at`      | When the row is next due (backoff scheduling + visibility timeout).                          |
-| `last_error`        | Last send/decode error, for operators.                                                       |
+| Column              | Purpose                                                                             |
+|---------------------|-------------------------------------------------------------------------------------|
+| `id`                | Row id; also the stable message id (`melody-outbox-<id>`) consumers deduplicate on. |
+| `type_name`         | Codec type name used to rebuild the Go message.                                     |
+| `payload`           | Codec-encoded message body.                                                         |
+| `status`            | `pending` → `inflight` → `sent` / `dead`.                                           |
+| `attempts`          | Send failures — drives backoff and the `MaxAttempts` dead-letter.                   |
+| `delivery_attempts` | Every claim — drives the `MaxDeliveryAttempts` crash-poison cap.                    |
+| `available_at`      | When the row is next due (backoff scheduling + visibility timeout).                 |
+| `last_error`        | Last send/decode error, for operators.                                              |
 
 ## Usage
 

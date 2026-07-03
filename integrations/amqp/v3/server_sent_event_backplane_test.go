@@ -206,8 +206,6 @@ func TestServerSentEventBackplane_DoesNotEchoToOriginInstanceTwice(t *testing.T)
     }
 }
 
-/* @info reconnect backoff reset */
-
 func TestShouldResetReconnectBackoff(t *testing.T) {
     config := resolveReconnectConfig(nil, nil)
     initialBackoff := config.InitialBackoff
@@ -266,8 +264,6 @@ func TestServerSentEventBackplane_ListenStopsWhenConnectionGoneAndNoDialer(t *te
         t.Fatalf("listen kept backing off instead of stopping when the connection is gone and no dialer is configured")
     }
 }
-
-/* @info publish channel reopen */
 
 func TestServerSentEventBackplane_EnsurePublishChannel_ReopensClosedChannel(t *testing.T) {
     dsn := os.Getenv("AMQP_DSN")

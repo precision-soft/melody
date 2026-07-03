@@ -516,6 +516,7 @@ func TestContainer_Close_ClosesDiamondDependencyInDeterministicOrder(t *testing.
         }
     }
 }
+
 /* @info OverrideProtectedInstance on a WithoutTypeRegistration value service must close once (CR #64) */
 
 type overrideValueCloserCR64 struct {

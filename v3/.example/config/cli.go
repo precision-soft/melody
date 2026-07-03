@@ -4,25 +4,20 @@ import (
     "github.com/precision-soft/melody/v3/.example/cli"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
-    melodyhttp "github.com/precision-soft/melody/v3/http"
     melodykernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
-    melodyopenapi "github.com/precision-soft/melody/v3/openapi"
 )
 
+/* RegisterCliCommands contributes only the application's own commands. The core commands (melody:routes:manifest, melody:openapi:generate, melody:messagebus:consume) are auto-registered by the framework once their services are configured, so they are not listed here. */
 func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.Kernel) []melodyclicontract.Command {
     return []melodyclicontract.Command{
         cli.NewAppInfoCommand(),
         cli.NewProductListCommand(),
-        /* @info the cron command is contributed by the cron module (see configure.go). */
-        instance.messageBusConsumeCommand,
         cli.NewMessageBusDemoCommand(
             instance.messageBusDispatch,
             instance.messageBusConsume,
             instance.messageBusTransport,
         ),
         cli.NewAuthTokenCommand(instance.jwtSecret),
-        melodyopenapi.NewGenerateCommand(instance.openApiInfo, instance.openApiRegistry),
-        melodyhttp.NewRouteManifestCommand(),
         cli.NewMailSendCommand(instance.mailer),
     }
 }

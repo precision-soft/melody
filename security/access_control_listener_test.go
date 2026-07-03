@@ -364,8 +364,6 @@ func TestAccessControlListener_WhenDecisionDenied_EmitsAuthorizationDeniedAndSet
     }
 }
 
-/* @info matchAccessControlRule */
-
 func TestMatchAccessControlRule_SetsMetadataCorrectly(t *testing.T) {
     control := NewAccessControl(
         NewAccessControlRule("/admin", "ROLE_ADMIN"),

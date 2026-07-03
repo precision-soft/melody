@@ -58,10 +58,10 @@ func TestDelayBucketFor_SelectsLargestNotExceeding(t *testing.T) {
     buckets := []time.Duration{5 * time.Second, time.Minute, 10 * time.Minute, time.Hour}
 
     cases := []struct {
-        name   string
-        delay  time.Duration
-        want   time.Duration
-        found  bool
+        name  string
+        delay time.Duration
+        want  time.Duration
+        found bool
     }{
         {name: "below smallest keeps legacy queue", delay: time.Second, want: 0, found: false},
         {name: "exact smallest", delay: 5 * time.Second, want: 5 * time.Second, found: true},

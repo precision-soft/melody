@@ -1,5 +1,7 @@
 package main
 
+//go:generate go run . melody:routes:manifest --zone frontend --out assets/routes.json
+
 import (
     "context"
 

@@ -110,8 +110,6 @@ func TestServerSentEventHub_UnsubscribeStopsDelivery(t *testing.T) {
     }
 }
 
-/* @info backplane */
-
 type recordingBackplane struct {
     mutex      sync.Mutex
     published  []ServerSentEvent

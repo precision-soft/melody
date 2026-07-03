@@ -299,8 +299,6 @@ func TestProviderOpenWithRetryAndNoLoggerServiceDoesNotPanic(t *testing.T) {
     }
 }
 
-/* @info Open with zero connect timeout */
-
 func TestProviderOpenWithZeroConnectTimeoutConnects(t *testing.T) {
     host := os.Getenv("PGSQL_HOST")
     if "" == host {

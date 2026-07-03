@@ -10,7 +10,6 @@ import (
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     melodymailercontract "github.com/precision-soft/melody/v3/mailer/contract"
-    melodymessagebus "github.com/precision-soft/melody/v3/messagebus"
     melodymessagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
     melodyopenapi "github.com/precision-soft/melody/v3/openapi"
     melodysecurity "github.com/precision-soft/melody/v3/security"
@@ -21,10 +20,9 @@ import (
 )
 
 type Module struct {
-    messageBusDispatch       melodymessagebuscontract.Bus
-    messageBusConsume        melodymessagebuscontract.Bus
-    messageBusTransport      melodymessagebuscontract.Transport
-    messageBusConsumeCommand *melodymessagebus.ConsumeCommand
+    messageBusDispatch  melodymessagebuscontract.Bus
+    messageBusConsume   melodymessagebuscontract.Bus
+    messageBusTransport melodymessagebuscontract.Transport
 
     jwtSecret            []byte
     tokenValidator       melodysecuritycontract.TokenValidator

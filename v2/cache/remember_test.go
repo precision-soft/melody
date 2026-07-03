@@ -171,8 +171,6 @@ func TestRemember_ZeroTtlActsAsForever(t *testing.T) {
     }
 }
 
-/* @info stampede protection */
-
 func TestRemember_ProtectAgainstStampede_ExecutesCallbackOnce(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
