@@ -86,6 +86,60 @@ func TestHmacTokenSource_ValidEnvelopeAuthenticatesAsServiceWithActor(t *testing
     }
 }
 
+func TestHmacTokenSource_MatchingAudienceAuthenticates(t *testing.T) {
+    signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "wms-service", Secrets: hmacTestSecrets(), Audience: "orders-service"})
+
+    headerValue, signErr := signer.Sign("GET", "/internal/ping", nil, nil)
+    if nil != signErr {
+        t.Fatalf("sign: %v", signErr)
+    }
+
+    source := NewHmacTokenSource(HmacTokenSourceConfig{
+        Secrets:         hmacTestSecrets(),
+        Apps:            hmacTestApps(),
+        NonceGuard:      NewMemoryNonceGuard(),
+        ServiceIdentity: "orders-service",
+    })
+
+    token, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/ping", nil, signer.HeaderName(), headerValue))
+    if false == token.IsAuthenticated() {
+        t.Fatal("expected an envelope addressed to this service to authenticate")
+    }
+}
+
+/* an envelope minted for a different callee must not authenticate here, even though this service trusts the same caller and serves the same endpoint — this is the cross-service replay the audience binding closes. */
+func TestHmacTokenSource_MismatchedAudienceIsAnonymous(t *testing.T) {
+    signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "wms-service", Secrets: hmacTestSecrets(), Audience: "billing-service"})
+
+    headerValue, _ := signer.Sign("GET", "/internal/ping", nil, nil)
+
+    source := NewHmacTokenSource(HmacTokenSourceConfig{
+        Secrets:         hmacTestSecrets(),
+        Apps:            hmacTestApps(),
+        NonceGuard:      NewMemoryNonceGuard(),
+        ServiceIdentity: "orders-service",
+    })
+
+    token, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/ping", nil, signer.HeaderName(), headerValue))
+    if true == token.IsAuthenticated() {
+        t.Fatal("expected an envelope minted for another service to be rejected")
+    }
+}
+
+/* backward compatible: a verifier that configures no ServiceIdentity does not check the audience, so an envelope signed before callers opted into audiences still authenticates. */
+func TestHmacTokenSource_AudienceUnenforcedWhenNoServiceIdentity(t *testing.T) {
+    signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "wms-service", Secrets: hmacTestSecrets()})
+
+    headerValue, _ := signer.Sign("GET", "/internal/ping", nil, nil)
+
+    source := hmacTestSource(NewMemoryNonceGuard())
+
+    token, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/ping", nil, signer.HeaderName(), headerValue))
+    if false == token.IsAuthenticated() {
+        t.Fatal("expected audience enforcement to be off when no ServiceIdentity is configured")
+    }
+}
+
 /* negative control: a tampered envelope must not authenticate. */
 func TestHmacTokenSource_TamperedSignatureIsAnonymous(t *testing.T) {
     signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "wms-service", Secrets: hmacTestSecrets()})

@@ -2,6 +2,7 @@ package validation
 
 import (
     "fmt"
+    "unicode/utf8"
 
     "github.com/precision-soft/melody/exception"
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
@@ -28,14 +29,15 @@ func (instance *MaxLength) Validate(value any, field string) validationcontract.
     }
 
     stringValue := fmt.Sprintf("%v", resolved)
-    if len(stringValue) > instance.max {
+    length := utf8.RuneCountInString(stringValue)
+    if length > instance.max {
         return NewValidationError(
             field,
             fmt.Sprintf("this field must not exceed %d characters", instance.max),
             ConstraintMaxLengthErrorTooLong,
             map[string]any{
                 "max":    instance.max,
-                "actual": len(stringValue),
+                "actual": length,
             },
         )
     }

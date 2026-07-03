@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `v3/nonce_guard.go` — `NonceGuard` (`NewNonceGuard(client)` / `NewNonceGuardWithPrefix(client, prefix)`) is a Redis-backed implementation of the core `security/contract.NonceGuard`, the replay-protection guard for the internal-auth HMAC token source. `Remember` runs a single atomic `SET NX PX` Lua script that records a nonce only when absent and returns whether it already existed, so a nonce replayed against any application instance is detected (which the core in-process `MemoryNonceGuard` cannot do across instances). A non-positive ttl reports unseen without storing. Requires the core `melody/v3` version that introduces `security/contract.NonceGuard`.
+- `v3/nonce_guard.go` — `NonceGuard` (`NewNonceGuard(client)` / `NewNonceGuardWithPrefix(client, prefix)`) is a Redis-backed implementation of the core `security/contract.NonceGuard`, the replay-protection guard for the internal-auth HMAC token source. `Remember` runs a single atomic `SET NX PX` Lua script that records a nonce only when absent and returns whether it already existed, so a nonce replayed against any application instance is detected (which the core in-process `MemoryNonceGuard` cannot do across instances). A non-positive ttl performs a read-only existence check — reporting whether the nonce is currently recorded — without storing, matching the in-process `MemoryNonceGuard` at the acceptance-window edge rather than reporting a still-recorded nonce as fresh. Requires the core `melody/v3` version that introduces `security/contract.NonceGuard`.
 
 ## [v3.2.0] - 2026-06-16 - Redis Lock, Revocable Token Store, and Server-Sent Events Backplane
 

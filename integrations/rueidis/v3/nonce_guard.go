@@ -47,7 +47,18 @@ func (instance *NonceGuard) Remember(
     ttl time.Duration,
 ) (bool, error) {
     if 0 >= ttl {
-        return false, nil
+        /* a non-positive ttl carries no lifetime to record, but the NonceGuard contract still reports whether the nonce is currently recorded — mirror MemoryNonceGuard, which performs the existence check before its own ttl short-circuit, with a read-only EXISTS rather than silently reporting the nonce as fresh (which would let a replay through at the acceptance-window edge). */
+        existsResult := instance.client.Do(
+            runtimeInstance.Context(),
+            instance.client.B().Exists().Key(instance.key(nonce)).Build(),
+        )
+
+        seen, existsErr := existsResult.AsInt64()
+        if nil != existsErr {
+            return false, exception.NewError("redis nonce guard failed", map[string]any{"nonce": nonce}, existsErr)
+        }
+
+        return 1 == seen, nil
     }
 
     milliseconds := strconv.FormatInt(floorPositiveMilliseconds(ttl), 10)

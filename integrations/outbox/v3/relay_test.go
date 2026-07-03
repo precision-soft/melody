@@ -37,7 +37,7 @@ func (instance *fakeRepository) ClaimDueMessages(_ context.Context, _ int, _ tim
 }
 
 /* models the store: charges a delivery attempt to a single row (advancing its stored count) only when that row is actually reached, and reports the row missing (claimed=false) when it is not among the due rows. It does not append to calls so the exact resolution-call assertions elsewhere stay meaningful. */
-func (instance *fakeRepository) RecordDeliveryAttempt(_ context.Context, id int64) (int, bool, error) {
+func (instance *fakeRepository) RecordDeliveryAttempt(_ context.Context, id int64, _ string) (int, bool, error) {
     for index := range instance.due {
         if id == instance.due[index].Id {
             instance.due[index].DeliveryAttempts++
@@ -49,19 +49,19 @@ func (instance *fakeRepository) RecordDeliveryAttempt(_ context.Context, id int6
     return 0, false, nil
 }
 
-func (instance *fakeRepository) MarkSent(_ context.Context, id int64) error {
+func (instance *fakeRepository) MarkSent(_ context.Context, id int64, _ string) error {
     instance.calls = append(instance.calls, repoCall{kind: "sent", id: id})
 
     return nil
 }
 
-func (instance *fakeRepository) Reschedule(_ context.Context, id int64, attempts int, _ time.Time, _ string) error {
+func (instance *fakeRepository) Reschedule(_ context.Context, id int64, attempts int, _ time.Time, _ string, _ string) error {
     instance.calls = append(instance.calls, repoCall{kind: "reschedule", id: id, attempts: attempts})
 
     return nil
 }
 
-func (instance *fakeRepository) MarkDead(_ context.Context, id int64, attempts int, _ string) error {
+func (instance *fakeRepository) MarkDead(_ context.Context, id int64, attempts int, _ string, _ string) error {
     instance.calls = append(instance.calls, repoCall{kind: "dead", id: id, attempts: attempts})
 
     return nil
@@ -285,7 +285,7 @@ type markSentFailingRepository struct {
     fakeRepository
 }
 
-func (instance *markSentFailingRepository) MarkSent(_ context.Context, _ int64) error {
+func (instance *markSentFailingRepository) MarkSent(_ context.Context, _ int64, _ string) error {
     return errors.New("mark sent failed")
 }
 

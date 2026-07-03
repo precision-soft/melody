@@ -136,12 +136,12 @@ func TestStore_StaleResolveDoesNotClobberResolvedRow(t *testing.T) {
     id := claimed[0].Id
 
     /* the current owner resolves the row as sent */
-    if sentErr := store.MarkSent(ctx, id); nil != sentErr {
+    if sentErr := store.MarkSent(ctx, id, claimed[0].ClaimToken); nil != sentErr {
         t.Fatalf("mark sent: %v", sentErr)
     }
 
-    /* a stale run (its claim long lapsed) tries to reschedule the same id; the in-flight guard must make it a no-op */
-    if rescheduleErr := store.Reschedule(ctx, id, 1, time.Now(), "stale"); nil != rescheduleErr {
+    /* a stale run (its claim long lapsed) tries to reschedule the same id under its old fencing token; both the in-flight guard and the token guard must make it a no-op */
+    if rescheduleErr := store.Reschedule(ctx, id, 1, time.Now(), "stale", "stale-claim-token"); nil != rescheduleErr {
         t.Fatalf("stale reschedule: %v", rescheduleErr)
     }
 
@@ -171,7 +171,7 @@ func TestStore_RecordDeliveryAttemptIncrementsPerRowNotClaim(t *testing.T) {
     }
     id := claimed[0].Id
 
-    first, claimedOk, recordErr := store.RecordDeliveryAttempt(ctx, id)
+    first, claimedOk, recordErr := store.RecordDeliveryAttempt(ctx, id, claimed[0].ClaimToken)
     if nil != recordErr {
         t.Fatalf("record delivery attempt: %v", recordErr)
     }
@@ -179,7 +179,7 @@ func TestStore_RecordDeliveryAttemptIncrementsPerRowNotClaim(t *testing.T) {
         t.Fatalf("expected the first recorded attempt to return 1 and claimed, got %d claimed=%v", first, claimedOk)
     }
 
-    second, _, secondErr := store.RecordDeliveryAttempt(ctx, id)
+    second, _, secondErr := store.RecordDeliveryAttempt(ctx, id, claimed[0].ClaimToken)
     if nil != secondErr {
         t.Fatalf("second record: %v", secondErr)
     }
@@ -201,16 +201,63 @@ func TestStore_RecordDeliveryAttemptReportsUnclaimedWhenNotInFlight(t *testing.T
     }
     id := claimed[0].Id
 
-    if sentErr := store.MarkSent(ctx, id); nil != sentErr {
+    if sentErr := store.MarkSent(ctx, id, claimed[0].ClaimToken); nil != sentErr {
         t.Fatalf("mark sent: %v", sentErr)
     }
 
-    _, claimedOk, recordErr := store.RecordDeliveryAttempt(ctx, id)
+    _, claimedOk, recordErr := store.RecordDeliveryAttempt(ctx, id, claimed[0].ClaimToken)
     if nil != recordErr {
         t.Fatalf("record delivery attempt: %v", recordErr)
     }
     if true == claimedOk {
         t.Fatal("expected a resolved (no longer in-flight) row to report claimed=false")
+    }
+}
+
+/* the fencing token stops a stale run whose claim lapsed from clobbering a row another instance has re-claimed: once a re-claim rewrites claim_token, the original claim's RecordDeliveryAttempt/MarkSent must no-op while the current owner's still transition the row. */
+func TestStore_StaleClaimTokenCannotClobberReclaimedRow(t *testing.T) {
+    store := outboxTestStore(t)
+    ctx := context.Background()
+
+    enqueueOutboxRows(t, store, 1)
+
+    firstClaim, firstErr := store.ClaimDueMessages(ctx, 10, 1*time.Millisecond)
+    if nil != firstErr || 1 != len(firstClaim) {
+        t.Fatalf("first claim: %v (got %d)", firstErr, len(firstClaim))
+    }
+
+    /* let the visibility window lapse so the row is due again, then re-claim it under a fresh token */
+    time.Sleep(10 * time.Millisecond)
+
+    secondClaim, secondErr := store.ClaimDueMessages(ctx, 10, time.Minute)
+    if nil != secondErr || 1 != len(secondClaim) {
+        t.Fatalf("second claim: %v (got %d)", secondErr, len(secondClaim))
+    }
+    if firstClaim[0].ClaimToken == secondClaim[0].ClaimToken {
+        t.Fatal("expected the re-claim to mint a distinct fencing token")
+    }
+
+    id := firstClaim[0].Id
+
+    _, staleClaimed, staleRecordErr := store.RecordDeliveryAttempt(ctx, id, firstClaim[0].ClaimToken)
+    if nil != staleRecordErr {
+        t.Fatalf("stale record: %v", staleRecordErr)
+    }
+    if true == staleClaimed {
+        t.Fatal("expected the stale claim's RecordDeliveryAttempt to report claimed=false after re-claim")
+    }
+
+    /* a stale resolution must not clobber the new owner: this MarkSent matches no row */
+    if sentErr := store.MarkSent(ctx, id, firstClaim[0].ClaimToken); nil != sentErr {
+        t.Fatalf("stale mark sent: %v", sentErr)
+    }
+
+    _, freshClaimed, freshRecordErr := store.RecordDeliveryAttempt(ctx, id, secondClaim[0].ClaimToken)
+    if nil != freshRecordErr {
+        t.Fatalf("fresh record: %v", freshRecordErr)
+    }
+    if false == freshClaimed {
+        t.Fatal("expected the current owner's RecordDeliveryAttempt to report claimed=true after a stale resolution")
     }
 }
 

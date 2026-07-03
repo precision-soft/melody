@@ -25,6 +25,9 @@ type HmacEnvelopeSignerConfig struct {
 
     /* Ttl is how long a signed envelope stays valid; defaults to defaultHmacSignerTtl. */
     Ttl time.Duration
+
+    /* Audience, when set, names the callee service this envelope is minted for and is signed into the envelope; the callee's HmacTokenSource rejects it unless its configured ServiceIdentity matches, so an envelope captured en route to one service cannot be replayed against another that trusts the same caller. Optional and opt-in: leave it empty and the callee's audience check (which is itself only active when it configures a ServiceIdentity) is not engaged, preserving the previous behavior. */
+    Audience string
 }
 
 func NewHmacEnvelopeSigner(config HmacEnvelopeSignerConfig) *HmacEnvelopeSigner {
@@ -63,6 +66,7 @@ func NewHmacEnvelopeSigner(config HmacEnvelopeSignerConfig) *HmacEnvelopeSigner 
         secrets:    config.Secrets,
         headerName: headerName,
         ttl:        ttl,
+        audience:   config.Audience,
     }
 }
 
@@ -71,6 +75,7 @@ type HmacEnvelopeSigner struct {
     secrets    HmacSecretProvider
     headerName string
     ttl        time.Duration
+    audience   string
 }
 
 func (instance *HmacEnvelopeSigner) HeaderName() string {
@@ -105,6 +110,7 @@ func (instance *HmacEnvelopeSigner) Sign(
 
     envelope := hmacEnvelope{
         App:       instance.app,
+        Audience:  instance.audience,
         Method:    method,
         Path:      signedPath,
         Query:     signedQuery,

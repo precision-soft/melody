@@ -2,6 +2,7 @@ package validation
 
 import (
     "fmt"
+    "unicode/utf8"
 
     "github.com/precision-soft/melody/v2/exception"
     exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
@@ -28,14 +29,15 @@ func (instance *MinLength) Validate(value any, field string) validationcontract.
     }
 
     stringValue := fmt.Sprintf("%v", resolved)
-    if len(stringValue) < instance.min {
+    length := utf8.RuneCountInString(stringValue)
+    if length < instance.min {
         return NewValidationError(
             field,
             fmt.Sprintf("this field must be at least %d characters long", instance.min),
             ConstraintMinLengthErrorInsufficientLength,
             map[string]any{
                 "min":    instance.min,
-                "actual": len(stringValue),
+                "actual": length,
             },
         )
     }

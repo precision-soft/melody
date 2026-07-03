@@ -30,6 +30,9 @@ type HmacTokenSourceConfig struct {
     /* MaxFutureExpiry caps how far in the future an envelope's ExpiresAt may sit (measured from the verifier's clock). The nonce guard remembers each nonce until its envelope expires, so without a cap a holder of a valid secret could issue far-future-expiry envelopes and pin unbounded memory in an in-process guard. Zero leaves the horizon unbounded (the previous behaviour) for callers that deliberately mint long-lived envelopes; set it (for example a few minutes above the signer's Ttl) on multi-instance deployments. */
     MaxFutureExpiry time.Duration
 
+    /* ServiceIdentity, when set, is this service's own name and turns on audience enforcement: the verifier rejects any envelope whose signed Audience does not equal it, so a shared caller's envelope captured en route to a different service cannot be replayed here. Opt-in and backward compatible — leaving it empty skips the audience check entirely, so envelopes minted before signers set an Audience keep verifying. Once set, callers must sign with a matching HmacEnvelopeSignerConfig.Audience or their envelopes are rejected. */
+    ServiceIdentity string
+
     /* VerifyBodyBeforeNonce selects the default order of the body and nonce checks. When false (the default) the nonce is consumed before the body is read, so a captured valid envelope can force at most one body buffering — but an on-path party who replays the header with a mutated body burns the nonce and fails the legitimate request as a replay. When true the body hash is verified first, so a body mismatch is rejected without consuming the nonce, at the cost of letting a captured envelope force body buffering until it expires. A per-request override (route attribute HmacVerifyBodyBeforeNonceAttribute, or SetHmacVerifyBodyBeforeNonce) takes precedence for routes/calls that need the opposite trade-off. */
     VerifyBodyBeforeNonce bool
 }
@@ -61,6 +64,7 @@ func NewHmacTokenSource(config HmacTokenSourceConfig) *HmacTokenSource {
         leeway:                config.Leeway,
         maxFutureExpiry:       config.MaxFutureExpiry,
         verifyBodyBeforeNonce: config.VerifyBodyBeforeNonce,
+        serviceIdentity:       config.ServiceIdentity,
     }
 }
 
@@ -77,6 +81,7 @@ type HmacTokenSource struct {
     leeway                time.Duration
     maxFutureExpiry       time.Duration
     verifyBodyBeforeNonce bool
+    serviceIdentity       string
 }
 
 func (instance *HmacTokenSource) Name() string {
@@ -118,6 +123,10 @@ func (instance *HmacTokenSource) Resolve(
         )
     }
 
+    if audienceErr := instance.verifyAudience(envelope); nil != audienceErr {
+        return instance.reject(runtimeInstance, audienceErr)
+    }
+
     if bindErr := instance.verifyEndpoint(envelope, request); nil != bindErr {
         return instance.reject(runtimeInstance, bindErr)
     }
@@ -136,6 +145,23 @@ func (instance *HmacTokenSource) Resolve(
     }
 
     return NewAuthenticatedTokenWithActor(envelope.App, roles, actor), nil
+}
+
+func (instance *HmacTokenSource) verifyAudience(envelope hmacEnvelope) error {
+    if "" == instance.serviceIdentity {
+        /* audience enforcement is opt-in: with no configured ServiceIdentity the envelope's audience is not checked, so envelopes minted before signers set an Audience keep verifying (backward compatible). */
+        return nil
+    }
+
+    if envelope.Audience != instance.serviceIdentity {
+        return exception.NewError(
+            "internal-auth audience does not match this service",
+            map[string]any{"signed": envelope.Audience, "service": instance.serviceIdentity},
+            nil,
+        )
+    }
+
+    return nil
 }
 
 func (instance *HmacTokenSource) verifyEndpoint(envelope hmacEnvelope, request httpcontract.Request) error {

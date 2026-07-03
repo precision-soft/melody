@@ -18,9 +18,10 @@ const (
     DefaultHmacHeaderName = "X-Melody-Internal-Auth"
 )
 
-/* hmacEnvelope is the signed payload of the internal-auth header. Every field that matters for authorization is inside the envelope so the single HMAC signature covers all of it — there is no separate-header canonicalization to get wrong. Method/Path/Query bind the envelope to one endpoint (a captured envelope cannot be replayed against another route, nor have its query parameters tampered with), IssuedAt/ExpiresAt/Nonce bound its lifetime and single use, BodyHash makes the request body tamper-evident, and Actor optionally carries the originating actor (F1) so the callee authorizes/audits as the upstream principal. */
+/* hmacEnvelope is the signed payload of the internal-auth header. Every field that matters for authorization is inside the envelope so the single HMAC signature covers all of it — there is no separate-header canonicalization to get wrong. Method/Path/Query bind the envelope to one endpoint (a captured envelope cannot be replayed against another route, nor have its query parameters tampered with), Audience optionally binds it to the intended callee service (so a shared caller's envelope captured en route to service Y cannot be replayed against service Z that also trusts the caller), IssuedAt/ExpiresAt/Nonce bound its lifetime and single use, BodyHash makes the request body tamper-evident, and Actor optionally carries the originating actor (F1) so the callee authorizes/audits as the upstream principal. */
 type hmacEnvelope struct {
     App       string                      `json:"app"`
+    Audience  string                      `json:"audience,omitempty"`
     Method    string                      `json:"method"`
     Path      string                      `json:"path"`
     Query     string                      `json:"query,omitempty"`

@@ -26,6 +26,9 @@ type ImpersonationTokenSourceConfig struct {
 
     /* RoleMode selects whose roles the impersonation token authorizes with: RoleModeImpersonated (the default) takes on the target's roles for their full context, RoleModeImpersonator keeps the admin's own rights. The impersonator stays auditable and propagates between services in either mode. */
     RoleMode ImpersonationRoleMode
+
+    /* RoleHierarchy, when set, expands the admin's roles through the role hierarchy before the switch-role check, matching how the access-decision path authorizes (an admin granted the switch role transitively — e.g. via a super-admin role that implies it — is then allowed to switch). Optional: a nil hierarchy checks the raw token roles, so the default behavior is unchanged. */
+    RoleHierarchy *RoleHierarchy
 }
 
 func NewImpersonationTokenSource(config ImpersonationTokenSourceConfig) *ImpersonationTokenSource {
@@ -48,20 +51,22 @@ func NewImpersonationTokenSource(config ImpersonationTokenSourceConfig) *Imperso
     }
 
     return &ImpersonationTokenSource{
-        inner:      config.Inner,
-        users:      config.Users,
-        headerName: headerName,
-        switchRole: switchRole,
-        roleMode:   config.RoleMode,
+        inner:         config.Inner,
+        users:         config.Users,
+        headerName:    headerName,
+        switchRole:    switchRole,
+        roleMode:      config.RoleMode,
+        roleHierarchy: config.RoleHierarchy,
     }
 }
 
 type ImpersonationTokenSource struct {
-    inner      securitycontract.TokenSource
-    users      securitycontract.ImpersonatedUserResolver
-    headerName string
-    switchRole string
-    roleMode   ImpersonationRoleMode
+    inner         securitycontract.TokenSource
+    users         securitycontract.ImpersonatedUserResolver
+    headerName    string
+    switchRole    string
+    roleMode      ImpersonationRoleMode
+    roleHierarchy *RoleHierarchy
 }
 
 func (instance *ImpersonationTokenSource) Name() string {
@@ -88,7 +93,12 @@ func (instance *ImpersonationTokenSource) Resolve(
         return innerToken, nil
     }
 
-    if false == hasRole(innerToken.Roles(), instance.switchRole) {
+    switchRoles := innerToken.Roles()
+    if nil != instance.roleHierarchy {
+        switchRoles = instance.roleHierarchy.ExpandRoles(switchRoles)
+    }
+
+    if false == hasRole(switchRoles, instance.switchRole) {
         instance.logDenied(runtimeInstance, "principal is not allowed to switch user", target)
 
         return innerToken, nil

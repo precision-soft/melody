@@ -164,7 +164,7 @@ func (instance *Relay) deliver(runtimeInstance runtimecontract.Runtime, pending 
     ctx := runtimeInstance.Context()
 
     /* record this delivery attempt — and persist it — before decoding or sending, both of which can crash or hang the relay. Charging the attempt per row at this point (rather than to the whole batch at claim time) means a row that keeps crashing advances only its own poison counter; a batch-mate the relay never reaches is never charged an attempt it never received, so it is never falsely dead-lettered. */
-    deliveryAttempts, claimed, recordErr := instance.config.Repository.RecordDeliveryAttempt(ctx, pending.Id)
+    deliveryAttempts, claimed, recordErr := instance.config.Repository.RecordDeliveryAttempt(ctx, pending.Id, pending.ClaimToken)
     if nil != recordErr {
         return false, recordErr
     }
@@ -176,13 +176,13 @@ func (instance *Relay) deliver(runtimeInstance runtimecontract.Runtime, pending 
 
     if deliveryAttempts > instance.config.MaxDeliveryAttempts {
         /* the row has been delivered more times than the delivery cap without ever resolving. A row that merely fails to send is dead-lettered by the send-failure path at MaxAttempts, so exceeding the (larger) delivery cap means it keeps crashing or hanging the relay between the recorded attempt and resolve — its send-failure attempts never advance. Dead-letter it as poison so it cannot re-surface forever. */
-        return false, instance.config.Repository.MarkDead(ctx, pending.Id, pending.Attempts, "exceeded max delivery attempts (poison crashing the relay between claim and resolve)")
+        return false, instance.config.Repository.MarkDead(ctx, pending.Id, pending.Attempts, "exceeded max delivery attempts (poison crashing the relay between claim and resolve)", pending.ClaimToken)
     }
 
     message, decodeErr := instance.config.Codec.Decode(pending.TypeName, pending.Payload)
     if nil != decodeErr {
         /* an undecodable row is poison and can never succeed, so it goes straight to the dead state rather than being retried forever */
-        return false, instance.config.Repository.MarkDead(ctx, pending.Id, pending.Attempts, "decode: "+decodeErr.Error())
+        return false, instance.config.Repository.MarkDead(ctx, pending.Id, pending.Attempts, "decode: "+decodeErr.Error(), pending.ClaimToken)
     }
 
     /* stamp the outbox row id as the message id so the transport can carry it (for example as the AMQP message id) and a consumer can deduplicate: the outbox is at-least-once (a transport success followed by a crash before MarkSent redelivers the row), so the same logical message must always publish under the same id. */
@@ -190,17 +190,17 @@ func (instance *Relay) deliver(runtimeInstance runtimecontract.Runtime, pending 
 
     sendErr := instance.config.Transport.Send(runtimeInstance, envelope)
     if nil == sendErr {
-        return true, instance.config.Repository.MarkSent(ctx, pending.Id)
+        return true, instance.config.Repository.MarkSent(ctx, pending.Id, pending.ClaimToken)
     }
 
     attempts := pending.Attempts + 1
     if attempts >= instance.config.MaxAttempts {
-        return false, instance.config.Repository.MarkDead(ctx, pending.Id, attempts, sendErr.Error())
+        return false, instance.config.Repository.MarkDead(ctx, pending.Id, attempts, sendErr.Error(), pending.ClaimToken)
     }
 
     availableAt := time.Now().Add(instance.nextBackoff(attempts))
 
-    return false, instance.config.Repository.Reschedule(ctx, pending.Id, attempts, availableAt, sendErr.Error())
+    return false, instance.config.Repository.Reschedule(ctx, pending.Id, attempts, availableAt, sendErr.Error(), pending.ClaimToken)
 }
 
 func (instance *Relay) acquireLease(runtimeInstance runtimecontract.Runtime) (func(), func(runtimecontract.Runtime) error, bool, error) {

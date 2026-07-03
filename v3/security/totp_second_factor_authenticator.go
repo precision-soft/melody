@@ -14,7 +14,9 @@ import (
 /* DefaultTotpCodeHeaderName is the request header the TOTP code is read from unless overridden. */
 const DefaultTotpCodeHeaderName = "X-2FA-Code"
 
-/* TotpSecondFactorAuthenticatorConfig composes a primary authenticator with a TOTP second factor into a single Authenticator, so it slots into the existing AuthenticatorManager without changing the manager's first-match flow. When the primary credential is accepted and the user has a TOTP enrollment, a valid code header is additionally required; otherwise the result is a non-authenticated TwoFactorPendingToken the application uses to prompt for a code. */
+/* TotpSecondFactorAuthenticatorConfig composes a primary authenticator with a TOTP second factor into a single Authenticator, so it slots into the existing AuthenticatorManager without changing the manager's first-match flow. When the primary credential is accepted and the user has a TOTP enrollment, a valid code header is additionally required; otherwise the result is a non-authenticated TwoFactorPendingToken the application uses to prompt for a code.
+
+The ReplayGuard blocks reuse of an *accepted* code within its validity window, but this authenticator intentionally does NOT rate-limit *failed* code attempts: an unthrottled stream of distinct wrong guesses against a 6-digit code (with skew, a handful of codes are valid at any instant) can brute-force the second factor once the primary credential is known. Throttling and per-user lockout are the application's responsibility and MUST front this authenticator — enforce them at the transport/middleware layer (an attempt counter with exponential backoff or a temporary lockout keyed on the authenticating user), the same layer that should already rate-limit primary-credential attempts. */
 type TotpSecondFactorAuthenticatorConfig struct {
     Primary securitycontract.Authenticator
 
