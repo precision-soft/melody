@@ -267,6 +267,58 @@ func TestValidator_MalformedNumericParameterFailsClosed(t *testing.T) {
     requireValidationErrors(t, validatorInstance.Validate(payloadWithFractionalMaxLength{Name: "abcd"}))
 }
 
+type payloadWithGreaterThanUnknownParam struct {
+    Count int `json:"count" validate:"greaterThan(min=18)"`
+}
+
+type payloadWithLessThanUnknownParam struct {
+    Count int `json:"count" validate:"lessThan(max=5)"`
+}
+
+type payloadWithMinLengthUnknownParam struct {
+    Name string `json:"name" validate:"min(len=8)"`
+}
+
+type payloadWithMaxLengthUnknownParam struct {
+    Name string `json:"name" validate:"max(limit=10)"`
+}
+
+type payloadWithRegexUnknownParam struct {
+    Value string `json:"value" validate:"regex(re=^[0-9]{4}$)"`
+}
+
+type payloadWithGreaterThanShorthand struct {
+    Count int `json:"count" validate:"greaterThan=5"`
+}
+
+func TestValidator_UnrecognizedParameterKeyFailsClosed(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    /* a parameterizable constraint that receives parameters without its recognized key ("value", or "pattern"/"value" for regex) must fail closed rather than silently degrade to the registered default bound: a fail-open here would leave the field validated against a weaker constraint than the tag declares (regex(re=...) degrading to the match-all `.*` default, min(len=8) to a floor of 1) */
+    for _, payload := range []any{
+        payloadWithGreaterThanUnknownParam{Count: -1},
+        payloadWithLessThanUnknownParam{Count: 100},
+        payloadWithMinLengthUnknownParam{Name: ""},
+        payloadWithMaxLengthUnknownParam{Name: "value"},
+        payloadWithRegexUnknownParam{Value: "not-four-digits"},
+    } {
+        validationErrors := requireValidationErrors(t, validatorInstance.Validate(payload))
+
+        validationError, ok := validationErrors[0].(*ValidationError)
+        if false == ok {
+            t.Fatalf("expected *ValidationError, got %T", validationErrors[0])
+        }
+
+        if ErrorInvalidRuleSyntax != validationError.Code() {
+            t.Fatalf("expected an unrecognized constraint parameter to fail closed with code %q, got %q", ErrorInvalidRuleSyntax, validationError.Code())
+        }
+    }
+
+    /* the shorthand form maps to the recognized `value` key, so it still configures and enforces the bound: 3 is not greater than 5, 9 is */
+    requireValidationErrors(t, validatorInstance.Validate(payloadWithGreaterThanShorthand{Count: 3}))
+    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithGreaterThanShorthand{Count: 9}))
+}
+
 func TestValidator_MapsJsonTagNameAsField(t *testing.T) {
     validatorInstance := NewValidator()
 

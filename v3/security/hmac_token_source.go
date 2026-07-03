@@ -144,6 +144,11 @@ func (instance *HmacTokenSource) verifyEndpoint(envelope hmacEnvelope, request h
         return exception.NewError("internal-auth request is nil", nil, nil)
     }
 
+    if nil == httpRequest.URL {
+        /* @important a server-originated *http.Request always carries a non-nil URL, but a synthetically constructed request (an internal caller building an *http.Request directly) can leave it nil; guard it so endpoint verification fails closed instead of dereferencing a nil URL and panicking inside the request pipeline */
+        return exception.NewError("internal-auth request url is nil", nil, nil)
+    }
+
     if envelope.Method != httpRequest.Method {
         return exception.NewError(
             "internal-auth method does not match the request",

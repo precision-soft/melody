@@ -50,7 +50,13 @@ func (instance *MinLength) Min() int {
 func (instance *MinLength) WithParams(params map[string]string) (validationcontract.Constraint, error) {
     valueString, exists := params["value"]
     if false == exists {
-        return NewMinLength(instance.min), nil
+        return nil, exception.NewError(
+            "min length constraint requires a value parameter",
+            exceptioncontract.Context{
+                "params": params,
+            },
+            nil,
+        )
     }
 
     parsed, ok := parseIntStrict(valueString)

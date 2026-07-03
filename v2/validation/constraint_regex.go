@@ -3,6 +3,8 @@ package validation
 import (
     "regexp"
 
+    "github.com/precision-soft/melody/v2/exception"
+    exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
     validationcontract "github.com/precision-soft/melody/v2/validation/contract"
 )
 
@@ -79,7 +81,13 @@ func (instance *Regex) WithParams(params map[string]string) (validationcontract.
         return NewRegex(patternString), nil
     }
 
-    return NewRegex(instance.pattern), nil
+    return nil, exception.NewError(
+        "regex constraint requires a pattern or value parameter",
+        exceptioncontract.Context{
+            "params": params,
+        },
+        nil,
+    )
 }
 
 var _ validationcontract.Constraint = (*Regex)(nil)

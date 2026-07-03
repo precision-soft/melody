@@ -121,7 +121,13 @@ func (instance *GreaterThan) Min() int {
 func (instance *GreaterThan) WithParams(params map[string]string) (validationcontract.Constraint, error) {
     valueString, exists := params["value"]
     if false == exists {
-        return NewGreaterThan(instance.min), nil
+        return nil, exception.NewError(
+            "greater than constraint requires a value parameter",
+            exceptioncontract.Context{
+                "params": params,
+            },
+            nil,
+        )
     }
 
     parsed, ok := parseIntStrict(valueString)

@@ -219,7 +219,7 @@ func (instance *ConsumeCommand) consumeFrom(
                         return
                     }
 
-                    instance.consume(consumeRuntime, transport, envelopeInstance)
+                    instance.consumeRecovered(consumeRuntime, transport, envelopeInstance)
 
                     if limit > 0 && atomic.AddInt64(&processed, 1) >= limit {
                         cancelWorkers()
@@ -248,6 +248,37 @@ func (instance *ConsumeCommand) consumeFrom(
     case <-time.After(instance.shutdownGrace):
         return exception.NewError("consumer shutdown timed out waiting for in-flight handlers", nil, nil)
     }
+}
+
+/* consumeRecovered runs consume behind a panic barrier so a panic raised OUTSIDE the handler dispatch — in per-message scope setup, the transport Ack/Nack, or scope teardown — is logged and the worker goroutine survives to process the next delivery, instead of dying and silently shrinking the worker pool until the consumer stalls with no error surfaced. A handler panic is already converted into the retry/dead-letter pipeline inside dispatchSafely; this is the backstop for everything else on the per-message path. The in-flight delivery is left unacked, so the broker redelivers it. */
+func (instance *ConsumeCommand) consumeRecovered(
+    runtimeInstance runtimecontract.Runtime,
+    transport messagebuscontract.Transport,
+    envelopeInstance messagebuscontract.Envelope,
+) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            return
+        }
+
+        recoveredErr, _ := recoveredValue.(error)
+
+        instance.logError(
+            runtimeInstance,
+            "message processing panicked outside the handler",
+            exception.NewError(
+                "message processing panicked",
+                exceptioncontract.Context{
+                    "recoveredValue": recoveredValue,
+                    "panicStack":     string(debug.Stack()),
+                },
+                recoveredErr,
+            ),
+        )
+    }()
+
+    instance.consume(runtimeInstance, transport, envelopeInstance)
 }
 
 func (instance *ConsumeCommand) consume(

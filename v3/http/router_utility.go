@@ -220,31 +220,30 @@ func writeResponse(
         sessionPersistFailed := false
 
         if true == sessionInstance.IsCleared() {
-            err := sessionManager.DeleteSession(sessionInstance.Id())
-            if nil != err {
-                /* @important a session-backend outage must degrade to a logged error and a response without session-cookie changes: writeResponse also runs inside the kernel's already-consumed panic-recovery defer, where a second panic would escape ServeHttp and abort the connection instead of delivering the built response */
+            if err := sessionManager.DeleteSession(sessionInstance.Id()); nil != err {
+                /* @important a session-backend outage on logout must degrade to a logged error but STILL expire the browser cookie: clearing the cookie is independent of and strictly safer than the backend delete (it can only end a session, never resurrect an unpersisted one), so a failed DeleteSession must not leave the client holding a live session cookie while it is told it was logged out. Mark the persistence failed so MarkSessionPersisted is skipped, but emit the clearing cookie below regardless. (This differs from the save path, where a failed SaveSession MUST suppress the cookie so the browser is not pointed at a never-persisted session id.) */
                 sessionPersistFailed = true
 
                 logSessionPersistenceError(runtimeInstance, "failed to delete session", err)
-            } else {
-                cookiePath := sessionCookiePolicy.Path
-                if "" == cookiePath {
-                    cookiePath = "/"
-                }
-
-                cookie := &nethttp.Cookie{
-                    Name:     session.SessionCookieName,
-                    Value:    "",
-                    Path:     cookiePath,
-                    Domain:   sessionCookiePolicy.Domain,
-                    HttpOnly: true,
-                    SameSite: sessionCookiePolicy.SameSite,
-                    Secure:   "https" == detectSchemeWithForwardedHeadersPolicy(request.HttpRequest(), forwardedHeadersPolicy),
-                    MaxAge:   -1,
-                }
-
-                SetCookie(response, cookie)
             }
+
+            cookiePath := sessionCookiePolicy.Path
+            if "" == cookiePath {
+                cookiePath = "/"
+            }
+
+            cookie := &nethttp.Cookie{
+                Name:     session.SessionCookieName,
+                Value:    "",
+                Path:     cookiePath,
+                Domain:   sessionCookiePolicy.Domain,
+                HttpOnly: true,
+                SameSite: sessionCookiePolicy.SameSite,
+                Secure:   "https" == detectSchemeWithForwardedHeadersPolicy(request.HttpRequest(), forwardedHeadersPolicy),
+                MaxAge:   -1,
+            }
+
+            SetCookie(response, cookie)
         } else if true == sessionInstance.IsModified() {
             err := sessionManager.SaveSession(sessionInstance)
             if nil != err {

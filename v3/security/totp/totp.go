@@ -19,6 +19,7 @@ const (
     defaultPeriod        = 30
     defaultDigits        = 6
     defaultSkew          = 1
+    maxSkew              = 10
     defaultSecretBytes   = 20
     defaultRecoveryCount = 10
 )
@@ -43,8 +44,11 @@ func (instance Config) withDefaults() Config {
         resolved.Digits = defaultDigits
     }
 
+    /* clamp the skew window: the verify loop runs 2*Skew+1 HMAC-SHA1 computations, so an unbounded (mis)configured skew turns every verification into heavy CPU work — and a skew near the uint maximum would additionally overflow the int64 loop bound in VerifyAt. A window of a few steps already covers realistic clock drift (maxSkew steps is ±5 minutes at the default 30-second period). */
     if 0 == resolved.Skew {
         resolved.Skew = defaultSkew
+    } else if maxSkew < resolved.Skew {
+        resolved.Skew = maxSkew
     }
 
     return resolved

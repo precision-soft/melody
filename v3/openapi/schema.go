@@ -415,6 +415,12 @@ func applyValidation(schema *Schema, validateTag string) {
         return
     }
 
+    if true == tagHasUnconsumedParameterizedParams(validateTag) {
+        /* @important a parameterizable constraint (min/max/greaterThan/lessThan/regex) that receives parameters without its recognized key ("value", or "pattern"/"value" for regex) fails closed in the validator post-CR85: WithParams returns an error and createConstraintWithParams returns invalid-rule before Constraint.Validate runs, so the field accepts no value of any kind — advertise it unsatisfiable, mirroring tagHasParamsOnNonParameterizable for the parameterizable constraints. A bare value-less constraint (no parameters at all) still resolves to the registered default and is handled by the per-case branches below. */
+        markFieldUnsatisfiable(schema)
+        return
+    }
+
     if "" != schema.Ref || nil != schema.AllOf {
         /* @important a $ref (or nullable allOf-wrapped $ref) denotes a struct, which the validator rejects outright for notEmpty and greaterThan/lessThan, and it fails closed on params a non-parameterizable constraint cannot consume — so advertise the field unsatisfiable rather than as a satisfiable object. No length/numeric facet otherwise attaches to a $ref. */
         if true == tagRejectsStruct(validateTag) || true == tagHasParamsOnNonParameterizable(validateTag) || true == tagRejectsAllViaNumericBound(validateTag) {
@@ -808,6 +814,31 @@ func tagHasParamsOnNonParameterizable(validateTag string) bool {
         switch name {
         case "email", "alpha", "numeric", "alphanumeric", "notBlank", "notEmpty":
             return true
+        }
+    }
+
+    return false
+}
+
+/* @important reports whether a validate tag carries parameters a PARAMETERIZABLE constraint cannot consume: min/max/greaterThan/lessThan read only the "value" key and regex only "pattern"/"value", so a non-empty parameter set lacking the recognized key makes WithParams fail the rule closed (createConstraintWithParams returns invalid-rule before Constraint.Validate runs, post-CR85), and the field accepts no value of any kind. Mirrors tagHasParamsOnNonParameterizable for the parameterizable constraints. A bare constraint with no parameters is excluded (0 == len(params)) because it resolves to the registered default rather than failing closed. */
+func tagHasUnconsumedParameterizedParams(validateTag string) bool {
+    for _, rule := range splitRules(validateTag) {
+        name, params := splitRule(rule)
+        if 0 == len(params) {
+            continue
+        }
+
+        switch name {
+        case "min", "max", "greaterThan", "lessThan":
+            if _, exists := params["value"]; false == exists {
+                return true
+            }
+        case "regex", "pattern":
+            _, hasPattern := params["pattern"]
+            _, hasValue := params["value"]
+            if false == hasPattern && false == hasValue {
+                return true
+            }
         }
     }
 

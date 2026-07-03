@@ -129,7 +129,13 @@ func (instance *LessThan) Max() int {
 func (instance *LessThan) WithParams(params map[string]string) (validationcontract.Constraint, error) {
     valueString, exists := params["value"]
     if false == exists {
-        return NewLessThan(instance.max), nil
+        return nil, exception.NewError(
+            "less than constraint requires a value parameter",
+            exceptioncontract.Context{
+                "params": params,
+            },
+            nil,
+        )
     }
 
     parsed, ok := parseIntStrict(valueString)

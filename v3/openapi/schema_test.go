@@ -1097,6 +1097,35 @@ func TestBuildSchema_ParamsOnNonParameterizableConstraintIsUnsatisfiable(t *test
     }
 }
 
+type unconsumedParameterizedParamsRequest struct {
+    Name  string `json:"name" validate:"min(len=8)"`
+    Code  string `json:"code" validate:"regex(re=^[0-9]{4}$)"`
+    Count int    `json:"count" validate:"greaterThan(min=18)"`
+}
+
+func TestBuildSchema_UnconsumedParameterizedParamsIsUnsatisfiable(t *testing.T) {
+    components := map[string]*Schema{}
+    buildSchema(reflect.TypeOf(unconsumedParameterizedParamsRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    schema := components["unconsumedParameterizedParamsRequest"]
+    if nil == schema {
+        t.Fatalf("expected the request schema to be registered in components")
+    }
+
+    /* @important a parameterizable constraint that receives parameters without its recognized key fails the rule closed in the validator (WithParams returns an error, createConstraintWithParams rejects the rule) before Constraint.Validate runs, so the spec must advertise the field unsatisfiable rather than as the satisfiable default bound (minLength 1, the match-all `.*` pattern, or > 0) a client would trust */
+    for _, fieldName := range []string{"name", "code"} {
+        property := schema.Properties[fieldName]
+        if nil == property || nil == property.MinLength || 1 != *property.MinLength || nil == property.MaxLength || 0 != *property.MaxLength {
+            t.Fatalf("expected unconsumed parameterized params to advertise an unsatisfiable string schema, field %q got: %+v", fieldName, property)
+        }
+    }
+
+    count := schema.Properties["count"]
+    if nil == count || true == count.Nullable || nil == count.Minimum || nil == count.Maximum || *count.Minimum != *count.Maximum {
+        t.Fatalf("expected unconsumed parameterized params on a numeric field to advertise an empty exclusive range, got: %+v", count)
+    }
+}
+
 type paramsOnNonParameterizableStructRequest struct {
     Inline *paramsOnNonParameterizableRequest `json:"inline" validate:"notBlank(mode=hard)"`
     Plain  paramsOnNonParameterizableRequest  `json:"plain" validate:"email(strict=yes)"`

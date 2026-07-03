@@ -1,6 +1,7 @@
 package outbox
 
 import (
+    "math"
     "strconv"
     "time"
 
@@ -87,7 +88,12 @@ func NewRelay(config RelayConfig) *Relay {
     }
     /* MaxDeliveryAttempts must exceed MaxAttempts: every send-failure retry re-claims the row and so counts toward it, so a value at or below MaxAttempts (including an unset zero) would dead-letter a normally-retrying row as poison after its first re-claim. Raise such a value to the default head-room rather than silently breaking the retry path. */
     if resolved.MaxDeliveryAttempts <= resolved.MaxAttempts {
-        resolved.MaxDeliveryAttempts = defaultMaxDeliveryAttemptsFactor * resolved.MaxAttempts
+        /* guard against int overflow: a MaxAttempts large enough that defaultMaxDeliveryAttemptsFactor * MaxAttempts wraps past math.MaxInt would produce a NEGATIVE MaxDeliveryAttempts, and then every row's first delivery (deliveryAttempts 1) would exceed it and be dead-lettered as poison. Saturate to math.MaxInt in that corner instead — still strictly above MaxAttempts, so the invariant holds without data loss. */
+        if resolved.MaxAttempts > math.MaxInt/defaultMaxDeliveryAttemptsFactor {
+            resolved.MaxDeliveryAttempts = math.MaxInt
+        } else {
+            resolved.MaxDeliveryAttempts = defaultMaxDeliveryAttemptsFactor * resolved.MaxAttempts
+        }
     }
     if 0 >= resolved.InitialBackoff {
         resolved.InitialBackoff = defaultInitialBackoff
