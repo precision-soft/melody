@@ -1,6 +1,8 @@
 package config
 
 import (
+    "time"
+
     melodymysql "github.com/precision-soft/melody/integrations/bunorm/mysql/v3"
     melodybunorm "github.com/precision-soft/melody/integrations/bunorm/v3"
     "github.com/precision-soft/melody/v3/exception"
@@ -17,7 +19,13 @@ func (instance *Module) buildDatabase() {
         port = "3306"
     }
 
-    provider := melodymysql.NewProvider()
+    /* retry the initial connection with backoff so the example survives a cold-start race against the
+       database container — mysql often takes 20-30s to accept connections while the app boots in seconds,
+       and buildDatabase panics on a hard failure. The provider only retries transient errors (connection
+       refused), so a real misconfiguration still fails fast. */
+    provider := melodymysql.NewProvider(
+        melodymysql.WithRetryConfig(melodymysql.NewRetryConfig(10, time.Second, 5*time.Second, 2.0)),
+    )
 
     database, openErr := provider.Open(
         melodybunorm.ConnectionParams{

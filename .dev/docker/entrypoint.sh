@@ -86,9 +86,32 @@ if [[ "1" = "${REFLEX_ENABLED}" ]] && command -v reflex >/dev/null 2>&1; then
         export PATH=\"/usr/local/go/bin:/usr/local/bin:\${PATH}\"
         echo ''
         echo \"[melody-dev] rebuild triggered \$(date '+%Y-%m-%d %H:%M:%S')\"
-        ${RUN_COMMAND}
+        # supervisor: restart the example if it exits on its own (e.g. a boot panic outside the
+        # DB/redis retry window), but exit cleanly when reflex signals a file-change restart so the
+        # loop does not fight reflex's kill-and-rerun.
+        trap 'exit 0' TERM INT
+        while true; do
+            ${RUN_COMMAND}
+            echo \"[melody-dev] example exited (status \$?); restarting in 2s\"
+            sleep 2
+        done
     "
 fi
 
-echo "[melody-dev] reflex disabled; running: ${RUN_COMMAND}"
-exec bash -c "export PATH=\"/usr/local/go/bin:/usr/local/bin:\${PATH}\"; ${RUN_COMMAND}"
+echo "[melody-dev] reflex disabled; running with a restart supervisor: ${RUN_COMMAND}"
+# run the example in the background and wait on it so this bash (PID 1) can service signals: on
+# docker stop/restart, forward SIGTERM to the example for a graceful shutdown, wait for it, then exit
+# the loop (a foreground child would defer the trap, so PID 1 would never relay the stop and docker
+# would SIGKILL the whole tree after the grace period).
+exec bash -c "
+    export PATH=\"/usr/local/go/bin:/usr/local/bin:\${PATH}\"
+    child=0
+    trap 'kill -TERM \"\${child}\" 2>/dev/null; wait \"\${child}\" 2>/dev/null; exit 0' TERM INT
+    while true; do
+        ${RUN_COMMAND} &
+        child=\$!
+        wait \"\${child}\"
+        echo \"[melody-dev] example exited (status \$?); restarting in 2s\"
+        sleep 2
+    done
+"

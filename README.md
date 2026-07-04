@@ -68,7 +68,15 @@ curl http://localhost:8080/health
 ### Next steps
 
 - Read the [example application](./v3/.example/README.md) — a realistic catalog app wiring modules,
-  services, security, sessions, events, CLI commands, and every platform integration.
+  services, security, sessions, events, CLI commands, and every platform integration. Run the whole
+  showcase (example + every backing service) with one command from the repository root:
+
+  ```bash
+  ./dc up:all --build
+  ```
+
+  Then open http://localhost:8180 (`DEV_HTTP_HOST_PORT`). Use `./dc up:all` (backends are on the compose
+  `all` profile) — not plain `./dc up`; see the [example README](./v3/.example/README.md#running-fully-against-containers) for details.
 - Browse the [v3 package documentation](./v3/.documentation/package/) for the API reference.
 - Add an [integration](./integrations/) (database, Redis, message broker, object storage, observability).
 

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `otlp/` — new opt-in subpackage that exports spans to an OTLP collector, kept separate so metrics-only consumers of the root package do not pull the OTLP/gRPC dependencies into their build. `otlp.NewTracerProvider(ctx, otlp.Config{Endpoint, Protocol, ServiceName, ServiceVersion, SampleRatio, Headers, Insecure, BatchTimeout})` builds a batching `TracerProvider` over the grpc (default, collector `:4317`) or http/protobuf (`:4318`) exporter. `otlp.NewModule(otlp.ModuleConfig{Config, TracerName, Propagator})` is the plug-and-play facade — registered with one `app.RegisterModule(...)`, it builds the provider, installs `NewTracingMiddleware`, and registers the provider under `otlp.ServiceTracerProvider` as a `Close()`-able container service so the application's shutdown flushes pending spans. The root package keeps `NewTracingMiddleware(tracer, propagator)` for bring-your-own-tracer wiring.
+
 ## [v3.1.0] - 2026-07-03 - Lifecycle Handler Decorator
 
 ### Added

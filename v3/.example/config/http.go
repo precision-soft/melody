@@ -8,14 +8,16 @@ import (
     handleri18n "github.com/precision-soft/melody/v3/.example/handler/i18n"
     handlerinternalauth "github.com/precision-soft/melody/v3/.example/handler/internalauth"
     handleroutbox "github.com/precision-soft/melody/v3/.example/handler/outbox"
-    handlerstorage "github.com/precision-soft/melody/v3/.example/handler/storage"
     handlerproduct "github.com/precision-soft/melody/v3/.example/handler/product"
     handlersecure "github.com/precision-soft/melody/v3/.example/handler/secure"
+    handlerstorage "github.com/precision-soft/melody/v3/.example/handler/storage"
     handlertwofactor "github.com/precision-soft/melody/v3/.example/handler/twofactor"
     handleruser "github.com/precision-soft/melody/v3/.example/handler/user"
+    handlerwebsocketdemo "github.com/precision-soft/melody/v3/.example/handler/websocketdemo"
     "github.com/precision-soft/melody/v3/.example/route"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodyhttp "github.com/precision-soft/melody/v3/http"
+    melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     melodykernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     melodyopenapi "github.com/precision-soft/melody/v3/openapi"
 )
@@ -46,6 +48,13 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     router.HandleNamed("example.cache.demo", "GET", "/cache/demo", handler.CacheDemoHandler())
 
+    /* @info exposed to the route manifest so the admin nav can link to it by name (data-route="example.websocket.demo"). */
+    router.HandleWithOptions(
+        "/websocket/demo",
+        handlerwebsocketdemo.PageHandler(),
+        melodyhttp.NewRouteOptions("example.websocket.demo", []string{"GET"}, "", nil, nil, nil, nil, 0, melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)),
+    )
+
     router.HandleNamed("example.encrypt.demo", "GET", "/encrypt/demo", handler.EncryptDemoHandler(instance.cipher))
 
     if nil != instance.redisClient {
@@ -58,10 +67,22 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     }
 
     router.HandleNamed(route.LoginPageName, "GET", route.LoginPagePattern, handler.LoginPageHandler())
-    router.HandleNamed(route.LoginSubmitName, "POST", route.LoginSubmitPattern, handler.LoginHandler())
-    router.HandleNamed(route.LogoutName, "GET", route.LogoutPattern, handler.LogoutHandler())
 
-    router.HandleNamed(route.RoutesName, "GET", route.RoutesPattern, handler.RoutesHandler())
+    /* @info login-submit and logout are exposed to the route manifest (window.melodyRoutes) because the
+       frontend resolves their URLs by name — the login form posts to route("example.login.submit") and the
+       nav logs out via route("example.logout"); an unexposed route would make the client throw "unknown route". */
+    router.HandleWithOptions(
+        route.LoginSubmitPattern,
+        handler.LoginHandler(),
+        melodyhttp.NewRouteOptions(route.LoginSubmitName, []string{"POST"}, "", nil, nil, nil, nil, 0, melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)),
+    )
+    router.HandleWithOptions(
+        route.LogoutPattern,
+        handler.LogoutHandler(),
+        melodyhttp.NewRouteOptions(route.LogoutName, []string{"GET"}, "", nil, nil, nil, nil, 0, melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)),
+    )
+
+    router.HandleWithOptions(route.RoutesPattern, handler.RoutesHandler(), frontendRoute(route.RoutesName, "GET"))
 
     router.HandleNamed(route.SecureMeName, "GET", route.SecureMePattern, handlersecure.MeHandler())
 
@@ -88,43 +109,36 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     router.HandleNamed(route.EventsStreamName, "GET", route.EventsStreamPattern, handlerevents.StreamHandler(instance.serverSentEventHub))
     router.HandleNamed(route.EventsPublishName, "GET", route.EventsPublishPattern, handlerevents.PublishHandler(instance.messageBusDispatch))
 
-    router.HandleNamed(route.CategoriesApiReadAllName, "GET", route.CategoriesApiReadAllPattern, handlercategory.ApiReadAllHandler())
+    /* @info every catalog/user route below is exposed in the frontend zone: the admin SPA generates all of
+       their URLs by name from the route manifest (data-route / route(...)), so an unexposed route would make
+       the client throw "unknown route". */
+    router.HandleWithOptions(route.CategoriesApiReadAllPattern, handlercategory.ApiReadAllHandler(), frontendRoute(route.CategoriesApiReadAllName, "GET"))
 
-    router.HandleNamed(route.CurrenciesApiReadAllName, "GET", route.CurrenciesApiReadAllPattern, handlercurrency.ApiReadAllHandler())
+    router.HandleWithOptions(route.CurrenciesApiReadAllPattern, handlercurrency.ApiReadAllHandler(), frontendRoute(route.CurrenciesApiReadAllName, "GET"))
 
-    router.HandleWithOptions(
-        route.ProductsListPagePattern,
-        handlerproduct.ListPageHandler(),
-        melodyhttp.NewRouteOptions(route.ProductsListPageName, []string{"GET"}, "", nil, nil, nil, nil, 0, melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZoneFrontend)),
-    )
-    router.HandleNamed(route.ProductsCreatePageName, "GET", route.ProductsCreatePagePattern, handlerproduct.CreatePageHandler())
-    router.HandleNamed(route.ProductsUpdatePageName, "GET", route.ProductsUpdatePagePattern, handlerproduct.UpdatePageHandler())
-    router.HandleNamed(route.ProductsApiCreateName, "POST", route.ProductsApiCreatePattern, handlerproduct.ApiCreateHandler())
-    router.HandleNamed(route.ProductsApiReadAllName, "GET", route.ProductsApiReadAllPattern, handlerproduct.ApiReadAllHandler())
-    router.HandleWithOptions(
-        route.ProductsApiReadPattern,
-        handlerproduct.ApiReadHandler(),
-        melodyhttp.NewRouteOptions(route.ProductsApiReadName, []string{"GET"}, "", nil, nil, nil, nil, 0, melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZoneFrontend)),
-    )
-    router.HandleNamed(route.ProductsApiUpdateName, "PUT", route.ProductsApiUpdatePattern, handlerproduct.ApiUpdateHandler())
-    router.HandleNamed(route.ProductsApiDeleteName, "DELETE", route.ProductsApiDeletePattern, handlerproduct.ApiDeleteHandler())
+    router.HandleWithOptions(route.ProductsListPagePattern, handlerproduct.ListPageHandler(), frontendRoute(route.ProductsListPageName, "GET"))
+    router.HandleWithOptions(route.ProductsCreatePagePattern, handlerproduct.CreatePageHandler(), frontendRoute(route.ProductsCreatePageName, "GET"))
+    router.HandleWithOptions(route.ProductsUpdatePagePattern, handlerproduct.UpdatePageHandler(), frontendRoute(route.ProductsUpdatePageName, "GET"))
+    router.HandleWithOptions(route.ProductsApiCreatePattern, handlerproduct.ApiCreateHandler(), frontendRoute(route.ProductsApiCreateName, "POST"))
+    router.HandleWithOptions(route.ProductsApiReadAllPattern, handlerproduct.ApiReadAllHandler(), frontendRoute(route.ProductsApiReadAllName, "GET"))
+    router.HandleWithOptions(route.ProductsApiReadPattern, handlerproduct.ApiReadHandler(), frontendRoute(route.ProductsApiReadName, "GET"))
+    router.HandleWithOptions(route.ProductsApiUpdatePattern, handlerproduct.ApiUpdateHandler(), frontendRoute(route.ProductsApiUpdateName, "PUT"))
+    router.HandleWithOptions(route.ProductsApiDeletePattern, handlerproduct.ApiDeleteHandler(), frontendRoute(route.ProductsApiDeleteName, "DELETE"))
 
-    router.HandleWithOptions(
-        route.UsersListPagePattern,
-        handleruser.ListPageHandler(),
-        melodyhttp.NewRouteOptions(route.UsersListPageName, []string{"GET"}, "", nil, nil, nil, nil, 0, melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZoneFrontend)),
-    )
-    router.HandleNamed(route.UsersCreatePageName, "GET", route.UsersCreatePagePattern, handleruser.CreatePageHandler())
-    router.HandleNamed(route.UsersUpdatePageName, "GET", route.UsersUpdatePagePattern, handleruser.UpdatePageHandler())
-    router.HandleNamed(route.UsersApiCreateName, "POST", route.UsersApiCreatePattern, handleruser.ApiCreateHandler())
-    router.HandleNamed(route.UsersApiReadAllName, "GET", route.UsersApiReadAllPattern, handleruser.ApiReadAllHandler())
-    router.HandleWithOptions(
-        route.UsersApiReadPattern,
-        handleruser.ApiReadHandler(),
-        melodyhttp.NewRouteOptions(route.UsersApiReadName, []string{"GET"}, "", nil, nil, nil, nil, 0, melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZoneFrontend)),
-    )
-    router.HandleNamed(route.UsersApiUpdateName, "PUT", route.UsersApiUpdatePattern, handleruser.ApiUpdateHandler())
-    router.HandleNamed(route.UsersApiDeleteName, "DELETE", route.UsersApiDeletePattern, handleruser.ApiDeleteHandler())
+    router.HandleWithOptions(route.UsersListPagePattern, handleruser.ListPageHandler(), frontendRoute(route.UsersListPageName, "GET"))
+    router.HandleWithOptions(route.UsersCreatePagePattern, handleruser.CreatePageHandler(), frontendRoute(route.UsersCreatePageName, "GET"))
+    router.HandleWithOptions(route.UsersUpdatePagePattern, handleruser.UpdatePageHandler(), frontendRoute(route.UsersUpdatePageName, "GET"))
+    router.HandleWithOptions(route.UsersApiCreatePattern, handleruser.ApiCreateHandler(), frontendRoute(route.UsersApiCreateName, "POST"))
+    router.HandleWithOptions(route.UsersApiReadAllPattern, handleruser.ApiReadAllHandler(), frontendRoute(route.UsersApiReadAllName, "GET"))
+    router.HandleWithOptions(route.UsersApiReadPattern, handleruser.ApiReadHandler(), frontendRoute(route.UsersApiReadName, "GET"))
+    router.HandleWithOptions(route.UsersApiUpdatePattern, handleruser.ApiUpdateHandler(), frontendRoute(route.UsersApiUpdateName, "PUT"))
+    router.HandleWithOptions(route.UsersApiDeletePattern, handleruser.ApiDeleteHandler(), frontendRoute(route.UsersApiDeleteName, "DELETE"))
+}
+
+/* frontendRoute marks a route as exposed in the frontend zone so its URL is generatable by name from the
+   route manifest (window.melodyRoutes) that the admin SPA resolves data-route / route(...) calls against. */
+func frontendRoute(name string, method string) melodyhttpcontract.RouteOptions {
+    return melodyhttp.NewRouteOptions(name, []string{method}, "", nil, nil, nil, nil, 0, melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZoneFrontend))
 }
 
 var _ melodyapplicationcontract.HttpModule = (*Module)(nil)

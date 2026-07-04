@@ -25,6 +25,7 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         melodysecurity.NewAccessControlRegexRule("^/metrics", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/openapi.json", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/ws", melodysecuritycontract.AttributePublicAccess),
+        melodysecurity.NewAccessControlRegexRule("^/websocket/demo", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/platform/demo", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/messagebus/demo", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/cache/demo", melodysecuritycontract.AttributePublicAccess),

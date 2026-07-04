@@ -99,3 +99,25 @@ services:
         ports:
             - "${MAILPIT_SMTP_HOST_PORT:-1026}:1025"
             - "${MAILPIT_UI_HOST_PORT:-8026}:8025"
+
+    prometheus:
+        image: prom/prometheus:v2.54.1
+        profiles: [ 'all' ]
+        restart: 'no'
+        depends_on:
+            - dev
+        volumes:
+            - ${RELATIVE_PATH_TO_ROOT}/${DOCKER_PATH}/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+        ports:
+            - "${PROMETHEUS_HOST_PORT:-9091}:9090"
+
+    otel-collector:
+        image: otel/opentelemetry-collector:0.109.0
+        profiles: [ 'all' ]
+        restart: 'no'
+        command: [ "--config=/etc/otel-collector-config.yaml" ]
+        volumes:
+            - ${RELATIVE_PATH_TO_ROOT}/${DOCKER_PATH}/otel-collector/config.yaml:/etc/otel-collector-config.yaml:ro
+        ports:
+            - "${OTEL_COLLECTOR_GRPC_HOST_PORT:-4317}:4317"
+            - "${OTEL_COLLECTOR_HTTP_HOST_PORT:-4318}:4318"

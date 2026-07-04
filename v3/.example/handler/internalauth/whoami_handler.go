@@ -10,9 +10,9 @@ import (
 )
 
 type whoamiPayload struct {
-    ServicePrincipal string      `json:"servicePrincipal"`
-    Roles            []string    `json:"roles"`
-    OnBehalfOf       *actorView  `json:"onBehalfOf,omitempty"`
+    ServicePrincipal string     `json:"servicePrincipal"`
+    Roles            []string   `json:"roles"`
+    OnBehalfOf       *actorView `json:"onBehalfOf,omitempty"`
 }
 
 type actorView struct {

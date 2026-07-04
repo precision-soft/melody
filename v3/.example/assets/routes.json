@@ -1,36 +1,36 @@
 {
-  "routes": [
-    {
-      "name": "example.products.api.read",
-      "pattern": "/products/api/read/:id",
-      "methods": [
-        "GET"
-      ],
-      "zone": "frontend"
-    },
-    {
-      "name": "example.products.list.page",
-      "pattern": "/products",
-      "methods": [
-        "GET"
-      ],
-      "zone": "frontend"
-    },
-    {
-      "name": "example.users.api.read",
-      "pattern": "/users/api/read/:id",
-      "methods": [
-        "GET"
-      ],
-      "zone": "frontend"
-    },
-    {
-      "name": "example.users.list.page",
-      "pattern": "/users",
-      "methods": [
-        "GET"
-      ],
-      "zone": "frontend"
-    }
-  ]
+    "routes": [
+        {
+            "name": "example.products.api.read",
+            "pattern": "/products/api/read/:id",
+            "methods": [
+                "GET"
+            ],
+            "zone": "frontend"
+        },
+        {
+            "name": "example.products.list.page",
+            "pattern": "/products",
+            "methods": [
+                "GET"
+            ],
+            "zone": "frontend"
+        },
+        {
+            "name": "example.users.api.read",
+            "pattern": "/users/api/read/:id",
+            "methods": [
+                "GET"
+            ],
+            "zone": "frontend"
+        },
+        {
+            "name": "example.users.list.page",
+            "pattern": "/users",
+            "methods": [
+                "GET"
+            ],
+            "zone": "frontend"
+        }
+    ]
 }

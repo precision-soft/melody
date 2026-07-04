@@ -7,7 +7,7 @@
  * hardcoded path — the same manifest the melody:routes:manifest command exports.
  */
 
-import { RouteGenerator, RouteManifest, RouteParams } from "./melody-routes";
+import {RouteGenerator, RouteManifest, RouteParams} from "./melody-routes";
 
 /* jQuery is loaded separately by the pages and is not bundled here. */
 declare const $: any;
@@ -27,7 +27,7 @@ const requireJquery = (): void => {
 };
 
 const routeGenerator = new RouteGenerator(
-    window.melodyRoutes ?? { routes: [] },
+    window.melodyRoutes ?? {routes: []},
 );
 
 const route = (routeName: string, parameters?: RouteParams): string => {
@@ -213,10 +213,10 @@ const initAuthHeader = async (options?: { loginSelector?: string; logoutSelector
 };
 
 window.melodyExample = window.melodyExample ?? {};
-window.melodyExample.http = { getJson, postJson, putJson, deleteJson, requestJson };
-window.melodyExample.ui = { setStatus };
-window.melodyExample.routing = { route, resolveDataRoutes };
-window.melodyExample.auth = { initAuthHeader };
+window.melodyExample.http = {getJson, postJson, putJson, deleteJson, requestJson};
+window.melodyExample.ui = {setStatus};
+window.melodyExample.routing = {route, resolveDataRoutes};
+window.melodyExample.auth = {initAuthHeader};
 
 $(document).ready(() => {
     try {

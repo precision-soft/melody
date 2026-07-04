@@ -3,10 +3,13 @@ module github.com/precision-soft/melody/.dev/e2e
 go 1.25.0
 
 require (
+	github.com/coder/websocket v1.8.12
 	github.com/precision-soft/melody/integrations/amqp/v3 v3.2.0
+	github.com/precision-soft/melody/integrations/bunorm/migrate/v3 v3.0.0
 	github.com/precision-soft/melody/integrations/bunorm/pgsql/v3 v3.2.0
 	github.com/precision-soft/melody/integrations/outbox/v3 v3.0.0
 	github.com/precision-soft/melody/integrations/rueidis/v3 v3.3.0
+	github.com/precision-soft/melody/integrations/websocket/v3 v3.0.0
 	github.com/precision-soft/melody/v3 v3.9.0
 	github.com/uptrace/bun v1.2.16
 	github.com/uptrace/bun/dialect/pgdialect v1.2.16
@@ -43,3 +46,7 @@ replace github.com/precision-soft/melody/integrations/outbox/v3 => ../../integra
 replace github.com/precision-soft/melody/integrations/bunorm/pgsql/v3 => ../../integrations/bunorm/pgsql/v3
 
 replace github.com/precision-soft/melody/integrations/amqp/v3 => ../../integrations/amqp/v3
+
+replace github.com/precision-soft/melody/integrations/websocket/v3 => ../../integrations/websocket/v3
+
+replace github.com/precision-soft/melody/integrations/bunorm/migrate/v3 => ../../integrations/bunorm/migrate/v3

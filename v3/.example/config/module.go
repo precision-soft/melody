@@ -4,11 +4,11 @@ import (
     nethttp "net/http"
 
     minio "github.com/minio/minio-go/v7"
-    "github.com/precision-soft/melody/v3/.example/twofactor"
     melodyawss3 "github.com/precision-soft/melody/integrations/awss3/v3"
     melodyencrypt "github.com/precision-soft/melody/integrations/bunorm/v3/encrypt"
     outbox "github.com/precision-soft/melody/integrations/outbox/v3"
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
+    "github.com/precision-soft/melody/v3/.example/twofactor"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodyconfigcontract "github.com/precision-soft/melody/v3/config/contract"
     melodyhttp "github.com/precision-soft/melody/v3/http"
@@ -71,6 +71,7 @@ type Module struct {
 func NewExampleModule(configuration melodyconfigcontract.Configuration) *Module {
     moduleInstance := &Module{configuration: configuration}
     moduleInstance.buildServerSentEvent()
+    moduleInstance.buildWebsocketDemo()
     moduleInstance.buildObservability()
     moduleInstance.buildEncrypt()
     moduleInstance.buildRedis()
@@ -111,11 +112,15 @@ const (
     environmentKeyS3Bucket    = "S3_BUCKET"
 
     environmentKeySmtpAddress = "SMTP_ADDRESS"
+
+    environmentKeyOtelExporterEndpoint = "OTEL_EXPORTER_OTLP_ENDPOINT"
 )
 
-/* environmentValue reads a value melody auto-registered from the .env files (every env
-   key becomes a same-named parameter). Returns "" when the key is absent so the eager
-   build steps keep their "unset means skip this integration" behaviour. */
+/* environmentValue reads a value melody auto-registered from the .env files (every env key becomes a
+   same-named parameter). The values are already fully resolved here — NewConfiguration (called in
+   NewApplication, before this composition root runs) applies applyEnvironmentOverrides + resolvePlaceholders,
+   which expand %env(X)%/%name% indirection and unescape %% — so a plain String() read is correct. Returns ""
+   when the key is absent so the eager build steps keep their "unset means skip this integration" behaviour. */
 func (instance *Module) environmentValue(key string) string {
     parameter := instance.configuration.Get(key)
     if nil == parameter {

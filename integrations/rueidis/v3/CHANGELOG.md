@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `v3/retry_config.go`, `v3/provider.go` — `WithRetryConfig(RetryConfig)` provider option (plus `RetryConfig`, `DefaultRetryConfig()`, `NewRetryConfig(maxAttempts, initialDelay, maxDelay, backoffMultiplier)`) makes `Provider.Open` re-dial the initial connection with capped exponential backoff on transient failures (connection refused, no such host, i/o timeout, network unreachable, `EOF`/closed-connection during the handshake, …), so an application racing a cold-starting redis container no longer hard-fails at boot. The backoff is computed in float space and capped at `MaxDelay` before the `time.Duration` conversion, so a very high `MaxAttempts` cannot overflow the delay to a negative value that collapses the backoff. Only transient errors retry — a real misconfiguration (for example a bad password) still fails fast. Mirrors the `bunorm/mysql/v3` provider's retry. Opt-in: without the option `Open` behaves exactly as before.
+
 ## [v3.3.0] - 2026-07-03 - Redis-Backed Nonce Guard
 
 ### Added
