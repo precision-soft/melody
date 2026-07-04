@@ -1,20 +1,18 @@
 package config
 
 import (
-    "os"
-
     melodymysql "github.com/precision-soft/melody/integrations/bunorm/mysql/v3"
     melodybunorm "github.com/precision-soft/melody/integrations/bunorm/v3"
     "github.com/precision-soft/melody/v3/exception"
 )
 
 func (instance *Module) buildDatabase() {
-    host := os.Getenv("MYSQL_HOST")
+    host := instance.environmentValue(environmentKeyMysqlHost)
     if "" == host {
         return
     }
 
-    port := os.Getenv("MYSQL_PORT")
+    port := instance.environmentValue(environmentKeyMysqlPort)
     if "" == port {
         port = "3306"
     }
@@ -25,9 +23,9 @@ func (instance *Module) buildDatabase() {
         melodybunorm.ConnectionParams{
             Host:     host,
             Port:     port,
-            Database: os.Getenv("MYSQL_DATABASE"),
-            User:     os.Getenv("MYSQL_USER"),
-            Password: os.Getenv("MYSQL_PASSWORD"),
+            Database: instance.environmentValue(environmentKeyMysqlDatabase),
+            User:     instance.environmentValue(environmentKeyMysqlUser),
+            Password: instance.environmentValue(environmentKeyMysqlPassword),
         },
         nil,
     )

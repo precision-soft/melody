@@ -3,7 +3,6 @@ package config
 import (
     "context"
     "encoding/json"
-    "os"
 
     amqp "github.com/precision-soft/melody/integrations/amqp/v3"
     outbox "github.com/precision-soft/melody/integrations/outbox/v3"
@@ -41,7 +40,7 @@ func (instance *Module) buildOutbox() {
 }
 
 func (instance *Module) buildOutboxTransport() melodymessagebuscontract.Transport {
-    dsn := os.Getenv("AMQP_DSN")
+    dsn := instance.environmentValue(environmentKeyAmqpDsn)
     if "" == dsn {
         return melodymessagebus.NewInMemoryTransport(64)
     }

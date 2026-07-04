@@ -10,6 +10,7 @@ import (
     outbox "github.com/precision-soft/melody/integrations/outbox/v3"
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
+    melodyconfigcontract "github.com/precision-soft/melody/v3/config/contract"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     melodymailercontract "github.com/precision-soft/melody/v3/mailer/contract"
@@ -23,6 +24,8 @@ import (
 )
 
 type Module struct {
+    configuration melodyconfigcontract.Configuration
+
     messageBusDispatch  melodymessagebuscontract.Bus
     messageBusConsume   melodymessagebuscontract.Bus
     messageBusTransport melodymessagebuscontract.Transport
@@ -65,8 +68,8 @@ type Module struct {
     cipher   melodyencrypt.Cipher
 }
 
-func NewExampleModule() *Module {
-    moduleInstance := &Module{}
+func NewExampleModule(configuration melodyconfigcontract.Configuration) *Module {
+    moduleInstance := &Module{configuration: configuration}
     moduleInstance.buildServerSentEvent()
     moduleInstance.buildObservability()
     moduleInstance.buildEncrypt()
@@ -84,6 +87,42 @@ func NewExampleModule() *Module {
     moduleInstance.buildMailer()
 
     return moduleInstance
+}
+
+/* env-key constants for the example's opt-in live integrations. melody auto-registers
+   every .env key as a same-named parameter, so these double as the parameter names the
+   eager build steps read through environmentValue. */
+const (
+    environmentKeyMysqlHost     = "MYSQL_HOST"
+    environmentKeyMysqlPort     = "MYSQL_PORT"
+    environmentKeyMysqlDatabase = "MYSQL_DATABASE"
+    environmentKeyMysqlUser     = "MYSQL_USER"
+    environmentKeyMysqlPassword = "MYSQL_PASSWORD"
+
+    environmentKeyRedisAddress = "REDIS_ADDRESS"
+
+    environmentKeyAmqpDsn = "AMQP_DSN"
+
+    environmentKeyS3Endpoint  = "S3_ENDPOINT"
+    environmentKeyS3AccessKey = "S3_ACCESS_KEY"
+    environmentKeyS3SecretKey = "S3_SECRET_KEY"
+    environmentKeyS3Secure    = "S3_SECURE"
+    environmentKeyS3Region    = "S3_REGION"
+    environmentKeyS3Bucket    = "S3_BUCKET"
+
+    environmentKeySmtpAddress = "SMTP_ADDRESS"
+)
+
+/* environmentValue reads a value melody auto-registered from the .env files (every env
+   key becomes a same-named parameter). Returns "" when the key is absent so the eager
+   build steps keep their "unset means skip this integration" behaviour. */
+func (instance *Module) environmentValue(key string) string {
+    parameter := instance.configuration.Get(key)
+    if nil == parameter {
+        return ""
+    }
+
+    return parameter.String()
 }
 
 func (instance *Module) Name() string {

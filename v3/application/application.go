@@ -87,6 +87,14 @@ func (instance *Application) RegisterParameter(
     instance.configuration.RegisterRuntime(name, value)
 }
 
+/* Configuration exposes the loaded configuration before boot so wiring code (module
+   construction in the composition root) can read parameters — including the values
+   melody auto-registers from the .env files — without reaching for os.Getenv. Services
+   resolved from the container should instead read config through the resolver. */
+func (instance *Application) Configuration() configcontract.Configuration {
+    return instance.configuration
+}
+
 func (instance *Application) Run() {
     _ = instance.Boot()
 

@@ -13,7 +13,7 @@ import (
 )
 
 func Configure(app *melodyapplication.Application) {
-    moduleInstance := NewExampleModule()
+    moduleInstance := NewExampleModule(app.Configuration())
 
     /* @info observability module first so its metrics middleware wraps outermost, ahead of the example timing middleware. */
     app.RegisterModule(melodyopentelemetry.NewModule(melodyopentelemetry.ModuleConfig{

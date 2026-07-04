@@ -1,14 +1,12 @@
 package config
 
 import (
-    "os"
-
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
     "github.com/precision-soft/melody/v3/exception"
 )
 
 func (instance *Module) buildRedis() {
-    address := os.Getenv("REDIS_ADDRESS")
+    address := instance.environmentValue(environmentKeyRedisAddress)
     if "" == address {
         return
     }
