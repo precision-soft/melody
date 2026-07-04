@@ -1,6 +1,8 @@
 package http
 
 import (
+    "bytes"
+    "io"
     "mime"
     nethttp "net/http"
 
@@ -44,7 +46,27 @@ func NewRequest(
     postBag := bag.NewParameterBag()
 
     if true == shouldAutoParseForm(httpRequest) {
+        /* @important a urlencoded body is drained by ParseForm; buffer it first and restore Body/GetBody
+        afterwards so a later reader that needs the raw bytes still sees them — in particular the HMAC
+        internal-auth source, whose signed body-hash check would otherwise verify against an empty body and
+        silently accept a tampered form-encoded request. multipart bodies are left untouched: ParseForm does
+        not read them (a handler streams them through ParseMultipartForm), so buffering there would defeat
+        the large-upload disk spooling for no benefit. */
+        var rawBody []byte
+        bufferedBody := false
+        if true == isUrlEncodedForm(httpRequest) {
+            rawBody, bufferedBody = readRequestBodyBytes(httpRequest)
+            if true == bufferedBody {
+                restoreRequestBody(httpRequest, rawBody)
+            }
+        }
+
         parseFormErr := httpRequest.ParseForm()
+
+        if true == bufferedBody {
+            restoreRequestBody(httpRequest, rawBody)
+        }
+
         if nil == parseFormErr {
             postBag = bag.NewParameterBagFromValues(httpRequest.PostForm)
         } else if nil != runtimeInstance {
@@ -148,6 +170,45 @@ func shouldAutoParseForm(httpRequest *nethttp.Request) bool {
     }
 
     return "application/x-www-form-urlencoded" == mediaType || "multipart/form-data" == mediaType
+}
+
+/* isUrlEncodedForm reports whether the request carries an application/x-www-form-urlencoded body — the one
+auto-parsed form type whose body ParseForm consumes (multipart is streamed separately), so only this one
+needs its body buffered and restored for later readers. */
+func isUrlEncodedForm(httpRequest *nethttp.Request) bool {
+    mediaType, _, parseErr := mime.ParseMediaType(httpRequest.Header.Get("Content-Type"))
+    if nil != parseErr {
+        return false
+    }
+
+    return "application/x-www-form-urlencoded" == mediaType
+}
+
+/* readRequestBodyBytes reads the request body fully into memory, reporting whether a body was present. It
+does not restore the body; the caller restores it through restoreRequestBody once (or twice, around a
+draining parse) as needed. */
+func readRequestBodyBytes(httpRequest *nethttp.Request) ([]byte, bool) {
+    if nil == httpRequest.Body {
+        return nil, false
+    }
+
+    bodyBytes, readErr := io.ReadAll(httpRequest.Body)
+    if nil != readErr {
+        return nil, false
+    }
+
+    _ = httpRequest.Body.Close()
+
+    return bodyBytes, true
+}
+
+/* restoreRequestBody replaces Body and GetBody with fresh readers over the given bytes, so a consumer that
+already drained the body (ParseForm) does not strand it empty for the next reader. */
+func restoreRequestBody(httpRequest *nethttp.Request, bodyBytes []byte) {
+    httpRequest.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+    httpRequest.GetBody = func() (io.ReadCloser, error) {
+        return io.NopCloser(bytes.NewReader(bodyBytes)), nil
+    }
 }
 
 func (instance *Request) ContentType() string {

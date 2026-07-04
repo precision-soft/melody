@@ -32,12 +32,16 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         melodysecurity.NewAccessControlRegexRule("^/redis/token/demo", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/database/demo", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/database/audit/demo", melodysecuritycontract.AttributePublicAccess),
+        melodysecurity.NewAccessControlRegexRule("^/twofactor", melodysecuritycontract.AttributePublicAccess),
+        melodysecurity.NewAccessControlRegexRule("^/outbox", melodysecuritycontract.AttributePublicAccess),
+        melodysecurity.NewAccessControlRegexRule("^/storage", melodysecuritycontract.AttributePublicAccess),
 
         melodysecurity.NewAccessControlRule(route.ProductsPrefix, entity.RoleEditor),
         melodysecurity.NewAccessControlRule(route.CategoriesPrefix, entity.RoleUser),
         melodysecurity.NewAccessControlRule(route.CurrenciesPrefix, entity.RoleUser),
         melodysecurity.NewAccessControlRule(route.UsersPrefix, entity.RoleAdmin),
         melodysecurity.NewAccessControlRule(route.SecurePrefix, entity.RoleUser),
+        melodysecurity.NewAccessControlRule(route.InternalPrefix, demoInternalRole),
 
         melodysecurity.NewAccessControlRegexRule("^/", entity.RoleUser),
     )
@@ -67,11 +71,33 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
 
     override := melodysecurityconfig.NewFirewallOverrideConfiguration()
 
+    /* internal-auth (HMAC) firewall: a stateless machine-to-machine firewall on /internal that verifies
+       the signed envelope a caller service sends and authenticates the call as that service principal. */
+    builder.AddStatelessFirewall(
+        "internal",
+        melodysecurity.NewPathPrefixMatcher(route.InternalPrefix),
+        []melodysecuritycontract.Rule{},
+        melodysecurity.NewHmacTokenSource(melodysecurity.HmacTokenSourceConfig{
+            Secrets: instance.hmacSecrets,
+            Apps:    instance.hmacApps,
+        }),
+        melodysecurityconfig.NewFirewallOverrideConfiguration().
+            WithEntryPoint(melodysecurity.NewJsonEntryPoint()).
+            WithAccessDeniedHandler(melodysecurity.NewJsonAccessDeniedHandler()),
+    )
+
+    /* the token firewall's bearer source is decorated with switch-user impersonation: an admin holding
+       ROLE_ALLOWED_TO_SWITCH can act as another user by sending X-Switch-User, and the resulting token
+       authorizes as the target while keeping the admin readable (and auditable) as the impersonator. */
     builder.AddStatelessFirewall(
         "token",
         melodysecurity.NewPathPrefixMatcher(route.SecurePrefix),
         []melodysecuritycontract.Rule{},
-        melodysecurity.NewBearerTokenSourceWithEnricher(instance.tokenValidator, newScopeRoleEnricher()),
+        melodysecurity.NewImpersonationTokenSource(melodysecurity.ImpersonationTokenSourceConfig{
+            Inner:         melodysecurity.NewBearerTokenSourceWithEnricher(instance.tokenValidator, newScopeRoleEnricher()),
+            Users:         instance.impersonatedUsers,
+            RoleHierarchy: roleHierarchy,
+        }),
         melodysecurityconfig.NewFirewallOverrideConfiguration().
             WithEntryPoint(melodysecurity.NewJsonEntryPoint()).
             WithAccessDeniedHandler(melodysecurity.NewJsonAccessDeniedHandler()),

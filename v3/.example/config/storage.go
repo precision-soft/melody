@@ -36,4 +36,5 @@ func (instance *Module) buildStorage() {
 
     instance.storageClient = client
     instance.storageBucket = bucket
+    instance.storage = melodyawss3.NewStorage(client, bucket)
 }

@@ -4,7 +4,10 @@ import (
     nethttp "net/http"
 
     minio "github.com/minio/minio-go/v7"
+    "github.com/precision-soft/melody/v3/.example/twofactor"
+    melodyawss3 "github.com/precision-soft/melody/integrations/awss3/v3"
     melodyencrypt "github.com/precision-soft/melody/integrations/bunorm/v3/encrypt"
+    outbox "github.com/precision-soft/melody/integrations/outbox/v3"
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodyhttp "github.com/precision-soft/melody/v3/http"
@@ -29,6 +32,16 @@ type Module struct {
     opaqueTokenStore     *melodysecurity.InMemoryTokenStore
     opaqueTokenValidator melodysecuritycontract.TokenValidator
 
+    hmacSecrets melodysecurity.HmacSecretProvider
+    hmacApps    melodysecurity.HmacAppRegistry
+
+    impersonatedUsers melodysecuritycontract.ImpersonatedUserResolver
+
+    twoFactorStore *twofactor.Store
+
+    outboxStore *outbox.Store
+    outboxRelay *outbox.Relay
+
     translator melodytranslationcontract.Translator
 
     serverSentEventHub       *melodyhttp.ServerSentEventHub
@@ -46,6 +59,7 @@ type Module struct {
 
     storageClient *minio.Client
     storageBucket string
+    storage       *melodyawss3.Storage
 
     database *bun.DB
     cipher   melodyencrypt.Cipher
@@ -61,6 +75,10 @@ func NewExampleModule() *Module {
     moduleInstance.buildDatabase()
     moduleInstance.buildMessageBus()
     moduleInstance.buildTokenAuth()
+    moduleInstance.buildInternalAuth()
+    moduleInstance.buildImpersonation()
+    moduleInstance.buildTwoFactor()
+    moduleInstance.buildOutbox()
     moduleInstance.buildTranslation()
     moduleInstance.buildOpenApi()
     moduleInstance.buildMailer()

@@ -6,8 +6,12 @@ import (
     handlercurrency "github.com/precision-soft/melody/v3/.example/handler/currency"
     handlerevents "github.com/precision-soft/melody/v3/.example/handler/events"
     handleri18n "github.com/precision-soft/melody/v3/.example/handler/i18n"
+    handlerinternalauth "github.com/precision-soft/melody/v3/.example/handler/internalauth"
+    handleroutbox "github.com/precision-soft/melody/v3/.example/handler/outbox"
+    handlerstorage "github.com/precision-soft/melody/v3/.example/handler/storage"
     handlerproduct "github.com/precision-soft/melody/v3/.example/handler/product"
     handlersecure "github.com/precision-soft/melody/v3/.example/handler/secure"
+    handlertwofactor "github.com/precision-soft/melody/v3/.example/handler/twofactor"
     handleruser "github.com/precision-soft/melody/v3/.example/handler/user"
     "github.com/precision-soft/melody/v3/.example/route"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
@@ -60,6 +64,24 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     router.HandleNamed(route.RoutesName, "GET", route.RoutesPattern, handler.RoutesHandler())
 
     router.HandleNamed(route.SecureMeName, "GET", route.SecureMePattern, handlersecure.MeHandler())
+
+    router.HandleNamed(route.InternalWhoamiName, "POST", route.InternalWhoamiPattern, handlerinternalauth.WhoamiHandler())
+
+    if nil != instance.twoFactorStore {
+        router.HandleNamed("example.twofactor.enroll", "POST", "/twofactor/enroll", handlertwofactor.EnrollHandler(instance.twoFactorStore))
+        router.HandleNamed("example.twofactor.verify", "POST", "/twofactor/verify", handlertwofactor.VerifyHandler(instance.twoFactorStore))
+    }
+
+    if nil != instance.outboxRelay {
+        router.HandleNamed("example.outbox.enqueue", "POST", "/outbox/enqueue", handleroutbox.EnqueueHandler(instance.database, instance.outboxStore))
+        router.HandleNamed("example.outbox.relay", "POST", "/outbox/relay", handleroutbox.RelayHandler(instance.outboxRelay))
+        router.HandleNamed("example.outbox.status", "GET", "/outbox/status", handleroutbox.StatusHandler(instance.database))
+    }
+
+    if nil != instance.storage {
+        router.HandleNamed("example.storage.put", "POST", "/storage/demo", handlerstorage.PutHandler(instance.storage))
+        router.HandleNamed("example.storage.get", "GET", "/storage/demo", handlerstorage.GetHandler(instance.storage))
+    }
 
     router.HandleNamed(route.I18nGreetingName, "GET", route.I18nGreetingPattern, handleri18n.GreetingHandler())
 

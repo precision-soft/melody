@@ -13,6 +13,21 @@ services:
             MELODY_DEV_REFLEX_ENABLED: ${MELODY_DEV_REFLEX_ENABLED:-1}
             MELODY_DEV_EXAMPLE_DIR: ${MELODY_DEV_EXAMPLE_DIR:-/app/v3/.example}
             MELODY_DEV_RUN_COMMAND: ${MELODY_DEV_RUN_COMMAND:-go run .}
+            # opt-in integrations wired to the compose services so the example's
+            # database/redis/amqp-backed demos (and the two-factor flow) run live in dev
+            MYSQL_HOST: ${MYSQL_HOST:-mysql}
+            MYSQL_PORT: ${MYSQL_PORT:-3306}
+            MYSQL_DATABASE: ${MYSQL_DATABASE:-melody_example}
+            MYSQL_USER: ${MYSQL_USER:-melody}
+            MYSQL_PASSWORD: ${MYSQL_PASSWORD:-melody}
+            REDIS_ADDRESS: ${REDIS_ADDRESS:-redis:6379}
+            AMQP_DSN: ${AMQP_DSN:-amqp://guest:guest@rabbitmq:5672/}
+            S3_ENDPOINT: ${S3_ENDPOINT:-localstack:4566}
+            S3_ACCESS_KEY: ${S3_ACCESS_KEY:-test}
+            S3_SECRET_KEY: ${S3_SECRET_KEY:-test}
+            S3_REGION: ${S3_REGION:-eu-central-1}
+            S3_BUCKET: ${S3_BUCKET:-melody-example}
+            SMTP_ADDRESS: ${SMTP_ADDRESS:-mailpit:1025}
         volumes:
             - ${RELATIVE_PATH_TO_ROOT}:${CONTAINER_ROOT_PATH}
             - ${RELATIVE_PATH_TO_ROOT}/.dev-data/go/pkg/mod:/go/pkg/mod
