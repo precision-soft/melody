@@ -15,16 +15,19 @@ MODE_STRING="all"
 if [[ "" = "${1-}" ]]; then
     :
 elif [[ "-h" = "${1-}" ]]; then
-    println "usage: all.sh [-h] [--all | --staged]"
+    println "usage: all.sh [-h] [--all | --staged | --live]"
     println ""
     println "  -h         show this help and exit"
-    println "  --all      validate all modules (default)"
+    println "  --all      validate all modules and the live integration suites (default)"
     println "  --staged   validate only modules with staged changes"
+    println "  --live     run only the live integration suites (mirrors the ci live job)"
     exit 0
 elif [[ "--staged" = "${1-}" ]]; then
     MODE_STRING="staged"
 elif [[ "--all" = "${1-}" ]]; then
     MODE_STRING="all"
+elif [[ "--live" = "${1-}" ]]; then
+    MODE_STRING="live"
 else
     fail "unknown flag: ${1}"
 fi
@@ -82,6 +85,52 @@ run_go_checks() {
     done
 
     run_section "${COMPONENT_TITLE_STRING}" "${TAG_VALIDATE}" "go" -- \
+        run_batch_in_service_shell "${SERVICE_NAME_STRING}" "${BATCH_COMMAND_LIST[@]}"
+}
+
+LIVE_SERVICE_NAME_STRING_LIST=(
+    "rabbitmq"
+    "redis"
+    "mysql"
+    "postgres"
+    "localstack"
+)
+
+LIVE_ENVIRONMENT_EXPORT_STRING="export AMQP_DSN='amqp://guest:guest@rabbitmq:5672/' REDIS_ADDRESS='redis:6379' MYSQL_DSN='melody:melody@tcp(mysql:3306)/melody_example' PGSQL_HOST='postgres' PGSQL_PORT='5432' PGSQL_DATABASE='melody_test' PGSQL_USER='melody' PGSQL_PASSWORD='melody' POSTGRES_DSN='postgres://melody:melody@postgres:5432/melody_test?sslmode=disable' MINIO_ENDPOINT='localstack:4566' MINIO_ACCESS_KEY='test' MINIO_SECRET_KEY='test'"
+
+LIVE_SUITE_SPECIFICATION_STRING_LIST=(
+    "integrations/amqp/v3 -race"
+    "integrations/rueidis/v3 -race"
+    "integrations/rueidis/v2"
+    "integrations/rueidis"
+    "integrations/bunorm/mysql/v3"
+    "integrations/bunorm/mysql/v2"
+    "integrations/bunorm/mysql"
+    "integrations/bunorm/pgsql/v3 -race"
+    "integrations/bunorm/pgsql/v2"
+    "integrations/bunorm/pgsql"
+    "integrations/outbox/v3 -race"
+    "integrations/awss3/v3"
+)
+
+run_live_go_suites() {
+    docker_compose up -d --wait "${LIVE_SERVICE_NAME_STRING_LIST[@]}"
+
+    local BATCH_COMMAND_LIST=()
+
+    local LIVE_SUITE_SPECIFICATION_STRING
+    for LIVE_SUITE_SPECIFICATION_STRING in "${LIVE_SUITE_SPECIFICATION_STRING_LIST[@]}"; do
+        local LIVE_MODULE_RELATIVE_PATH_STRING="${LIVE_SUITE_SPECIFICATION_STRING%% *}"
+
+        local LIVE_RACE_FLAG_STRING=""
+        if [[ "${LIVE_SUITE_SPECIFICATION_STRING}" != "${LIVE_MODULE_RELATIVE_PATH_STRING}" ]]; then
+            LIVE_RACE_FLAG_STRING="${LIVE_SUITE_SPECIFICATION_STRING#* } "
+        fi
+
+        BATCH_COMMAND_LIST+=("${LIVE_ENVIRONMENT_EXPORT_STRING} && cd ${CONTAINER_ROOT_PATH}/${LIVE_MODULE_RELATIVE_PATH_STRING} && go test ${LIVE_RACE_FLAG_STRING}-count=1 ./...")
+    done
+
+    run_section "melody live integration suites (mirrors the ci live job)" "${TAG_VALIDATE}" "go" -- \
         run_batch_in_service_shell "${SERVICE_NAME_STRING}" "${BATCH_COMMAND_LIST[@]}"
 }
 
@@ -210,6 +259,13 @@ main() {
     local ROOT_DIRECTORY_STRING
     ROOT_DIRECTORY_STRING="${REPOSITORY_ROOT_DIRECTORY_STRING}"
 
+    if [[ "live" = "${MODE_STRING}" ]]; then
+        run_live_go_suites
+
+        success "validation completed"
+        return 0
+    fi
+
     if [[ "all" = "${MODE_STRING}" ]]; then
         run_go_checks "${ROOT_DIRECTORY_STRING}" "melody framework (root module)"
 
@@ -226,6 +282,8 @@ main() {
             fi
             run_go_checks "${INTEGRATION_MODULE_DIRECTORY_STRING}" "melody integration module: ${INTEGRATION_MODULE_DIRECTORY_STRING#${ROOT_DIRECTORY_STRING}/}"
         done < <(get_integration_module_directory_list)
+
+        run_live_go_suites
 
         success "validation completed"
         return 0
