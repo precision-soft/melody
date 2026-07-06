@@ -13,4 +13,7 @@
 /public/assets/logo.png
 /public/assets/apple-touch-icon.png
 
+# generated frontend bundle (esbuild: assets/app.ts -> public/assets/app.js)
+/public/assets/app.js
+
 /.example
