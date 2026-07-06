@@ -522,6 +522,7 @@ func TestContainer_Close_NonComparableValueTypeServiceClosedOnce(t *testing.T) {
         t.Fatalf("expected non-comparable value-type service Close to be called once, got %d", count)
     }
 }
+
 /* @info OverrideProtectedInstance on a WithoutTypeRegistration value service must close once (CR #64) */
 
 type overrideValueCloserCR64 struct {

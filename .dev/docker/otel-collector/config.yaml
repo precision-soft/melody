@@ -1,0 +1,19 @@
+# dev-only OTLP collector: receives spans from the example over grpc/http and prints them
+# (debug exporter) so the tracing pipeline can be verified end-to-end from the container logs.
+receivers:
+    otlp:
+        protocols:
+            grpc:
+                endpoint: 0.0.0.0:4317
+            http:
+                endpoint: 0.0.0.0:4318
+
+exporters:
+    debug:
+        verbosity: detailed
+
+service:
+    pipelines:
+        traces:
+            receivers: [ otlp ]
+            exporters: [ debug ]

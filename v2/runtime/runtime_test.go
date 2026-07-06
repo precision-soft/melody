@@ -189,7 +189,7 @@ func TestNew_PanicsOnNilContainer(t *testing.T) {
     )
 }
 
-func TestRuntime_ScopeClosePanicsOnGet(t *testing.T) {
+func TestRuntime_ScopeCloseReturnsErrorOnGet(t *testing.T) {
     serviceContainer := container.NewContainer()
     scope := serviceContainer.NewScope()
 
@@ -201,7 +201,12 @@ func TestRuntime_ScopeClosePanicsOnGet(t *testing.T) {
 
     _ = runtimeInstance.Scope().Close()
 
+    _, getErr := runtimeInstance.Scope().Get("x")
+    if nil == getErr {
+        t.Fatalf("expected closed-scope error")
+    }
+
     testhelper.AssertPanics(t, func() {
-        _, _ = runtimeInstance.Scope().Get("x")
+        _ = runtimeInstance.Scope().MustGet("x")
     })
 }

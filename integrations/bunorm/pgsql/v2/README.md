@@ -11,17 +11,9 @@ This module implements [`bunorm.Provider`](../provider.go) and produces a Bun da
 
 ## Provider
 
-[`pgsql.Provider`](./provider.go) reads configuration values from Melody config using the parameter names passed to [`NewProvider`](./provider.go).
+[`pgsql.NewProvider`](./provider.go) builds a [`pgsql.Provider`](./provider.go) from optional [`ProviderOption`](./provider_option.go) values. Connection details (`Host`, `Port`, `Database`, `User`, `Password`) are supplied at open time through the [`bunorm.ConnectionParams`](../connection_params.go) passed to `Open` — the provider itself holds only dialect/driver tuning.
 
-Common parameter names:
-
-- `DB_HOST`
-- `DB_PORT`
-- `DB_DATABASE`
-- `DB_USER`
-- `DB_PASSWORD`
-
-Pool and timeout defaults can be overridden via [`WithPoolConfig`](./provider.go) and [`WithTimeoutConfig`](./provider.go) using [`PoolConfig`](./pool_config.go) and [`TimeoutConfig`](./timeout_config.go).
+Pool and timeout defaults can be overridden via the chainable [`WithPoolConfig`](./provider.go) and [`WithTimeoutConfig`](./provider.go) methods using [`PoolConfig`](./pool_config.go) and [`TimeoutConfig`](./timeout_config.go).
 
 ## TLS
 
@@ -55,10 +47,9 @@ provider := pgsql.NewProvider(pgsql.WithTlsConfig(&tls.Config{
 
 If you need driver options that are not exposed by [`TimeoutConfig`](./timeout_config.go) or other typed configs, use a post-build hook.
 
-Provider constructors accept optional provider options:
+The provider constructor accepts optional provider options:
 
 - [`pgsql.NewProvider`](./provider.go)
-- [`pgsql.NewProviderWithConfig`](./provider.go)
 
 Configure a hook via [`pgsql.WithPostBuildHook`](./provider_option.go) using the [`pgsql.PostBuildHook`](./post_build_hook.go) signature.
 

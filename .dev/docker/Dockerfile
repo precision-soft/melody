@@ -15,7 +15,7 @@ ENV GOCACHE=/go/cache/go-build
 ENV GOPRIVATE=github.com/precision-soft
 ENV GONOSUMDB=github.com/precision-soft
 
-RUN apk add --update --no-cache git shadow bash
+RUN apk add --update --no-cache git shadow bash nodejs npm
 
 ENV GOBIN=/usr/local/bin
 ENV PATH="/usr/local/go/bin:/usr/local/bin:${PATH}"

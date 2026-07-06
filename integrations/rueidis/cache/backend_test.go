@@ -127,8 +127,6 @@ var (
     _ func(*Backend, string, int64) (int64, error)           = (*Backend).Decrement
 )
 
-/* @info glob escape */
-
 func TestEscapeRedisGlobMeta(t *testing.T) {
     cases := []struct {
         name     string

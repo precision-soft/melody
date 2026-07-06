@@ -25,6 +25,7 @@ func NewValidator() *Validator {
     validator.RegisterConstraint(ConstraintAlpha, &Alpha{})
     validator.RegisterConstraint(ConstraintAlphanumeric, &Alphanumeric{})
     validator.RegisterConstraint(ConstraintGreaterThan, NewGreaterThan(0))
+    validator.RegisterConstraint(ConstraintLessThan, NewLessThan(0))
     validator.RegisterConstraint(ConstraintNotEmpty, NewNotEmpty())
 
     return validator
@@ -220,51 +221,28 @@ func (instance *Validator) validateRule(value any, fieldName string, rule valida
 }
 
 func (instance *Validator) createConstraintWithParams(name string, params map[string]string) (validationcontract.Constraint, bool) {
-    switch name {
-    case ConstraintMinLength:
-        if valueString, exists := params["value"]; true == exists {
-            parsed, ok := parseIntStrict(valueString)
-            if false == ok {
-                return nil, false
-            }
-            return NewMinLength(parsed), true
-        }
-        return NewMinLength(1), true
+    instance.mutex.RLock()
+    constraint := instance.constraints[name]
+    instance.mutex.RUnlock()
 
-    case ConstraintMaxLength:
-        if valueString, exists := params["value"]; true == exists {
-            parsed, ok := parseIntStrict(valueString)
-            if false == ok {
-                return nil, false
-            }
-            return NewMaxLength(parsed), true
-        }
-        return NewMaxLength(100), true
-
-    case ConstraintRegex:
-        if patternString, exists := params["pattern"]; true == exists {
-            return NewRegex(patternString), true
-        }
-        if patternString, exists := params["value"]; true == exists {
-            return NewRegex(patternString), true
-        }
-        return NewRegex(".*"), true
-
-    case ConstraintGreaterThan:
-        if valueString, exists := params["value"]; true == exists {
-            parsed, ok := parseIntStrict(valueString)
-            if false == ok {
-                return nil, false
-            }
-            return NewGreaterThan(parsed), true
-        }
-        return NewGreaterThan(0), true
-
-    default:
-        instance.mutex.RLock()
-        constraint := instance.constraints[name]
-        instance.mutex.RUnlock()
-
+    if 0 == len(params) {
         return constraint, true
     }
+
+    parameterized, ok := constraint.(validationcontract.ParameterizedConstraint)
+    if false == ok {
+        /* @important fail closed when the tag carries parameters the registered constraint cannot consume: validating with the unparameterized singleton would silently enforce a different configuration than the tag declares (a custom `between(min=1,max=5)` would validate with whatever the singleton was built with) */
+        return nil, false
+    }
+
+    configured, withParamsErr := parameterized.WithParams(params)
+    if nil != withParamsErr {
+        return nil, false
+    }
+
+    if true == internal.IsNilInterface(configured) {
+        return nil, false
+    }
+
+    return configured, true
 }

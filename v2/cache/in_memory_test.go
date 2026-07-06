@@ -319,8 +319,6 @@ func TestInMemoryBackend_Decrement_MinInt64Delta_ReturnsError(t *testing.T) {
     }
 }
 
-/* @info increment ttl */
-
 func TestInMemoryBackend_IncrementPreservesExistingTtl(t *testing.T) {
     start := time.Unix(10, 0)
     clockInstance := &cacheTestClock{now: start}

@@ -18,6 +18,10 @@ type PathPrefixMatcher struct {
 }
 
 func (instance *PathPrefixMatcher) Matches(request httpcontract.Request) bool {
+    if nil == request {
+        return false
+    }
+
     if nil == request.HttpRequest() {
         return false
     }

@@ -80,6 +80,11 @@ const (
     SecureMeName    = "example.secure.me"
     SecureMePattern = SecurePrefix + "/me/"
 
+    InternalPrefix = "/internal"
+
+    InternalWhoamiName    = "example.internal.whoami"
+    InternalWhoamiPattern = InternalPrefix + "/whoami/"
+
     I18nPrefix = "/i18n"
 
     I18nGreetingName    = "example.i18n.greeting"

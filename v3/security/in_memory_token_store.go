@@ -118,7 +118,42 @@ func cloneClaims(claims securitycontract.Claims) securitycontract.Claims {
         cloned.Attributes = internal.CopyAnyMap(claims.Attributes)
     }
 
+    cloned.OriginatingActor = cloneActorData(claims.OriginatingActor)
+
     return cloned
+}
+
+/* @important maxActorImpersonationDepth bounds the impersonator-chain deep-copy recursion so a cyclic ActorData — an in-process caller can point actor.Impersonator back into the chain through the exported field and Put/Lookup it — cannot recurse until the goroutine stack overflows, a fatal error no deferred recover() can catch and which takes down the whole process. A real impersonation chain (a subject acted for by an operator) is a handful of links deep, far below this bound; a JSON-decoded actor is additionally capped by encoding/json's own nesting limit. Mirrors internal.maxCopyDepth. */
+const maxActorImpersonationDepth = 10000
+
+/* cloneActorData deep-copies an originating actor, including its nested Impersonator subtree, so a stored or returned actor never aliases the caller's mutable ActorData (its Roles, Attributes, or the accountable impersonator behind it). Recurses through the impersonator chain; a nil carrier clones to nil. */
+func cloneActorData(actor *securitycontract.ActorData) *securitycontract.ActorData {
+    return cloneActorDataAtDepth(actor, 0)
+}
+
+func cloneActorDataAtDepth(actor *securitycontract.ActorData, depth int) *securitycontract.ActorData {
+    if nil == actor {
+        return nil
+    }
+
+    actorCopy := *actor
+    if nil != actor.Roles {
+        actorCopy.Roles = append([]string{}, actor.Roles...)
+    }
+    if nil != actor.Attributes {
+        actorCopy.Attributes = internal.CopyStringMap(actor.Attributes)
+    }
+
+    /* @important at the depth bound stop following the impersonator chain rather than recurse further: this halts a cyclic chain before the stack overflows while leaving every realistically-shallow chain fully deep-copied. The truncated link is dropped (nil), never aliased, so no caller-mutable ActorData leaks into the store. */
+    if depth >= maxActorImpersonationDepth {
+        actorCopy.Impersonator = nil
+
+        return &actorCopy
+    }
+
+    actorCopy.Impersonator = cloneActorDataAtDepth(actor.Impersonator, depth+1)
+
+    return &actorCopy
 }
 
 func (instance *InMemoryTokenStore) Lookup(

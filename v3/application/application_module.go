@@ -95,6 +95,16 @@ func (instance *Application) bootModulesPostConfigurationResolve() {
             httpMiddlewareModule.RegisterHttpMiddlewares(instance.kernel, instance.httpMiddlewares)
         }
 
+        if decoratorModule, ok := moduleInstance.(applicationcontract.HttpHandlerDecoratorModule); true == ok {
+            for _, decorator := range decoratorModule.RegisterHttpHandlerDecorators(instance.kernel) {
+                if nil == decorator {
+                    continue
+                }
+
+                instance.httpHandlerDecorators = append(instance.httpHandlerDecorators, decorator)
+            }
+        }
+
         if httpModule, ok := moduleInstance.(applicationcontract.HttpModule); true == ok {
             httpModule.RegisterHttpRoutes(instance.kernel)
         }

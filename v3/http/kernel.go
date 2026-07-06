@@ -358,7 +358,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             )
             instance.logEventDispatchError(requestLogger, "kernel response error", eventKernelExceptionErr)
 
-            /* @important close the discarded response body when an EventKernelResponse listener swapped the response, so a file-backed body (an open *os.File from FileResponse/ServeReader) is not leaked; mirrors the discarded-response cleanup the error-handler path performs */
+            /* @important close the swapped-out response body so a file-backed body (FileResponse/ServeReader) is not leaked */
             if nil != finalResponse && finalResponse != kernelResponseEvent.Response() {
                 closeDiscardedResponseBody(finalResponse, requestLogger)
             }
@@ -380,6 +380,24 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         _, eventKernelRequestErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, kernelRequestEvent)
         instance.logEventDispatchError(requestLogger, "kernel request error", eventKernelRequestErr)
 
+        /* @important fail closed when the kernel.request dispatch aborted with an error and no listener produced a response: the dispatcher stops at the first failing listener, so listeners behind it (e.g. the access-control listener) never ran; proceeding to the handler would treat a partially-processed request as authorized */
+        if nil != eventKernelRequestErr && nil == kernelRequestEvent.Response() {
+            statusCode := nethttp.StatusInternalServerError
+            message := "internal server error"
+            if true == debugMode {
+                message = eventKernelRequestErr.Error()
+            }
+
+            if true == PrefersHtml(melodyRequest) {
+                kernelRequestEvent.SetResponse(HtmlResponse(
+                    statusCode,
+                    "<!doctype html><html><head><meta charset=\"utf-8\"><title>Melody Error</title></head><body><h1>Error</h1><p>"+html.EscapeString(message)+"</p></body></html>",
+                ))
+            } else {
+                kernelRequestEvent.SetResponse(JsonErrorResponse(statusCode, message))
+            }
+        }
+
         if nil != kernelRequestEvent.Response() {
             finalResponse = kernelRequestEvent.Response()
 
@@ -387,7 +405,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             _, eventKernelResponseErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelResponse, kernelResponseEvent)
             instance.logEventDispatchError(requestLogger, "kernel response error", eventKernelResponseErr)
 
-            /* @important close the discarded response body when an EventKernelResponse listener swapped the response, so a file-backed body (an open *os.File from FileResponse/ServeReader) is not leaked; mirrors the discarded-response cleanup the error-handler path performs */
+            /* @important close the swapped-out response body so a file-backed body (FileResponse/ServeReader) is not leaked */
             if nil != finalResponse && finalResponse != kernelResponseEvent.Response() {
                 closeDiscardedResponseBody(finalResponse, requestLogger)
             }
@@ -446,9 +464,12 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                             }
                         }
 
-                        allowedMethodsSet[nethttp.MethodOptions] = struct{}{}
+                        /* @important only advertise in Allow the synthetic methods the kernel actually honors under the configured MethodPolicy: OPTIONS is answered automatically only when AutomaticOptions is set (otherwise an OPTIONS request falls through to this 405), and a HEAD is served by falling back to GET only when HeadFallbackToGet is set — so listing either under the opposite configuration promises a method that in fact returns 405. A method the route declares explicitly is already added from allowedMethods above. */
+                        if true == instance.options.MethodPolicy.AutomaticOptions {
+                            allowedMethodsSet[nethttp.MethodOptions] = struct{}{}
+                        }
 
-                        if true == hasGet && false == hasHead {
+                        if true == instance.options.MethodPolicy.HeadFallbackToGet && true == hasGet && false == hasHead {
                             allowedMethodsSet[nethttp.MethodHead] = struct{}{}
                         }
 
@@ -502,7 +523,14 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                                 message = err.Error()
                             }
 
-                            kernelExceptionEvent.SetResponse(JsonErrorResponse(statusCode, message))
+                            if true == PrefersHtml(request) {
+                                kernelExceptionEvent.SetResponse(HtmlResponse(
+                                    statusCode,
+                                    "<!doctype html><html><head><meta charset=\"utf-8\"><title>Melody Error</title></head><body><h1>Error</h1><p>"+html.EscapeString(message)+"</p></body></html>",
+                                ))
+                            } else {
+                                kernelExceptionEvent.SetResponse(JsonErrorResponse(statusCode, message))
+                            }
                         }
 
                         if nil != response && response != kernelExceptionEvent.Response() {
@@ -523,19 +551,32 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         _, eventKernelControllerErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelController, kernelControllerEvent)
         instance.logEventDispatchError(requestLogger, "kernel controller error", eventKernelControllerErr)
 
+        /* @important fail closed when the kernel.controller dispatch aborted with an error and no listener produced a response, mirroring the kernel.request path: the dispatcher stops at the first failing listener, so a required listener behind it (marked through RequiredListenerRegistrar) never ran; proceeding to the handler would treat a partially-processed request as authorized */
+        if nil != eventKernelControllerErr && nil == kernelControllerEvent.Response() {
+            statusCode := nethttp.StatusInternalServerError
+            message := "internal server error"
+            if true == debugMode {
+                message = eventKernelControllerErr.Error()
+            }
+
+            if true == PrefersHtml(melodyRequest) {
+                kernelControllerEvent.SetResponse(HtmlResponse(
+                    statusCode,
+                    "<!doctype html><html><head><meta charset=\"utf-8\"><title>Melody Error</title></head><body><h1>Error</h1><p>"+html.EscapeString(message)+"</p></body></html>",
+                ))
+            } else {
+                kernelControllerEvent.SetResponse(JsonErrorResponse(statusCode, message))
+            }
+        }
+
         if nil != kernelControllerEvent.Response() {
             finalResponse = kernelControllerEvent.Response()
 
             kernelResponseEvent := NewKernelResponseEvent(melodyRequest, finalResponse)
             _, eventKernelResponseErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelResponse, kernelResponseEvent)
-            if nil != eventKernelResponseErr {
-                requestLogger.Error(
-                    "kernel response error",
-                    exception.LogContext(eventKernelResponseErr),
-                )
-            }
+            instance.logEventDispatchError(requestLogger, "kernel response error", eventKernelResponseErr)
 
-            /* @important close the discarded response body when an EventKernelResponse listener swapped the response, so a file-backed body (an open *os.File from FileResponse/ServeReader) is not leaked; mirrors the discarded-response cleanup the error-handler path performs */
+            /* @important close the swapped-out response body so a file-backed body (FileResponse/ServeReader) is not leaked */
             if nil != finalResponse && finalResponse != kernelResponseEvent.Response() {
                 closeDiscardedResponseBody(finalResponse, requestLogger)
             }
@@ -617,14 +658,9 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 kernelcontract.EventKernelResponse,
                 kernelResponseEvent,
             )
-            if nil != eventKernelResponseErr {
-                requestLogger.Error(
-                    "kernel response error",
-                    exception.LogContext(eventKernelResponseErr),
-                )
-            }
+            instance.logEventDispatchError(requestLogger, "kernel response error", eventKernelResponseErr)
 
-            /* @important close the discarded response body when an EventKernelResponse listener swapped the response, so a file-backed body (an open *os.File from FileResponse/ServeReader) is not leaked; mirrors the discarded-response cleanup the error-handler path performs */
+            /* @important close the swapped-out response body so a file-backed body (FileResponse/ServeReader) is not leaked */
             if nil != finalResponse && finalResponse != kernelResponseEvent.Response() {
                 closeDiscardedResponseBody(finalResponse, requestLogger)
             }

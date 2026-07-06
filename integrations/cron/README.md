@@ -10,7 +10,7 @@ The integration is published as independent Go modules so applications pull only
 * Melody v2 binding: [`./v2/`](./v2/) — `github.com/precision-soft/melody/integrations/cron/v2`
 * Melody v3 binding: [`./v3/`](./v3/) — `github.com/precision-soft/melody/integrations/cron/v3`
 
-The three bindings share the same exported API and behavior; they differ only in the melody version they import. The examples below use the v3 import path; for v2, replace `/v3` with `/v2`; for v1, drop the `/v3` suffix entirely (the v1 binding lives at the module root, following Go's no-suffix convention for v0/v1).
+The three bindings share the same exported API and behavior; they differ in the melody version they import, and the v3 binding additionally ships the built-in `k8s` template (see [Customizing the template](#customizing-the-template)). The examples below use the v3 import path; for v2, replace `/v3` with `/v2`; for v1, drop the `/v3` suffix entirely (the v1 binding lives at the module root, following Go's no-suffix convention for v0/v1).
 
 ## What you get
 
@@ -88,14 +88,14 @@ The integration ships an opt-in helper that registers safe path/template default
 
 ```go
 import (
-    melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
-    melodycron "github.com/precision-soft/melody/integrations/cron/v3"
+melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
+melodycron "github.com/precision-soft/melody/integrations/cron/v3"
 )
 
 func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.ParameterRegistrar) {
-    melodycron.RegisterDefaultParameters(registrar)
+melodycron.RegisterDefaultParameters(registrar)
 
-    registrar.RegisterParameter(melodycron.ParameterUser, "%env(COMMANDS_USER)%")
+registrar.RegisterParameter(melodycron.ParameterUser, "%env(COMMANDS_USER)%")
 }
 ```
 
@@ -111,9 +111,9 @@ COMMANDS_LOGS_DIR=%kernel.logs_dir%/cron
 
 ```go
 func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.ParameterRegistrar) {
-    registrar.RegisterParameter(melodycron.ParameterUser, "%env(COMMANDS_USER)%")
-    registrar.RegisterParameter(melodycron.ParameterLogsDir, "%env(COMMANDS_LOGS_DIR)%")
-    // melody.cron.destination_file omitted — supply via --out at run time or register here
+registrar.RegisterParameter(melodycron.ParameterUser, "%env(COMMANDS_USER)%")
+registrar.RegisterParameter(melodycron.ParameterLogsDir, "%env(COMMANDS_LOGS_DIR)%")
+// melody.cron.destination_file omitted — supply via --out at run time or register here
 }
 ```
 
@@ -170,11 +170,11 @@ Example:
 
 ```go
 cronConfiguration.Schedule("billing:run", &melodycron.EntryConfig{
-    Schedule:        &melodycron.Schedule{Minute: "0", Hour: "2"},
-    User:            "billing",
-    DestinationFile: "billing-crontab",
-    Command:         []string{"/usr/bin/flock", "-n", "/var/run/billing.lock", "/opt/app", "billing:run"},
-    LogFileName:     "billing.log",
+Schedule:        &melodycron.Schedule{Minute: "0", Hour: "2"},
+User:            "billing",
+DestinationFile: "billing-crontab",
+Command:         []string{"/usr/bin/flock", "-n", "/var/run/billing.lock", "/opt/app", "billing:run"},
+LogFileName:     "billing.log",
 })
 ```
 
@@ -191,7 +191,7 @@ APP_CRON_HEARTBEAT_AUTO_ENABLED=true
 
 ```go
 func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.ParameterRegistrar) {
-    registrar.RegisterParameter(melodycron.ParameterHeartbeatAutoEnabled, "%env(APP_CRON_HEARTBEAT_AUTO_ENABLED)%")
+registrar.RegisterParameter(melodycron.ParameterHeartbeatAutoEnabled, "%env(APP_CRON_HEARTBEAT_AUTO_ENABLED)%")
 }
 ```
 
@@ -226,8 +226,8 @@ Equivalent at the API level via `cron.Render`:
 
 ```go
 content, err := cron.Render(entries, cron.RenderOptions{
-    HeartbeatUser:    "monitor",
-    HeartbeatCommand: []string{"/usr/bin/curl", "-fsS", "https://healthcheck.example.com/ping"},
+HeartbeatUser:    "monitor",
+HeartbeatCommand: []string{"/usr/bin/curl", "-fsS", "https://healthcheck.example.com/ping"},
 })
 ```
 
@@ -251,14 +251,14 @@ Accepted values: `default` (the `--out` destination), an absolute path, or a rel
 
 ## Customizing the template
 
-The generator dispatches rendering to a registered `Template` whose `Name()` matches `--template` (or, if unset, the `melody.cron.template` container parameter; default `"crontab"`). Two templates ship in-tree and are registered automatically — `crontab` and `k8s` (Kubernetes `CronJob` manifests). You can also plug in your own (Supervisor, custom YAML/INI, etc.) without forking the cron integration.
+The generator dispatches rendering to a registered `Template` whose `Name()` matches `--template` (or, if unset, the `melody.cron.template` container parameter; default `"crontab"`). The `crontab` template ships in-tree in all three bindings and is registered automatically; the v3 binding additionally ships a built-in `k8s` template (Kubernetes `CronJob` manifests). You can also plug in your own (Supervisor, custom YAML/INI, etc.) without forking the cron integration.
 
 ### `Template` interface
 
 ```go
 type Template interface {
-    Name() string
-    Render(entries []Entry, options RenderOptions) (string, error)
+Name() string
+Render(entries []Entry, options RenderOptions) (string, error)
 }
 ```
 
@@ -266,9 +266,9 @@ type Template interface {
 
 ### Built-in templates
 
-`cron.BuiltinTemplates()` returns the list of templates shipped with the integration: `*CrontabTemplate{}` (`cron.TemplateNameCrontab == "crontab"`) and `*K8sTemplate{}` (`cron.TemplateNameK8s == "k8s"`). `NewGenerateCommand` iterates this slice on construction, so you never register the built-ins by hand — they are always available even after you add your own.
+`cron.BuiltinTemplates()` returns the list of templates shipped with the binding: `*CrontabTemplate{}` (`cron.TemplateNameCrontab == "crontab"`) in all three bindings, plus `*K8sTemplate{}` (`cron.TemplateNameK8s == "k8s"`) in the v3 binding only. `NewGenerateCommand` iterates this slice on construction, so you never register the built-ins by hand — they are always available even after you add your own.
 
-### Built-in `k8s` template
+### Built-in `k8s` template (v3 binding only)
 
 `--template=k8s` renders the same `cron.Configuration` as a multi-document YAML stream — one `batch/v1` `CronJob` per scheduled command (`---`-separated) — suitable for `kubectl apply -f`. The same registry drives both the on-VPS crontab and the in-cluster CronJobs.
 
@@ -300,29 +300,29 @@ These parameters are **not** registered by `RegisterDefaultParameters` (the cron
 
 ```go
 import (
-    melodycron "github.com/precision-soft/melody/integrations/cron/v3"
+melodycron "github.com/precision-soft/melody/integrations/cron/v3"
 )
 
 type KubernetesCronjobTemplate struct {
-    Namespace string
-    Image     string
+Namespace string
+Image     string
 }
 
 func (instance *KubernetesCronjobTemplate) Name() string {
-    return "k8s_cronjob"
+return "k8s_cronjob"
 }
 
 func (instance *KubernetesCronjobTemplate) Render(entries []melodycron.Entry, options melodycron.RenderOptions) (string, error) {
-    forbidden := []melodycron.ForbiddenChar{
-        {Char: '\t', Reason: "tabs break YAML indentation"},
-    }
-    for _, entry := range entries {
-        if validationErr := melodycron.ValidateNoForbiddenChars(entry.Command, forbidden, "k8s entry "+entry.Name); nil != validationErr {
-            return "", validationErr
-        }
-    }
-    // ... build the YAML from entries + instance.Namespace + instance.Image ...
-    return yamlContent, nil
+forbidden := []melodycron.ForbiddenChar{
+{Char: '\t', Reason: "tabs break YAML indentation"},
+}
+for _, entry := range entries {
+if validationErr := melodycron.ValidateNoForbiddenChars(entry.Command, forbidden, "k8s entry "+entry.Name); nil != validationErr {
+return "", validationErr
+}
+}
+// ... build the YAML from entries + instance.Namespace + instance.Image ...
+return yamlContent, nil
 }
 
 var _ melodycron.Template = (*KubernetesCronjobTemplate)(nil)
@@ -332,23 +332,23 @@ Hand the instance to `GenerateCommand.RegisterTemplate` before the kernel runs `
 
 ```go
 func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.Kernel) []melodyclicontract.Command {
-    commands := []melodyclicontract.Command{
-        command.NewAppInfoCommand(),
-        command.NewProductListCommand(),
-    }
+commands := []melodyclicontract.Command{
+command.NewAppInfoCommand(),
+command.NewProductListCommand(),
+}
 
-    cronConfiguration := melodycron.NewConfiguration().
-        Schedule(melodycron.CommandName(command.NewProductListCommand), &melodycron.EntryConfig{
-            Schedule: &melodycron.Schedule{Minute: "0", Hour: "3"},
-        })
+cronConfiguration := melodycron.NewConfiguration().
+Schedule(melodycron.CommandName(command.NewProductListCommand), &melodycron.EntryConfig{
+Schedule: &melodycron.Schedule{Minute: "0", Hour: "3"},
+})
 
-    generateCommand := melodycron.NewGenerateCommand(cronConfiguration)
-    generateCommand.RegisterTemplate(&KubernetesCronjobTemplate{
-        Namespace: "production",
-        Image:     "myapp:latest",
-    })
+generateCommand := melodycron.NewGenerateCommand(cronConfiguration)
+generateCommand.RegisterTemplate(&KubernetesCronjobTemplate{
+Namespace: "production",
+Image:     "myapp:latest",
+})
 
-    return append(commands, generateCommand)
+return append(commands, generateCommand)
 }
 ```
 
@@ -409,26 +409,26 @@ The command is a plain Melody CLI command — there is no cron-specific interfac
 
 ```go
 import (
-    melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
-    melodycron "github.com/precision-soft/melody/integrations/cron/v3"
-    melodykernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
+melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
+melodycron "github.com/precision-soft/melody/integrations/cron/v3"
+melodykernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
 )
 
 func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.Kernel) []melodyclicontract.Command {
-    commands := []melodyclicontract.Command{
-        command.NewAppInfoCommand(),
-        command.NewProductListCommand(),
-    }
+commands := []melodyclicontract.Command{
+command.NewAppInfoCommand(),
+command.NewProductListCommand(),
+}
 
-    cronConfiguration := melodycron.NewConfiguration().
-        Schedule(melodycron.CommandName(command.NewProductListCommand), &melodycron.EntryConfig{
-            Schedule: &melodycron.Schedule{Minute: "0", Hour: "3"},
-        }).
-        Schedule(melodycron.CommandName(command.NewAppInfoCommand), &melodycron.EntryConfig{
-            Schedule: &melodycron.Schedule{Minute: "0", Hour: "12"},
-        })
+cronConfiguration := melodycron.NewConfiguration().
+Schedule(melodycron.CommandName(command.NewProductListCommand), &melodycron.EntryConfig{
+Schedule: &melodycron.Schedule{Minute: "0", Hour: "3"},
+}).
+Schedule(melodycron.CommandName(command.NewAppInfoCommand), &melodycron.EntryConfig{
+Schedule: &melodycron.Schedule{Minute: "0", Hour: "12"},
+})
 
-    return append(commands, melodycron.NewGenerateCommand(cronConfiguration))
+return append(commands, melodycron.NewGenerateCommand(cronConfiguration))
 }
 ```
 
@@ -495,3 +495,5 @@ The three bindings expose the same identifiers. From any of `github.com/precisio
 * Parameter-name constants: `ParameterUser`, `ParameterLogsDir`, `ParameterBinary`, `ParameterDestinationFile`, `ParameterHeartbeatPath`, `ParameterHeartbeatAutoEnabled`, `ParameterTemplate`.
 * Template-name constants: `TemplateNameCrontab`.
 * Globals: `CrontabForbiddenChars`.
+
+The v3 binding additionally exposes the built-in `k8s` template: `K8sTemplate`, `TemplateNameK8s`, and the `ParameterImage`/`ParameterNamespace`/`ParameterRestartPolicy` parameter-name constants.

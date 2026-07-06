@@ -2,7 +2,10 @@ package validation
 
 import (
     "fmt"
+    "unicode/utf8"
 
+    "github.com/precision-soft/melody/v2/exception"
+    exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
     validationcontract "github.com/precision-soft/melody/v2/validation/contract"
 )
 
@@ -26,14 +29,15 @@ func (instance *MinLength) Validate(value any, field string) validationcontract.
     }
 
     stringValue := fmt.Sprintf("%v", resolved)
-    if len(stringValue) < instance.min {
+    length := utf8.RuneCountInString(stringValue)
+    if length < instance.min {
         return NewValidationError(
             field,
             fmt.Sprintf("this field must be at least %d characters long", instance.min),
             ConstraintMinLengthErrorInsufficientLength,
             map[string]any{
                 "min":    instance.min,
-                "actual": len(stringValue),
+                "actual": length,
             },
         )
     }
@@ -45,4 +49,31 @@ func (instance *MinLength) Min() int {
     return instance.min
 }
 
+func (instance *MinLength) WithParams(params map[string]string) (validationcontract.Constraint, error) {
+    valueString, exists := params["value"]
+    if false == exists {
+        return nil, exception.NewError(
+            "min length constraint requires a value parameter",
+            exceptioncontract.Context{
+                "params": params,
+            },
+            nil,
+        )
+    }
+
+    parsed, ok := parseIntStrict(valueString)
+    if false == ok {
+        return nil, exception.NewError(
+            "invalid min length parameter",
+            exceptioncontract.Context{
+                "value": valueString,
+            },
+            nil,
+        )
+    }
+
+    return NewMinLength(parsed), nil
+}
+
 var _ validationcontract.Constraint = (*MinLength)(nil)
+var _ validationcontract.ParameterizedConstraint = (*MinLength)(nil)

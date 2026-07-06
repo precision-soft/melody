@@ -4,6 +4,10 @@ A durable, transport-agnostic [`messagebus`](https://github.com/precision-soft/m
 
 It implements `messagebus/contract.Transport`, so a Melody message bus can route messages to RabbitMQ for asynchronous, cross-process handling, and the `melody:messagebus:consume` worker can drain them.
 
+## Version lines
+
+This integration is v3-only (`github.com/precision-soft/melody/integrations/amqp/v3`); no v1 or v2 bindings are currently planned.
+
 ## Installation
 
 ```sh
@@ -195,5 +199,5 @@ defer backplane.Close()
 - With auto-reconnect, a message received just before a reconnect carries a delivery tag from the old channel. Each delivery is stamped with the consume-channel generation it arrived on; once the channel rotates, an `Ack`/`Nack` for an older generation is skipped as a no-op rather than acking the stale tag against the new channel — which would otherwise ack an unrelated delivery (silent loss) or trip a 406 channel close. The broker redelivers the still-unacked message. Combined with the at-least-once requeue, this means **handlers must be idempotent**.
 - Behind a load balancer the consumer runs on several instances as competing consumers on the same queue; this is the normal AMQP fan-out and is safe. Because redelivery can land a message on a different instance than first processed it, idempotency must be keyed on the message, not on local state.
 - Queue/exchange topology is declared on first use and assumed stable. Redeclaring with conflicting arguments will fail at the broker.
-- Stamps are process-local and are not serialized over the wire; only the message body and its type name cross the broker. The transport adds a `DeliveryStamp` and a `messagebus.ReceivedStamp` on receive.
+- Most stamps are process-local and are not serialized over the wire; beyond the message body and its type name, exactly three pieces of stamp data cross the broker. A producer-assigned `messagebus.MessageIdStamp` is carried as the AMQP `MessageId` property and round-tripped back into a `MessageIdStamp` on receive, so a consumer can deduplicate redeliveries from an at-least-once producer (for example the outbox row id) and an application-driven requeue re-publishes under the same id. The redelivery count crosses in the `x-redelivery-count` header (surfaced as a `messagebus.RedeliveryStamp`) and the dead-letter attempt count in the `x-dead-letter-attempt-count` header (surfaced as a `messagebus.DeadLetterAttemptStamp`). All other stamps stay process-local. The transport also adds a `DeliveryStamp` and a `messagebus.ReceivedStamp` on receive.
 - The integration test (`transport_test.go`) is skipped unless `AMQP_DSN` is set. A RabbitMQ service is available in `.dev/docker/docker-compose.yml`.

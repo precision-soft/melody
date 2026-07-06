@@ -1,0 +1,11 @@
+# dev-only prometheus that scrapes the example app's opentelemetry /metrics endpoint,
+# so the metrics pipeline (integration → /metrics → collector) can be exercised end-to-end.
+global:
+    scrape_interval: 5s
+    scrape_timeout: 3s
+
+scrape_configs:
+    -   job_name: melody-example
+        metrics_path: /metrics
+        static_configs:
+            -   targets: [ 'dev:8080' ]

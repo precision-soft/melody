@@ -8,8 +8,6 @@ import (
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
-/* @info FromError */
-
 func TestFromError_ReturnsNilOnNil(t *testing.T) {
     if nil != FromError(nil) {
         t.Fatalf("expected nil")

@@ -4,6 +4,10 @@ HTTP observability for Melody: distributed tracing and Prometheus metrics as HTT
 
 Structured logging already exists in core Melody; this integration adds traces and metrics.
 
+## Version lines
+
+This integration is v3-only (`github.com/precision-soft/melody/integrations/opentelemetry/v3`); no v1 or v2 bindings are currently planned.
+
 ## Installation
 
 ```sh

@@ -256,6 +256,99 @@ func TestEventDispatcher_StopPropagation_SkipsRemainingListeners(t *testing.T) {
     }
 }
 
+func TestEventDispatcher_StopBeforeRequiredListener_FailsClosed(t *testing.T) {
+    dispatcher, clockInstance := testNewEventDispatcher()
+
+    requiredRan := false
+
+    _ = dispatcher.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            eventValue.StopPropagation()
+            return nil
+        },
+        100,
+    )
+    requiredRegistration := dispatcher.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            requiredRan = true
+            return nil
+        },
+        0,
+    )
+    dispatcher.MarkListenerRequired(requiredRegistration)
+
+    runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
+
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    if nil == err {
+        t.Fatalf("expected a fail-closed error when propagation stopped before a required listener")
+    }
+    if true == requiredRan {
+        t.Fatalf("the required listener must not have run")
+    }
+}
+
+func TestEventDispatcher_MaySkipRequiredListeners_RestoresProceed(t *testing.T) {
+    dispatcher, clockInstance := testNewEventDispatcher()
+
+    stopperRegistration := dispatcher.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            eventValue.StopPropagation()
+            return nil
+        },
+        100,
+    )
+    dispatcher.MarkListenerMaySkipRequiredListeners(stopperRegistration)
+
+    requiredRegistration := dispatcher.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            return nil
+        },
+        0,
+    )
+    dispatcher.MarkListenerRequired(requiredRegistration)
+
+    runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
+
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    if nil != err {
+        t.Fatalf("a stopping listener marked may-skip must not fail closed, got %v", err)
+    }
+}
+
+func TestEventDispatcher_StopAfterRequiredListener_DoesNotFail(t *testing.T) {
+    dispatcher, clockInstance := testNewEventDispatcher()
+
+    requiredRegistration := dispatcher.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            return nil
+        },
+        100,
+    )
+    dispatcher.MarkListenerRequired(requiredRegistration)
+
+    _ = dispatcher.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            eventValue.StopPropagation()
+            return nil
+        },
+        50,
+    )
+
+    runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
+
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    if nil != err {
+        t.Fatalf("stopping propagation after a required listener already ran must not fail, got %v", err)
+    }
+}
+
 func TestEventDispatcher_ListenerError_IsWrappedWithContext(t *testing.T) {
     dispatcher, clockInstance := testNewEventDispatcher()
 

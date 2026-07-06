@@ -5,6 +5,8 @@ import (
     "math"
     "reflect"
 
+    "github.com/precision-soft/melody/v3/exception"
+    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     validationcontract "github.com/precision-soft/melody/v3/validation/contract"
 )
 
@@ -124,4 +126,31 @@ func (instance *LessThan) Max() int {
     return instance.max
 }
 
+func (instance *LessThan) WithParams(params map[string]string) (validationcontract.Constraint, error) {
+    valueString, exists := params["value"]
+    if false == exists {
+        return nil, exception.NewError(
+            "less than constraint requires a value parameter",
+            exceptioncontract.Context{
+                "params": params,
+            },
+            nil,
+        )
+    }
+
+    parsed, ok := parseIntStrict(valueString)
+    if false == ok {
+        return nil, exception.NewError(
+            "invalid less than parameter",
+            exceptioncontract.Context{
+                "value": valueString,
+            },
+            nil,
+        )
+    }
+
+    return NewLessThan(parsed), nil
+}
+
 var _ validationcontract.Constraint = (*LessThan)(nil)
+var _ validationcontract.ParameterizedConstraint = (*LessThan)(nil)

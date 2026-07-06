@@ -19,7 +19,7 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
 
     eventDispatcher := kernelInstance.EventDispatcher()
 
-    eventDispatcher.AddListener(
+    accessControlRegistration := eventDispatcher.AddListener(
         kernelcontract.EventKernelRequest,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
             requestEvent, ok := eventValue.Payload().(*http.KernelRequestEvent)
@@ -281,6 +281,11 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
         },
         KernelAccessControlListenerPriority,
     )
+
+    /* @important mark access control as a required kernel.request listener: if another listener stops propagation before it runs, the dispatch fails closed rather than letting the request reach the handler with access control silently skipped. A no-op on a dispatcher that does not support required listeners, so this stays optional. */
+    if registrar, ok := eventDispatcher.(eventcontract.RequiredListenerRegistrar); true == ok {
+        registrar.MarkListenerRequired(accessControlRegistration)
+    }
 }
 
 func matchAccessControlRule(accessControl *AccessControl, path string, source Source, firewallName string) (*MatchedAccessControlRule, []string, bool) {

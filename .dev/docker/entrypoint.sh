@@ -41,16 +41,77 @@ fi
 
 cd "${EXAMPLE_DIR}"
 
+# build the example frontend bundle (TypeScript -> public/assets/app.js) so the
+# example is functional in the browser on startup and picks up local .ts edits;
+# the committed bundle stays as the fallback if the build cannot run.
+if [[ -f "assets/package.json" ]] && command -v npm >/dev/null 2>&1; then
+    echo "[melody-dev] building example frontend bundle"
+    (
+        cd assets
+        [[ -d node_modules ]] || npm ci --no-audit --no-fund
+        npm run build
+    ) && echo "[melody-dev] frontend bundle built" \
+        || echo "[melody-dev] frontend bundle build failed; serving the committed bundle"
+
+    # hot-reload the frontend bundle by polling the .ts sources: this host's bind
+    # mount does not propagate inotify events into the container (so esbuild --watch
+    # would never fire), but file CONTENT does sync, so re-hashing the sources and
+    # rebuilding on change works. A browser refresh then serves the rebuilt bundle.
+    if [[ "1" = "${REFLEX_ENABLED}" ]]; then
+        (
+            cd assets
+            last=""
+            while true; do
+                current="$(cat ./*.ts 2>/dev/null | md5sum)"
+                if [[ "${current}" != "${last}" ]]; then
+                    if [[ -n "${last}" ]]; then
+                        npm run build >/dev/null 2>&1 \
+                            && echo "[melody-dev] frontend bundle rebuilt ($(date '+%H:%M:%S'))"
+                    fi
+                    last="${current}"
+                fi
+                sleep 1
+            done
+        ) &
+        echo "[melody-dev] polling example frontend .ts for changes"
+    fi
+fi
+
 if [[ "1" = "${REFLEX_ENABLED}" ]] && command -v reflex >/dev/null 2>&1; then
     echo "[melody-dev] reflex hot-reload watching ${EXAMPLE_DIR}"
     echo "[melody-dev] running: ${RUN_COMMAND}"
-    exec reflex -s --all -r '\.go$|\.html$|\.css$|\.js$|\.svg$|(^|/)\.env(\..*)?$|\.ya?ml$|\.json$|\.toml$' -G '.git/' -- bash -c "
+    # the generated bundle is ignored so an esbuild rebuild does not restart the
+    # Go server (it serves public/assets/app.js from disk on each request anyway).
+    exec reflex -s --all -r '\.go$|\.html$|\.css$|\.js$|\.svg$|(^|/)\.env(\..*)?$|\.ya?ml$|\.json$|\.toml$' -G '.git/' -G 'public/assets/app.js' -- bash -c "
         export PATH=\"/usr/local/go/bin:/usr/local/bin:\${PATH}\"
         echo ''
         echo \"[melody-dev] rebuild triggered \$(date '+%Y-%m-%d %H:%M:%S')\"
-        ${RUN_COMMAND}
+        # supervisor: restart the example if it exits on its own (e.g. a boot panic outside the
+        # DB/redis retry window), but exit cleanly when reflex signals a file-change restart so the
+        # loop does not fight reflex's kill-and-rerun.
+        trap 'exit 0' TERM INT
+        while true; do
+            ${RUN_COMMAND}
+            echo \"[melody-dev] example exited (status \$?); restarting in 2s\"
+            sleep 2
+        done
     "
 fi
 
-echo "[melody-dev] reflex disabled; running: ${RUN_COMMAND}"
-exec bash -c "export PATH=\"/usr/local/go/bin:/usr/local/bin:\${PATH}\"; ${RUN_COMMAND}"
+echo "[melody-dev] reflex disabled; running with a restart supervisor: ${RUN_COMMAND}"
+# run the example in the background and wait on it so this bash (PID 1) can service signals: on
+# docker stop/restart, forward SIGTERM to the example for a graceful shutdown, wait for it, then exit
+# the loop (a foreground child would defer the trap, so PID 1 would never relay the stop and docker
+# would SIGKILL the whole tree after the grace period).
+exec bash -c "
+    export PATH=\"/usr/local/go/bin:/usr/local/bin:\${PATH}\"
+    child=0
+    trap 'kill -TERM \"\${child}\" 2>/dev/null; wait \"\${child}\" 2>/dev/null; exit 0' TERM INT
+    while true; do
+        ${RUN_COMMAND} &
+        child=\$!
+        wait \"\${child}\"
+        echo \"[melody-dev] example exited (status \$?); restarting in 2s\"
+        sleep 2
+    done
+"

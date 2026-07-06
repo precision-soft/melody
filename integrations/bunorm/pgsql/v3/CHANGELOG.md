@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.2.0] - 2026-07-06 - PostgreSQL Advisory-Lock Locker
+
+### Added
+
+- `lock.go` — `NewLocker(database, ...)` returns a `lock/contract.Locker` backed by PostgreSQL session advisory locks, the Postgres counterpart of the MySQL `GET_LOCK` locker (which had no pgsql equivalent, blocking applications that use the locker — e.g. ERP WMS delivery-picking and reception-stock-in — from running on Postgres). `Acquire` runs a non-blocking `pg_try_advisory_lock` (try-lock, timeout 0) on a dedicated pinned `*sql.Conn` (a session advisory lock is held by the connection that took it); `Release` runs `pg_advisory_unlock`; and because a session advisory lock has no TTL — it is held for as long as its backend session lives — `Refresh` is a connection-liveness probe (the lock is still held as long as the pinned connection answers, so there is no lease to renew and a transient or canceled request context is never mistaken for a lost lock) rather than a `pg_locks` introspection. Arbitrary string lock names are hashed (FNV-1a 64-bit) into the two-int advisory key. Every
+  release runs on a fresh, bounded context so a canceled request context cannot strand the lock, and if `pg_advisory_unlock` cannot be issued the physical session is ended instead (the driver connection is marked bad so `database/sql` closes rather than pools it), which releases the lock server-side and guarantees a still-held lock is never returned to the pool for reuse. `WithLockReleaseTimeout` tunes the release timeout (default 5s).
+
+### Fixed
+
+- `go.mod` — the framework pin is raised from `v3.0.0` to `v3.7.0`, the lowest version providing the newly imported `lock/contract` package, so the module resolves outside the repository workspace; the module-local `go.sum` is now complete for standalone builds.
+- `provider.go` — the connection-retry backoff no longer collapses to zero at very high attempt counts: `computeBackoffDelay` now grows the delay in float space and returns `MaxDelay` as soon as it is reached, instead of converting `float64(initialDelay) * multiplier` to `time.Duration` first — for an aggressive `RetryConfig` (e.g. `MaxAttempts >= 37` with the default 2× multiplier) the product overflowed `int64` to a negative duration that slipped past the `> MaxDelay` cap, so `time.Sleep` returned immediately and late attempts re-dialled with no backoff.
+- `provider.go` — `isTransientError` now also treats bare `EOF`/`unexpected EOF`, `use of closed network connection`, `connection closed`, and `connection reset` as transient, so a graceful peer close during the handshake phase of a cold-starting database is retried instead of hard-failing on the first attempt.
+
 ## [v3.1.1] - 2026-06-16 - Honor Zero ConnectTimeout on the Connection Ping
 
 ### Added
@@ -56,7 +69,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Code duplicated into `integrations/bunorm/pgsql/v3/`; v2 and v3 implementations maintained in parallel
 - Dependencies pinned to `bunorm/v3` and `melody/v3`
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v3.1.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v3.2.0...HEAD
+
+[v3.2.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v3.1.1...integrations/bunorm/pgsql/v3.2.0
 
 [v3.1.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v3.1.0...integrations/bunorm/pgsql/v3.1.1
 

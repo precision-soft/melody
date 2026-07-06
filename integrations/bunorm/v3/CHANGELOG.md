@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.1.2] - 2026-07-06 - Standalone Module Resolution Fix
+
+### Fixed
+
+- `go.mod` — the module pinned `melody/v3 v3.0.0` while importing the `cli/contract.StringSliceFlag` symbol (used by the `encrypt` command), which only exists from `v3.6.0`, so outside the repository workspace (`GOWORK=off`, or any consumer cloning just this module) the module did not resolve. The pin is raised to `v3.6.0` — the lowest framework version that provides every imported package — and the module-local `go.sum` is now complete for standalone builds.
+
 ## [v3.1.1] - 2026-06-25 - Audit Redaction Completeness
 
 ### Fixed
@@ -78,7 +84,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dependencies pinned to `github.com/precision-soft/melody/v3` and other v3 module paths
 - README relative path links updated to reflect v3 directory structure
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.1.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.1.2...HEAD
+
+[v3.1.2]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.1.1...integrations/bunorm/v3.1.2
 
 [v3.1.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.1.0...integrations/bunorm/v3.1.1
 

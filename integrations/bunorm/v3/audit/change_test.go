@@ -466,8 +466,6 @@ func TestChangeSet_RedactTagHonoredInsideMapOfInterfaceValues(t *testing.T) {
     }
 }
 
-/* @info redact tag on embedded struct */
-
 type EmbeddedSecret struct {
     Token string `bun:"token"`
 }

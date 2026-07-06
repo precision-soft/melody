@@ -84,7 +84,7 @@ app.RegisterModule(bunormmigrate.NewModule(bunormmigrate.ModuleConfig{
 
 ## Commands
 
-All commands support standard Melody output flags (for example `--format=json`). The manager can be selected with `--<managerFlagName>`; if omitted, the registry default manager is used.
+All commands accept the standard Melody output flags, but only `--verbose` and `--no-color` affect the output; `--format=json` is not implemented (the commands always print their plain-text output). The manager can be selected with `--<managerFlagName>`; if omitted, the registry default manager is used.
 
 With the default prefix (`db`):
 

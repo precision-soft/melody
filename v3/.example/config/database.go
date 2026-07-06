@@ -1,7 +1,7 @@
 package config
 
 import (
-    "os"
+    "time"
 
     melodymysql "github.com/precision-soft/melody/integrations/bunorm/mysql/v3"
     melodybunorm "github.com/precision-soft/melody/integrations/bunorm/v3"
@@ -9,25 +9,31 @@ import (
 )
 
 func (instance *Module) buildDatabase() {
-    host := os.Getenv("MYSQL_HOST")
+    host := instance.environmentValue(environmentKeyMysqlHost)
     if "" == host {
         return
     }
 
-    port := os.Getenv("MYSQL_PORT")
+    port := instance.environmentValue(environmentKeyMysqlPort)
     if "" == port {
         port = "3306"
     }
 
-    provider := melodymysql.NewProvider()
+    /* retry the initial connection with backoff so the example survives a cold-start race against the
+       database container — mysql often takes 20-30s to accept connections while the app boots in seconds,
+       and buildDatabase panics on a hard failure. The provider only retries transient errors (connection
+       refused), so a real misconfiguration still fails fast. */
+    provider := melodymysql.NewProvider(
+        melodymysql.WithRetryConfig(melodymysql.NewRetryConfig(10, time.Second, 5*time.Second, 2.0)),
+    )
 
     database, openErr := provider.Open(
         melodybunorm.ConnectionParams{
             Host:     host,
             Port:     port,
-            Database: os.Getenv("MYSQL_DATABASE"),
-            User:     os.Getenv("MYSQL_USER"),
-            Password: os.Getenv("MYSQL_PASSWORD"),
+            Database: instance.environmentValue(environmentKeyMysqlDatabase),
+            User:     instance.environmentValue(environmentKeyMysqlUser),
+            Password: instance.environmentValue(environmentKeyMysqlPassword),
         },
         nil,
     )

@@ -1,8 +1,6 @@
 package config
 
 import (
-    "os"
-
     amqp "github.com/precision-soft/melody/integrations/amqp/v3"
     "github.com/precision-soft/melody/v3/.example/message"
     "github.com/precision-soft/melody/v3/.example/messagehandler"
@@ -46,19 +44,10 @@ func (instance *Module) buildMessageBus() {
         "default.consume",
         melodymessagebus.NewHandleMessageMiddleware(locator),
     )
-    instance.messageBusConsumeCommand = melodymessagebus.NewConsumeCommandWithRetry(
-        instance.messageBusConsume,
-        map[string]melodymessagebuscontract.Transport{
-            messageBusTransportAsync: transport,
-        },
-        melodymessagebus.RetryPolicy{
-            MaxRetries: 3,
-        },
-    )
 }
 
 func (instance *Module) buildMessageBusTransport() melodymessagebuscontract.Transport {
-    dsn := os.Getenv("AMQP_DSN")
+    dsn := instance.environmentValue(environmentKeyAmqpDsn)
     if "" == dsn {
         return melodymessagebus.NewInMemoryTransport(64)
     }

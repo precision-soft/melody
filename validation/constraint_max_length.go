@@ -2,7 +2,10 @@ package validation
 
 import (
     "fmt"
+    "unicode/utf8"
 
+    "github.com/precision-soft/melody/exception"
+    exceptioncontract "github.com/precision-soft/melody/exception/contract"
     validationcontract "github.com/precision-soft/melody/validation/contract"
 )
 
@@ -26,14 +29,15 @@ func (instance *MaxLength) Validate(value any, field string) validationcontract.
     }
 
     stringValue := fmt.Sprintf("%v", resolved)
-    if len(stringValue) > instance.max {
+    length := utf8.RuneCountInString(stringValue)
+    if length > instance.max {
         return NewValidationError(
             field,
             fmt.Sprintf("this field must not exceed %d characters", instance.max),
             ConstraintMaxLengthErrorTooLong,
             map[string]any{
                 "max":    instance.max,
-                "actual": len(stringValue),
+                "actual": length,
             },
         )
     }
@@ -45,4 +49,31 @@ func (instance *MaxLength) Max() int {
     return instance.max
 }
 
+func (instance *MaxLength) WithParams(params map[string]string) (validationcontract.Constraint, error) {
+    valueString, exists := params["value"]
+    if false == exists {
+        return nil, exception.NewError(
+            "max length constraint requires a value parameter",
+            exceptioncontract.Context{
+                "params": params,
+            },
+            nil,
+        )
+    }
+
+    parsed, ok := parseIntStrict(valueString)
+    if false == ok {
+        return nil, exception.NewError(
+            "invalid max length parameter",
+            exceptioncontract.Context{
+                "value": valueString,
+            },
+            nil,
+        )
+    }
+
+    return NewMaxLength(parsed), nil
+}
+
 var _ validationcontract.Constraint = (*MaxLength)(nil)
+var _ validationcontract.ParameterizedConstraint = (*MaxLength)(nil)

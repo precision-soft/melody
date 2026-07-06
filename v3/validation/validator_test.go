@@ -1,8 +1,10 @@
 package validation
 
 import (
+    "fmt"
     "testing"
 
+    "github.com/precision-soft/melody/v3/exception"
     validationcontract "github.com/precision-soft/melody/v3/validation/contract"
 )
 
@@ -265,6 +267,58 @@ func TestValidator_MalformedNumericParameterFailsClosed(t *testing.T) {
     requireValidationErrors(t, validatorInstance.Validate(payloadWithFractionalMaxLength{Name: "abcd"}))
 }
 
+type payloadWithGreaterThanUnknownParam struct {
+    Count int `json:"count" validate:"greaterThan(min=18)"`
+}
+
+type payloadWithLessThanUnknownParam struct {
+    Count int `json:"count" validate:"lessThan(max=5)"`
+}
+
+type payloadWithMinLengthUnknownParam struct {
+    Name string `json:"name" validate:"min(len=8)"`
+}
+
+type payloadWithMaxLengthUnknownParam struct {
+    Name string `json:"name" validate:"max(limit=10)"`
+}
+
+type payloadWithRegexUnknownParam struct {
+    Value string `json:"value" validate:"regex(re=^[0-9]{4}$)"`
+}
+
+type payloadWithGreaterThanShorthand struct {
+    Count int `json:"count" validate:"greaterThan=5"`
+}
+
+func TestValidator_UnrecognizedParameterKeyFailsClosed(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    /* a parameterizable constraint that receives parameters without its recognized key ("value", or "pattern"/"value" for regex) must fail closed rather than silently degrade to the registered default bound: a fail-open here would leave the field validated against a weaker constraint than the tag declares (regex(re=...) degrading to the match-all `.*` default, min(len=8) to a floor of 1) */
+    for _, payload := range []any{
+        payloadWithGreaterThanUnknownParam{Count: -1},
+        payloadWithLessThanUnknownParam{Count: 100},
+        payloadWithMinLengthUnknownParam{Name: ""},
+        payloadWithMaxLengthUnknownParam{Name: "value"},
+        payloadWithRegexUnknownParam{Value: "not-four-digits"},
+    } {
+        validationErrors := requireValidationErrors(t, validatorInstance.Validate(payload))
+
+        validationError, ok := validationErrors[0].(*ValidationError)
+        if false == ok {
+            t.Fatalf("expected *ValidationError, got %T", validationErrors[0])
+        }
+
+        if ErrorInvalidRuleSyntax != validationError.Code() {
+            t.Fatalf("expected an unrecognized constraint parameter to fail closed with code %q, got %q", ErrorInvalidRuleSyntax, validationError.Code())
+        }
+    }
+
+    /* the shorthand form maps to the recognized `value` key, so it still configures and enforces the bound: 3 is not greater than 5, 9 is */
+    requireValidationErrors(t, validatorInstance.Validate(payloadWithGreaterThanShorthand{Count: 3}))
+    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithGreaterThanShorthand{Count: 9}))
+}
+
 func TestValidator_MapsJsonTagNameAsField(t *testing.T) {
     validatorInstance := NewValidator()
 
@@ -430,4 +484,105 @@ func TestValidator_Validate_ReturnsInvalidRuleSyntaxErrorForInvalidTag(t *testin
     if ErrorInvalidRuleSyntax != validationError.Code() {
         t.Fatalf("expected code `%s`, got `%s`", ErrorInvalidRuleSyntax, validationError.Code())
     }
+}
+
+type betweenLengthConstraint struct {
+    min int
+    max int
+}
+
+func (instance *betweenLengthConstraint) Validate(value any, field string) validationcontract.ValidationError {
+    resolved, ok := dereferenceValue(value)
+    if false == ok {
+        return nil
+    }
+
+    stringValue := fmt.Sprintf("%v", resolved)
+    if len(stringValue) < instance.min || len(stringValue) > instance.max {
+        return NewValidationError(field, "length out of bounds", "betweenLength", nil)
+    }
+
+    return nil
+}
+
+func (instance *betweenLengthConstraint) WithParams(params map[string]string) (validationcontract.Constraint, error) {
+    configured := &betweenLengthConstraint{min: instance.min, max: instance.max}
+
+    if valueString, exists := params["min"]; true == exists {
+        parsed, ok := parseIntStrict(valueString)
+        if false == ok {
+            return nil, exception.NewError("invalid between min parameter", nil, nil)
+        }
+        configured.min = parsed
+    }
+
+    if valueString, exists := params["max"]; true == exists {
+        parsed, ok := parseIntStrict(valueString)
+        if false == ok {
+            return nil, exception.NewError("invalid between max parameter", nil, nil)
+        }
+        configured.max = parsed
+    }
+
+    return configured, nil
+}
+
+type rigidConstraint struct{}
+
+func (instance *rigidConstraint) Validate(value any, field string) validationcontract.ValidationError {
+    return nil
+}
+
+type payloadWithBetween struct {
+    Code string `json:"code" validate:"betweenLength(min=2,max=3)"`
+}
+
+type payloadWithRigidParams struct {
+    Code string `json:"code" validate:"rigid(strictness=high)"`
+}
+
+func TestValidator_CustomParameterizedConstraintConsumesParams(t *testing.T) {
+    validatorInstance := NewValidator()
+    validatorInstance.RegisterConstraint("betweenLength", &betweenLengthConstraint{min: 0, max: 1000})
+
+    tooShort := payloadWithBetween{Code: "a"}
+    err := validatorInstance.Validate(tooShort)
+    requireValidationErrors(t, err)
+
+    inBounds := payloadWithBetween{Code: "ab"}
+    err = validatorInstance.Validate(inBounds)
+    requireNoValidationErrors(t, err)
+
+    tooLong := payloadWithBetween{Code: "abcd"}
+    err = validatorInstance.Validate(tooLong)
+    requireValidationErrors(t, err)
+}
+
+func TestValidator_ParamsOnNonParameterizableConstraintFailClosed(t *testing.T) {
+    validatorInstance := NewValidator()
+    validatorInstance.RegisterConstraint("rigid", &rigidConstraint{})
+
+    /* @important pre-fix the params were silently discarded and the field validated with the registered singleton (fail-open); the rule must instead be rejected as invalid */
+    err := validatorInstance.Validate(payloadWithRigidParams{Code: "anything"})
+    validationErrors := requireValidationErrors(t, err)
+
+    validationError, ok := validationErrors[0].(*ValidationError)
+    if false == ok {
+        t.Fatalf("expected *ValidationError")
+    }
+
+    if ErrorInvalidRuleSyntax != validationError.Code() {
+        t.Fatalf("expected the invalid-rule code, got %q", validationError.Code())
+    }
+}
+
+func TestValidator_ParamsOnNonParameterizableBuiltInFailClosed(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    type payloadWithParameterizedEmail struct {
+        Email string `json:"email" validate:"email(strict=yes)"`
+    }
+
+    err := validatorInstance.Validate(payloadWithParameterizedEmail{Email: "valid@example.com"})
+    requireValidationErrors(t, err)
 }

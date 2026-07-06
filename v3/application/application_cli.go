@@ -16,8 +16,11 @@ import (
     "github.com/precision-soft/melody/v3/debug"
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
+    "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/logging"
+    "github.com/precision-soft/melody/v3/messagebus"
+    "github.com/precision-soft/melody/v3/openapi"
     "github.com/precision-soft/melody/v3/runtime"
     "github.com/precision-soft/melody/v3/version"
 )
@@ -101,6 +104,34 @@ func (instance *Application) bootCli() {
     for _, commandInstance := range debugCommands {
         instance.RegisterCliCommand(commandInstance)
     }
+
+    instance.registerCoreCliCommands()
+}
+
+/* registerCoreCliCommands contributes the framework-owned core commands the same way the debug commands are contributed: the application does not have to wire them by hand. The route manifest is always available (it only needs the router, which the framework always registers); the openapi and messagebus consume commands are exposed only when their feature is configured — detected by the presence of the backing service — so an application that does not use them sees no dead command. The messagebus command additionally requires a resolvable bus so it never surfaces a command that would panic at run time. Each command is skipped when the application already registered one of the same name, so an app still wiring a core command by hand keeps working instead of panicking on a duplicate. */
+func (instance *Application) registerCoreCliCommands() {
+    serviceContainer := instance.kernel.ServiceContainer()
+
+    instance.registerCoreCliCommandIfAbsent(http.NewRouteManifestCommand())
+
+    if true == serviceContainer.Has(openapi.ServiceOpenApiRegistry) {
+        instance.registerCoreCliCommandIfAbsent(openapi.NewGenerateCommandFromContainer())
+    }
+
+    hasBus := true == serviceContainer.Has(messagebus.ServiceConsumeBus) || true == serviceContainer.Has(messagebus.ServiceBus)
+    if true == serviceContainer.Has(messagebus.ServiceTransports) && true == hasBus {
+        instance.registerCoreCliCommandIfAbsent(messagebus.NewConsumeCommandFromContainer())
+    }
+}
+
+func (instance *Application) registerCoreCliCommandIfAbsent(command clicontract.Command) {
+    for _, existingCommand := range instance.cliCommands {
+        if existingCommand.Name() == command.Name() {
+            return
+        }
+    }
+
+    instance.RegisterCliCommand(command)
 }
 
 func (instance *Application) runCli() error {

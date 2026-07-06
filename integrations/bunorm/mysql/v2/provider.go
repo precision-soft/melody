@@ -232,19 +232,24 @@ func (instance *Provider) computeBackoffDelay(attempt uint32) time.Duration {
         backoffMultiplier = 2.0
     }
 
-    multiplier := 1.0
-    exponent := attempt - 1
+    /* grow the delay in float space and cap at maxDelay as soon as it is reached, before converting to
+       time.Duration — otherwise a large attempt count overflows the float64->int64 conversion to a negative
+       duration, which slips past the `> maxDelay` cap and collapses the backoff to zero (a re-dial storm). */
+    maxDelayFloat := float64(maxDelay)
+    delay := float64(initialDelay)
 
-    for i := uint32(0); i < exponent; i = i + 1 {
-        multiplier = multiplier * backoffMultiplier
+    for i := uint32(1); i < attempt; i = i + 1 {
+        delay = delay * backoffMultiplier
+        if delay >= maxDelayFloat {
+            return maxDelay
+        }
     }
 
-    delay := time.Duration(float64(initialDelay) * multiplier)
-    if delay > maxDelay {
-        delay = maxDelay
+    if delay >= maxDelayFloat {
+        return maxDelay
     }
 
-    return delay
+    return time.Duration(delay)
 }
 
 func (instance *Provider) isTransientError(inputErr error) bool {
@@ -271,11 +276,15 @@ func (instance *Provider) isTransientError(inputErr error) bool {
         "temporary failure",
         "no such host",
         "server closed the connection",
+        "connection closed",
+        "use of closed network connection",
         "bad connection",
         "too many connections",
         "network is unreachable",
         "host is down",
         "broken pipe",
+        "connection reset",
+        "eof",
     }
 
     currentErr := inputErr

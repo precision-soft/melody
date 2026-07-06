@@ -14,7 +14,7 @@ provider := pgsql.NewProvider()
 
 Register it through the core registry by attaching it to a [`bunorm.ProviderDefinition`](../../v3/provider_definition.go) (see the [bunorm README](../../v3/README.md)).
 
-Unlike the [MySQL provider](../../mysql/v3/README.md), this package ships no self-registering application module: PostgreSQL exposes no application-level service (the MySQL module exists only to register the advisory-lock `Locker`). Register the provider through the core registry as shown above.
+Unlike the [MySQL provider](../../mysql/v3/README.md), this package ships no self-registering application module or registration helper — register the provider through the core registry as shown above. It does ship an application-level service: an advisory-lock [`Locker`](./lock.go) (see [Distributed lock](#distributed-lock) below).
 
 ### Options
 
@@ -47,6 +47,34 @@ provider := pgsql.NewProvider(pgsql.WithTlsConfig(&tls.Config{
     MinVersion: tls.VersionTLS12,
 }))
 ```
+
+## Distributed lock
+
+[`pgsql.NewLocker(database, options...)`](./lock.go) returns a `lock/contract.Locker` backed by PostgreSQL session advisory locks (`pg_try_advisory_lock` / `pg_advisory_unlock`) — the Postgres counterpart of the [MySQL `GET_LOCK` locker](../../mysql/v3/README.md). Lock names are hashed with FNV-1a (64-bit) into the two 32-bit halves of the advisory key.
+
+```go
+locker := pgsql.NewLocker(database) // database is a *bun.DB
+
+namedLock := locker.CreateLock("import:catalog", 30*time.Second)
+
+acquired, err := namedLock.Acquire(runtime)
+if err != nil {
+    // connection or query error
+}
+if !acquired {
+    // another holder owns the lock — do not proceed
+    return
+}
+defer namedLock.Release(runtime)
+```
+
+- **Try-acquire only.** `Acquire` issues `SELECT pg_try_advisory_lock($1, $2)` — a non-blocking attempt that returns immediately. A failed acquisition returns `(false, nil)`, not an error.
+- **Session-pinned.** Each held lock pins a dedicated `*sql.Conn` for its lifetime; `Release` runs `pg_advisory_unlock` on that same connection — on a fresh context, bounded by [`WithLockReleaseTimeout`](./lock.go) (default 5s) — before returning it to the pool.
+- **Reentrant within a `Lock`.** Calling `Acquire` on a lock that is already held verifies ownership and returns `(true, nil)`; if the lease was lost it re-acquires on a fresh connection.
+- **No TTL.** Session advisory locks do not auto-expire — the `ttl` passed to `CreateLock` is accepted only for interface compatibility. The lock is released by `Release` or when its connection drops (e.g. the process dies). For TTL-based auto-expiry, use the Redis backend in [`integrations/rueidis/v3`](../../../rueidis).
+- **`Refresh` verifies ownership.** Because there is nothing to extend, `Refresh` instead confirms the lock is still granted to the pinned connection via `pg_locks` and returns a "lock is no longer held" error if the lease was lost — matching the lost-lock signal of the other backends.
+
+Unlike the MySQL package there is no `RegisterLockerService` helper or module; register the locker under the core `lock.ServiceLocker` service name yourself if handlers should resolve it via `lock.LockerMustFromResolver`.
 
 ## Advanced connector customization
 

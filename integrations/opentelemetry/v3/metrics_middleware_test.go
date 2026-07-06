@@ -26,7 +26,11 @@ func TestNormalizedMethod(t *testing.T) {
     }
 }
 
-/* @info middleware metrics */
+func TestMetricsMiddleware_RequiresMeter(t *testing.T) {
+    if _, middlewareErr := NewMetricsMiddleware(nil); nil == middlewareErr {
+        t.Fatalf("expected a nil meter to be rejected")
+    }
+}
 
 func TestMetricsMiddleware_RecordsRequestMetrics(t *testing.T) {
     meter, registry, meterErr := NewPrometheusMeter("melody-test")

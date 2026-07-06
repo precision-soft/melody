@@ -229,6 +229,38 @@ The example application wires an `ServerSentEventHub`, an `/events/stream` Serve
 `ServerSentEventHub` keeps its subscribers in process, so a plain `Broadcast` only reaches clients connected to **this** instance. When the application runs on several instances behind a load balancer, attach an [`ServerSentEventBackplane`](../../http/server_sent_event_hub.go) with [`SetBackplane`](../../http/server_sent_event_hub.go): `Broadcast` then also replicates the event to the other instances, each of which delivers it to its own subscribers via [`DeliverLocal`](../../http/server_sent_event_hub.go). The backplane tags every event with a per-instance origin and ignores the echo of its own broadcasts, so nothing is delivered twice. Concrete backplanes ship in [`integrations/rueidis`](../../../integrations/rueidis) (Redis pub/sub) and [`integrations/amqp`](../../../integrations/amqp) (fanout exchange); the WebSocket integration shares the same hub, so it fans out the same way. Without a backplane, pin clients to an instance with sticky sessions and accept that an event only
 reaches that instance. Replication is best-effort like local delivery; [`BackplaneFailures`](../../http/server_sent_event_hub.go) counts broadcasts that could not be replicated. After [`Shutdown`](../../http/server_sent_event_hub.go) the hub stops replicating — a `Broadcast` during or after a graceful stop delivers to nobody locally and is not pushed to the backplane.
 
+## Route manifest
+
+Routes can be exported to a frontend-facing JSON manifest, so a TypeScript/JavaScript client generates URLs by route name instead of hardcoding paths. A route opts in by setting the [`RouteAttributeExpose`](../../http/route.go) attribute to `true` in its route-options attributes — the helper [`ExposedRouteAttributes(zone)`](../../http/route.go) builds that map, optionally tagging the route with a [`RouteAttributeZone`](../../http/route.go) (`RouteZonePublic`, `RouteZoneInternal`, `RouteZoneFrontend`, `RouteZoneClient`). [`BuildRouteManifest`](../../http/route_manifest.go) projects the exposed **named** routes (an unnamed route cannot be referenced by the frontend) into a stable [`RouteManifest`](../../http/route_manifest.go) DTO, sorted by name and carrying only what a URL generator needs — name, pattern, methods, requirements, defaults, zone; handlers and internal attributes are never leaked. The [`RouteManifestCommand`](../../http/command_route_manifest.go) CLI command (
+`melody:routes:manifest [--out <path>] [--zone <zone>]`) writes the manifest as JSON to a file or stdout, mirroring the OpenAPI generate command.
+
+```go
+router.HandleWithOptions(
+	"/users/:id",
+	showUserHandler,
+	http.NewRouteOptions(
+		"user_show",
+		[]string{nethttp.MethodGet},
+		"", nil,
+		map[string]string{"id": `\d+`},
+		nil, nil, 0,
+		http.ExposedRouteAttributes(http.RouteZoneFrontend),
+	),
+)
+```
+
+On the frontend, the reference helper [`melody-routes.ts`](../../.example/assets/melody-routes.ts) (bundled into the example's frontend and available to vendor into your project; a usage example lives in [`.example/assets/routes-usage.ts`](../../.example/assets/routes-usage.ts)) loads the manifest and builds URLs from a route name and parameters with the same placeholder grammar the server-side router and Go `UrlGenerator` use, matched per path segment: required `:param`, optional `:param?` (dropped when no value is given), single wildcard `*name`, and catch-all `*name...` (or a trailing `*name`, which may span multiple slash-separated segments). Parameters not consumed by a placeholder fall back to the route's defaults and any leftovers are appended as query-string parameters.
+
+```ts
+import { RouteGenerator, RouteManifest } from "./melody-routes";
+import manifestJson from "./routes.json"; // melody:routes:manifest --out ./web/routes.json
+
+const routes = new RouteGenerator(manifestJson as RouteManifest);
+
+const userPath = routes.path("user_show", { id: 42 });                   // /users/42
+const ordersPath = routes.path("user_show", { id: 42, tab: "orders" }); // /users/42?tab=orders
+```
+
 ## Footguns & caveats
 
 * Server-Sent Events handlers must return `(nil, nil)` after streaming; returning a non-nil response would make the kernel write a second header/body.

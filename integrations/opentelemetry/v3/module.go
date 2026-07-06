@@ -12,10 +12,12 @@ import (
 const defaultMetricsRouteName = "melody.metrics"
 
 type ModuleConfig struct {
-    Middlewares      []httpcontract.Middleware
-    MetricsHandler   nethttp.Handler
-    MetricsRouteName string
-    MetricsPath      string
+    Middlewares []httpcontract.Middleware
+    /* HandlerDecorators are registered as outermost wrappers around the kernel's nethttp.Handler (Application.RegisterHttpHandlerDecorator), so short-circuited requests — security denials, listener-written responses — are traced and counted too; build one with NewHandlerDecorator. */
+    HandlerDecorators []applicationcontract.HttpHandlerDecorator
+    MetricsHandler    nethttp.Handler
+    MetricsRouteName  string
+    MetricsPath       string
 }
 
 func NewModule(config ModuleConfig) *Module {
@@ -42,6 +44,19 @@ func (instance *Module) RegisterHttpMiddlewares(kernelInstance kernelcontract.Ke
 
         registrar.Use(middleware)
     }
+}
+
+func (instance *Module) RegisterHttpHandlerDecorators(kernelInstance kernelcontract.Kernel) []applicationcontract.HttpHandlerDecorator {
+    decorators := make([]applicationcontract.HttpHandlerDecorator, 0, len(instance.config.HandlerDecorators))
+    for _, decorator := range instance.config.HandlerDecorators {
+        if nil == decorator {
+            continue
+        }
+
+        decorators = append(decorators, decorator)
+    }
+
+    return decorators
 }
 
 func (instance *Module) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel) {
@@ -71,7 +86,8 @@ func MetricsRouteHandler(handler nethttp.Handler) httpcontract.Handler {
 }
 
 var (
-    _ applicationcontract.Module               = (*Module)(nil)
-    _ applicationcontract.HttpMiddlewareModule = (*Module)(nil)
-    _ applicationcontract.HttpModule           = (*Module)(nil)
+    _ applicationcontract.Module                     = (*Module)(nil)
+    _ applicationcontract.HttpMiddlewareModule       = (*Module)(nil)
+    _ applicationcontract.HttpModule                 = (*Module)(nil)
+    _ applicationcontract.HttpHandlerDecoratorModule = (*Module)(nil)
 )

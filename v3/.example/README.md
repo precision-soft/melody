@@ -126,6 +126,8 @@ Once started, open the application in your browser:
 
 - http://localhost:8080
 
+> The committed [`.env`](./.env) points the integration endpoints at the dev compose service names (`redis:6379`, `mysql`, …), so the fully-wired experience is [`./dc up:all --build`](#running-fully-against-containers), which runs this same app inside the dev container where those names resolve. A bare host `go run .` needs those services reachable (override the endpoints to the mapped host ports, [see below](#running-the-binary-directly-against-mapped-ports)) — or remove their lines from `.env` to boot with the in-process fallbacks and zero infrastructure.
+
 ### CLI mode
 
 The example also wires CLI commands. List them:
@@ -148,7 +150,7 @@ The example registers two scheduled commands in [`config/cli.go`](./config/cli.g
 
 ## Platform integrations (optional, env-gated)
 
-The example wires **every v3 platform integration**. Each backend that needs external infrastructure is **gated on an environment variable**: when the variable is unset the application boots with an in-process fallback (the example always runs with zero infrastructure), and when it is set the matching integration is activated and resolved through the same core service constant, so the rest of the app is unchanged.
+The example wires **every v3 platform integration**. Each backend that needs external infrastructure is **gated on an environment variable**: when the variable is unset the application boots with an in-process fallback (remove the integration lines from [`.env`](./.env) and the example runs with zero infrastructure), and when it is set the matching integration is activated and resolved through the same core service constant, so the rest of the app is unchanged. The committed `.env` sets these variables to the dev compose service endpoints so `./dc up:all` wires everything out of the box.
 
 | Integration                                                                                                                                      | Activated by                                 | Falls back to            | Demo endpoint                                    |
 |--------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------|--------------------------|--------------------------------------------------|
@@ -165,22 +167,37 @@ The lock service follows a single priority: Redis if configured, otherwise MySQL
 
 ### Running fully against containers
 
-The dev [`docker-compose.yml`](../../.dev/docker/docker-compose.yml) provides RabbitMQ, Redis, MySQL, and MinIO (an S3-compatible mock). Bring them up with the [`./dc`](../../dc) wrapper, then start the example with every integration pointed at the mapped host ports:
+The dev [`docker-compose.yml`](../../.dev/docker/docker-compose.yml) provides the whole backing stack — RabbitMQ, Redis, MySQL, PostgreSQL, LocalStack (S3), Mailpit (SMTP), Prometheus, and an OpenTelemetry collector. The one-command way to run the entire showcase is the [`./dc`](../../dc) wrapper:
 
 ```bash
-# from the repository root — start the backing services
-./dc up -d rabbitmq redis mysql minio
+# from the repository root — build the dev image and start the example + every backend
+./dc up:all --build
+```
 
-# from v3/.example — run with all integrations enabled
+This brings up the backing services **and** the example itself: the `dev` container builds the frontend bundle and runs the app under a hot-reload + restart supervisor. The example reads its integration endpoints from [`.env`](./.env), which points at the compose service names (`REDIS_ADDRESS=redis:6379`, `MYSQL_HOST=mysql`, `AMQP_DSN=amqp://…@rabbitmq:5672/`, `S3_ENDPOINT=localstack:4566`, `SMTP_ADDRESS=mailpit:1025`, `OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317`), so no manual configuration is needed. Open it on the mapped host port:
+
+- http://localhost:8180 (the `DEV_HTTP_HOST_PORT`, `8180` by default)
+
+Notes:
+
+- **`--build` rebuilds the dev image** — use it after changing dependencies or the container [`entrypoint.sh`](../../.dev/docker/entrypoint.sh). For day-to-day Go/HTML/asset edits `./dc up:all` (without `--build`) is enough; reflex hot-reloads them.
+- **Always `up:all`, not plain `up`.** The backends live on the compose `all` profile, so `./dc up` / `./dc up:minimal` start only the dev container and load balancer — the example would then have no Redis/MySQL to reach. Use `./dc up:all` whenever you want the integration demos.
+- **Cold-start is self-healing.** If a backend is not ready yet — or you start it afterwards — the MySQL/Redis providers retry the initial connection with backoff and the entrypoint supervisor restarts the process, so the app comes up on its own without a manual restart.
+
+The demo endpoints listed above then work against the mapped host port, e.g. `curl localhost:8180/database/demo`, `curl localhost:8180/cache/demo`.
+
+#### Running the binary directly against mapped ports
+
+To run `go run .` on the host (outside the dev container) instead, point the integrations at the **mapped host ports** — an OS environment variable overrides the matching `.env` value:
+
+```bash
 cd v3/.example
 AMQP_DSN="amqp://guest:guest@localhost:5673/" \
 REDIS_ADDRESS="localhost:6380" \
-S3_ENDPOINT="localhost:9000" S3_ACCESS_KEY="minioadmin" S3_SECRET_KEY="minioadmin" S3_BUCKET="melody-example" \
+S3_ENDPOINT="localhost:4566" S3_ACCESS_KEY="test" S3_SECRET_KEY="test" S3_BUCKET="melody-example" \
 MYSQL_HOST="localhost" MYSQL_PORT="3307" MYSQL_DATABASE="melody_example" MYSQL_USER="melody" MYSQL_PASSWORD="melody" \
 go run .
 ```
-
-Leave the variables unset to run the same application end-to-end with no infrastructure. The demo endpoints above let you exercise each backend (e.g. `curl localhost:8080/database/demo`, `curl localhost:8080/cache/demo`).
 
 ---
 

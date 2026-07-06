@@ -11,6 +11,8 @@ type Claims struct {
     Scope map[string]any `json:"Scope,omitempty"`
 
     Attributes map[string]any `json:"Attributes,omitempty"`
+
+    OriginatingActor *ActorData `json:"OriginatingActor,omitempty"`
 }
 
 type TokenValidator interface {

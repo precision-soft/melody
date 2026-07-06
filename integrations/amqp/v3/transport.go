@@ -2,6 +2,7 @@ package amqp
 
 import (
     "context"
+    "math"
     "reflect"
     "strconv"
     "sync"
@@ -68,6 +69,8 @@ func newTransport(config TransportConfig, general *ReconnectConfig) *Transport {
 
     reconnect := resolveReconnectConfig(general, config.Reconnect)
 
+    delayBuckets := resolveDelayBuckets(config.DelayBuckets)
+
     return &Transport{
         connection:          config.Connection,
         dialer:              config.Dialer,
@@ -80,6 +83,7 @@ func newTransport(config TransportConfig, general *ReconnectConfig) *Transport {
         deadLetter:          config.DeadLetter,
         publishReturnBuffer: publishReturnBuffer,
         reconnect:           reconnect,
+        delayBuckets:        delayBuckets,
         closeSignal:         make(chan struct{}),
     }
 }
@@ -96,6 +100,8 @@ type TransportConfig struct {
     DeadLetter          bool
     Reconnect           *ReconnectConfig
     PublishReturnBuffer int
+    /* DelayBuckets are the queue-level-ttl delay tiers for delayed redelivery (ascending, positive, at most maxDelayBuckets; zero value uses defaultDelayBuckets). A delayed message is parked in the largest bucket not exceeding its requested delay, so every message in a bucket queue shares one ttl and RabbitMQ's head-of-queue-only expiry cannot stall short delays behind long ones; the actual delay quantizes down to the bucket. Delays below the smallest bucket keep the legacy per-message-ttl queue, where head-of-line waiting is bounded by that smallest bucket. */
+    DelayBuckets []time.Duration
 }
 
 type Transport struct {
@@ -111,6 +117,7 @@ type Transport struct {
 
     publishReturnBuffer int
     reconnect           ReconnectConfig
+    delayBuckets        []time.Duration
 
     mutex             sync.Mutex
     publishChannel    *amqp091.Channel
@@ -310,20 +317,27 @@ func (instance *Transport) nackChannel(channel *amqp091.Channel, tag uint64, req
     return channel.Nack(tag, false, requeue)
 }
 
+/* drainPublishReturn removes every return currently queued on the channel, reporting the last one seen and whether any were drained. It drains the whole buffer rather than a single return so that an unroutable publish is still detected when more than one return has accumulated (and so a stale return from an earlier publish cannot be left behind to be misattributed to the next one). */
 func drainPublishReturn(returns <-chan amqp091.Return) (amqp091.Return, bool) {
     if nil == returns {
         return amqp091.Return{}, false
     }
 
-    select {
-    case returned, open := <-returns:
-        if false == open {
-            return amqp091.Return{}, false
-        }
+    var lastReturned amqp091.Return
+    drained := false
 
-        return returned, true
-    default:
-        return amqp091.Return{}, false
+    for {
+        select {
+        case returned, open := <-returns:
+            if false == open {
+                return lastReturned, drained
+            }
+
+            lastReturned = returned
+            drained = true
+        default:
+            return lastReturned, drained
+        }
     }
 }
 
@@ -355,7 +369,7 @@ func (instance *Transport) buildPublishing(
         return amqp091.Publishing{}, serializeErr
     }
 
-    return amqp091.Publishing{
+    publishing := amqp091.Publishing{
         ContentType:  instance.serializer.ContentType(),
         DeliveryMode: amqp091.Persistent,
         Expiration:   expiration,
@@ -365,7 +379,14 @@ func (instance *Transport) buildPublishing(
             headerDeadLetterAttemptCount: int64(melodymessagebus.DeadLetterAttemptCount(envelopeInstance)),
         },
         Body: body,
-    }, nil
+    }
+
+    /* carry a producer-assigned message id (for example the outbox row id) as the AMQP message id so a consumer can deduplicate redeliveries from an at-least-once producer. */
+    if messageId, hasMessageId := melodymessagebus.MessageId(envelopeInstance); true == hasMessageId {
+        publishing.MessageId = messageId
+    }
+
+    return publishing, nil
 }
 
 func (instance *Transport) publish(
@@ -438,7 +459,7 @@ func (instance *Transport) publishOnce(
     return channel, nil
 }
 
-/* @important closes the cached publish channel only when it is still the one the caller failed on, so a concurrent publisher that already reopened a healthy channel is not torn down. */
+/* @important closes the cached publish channel only when it is still the one the caller failed on, so a concurrent publisher that already reopened a healthy channel is not torn down. A nil failed channel (the caller never obtained one, e.g. ensurePublishChannel itself failed) identifies no specific channel, so it is a no-op rather than closing whatever channel is currently cached — a stale/closed cached channel is re-detected by ensurePublishChannel's IsClosed guard on the next publish. */
 func (instance *Transport) resetPublishChannel(failed *amqp091.Channel) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -447,7 +468,7 @@ func (instance *Transport) resetPublishChannel(failed *amqp091.Channel) {
         return
     }
 
-    if nil != failed && instance.publishChannel != failed {
+    if nil == failed || instance.publishChannel != failed {
         return
     }
 
@@ -538,10 +559,83 @@ func (instance *Transport) consumeLoop(
     }
 }
 
+/* maxDelayExpirationMilliseconds caps a delayed-retry message's expiration. The AMQP per-message expiration is a string RabbitMQ parses as a 32-bit millisecond count, so a delay whose milliseconds exceed this would wrap and could collapse to a tiny ttl — expiring the message almost immediately instead of after the intended delay. ~49.7 days is far beyond any realistic retry delay. */
+const maxDelayExpirationMilliseconds = int64(math.MaxUint32)
+
+var defaultDelayBuckets = []time.Duration{5 * time.Second, 1 * time.Minute, 10 * time.Minute, 1 * time.Hour}
+
+/* maxDelayBuckets bounds the delay-tier count so a misconfiguration cannot declare an unbounded number of broker queues. */
+const maxDelayBuckets = 8
+
+func resolveDelayBuckets(buckets []time.Duration) []time.Duration {
+    if 0 == len(buckets) {
+        return append([]time.Duration(nil), defaultDelayBuckets...)
+    }
+
+    if maxDelayBuckets < len(buckets) {
+        exception.Panic(
+            exception.NewError(
+                "amqp transport delay buckets exceed the maximum",
+                map[string]any{
+                    "buckets": len(buckets),
+                    "maximum": maxDelayBuckets,
+                },
+                nil,
+            ),
+        )
+    }
+
+    resolved := make([]time.Duration, 0, len(buckets))
+    previous := time.Duration(0)
+    for _, bucket := range buckets {
+        if 0 >= bucket || bucket <= previous {
+            exception.Panic(
+                exception.NewError(
+                    "amqp transport delay buckets must be positive and strictly ascending",
+                    map[string]any{
+                        "bucket": bucket.String(),
+                    },
+                    nil,
+                ),
+            )
+        }
+
+        resolved = append(resolved, bucket)
+        previous = bucket
+    }
+
+    return resolved
+}
+
+/* delayBucketFor picks the largest bucket not exceeding the requested delay; a delay below the smallest bucket returns false so the caller keeps the legacy per-message-ttl queue (bounded head-of-line waiting) instead of over-delaying the message. */
+func delayBucketFor(buckets []time.Duration, delay time.Duration) (time.Duration, bool) {
+    selected := time.Duration(0)
+    found := false
+
+    for _, bucket := range buckets {
+        if bucket > delay {
+            break
+        }
+
+        selected = bucket
+        found = true
+    }
+
+    return selected, found
+}
+
+func delayBucketQueueName(queue string, bucket time.Duration) string {
+    return queue + ".delay." + strconv.FormatInt(bucket.Milliseconds(), 10) + "ms"
+}
+
 func delayExpirationMilliseconds(delay time.Duration) int64 {
     milliseconds := delay.Milliseconds()
     if 0 >= milliseconds {
-        milliseconds = 1
+        return 1
+    }
+
+    if milliseconds > maxDelayExpirationMilliseconds {
+        return maxDelayExpirationMilliseconds
     }
 
     return milliseconds
@@ -612,9 +706,16 @@ func (instance *Transport) republish(
     exchange, routingKey := instance.mainTarget()
 
     if delayStamp, hasDelay := melodymessagebus.LastStampOfType[melodymessagebus.DelayStamp](envelopeInstance); true == hasDelay && 0 < delayStamp.Delay {
-        expiration = strconv.FormatInt(delayExpirationMilliseconds(delayStamp.Delay), 10)
         exchange = ""
-        routingKey = instance.queue + ".delay"
+
+        if bucket, hasBucket := delayBucketFor(instance.delayBuckets, delayStamp.Delay); true == hasBucket {
+            /* the bucket queue carries a queue-level ttl, so no per-message expiration: every message in it shares the same ttl and the head-of-queue expiry cannot stall a short delay behind a long one */
+            routingKey = delayBucketQueueName(instance.queue, bucket)
+        } else {
+            /* below the smallest bucket the per-message expiration stays precise; head-of-line waiting here is bounded by the smallest bucket */
+            expiration = strconv.FormatInt(delayExpirationMilliseconds(delayStamp.Delay), 10)
+            routingKey = instance.queue + ".delay"
+        }
     }
 
     publishing, buildErr := instance.buildPublishing(envelopeInstance, expiration)
@@ -742,6 +843,11 @@ func (instance *Transport) decode(delivery amqp091.Delivery, generation uint64) 
 
     if count := deadLetterAttemptCountFromHeader(delivery.Headers); 0 < count {
         stamps = append(stamps, melodymessagebus.DeadLetterAttemptStamp{Count: count})
+    }
+
+    /* round-trip a producer-assigned message id so a consumer can read it for deduplication and, just as importantly, so an application-driven requeue (Nack with requeue, including the delayed-retry path) re-publishes through buildPublishing under the SAME message id instead of an empty one. */
+    if "" != delivery.MessageId {
+        stamps = append(stamps, melodymessagebus.MessageIdStamp{MessageId: delivery.MessageId})
     }
 
     return melodymessagebus.NewEnvelope(message, stamps...), nil
@@ -944,6 +1050,22 @@ func (instance *Transport) declareTopology(channel *amqp091.Channel) error {
     })
     if nil != delayQueueErr {
         return exception.NewError("amqp delay queue declare failed", map[string]any{"queue": delayQueue}, delayQueueErr)
+    }
+
+    /* one queue per delay bucket, each with a queue-level ttl and a dead-letter route back to the main queue: RabbitMQ expires only the head of a queue, so heterogeneous per-message ttls in one queue stall short delays behind long ones (up to the retry policy's MaxDelay); uniform-ttl buckets remove that while the legacy per-message-ttl queue above keeps serving delays below the smallest bucket (and drains messages parked by older deployments). */
+    for _, bucket := range instance.delayBuckets {
+        bucketQueue := delayBucketQueueName(instance.queue, bucket)
+
+        bucketTtl := delayExpirationMilliseconds(bucket)
+
+        _, bucketQueueErr := channel.QueueDeclare(bucketQueue, true, false, false, false, amqp091.Table{
+            "x-message-ttl":             bucketTtl,
+            "x-dead-letter-exchange":    "",
+            "x-dead-letter-routing-key": instance.queue,
+        })
+        if nil != bucketQueueErr {
+            return exception.NewError("amqp delay bucket queue declare failed", map[string]any{"queue": bucketQueue}, bucketQueueErr)
+        }
     }
 
     if "" != instance.exchange {

@@ -85,7 +85,7 @@ Empty values are replaced with the defaults in [`RegisterCommands`](./register.g
 
 ## Commands
 
-All commands support standard Melody output flags (for example `--format=json`).
+All commands accept the standard Melody output flags, but only `--verbose` and `--no-color` affect the output; `--format=json` is not implemented (the commands always print their plain-text output).
 
 The manager can be selected with `--<managerFlagName>`. If not provided, the registry default manager is used.
 

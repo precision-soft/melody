@@ -4,6 +4,7 @@ import (
     "context"
     "encoding/json"
     "errors"
+    "math"
     "os"
     "testing"
     "time"
@@ -78,8 +79,6 @@ func drainedToDeadLetter(t *testing.T, connection *amqp091.Connection, deadLette
         }
     }
 }
-
-/* @info send/receive integration */
 
 func TestTransport_SendReceiveAck(t *testing.T) {
     dsn := os.Getenv("AMQP_DSN")
@@ -365,8 +364,6 @@ func TestTransport_ReconnectsAfterConnectionDrop(t *testing.T) {
         }
     }
 }
-
-/* @info reconnect and backoff */
 
 func TestNextBackoff_GrowsAndCaps(t *testing.T) {
     expected := []time.Duration{
@@ -663,6 +660,88 @@ func TestTransport_RequeuePersistsDeadLetterAttemptCount(t *testing.T) {
     }
 }
 
+/* a message id stamped by a producer (for example the outbox relay) is carried as the AMQP message id so a consumer can deduplicate at-least-once redeliveries. */
+func TestTransport_BuildPublishingCarriesMessageId(t *testing.T) {
+    registry := NewMessageRegistry()
+    RegisterMessage[reconnectMessage](registry, "amqp.test.messageid")
+
+    serializer := melodyserializer.NewJsonSerializer()
+    instance := &Transport{queue: "orders", registry: registry, serializer: serializer}
+
+    envelope := melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}).
+        WithStamp(melodymessagebus.MessageIdStamp{MessageId: "melody-outbox-42"})
+
+    publishing, buildErr := instance.buildPublishing(envelope, "")
+    if nil != buildErr {
+        t.Fatalf("build publishing: %v", buildErr)
+    }
+
+    if "melody-outbox-42" != publishing.MessageId {
+        t.Fatalf("expected the stamped message id on the publishing, got %q", publishing.MessageId)
+    }
+}
+
+/* the producer-assigned message id must survive a broker round-trip and an application requeue: decode reads delivery.MessageId back into a stamp so a consumer can read it and a republish (Nack-with-requeue / delayed retry) re-emits the SAME id rather than an empty one. */
+func TestTransport_MessageIdSurvivesDecodeAndRepublish(t *testing.T) {
+    registry := NewMessageRegistry()
+    RegisterMessage[reconnectMessage](registry, "amqp.test.messageid.roundtrip")
+
+    serializer := melodyserializer.NewJsonSerializer()
+    instance := &Transport{queue: "orders", registry: registry, serializer: serializer}
+
+    /* first publish carries the producer id */
+    sent := melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}).
+        WithStamp(melodymessagebus.MessageIdStamp{MessageId: "melody-outbox-42"})
+    published, buildErr := instance.buildPublishing(sent, "")
+    if nil != buildErr {
+        t.Fatalf("build publishing: %v", buildErr)
+    }
+
+    /* the broker delivers it back; decode must expose the id as a stamp */
+    delivery := amqp091.Delivery{
+        Headers:   published.Headers,
+        Body:      published.Body,
+        MessageId: published.MessageId,
+    }
+    decoded, decodeErr := instance.decode(delivery, 1)
+    if nil != decodeErr {
+        t.Fatalf("decode: %v", decodeErr)
+    }
+
+    roundTripped, present := melodymessagebus.MessageId(decoded)
+    if false == present || "melody-outbox-42" != roundTripped {
+        t.Fatalf("expected decode to surface the message id, got %q present=%v", roundTripped, present)
+    }
+
+    /* a requeue re-publishes the decoded envelope; the id must not be lost */
+    republished, republishErr := instance.buildPublishing(decoded, "")
+    if nil != republishErr {
+        t.Fatalf("rebuild publishing: %v", republishErr)
+    }
+
+    if "melody-outbox-42" != republished.MessageId {
+        t.Fatalf("expected the republished message to keep its id, got %q", republished.MessageId)
+    }
+}
+
+/* negative control: without a message id stamp the publishing leaves MessageId empty rather than inventing one. */
+func TestTransport_BuildPublishingWithoutMessageIdStampLeavesItEmpty(t *testing.T) {
+    registry := NewMessageRegistry()
+    RegisterMessage[reconnectMessage](registry, "amqp.test.nomessageid")
+
+    serializer := melodyserializer.NewJsonSerializer()
+    instance := &Transport{queue: "orders", registry: registry, serializer: serializer}
+
+    publishing, buildErr := instance.buildPublishing(melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}), "")
+    if nil != buildErr {
+        t.Fatalf("build publishing: %v", buildErr)
+    }
+
+    if "" != publishing.MessageId {
+        t.Fatalf("expected no message id without a stamp, got %q", publishing.MessageId)
+    }
+}
+
 func TestAckNack_StaleGenerationIsNoOp(t *testing.T) {
     runtimeInstance := newReconnectRuntime(context.Background())
 
@@ -709,8 +788,6 @@ func TestConsumeLoop_ContextDoneClosesOut(t *testing.T) {
         t.Fatalf("expected consumeLoop to close out after context cancellation")
     }
 }
-
-/* @info close unblocks parked goroutines */
 
 func TestForwardDeliveries_CloseUnblocksGoroutineParkedOnOutput(t *testing.T) {
     registry := NewMessageRegistry()
@@ -796,8 +873,6 @@ func TestReopenConsume_CloseUnblocksGoroutineParkedOnBackoff(t *testing.T) {
     }
 }
 
-/* @info publisher confirms */
-
 func TestTransport_SendSurfacesUnroutablePublishAfterQueueDelete(t *testing.T) {
     dsn := os.Getenv("AMQP_DSN")
     if "" == dsn {
@@ -849,8 +924,6 @@ func TestTransport_SendSurfacesUnroutablePublishAfterQueueDelete(t *testing.T) {
         t.Fatalf("expected Send to fail after the queue was deleted; the broker silently discarded the message")
     }
 }
-
-/* @info channel reopen */
 
 func TestEnsurePublishChannel_ReopensClosedChannelWithoutDialer(t *testing.T) {
     dsn := os.Getenv("AMQP_DSN")
@@ -934,8 +1007,6 @@ func TestEnsureConsumeChannel_ReopensClosedChannelWithoutDialer(t *testing.T) {
     }
 }
 
-/* @info delay expiration */
-
 func TestDelayExpirationMilliseconds_ClampsSubMillisecondToOne(t *testing.T) {
     if 1 != delayExpirationMilliseconds(200*time.Microsecond) {
         t.Fatalf("expected a sub-millisecond delay to clamp to 1ms, got %d (a \"0\" TTL expires immediately and drops the backoff)", delayExpirationMilliseconds(200*time.Microsecond))
@@ -950,7 +1021,43 @@ func TestDelayExpirationMilliseconds_ClampsSubMillisecondToOne(t *testing.T) {
     }
 }
 
-/* @info redelivery header */
+/* a delay whose milliseconds exceed RabbitMQ's 32-bit expiration must clamp to the cap rather than be passed through to wrap to a tiny ttl that would expire the message almost immediately. */
+func TestDelayExpirationMilliseconds_ClampsHugeDelayToCap(t *testing.T) {
+    huge := time.Duration(math.MaxUint32+1000) * time.Millisecond
+    if maxDelayExpirationMilliseconds != delayExpirationMilliseconds(huge) {
+        t.Fatalf("expected a huge delay to clamp to %d, got %d", maxDelayExpirationMilliseconds, delayExpirationMilliseconds(huge))
+    }
+
+    atCap := time.Duration(maxDelayExpirationMilliseconds) * time.Millisecond
+    if maxDelayExpirationMilliseconds != delayExpirationMilliseconds(atCap) {
+        t.Fatalf("expected a delay at the cap to stay %d, got %d", maxDelayExpirationMilliseconds, delayExpirationMilliseconds(atCap))
+    }
+}
+
+/* drainPublishReturn must remove every queued return, not just one, so a publish is reported unroutable even when more than one return has accumulated and so no stale return is left behind to be misattributed to the next publish. */
+func TestDrainPublishReturn_DrainsEveryQueuedReturn(t *testing.T) {
+    returns := make(chan amqp091.Return, 8)
+    returns <- amqp091.Return{ReplyCode: 312, ReplyText: "first"}
+    returns <- amqp091.Return{ReplyCode: 312, ReplyText: "second"}
+    returns <- amqp091.Return{ReplyCode: 312, ReplyText: "third"}
+
+    last, drained := drainPublishReturn(returns)
+    if false == drained {
+        t.Fatal("expected drained to report the accumulated returns")
+    }
+
+    if "third" != last.ReplyText {
+        t.Fatalf("expected the last return reported, got %q", last.ReplyText)
+    }
+
+    if 0 != len(returns) {
+        t.Fatalf("expected every queued return drained, %d left", len(returns))
+    }
+
+    if _, stillDrained := drainPublishReturn(returns); true == stillDrained {
+        t.Fatal("expected an empty channel to report nothing drained")
+    }
+}
 
 func TestRedeliveryCountFromHeader(t *testing.T) {
     cases := []struct {
@@ -978,8 +1085,6 @@ func TestRedeliveryCountFromHeader(t *testing.T) {
         })
     }
 }
-
-/* @info message type name */
 
 func TestMessageTypeName_NilDoesNotPanic(t *testing.T) {
     if "<nil>" != messageTypeName(nil) {

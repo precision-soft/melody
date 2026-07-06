@@ -9,8 +9,6 @@ import (
     melodylock "github.com/precision-soft/melody/v3/lock"
 )
 
-/* @info fakes */
-
 type fakeClient struct {
     rueidis.Client
 }
@@ -32,8 +30,6 @@ func containsName(names []string, want string) bool {
 
     return false
 }
-
-/* @info tests */
 
 func TestModule_NameAndDescription(t *testing.T) {
     module := NewModule(ModuleConfig{})

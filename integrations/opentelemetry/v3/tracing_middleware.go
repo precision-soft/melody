@@ -8,12 +8,18 @@ import (
     "go.opentelemetry.io/otel/propagation"
     "go.opentelemetry.io/otel/trace"
 
+    "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
 func NewTracingMiddleware(tracer trace.Tracer, propagator propagation.TextMapPropagator) httpcontract.Middleware {
+    /* @important fail fast on a nil tracer at construction rather than nil-panicking on the first request deep inside the middleware chain, matching NewHandlerDecorator's nil-Tracer guard. A no-error constructor cannot report this, so it panics with a clear cause like the other constructors of required dependencies (for example NewInMemoryTokenStoreWithClock on a nil clock). */
+    if nil == tracer {
+        exception.Panic(exception.NewError("tracing middleware tracer is nil", nil, nil))
+    }
+
     if nil == propagator {
         propagator = propagation.TraceContext{}
     }
@@ -65,6 +71,8 @@ func NewTracingMiddleware(tracer trace.Tracer, propagator propagation.TextMapPro
         }
     }
 }
+
+/* @info NewTracingMiddleware panics on a nil tracer at construction; the neg-control lives in tracing_middleware_test.go */
 
 func spanName(request httpcontract.Request) string {
     return normalizedMethod(request.HttpRequest().Method) + " " + routeLabel(request)

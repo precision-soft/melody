@@ -146,7 +146,13 @@ func (instance *SmtpTransport) dial() (*smtp.Client, error) {
         return smtp.NewClient(connection, instance.host)
     }
 
-    return smtp.Dial(instance.address)
+    /* @important dial the raw connection and build the client with instance.host explicitly, rather than smtp.Dial(address) which derives the client server name from the address host: startTls uses instance.host for the TLS SNI and PlainAuth is constructed with instance.host, so a configured Host that differs from the Address host (dialing by IP, through a tunnel, or a CNAME) must be the server name here too — otherwise smtp.PlainAuth.Start rejects the mismatch with "wrong host name" and authentication can never succeed. Mirrors the implicit-TLS branch, which already passes instance.host to NewClient. */
+    connection, dialErr := net.Dial("tcp", instance.address)
+    if nil != dialErr {
+        return nil, dialErr
+    }
+
+    return smtp.NewClient(connection, instance.host)
 }
 
 func (instance *SmtpTransport) startTls(client *smtp.Client) error {

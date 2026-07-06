@@ -7,36 +7,15 @@ import (
     melodyhttp "github.com/precision-soft/melody/v3/http"
 )
 
-type jsRouteDefinition struct {
-    Name    string `json:"name"`
-    Pattern string `json:"pattern"`
-}
-
+/* RoutesJsonFromContainer projects the exposed named routes into the RouteManifest shape the frontend RouteGenerator (melody-routes.ts) consumes, injected into every page as window.melodyRoutes. It reuses the framework BuildRouteManifest so it applies the same RouteAttributeExpose opt-in filter as the melody:routes:manifest export command: the example's frontend-facing routes already opt in via ExposedRouteAttributes (see config/http.go), and an example must model shipping only deliberately-exposed route metadata to the browser rather than dumping every route's pattern, requirements and defaults — internal routes stay server-side. */
 func RoutesJsonFromContainer(serviceContainer containercontract.Container) (string, error) {
     routeRegistry := melodyhttp.RouteRegistryMustFromContainer(serviceContainer)
-    definitions := routeRegistry.RouteDefinitions()
 
-    jsRoutes := make([]jsRouteDefinition, 0, len(definitions))
+    manifest := melodyhttp.BuildRouteManifest(routeRegistry.RouteDefinitions())
 
-    for _, definition := range definitions {
-        if nil == definition {
-            continue
-        }
-
-        name := definition.Name()
-        if "" == name {
-            continue
-        }
-
-        jsRoutes = append(jsRoutes, jsRouteDefinition{
-            Name:    name,
-            Pattern: definition.Pattern(),
-        })
-    }
-
-    payload, marshalErr := json.Marshal(jsRoutes)
+    payload, marshalErr := json.Marshal(manifest)
     if nil != marshalErr {
-        return "[]", marshalErr
+        return `{"routes":[]}`, marshalErr
     }
 
     return string(payload), nil

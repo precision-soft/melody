@@ -29,6 +29,8 @@ use (
 
 	./integrations/awss3/v3
 
+	./integrations/outbox/v3
+
 	./integrations/opentelemetry/v3
 
 	./integrations/websocket/v3

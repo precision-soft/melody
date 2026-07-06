@@ -3,6 +3,7 @@ package openapi
 import (
     "fmt"
     "reflect"
+    "regexp"
     "strconv"
     "strings"
     "time"
@@ -398,6 +399,7 @@ func isRequired(validateTag string) bool {
     return false
 }
 
+/* parseLeadingInt must accept exactly the numeric bound strings the validator's parseIntStrict accepts (validation/validation_rule.go): the openapi mirror decides a field is unsatisfiable when a numeric bound is malformed, so if the two diverged the spec would advertise satisfiability the validator does not honour (or the reverse). Both use the same fmt.Sscanf("%d") acceptance; TestParseLeadingIntMatchesValidator locks the equivalence. Keep them in lockstep — change one only alongside the other and that test. */
 func parseLeadingInt(valueString string) (int64, bool) {
     var result int64
     if _, scanErr := fmt.Sscanf(valueString, "%d", &result); nil != scanErr {
@@ -408,9 +410,21 @@ func parseLeadingInt(valueString string) (int64, bool) {
 }
 
 func applyValidation(schema *Schema, validateTag string) {
+    if true == tagHasInvalidSyntax(validateTag) {
+        /* @important the validator's parseValidationTag rejects a malformed tag with a value-independent "invalid validation tag syntax" error before any value is examined (createConstraintWithParams never runs), so the field accepts no value of any kind — null included. The mirror's splitRule is lenient (it silently drops a malformed parameter pair and returns an empty-param rule), so without this guard applyValidation would advertise a satisfiable schema for a field the validator rejects outright — e.g. a stray paren token such as min(5)/notEmpty(foo)/email(x). Detect the syntax error up front and advertise the field unsatisfiable, mirroring the malformed-numeric-bound and uncompilable-regex reject-all cases. */
+        markFieldUnsatisfiable(schema)
+        return
+    }
+
+    if true == tagHasUnconsumedParameterizedParams(validateTag) {
+        /* @important a parameterizable constraint (min/max/greaterThan/lessThan/regex) that receives parameters without its recognized key ("value", or "pattern"/"value" for regex) fails closed in the validator post-CR85: WithParams returns an error and createConstraintWithParams returns invalid-rule before Constraint.Validate runs, so the field accepts no value of any kind — advertise it unsatisfiable, mirroring tagHasParamsOnNonParameterizable for the parameterizable constraints. A bare value-less constraint (no parameters at all) still resolves to the registered default and is handled by the per-case branches below. */
+        markFieldUnsatisfiable(schema)
+        return
+    }
+
     if "" != schema.Ref || nil != schema.AllOf {
-        /* @important a $ref (or a nullable allOf-wrapped $ref) always denotes a struct component, and the validator rejects a struct value outright for notEmpty (constraint_not_empty.go default branch) and for greaterThan/lessThan ("value must be numeric", constraint_greater_than.go/constraint_less_than.go default branch); such a tag makes the field unsatisfiable server-side, so advertise it as such rather than as a satisfiable object a client would trust. No length/numeric facet otherwise attaches to a $ref, so there is nothing else to apply here. */
-        if true == tagRejectsStruct(validateTag) {
+        /* @important a $ref (or nullable allOf-wrapped $ref) denotes a struct, which the validator rejects outright for notEmpty and greaterThan/lessThan, and it fails closed on params a non-parameterizable constraint cannot consume — so advertise the field unsatisfiable rather than as a satisfiable object. No length/numeric facet otherwise attaches to a $ref. */
+        if true == tagRejectsStruct(validateTag) || true == tagHasParamsOnNonParameterizable(validateTag) || true == tagRejectsAllViaNumericBound(validateTag) {
             markFieldUnsatisfiable(schema)
         } else if true == tagForbidsNullStruct(validateTag) {
             /* @important notBlank on a pointer-to-struct field (rendered as a nullable allOf-wrapped $ref): the validator rejects a nil pointer (dereferenceValue returns ok=false) but stringifies a non-nil struct via %v and accepts it, so the field is satisfiable with a non-null value — clear only the nullable advertisement so the spec does not offer a null the validator rejects, rather than marking the whole field unsatisfiable. */
@@ -423,16 +437,28 @@ func applyValidation(schema *Schema, validateTag string) {
     rejectsAll := false
     emptyValueSpace := false
 
+    /* @important an unparseable bound or a negative max fails the rule closed before the value is examined (validator.go), rejecting every value of every kind — detect this kind-independent reject-all up front, since the per-kind cases below only cover valid string/numeric/boolean bounds. */
+    if true == tagRejectsAllViaNumericBound(validateTag) {
+        rejectsAll = true
+    }
+
     for _, rule := range splitRules(validateTag) {
         name, params := splitRule(rule)
 
         switch name {
         case "email":
+            if 0 != len(params) {
+                /* @important the validator fails closed when a tag carries parameters a non-parameterizable constraint cannot consume (createConstraintWithParams returns invalid-rule), so the field accepts no value — advertise it unsatisfiable rather than as a satisfiable field a client would trust */
+                rejectsAll = true
+
+                continue
+            }
             /* @important only set the email format on a genuine string whose format slot is free, so a structural format such as byte (for a []byte field) is preserved and the spec does not advertise an email constraint the validator cannot enforce on non-string values */
             if "string" == schema.Type && "" == schema.Format {
                 schema.Format = "email"
             }
         case "min":
+            /* @important known limitation: a length min/max on a NON-string field is mirrored only where cheaply provable unsatisfiable — an unparseable bound and a below-minimum max on integer/number/boolean (below). A valid-but-rejecting bound on a numeric/array/map/$ref field is left advertised as satisfiable: precise mirroring would need per-kind, per-int-width stringification-length modelling not worth it for an already-misconfigured tag. */
             if "string" == schema.Type {
                 if valueString, exists := params["value"]; true == exists {
                     if parsed, parsedOk := parseLeadingInt(valueString); true == parsedOk {
@@ -450,9 +476,11 @@ func applyValidation(schema *Schema, validateTag string) {
                         rejectsAll = true
                     }
                 } else {
-                    /* @important a value-less min constraint is enforced as minLength 1 by the validator, so the spec must advertise the same bound */
+                    /* @important a value-less min constraint is enforced as minLength 1 by the validator, so the spec must advertise the same bound — but raise-only, matching the value-carrying branch and the value-less max branch: a higher floor already set by another rule (an earlier real min=5, a notEmpty/notBlank floor) must not be lowered back to 1, or the spec would advertise a minLength the validator rejects values below. */
                     defaultMinLength := 1
-                    schema.MinLength = &defaultMinLength
+                    if nil == schema.MinLength || defaultMinLength > *schema.MinLength {
+                        schema.MinLength = &defaultMinLength
+                    }
                 }
             }
         case "max":
@@ -461,9 +489,14 @@ func applyValidation(schema *Schema, validateTag string) {
                     if parsed, parsedOk := parseLeadingInt(valueString); true == parsedOk {
                         value := int(parsed)
                         if 0 > value {
-                            /* @important a negative max makes MaxLength.Validate (len > max) reject every value including the empty string, so the field accepts nothing — flag it unsatisfiable rather than advertise maxLength 0 (which would advertise "" as valid) */
-                            rejectsAll = true
-                        } else {
+                            /* @important a negative max makes MaxLength.Validate (len > max) reject every NON-NULL value including the empty string; but the validator dereferences a nil pointer to "absent" and passes, so a nullable field still accepts null (emptyValueSpace) while a non-nullable one accepts nothing (rejectsAll) — matching the integer/number/boolean branch below rather than clearing Nullable on a value the validator admits */
+                            if true == schema.Nullable {
+                                emptyValueSpace = true
+                            } else {
+                                rejectsAll = true
+                            }
+                        } else if nil == schema.MaxLength || value < *schema.MaxLength {
+                            /* @important tighten-only: the validator enforces every rule on the field, so when another rule already set a lower ceiling (for example an uncompilable regex sets maxLength 0, admitting only the empty string) a looser max must not raise it back and resurrect values that rule rejects; the intersection keeps the tighter bound */
                             schema.MaxLength = &value
                         }
                     } else {
@@ -471,12 +504,14 @@ func applyValidation(schema *Schema, validateTag string) {
                         rejectsAll = true
                     }
                 } else {
-                    /* @important a value-less max constraint is enforced as maxLength 100 by the validator, so the spec must advertise the same bound */
+                    /* @important a value-less max constraint is enforced as maxLength 100 by the validator, so the spec must advertise the same bound — but tighten-only, matching the value-carrying branch: a lower ceiling already set by another rule (an uncompilable regex sets maxLength 0, an earlier smaller max) must not be raised back to 100, or the spec would offer values the validator rejects */
                     defaultMaxLength := 100
-                    schema.MaxLength = &defaultMaxLength
+                    if nil == schema.MaxLength || defaultMaxLength < *schema.MaxLength {
+                        schema.MaxLength = &defaultMaxLength
+                    }
                 }
             } else if "integer" == schema.Type || "number" == schema.Type || "boolean" == schema.Type {
-                /* @important MaxLength.Validate is not string-only: it stringifies any dereferenced value with %v and rejects it when len > max, so `max` is enforced on integer/number/boolean fields too. The shortest possible stringification is 1 character for an integer/number (e.g. "0") and 4 for a boolean ("true"), so a bound below that minimum — or a negative or malformed bound, which fails the field closed — admits no non-null value. There is no exact OpenAPI numeric facet for a stringified-length ceiling, so a satisfiable bound (at or above the minimum) is left unconstrained rather than mis-advertised; only the empty-value-space corner is advertised. A nil pointer passes MaxLength (dereferenceValue returns ok=false, Validate returns nil), so for a nullable field null stays valid and only the non-null space is empty (emptyValueSpace); a non-nullable field accepts nothing at all (rejectsAll). */
+                /* @important MaxLength.Validate stringifies any value with %v (len > max), so max applies to integer/number/boolean too; the shortest stringification is 1 char for a number and 4 for a boolean ("true"). A bound below that minimum admits no non-null value: a nullable field keeps null valid (emptyValueSpace), a non-nullable one accepts nothing (rejectsAll). No exact OpenAPI facet exists for a stringified-length ceiling, so a satisfiable bound is left unconstrained. */
                 minStringLength := 1
                 if "boolean" == schema.Type {
                     minStringLength = 4
@@ -501,22 +536,55 @@ func applyValidation(schema *Schema, validateTag string) {
             }
         case "regex", "pattern":
             if "string" == schema.Type {
-                patterns = append(patterns, patternParam(params))
+                pattern := patternParam(params)
+                if _, compileErr := regexp.Compile(pattern); nil != compileErr {
+                    /* @important a pattern that fails to compile is NOT emitted verbatim (an uncompilable pattern is invalid in the spec and most OpenAPI tooling rejects it). Regex.Validate (constraint_regex.go) short-circuits and accepts the empty string and a nil pointer BEFORE the invalid-pattern branch, rejecting only non-empty values — so the faithful advertisement is maxLength 0 (only the empty string satisfies) with the nullable advertisement left intact, not a fully unsatisfiable field. */
+                    zeroLength := 0
+                    if nil == schema.MaxLength || 0 < *schema.MaxLength {
+                        schema.MaxLength = &zeroLength
+                    }
+                } else {
+                    patterns = append(patterns, pattern)
+                }
             }
         case "alpha":
+            if 0 != len(params) {
+                /* @important the validator fails closed when a tag carries parameters a non-parameterizable constraint cannot consume (createConstraintWithParams returns invalid-rule), so the field accepts no value — advertise it unsatisfiable rather than as a satisfiable field a client would trust */
+                rejectsAll = true
+
+                continue
+            }
             /* @important the validator enforces these character classes with an anchored pattern but short-circuits on an empty string (it accepts ""), so advertise the class with a * quantifier — which also matches "" — rather than + which would reject the "" the validator accepts */
             if "string" == schema.Type {
                 patterns = append(patterns, "^[a-zA-Z]*$")
             }
         case "numeric":
+            if 0 != len(params) {
+                /* @important the validator fails closed when a tag carries parameters a non-parameterizable constraint cannot consume (createConstraintWithParams returns invalid-rule), so the field accepts no value — advertise it unsatisfiable rather than as a satisfiable field a client would trust */
+                rejectsAll = true
+
+                continue
+            }
             if "string" == schema.Type {
                 patterns = append(patterns, "^[0-9]*$")
             }
         case "alphanumeric":
+            if 0 != len(params) {
+                /* @important the validator fails closed when a tag carries parameters a non-parameterizable constraint cannot consume (createConstraintWithParams returns invalid-rule), so the field accepts no value — advertise it unsatisfiable rather than as a satisfiable field a client would trust */
+                rejectsAll = true
+
+                continue
+            }
             if "string" == schema.Type {
                 patterns = append(patterns, "^[a-zA-Z0-9]*$")
             }
         case "notBlank":
+            if 0 != len(params) {
+                /* @important the validator fails closed when a tag carries parameters a non-parameterizable constraint cannot consume (createConstraintWithParams returns invalid-rule), so the field accepts no value — advertise it unsatisfiable rather than as a satisfiable field a client would trust */
+                rejectsAll = true
+
+                continue
+            }
             /* @important notBlank rejects a null pointer for a field of any kind (dereferenceValue returns ok=false), so the spec must never advertise the field as nullable regardless of its generated type — clear nullable unconditionally (mirroring notEmpty), not only on the string path, so a *int/*bool/*float64/*[]T/*map/*struct field is not advertised as accepting null the validator rejects. The length floor is string-only: for a string, notBlank also rejects an empty (or whitespace-only) value, so advertise minLength 1 (the OpenAPI required list only means the key is present, so an empty value would still satisfy it; a client must not send "" against the spec and then be rejected). An explicit min >= 1 in either tag order still wins, but a degenerate min=0 is raised to 1 because notBlank forbids the empty value. The whitespace-only rejection cannot be expressed by minLength. For non-string kinds notBlank accepts any non-null value (its %v stringification is non-blank), so no length/items/properties floor is advertised. */
             schema.Nullable = false
             if "string" == schema.Type {
@@ -526,6 +594,12 @@ func applyValidation(schema *Schema, validateTag string) {
                 }
             }
         case "notEmpty":
+            if 0 != len(params) {
+                /* @important the validator fails closed when a tag carries parameters a non-parameterizable constraint cannot consume (createConstraintWithParams returns invalid-rule), so the field accepts no value — advertise it unsatisfiable rather than as a satisfiable field a client would trust */
+                rejectsAll = true
+
+                continue
+            }
             /* @important notEmpty rejects a zero-length string, array, slice, or map and rejects a null pointer, so the spec must neither advertise the field as nullable nor accept an empty value. Advertise the matching length floor for whichever shape the field generated — minLength 1 for a string, minItems 1 for an array, minProperties 1 for a map (object with additionalProperties) — and clear nullable so a *string/*[]T/*map field is not advertised as accepting null; otherwise a client trusting the spec sends a null or empty value and is then rejected by the validator. An explicit min >= 1 in either tag order still wins, but a degenerate min=0 is raised to 1 because notEmpty forbids the empty value. A struct value (an inline struct object, a named-struct $ref, or any non string/array/slice/map kind) is instead advertised unsatisfiable, because the validator rejects it outright (constraint_not_empty.go default branch) rather than ignoring it */
             schema.Nullable = false
             switch schema.Type {
@@ -677,12 +751,134 @@ func applyEmptyValueSpace(schema *Schema) {
     }
 }
 
+/* @important reports whether a validate tag is malformed the way the runtime validator's parseValidationTag treats as a hard error: it returns "invalid validation tag syntax" — before any value is examined — for a parenthesized part that does not close with ')', has an empty constraint name, carries unbalanced parameter brackets, or contains a parameter pair without '=' or with an empty key; and for a '='-bearing part with an empty name. The mirror's splitRule tolerates all of these (it skips a malformed pair and returns an empty-param rule), so applyValidation would otherwise emit a satisfiable schema for a field the validator rejects for every value. This mirrors parseValidationTag exactly, reusing the same top-level (splitRules), parameter (splitRuleParameters) and bracket-balance (hasBalancedRuleBrackets) split helpers, so a valid tag never trips it. */
+func tagHasInvalidSyntax(validateTag string) bool {
+    for _, rule := range splitRules(validateTag) {
+        part := strings.TrimSpace(rule)
+        if "" == part {
+            continue
+        }
+
+        openIndex := strings.IndexByte(part, '(')
+        equalIndex := strings.IndexByte(part, '=')
+
+        isParenthesized := -1 != openIndex && (-1 == equalIndex || openIndex < equalIndex)
+
+        if true == isParenthesized {
+            if false == strings.HasSuffix(part, ")") {
+                return true
+            }
+
+            name := strings.TrimSpace(part[:openIndex])
+            if "" == name {
+                return true
+            }
+
+            paramsString := strings.TrimSpace(part[openIndex+1 : len(part)-1])
+            if false == hasBalancedRuleBrackets(paramsString) {
+                return true
+            }
+
+            if "" != paramsString {
+                for _, pair := range splitRuleParameters(paramsString) {
+                    pair = strings.TrimSpace(pair)
+                    if "" == pair {
+                        continue
+                    }
+
+                    separator := strings.IndexByte(pair, '=')
+                    if -1 == separator {
+                        return true
+                    }
+
+                    if "" == strings.TrimSpace(pair[:separator]) {
+                        return true
+                    }
+                }
+            }
+
+            continue
+        }
+
+        if true == strings.Contains(part, "=") {
+            if "" == strings.TrimSpace(part[:equalIndex]) {
+                return true
+            }
+        }
+    }
+
+    return false
+}
+
+/* @important reports whether a validate tag carries parameters on a constraint that cannot consume them: the validator fails such a rule closed (createConstraintWithParams returns invalid-rule before Constraint.Validate runs), so the field accepts no value of any kind — including a struct behind a $ref/allOf, which the in-switch guards below never see because applyValidation returns early for those schemas. */
+func tagHasParamsOnNonParameterizable(validateTag string) bool {
+    for _, rule := range splitRules(validateTag) {
+        name, params := splitRule(rule)
+        if 0 == len(params) {
+            continue
+        }
+
+        switch name {
+        case "email", "alpha", "numeric", "alphanumeric", "notBlank", "notEmpty":
+            return true
+        }
+    }
+
+    return false
+}
+
+/* @important reports whether a validate tag carries parameters a PARAMETERIZABLE constraint cannot consume: min/max/greaterThan/lessThan read only the "value" key and regex only "pattern"/"value", so a non-empty parameter set lacking the recognized key makes WithParams fail the rule closed (createConstraintWithParams returns invalid-rule before Constraint.Validate runs, post-CR85), and the field accepts no value of any kind. Mirrors tagHasParamsOnNonParameterizable for the parameterizable constraints. A bare constraint with no parameters is excluded (0 == len(params)) because it resolves to the registered default rather than failing closed. */
+func tagHasUnconsumedParameterizedParams(validateTag string) bool {
+    for _, rule := range splitRules(validateTag) {
+        name, params := splitRule(rule)
+        if 0 == len(params) {
+            continue
+        }
+
+        switch name {
+        case "min", "max", "greaterThan", "lessThan":
+            if _, exists := params["value"]; false == exists {
+                return true
+            }
+        case "regex", "pattern":
+            _, hasPattern := params["pattern"]
+            _, hasValue := params["value"]
+            if false == hasPattern && false == hasValue {
+                return true
+            }
+        }
+    }
+
+    return false
+}
+
 /* @important reports whether a validate tag carries a constraint the runtime validator rejects outright for a struct value: notEmpty falls into constraint_not_empty.go's default branch, and greaterThan/lessThan into their "value must be numeric" default branch. A $ref/allOf schema (always a struct component) carrying any of these is therefore unsatisfiable server-side. notBlank is excluded because it stringifies any value with %v and only rejects a blank or nil one, so it does not reject a struct outright. */
 func tagRejectsStruct(validateTag string) bool {
     for _, rule := range splitRules(validateTag) {
         name, _ := splitRule(rule)
         switch name {
         case "notEmpty", "greaterThan", "lessThan":
+            return true
+        }
+    }
+
+    return false
+}
+
+/* @important reports whether a min/max tag carries a value the validator's parseIntStrict cannot parse (malformed or empty): createConstraintWithParams then fails the rule and validateRule returns the error BEFORE the field value is examined, so the validator rejects every value of every kind — a nil pointer included — making the field unconditionally unsatisfiable (null too). This is the only kind-independent reject-all case: a VALID but restrictive bound (a negative max, a too-large min) still lets MaxLength/MinLength.Validate run, and those accept a nil pointer (dereferenceValue returns ok=false), so a nullable field keeps null valid and is handled by the per-kind emptyValueSpace branches, not here. */
+func tagRejectsAllViaNumericBound(validateTag string) bool {
+    for _, rule := range splitRules(validateTag) {
+        name, params := splitRule(rule)
+        if "min" != name && "max" != name {
+            continue
+        }
+
+        valueString, exists := params["value"]
+        if false == exists {
+            continue
+        }
+
+        if _, parsedOk := parseLeadingInt(valueString); false == parsedOk {
             return true
         }
     }

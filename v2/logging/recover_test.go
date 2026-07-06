@@ -1,6 +1,9 @@
 package logging
 
 import (
+    "io"
+    "os"
+    "strings"
     "testing"
 
     "github.com/precision-soft/melody/v2/exception"
@@ -86,4 +89,59 @@ func TestLogOnRecover_PanicAgainRePanicsAndMarksLogged(t *testing.T) {
 
         exception.Panic(exception.NewError("boom", nil, nil))
     }()
+}
+
+func TestEchoExitToStderr_WritesOneLineForNonZeroExit(t *testing.T) {
+    readEnd, writeEnd, pipeErr := os.Pipe()
+    if nil != pipeErr {
+        t.Fatalf("unexpected pipe error: %v", pipeErr)
+    }
+
+    originalStderr := os.Stderr
+    os.Stderr = writeEnd
+    defer func() {
+        os.Stderr = originalStderr
+    }()
+
+    echoExitToStderr(exception.NewError("http server error", nil, nil), 1)
+
+    _ = writeEnd.Close()
+    os.Stderr = originalStderr
+
+    output, readErr := io.ReadAll(readEnd)
+    if nil != readErr {
+        t.Fatalf("unexpected read error: %v", readErr)
+    }
+
+    /* @important a fatal non-zero exit must leave a visible trace on stderr even when the configured logger writes elsewhere (e.g. a file logger): the pre-fix behavior exited completely silently on the AlreadyLogged path */
+    if false == strings.Contains(string(output), "melody: exiting with code 1") || false == strings.Contains(string(output), "http server error") {
+        t.Fatalf("expected the exit echo line on stderr, got %q", string(output))
+    }
+}
+
+func TestEchoExitToStderr_StaysSilentForZeroExit(t *testing.T) {
+    readEnd, writeEnd, pipeErr := os.Pipe()
+    if nil != pipeErr {
+        t.Fatalf("unexpected pipe error: %v", pipeErr)
+    }
+
+    originalStderr := os.Stderr
+    os.Stderr = writeEnd
+    defer func() {
+        os.Stderr = originalStderr
+    }()
+
+    echoExitToStderr(exception.NewError("clean exit", nil, nil), 0)
+
+    _ = writeEnd.Close()
+    os.Stderr = originalStderr
+
+    output, readErr := io.ReadAll(readEnd)
+    if nil != readErr {
+        t.Fatalf("unexpected read error: %v", readErr)
+    }
+
+    if "" != string(output) {
+        t.Fatalf("expected no stderr echo for a zero exit code, got %q", string(output))
+    }
 }

@@ -5,6 +5,8 @@ import (
     "math"
     "reflect"
 
+    "github.com/precision-soft/melody/exception"
+    exceptioncontract "github.com/precision-soft/melody/exception/contract"
     validationcontract "github.com/precision-soft/melody/validation/contract"
 )
 
@@ -70,9 +72,14 @@ func (instance *GreaterThan) Validate(value any, field string) validationcontrac
 
         return nil
 
-    case reflect.Float32, reflect.Float64:
-        actual := reflectedValue.Float()
-        if true == math.IsNaN(actual) || actual <= float64(instance.min) {
+    case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+        actual := reflectedValue.Uint()
+
+        if 0 > instance.min {
+            return nil
+        }
+
+        if actual <= uint64(instance.min) {
             return NewValidationError(
                 field,
                 fmt.Sprintf("value must be greater than %d", instance.min),
@@ -86,14 +93,9 @@ func (instance *GreaterThan) Validate(value any, field string) validationcontrac
 
         return nil
 
-    case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-        actual := reflectedValue.Uint()
-
-        if 0 > instance.min {
-            return nil
-        }
-
-        if actual <= uint64(instance.min) {
+    case reflect.Float32, reflect.Float64:
+        actual := reflectedValue.Float()
+        if true == math.IsNaN(actual) || actual <= float64(instance.min) {
             return NewValidationError(
                 field,
                 fmt.Sprintf("value must be greater than %d", instance.min),
@@ -116,4 +118,31 @@ func (instance *GreaterThan) Min() int {
     return instance.min
 }
 
+func (instance *GreaterThan) WithParams(params map[string]string) (validationcontract.Constraint, error) {
+    valueString, exists := params["value"]
+    if false == exists {
+        return nil, exception.NewError(
+            "greater than constraint requires a value parameter",
+            exceptioncontract.Context{
+                "params": params,
+            },
+            nil,
+        )
+    }
+
+    parsed, ok := parseIntStrict(valueString)
+    if false == ok {
+        return nil, exception.NewError(
+            "invalid greater than parameter",
+            exceptioncontract.Context{
+                "value": valueString,
+            },
+            nil,
+        )
+    }
+
+    return NewGreaterThan(parsed), nil
+}
+
 var _ validationcontract.Constraint = (*GreaterThan)(nil)
+var _ validationcontract.ParameterizedConstraint = (*GreaterThan)(nil)

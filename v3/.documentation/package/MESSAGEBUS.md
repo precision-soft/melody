@@ -147,6 +147,8 @@ By default the consumer handles one message at a time (so the broker's prefetch 
 
 Poison messages (a delivery that can never decode) are nacked without requeue. With a durable transport this lands them in the configured dead-letter queue (enable `DeadLetter` on the AMQP transport); **without** a DLQ the broker discards them. Enable a DLQ in production so an undecodable message is retained for inspection rather than dropped.
 
+A message that exhausts `RetryPolicy.MaxRetries` is routed to the configured `FailureTransport`. When the failure transport itself rejects it, the message is requeued to its source and retried — by default indefinitely (the no-loss behavior: keep requeuing until the failure transport recovers). Setting `RetryPolicy.MaxDeadLetterAttempts` bounds this: after that many failed dead-letter routings — counted by the [`DeadLetterAttemptStamp`](../../messagebus/stamp.go) carried across requeues — the consumer gives up and nacks without requeue, so a transport-native dead-letter (for example the AMQP DLX) can claim the message instead of it looping forever while both the handler and the failure transport are down.
+
 A runnable end-to-end demonstration lives in the example application: [`messagebus:demo`](../../.example/cli/messagebus_demo_command.go), wired in [`.example/config/messagebus.go`](../../.example/config/messagebus.go).
 
 ## Footguns & caveats
@@ -178,8 +180,12 @@ A runnable end-to-end demonstration lives in the example application: [`messageb
 - [`EnsureEnvelope(message any) messagebuscontract.Envelope`](../../messagebus/envelope.go)
 - [`type BusNameStamp`](../../messagebus/stamp.go), [`type SentStamp`](../../messagebus/stamp.go), [`type ReceivedStamp`](../../messagebus/stamp.go), [`type HandledStamp`](../../messagebus/stamp.go)
 - [`type RedeliveryStamp`](../../messagebus/stamp.go), [`type DelayStamp`](../../messagebus/stamp.go) — retry metadata carried on a requeued envelope
+- [`type DeadLetterAttemptStamp`](../../messagebus/stamp.go) — retry metadata counting failed dead-letter routings of an exhausted envelope (see `RetryPolicy.MaxDeadLetterAttempts`)
+- [`type MessageIdStamp`](../../messagebus/stamp.go) — a stable, producer-assigned message id, so a transport can publish it (the AMQP transport round-trips it as the AMQP message id) and a consumer can deduplicate redeliveries; the outbox relay stamps a deterministic id per logical message
 - [`LastStampOfType[T messagebuscontract.Stamp](envelope) (T, bool)`](../../messagebus/stamp.go)
 - [`RedeliveryCount(envelope messagebuscontract.Envelope) int`](../../messagebus/stamp.go) — the number of redeliveries so far, for a handler inspecting retry attempts
+- [`DeadLetterAttemptCount(envelope messagebuscontract.Envelope) int`](../../messagebus/stamp.go) — the number of failed dead-letter routings so far
+- [`MessageId(envelope messagebuscontract.Envelope) (string, bool)`](../../messagebus/stamp.go) — the producer-assigned message id stamped on the envelope, if any
 - [`type HandlerLocator`](../../messagebus/locator.go)
     - [`NewHandlerLocator() *HandlerLocator`](../../messagebus/locator.go)
     - [`RegisterHandler[T any](locator *HandlerLocator, handle func(runtimecontract.Runtime, T) error)`](../../messagebus/locator.go)
@@ -201,7 +207,7 @@ A runnable end-to-end demonstration lives in the example application: [`messageb
     - [`NewConsumeCommand(bus messagebuscontract.Bus, transports map[string]messagebuscontract.Transport) *ConsumeCommand`](../../messagebus/consume_command.go)
     - [`NewConsumeCommandWithRetry(bus messagebuscontract.Bus, transports map[string]messagebuscontract.Transport, retryPolicy RetryPolicy) *ConsumeCommand`](../../messagebus/consume_command.go)
     - [`(*ConsumeCommand).WithShutdownGrace(grace time.Duration) *ConsumeCommand`](../../messagebus/consume_command.go)
-- [`type RetryPolicy`](../../messagebus/consume_command.go) (`MaxRetries int`, `BaseDelay time.Duration`, `FailureTransport messagebuscontract.Transport`)
+- [`type RetryPolicy`](../../messagebus/consume_command.go) (`MaxRetries int`, `BaseDelay time.Duration`, `FailureTransport messagebuscontract.Transport`, `MaxDeadLetterAttempts int`)
 
 ### Container helpers (`messagebus`)
 

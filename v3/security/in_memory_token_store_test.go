@@ -17,6 +17,40 @@ func tokenStoreRuntime() runtimecontract.Runtime {
     return runtime.New(context.Background(), c.NewScope(), c)
 }
 
+/* regression: the originating actor must survive the store's claim clone (Put + Lookup), otherwise the opaque-token path silently drops F1 propagation. */
+func TestInMemoryTokenStore_PreservesOriginatingActor(t *testing.T) {
+    store := NewInMemoryTokenStore()
+
+    store.Put("opaque-actor", securitycontract.Claims{
+        UserIdentifier: "billing-service",
+        Roles:          []string{"ROLE_SERVICE"},
+        OriginatingActor: &securitycontract.ActorData{
+            Identifier: "client-42",
+            Type:       securitycontract.ActorTypeApiClient,
+            Roles:      []string{"ROLE_CLIENT"},
+            Attributes: map[string]string{"region": "eu"},
+        },
+    })
+
+    claims, found, lookupErr := store.Lookup(testRuntime(), "opaque-actor")
+    if nil != lookupErr || false == found {
+        t.Fatalf("expected the token to be found: found=%v err=%v", found, lookupErr)
+    }
+
+    if nil == claims.OriginatingActor {
+        t.Fatal("expected the originating actor to survive the store round-trip")
+    }
+
+    if "client-42" != claims.OriginatingActor.Identifier || "eu" != claims.OriginatingActor.Attributes["region"] {
+        t.Fatalf("unexpected actor after round-trip: %+v", claims.OriginatingActor)
+    }
+
+    token := NewAuthenticatedTokenFromClaims(claims)
+    if _, present := token.OnBehalfOf(); false == present {
+        t.Fatal("expected the rebuilt token to carry the actor")
+    }
+}
+
 func TestInMemoryTokenStore_TtlExpiresToken(t *testing.T) {
     frozen := clock.NewFrozenClock(time.Unix(1000, 0))
     store := NewInMemoryTokenStoreWithClock(frozen)
@@ -114,6 +148,101 @@ func TestInMemoryTokenStore_LookupDeepCopiesNestedAttributeMap(t *testing.T) {
     c2, _, _ := store.Lookup(rt, "tok")
     if 99 == c2.Attributes["meta"].(map[string]any)["x"] {
         t.Fatalf("mutating a nested map returned by Lookup corrupted the stored entry")
+    }
+}
+
+/* regression: the impersonator subtree carried on an originating actor must be deep-copied by the store clone, otherwise a Lookup caller (or a caller mutating its claims after Put) corrupts the stored impersonator's roles and concurrent Lookups race on the shared *ActorData. */
+func TestInMemoryTokenStore_LookupDeepCopiesImpersonatorSubtree(t *testing.T) {
+    store := NewInMemoryTokenStore()
+    rt := tokenStoreRuntime()
+
+    store.Put("tok-imp", securitycontract.Claims{
+        UserIdentifier: "billing-service",
+        OriginatingActor: &securitycontract.ActorData{
+            Identifier: "client-42",
+            Type:       securitycontract.ActorTypeUser,
+            Impersonator: &securitycontract.ActorData{
+                Identifier: "admin-7",
+                Type:       securitycontract.ActorTypeUser,
+                Roles:      []string{"ROLE_ADMIN"},
+                Attributes: map[string]string{"region": "eu"},
+            },
+        },
+    })
+
+    first, found, err := store.Lookup(rt, "tok-imp")
+    if nil != err || false == found {
+        t.Fatalf("lookup failed: found=%v err=%v", found, err)
+    }
+
+    first.OriginatingActor.Impersonator.Roles[0] = "ROLE_PWNED"
+    first.OriginatingActor.Impersonator.Attributes["region"] = "evil"
+
+    second, _, _ := store.Lookup(rt, "tok-imp")
+    if "ROLE_ADMIN" != second.OriginatingActor.Impersonator.Roles[0] {
+        t.Fatalf("mutating a returned impersonator role corrupted the stored entry, got %v", second.OriginatingActor.Impersonator.Roles)
+    }
+    if "eu" != second.OriginatingActor.Impersonator.Attributes["region"] {
+        t.Fatalf("mutating a returned impersonator attribute corrupted the stored entry, got %v", second.OriginatingActor.Impersonator.Attributes)
+    }
+}
+
+/* regression: mutating the caller's nested impersonator after Put must not reach the stored entry. */
+func TestInMemoryTokenStore_PutDeepCopiesImpersonatorSubtree(t *testing.T) {
+    store := NewInMemoryTokenStore()
+    rt := tokenStoreRuntime()
+
+    original := securitycontract.Claims{
+        UserIdentifier: "billing-service",
+        OriginatingActor: &securitycontract.ActorData{
+            Identifier: "client-42",
+            Type:       securitycontract.ActorTypeUser,
+            Impersonator: &securitycontract.ActorData{
+                Identifier: "admin-7",
+                Type:       securitycontract.ActorTypeUser,
+                Roles:      []string{"ROLE_ADMIN"},
+            },
+        },
+    }
+
+    store.Put("tok-imp-put", original)
+
+    original.OriginatingActor.Impersonator.Roles[0] = "ROLE_PWNED"
+
+    stored, found, err := store.Lookup(rt, "tok-imp-put")
+    if nil != err || false == found {
+        t.Fatalf("lookup failed: found=%v err=%v", found, err)
+    }
+
+    if "ROLE_ADMIN" != stored.OriginatingActor.Impersonator.Roles[0] {
+        t.Fatalf("mutating the caller's impersonator after Put corrupted the stored entry, got %v", stored.OriginatingActor.Impersonator.Roles)
+    }
+}
+
+/* @important a cyclic impersonator chain (reachable in-process through the exported ActorData.Impersonator field) must terminate via the depth bound rather than recurse until the goroutine stack overflows — a fatal error no recover() can catch. The test completing (Put and Lookup both return) is the assertion; without the bound cloneActorData would SIGSEGV. */
+func TestInMemoryTokenStore_CyclicImpersonatorChainTerminates(t *testing.T) {
+    store := NewInMemoryTokenStore()
+    rt := tokenStoreRuntime()
+
+    actor := &securitycontract.ActorData{
+        Identifier: "client-42",
+        Type:       securitycontract.ActorTypeUser,
+        Roles:      []string{"ROLE_USER"},
+    }
+    actor.Impersonator = actor
+
+    store.Put("tok-cycle", securitycontract.Claims{
+        UserIdentifier:   "billing-service",
+        OriginatingActor: actor,
+    })
+
+    stored, found, err := store.Lookup(rt, "tok-cycle")
+    if nil != err || false == found {
+        t.Fatalf("lookup failed: found=%v err=%v", found, err)
+    }
+
+    if nil == stored.OriginatingActor || "client-42" != stored.OriginatingActor.Identifier {
+        t.Fatalf("expected the cyclic actor to round-trip its top link, got %+v", stored.OriginatingActor)
     }
 }
 

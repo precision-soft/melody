@@ -255,8 +255,6 @@ func TestRegisterRuntimeAddsValue(t *testing.T) {
     }
 }
 
-/* @info placeholder patterns */
-
 func TestEnvPlaceholderPattern_RejectsIdentifiersStartingWithDigit(t *testing.T) {
     if true == envPlaceholderPattern.MatchString("%env(1INVALID)%") {
         t.Fatalf("expected pattern to reject identifier starting with digit")

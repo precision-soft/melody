@@ -39,12 +39,11 @@ func (instance *scope) Get(serviceName string) (any, error) {
 
     containerInstance := instance.container.Load()
     if nil == containerInstance {
-        exception.Panic(
-            exception.NewError(
-                "scope is closed",
-                nil,
-                nil,
-            ),
+        /* @important return the closed-scope error instead of panicking: error-returning methods follow the Must/non-Must convention (Must* wrappers keep panicking), and a panic here is fatal in handler-spawned goroutines that outlive the request — the kernel closes the scope when ServeHttp returns and no recover covers those goroutines */
+        return nil, exception.NewError(
+            "scope is closed",
+            nil,
+            nil,
         )
     }
 
@@ -81,12 +80,11 @@ func (instance *scope) GetByType(targetType reflect.Type) (any, error) {
 
     containerInstance := instance.container.Load()
     if nil == containerInstance {
-        exception.Panic(
-            exception.NewError(
-                "scope is closed",
-                nil,
-                nil,
-            ),
+        /* @important mirror Get: closed scope yields an error, not a panic; MustGetByType keeps the panic */
+        return nil, exception.NewError(
+            "scope is closed",
+            nil,
+            nil,
         )
     }
 
@@ -230,12 +228,11 @@ func (instance *scope) OverrideProtectedInstance(serviceName string, value any) 
     defer instance.mutex.Unlock()
 
     if nil == instance.container.Load() {
-        exception.Panic(
-            exception.NewError(
-                "scope is closed",
-                nil,
-                nil,
-            ),
+        /* @important mirror Get: closed scope yields an error, not a panic; MustOverrideProtectedInstance keeps the panic */
+        return exception.NewError(
+            "scope is closed",
+            nil,
+            nil,
         )
     }
 

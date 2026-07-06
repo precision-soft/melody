@@ -4,6 +4,7 @@ import (
     "context"
     "os"
     "os/signal"
+    "runtime/debug"
     "sync"
     "sync/atomic"
     "syscall"
@@ -11,6 +12,7 @@ import (
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/exception"
+    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     "github.com/precision-soft/melody/v3/logging"
     messagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
     "github.com/precision-soft/melody/v3/runtime"
@@ -30,7 +32,7 @@ type RetryPolicy struct {
     FailureTransport    messagebuscontract.Transport
     MaxDelay            time.Duration
     FailureRequeueDelay time.Duration
-    /* @important bound on how many times an exhausted message is requeued to the source after the FailureTransport itself rejects it; 0 keeps the default unbounded, no-loss behavior (requeue until the failure transport recovers), while a positive value gives up after that many failed dead-letter routings and nacks without requeue so a transport-native dead-letter (e.g. the AMQP DLX) can claim it instead of looping forever while both the handler and the failure transport are down */
+    /* @important bound on requeues of an exhausted message after the FailureTransport rejects it; 0 keeps the default no-loss behavior (requeue until it recovers), a positive value nacks without requeue after that many failed routings so a transport-native dead-letter (AMQP DLX) can claim it instead of looping forever */
     MaxDeadLetterAttempts int
 }
 
@@ -46,6 +48,24 @@ func NewConsumeCommandWithRetry(
     transports map[string]messagebuscontract.Transport,
     retryPolicy RetryPolicy,
 ) *ConsumeCommand {
+    return &ConsumeCommand{
+        bus:           bus,
+        transports:    transports,
+        retryPolicy:   normalizeRetryPolicy(retryPolicy),
+        shutdownGrace: defaultShutdownGrace,
+    }
+}
+
+/* NewConsumeCommandFromContainer builds the command so it resolves the bus, the transport map and an optional retry policy from the service container at run time, letting the framework auto-register melody:messagebus:consume once the application registers its transports. */
+func NewConsumeCommandFromContainer() *ConsumeCommand {
+    return &ConsumeCommand{
+        retryPolicy:          normalizeRetryPolicy(RetryPolicy{MaxRetries: defaultMaxRetries}),
+        shutdownGrace:        defaultShutdownGrace,
+        resolveFromContainer: true,
+    }
+}
+
+func normalizeRetryPolicy(retryPolicy RetryPolicy) RetryPolicy {
     if 0 > retryPolicy.MaxRetries {
         retryPolicy.MaxRetries = 0
     }
@@ -62,19 +82,15 @@ func NewConsumeCommandWithRetry(
         retryPolicy.MaxDeadLetterAttempts = 0
     }
 
-    return &ConsumeCommand{
-        bus:           bus,
-        transports:    transports,
-        retryPolicy:   retryPolicy,
-        shutdownGrace: defaultShutdownGrace,
-    }
+    return retryPolicy
 }
 
 type ConsumeCommand struct {
-    bus           messagebuscontract.Bus
-    transports    map[string]messagebuscontract.Transport
-    retryPolicy   RetryPolicy
-    shutdownGrace time.Duration
+    bus                  messagebuscontract.Bus
+    transports           map[string]messagebuscontract.Transport
+    retryPolicy          RetryPolicy
+    shutdownGrace        time.Duration
+    resolveFromContainer bool
 }
 
 func (instance *ConsumeCommand) WithShutdownGrace(grace time.Duration) *ConsumeCommand {
@@ -116,6 +132,10 @@ func (instance *ConsumeCommand) Run(
     runtimeInstance runtimecontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
+    if true == instance.resolveFromContainer {
+        instance.hydrateFromContainer(runtimeInstance)
+    }
+
     transportName := commandContext.String("transport")
     if "" == transportName {
         return exception.NewError("a transport name is required", nil, nil)
@@ -136,6 +156,17 @@ func (instance *ConsumeCommand) Run(
     }
 
     return instance.consumeFrom(runtimeInstance, transport, int64(commandContext.Int("limit")), concurrency)
+}
+
+func (instance *ConsumeCommand) hydrateFromContainer(runtimeInstance runtimecontract.Runtime) {
+    serviceContainer := runtimeInstance.Container()
+
+    instance.bus = ConsumeBusFromResolver(serviceContainer)
+    instance.transports = TransportsMustFromResolver(serviceContainer)
+
+    if resolvedPolicy, hasPolicy := RetryPolicyFromResolver(serviceContainer); true == hasPolicy {
+        instance.retryPolicy = normalizeRetryPolicy(resolvedPolicy)
+    }
 }
 
 func (instance *ConsumeCommand) consumeFrom(
@@ -188,7 +219,7 @@ func (instance *ConsumeCommand) consumeFrom(
                         return
                     }
 
-                    instance.consume(consumeRuntime, transport, envelopeInstance)
+                    instance.consumeRecovered(consumeRuntime, transport, envelopeInstance)
 
                     if limit > 0 && atomic.AddInt64(&processed, 1) >= limit {
                         cancelWorkers()
@@ -219,12 +250,48 @@ func (instance *ConsumeCommand) consumeFrom(
     }
 }
 
+/* consumeRecovered runs consume behind a panic barrier so a panic raised OUTSIDE the handler dispatch — in per-message scope setup, the transport Ack/Nack, or scope teardown — is logged and the worker goroutine survives to process the next delivery, instead of dying and silently shrinking the worker pool until the consumer stalls with no error surfaced. A handler panic is already converted into the retry/dead-letter pipeline inside dispatchSafely; this is the backstop for everything else on the per-message path. The in-flight delivery is left unacked, so the broker redelivers it. */
+func (instance *ConsumeCommand) consumeRecovered(
+    runtimeInstance runtimecontract.Runtime,
+    transport messagebuscontract.Transport,
+    envelopeInstance messagebuscontract.Envelope,
+) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            return
+        }
+
+        recoveredErr, _ := recoveredValue.(error)
+
+        instance.logError(
+            runtimeInstance,
+            "message processing panicked outside the handler",
+            exception.NewError(
+                "message processing panicked",
+                exceptioncontract.Context{
+                    "recoveredValue": recoveredValue,
+                    "panicStack":     string(debug.Stack()),
+                },
+                recoveredErr,
+            ),
+        )
+    }()
+
+    instance.consume(runtimeInstance, transport, envelopeInstance)
+}
+
 func (instance *ConsumeCommand) consume(
     runtimeInstance runtimecontract.Runtime,
     transport messagebuscontract.Transport,
     envelopeInstance messagebuscontract.Envelope,
 ) {
-    _, dispatchErr := instance.bus.Dispatch(runtimeInstance, envelopeInstance)
+    messageRuntime, closeMessageScope := instance.messageRuntime(runtimeInstance, envelopeInstance)
+    defer closeMessageScope()
+
+    runtimeInstance = messageRuntime
+
+    dispatchErr := instance.dispatchSafely(runtimeInstance, envelopeInstance)
     if nil == dispatchErr {
         if ackErr := transport.Ack(runtimeInstance, envelopeInstance); nil != ackErr {
             instance.logError(runtimeInstance, "message ack failed", ackErr)
@@ -293,6 +360,91 @@ func (instance *ConsumeCommand) consume(
     if nackErr := transport.Nack(runtimeInstance, envelopeInstance, false); nil != nackErr {
         instance.logError(runtimeInstance, "message dead-letter failed", nackErr)
     }
+}
+
+/* messageRuntime gives each delivery its own container scope and a message-scoped logger (keyed by MessageIdStamp), mirroring the http kernel's scope-per-request idiom so ambient scope state cannot leak between in-flight messages and every log line is correlatable. The parent context is kept as-is; without a resolvable container the shared runtime is returned untouched. */
+func (instance *ConsumeCommand) messageRuntime(
+    runtimeInstance runtimecontract.Runtime,
+    envelopeInstance messagebuscontract.Envelope,
+) (runtimecontract.Runtime, func()) {
+    noopClose := func() {}
+
+    serviceContainer := runtimeInstance.Container()
+    if nil == serviceContainer {
+        return runtimeInstance, noopClose
+    }
+
+    messageScope := serviceContainer.NewScope()
+
+    baseLogger := logging.LoggerFromRuntime(runtimeInstance)
+
+    closeScope := func() {
+        scopeCloseErr := messageScope.Close()
+        if nil != scopeCloseErr && nil != baseLogger {
+            baseLogger.Error(
+                "failed to close message scope",
+                exception.LogContext(scopeCloseErr),
+            )
+        }
+    }
+
+    if nil != baseLogger {
+        messageId, hasMessageId := MessageId(envelopeInstance)
+        if false == hasMessageId || "" == messageId {
+            messageId = "-"
+        }
+
+        messageLogger := logging.NewRequestLogger(baseLogger, messageId, "messageId")
+
+        overrideErr := messageScope.OverrideProtectedInstance(logging.ServiceLogger, messageLogger)
+        if nil != overrideErr {
+            baseLogger.Error(
+                "failed to override message logger",
+                exception.LogContext(overrideErr),
+            )
+        }
+    }
+
+    return runtime.New(runtimeInstance.Context(), messageScope, serviceContainer), closeScope
+}
+
+func (instance *ConsumeCommand) dispatchSafely(
+    runtimeInstance runtimecontract.Runtime,
+    envelopeInstance messagebuscontract.Envelope,
+) (dispatchErr error) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            return
+        }
+
+        /* @important a panicking handler must flow into the retry/dead-letter pipeline like a returned error; otherwise the worker dies with the delivery unacked, the broker redelivers with an unchanged count, MaxRetries never trips and one poison message crash-loops every replica. Mirrors the http kernel's recover-to-error contract. */
+        recoveredErr, ok := recoveredValue.(error)
+        if true == ok && nil != recoveredErr {
+            dispatchErr = exception.NewError(
+                "message handler panicked",
+                exceptioncontract.Context{
+                    "panicStack": string(debug.Stack()),
+                },
+                recoveredErr,
+            )
+
+            return
+        }
+
+        dispatchErr = exception.NewError(
+            "message handler panicked",
+            exceptioncontract.Context{
+                "recoveredValue": recoveredValue,
+                "panicStack":     string(debug.Stack()),
+            },
+            nil,
+        )
+    }()
+
+    _, err := instance.bus.Dispatch(runtimeInstance, envelopeInstance)
+
+    return err
 }
 
 func (instance *ConsumeCommand) retryDelay(attempt int) time.Duration {

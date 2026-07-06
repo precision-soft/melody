@@ -18,9 +18,15 @@ func NewGenerateCommand(info Info, registry *Registry) *GenerateCommand {
     }
 }
 
+/* NewGenerateCommandFromContainer builds the command so it resolves its Info and Registry from the service container at run time, letting the framework auto-register it without the application wiring those dependencies by hand. */
+func NewGenerateCommandFromContainer() *GenerateCommand {
+    return &GenerateCommand{resolveFromContainer: true}
+}
+
 type GenerateCommand struct {
-    info     Info
-    registry *Registry
+    info                 Info
+    registry             *Registry
+    resolveFromContainer bool
 }
 
 func (instance *GenerateCommand) Name() string {
@@ -46,7 +52,14 @@ func (instance *GenerateCommand) Run(
 ) error {
     router := http.RouterMustFromContainer(runtimeInstance.Container())
 
-    document := Generate(instance.info, router.RouteDefinitions(), instance.registry)
+    info := instance.info
+    registry := instance.registry
+    if true == instance.resolveFromContainer {
+        info = InfoFromResolver(runtimeInstance.Container())
+        registry = RegistryMustFromResolver(runtimeInstance.Container())
+    }
+
+    document := Generate(info, router.RouteDefinitions(), registry)
 
     payload, marshalErr := json.MarshalIndent(document, "", "  ")
     if nil != marshalErr {

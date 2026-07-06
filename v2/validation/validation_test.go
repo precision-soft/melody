@@ -36,6 +36,7 @@ func requireValidationErrors(t *testing.T, err error) ValidationErrors {
 func pointerOf(value string) *string {
     return &value
 }
+
 /* @info regex shorthand fail-open + comma-in-meta back-port (CR #64) */
 
 type payloadWithRegexShorthandCR64 struct {

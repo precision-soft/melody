@@ -1,6 +1,7 @@
 package logging
 
 import (
+    "fmt"
     "os"
 
     "github.com/precision-soft/melody/v3/exception"
@@ -21,11 +22,15 @@ func LogOnRecover(
         err := exitError.ErrorValue()
 
         if true == err.AlreadyLogged() {
+            echoExitToStderr(err, exitError.ExitCode())
+
             os.Exit(exitError.ExitCode())
         }
 
         LogError(logger, err)
         err.MarkAsLogged()
+
+        echoExitToStderr(err, exitError.ExitCode())
 
         os.Exit(exitError.ExitCode())
     }
@@ -86,17 +91,24 @@ func LogOnRecoverAndExit(
         err := exitError.ErrorValue()
 
         if true == err.AlreadyLogged() {
+            echoExitToStderr(err, exitError.ExitCode())
+
             os.Exit(exitError.ExitCode())
         }
 
         LogError(logger, err)
         err.MarkAsLogged()
 
+        echoExitToStderr(err, exitError.ExitCode())
+
         os.Exit(exitError.ExitCode())
     }
 
     if err, ok := recovered.(*exception.Error); true == ok {
         if true == err.AlreadyLogged() {
+            /* @important the earlier logging may have gone to a file logger, leaving stdout/stderr silent: without this echo a fatal exit (e.g. an http bind failure logged by runHttp) terminates the process with no visible trace in a container whose logs are the standard streams */
+            echoExitToStderr(err, exitCode)
+
             os.Exit(exitCode)
         }
     }
@@ -127,5 +139,21 @@ func LogOnRecoverAndExit(
     LogError(logger, err)
     err.MarkAsLogged()
 
+    echoExitToStderr(err, exitCode)
+
     os.Exit(exitCode)
+}
+
+/* @important echoExitToStderr writes one final line to stderr before a fatal exit so the failure is visible even when the configured logger writes elsewhere (for example the example apps' file logger): a non-zero exit must never be completely silent on the standard streams */
+func echoExitToStderr(err error, exitCode int) {
+    if 0 == exitCode {
+        return
+    }
+
+    message := "-"
+    if nil != err {
+        message = err.Error()
+    }
+
+    _, _ = fmt.Fprintf(os.Stderr, "melody: exiting with code %d after unrecovered error: %s\n", exitCode, message)
 }
