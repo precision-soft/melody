@@ -489,8 +489,12 @@ func applyValidation(schema *Schema, validateTag string) {
                     if parsed, parsedOk := parseLeadingInt(valueString); true == parsedOk {
                         value := int(parsed)
                         if 0 > value {
-                            /* @important a negative max makes MaxLength.Validate (len > max) reject every value including the empty string, so the field accepts nothing — flag it unsatisfiable rather than advertise maxLength 0 (which would advertise "" as valid) */
-                            rejectsAll = true
+                            /* @important a negative max makes MaxLength.Validate (len > max) reject every NON-NULL value including the empty string; but the validator dereferences a nil pointer to "absent" and passes, so a nullable field still accepts null (emptyValueSpace) while a non-nullable one accepts nothing (rejectsAll) — matching the integer/number/boolean branch below rather than clearing Nullable on a value the validator admits */
+                            if true == schema.Nullable {
+                                emptyValueSpace = true
+                            } else {
+                                rejectsAll = true
+                            }
                         } else if nil == schema.MaxLength || value < *schema.MaxLength {
                             /* @important tighten-only: the validator enforces every rule on the field, so when another rule already set a lower ceiling (for example an uncompilable regex sets maxLength 0, admitting only the empty string) a looser max must not raise it back and resurrect values that rule rejects; the intersection keeps the tighter bound */
                             schema.MaxLength = &value

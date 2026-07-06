@@ -459,7 +459,7 @@ func (instance *Transport) publishOnce(
     return channel, nil
 }
 
-/* @important closes the cached publish channel only when it is still the one the caller failed on, so a concurrent publisher that already reopened a healthy channel is not torn down. */
+/* @important closes the cached publish channel only when it is still the one the caller failed on, so a concurrent publisher that already reopened a healthy channel is not torn down. A nil failed channel (the caller never obtained one, e.g. ensurePublishChannel itself failed) identifies no specific channel, so it is a no-op rather than closing whatever channel is currently cached — a stale/closed cached channel is re-detected by ensurePublishChannel's IsClosed guard on the next publish. */
 func (instance *Transport) resetPublishChannel(failed *amqp091.Channel) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -468,7 +468,7 @@ func (instance *Transport) resetPublishChannel(failed *amqp091.Channel) {
         return
     }
 
-    if nil != failed && instance.publishChannel != failed {
+    if nil == failed || instance.publishChannel != failed {
         return
     }
 

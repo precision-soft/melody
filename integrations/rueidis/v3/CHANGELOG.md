@@ -7,15 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- `v3/retry_config.go`, `v3/provider.go` — `WithRetryConfig(RetryConfig)` provider option (plus `RetryConfig`, `DefaultRetryConfig()`, `NewRetryConfig(maxAttempts, initialDelay, maxDelay, backoffMultiplier)`) makes `Provider.Open` re-dial the initial connection with capped exponential backoff on transient failures (connection refused, no such host, i/o timeout, network unreachable, `EOF`/closed-connection during the handshake, …), so an application racing a cold-starting redis container no longer hard-fails at boot. The backoff is computed in float space and capped at `MaxDelay` before the `time.Duration` conversion, so a very high `MaxAttempts` cannot overflow the delay to a negative value that collapses the backoff. Only transient errors retry — a real misconfiguration (for example a bad password) still fails fast. Mirrors the `bunorm/mysql/v3` provider's retry. Opt-in: without the option `Open` behaves exactly as before.
-
-## [v3.3.0] - 2026-07-03 - Redis-Backed Nonce Guard
+## [v3.3.0] - 2026-07-06 - Redis-Backed Nonce Guard and Provider Open Retry
 
 ### Added
 
 - `v3/nonce_guard.go` — `NonceGuard` (`NewNonceGuard(client)` / `NewNonceGuardWithPrefix(client, prefix)`) is a Redis-backed implementation of the core `security/contract.NonceGuard`, the replay-protection guard for the internal-auth HMAC token source. `Remember` runs a single atomic `SET NX PX` Lua script that records a nonce only when absent and returns whether it already existed, so a nonce replayed against any application instance is detected (which the core in-process `MemoryNonceGuard` cannot do across instances). A non-positive ttl performs a read-only existence check — reporting whether the nonce is currently recorded — without storing, matching the in-process `MemoryNonceGuard` at the acceptance-window edge rather than reporting a still-recorded nonce as fresh. Requires the core `melody/v3` version that introduces `security/contract.NonceGuard`.
+- `v3/retry_config.go`, `v3/provider.go` — `WithRetryConfig(RetryConfig)` provider option (plus `RetryConfig`, `DefaultRetryConfig()`, `NewRetryConfig(maxAttempts, initialDelay, maxDelay, backoffMultiplier)`) makes `Provider.Open` re-dial the initial connection with capped exponential backoff on transient failures (connection refused, no such host, i/o timeout, network unreachable, `EOF`/closed-connection during the handshake, …), so an application racing a cold-starting redis container no longer hard-fails at boot. The backoff is computed in float space and capped at `MaxDelay` before the `time.Duration` conversion, so a very high `MaxAttempts` cannot overflow the delay to a negative value that collapses the backoff. Only transient errors retry — a real misconfiguration (for example a bad password) still fails fast. Mirrors the `bunorm/mysql/v3` provider's retry. Opt-in: without the option `Open` behaves exactly as before.
+
+### Fixed
+
+- `provider.go` — `isTransientError` now also classifies a Redis `LOADING` reply (`LOADING Redis is loading the dataset in memory`, returned while a restarted server replays its RDB/AOF before accepting commands) as transient, so `WithRetryConfig`'s `Open` retry covers the cold-start window it targets rather than hard-failing the moment the server accepts connections but is not yet ready.
 
 ## [v3.2.0] - 2026-06-16 - Redis Lock, Revocable Token Store, and Server-Sent Events Backplane
 

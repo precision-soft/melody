@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v3.2.0] - 2026-07-03 - Message-Id Round-Trip and Bucketed Delay Topology
+## [v3.2.0] - 2026-07-06 - Message-Id Round-Trip and Bucketed Delay Topology
 
 ### Added
 
@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `transport.go`, `server_sent_event_backplane.go` — `resetPublishChannel` no longer tears down a healthy publish channel when the caller never obtained one. On a publish where `ensurePublishChannel` itself failed, `publish`/`Publish` passed a nil failed-channel to `resetPublishChannel`, whose guard ("close the cached channel only when it is still the one the caller failed on") was bypassed for a nil argument — so it closed whatever channel was currently cached, including one a concurrent publisher had just reopened. A nil failed-channel identifies no specific channel and is now a no-op; a stale or closed cached channel is re-detected by `ensurePublishChannel`'s `IsClosed` guard on the next publish.
 - `transport.go` — delayed retries no longer suffer head-of-line blocking: the single `<queue>.delay` queue relied on per-message expirations, but RabbitMQ expires only the head of a queue, so one long-delayed message (retry delays grow with the attempt count, up to the consumer's `MaxDelay`, default 1h) stalled every shorter delay parked behind it for its full ttl. With the bucketed topology every message in a delay queue shares one ttl, so nothing can be stalled by a longer delay; residual head-of-line waiting exists only below the smallest bucket and is bounded by it.
 - `transport.go` — `drainPublishReturn` now drains every queued unroutable return rather than a single one. The publish path drains returns both before publishing (to clear any stale return) and after the broker confirm (to detect that this publish was returned as unroutable); reading only one return could leave a stale return behind to be misattributed to the next publish, or miss a return when more than one had accumulated on the buffered `NotifyReturn` channel. Covered by `TestDrainPublishReturn_DrainsEveryQueuedReturn`.
 - `transport.go` — `delayExpirationMilliseconds` now clamps a delayed-retry message's expiration to a 32-bit millisecond ceiling (`math.MaxUint32`, ~49.7 days). RabbitMQ parses the per-message `expiration` as a 32-bit value, so a pathologically large `DelayStamp` could wrap to a tiny ttl and expire the message almost immediately instead of after the intended delay. Covered by `TestDelayExpirationMilliseconds_ClampsHugeDelayToCap`.

@@ -450,6 +450,62 @@ func TestKernel_FailsClosedWhenKernelRequestDispatchErrors(t *testing.T) {
     }
 }
 
+func TestKernel_FailsClosedWhenKernelControllerDispatchErrors(t *testing.T) {
+    handlerRan := false
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/guarded",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            handlerRan = true
+
+            return TextResponse(nethttp.StatusOK, "handled"), nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainer()
+
+    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+
+    dispatcher.AddListener(
+        kernelcontract.EventKernelController,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            return exception.NewError("controller guard listener failed", nil, nil)
+        },
+        50,
+    )
+
+    lowerPriorityRan := false
+    dispatcher.AddListener(
+        kernelcontract.EventKernelController,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            lowerPriorityRan = true
+
+            return nil
+        },
+        20,
+    )
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    req := httptest.NewRequest(nethttp.MethodGet, "/guarded", nil)
+    rec := httptest.NewRecorder()
+
+    handler.ServeHTTP(rec, req)
+
+    if true == lowerPriorityRan {
+        t.Fatalf("expected the lower-priority kernel.controller listener to be skipped by the dispatcher abort")
+    }
+
+    if true == handlerRan {
+        t.Fatalf("expected the handler not to run when the kernel.controller dispatch aborted with partially-run listeners")
+    }
+
+    if nethttp.StatusInternalServerError != rec.Code {
+        t.Fatalf("expected a fail-closed 500 when the kernel.controller dispatch errored, got %d", rec.Code)
+    }
+}
 func TestKernel_KernelRequestListenerResponseStillWinsOverDispatchError(t *testing.T) {
     router := NewRouter()
     router.Handle(

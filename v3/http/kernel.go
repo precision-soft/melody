@@ -551,6 +551,24 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         _, eventKernelControllerErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelController, kernelControllerEvent)
         instance.logEventDispatchError(requestLogger, "kernel controller error", eventKernelControllerErr)
 
+        /* @important fail closed when the kernel.controller dispatch aborted with an error and no listener produced a response, mirroring the kernel.request path: the dispatcher stops at the first failing listener, so a required listener behind it (marked through RequiredListenerRegistrar) never ran; proceeding to the handler would treat a partially-processed request as authorized */
+        if nil != eventKernelControllerErr && nil == kernelControllerEvent.Response() {
+            statusCode := nethttp.StatusInternalServerError
+            message := "internal server error"
+            if true == debugMode {
+                message = eventKernelControllerErr.Error()
+            }
+
+            if true == PrefersHtml(melodyRequest) {
+                kernelControllerEvent.SetResponse(HtmlResponse(
+                    statusCode,
+                    "<!doctype html><html><head><meta charset=\"utf-8\"><title>Melody Error</title></head><body><h1>Error</h1><p>"+html.EscapeString(message)+"</p></body></html>",
+                ))
+            } else {
+                kernelControllerEvent.SetResponse(JsonErrorResponse(statusCode, message))
+            }
+        }
+
         if nil != kernelControllerEvent.Response() {
             finalResponse = kernelControllerEvent.Response()
 

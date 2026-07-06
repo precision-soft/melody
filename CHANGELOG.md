@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v1.15.0] - 2026-07-03 - Kernel Fail-Closed Dispatch, Non-Panicking Response Write and Closed-Scope Errors
+## [v1.15.0] - 2026-07-06 - Kernel Fail-Closed Dispatch, Non-Panicking Response Write and Closed-Scope Errors
 
 ### Added
 
@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `http/kernel.go` — the kernel now also fails closed when the `kernel.controller` event dispatch aborts with an error and no listener produced a response, mirroring the existing `kernel.request` fail-closed path: the dispatcher stops at the first failing listener, so a listener marked required through `RequiredListenerRegistrar` sitting behind a failing higher-priority `kernel.controller` listener never ran, yet the kernel logged the error and proceeded to the handler — a silent fail-open one lifecycle event past the `kernel.request` gate the primitive already closed. It now synthesizes a 500 instead. Fixed in lockstep across `v1`/`v2`/`v3`.
 - `http/request.go` — the request wrapper now preserves the raw body of an `application/x-www-form-urlencoded` request across its automatic form parse: it buffers the body and restores `Body`/`GetBody` around `ParseForm` (which consumes a urlencoded body), so a consumer that reads the raw body after the request is built still sees the true bytes instead of an empty one; multipart bodies stay streamed. Fixed in lockstep with `v3`, where it restores the HMAC internal-auth source's body-hash tamper-evidence for form-encoded requests (this module has no such consumer, so the change is a forward-looking parity back-port).
 - `http/kernel.go` — the kernel now fails closed when the `kernel.request` event dispatch aborts with an error and no listener produced a response: it synthesizes a 500 instead of proceeding to the handler with partially-run listeners (the dispatcher stops at the first failing listener — now documented on `event/contract.EventDispatcher` — so e.g. the access-control listener behind a failing higher-priority listener never ran, and the request continued fail-open). A response set by an earlier listener still wins. Fixed in lockstep with `v2`/`v3`.
 - `http/kernel.go` — the four response-finalization blocks now share one dispatch-error logging policy (`logEventDispatchError`, `AlreadyLogged`-aware): the controller-event and handler-response blocks logged the `EventKernelResponse` dispatch error inline, producing a duplicate log line for one listener failure. The not-found-handler error fallback also gains the `PrefersHtml` HTML branch the other error fallbacks already had. Fixed in lockstep with `v2`/`v3`.
@@ -32,11 +33,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `validation` — a parameterized validation tag on a constraint outside the four built-ins (`min`/`max`/`regex`/`greaterThan`) — for example an application-registered `between(min=1,max=5)` — no longer silently discards its parameters and validates against the registered singleton's baked-in configuration (a fail-open in which the tag's declared bound went unenforced). `createConstraintWithParams` now mirrors `v3`'s generic contract: a constraint that accepts parameters implements the new `validation/contract.ParameterizedConstraint` (`WithParams`), and a tag carrying parameters the constraint cannot consume fails closed (the field is rejected as an invalid rule) instead of being validated permissively. The built-in `min`/`max`/`regex`/`greaterThan` parameterized tags are unaffected. Back-ported from `v3`.
 - `validation/constraint_greater_than.go`, `constraint_less_than.go`, `constraint_min_length.go`, `constraint_max_length.go`, `constraint_regex.go` — the built-in parameterized constraints now also fail the rule closed when a parenthesized tag carries parameters without the key they consume (`value`, or `pattern`/`value` for `regex`), instead of silently falling back to their registered default bound. A mistyped key such as `greaterThan(min=18)` validated as `> 0`, `min(len=8)` as `minLength 1`, and — worst — `regex(re=^\d{4}$)` fell back to the match-all `.*` default, leaving the field effectively unvalidated; each now returns `invalid validation rule parameter`. The shorthand form (`greaterThan=18`) is unaffected — the parser maps it to the `value` key — and a bare value-less constraint (`min`) still resolves to its default. Extends the fail-closed parameterized-constraint contract above (which had left the built-ins unaffected) to the built-ins themselves. Back-ported from `v3`.
 - `validation/constraint_min_length.go`, `validation/constraint_max_length.go` — the min/max length constraints now count Unicode code points (runes) instead of UTF-8 bytes, matching the error text ("characters") and, in `v3`, the OpenAPI `minLength`/`maxLength` facets (code-point based). Previously a multibyte value passed a byte-based minimum with fewer characters than required (a fail-open for a minimum-length check) and a code-point-valid value could be rejected server-side. Fixed in lockstep across `v1`/`v2`/`v3`.
-
-## [v1.14.2] - 2026-06-25 - Firewall Matcher Nil-Request Guard
-
-### Fixed
-
 - `security/matcher.go` — `PathPrefixMatcher.Matches` dereferenced the request (`request.HttpRequest()`) without first checking that the `httpcontract.Request` interface itself is non-nil, so a nil request triggered a nil-pointer dereference panic. Both `Firewall.Check` and `ApiKeyHeaderRule.Check` reach the matcher through `Applies` *before* any request nil-check (the `nil == request` guards inside `ApiKeyHeaderRule.Check` run only after `Applies`, leaving them unreachable dead code for a nil request), so a nil request reaching the firewall crashed the request rather than being treated as non-matching. `Matches` now returns `false` for a nil request, mirroring its existing `nil == request.HttpRequest()` guard, so the rule cleanly does not apply. Latent hardening: the request is always non-nil through the normal request-event flow, so this was not reachable in production. Fixed in lockstep with `v2`/`v3`.
 
 ## [v1.14.1] - 2026-06-25 - Cross-Version Security and Correctness Back-ports
@@ -473,9 +469,7 @@ Lock-step release — no `v1/` changes this cycle. Tag published to keep the cor
 
 [Unreleased]: https://github.com/precision-soft/melody/compare/v1.15.0...HEAD
 
-[v1.15.0]: https://github.com/precision-soft/melody/compare/v1.14.2...v1.15.0
-
-[v1.14.2]: https://github.com/precision-soft/melody/compare/v1.14.1...v1.14.2
+[v1.15.0]: https://github.com/precision-soft/melody/compare/v1.14.1...v1.15.0
 
 [v1.14.1]: https://github.com/precision-soft/melody/compare/v1.14.0...v1.14.1
 

@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v3.9.0] - 2026-07-03 - Cross-App Security, Route Manifest, Consumer Hardening and the Observability Seam
+## [v3.9.0] - 2026-07-06 - Cross-App Security, Route Manifest, Consumer Hardening and the Observability Seam
 
 ### Added
 
@@ -43,6 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `http/kernel.go` — the kernel now also fails closed when the `kernel.controller` event dispatch aborts with an error and no listener produced a response, mirroring the existing `kernel.request` fail-closed path: the dispatcher stops at the first failing listener, so a listener marked required through `RequiredListenerRegistrar` sitting behind a failing higher-priority `kernel.controller` listener never ran, yet the kernel logged the error and proceeded to the handler — a silent fail-open one lifecycle event past the `kernel.request` gate the primitive already closed. It now synthesizes a 500 instead. Fixed in lockstep across `v1`/`v2`/`v3`.
+- `openapi/schema.go` — a negative `max` bound on a **nullable** string field (for example a `*string` carrying `validate:"max(value=-1)"`) is no longer advertised as fully unsatisfiable. `MaxLength.Validate` rejects every non-null value but passes a nil pointer (it dereferences to absent), so the validator still accepts null; the mirror now contradicts only the non-null value space (`applyEmptyValueSpace`) and preserves the `nullable` advertisement — matching the integer/number/boolean branch — instead of clearing `Nullable` and advertising a null the validator in fact accepts.
 - `http/request.go` — the request wrapper now preserves the raw body of an `application/x-www-form-urlencoded` request across its automatic form parse. `NewRequest` auto-runs `ParseForm` for form content types, and `ParseForm` *consumes* a urlencoded body; the wrapper now buffers the body and restores `Body`/`GetBody` around that parse so a later reader still sees the true bytes. Without this the new HMAC internal-auth source — which reads the body *after* the auto-parse to verify the envelope's signed body hash — saw an empty body and therefore verified every form-encoded request against the hash of an empty body, silently accepting a tampered form body (the envelope's documented body-tamper-evidence was void for that one content type; JSON and other content types were already correct, and multipart bodies are deliberately left streamed so large-upload disk spooling is preserved). Found via live end-to-end testing of the internal-auth firewall. Fixed in lockstep with `v1`/`v2`.
 - `openapi/schema.go` — closed two advertise-vs-enforce gaps in the OpenAPI generator against the validator's behavior: (1) a malformed or empty `min`/`max` value on a non-string field — integer, number, boolean, array, object or a `$ref` struct — is now advertised as unsatisfiable (null included), matching the validator which fails the rule closed and rejects every value before it is examined; previously only the string shape was handled, so a non-string field with e.g. `min=abc` was advertised satisfiable while the server rejected all input. A valid-but-restrictive bound (a negative `max`, a too-large `min`) is left to the per-kind handling, which preserves a nullable field's null since the constraint still accepts a nil pointer. When several length rules apply to one field the tighter ceiling wins (a later `max` no longer raises a lower `maxLength` set by an uncompilable-regex rule), and symmetrically a value-less `min` is now raise-only so it cannot lower a higher `minLength` floor
   an earlier rule already set (advertising the effective floor the validator enforces). (2) a `regex`/`pattern` whose value fails to compile is no longer emitted verbatim (an uncompilable
@@ -78,11 +80,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `security/actor.go` — `NewActorFromData` and `ActorToData` bound the impersonator-chain recursion at `maxActorImpersonationDepth` and truncate at the bound, the companion to the token store's `cloneActorData` above. Because `ActorData.Impersonator` (and an `Actor`'s `Impersonator()`) are reachable through the exported field, an in-process caller can build a cyclic or pathologically deep chain; without the bound, rebuilding one (`NewActorFromData`, on the HMAC decode path) or serializing one (`ActorToData`, on the sign path) recursed until the goroutine stack overflowed — a fatal error no `recover()` can catch. A JSON-decoded actor is additionally capped by `encoding/json`'s nesting limit.
 - `http/kernel.go` — the synthetic `Allow` header on an automatic `405`/`OPTIONS` response now reflects the configured `MethodPolicy`: it advertises `OPTIONS` only when `AutomaticOptions` is enabled and the synthetic `HEAD` only when `HeadFallbackToGet` is enabled. Previously both were listed unconditionally, so under a non-default policy the `Allow` header promised `OPTIONS`/`HEAD` that in fact return `405`. A method the route declares explicitly is unaffected. Fixed in lockstep with `v1`/`v2`.
 - `.example/url/route_registry.go` — the example's `window.melodyRoutes` projection now reuses the framework `BuildRouteManifest`, so it applies the same `RouteAttributeExpose` opt-in filter as the `melody:routes:manifest` command instead of dumping every route's pattern, requirements and defaults to the browser. The example's frontend-facing routes already opt in via `ExposedRouteAttributes`, so the demo is unchanged; the example now models exposing only deliberately-published route metadata rather than an anti-pattern a reader might copy into production.
-
-## [v3.8.2] - 2026-06-25 - Firewall Matcher Nil-Request Guard
-
-### Fixed
-
 - `security/matcher.go` — `PathPrefixMatcher.Matches` dereferenced the request (`request.HttpRequest()`) without first checking that the `httpcontract.Request` interface itself is non-nil, so a nil request triggered a nil-pointer dereference panic. Both `Firewall.Check` and `ApiKeyHeaderRule.Check` reach the matcher through `Applies` *before* any request nil-check (the `nil == request` guards inside `ApiKeyHeaderRule.Check` run only after `Applies`, leaving them unreachable dead code for a nil request), so a nil request reaching the firewall crashed the request rather than being treated as non-matching. `Matches` now returns `false` for a nil request, mirroring its existing `nil == request.HttpRequest()` guard, so the rule cleanly does not apply. Latent hardening: the request is always non-nil through the normal request-event flow, so this was not reachable in production. Fixed in lockstep with `v1`/`v2`.
 
 ## [v3.8.1] - 2026-06-25 - OpenAPI notBlank Nullability and Numeric `max` Spec Fidelity
@@ -523,9 +520,7 @@ Lock-step release — no `v3/` changes this cycle. Tag SHA differs from `v3.0.0`
 
 [Unreleased]: https://github.com/precision-soft/melody/compare/v3.9.0...HEAD
 
-[v3.9.0]: https://github.com/precision-soft/melody/compare/v3.8.2...v3.9.0
-
-[v3.8.2]: https://github.com/precision-soft/melody/compare/v3.8.1...v3.8.2
+[v3.9.0]: https://github.com/precision-soft/melody/compare/v3.8.1...v3.9.0
 
 [v3.8.1]: https://github.com/precision-soft/melody/compare/v3.8.0...v3.8.1
 

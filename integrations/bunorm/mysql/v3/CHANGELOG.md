@@ -7,16 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.1.1] - 2026-07-06 - Standalone Module Resolution and Connection-Retry Fixes
+
 ### Fixed
 
+- `lock.go` — the advisory-lock (`GET_LOCK`) locker now marks the pinned driver connection bad (`driver.ErrBadConn`) when `RELEASE_LOCK` cannot be issued, so `database/sql` ends the physical session — releasing the lock server-side — instead of returning a still-locked connection to the pool for reuse; and `Refresh` now probes lock ownership on a fresh, bounded context rather than the request context, so a canceled or expired request context is never mistaken for a lost lock and does not actively release a still-held one. Both bring the MySQL locker to parity with the PostgreSQL advisory-lock locker, which already handled these cases.
+- `go.mod` — the module pinned `melody/v3 v3.0.0` while importing the `lock`/`lock/contract` packages, which only exist from `v3.7.0`: outside the repository workspace (`GOWORK=off`, or any consumer cloning just this module) the module did not resolve. The pin is raised to `v3.7.0` — the lowest framework version that provides every imported package — and the module-local `go.sum` is now complete for standalone builds.
 - `provider.go` — the connection-retry backoff no longer collapses to zero at very high attempt counts: `computeBackoffDelay` now grows the delay in float space and returns `MaxDelay` as soon as it is reached, instead of converting `float64(initialDelay) * multiplier` to `time.Duration` first — for an aggressive `RetryConfig` (e.g. `MaxAttempts >= 37` with the default 2× multiplier) the product overflowed `int64` to a negative duration that slipped past the `> MaxDelay` cap, so `time.Sleep` returned immediately and late attempts re-dialled with no backoff.
 - `provider.go` — `isTransientError` now also treats bare `EOF`/`unexpected EOF`, `use of closed network connection`, `connection closed`, and `connection reset` as transient, so a graceful peer close during the RESP/handshake phase of a cold-starting server is retried instead of hard-failing on the first attempt.
-
-## [v3.1.1] - 2026-07-03 - Standalone Module Resolution Fix
-
-### Fixed
-
-- `go.mod` — the module pinned `melody/v3 v3.0.0` while importing the `lock`/`lock/contract` packages, which only exist from `v3.7.0`: outside the repository workspace (`GOWORK=off`, or any consumer cloning just this module) the module did not resolve. The pin is raised to `v3.7.0` — the lowest framework version that provides every imported package — and the module-local `go.sum` is now complete for standalone builds.
 
 ## [v3.1.0] - 2026-06-16 - MySQL Advisory Lock (GET_LOCK)
 

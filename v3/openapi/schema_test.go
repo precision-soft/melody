@@ -383,6 +383,29 @@ func TestBuildSchema_NegativeMinClampedNegativeMaxUnsatisfiable(t *testing.T) {
     }
 }
 
+/** @info a negative max admits no non-null value, but MaxLength.Validate passes a nil pointer (dereferenceValue returns absent), so the validator still accepts null on a NULLABLE field. The mirror must therefore contradict only the value space and preserve the nullable advertisement — matching the integer/number/boolean branch — rather than clearing Nullable and advertising a null the validator accepts as invalid. A non-nullable field stays fully unsatisfiable. */
+func TestApplyValidation_NegativeMaxOnNullableStringKeepsNullValid(t *testing.T) {
+    nullable := &Schema{Type: "string", Nullable: true}
+    applyValidation(nullable, "max(value=-1)")
+
+    if false == nullable.Nullable {
+        t.Fatalf("expected a nullable string with a negative max to keep null valid (the validator accepts null), but Nullable was cleared")
+    }
+    if nil == nullable.MinLength || 1 != *nullable.MinLength || nil == nullable.MaxLength || 0 != *nullable.MaxLength {
+        t.Fatalf("expected the non-null value space contradicted (minLength 1, maxLength 0), got: %+v", nullable)
+    }
+
+    nonNullable := &Schema{Type: "string"}
+    applyValidation(nonNullable, "max(value=-1)")
+
+    if true == nonNullable.Nullable {
+        t.Fatalf("expected a non-nullable string with a negative max to stay non-nullable")
+    }
+    if nil == nonNullable.MinLength || 1 != *nonNullable.MinLength || nil == nonNullable.MaxLength || 0 != *nonNullable.MaxLength {
+        t.Fatalf("expected a non-nullable field advertised fully unsatisfiable (minLength 1, maxLength 0), got: %+v", nonNullable)
+    }
+}
+
 func TestBuildSchema_ParenthesizedRegexCommaInGroupPreserved(t *testing.T) {
     components := map[string]*Schema{}
     names := map[reflect.Type]string{}

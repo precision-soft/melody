@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v2.0.3] - 2026-07-06 - Connection-Retry Backoff Overflow and Transient-Error Coverage
+
 ### Fixed
 
 - `provider.go` — the connection-retry backoff no longer collapses to zero at very high attempt counts: `computeBackoffDelay` now grows the delay in float space and returns `MaxDelay` as soon as it is reached, instead of converting `float64(initialDelay) * multiplier` to `time.Duration` first — for an aggressive `RetryConfig` (e.g. `MaxAttempts >= 37` with the default 2× multiplier) the product overflowed `int64` to a negative duration that slipped past the `> MaxDelay` cap, so `time.Sleep` returned immediately and late attempts re-dialled with no backoff.
@@ -38,7 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Code moved to `integrations/bunorm/mysql/v2/` with matching module path
 - Dependencies: `github.com/precision-soft/melody/integrations/bunorm/v2 v2.0.0`, `github.com/precision-soft/melody/v2 v2.0.0`
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v2.0.2...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v2.0.3...HEAD
+
+[v2.0.3]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v2.0.2...integrations/bunorm/mysql/v2.0.3
 
 [v2.0.2]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v2.0.1...integrations/bunorm/mysql/v2.0.2
 

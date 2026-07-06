@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v3.1.2] - 2026-07-03 - Standalone Module Resolution Fix
+## [v3.1.2] - 2026-07-06 - Standalone Module Resolution Fix
 
 ### Fixed
 

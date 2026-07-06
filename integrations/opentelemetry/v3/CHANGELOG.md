@@ -7,16 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- `otlp/` — new opt-in subpackage that exports spans to an OTLP collector, kept separate so metrics-only consumers of the root package do not pull the OTLP/gRPC dependencies into their build. `otlp.NewTracerProvider(ctx, otlp.Config{Endpoint, Protocol, ServiceName, ServiceVersion, SampleRatio, Headers, Insecure, BatchTimeout})` builds a batching `TracerProvider` over the grpc (default, collector `:4317`) or http/protobuf (`:4318`) exporter. `otlp.NewModule(otlp.ModuleConfig{Config, TracerName, Propagator})` is the plug-and-play facade — registered with one `app.RegisterModule(...)`, it builds the provider, installs `NewTracingMiddleware`, and registers the provider under `otlp.ServiceTracerProvider` as a `Close()`-able container service so the application's shutdown flushes pending spans. The root package keeps `NewTracingMiddleware(tracer, propagator)` for bring-your-own-tracer wiring.
-
-## [v3.1.0] - 2026-07-03 - Lifecycle Handler Decorator
+## [v3.1.0] - 2026-07-06 - Lifecycle Handler Decorator and OTLP Trace Export
 
 ### Added
 
 - `handler_decorator.go` — `NewHandlerDecorator(HandlerDecoratorConfig{Tracer, Propagator, Meter})` builds the outermost observability seam: registered through the new core `Application.RegisterHttpHandlerDecorator` (or `ModuleConfig.HandlerDecorators` on this module), it wraps the full `nethttp.Handler` the http kernel produces, so requests the middlewares never observe — security denials and other `kernel.request` short-circuits, listener-written responses, the panic-recovery path — now produce a lifecycle span (and, with a `Meter`, lifecycle count/duration metrics under distinct `http.server.lifecycle.request.*` instrument names, so routed requests are not double-counted). The routed tracing middleware's span becomes a child of the lifecycle span through the injected context. The status-recording writer keeps satisfying `http.Flusher`/`http.Hijacker` (mirroring the kernel's recording writer), so SSE and WebSocket upgrades pass through unchanged.
 - `module.go` — `ModuleConfig.HandlerDecorators`: the module now implements the core `HttpHandlerDecoratorModule` hook and registers the configured decorators as outermost wrappers.
+- `otlp/` — new opt-in subpackage that exports spans to an OTLP collector, kept separate so metrics-only consumers of the root package do not pull the OTLP/gRPC dependencies into their build. `otlp.NewTracerProvider(ctx, otlp.Config{Endpoint, Protocol, ServiceName, ServiceVersion, SampleRatio, Headers, Insecure, BatchTimeout})` builds a batching `TracerProvider` over the grpc (default, collector `:4317`) or http/protobuf (`:4318`) exporter. `otlp.NewModule(otlp.ModuleConfig{Config, TracerName, Propagator})` is the plug-and-play facade — registered with one `app.RegisterModule(...)`, it builds the provider, installs `NewTracingMiddleware`, and registers the provider under `otlp.ServiceTracerProvider` as a `Close()`-able container service so the application's shutdown flushes pending spans. The root package keeps `NewTracingMiddleware(tracer, propagator)` for bring-your-own-tracer wiring.
 
 ### Fixed
 
