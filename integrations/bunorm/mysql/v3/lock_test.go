@@ -208,7 +208,7 @@ func TestMysqlLock_AcquireVerifyErrorReleasesHeldLock(t *testing.T) {
     }
 }
 
-func TestMysqlLock_RefreshVerifyErrorReleasesHeldLock(t *testing.T) {
+func TestMysqlLock_RefreshCanceledRuntimeContextKeepsHeldLock(t *testing.T) {
     dsn := os.Getenv("MYSQL_DSN")
     if "" == dsn {
         t.Skip("MYSQL_DSN not set; skipping mysql lock integration test")
@@ -223,7 +223,7 @@ func TestMysqlLock_RefreshVerifyErrorReleasesHeldLock(t *testing.T) {
     database := bun.NewDB(sqldb, mysqldialect.New())
 
     locker := NewLocker(database)
-    name := "melody_lock_refresh_verify_error_release"
+    name := "melody_lock_refresh_canceled_context_keeps_lock"
 
     lock := locker.CreateLock(name, 0)
 
@@ -235,16 +235,27 @@ func TestMysqlLock_RefreshVerifyErrorReleasesHeldLock(t *testing.T) {
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
 
-    if refreshErr := lock.Refresh(newLockRuntimeWithContext(cancelledContext), 0); nil == refreshErr {
-        t.Fatalf("expected refresh to fail on the cancelled verify query")
+    if refreshErr := lock.Refresh(newLockRuntimeWithContext(cancelledContext), 0); nil != refreshErr {
+        t.Fatalf("expected refresh to succeed despite the canceled runtime context: %v", refreshErr)
     }
 
     var holder sql.NullInt64
     if holderErr := sqldb.QueryRowContext(context.Background(), "SELECT IS_USED_LOCK(?)", name).Scan(&holder); nil != holderErr {
         t.Fatalf("read lock holder: %v", holderErr)
     }
+    if false == holder.Valid {
+        t.Fatalf("lock was released: a canceled runtime context must not release a still-held lock")
+    }
+
+    if releaseErr := lock.Release(newLockRuntime()); nil != releaseErr {
+        t.Fatalf("release: %v", releaseErr)
+    }
+
+    if holderErr := sqldb.QueryRowContext(context.Background(), "SELECT IS_USED_LOCK(?)", name).Scan(&holder); nil != holderErr {
+        t.Fatalf("read lock holder after release: %v", holderErr)
+    }
     if true == holder.Valid {
-        t.Fatalf("lock was orphaned: still held by session %d after the refresh verify-error path", holder.Int64)
+        t.Fatalf("lock still held by session %d after release", holder.Int64)
     }
 }
 

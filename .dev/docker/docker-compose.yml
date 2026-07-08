@@ -47,6 +47,11 @@ services:
         ports:
             - "${RABBITMQ_HOST_PORT:-5673}:5672"
             - "${RABBITMQ_MANAGEMENT_HOST_PORT:-15673}:15672"
+        healthcheck:
+            test: [ 'CMD-SHELL', 'rabbitmq-diagnostics -q ping' ]
+            interval: 5s
+            timeout: 5s
+            retries: 20
 
     redis:
         image: redis:7-alpine
@@ -54,6 +59,11 @@ services:
         restart: 'no'
         ports:
             - "${REDIS_HOST_PORT:-6380}:6379"
+        healthcheck:
+            test: [ 'CMD-SHELL', 'redis-cli ping' ]
+            interval: 5s
+            timeout: 5s
+            retries: 20
 
     mysql:
         image: mysql:8.4
@@ -66,6 +76,11 @@ services:
             MYSQL_PASSWORD: melody
         ports:
             - "${MYSQL_HOST_PORT:-3307}:3306"
+        healthcheck:
+            test: [ 'CMD-SHELL', 'mysqladmin ping -h localhost -proot' ]
+            interval: 5s
+            timeout: 5s
+            retries: 20
 
     localstack:
         image: localstack/localstack:3.8
@@ -80,6 +95,11 @@ services:
             - ${RELATIVE_PATH_TO_ROOT}/.dev-data/localstack:/var/lib/localstack
         ports:
             - "${LOCALSTACK_HOST_PORT:-4566}:4566"
+        healthcheck:
+            test: [ 'CMD-SHELL', 'curl -sf http://localhost:4566/_localstack/health' ]
+            interval: 5s
+            timeout: 5s
+            retries: 20
 
     postgres:
         image: postgres:16-alpine
@@ -91,6 +111,11 @@ services:
             POSTGRES_DB: melody_test
         ports:
             - "${POSTGRES_HOST_PORT:-5433}:5432"
+        healthcheck:
+            test: [ 'CMD-SHELL', 'pg_isready -U melody' ]
+            interval: 5s
+            timeout: 5s
+            retries: 20
 
     mailpit:
         image: axllent/mailpit
