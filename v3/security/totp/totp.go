@@ -74,7 +74,7 @@ func Verify(secret string, code string, config Config) (bool, error) {
     return VerifyAt(secret, code, time.Now(), config)
 }
 
-/* VerifyAt is Verify at an explicit time, exposed for deterministic testing and for callers that drive their own clock. */
+/* VerifyAt is Verify at an explicit time, exposed for deterministic testing and for callers that drive their own clock. Whitespace anywhere in the submitted code is stripped before comparison — authenticator apps display codes as "123 456" and mobile copy/paste keeps the separator (often as a non-breaking space) — mirroring the secret normalization; whitespace can never be part of an all-digit code, so the tolerance is unambiguous and the comparison stays constant-time. */
 func VerifyAt(secret string, code string, at time.Time, config Config) (bool, error) {
     resolved := config.withDefaults()
 
@@ -82,6 +82,8 @@ func VerifyAt(secret string, code string, at time.Time, config Config) (bool, er
     if nil != decodeErr {
         return false, decodeErr
     }
+
+    code = strings.Join(strings.Fields(code), "")
 
     if len(code) != resolved.Digits {
         return false, nil

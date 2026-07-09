@@ -1,6 +1,7 @@
 package migrate
 
 import (
+    "strings"
     "testing"
 
     "github.com/uptrace/bun/migrate"
@@ -64,5 +65,53 @@ func TestModule_RegisterCliCommandsHonorsConfiguredOptions(t *testing.T) {
         }
 
         expectedNames[command.Name()] = true
+    }
+}
+
+func TestModule_RegisterCliCommandsComposesLegacyAndContexts(t *testing.T) {
+    module := NewModule(ModuleConfig{
+        Migrations: migrate.NewMigrations(),
+        Contexts: []ContextConfig{
+            {Name: "payment", Migrations: migrate.NewMigrations()},
+        },
+    })
+
+    commands := module.RegisterCliCommands(nil)
+
+    names := make(map[string]bool, len(commands))
+    for _, command := range commands {
+        names[command.Name()] = true
+    }
+
+    if false == names["db:migrate"] {
+        t.Fatalf("expected the legacy unprefixed family to survive, got: %v", names)
+    }
+
+    if false == names["db:payment:migrate"] {
+        t.Fatalf("expected the per-context family, got: %v", names)
+    }
+
+    if 12 != len(commands) {
+        t.Fatalf("expected both families (12 commands), got %d", len(commands))
+    }
+}
+
+func TestModule_RegisterCliCommandsContextsOnly(t *testing.T) {
+    module := NewModule(ModuleConfig{
+        Contexts: []ContextConfig{
+            {Name: "platform", Migrations: migrate.NewMigrations()},
+        },
+    })
+
+    commands := module.RegisterCliCommands(nil)
+
+    if 6 != len(commands) {
+        t.Fatalf("expected one context family, got %d commands", len(commands))
+    }
+
+    for _, command := range commands {
+        if false == strings.HasPrefix(command.Name(), "db:platform:") {
+            t.Fatalf("expected the context prefix, got: %s", command.Name())
+        }
     }
 }

@@ -10,8 +10,10 @@ import (
     "github.com/precision-soft/melody/clock"
     clockcontract "github.com/precision-soft/melody/clock/contract"
     "github.com/precision-soft/melody/exception"
+    exceptioncontract "github.com/precision-soft/melody/exception/contract"
     httpcontract "github.com/precision-soft/melody/http/contract"
     "github.com/precision-soft/melody/internal"
+    "github.com/precision-soft/melody/logging"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
@@ -319,7 +321,25 @@ func RateLimitMiddleware(config *RateLimitConfig) httpcontract.Middleware {
         return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             key := config.KeyExtractor()(request)
 
-            if false == config.Limiter().Allow(key) {
+            allowed := false
+            if runtimeLimiter, isRuntimeLimiter := config.Limiter().(httpcontract.RuntimeRateLimiter); true == isRuntimeLimiter {
+                var allowErr error
+                allowed, allowErr = runtimeLimiter.AllowWithRuntime(runtimeInstance, key)
+                if nil != allowErr {
+                    /* the returned allowed value already reflects the limiter's failure policy; the middleware only reports the store failure */
+                    logger := logging.LoggerFromRuntime(runtimeInstance)
+                    if nil != logger {
+                        logger.Error(
+                            "rate limiter store failure",
+                            exception.LogContext(allowErr, exceptioncontract.Context{"key": key}),
+                        )
+                    }
+                }
+            } else {
+                allowed = config.Limiter().Allow(key)
+            }
+
+            if false == allowed {
                 return config.OnLimitExceeded()(request)
             }
 

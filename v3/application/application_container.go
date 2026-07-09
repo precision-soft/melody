@@ -1,6 +1,7 @@
 package application
 
 import (
+    "errors"
     "os"
 
     applicationcontract "github.com/precision-soft/melody/v3/application/contract"
@@ -10,6 +11,7 @@ import (
     clockcontract "github.com/precision-soft/melody/v3/clock/contract"
     "github.com/precision-soft/melody/v3/config"
     configcontract "github.com/precision-soft/melody/v3/config/contract"
+    "github.com/precision-soft/melody/v3/container"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/event"
     eventcontract "github.com/precision-soft/melody/v3/event/contract"
@@ -37,7 +39,23 @@ func (instance *Application) RegisterService(
         exception.Panic(exception.NewError("may not register services after boot", nil, nil))
     }
 
-    instance.kernel.ServiceContainer().MustRegister(serviceName, provider, options...)
+    registerErr := instance.kernel.ServiceContainer().Register(serviceName, provider, options...)
+    if nil == registerErr {
+        return
+    }
+
+    /* duplicates are recorded for the aggregated boot report instead of panicking one at a time (the first registration wins until the guaranteed panic ends the boot); any other registration failure stays fail-fast */
+    if true == errors.Is(registerErr, container.ErrServiceIdAlreadyRegistered) {
+        instance.recordBootCollision(bootCollisionKindService, serviceName, 1)
+        return
+    }
+
+    if true == errors.Is(registerErr, container.ErrServiceTypeAlreadyRegistered) {
+        instance.recordBootCollision(bootCollisionKindServiceType, serviceName, 1)
+        return
+    }
+
+    exception.Panic(exception.FromError(registerErr))
 }
 
 func (instance *Application) bootContainer() {
@@ -82,6 +100,13 @@ func (instance *Application) bootContainer() {
         config.ServiceConfig,
         func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
             return configuration, nil
+        },
+    )
+
+    instance.RegisterService(
+        ServiceProcessRole,
+        func(resolver containercontract.Resolver) (string, error) {
+            return instance.runtimeFlags.Role(), nil
         },
     )
 

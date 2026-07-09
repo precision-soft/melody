@@ -96,7 +96,7 @@ func (instance *GenerateCommand) Flags() []clicontract.Flag {
         },
         &clicontract.StringFlag{
             Name:  flagNameTemplate,
-            Usage: "name of the registered template that will render the entries; overrides the melody.cron.template parameter (default: crontab)",
+            Usage: "name of the registered template that will render the entries; overrides the melody.cron.template parameter (default: crontab). Built-in templates: crontab, crontab-no-user",
         },
     }
 }

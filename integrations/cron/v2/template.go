@@ -8,6 +8,7 @@ type Template interface {
 func BuiltinTemplates() []Template {
     return []Template{
         defaultCrontabTemplate,
+        defaultCrontabNoUserTemplate,
     }
 }
 

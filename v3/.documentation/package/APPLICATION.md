@@ -36,10 +36,24 @@ This allows HTTP/CLI module code to read resolved configuration values during re
 
 ## Runtime mode
 
-Runtime mode is determined by [`ParseRuntimeFlags`](../../application/cli.go):
+Runtime mode is determined by [`ParseRuntimeFlags`](../../application/cli.go). The full contract, in precedence order:
 
-- `--mode=http` or `--mode=cli` (also `-mode=...`)
-- When no explicit mode is provided, non-runtime arguments imply CLI mode.
+1. An explicit `--mode=http` or `--mode=cli` flag (also `-mode=...`, or the space-separated form `--mode cli`) always wins.
+2. Without an explicit flag, ANY other non-runtime argument implies CLI mode — `./app melody:messagebus:consume`, `./app db:migrate` and so on each run that one command and exit.
+3. With no arguments at all, the `MELODY_DEFAULT_MODE` parameter applies (settable only through the `.env` artifacts — see the CONFIG note below), and it defaults to `http`.
+
+An invalid mode panics at startup. The consequence worth internalizing: **`./app` with no arguments starts HTTP mode**, which boots every module — so anything wired to run in the serving process (outbox relays, consumers, schedulers) starts too. Any command argv flips the process to a one-shot CLI run. This is a supported contract, not an implementation detail; applications may rely on it as their web/background gate, or use the dedicated process role below for a gate that is independent of the transport.
+
+## Process role
+
+A process additionally declares a role — `web`, `worker` or `all` — resolved by [`ParseRuntimeFlagsWithRole`](../../application/cli.go):
+
+1. An explicit `--role=web|worker|all` flag (also `-role=...` or space-separated) always wins.
+2. Otherwise the `MELODY_PROCESS_ROLE` parameter applies, defaulting to `all`.
+
+Melody itself gates nothing on the role: it is declared intent for the composition root and long-running runners to query — through [`Application.ProcessRole()`](../../application/application.go), the `KernelConfiguration.ProcessRole()` accessor, the [`ServiceProcessRole`](../../application/service_resolver.go) container service, and the predicates [`config.RoleAllowsBackgroundWork` / `config.RoleAllowsHttp`](../../config/process_role.go). The flag exists because melody never reads the process environment: a docker-compose deployment differentiates containers built from one image with `command: ["/app", "--role=worker"]`, where an `APP_ROLE` environment variable would be silently inert.
+
+Like `--mode`, the `--role` flag never implies CLI mode and is stripped from `os.Args` before the CLI framework parses the arguments.
 
 ## Usage
 

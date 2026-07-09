@@ -131,3 +131,51 @@ func TestRegisterCommands_MetadataIsComplete(t *testing.T) {
         }
     }
 }
+
+func TestRegisterContextCommands_BuildsOneFamilyPerContext(t *testing.T) {
+    commands := RegisterContextCommands(
+        []ContextConfig{
+            {Name: "platform", Migrations: migrate.NewMigrations()},
+            {Name: "payment", Migrations: migrate.NewMigrations()},
+        },
+        Options{},
+    )
+
+    expectedNames := map[string]bool{
+        "db:platform:init":     false,
+        "db:platform:migrate":  false,
+        "db:platform:rollback": false,
+        "db:platform:status":   false,
+        "db:platform:unlock":   false,
+        "db:platform:create":   false,
+        "db:payment:init":      false,
+        "db:payment:migrate":   false,
+        "db:payment:rollback":  false,
+        "db:payment:status":    false,
+        "db:payment:unlock":    false,
+        "db:payment:create":    false,
+    }
+
+    if len(expectedNames) != len(commands) {
+        t.Fatalf("expected %d commands, got %d", len(expectedNames), len(commands))
+    }
+
+    for _, command := range commands {
+        seen, expected := expectedNames[command.Name()]
+        if false == expected {
+            t.Fatalf("unexpected command name: %s", command.Name())
+        }
+
+        if true == seen {
+            t.Fatalf("duplicate command name: %s", command.Name())
+        }
+
+        expectedNames[command.Name()] = true
+    }
+}
+
+func TestRegisterContextCommands_EmptyContextsBuildNothing(t *testing.T) {
+    if commands := RegisterContextCommands(nil, Options{}); 0 != len(commands) {
+        t.Fatalf("expected no commands, got %d", len(commands))
+    }
+}

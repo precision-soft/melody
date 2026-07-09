@@ -163,3 +163,54 @@ func containsAll(haystack string, needles ...string) bool {
 
     return true
 }
+
+func TestVerifyAt_ToleratesWhitespaceInTheSubmittedCode(t *testing.T) {
+    at := time.Unix(1111111109, 0)
+
+    code, codeErr := totp.GenerateCodeAt(rfc6238Secret, at, totp.Config{})
+    if nil != codeErr {
+        t.Fatalf("unexpected code error: %v", codeErr)
+    }
+
+    /* authenticator display format, plain copy/paste padding, and the NBSP mobile keyboards produce */
+    variants := []string{
+        " " + code + " ",
+        code[:3] + " " + code[3:],
+        code[:3] + " " + code[3:],
+        "\t" + code,
+    }
+
+    for _, variant := range variants {
+        valid, verifyErr := totp.VerifyAt(rfc6238Secret, variant, at, totp.Config{})
+        if nil != verifyErr {
+            t.Fatalf("unexpected verify error for %q: %v", variant, verifyErr)
+        }
+
+        if false == valid {
+            t.Fatalf("expected the whitespace variant %q to verify", variant)
+        }
+    }
+}
+
+func TestVerifyAt_StillRejectsWrongAndShortCodes(t *testing.T) {
+    at := time.Unix(1111111109, 0)
+
+    code, codeErr := totp.GenerateCodeAt(rfc6238Secret, at, totp.Config{})
+    if nil != codeErr {
+        t.Fatalf("unexpected code error: %v", codeErr)
+    }
+
+    /* flip the last digit so the normalized form is a well-formed but wrong code */
+    flipped := code[:5] + string('0'+(code[5]-'0'+1)%10)
+
+    for _, invalid := range []string{"12 34", "  ", flipped[:3] + " " + flipped[3:]} {
+        valid, verifyErr := totp.VerifyAt(rfc6238Secret, invalid, at, totp.Config{})
+        if nil != verifyErr {
+            t.Fatalf("unexpected verify error for %q: %v", invalid, verifyErr)
+        }
+
+        if true == valid {
+            t.Fatalf("expected %q to be rejected", invalid)
+        }
+    }
+}

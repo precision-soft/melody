@@ -8,28 +8,33 @@ import (
     "github.com/precision-soft/melody/internal/testhelper"
 )
 
-func TestParseModeFlagValue(t *testing.T) {
-    value, matched, consumeNext := parseModeFlagValue("-mode")
+func TestParseRuntimeFlagValue(t *testing.T) {
+    value, matched, consumeNext := parseRuntimeFlagValue("-mode", "mode")
     if false == matched || false == consumeNext || "" != value {
         t.Fatalf("unexpected result: value=%q matched=%v consumeNext=%v", value, matched, consumeNext)
     }
 
-    value, matched, consumeNext = parseModeFlagValue("--mode")
+    value, matched, consumeNext = parseRuntimeFlagValue("--mode", "mode")
     if false == matched || false == consumeNext || "" != value {
         t.Fatalf("unexpected result: value=%q matched=%v consumeNext=%v", value, matched, consumeNext)
     }
 
-    value, matched, consumeNext = parseModeFlagValue("-mode=cli")
+    value, matched, consumeNext = parseRuntimeFlagValue("-mode=cli", "mode")
     if false == matched || true == consumeNext || "cli" != value {
         t.Fatalf("unexpected result: value=%q matched=%v consumeNext=%v", value, matched, consumeNext)
     }
 
-    value, matched, consumeNext = parseModeFlagValue("--mode=http")
+    value, matched, consumeNext = parseRuntimeFlagValue("--mode=http", "mode")
     if false == matched || true == consumeNext || "http" != value {
         t.Fatalf("unexpected result: value=%q matched=%v consumeNext=%v", value, matched, consumeNext)
     }
 
-    value, matched, consumeNext = parseModeFlagValue("--other")
+    value, matched, consumeNext = parseRuntimeFlagValue("--role=worker", "role")
+    if false == matched || true == consumeNext || "worker" != value {
+        t.Fatalf("unexpected result: value=%q matched=%v consumeNext=%v", value, matched, consumeNext)
+    }
+
+    value, matched, consumeNext = parseRuntimeFlagValue("--other", "mode")
     if true == matched || true == consumeNext || "" != value {
         t.Fatalf("unexpected result: value=%q matched=%v consumeNext=%v", value, matched, consumeNext)
     }
@@ -146,4 +151,100 @@ func TestParseRuntimeFlags_PanicsOnInvalidMode(t *testing.T) {
     testhelper.AssertPanics(t, func() {
         _ = ParseRuntimeFlags(config.ModeHttp)
     })
+}
+
+func TestParseRuntimeFlags_RoleDefaultsToAll(t *testing.T) {
+    originalArguments := os.Args
+    t.Cleanup(func() {
+        os.Args = originalArguments
+    })
+
+    os.Args = []string{"app"}
+
+    flags := ParseRuntimeFlags(config.ModeHttp)
+    if config.RoleAll != flags.Role() {
+        t.Fatalf("expected role %q, got %q", config.RoleAll, flags.Role())
+    }
+}
+
+func TestParseRuntimeFlags_RoleFlagWinsOverConfiguredDefault(t *testing.T) {
+    originalArguments := os.Args
+    t.Cleanup(func() {
+        os.Args = originalArguments
+    })
+
+    os.Args = []string{"app", "--role=worker"}
+
+    flags := ParseRuntimeFlagsWithRole(config.ModeHttp, config.RoleWeb)
+    if config.RoleWorker != flags.Role() {
+        t.Fatalf("expected role %q, got %q", config.RoleWorker, flags.Role())
+    }
+}
+
+func TestParseRuntimeFlags_RoleFlagAloneDoesNotImplyCliMode(t *testing.T) {
+    originalArguments := os.Args
+    t.Cleanup(func() {
+        os.Args = originalArguments
+    })
+
+    /* a lone --role must not flip the process into cli mode: the worker container runs the same image with only the role changed */
+    os.Args = []string{"app", "--role=worker"}
+
+    flags := ParseRuntimeFlags(config.ModeHttp)
+    if config.ModeHttp != flags.Mode() {
+        t.Fatalf("expected mode %q, got %q", config.ModeHttp, flags.Mode())
+    }
+}
+
+func TestParseRuntimeFlags_RoleFlagConsumesNextValue(t *testing.T) {
+    originalArguments := os.Args
+    t.Cleanup(func() {
+        os.Args = originalArguments
+    })
+
+    os.Args = []string{"app", "--role", "web"}
+
+    flags := ParseRuntimeFlags(config.ModeHttp)
+    if config.RoleWeb != flags.Role() {
+        t.Fatalf("expected role %q, got %q", config.RoleWeb, flags.Role())
+    }
+
+    if config.ModeHttp != flags.Mode() {
+        t.Fatalf("expected mode %q, got %q", config.ModeHttp, flags.Mode())
+    }
+}
+
+func TestParseRuntimeFlags_PanicsOnInvalidRole(t *testing.T) {
+    originalArguments := os.Args
+    t.Cleanup(func() {
+        os.Args = originalArguments
+    })
+
+    os.Args = []string{"app", "--role=manager"}
+
+    testhelper.AssertPanics(t, func() {
+        _ = ParseRuntimeFlags(config.ModeHttp)
+    })
+}
+
+func TestStripRuntimeFlagsFromOsArgs_StripsRoleFlags(t *testing.T) {
+    originalArguments := os.Args
+    t.Cleanup(func() {
+        os.Args = originalArguments
+    })
+
+    os.Args = []string{"app", "--role", "worker", "someCommand", "--role=web", "-mode=cli", "other"}
+
+    stripRuntimeFlagsFromOsArgs()
+
+    expected := []string{"app", "someCommand", "other"}
+    if len(expected) != len(os.Args) {
+        t.Fatalf("expected %d args, got %d: %+v", len(expected), len(os.Args), os.Args)
+    }
+
+    for index := 0; index < len(expected); index++ {
+        if expected[index] != os.Args[index] {
+            t.Fatalf("expected arg %d to be %q, got %q", index, expected[index], os.Args[index])
+        }
+    }
 }

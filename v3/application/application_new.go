@@ -76,7 +76,7 @@ func NewApplication(
     application := &Application{
         ctx:                  ctx,
         configuration:        configuration,
-        runtimeFlags:         ParseRuntimeFlags(configuration.Kernel().DefaultMode()),
+        runtimeFlags:         ParseRuntimeFlagsWithRole(configuration.Kernel().DefaultMode(), configuration.Kernel().ProcessRole()),
         kernel:               kernelInstance,
         embeddedPublicFiles:  embeddedPublicFiles,
         modules:              make([]applicationcontract.Module, 0),

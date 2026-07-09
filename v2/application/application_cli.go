@@ -64,17 +64,9 @@ func (instance *Application) RegisterCliCommand(command clicontract.Command) {
 
     for _, existingCommand := range instance.cliCommands {
         if commandName == existingCommand.Name() {
-            exception.Panic(
-                exception.NewError(
-                    "duplicate cli command name",
-                    exceptioncontract.Context{
-                        "commandName": commandName,
-                        "existing":    reflect.TypeOf(existingCommand).String(),
-                        "new":         reflect.TypeOf(command).String(),
-                    },
-                    nil,
-                ),
-            )
+            /* recorded for the aggregated boot report instead of panicking one at a time; the first registration wins until the guaranteed panic ends the boot */
+            instance.recordBootCollision(bootCollisionKindCliCommand, commandName, 1)
+            return
         }
     }
 

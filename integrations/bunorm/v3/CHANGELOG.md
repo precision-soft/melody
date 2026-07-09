@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `encrypt/cipher_registry.go`, `encrypt/encrypted_string_for.go`, `encrypt/deterministic_for.go` — named cipher compartments for multi-context binaries. `UseCipher` was process-global with one current write key, so two DB contexts with separate key sets could not keep separate current keys — consolidating apps meant merging key maps and losing a key compartment that existed when the binaries were separate. Now each compartment installs its own cipher with `UseCipherNamed(name, cipher)` and binds columns through the type system: a zero-size marker implementing `CipherRef` (`CipherName() string`) parameterizes the new generic column types `EncryptedStringFor[R]` / `EncryptedDeterministicStringFor[R]` — the only channel available, since `database/sql` gives `Value()`/`Scan()` no context. Compartments are truly isolated (the "crm" cipher can never decrypt a "billing" ciphertext — unlike per-column key selection over a merged provider, where either context can read the other's rows), key rotation inside a compartment keeps working through the key id embedded in the ciphertext, and the generic types replicate the full redaction surface (`String`/`LogValue`/`MarshalJSON`). `UseCipher` and the existing column types are unchanged — the default cipher is now simply the registry's reserved unnamed entry. Per-`Manager` cipher binding was rejected: a `driver.Valuer` has no manager context, and bun query hooks would miss raw SQL paths.
+- `encrypt/module.go`, `encrypt/encrypt_database_command.go` — the bulk command module composes with compartments: `ModuleConfig.Contexts []CommandContextConfig{Name, Database, Cipher}` registers one `melody:encrypt:database:<name>` command per compartment (via the new `NewEncryptDatabaseCommandWithName`), while the legacy `{Database, Cipher}` fields keep the unsuffixed command.
+
 ## [v3.1.2] - 2026-07-06 - Standalone Module Resolution Fix
 
 ### Fixed

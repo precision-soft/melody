@@ -251,7 +251,12 @@ Accepted values: `default` (the `--out` destination), an absolute path, or a rel
 
 ## Customizing the template
 
-The generator dispatches rendering to a registered `Template` whose `Name()` matches `--template` (or, if unset, the `melody.cron.template` container parameter; default `"crontab"`). The `crontab` template ships in-tree in all three bindings and is registered automatically; the v3 binding additionally ships a built-in `k8s` template (Kubernetes `CronJob` manifests). You can also plug in your own (Supervisor, custom YAML/INI, etc.) without forking the cron integration.
+The generator dispatches rendering to a registered `Template` whose `Name()` matches `--template` (or, if unset, the `melody.cron.template` container parameter; default `"crontab"`). Two crontab dialects ship in-tree in all three bindings and are registered automatically:
+
+* `crontab` — the `/etc/cron.d` system format, with the user column; requires a user per entry (`EntryConfig.User`, `--user`, or the `melody.cron.user` parameter).
+* `crontab-no-user` — the user-less dialect for **busybox crond** (alpine images) and per-user `crontab` files, which reject the user column; the user parameter/flag is ignored entirely, everything else is identical. Use this instead of post-processing the generated file with `sed` in the image build.
+
+The v3 binding additionally ships a built-in `k8s` template (Kubernetes `CronJob` manifests). You can also plug in your own (Supervisor, custom YAML/INI, etc.) without forking the cron integration.
 
 ### `Template` interface
 

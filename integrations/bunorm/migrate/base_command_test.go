@@ -98,3 +98,92 @@ func TestResolveDatabase_UnknownManagerReturnsErrorInsteadOfPanic(t *testing.T) 
         t.Fatalf("expected an error for an unknown manager name, got nil")
     }
 }
+
+func pinTestRegistry(t *testing.T) *bunorm.ManagerRegistry {
+    t.Helper()
+
+    platformDatabase, _ := newFakeBunDatabase()
+    paymentDatabase, _ := newFakeBunDatabase()
+
+    registry, registryErr := bunorm.NewManagerRegistry(
+        &stubResolver{},
+        bunorm.ProviderDefinition{Name: "platform", Provider: &fakeDatabaseProvider{database: platformDatabase}, IsDefault: true},
+        bunorm.ProviderDefinition{Name: "payment", Provider: &fakeDatabaseProvider{database: paymentDatabase}},
+    )
+    if nil != registryErr {
+        t.Fatalf("failed to build manager registry: %s", registryErr.Error())
+    }
+
+    return registry
+}
+
+func resolveWithOptions(t *testing.T, options Options, flagValue string) string {
+    t.Helper()
+
+    registry := pinTestRegistry(t)
+
+    serviceContainer := container.NewContainer()
+    container.MustRegister[*bunorm.ManagerRegistry](
+        serviceContainer,
+        options.ManagerRegistryServiceId,
+        func(resolver containercontract.Resolver) (*bunorm.ManagerRegistry, error) {
+            return registry, nil
+        },
+    )
+
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    base := &baseCommand{options: options}
+
+    resolvedName := ""
+
+    command := &clicontract.CommandContext{
+        Name:  "migrate",
+        Flags: []clicontract.Flag{&clicontract.StringFlag{Name: options.ManagerFlagName}},
+        Action: func(ctx context.Context, commandContext *clicontract.CommandContext) error {
+            _, name, resolveErr := base.resolveDatabase(runtimeInstance, commandContext)
+            if nil != resolveErr {
+                t.Errorf("unexpected resolve error: %s", resolveErr.Error())
+                return nil
+            }
+
+            resolvedName = name
+
+            return nil
+        },
+    }
+
+    arguments := []string{"migrate"}
+    if "" != flagValue {
+        arguments = append(arguments, "--"+options.ManagerFlagName+"="+flagValue)
+    }
+
+    if runErr := command.Run(context.Background(), arguments); nil != runErr {
+        t.Fatalf("unexpected command error: %s", runErr.Error())
+    }
+
+    return resolvedName
+}
+
+func TestResolveDatabase_PinnedManagerWinsOverRegistryDefault(t *testing.T) {
+    options := DefaultOptions()
+    options.ManagerName = "payment"
+
+    if resolved := resolveWithOptions(t, options, ""); "payment" != resolved {
+        t.Fatalf("expected the pinned manager, got: %s", resolved)
+    }
+}
+
+func TestResolveDatabase_FlagWinsOverPinnedManager(t *testing.T) {
+    options := DefaultOptions()
+    options.ManagerName = "payment"
+
+    if resolved := resolveWithOptions(t, options, "platform"); "platform" != resolved {
+        t.Fatalf("expected the flag to win over the pin, got: %s", resolved)
+    }
+}
+
+func TestResolveDatabase_RegistryDefaultWithoutPinOrFlag(t *testing.T) {
+    if resolved := resolveWithOptions(t, DefaultOptions(), ""); "<default>" != resolved {
+        t.Fatalf("expected the registry default, got: %s", resolved)
+    }
+}

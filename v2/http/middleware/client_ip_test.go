@@ -1,0 +1,135 @@
+package middleware
+
+import (
+    nethttp "net/http"
+    "net/http/httptest"
+    "testing"
+
+    httpcontract "github.com/precision-soft/melody/v2/http/contract"
+    "github.com/precision-soft/melody/v2/internal/testhelper"
+)
+
+func forwardedRequest(remoteAddr string, forwardedFor string) httpcontract.Request {
+    req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    req.RemoteAddr = remoteAddr
+    if "" != forwardedFor {
+        req.Header.Set("X-Forwarded-For", forwardedFor)
+    }
+
+    return testhelper.NewHttpTestRequestFromHttpRequest(req)
+}
+
+func trustingPolicy(trustedProxies ...string) httpcontract.ForwardedHeadersPolicy {
+    return httpcontract.ForwardedHeadersPolicy{
+        TrustForwardedHeaders: true,
+        TrustedProxyList:      trustedProxies,
+    }
+}
+
+func TestForwardedClientIpResolver_ResolvesClientBehindTrustedProxy(t *testing.T) {
+    resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
+
+    ip := resolver(forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
+    if "203.0.113.7" != ip {
+        t.Fatalf("expected the forwarded client, got: %s", ip)
+    }
+}
+
+func TestForwardedClientIpResolver_SkipsTrustedInfixHops(t *testing.T) {
+    resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8", "192.168.0.10"))
+
+    /* client, then two trusted proxies appended by the infrastructure: walk right-to-left past both */
+    ip := resolver(forwardedRequest("10.0.0.1:5555", "203.0.113.7, 192.168.0.10, 10.0.0.9"))
+    if "203.0.113.7" != ip {
+        t.Fatalf("expected the first untrusted hop from the right, got: %s", ip)
+    }
+}
+
+func TestForwardedClientIpResolver_DoesNotBelieveSpoofedExtraEntries(t *testing.T) {
+    resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
+
+    /* the client sent its own X-Forwarded-For with a victim address; the proxy appended the real client — the rightmost untrusted entry wins, not the spoofed one */
+    ip := resolver(forwardedRequest("10.0.0.1:5555", "198.51.100.99, 203.0.113.7"))
+    if "203.0.113.7" != ip {
+        t.Fatalf("expected the proxy-attested client, got: %s", ip)
+    }
+}
+
+func TestForwardedClientIpResolver_FallsBackWhenPeerIsUntrusted(t *testing.T) {
+    resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
+
+    /* the direct peer is not a trusted proxy, so the header is attacker-controlled */
+    ip := resolver(forwardedRequest("203.0.113.50:5555", "198.51.100.99"))
+    if "203.0.113.50" != ip {
+        t.Fatalf("expected the direct peer, got: %s", ip)
+    }
+}
+
+func TestForwardedClientIpResolver_FallsBackWhenHeadersNotTrusted(t *testing.T) {
+    resolver := NewForwardedClientIpResolver(httpcontract.ForwardedHeadersPolicy{
+        TrustForwardedHeaders: false,
+        TrustedProxyList:      []string{"10.0.0.0/8"},
+    })
+
+    ip := resolver(forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
+    if "10.0.0.1" != ip {
+        t.Fatalf("expected the direct peer when the policy does not trust forwarded headers, got: %s", ip)
+    }
+}
+
+func TestForwardedClientIpResolver_FallsBackOnEmptyTrustedList(t *testing.T) {
+    resolver := NewForwardedClientIpResolver(httpcontract.ForwardedHeadersPolicy{
+        TrustForwardedHeaders: true,
+        TrustedProxyList:      nil,
+    })
+
+    ip := resolver(forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
+    if "10.0.0.1" != ip {
+        t.Fatalf("expected the direct peer with no trusted proxies, got: %s", ip)
+    }
+}
+
+func TestForwardedClientIpResolver_FallsBackOnGarbageEntry(t *testing.T) {
+    resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
+
+    ip := resolver(forwardedRequest("10.0.0.1:5555", "not-an-address"))
+    if "10.0.0.1" != ip {
+        t.Fatalf("expected the direct peer on an unparseable chain, got: %s", ip)
+    }
+}
+
+func TestForwardedClientIpResolver_FallsBackWhenChainIsAllTrusted(t *testing.T) {
+    resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
+
+    ip := resolver(forwardedRequest("10.0.0.1:5555", "10.0.0.7, 10.0.0.8"))
+    if "10.0.0.1" != ip {
+        t.Fatalf("expected the direct peer when every hop is trusted, got: %s", ip)
+    }
+}
+
+func TestForwardedClientIpResolver_FallsBackWhenHeaderIsAbsent(t *testing.T) {
+    resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
+
+    ip := resolver(forwardedRequest("10.0.0.1:5555", ""))
+    if "10.0.0.1" != ip {
+        t.Fatalf("expected the direct peer without a forwarded header, got: %s", ip)
+    }
+}
+
+func TestForwardedClientIpResolver_ResolvesIpv6Client(t *testing.T) {
+    resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
+
+    ip := resolver(forwardedRequest("10.0.0.1:5555", "2001:db8::1"))
+    if "2001:db8::1" != ip {
+        t.Fatalf("expected the ipv6 client, got: %s", ip)
+    }
+}
+
+func TestForwardedClientIpResolver_MatchesCidrAndExactEntries(t *testing.T) {
+    resolver := NewForwardedClientIpResolver(trustingPolicy("192.168.0.10", "2001:db8:aaaa::/48"))
+
+    ip := resolver(forwardedRequest("192.168.0.10:5555", "203.0.113.7, 2001:db8:aaaa::5"))
+    if "203.0.113.7" != ip {
+        t.Fatalf("expected the untrusted hop past the ipv6 CIDR match, got: %s", ip)
+    }
+}

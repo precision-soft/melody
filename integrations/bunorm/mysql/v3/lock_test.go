@@ -295,6 +295,25 @@ func TestMysqlLock_ReentrantAcquireDetectsLostLockWithoutRefresh(t *testing.T) {
         t.Logf("kill returned (tolerated): %v", killErr)
     }
 
+    /* @important KILL only flags the session; the GET_LOCK stays held until that session actually ends. Acquire probes with GET_LOCK(?, 0), which never waits, so the competitor below must not run before the kill has landed. */
+    lockFreed := false
+    for attempt := 0; attempt < 100; attempt++ {
+        var free sql.NullInt64
+        if freeErr := sqldb.QueryRowContext(runtimeInstance.Context(), "SELECT IS_FREE_LOCK(?)", name).Scan(&free); nil != freeErr {
+            t.Fatalf("read lock availability: %v", freeErr)
+        }
+        if true == free.Valid && 1 == free.Int64 {
+            lockFreed = true
+
+            break
+        }
+
+        time.Sleep(10 * time.Millisecond)
+    }
+    if false == lockFreed {
+        t.Fatalf("the killed session never released the lock")
+    }
+
     competitor := locker.CreateLock(name, 0)
     competitorAcquired, competitorErr := competitor.Acquire(runtimeInstance)
     if nil != competitorErr || false == competitorAcquired {

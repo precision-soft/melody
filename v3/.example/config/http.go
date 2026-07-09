@@ -1,6 +1,8 @@
 package config
 
 import (
+    "time"
+
     "github.com/precision-soft/melody/v3/.example/handler"
     handlercategory "github.com/precision-soft/melody/v3/.example/handler/category"
     handlercurrency "github.com/precision-soft/melody/v3/.example/handler/currency"
@@ -14,10 +16,12 @@ import (
     handlertwofactor "github.com/precision-soft/melody/v3/.example/handler/twofactor"
     handleruser "github.com/precision-soft/melody/v3/.example/handler/user"
     handlerwebsocketdemo "github.com/precision-soft/melody/v3/.example/handler/websocketdemo"
+    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
     "github.com/precision-soft/melody/v3/.example/route"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
+    melodyhttpmiddleware "github.com/precision-soft/melody/v3/http/middleware"
     melodykernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     melodyopenapi "github.com/precision-soft/melody/v3/openapi"
 )
@@ -59,6 +63,27 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     if nil != instance.redisClient {
         router.HandleNamed("example.redis.token.demo", "GET", "/redis/token/demo", handler.RedisTokenDemoHandler())
+
+        /* @info distributed rate-limit demo: the counter lives in redis, so N replicas enforce ONE
+           shared limit (the in-process limiters would each allow their own budget). The client key is
+           resolved trusted-proxy-aware — behind the compose load balancer the X-Forwarded-For client is
+           used, direct hits fall back to the peer address. Fail-closed: with redis down the route denies. */
+        rateLimitConfig := melodyhttpmiddleware.NewRateLimitConfig(
+            melodyrueidis.NewRateLimiter(instance.redisClient, 5, time.Minute, melodyrueidis.WithRateLimiterKeyPrefix("melody-example:rate_limit:")),
+            nil,
+            nil,
+        )
+        rateLimitConfig.SetClientIpResolver(melodyhttpmiddleware.NewForwardedClientIpResolver(melodyhttpcontract.ForwardedHeadersPolicy{
+            TrustForwardedHeaders: true,
+            TrustedProxyList:      []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"},
+        }))
+
+        router.HandleNamed(
+            "example.ratelimit.demo",
+            "GET",
+            "/ratelimit/demo",
+            melodyhttpmiddleware.RateLimitMiddleware(rateLimitConfig)(handler.HealthHandler()),
+        )
     }
 
     if nil != instance.database {

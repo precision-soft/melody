@@ -13,7 +13,12 @@ const (
     ModeHttp = "http"
     ModeCli  = "cli"
 
+    RoleWeb    = "web"
+    RoleWorker = "worker"
+    RoleAll    = "all"
+
     DefaultModeKey             = "MELODY_DEFAULT_MODE"
+    ProcessRoleKey             = "MELODY_PROCESS_ROLE"
     EnvKey                     = "MELODY_ENV"
     HttpAddressKey             = "MELODY_HTTP_ADDRESS"
     HttpMaxRequestBodyBytesKey = "MELODY_HTTP_MAX_REQUEST_BODY_BYTES"
@@ -28,6 +33,7 @@ const (
     StaticCacheMaxAgeKey       = "MELODY_STATIC_CACHE_MAX_AGE"
 
     KernelDefaultMode             = "kernel.default_mode"
+    KernelProcessRole             = "kernel.process_role"
     KernelEnv                     = "kernel.environment"
     KernelHttpAddress             = "kernel.http_address"
     KernelHttpMaxRequestBodyBytes = "kernel.http.max_request_body_bytes"

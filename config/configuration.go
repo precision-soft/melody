@@ -111,6 +111,16 @@ func (instance *Configuration) Parameters() ParameterMap {
     )
 }
 
+/* projectDirectoryParameterValue reads the project-directory default for diagnostics without requiring a resolved configuration. */
+func (instance *Configuration) projectDirectoryParameterValue() string {
+    parameter := instance.Get(KernelProjectDir)
+    if nil == parameter {
+        return ""
+    }
+
+    return parameter.String()
+}
+
 func (instance *Configuration) Get(name string) configcontract.Parameter {
     /* @important read under the read lock because RegisterRuntime mutates the shared parameters map at runtime; an unguarded read here races the writer and trips Go's fatal "concurrent map read and map write" */
     instance.mutex.RLock()
@@ -227,6 +237,16 @@ func (instance *Configuration) applyEnvironmentOverrides() error {
         },
     )
 
+    /* zero keys almost always means the .env artifacts were not found rather than deliberately empty: melody derives the project directory from the executable location (the working directory under go run), so a binary executed outside its project directory silently sees no .env and later fails resolve with an unsuggestive "undefined environment key". Name the directory that was searched so the cause is visible. */
+    if 0 == len(instance.environment.All()) {
+        instance.logger.Warning(
+            "no environment keys were loaded from the .env artifacts; melody derives the project directory from the executable location (the working directory under go run), so a binary run from elsewhere does not find its .env files",
+            loggingcontract.Context{
+                "projectDirectory": instance.projectDirectoryParameterValue(),
+            },
+        )
+    }
+
     return nil
 }
 
@@ -260,6 +280,7 @@ func (instance *Configuration) buildCliConfiguration() error {
 func (instance *Configuration) buildKernelConfiguration() error {
     kernelConfigurationInstance, newKernelConfigurationErr := newKernelConfiguration(
         instance.MustGet(KernelDefaultMode).MustString(),
+        instance.MustGet(KernelProcessRole).MustString(),
         instance.MustGet(KernelEnv).MustString(),
         instance.MustGet(KernelProjectDir).MustString(),
         instance.MustGet(KernelLogsDir).MustString(),

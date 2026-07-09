@@ -15,6 +15,7 @@ func (instance *Configuration) registerDefaultParameters(
     instance.setDefaultParameter(KernelCacheDir, filepath.Join("%"+KernelProjectDir+"%", "var", "cache"))
 
     instance.setDefaultParameter(DefaultModeKey, ModeHttp)
+    instance.setDefaultParameter(ProcessRoleKey, RoleAll)
     instance.setDefaultParameter(EnvKey, EnvDevelopment)
 
     instance.setDefaultParameter(HttpAddressKey, ":8080")

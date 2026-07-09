@@ -4,7 +4,11 @@ The [`config`](../../config) package provides `.env` loading and strongly typed 
 
 ## Scope
 
-Configuration in Melody is file-driven (via `.env` artifacts). The `config` package does not overlay OS environment variables by design.
+Configuration in Melody is file-driven (via `.env` artifacts). The `config` package does not overlay OS environment variables by design: the application is a black box that behaves identically wherever it runs, and its configuration travels with its artifacts.
+
+The project directory — where the `.env` artifacts are looked up — is derived from the **executable location**; only under `go run` (a `go-build` temp path) does it fall back to the working directory. The consequence: `go run .` finds your `.env`, but the same app built with `go build -o /tmp/app && /tmp/app` from the same directory does not — it looks next to `/tmp/app`. Deploy the `.env` artifacts next to the binary. Boot makes this visible: a warning names the searched directory when zero environment keys were loaded, and the resolve failure carries the `projectDirectory` in its context.
+
+The corollary is easy to miss in deployment: **setting a process environment variable does nothing**. `MELODY_DEFAULT_MODE`, `MELODY_PROCESS_ROLE`, `MELODY_HTTP_ADDRESS` and every other parameter must live in the `.env` files; an `environment:` entry in docker-compose is silently inert. To make this foot-gun visible, boot logs a warning for every process environment variable whose name matches a known configuration parameter (see `application/environment_warning.go`) — the warning is suppressed when the process value equals the resolved `.env` value, and values are never logged. For per-container variation from a single image, use the runtime flags instead (`--mode`, `--role`).
 
 A `Configuration` instance is created early (typically at application bootstrap) and is then passed into the kernel and other framework components.
 
