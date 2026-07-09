@@ -207,9 +207,11 @@ func isEnabledForGroup(definition *HttpMiddlewareDefinition, group string) bool 
 }
 
 type definitionNode struct {
-    definition *HttpMiddlewareDefinition
-    inDegree   int
-    out        []string
+    /* definition drives ordering (priority, before/after edges); duplicates share a name and therefore a node, so every one of them is kept here and emitted together at the node's position — keying the map on the name alone silently dropped all but the last, defeating allowDuplicates */
+    definition  *HttpMiddlewareDefinition
+    duplicates  []*HttpMiddlewareDefinition
+    inDegree    int
+    out         []string
 }
 
 func orderDefinitions(definitions []*HttpMiddlewareDefinition) ([]*HttpMiddlewareDefinition, []string, bool) {
@@ -225,8 +227,14 @@ func orderDefinitions(definitions []*HttpMiddlewareDefinition) ([]*HttpMiddlewar
             continue
         }
 
+        if existingNode, exists := nodes[definition.name]; true == exists {
+            existingNode.duplicates = append(existingNode.duplicates, definition)
+            continue
+        }
+
         nodes[definition.name] = &definitionNode{
             definition: definition,
+            duplicates: []*HttpMiddlewareDefinition{definition},
             inDegree:   0,
             out:        make([]string, 0),
         }
@@ -298,7 +306,7 @@ func orderDefinitions(definitions []*HttpMiddlewareDefinition) ([]*HttpMiddlewar
         node := ready[0]
         ready = ready[1:]
 
-        result = append(result, node.definition)
+        result = append(result, node.duplicates...)
 
         for _, toName := range node.out {
             toNode := nodes[toName]

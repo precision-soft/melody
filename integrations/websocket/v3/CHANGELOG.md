@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `handler.go` — the keepalive ping loop no longer disconnects healthy clients. A pong is processed only inside `connection.Read`, which the read loop leaves while it runs a synchronous `OnMessage` callback, so a ping issued in that window always timed out and was read as the peer's death. A timed-out ping now counts as death only when the read loop is neither inside a callback nor has seen a client frame within two intervals; a write failure still fails immediately, since the socket itself is gone.
+
 ## [v3.1.1] - 2026-07-06 - Standalone Module Resolution Fix
 
 ### Fixed

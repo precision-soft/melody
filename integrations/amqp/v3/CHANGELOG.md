@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `connection.go` — `redactDsn` fails closed. `net/url` parses a scheme-less dsn such as `guest:secret@host` into a scheme of `guest` with no userinfo at all, so the function returned it verbatim and the password reached the connection-failure log line. A dsn it cannot prove it has stripped is now reported as `(redacted)`.
+
 ## [v3.2.0] - 2026-07-06 - Message-Id Round-Trip and Bucketed Delay Topology
 
 ### Added

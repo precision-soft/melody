@@ -163,8 +163,15 @@ func (instance *Provider) open(params bunorm.ConnectionParams) (*bun.DB, error) 
 
     if nil != instance.tlsConfig {
         connectorOptions = append(connectorOptions, pgdriver.WithTLSConfig(instance.tlsConfig))
+    } else if true == instance.insecure {
+        /* pgdriver.WithInsecure(true) disables TLS entirely */
+        connectorOptions = append(connectorOptions, pgdriver.WithInsecure(true))
     } else {
-        connectorOptions = append(connectorOptions, pgdriver.WithInsecure(instance.insecure))
+        /* @important do NOT hand this case to pgdriver.WithInsecure(false): despite the name, pgdriver implements it as tls.Config{InsecureSkipVerify: true} — TLS is negotiated but the server certificate is never checked, so the default connection is trivially machine-in-the-middled. Build a verifying config instead: the system roots, and the configured host as the name to verify against. Callers that genuinely want an unverified session pass WithTlsConfig or WithInsecure(true) explicitly. */
+        connectorOptions = append(connectorOptions, pgdriver.WithTLSConfig(&tls.Config{
+            ServerName: params.Host,
+            MinVersion: tls.VersionTLS12,
+        }))
     }
 
     connector := pgdriver.NewConnector(connectorOptions...)

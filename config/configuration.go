@@ -87,6 +87,9 @@ type Configuration struct {
     cli         *cliConfiguration
     kernel      *kernelConfiguration
     http        *httpConfiguration
+
+    /* parameters whose raw value escaped a literal percent with %%; after resolution their value legitimately contains %...%, which the unresolved-placeholder check must not mistake for a placeholder it failed to expand */
+    parametersWithEscapedPercents map[string]bool
 }
 
 func (instance *Configuration) Cli() configcontract.CliConfiguration {

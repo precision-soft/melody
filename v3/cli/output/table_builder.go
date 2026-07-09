@@ -30,8 +30,10 @@ func (instance *TableBuilder) AddBlock(
 
     instance.table.Blocks = append(instance.table.Blocks, block)
 
+    /* hold the owner and the index, never a pointer into the slice: a later AddBlock can reallocate Blocks, and a builder pointing at the old backing array would silently write its rows into memory nobody reads */
     return &TableBlockBuilder{
-        block: &instance.table.Blocks[len(instance.table.Blocks)-1],
+        owner: instance,
+        index: len(instance.table.Blocks) - 1,
     }
 }
 
@@ -40,10 +42,13 @@ func (instance *TableBuilder) Build() *TableData {
 }
 
 type TableBlockBuilder struct {
-    block *TableBlock
+    owner *TableBuilder
+    index int
 }
 
 func (instance *TableBlockBuilder) AddRow(cells ...string) *TableBlockBuilder {
-    instance.block.Rows = append(instance.block.Rows, cells)
+    block := &instance.owner.table.Blocks[instance.index]
+    block.Rows = append(block.Rows, cells)
+
     return instance
 }

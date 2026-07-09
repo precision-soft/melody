@@ -276,3 +276,25 @@ func TestRegisterRuntimeAddsValue(t *testing.T) {
         t.Fatalf("expected runtime value to be visible")
     }
 }
+
+/** @info A value that escapes a literal percent with %% resolves to text of the shape %NAME%, which the post-resolution scan then rejected as an "unresolved placeholder" — failing the whole boot for a correctly escaped literal. */
+func TestConfiguration_EscapedPercentLiteralDoesNotFailValidation(t *testing.T) {
+    source := &testEnvironmentSource{values: map[string]string{
+        CliDescriptionKey: "%%APP_NAME%% stays literal",
+    }}
+
+    environment, environmentErr := NewEnvironment(source)
+    if nil != environmentErr {
+        t.Fatalf("new environment error: %v", environmentErr)
+    }
+
+    configuration, configurationErr := NewConfiguration(environment, "/tmp/melody")
+    if nil != configurationErr {
+        t.Fatalf("a correctly escaped percent literal must not fail configuration validation: %v", configurationErr)
+    }
+
+    resolved := configuration.MustGet(KernelCliDescription).String()
+    if "%APP_NAME% stays literal" != resolved {
+        t.Fatalf("expected the escaped percents to unescape, got %q", resolved)
+    }
+}

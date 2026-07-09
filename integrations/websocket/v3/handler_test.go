@@ -185,3 +185,70 @@ func TestDispatchOnMessage_RecoversPanicFromCallback(t *testing.T) {
         t.Fatalf("expected dispatchOnMessage to recover the callback panic and report it, so the read goroutine does not crash the process")
     }
 }
+
+/** @info A pong is processed only inside connection.Read, and the read loop is not inside Read while it runs a synchronous OnMessage callback. A ping issued in that window always times out, so treating that timeout as death disconnects perfectly healthy clients whenever a callback outlives the ping interval. */
+func TestStreamHandler_SlowOnMessageDoesNotDisconnectHealthyClient(t *testing.T) {
+    hub := melodyhttp.NewServerSentEventHub()
+
+    callbackEntered := make(chan struct{})
+
+    handler := NewStreamHandler(hub, Options{
+        TopicResolver:  func(request httpcontract.Request) string { return "demo" },
+        OriginPatterns: []string{"*"},
+        IdleTimeout:    100 * time.Millisecond,
+        OnMessage: func(runtimeInstance runtimecontract.Runtime, messageType coderwebsocket.MessageType, payload []byte) {
+            close(callbackEntered)
+
+            /* outlive several ping intervals while the read loop cannot answer pongs */
+            time.Sleep(400 * time.Millisecond)
+        },
+    })
+
+    server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+        serviceContainer := container.NewContainer()
+        runtimeInstance := runtime.New(request.Context(), serviceContainer.NewScope(), serviceContainer)
+        melodyRequest := melodyhttp.NewRequest(request, nil, runtimeInstance, nil)
+        handler(runtimeInstance, writer, melodyRequest)
+    }))
+    defer server.Close()
+
+    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancel()
+
+    connection, _, dialErr := coderwebsocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+    if nil != dialErr {
+        t.Fatalf("dial: %v", dialErr)
+    }
+    defer connection.CloseNow()
+
+    subscribeDeadline := time.Now().Add(2 * time.Second)
+    for hub.SubscriberCount("demo") < 1 {
+        if true == time.Now().After(subscribeDeadline) {
+            t.Fatalf("the websocket handler did not subscribe to the hub in time")
+        }
+        time.Sleep(time.Millisecond)
+    }
+
+    if writeErr := connection.Write(ctx, coderwebsocket.MessageText, []byte("work")); nil != writeErr {
+        t.Fatalf("write: %v", writeErr)
+    }
+
+    <-callbackEntered
+
+    /* the callback is still running; once it returns, a broadcast must still reach this client */
+    go func() {
+        time.Sleep(500 * time.Millisecond)
+        hub.Broadcast("demo", melodyhttp.ServerSentEvent{Event: "notification", Data: "still-here"})
+    }()
+
+    _, payload, readErr := connection.Read(ctx)
+    if nil != readErr {
+        t.Fatalf("a healthy client was disconnected because its OnMessage callback outlived the ping interval: %v", readErr)
+    }
+
+    if "still-here" != string(payload) {
+        t.Fatalf("unexpected payload %q", payload)
+    }
+
+    connection.Close(coderwebsocket.StatusNormalClosure, "")
+}

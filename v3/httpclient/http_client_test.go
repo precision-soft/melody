@@ -4,6 +4,7 @@ import (
     "bytes"
     "encoding/base64"
     "io"
+    "math"
     "net/http"
     "net/http/httptest"
     "strconv"
@@ -339,4 +340,89 @@ func TestHttpClientConcurrentSettersAndRequests(t *testing.T) {
     }()
 
     waitGroup.Wait()
+}
+
+
+/** @info net/http strips only Authorization/Cookie, and only across domains. A client-configured api-key header would otherwise be handed to whatever host the first server redirects to — a host that server's operator chooses. */
+func TestHttpClient_StripsCredentialHeadersOnCrossOriginRedirect(t *testing.T) {
+    var receivedApiKey string
+    var receivedAuthorization string
+
+    target := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        receivedApiKey = request.Header.Get("X-Api-Key")
+        receivedAuthorization = request.Header.Get("Authorization")
+        writer.WriteHeader(http.StatusOK)
+    }))
+    defer target.Close()
+
+    redirector := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        http.Redirect(writer, request, target.URL+"/stolen", http.StatusFound)
+    }))
+    defer redirector.Close()
+
+    client := NewHttpClient(NewHttpClientConfig(
+        "",
+        5*time.Second,
+        map[string]string{"X-Api-Key": "super-secret", "Authorization": "Bearer super-secret"},
+    ))
+
+    if _, err := client.Get(redirector.URL); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if "" != receivedApiKey {
+        t.Fatalf("the api key leaked to the redirect target: %q", receivedApiKey)
+    }
+    if "" != receivedAuthorization {
+        t.Fatalf("the authorization header leaked to the redirect target: %q", receivedAuthorization)
+    }
+}
+
+/** @info A same-origin redirect is not a credential boundary; stripping there would break ordinary /login -> /home flows. */
+func TestHttpClient_KeepsCredentialHeadersOnSameOriginRedirect(t *testing.T) {
+    var receivedApiKey string
+
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        if "/start" == request.URL.Path {
+            http.Redirect(writer, request, "/finish", http.StatusFound)
+            return
+        }
+
+        receivedApiKey = request.Header.Get("X-Api-Key")
+        writer.WriteHeader(http.StatusOK)
+    }))
+    defer server.Close()
+
+    client := NewHttpClient(NewHttpClientConfig(
+        server.URL,
+        5*time.Second,
+        map[string]string{"X-Api-Key": "super-secret"},
+    ))
+
+    if _, err := client.Get("/start"); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if "super-secret" != receivedApiKey {
+        t.Fatalf("expected the api key to survive a same-origin redirect, got %q", receivedApiKey)
+    }
+}
+
+/** @info int64(math.MaxInt)+1 wraps negative, so io.LimitReader would read zero bytes and hand back an empty body with no error. */
+func TestHttpClient_MaxResponseBodyBytesAtMaxIntDoesNotOverflow(t *testing.T) {
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        writer.Write([]byte("payload"))
+    }))
+    defer server.Close()
+
+    client := NewHttpClient(NewHttpClientConfig("", 5*time.Second, nil))
+
+    response, err := client.Get(server.URL, WithMaxResponseBodyBytes(math.MaxInt))
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if "payload" != string(response.Body()) {
+        t.Fatalf("expected the body to survive a MaxInt limit, got %q", string(response.Body()))
+    }
 }

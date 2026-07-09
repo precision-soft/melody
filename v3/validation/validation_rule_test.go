@@ -134,14 +134,15 @@ func TestParseValidationTag_RegexCharClassOfAllBracketsParses(t *testing.T) {
 }
 
 func TestHasBalancedBrackets_CharClassMembersAreLiteral(t *testing.T) {
-    balanced := []string{"^[)]$", "^[}]$", "^[(){}]+$", "[]]", "[^]]", "a{2,3}[xyz]"}
+    balanced := []string{"^[)]$", "^[}]$", "^[(){}]+$", "[]]", "[^]]", "a{2,3}[xyz]", "]a", "^a]b$"}
     for _, value := range balanced {
         if false == hasBalancedBrackets(value) {
             t.Fatalf("expected %q to be reported as balanced", value)
         }
     }
 
-    unbalanced := []string{"^[a", "a{2", "(a", "a)", "]a"}
+    /* a ']' with no open class is a literal in RE2 ("]a" matches "]a"), so it is not a syntax error; the genuinely unbalanced forms are the openers left open and the closers with no opener */
+    unbalanced := []string{"^[a", "a{2", "(a", "a)"}
     for _, value := range unbalanced {
         if true == hasBalancedBrackets(value) {
             t.Fatalf("expected %q to be reported as unbalanced", value)
@@ -181,5 +182,12 @@ func TestParseValidationTag_ParenthesizedRegexWithCommaInsideGroup(t *testing.T)
     }
     if shorthandRules[0].params["value"] != parenRules[0].params["value"] {
         t.Fatalf("shorthand and parenthesized forms must agree on the value: %q vs %q", shorthandRules[0].params["value"], parenRules[0].params["value"])
+    }
+}
+
+/** @info A ']' outside a character class is a literal in RE2, so a regex constraint containing one is a valid pattern; rejecting the tag made the field un-validatable on every request. */
+func TestParseValidationTag_RegexWithLiteralClosingBracketIsAccepted(t *testing.T) {
+    if _, err := parseValidationTag(`regex(pattern=^a]b$)`); nil != err {
+        t.Fatalf("expected a regex with a literal ']' to parse, got: %v", err)
     }
 }

@@ -194,17 +194,80 @@ func TestMysqlLock_AcquireVerifyErrorReleasesHeldLock(t *testing.T) {
         t.Fatalf("expected acquire to succeed: %v %v", acquired, acquireErr)
     }
 
-    cancelledContext, cancel := context.WithCancel(context.Background())
-    cancel()
+    /* induce a GENUINE verify error by killing the pinned session; a canceled request context must NOT do this (see TestMysqlLock_AcquireCanceledRuntimeContextKeepsHeldLock) */
+    var ownerId sql.NullInt64
+    if ownerErr := sqldb.QueryRowContext(context.Background(), "SELECT IS_USED_LOCK(?)", name).Scan(&ownerId); nil != ownerErr {
+        t.Fatalf("read lock owner: %v", ownerErr)
+    }
+    if false == ownerId.Valid {
+        t.Fatalf("expected the lock to be held by a session")
+    }
+    if _, killErr := sqldb.ExecContext(context.Background(), "KILL "+strconv.FormatInt(ownerId.Int64, 10)); nil != killErr {
+        t.Logf("kill returned (tolerated): %v", killErr)
+    }
 
-    lock.Acquire(newLockRuntimeWithContext(cancelledContext))
+    /* the verify now fails for real: the lock object must drop the dead connection and take the lock afresh */
+    reacquired, reacquireErr := lock.Acquire(newLockRuntime())
+    if nil != reacquireErr || false == reacquired {
+        t.Fatalf("expected re-acquire after a genuine verify error: %v %v", reacquired, reacquireErr)
+    }
+
+    if releaseErr := lock.Release(newLockRuntime()); nil != releaseErr {
+        t.Fatalf("release: %v", releaseErr)
+    }
 
     var holder sql.NullInt64
     if holderErr := sqldb.QueryRowContext(context.Background(), "SELECT IS_USED_LOCK(?)", name).Scan(&holder); nil != holderErr {
         t.Fatalf("read lock holder: %v", holderErr)
     }
     if true == holder.Valid {
-        t.Fatalf("lock was orphaned: still held by session %d after the verify-error path", holder.Int64)
+        t.Fatalf("lock was orphaned: still held by session %d after release", holder.Int64)
+    }
+}
+
+/** @info Mirrors TestMysqlLock_RefreshCanceledRuntimeContextKeepsHeldLock: a canceled request context is a transient caller-side condition, not a lost lock. Re-acquiring under one must not be mistaken for a verify error and must not RELEASE_LOCK a lock this process still holds. */
+func TestMysqlLock_AcquireCanceledRuntimeContextKeepsHeldLock(t *testing.T) {
+    dsn := os.Getenv("MYSQL_DSN")
+    if "" == dsn {
+        t.Skip("MYSQL_DSN not set; skipping mysql lock integration test")
+    }
+
+    sqldb, openErr := sql.Open("mysql", dsn)
+    if nil != openErr {
+        t.Fatalf("open: %v", openErr)
+    }
+    defer sqldb.Close()
+
+    database := bun.NewDB(sqldb, mysqldialect.New())
+
+    locker := NewLocker(database)
+    name := "melody_lock_acquire_canceled_ctx"
+
+    lock := locker.CreateLock(name, 0)
+
+    acquired, acquireErr := lock.Acquire(newLockRuntime())
+    if nil != acquireErr || false == acquired {
+        t.Fatalf("expected acquire to succeed: %v %v", acquired, acquireErr)
+    }
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    reacquired, reacquireErr := lock.Acquire(newLockRuntimeWithContext(cancelledContext))
+    if nil != reacquireErr || false == reacquired {
+        t.Fatalf("expected the re-acquire on a canceled context to report the lock as still held: %v %v", reacquired, reacquireErr)
+    }
+
+    var holder sql.NullInt64
+    if holderErr := sqldb.QueryRowContext(context.Background(), "SELECT IS_USED_LOCK(?)", name).Scan(&holder); nil != holderErr {
+        t.Fatalf("read lock holder: %v", holderErr)
+    }
+    if false == holder.Valid {
+        t.Fatal("a canceled request context released a lock this process still held")
+    }
+
+    if releaseErr := lock.Release(newLockRuntime()); nil != releaseErr {
+        t.Fatalf("release: %v", releaseErr)
     }
 }
 

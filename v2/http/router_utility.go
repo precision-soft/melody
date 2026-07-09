@@ -497,6 +497,13 @@ func matchPath(
                 }
 
                 if "" != wildcardName {
+                    /* a requirement on a catch-all is a whitelist like any other; skipping it here would let the wildcard swallow anything while the single-segment and named-parameter branches below enforce theirs */
+                    if regex, exists := routeDefinition.requirements[wildcardName]; true == exists {
+                        if false == regex.MatchString(rest) {
+                            return nil, false
+                        }
+                    }
+
                     params[wildcardName] = rest
                     if RouteAttributeLocale == wildcardName {
                         params[RouteAttributeLocale] = rest

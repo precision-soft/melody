@@ -196,8 +196,9 @@ func BuildCauseContextChain(causeErr error, maxDepth int) []map[string]any {
 
     current := causeErr
     for depth := 0; depth < maxDepth && nil != current; depth++ {
-        var causeException *Error
-        if true == errors.As(current, &causeException) {
+        /* @important assert on the immediate node, do not errors.As: a deep search jumps ahead to the nearest *Error while the cursor advances one link at a time, so a plain wrapper in front of an *Error would emit that *Error's context once per intervening level. One entry per link, matching BuildCauseChain. */
+        causeException, isException := current.(*Error)
+        if true == isException && nil != causeException {
             causeContext := causeException.Context()
             if nil != causeContext && 0 < len(causeContext) {
                 chain = append(chain, causeContext)

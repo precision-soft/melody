@@ -1,6 +1,8 @@
 package config
 
 import (
+    "strings"
+
     "github.com/precision-soft/melody/v3/exception"
 )
 
@@ -27,6 +29,14 @@ func (instance *Configuration) Resolve() error {
 
                 continue
             }
+        }
+
+        if true == strings.Contains(stringValue, "%%") {
+            if nil == instance.parametersWithEscapedPercents {
+                instance.parametersWithEscapedPercents = map[string]bool{}
+            }
+
+            instance.parametersWithEscapedPercents[name] = true
         }
 
         value, resolveWithTemplatesErr := instance.resolveWithTemplates(

@@ -111,9 +111,12 @@ func resolveErrorContextJson(resolveErr error, verbosityLevel int) string {
         return ""
     }
 
-    normalizedContextBytes, normalizeMarshalErr := json.Marshal(contextValue)
+    /* @important redact BEFORE marshalling: both fallbacks below print the value they were handed, so sanitizing only the happy path would leak exactly the stack and trace entries this function exists to strip whenever json.Marshal or json.Unmarshal fails */
+    redactedContext := sanitizeErrorContextValue(contextValue)
+
+    normalizedContextBytes, normalizeMarshalErr := json.Marshal(redactedContext)
     if nil != normalizeMarshalErr {
-        fallbackString := fmt.Sprintf("%v", contextValue)
+        fallbackString := fmt.Sprintf("%v", redactedContext)
 
         return truncateTableCellValueByVerbosity(fallbackString, verbosityLevel)
     }
@@ -158,7 +161,8 @@ func (instance *ContainerCommand) populateServiceList(
 
     endIndex := total
     if 0 < option.Limit {
-        if startIndex+option.Limit < endIndex {
+        /* startIndex+option.Limit overflows int for a large --limit and wraps negative, so the slice bound below panics; compare against the remaining count instead of forming the sum */
+        if option.Limit < total-startIndex {
             endIndex = startIndex + option.Limit
         }
     }

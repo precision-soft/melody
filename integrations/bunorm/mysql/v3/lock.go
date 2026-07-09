@@ -71,12 +71,17 @@ func (instance *mysqlLock) Acquire(runtimeInstance runtimecontract.Runtime) (boo
     defer instance.mutex.Unlock()
 
     if nil != instance.connection {
+        /* @important probe on a fresh, bounded context, exactly as Refresh does: the caller's request context may already be canceled, and a verify that fails for that reason would be mistaken for a lost lock and drive releaseAndCloseConnection() — actively releasing a lock this process still holds */
+        verifyCtx, cancelVerify := context.WithTimeout(context.Background(), instance.releaseTimeout)
+
         var held sql.NullBool
         verifyErr := instance.connection.QueryRowContext(
-            runtimeInstance.Context(),
+            verifyCtx,
             "SELECT IS_USED_LOCK(?) = CONNECTION_ID()",
             instance.name,
         ).Scan(&held)
+        cancelVerify()
+
         if nil == verifyErr && true == held.Valid && true == held.Bool {
             return true, nil
         }

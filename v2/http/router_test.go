@@ -197,3 +197,40 @@ func TestRouter_RequirementWithAlternationMatchesTheWholeSegment(t *testing.T) {
         }
     }
 }
+
+/** @info The catch-all branch assigned the joined remainder to the wildcard without consulting the route's requirements, while the single-segment and named-parameter branches enforced theirs — a whitelist that silently failed open on ":path...". */
+func TestRouter_RequirementIsEnforcedOnCatchAllWildcard(t *testing.T) {
+    router := NewRouter()
+
+    router.HandleWithOptions(
+        "/files/*path",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(200, "ok"), nil
+        },
+        NewRouteOptions(
+            "files.serve",
+            []string{nethttp.MethodGet},
+            "",
+            nil,
+            map[string]string{"path": `[a-z0-9/]+`},
+            nil,
+            nil,
+            0,
+            nil,
+        ),
+    )
+
+    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+
+    recorder := httptest.NewRecorder()
+    handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/files/a/b/c", nil))
+    if 200 != recorder.Code {
+        t.Fatalf("expected a conforming catch-all value to route, got %d", recorder.Code)
+    }
+
+    rejected := httptest.NewRecorder()
+    handler.ServeHTTP(rejected, httptest.NewRequest(nethttp.MethodGet, "/files/A..%2fetc", nil))
+    if 200 == rejected.Code {
+        t.Fatal("expected a catch-all value violating the requirement to be refused")
+    }
+}

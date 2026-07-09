@@ -218,7 +218,20 @@ func (instance *FileStorage) Close() error {
     return nil
 }
 
+/* purgeExpiredLocked drops every lapsed session before a snapshot is written. Without it an expired session is only ever removed when a Load happens to name it, so entries accumulate forever in the map and in the file — and because every Save rewrites the whole snapshot, the write cost grows with everything that ever expired. */
+func (instance *FileStorage) purgeExpiredLocked() {
+    now := time.Now().UnixNano()
+
+    for sessionId, entry := range instance.sessionById {
+        if 0 != entry.ExpiresAt && now >= entry.ExpiresAt {
+            delete(instance.sessionById, sessionId)
+        }
+    }
+}
+
 func (instance *FileStorage) flushLocked() error {
+    instance.purgeExpiredLocked()
+
     snapshot := instance.sessionById
 
     if true == instance.ownsFile && "" != instance.path {

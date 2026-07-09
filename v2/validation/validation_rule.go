@@ -157,6 +157,7 @@ func hasBalancedBrackets(valueString string) bool {
             continue
         }
 
+        /* a ']' that reaches here closes no class: RE2 reads it as a literal, so it must not sink the whole tag (the class scanner above consumes the ones that do close a class) */
         switch character {
         case '(':
             parenDepth++
@@ -165,8 +166,6 @@ func hasBalancedBrackets(valueString string) bool {
                 return false
             }
             parenDepth--
-        case ']':
-            return false
         case '{':
             curlyDepth++
         case '}':

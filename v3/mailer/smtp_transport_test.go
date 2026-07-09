@@ -251,3 +251,50 @@ func serveStartTlsAuthSmtp(listener net.Listener, certificate tls.Certificate, a
         }
     }
 }
+
+/** @info smtp.NewClient reads the server's 220 greeting synchronously with no deadline, so a server that accepts the connection and then says nothing pinned the sending goroutine and its socket forever. */
+func TestSmtpTransport_DialTimesOutWhenTheServerNeverGreets(t *testing.T) {
+    listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+    if nil != listenErr {
+        t.Fatalf("listen: %v", listenErr)
+    }
+    defer listener.Close()
+
+    accepted := make(chan struct{})
+
+    go func() {
+        connection, acceptErr := listener.Accept()
+        if nil != acceptErr {
+            return
+        }
+
+        close(accepted)
+
+        /* accept, then stay silent: no 220 greeting ever arrives */
+        <-time.After(5 * time.Second)
+        connection.Close()
+    }()
+
+    transport := NewSmtpTransport(SmtpConfig{
+        Address:     listener.Addr().String(),
+        Host:        "127.0.0.1",
+        DialTimeout: 150 * time.Millisecond,
+    })
+
+    finished := make(chan error, 1)
+    go func() {
+        _, dialErr := transport.dial()
+        finished <- dialErr
+    }()
+
+    <-accepted
+
+    select {
+    case dialErr := <-finished:
+        if nil == dialErr {
+            t.Fatal("expected the silent server to produce a dial error")
+        }
+    case <-time.After(3 * time.Second):
+        t.Fatal("dial hung on a server that accepted the connection and never sent a greeting")
+    }
+}

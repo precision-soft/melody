@@ -1,6 +1,7 @@
 package amqp
 
 import (
+    "strings"
     "testing"
     "time"
 
@@ -76,5 +77,36 @@ func TestProviderNewTransport_TransportOverridesGeneral(t *testing.T) {
 
     if 10*time.Second != instance.reconnect.MaxBackoff {
         t.Fatalf("expected overridden max backoff 10s, got %s", instance.reconnect.MaxBackoff)
+    }
+}
+
+/** @info net/url parses "guest:guest@host" as scheme "guest" with no userinfo, so the old redaction returned it verbatim and the password reached the connection-failure log. Redaction must fail closed. */
+func TestRedactDsn_FailsClosedOnDsnWithoutParsableUserinfo(t *testing.T) {
+    for _, dsn := range []string{
+        "guest:secret@rabbitmq:5672",
+        "not a url at all",
+        "amqp://",
+        "://broken",
+    } {
+        redacted := redactDsn(dsn)
+
+        if true == strings.Contains(redacted, "secret") {
+            t.Fatalf("the password leaked for %q: %q", dsn, redacted)
+        }
+        if redactedDsnPlaceholder != redacted {
+            t.Fatalf("expected %q to redact to the placeholder, got %q", dsn, redacted)
+        }
+    }
+}
+
+/** @info A well-formed dsn keeps its shape so the log stays useful; only the password goes. */
+func TestRedactDsn_KeepsWellFormedDsnWithoutThePassword(t *testing.T) {
+    redacted := redactDsn("amqp://guest:secret@rabbitmq:5672/vhost")
+
+    if true == strings.Contains(redacted, "secret") {
+        t.Fatalf("the password leaked: %q", redacted)
+    }
+    if false == strings.Contains(redacted, "rabbitmq:5672") || false == strings.Contains(redacted, "guest") {
+        t.Fatalf("expected the host and username to survive redaction, got %q", redacted)
     }
 }

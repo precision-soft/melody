@@ -80,10 +80,18 @@ func (instance *Provider) Close(connection *amqp091.Connection) error {
     return connection.Close()
 }
 
+/* redactedDsnPlaceholder stands in for any dsn this function cannot prove it has stripped credentials from. */
+const redactedDsnPlaceholder = "(redacted)"
+
+/* redactDsn strips the password from a dsn for logging. It fails CLOSED: a string that does not parse as a proper url with a scheme and a host is returned as a placeholder rather than verbatim, because net/url happily parses "guest:guest@host" into a scheme of "guest" with no userinfo at all — and returning that unchanged would put the password straight into the connection-failure log line. */
 func redactDsn(dsn string) string {
     parsed, parseErr := neturl.Parse(dsn)
     if nil != parseErr {
-        return ""
+        return redactedDsnPlaceholder
+    }
+
+    if "" == parsed.Scheme || "" == parsed.Host {
+        return redactedDsnPlaceholder
     }
 
     if nil != parsed.User {
