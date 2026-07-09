@@ -21,8 +21,13 @@ services:
             # dialing services that the validation run does not start.
         volumes:
             - ${RELATIVE_PATH_TO_ROOT}:${CONTAINER_ROOT_PATH}
-            - ${RELATIVE_PATH_TO_ROOT}/.dev-data/go/pkg/mod:/go/pkg/mod
-            - ${RELATIVE_PATH_TO_ROOT}/.dev-data/go/cache:/go/cache
+            # note: the go module and build caches live in named volumes, NOT host bind
+            # mounts: the go linker opens thousands of cache files in parallel and the
+            # Docker Desktop file-sharing daemon runs out of file descriptors ("too many
+            # open files" during go test ./...), besides being an order of magnitude
+            # slower for cache-heavy workloads. Named volumes stay inside the VM.
+            - go-mod-cache:/go/pkg/mod
+            - go-build-cache:/go/cache
             - ${RELATIVE_PATH_TO_ROOT}/.dev-data/bash/.bash_history:/home/.bash_history
         ports:
             - "${DEV_HTTP_HOST_PORT:-8180}:8080"
@@ -146,3 +151,7 @@ services:
         ports:
             - "${OTEL_COLLECTOR_GRPC_HOST_PORT:-4317}:4317"
             - "${OTEL_COLLECTOR_HTTP_HOST_PORT:-4318}:4318"
+
+volumes:
+    go-mod-cache:
+    go-build-cache:
