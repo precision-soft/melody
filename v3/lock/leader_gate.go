@@ -61,6 +61,9 @@ func NewLeaderGateWithOptions(
             resolved.RefreshInterval = ttl / 2
         }
     }
+    if minimumRefreshInterval > resolved.RefreshInterval {
+        resolved.RefreshInterval = minimumRefreshInterval
+    }
 
     return &LeaderGate{
         locker:  locker,
@@ -152,7 +155,8 @@ func (instance *LeaderGate) Run(runtimeInstance runtimecontract.Runtime) error {
 func (instance *LeaderGate) lead(runtimeInstance runtimecontract.Runtime, lock lockcontract.Lock) error {
     refreshTtl := instance.ttl
     if 0 >= refreshTtl {
-        refreshTtl = instance.options.RefreshInterval
+        /* session mode: a session locker ignores this ttl, while a lease locker rewrites the lease — renew for twice the probe cadence so the renewal never races the expiry it just set (see sessionProbeTtlFactor) */
+        refreshTtl = sessionProbeTtlFactor * instance.options.RefreshInterval
     }
 
     ticker := time.NewTicker(instance.options.RefreshInterval)

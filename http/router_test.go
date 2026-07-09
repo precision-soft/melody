@@ -226,3 +226,48 @@ func TestRouter_ParamExtraction(t *testing.T) {
         t.Fatalf("unexpected body")
     }
 }
+
+/** @info A requirement is a whitelist for one path segment. Anchors bind looser than alternation, so concatenating "^" and "$" onto "en|de|fr" yields (^en)|(de)|(fr$) — which accepts "aden", "frfr" and any string ending in "fr". The requirement must be wrapped in a non-capturing group so the anchors apply to the whole alternation. */
+func TestRouter_RequirementWithAlternationMatchesTheWholeSegment(t *testing.T) {
+    router := NewRouter()
+
+    router.HandleWithOptions(
+        "/shop/:locale/list",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(200, "ok"), nil
+        },
+        NewRouteOptions(
+            "shop.list",
+            []string{nethttp.MethodGet},
+            "",
+            nil,
+            map[string]string{"locale": "en|de|fr"},
+            nil,
+            nil,
+            0,
+            nil,
+        ),
+    )
+
+    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+
+    accepted := []string{"en", "de", "fr"}
+    for _, locale := range accepted {
+        recorder := httptest.NewRecorder()
+        handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/shop/"+locale+"/list", nil))
+
+        if 200 != recorder.Code {
+            t.Fatalf("expected the whitelisted locale %q to route, got %d", locale, recorder.Code)
+        }
+    }
+
+    rejected := []string{"aden", "frfr", "xxde", "enen", "en..%2fetc%2fpasswd"}
+    for _, locale := range rejected {
+        recorder := httptest.NewRecorder()
+        handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/shop/"+locale+"/list", nil))
+
+        if 200 == recorder.Code {
+            t.Fatalf("expected the non-whitelisted locale %q to be refused, but it routed", locale)
+        }
+    }
+}

@@ -74,6 +74,11 @@ func Verify(secret string, code string, config Config) (bool, error) {
     return VerifyAt(secret, code, time.Now(), config)
 }
 
+/* NormalizeCode strips whitespace from a submitted code, the same normalization Verify applies before comparison. A caller that keys anything on an accepted code — a replay guard above all — must key on this form: "123 456" and "123456" verify as the same code, so keying on the raw header value would let a captured code be replayed by re-spacing it. */
+func NormalizeCode(code string) string {
+    return strings.Join(strings.Fields(code), "")
+}
+
 /* VerifyAt is Verify at an explicit time, exposed for deterministic testing and for callers that drive their own clock. Whitespace anywhere in the submitted code is stripped before comparison — authenticator apps display codes as "123 456" and mobile copy/paste keeps the separator (often as a non-breaking space) — mirroring the secret normalization; whitespace can never be part of an all-digit code, so the tolerance is unambiguous and the comparison stays constant-time. */
 func VerifyAt(secret string, code string, at time.Time, config Config) (bool, error) {
     resolved := config.withDefaults()
@@ -83,7 +88,7 @@ func VerifyAt(secret string, code string, at time.Time, config Config) (bool, er
         return false, decodeErr
     }
 
-    code = strings.Join(strings.Fields(code), "")
+    code = NormalizeCode(code)
 
     if len(code) != resolved.Digits {
         return false, nil

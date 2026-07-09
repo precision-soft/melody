@@ -2,8 +2,9 @@
 infrastructure — the behaviours that only show up end-to-end against a real broker, database or cache. It
 is DEV TOOLING, kept under .dev (not shipped in any module tag) and grouped with the other dev scripts.
 
-Run it against the dev compose stack (./dc up:all) from inside the dev container. Each section runs only
-when its backend env var is set, so you can exercise one or all:
+Run it against the dev compose stack (./dc up:all) with .dev/e2e/run.sh, which sets every backend env var
+and executes the harness inside the dev container. Each section runs only when its backend env var is set,
+so you can exercise one or all by invoking it by hand instead:
 
     docker exec \
       -e REDIS_ADDRESS=redis:6379 \
@@ -13,16 +14,21 @@ when its backend env var is set, so you can exercise one or all:
       sh -c 'export PATH=/usr/local/go/bin:$PATH; cd /app/.dev/e2e && go run .'
 
 Sections:
-  - WEBSOCKET FAN-OUT    (in-process) — handshake + hub broadcast delivered to two live sockets
-  - CROSS-APP HMAC AUTH  (redis)    — sign→verify, actor propagation, replay/audience/tamper rejection
-  - CACHE                (redis)    — set/get round-trip, time-to-live expiry, miss, atomic increment
-  - OUTBOX               (postgres) — transactional enqueue → relay drains to transport, poison dead-letter
-  - PGSQL ADVISORY LOCK  (postgres) — mutual exclusion, release hand-off
-  - MIGRATE              (postgres) — up creates+seeds a table, down rolls it back
-  - AMQP PUBLISH/CONSUME (rabbitmq) — round-trip publish → consume → ack, and delayed redelivery
+  - WEBSOCKET FAN-OUT      (in-process) — handshake + hub broadcast delivered to two live sockets
+  - ENCRYPT COMPARTMENTS   (in-process) — named-cipher isolation, redaction, unregistered compartment errors
+  - CROSS-APP HMAC AUTH    (redis)    — sign→verify, actor propagation, replay/audience/tamper rejection
+  - CACHE                  (redis)    — set/get round-trip, time-to-live expiry, miss, atomic increment
+  - RATE LIMIT             (redis)    — shared budget, window reset, fail-closed default, opt-in fail-open
+  - RUN EXCLUSIVE          (redis)    — one holder per tick, release on return, fail-closed on store outage
+  - LEADER GATE            (redis)    — one leader of two contenders, follower promoted on shutdown
+  - OUTBOX                 (postgres) — transactional enqueue → relay drains to transport, poison dead-letter
+  - PGSQL ADVISORY LOCK    (postgres) — mutual exclusion, release hand-off
+  - MIGRATE                (postgres) — up creates+seeds a table, down rolls it back; per-context isolation
+  - AMQP PUBLISH/CONSUME   (rabbitmq) — round-trip publish → consume → ack, and delayed redelivery
+  - EXAMPLE OVER HTTP      (example)  — forwarded-client-ip trust boundary and the rate limit over real HTTP
 
-The websocket section needs no backend and always runs; the rest run only when their env var is set.
-Exits non-zero on the first unexpected outcome. */
+The websocket and encrypt sections need no backend and always run; the rest run only when their env var is
+set. Exits non-zero on the first unexpected outcome. */
 package main
 
 import (
@@ -48,13 +54,31 @@ func main() {
     runWebsocketCheck()
     sections++
 
-    if address := os.Getenv("REDIS_ADDRESS"); "" != address {
+    section("ENCRYPT COMPARTMENTS (in-process)")
+    runEncryptCompartmentCheck()
+    sections++
+
+    redisAddress := os.Getenv("REDIS_ADDRESS")
+
+    if address := redisAddress; "" != address {
         section("CROSS-APP HMAC AUTH (live redis)")
         runHmacCheck(address)
         sections++
 
         section("CACHE (live redis)")
         runCacheCheck(address)
+        sections++
+
+        section("RATE LIMIT (live redis)")
+        runRateLimitCheck(address)
+        sections++
+
+        section("RUN EXCLUSIVE (live redis)")
+        runRunExclusiveCheck(address)
+        sections++
+
+        section("LEADER GATE (live redis)")
+        runLeaderGateCheck(address)
         sections++
     }
 
@@ -75,6 +99,12 @@ func main() {
     if dsn := os.Getenv("AMQP_DSN"); "" != dsn {
         section("AMQP PUBLISH/CONSUME (live rabbitmq)")
         runAmqpCheck(dsn)
+        sections++
+    }
+
+    if baseUrl := os.Getenv("EXAMPLE_BASE_URL"); "" != baseUrl {
+        section("EXAMPLE OVER HTTP (live example application)")
+        runExampleHttpCheck(baseUrl, os.Getenv("EXAMPLE_LOAD_BALANCER_URL"), redisAddress)
         sections++
     }
 

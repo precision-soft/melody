@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `http/router.go` — a route parameter requirement is now wrapped in a non-capturing group before it is anchored (`^(?:...)$`). Alternation binds looser than the anchors, so a requirement like `en|de|fr` compiled to `^en|de|fr$` — which the regexp engine reads as `(^en)|(de)|(fr$)` — and matched `aden`, `frfr` and anything ending in `fr`. A requirement meant as a whitelist therefore failed **open**, both when matching an inbound path segment and when validating a value in `UrlGenerator.GeneratePath`, handing the handler a parameter it had been told was already validated. Note for consumers of the route manifest: the normalized requirement it publishes is now `^(?:\d+)$` where it was `^\d+$` — the same language, in Go and in JavaScript `RegExp` alike.
+- `http/middleware/compression.go` — a negative `MinSize` is now normalized along with zero. Only `0` was replaced by the 1024-byte default, so a negative value reached `make([]byte, peekSize)` and panicked on every request routed through the middleware.
+
 ### Added
 
 - `http/contract/middleware.go` — optional `RuntimeRateLimiter` widening of `RateLimiter` for shared-store limiters: `AllowWithRuntime(runtime, key) (bool, error)` threads the request context to the store and reports store failures, with the returned allowed value already reflecting the limiter's failure policy. `middleware.RateLimitMiddleware` now prefers this method when the configured limiter implements it (logging the store failure and honoring the returned decision); every existing `RateLimiter` takes the unchanged plain path. Back-port from `v3`.

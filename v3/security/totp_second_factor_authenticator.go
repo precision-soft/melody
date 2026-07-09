@@ -175,13 +175,15 @@ func (instance *TotpSecondFactorAuthenticator) tryRecoveryCode(
     return redeemed, nil
 }
 
-/* codeAlreadyUsed records an accepted code through the replay guard and reports whether it had already been used within its validity window. The constructor always installs a guard (an in-process one by default), so this relies on that invariant rather than tolerating a nil guard — a struct built by literal without one would fail loudly here instead of silently disabling replay protection. */
+/* codeAlreadyUsed records an accepted code through the replay guard and reports whether it had already been used within its validity window. The constructor always installs a guard (an in-process one by default), so this relies on that invariant rather than tolerating a nil guard — a struct built by literal without one would fail loudly here instead of silently disabling replay protection.
+
+The nonce keys on the NORMALIZED code, exactly as Verify compared it: "123 456" and "123456" are the same code to Verify, so keying on the raw header value would let a captured code be replayed by re-spacing it. */
 func (instance *TotpSecondFactorAuthenticator) codeAlreadyUsed(
     request httpcontract.Request,
     userIdentifier string,
     code string,
 ) (bool, error) {
-    nonce := "2fa:" + userIdentifier + ":" + code
+    nonce := "2fa:" + userIdentifier + ":" + totp.NormalizeCode(code)
 
     seen, rememberErr := instance.replayGuard.Remember(request.RuntimeInstance(), nonce, instance.codeValidityWindow())
     if nil != rememberErr {

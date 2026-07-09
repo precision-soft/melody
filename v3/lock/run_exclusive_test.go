@@ -193,3 +193,165 @@ func TestRunExclusive_ReleasesEvenWhenCallerContextIsCancelled(t *testing.T) {
         t.Fatalf("expected the lock to be released despite the cancelled caller context")
     }
 }
+
+/* recordingRefreshLocker captures the ttl each Refresh is asked to write, so a test can assert the lease
+margin the refresher gives a lease-style backend. */
+type recordingRefreshLocker struct {
+    inner        lockcontract.Locker
+    refreshTtl   chan time.Duration
+}
+
+func (instance *recordingRefreshLocker) CreateLock(name string, ttl time.Duration) lockcontract.Lock {
+    return &recordingRefreshLock{inner: instance.inner.CreateLock(name, ttl), refreshTtl: instance.refreshTtl}
+}
+
+type recordingRefreshLock struct {
+    inner      lockcontract.Lock
+    refreshTtl chan time.Duration
+}
+
+func (instance *recordingRefreshLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+    return instance.inner.Acquire(runtimeInstance)
+}
+
+func (instance *recordingRefreshLock) Release(runtimeInstance runtimecontract.Runtime) error {
+    return instance.inner.Release(runtimeInstance)
+}
+
+func (instance *recordingRefreshLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl time.Duration) error {
+    select {
+    case instance.refreshTtl <- ttl:
+    default:
+    }
+
+    return instance.inner.Refresh(runtimeInstance, ttl)
+}
+
+/* blockingRefreshLock blocks inside Refresh until its runtime context is cancelled, standing in for a
+backend whose connection has been blackholed by a network partition. */
+type blockingRefreshLocker struct {
+    entered chan struct{}
+}
+
+func (instance *blockingRefreshLocker) CreateLock(name string, ttl time.Duration) lockcontract.Lock {
+    return &blockingRefreshLock{entered: instance.entered}
+}
+
+type blockingRefreshLock struct {
+    entered chan struct{}
+    closed  bool
+}
+
+func (instance *blockingRefreshLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+    return true, nil
+}
+
+func (instance *blockingRefreshLock) Release(runtimeInstance runtimecontract.Runtime) error {
+    return nil
+}
+
+func (instance *blockingRefreshLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl time.Duration) error {
+    if false == instance.closed {
+        instance.closed = true
+        close(instance.entered)
+    }
+
+    <-runtimeInstance.Context().Done()
+
+    return exception.NewError("refresh aborted", nil, runtimeInstance.Context().Err())
+}
+
+/** @info A lease-style backend rewrites the lease to now+ttl on Refresh. Handing it the probe interval itself would renew the lease exactly as it expires, so every probe races its own expiry: fn is cancelled spuriously and the lapsed lease lets a second instance run alongside it. The probe must renew for a multiple of its own cadence, and the derived interval must never reach time.NewTicker as zero. */
+func TestResolveRefreshSchedule(t *testing.T) {
+    for _, testCase := range []struct {
+        name            string
+        ttl             time.Duration
+        wantedInterval  time.Duration
+        wantedRefreshTtl time.Duration
+    }{
+        {"positive ttl refreshes at half of it", 30 * time.Second, 15 * time.Second, 30 * time.Second},
+        {"zero ttl probes with a lease margin", 0, defaultSessionProbeInterval, sessionProbeTtlFactor * defaultSessionProbeInterval},
+        {"negative ttl probes with a lease margin", -1 * time.Second, defaultSessionProbeInterval, sessionProbeTtlFactor * defaultSessionProbeInterval},
+        {"tiny ttl is floored off zero", 1 * time.Nanosecond, minimumRefreshInterval, 1 * time.Nanosecond},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            interval, refreshTtl := resolveRefreshSchedule(testCase.ttl)
+
+            if testCase.wantedInterval != interval {
+                t.Fatalf("interval: wanted %s, got %s", testCase.wantedInterval, interval)
+            }
+            if testCase.wantedRefreshTtl != refreshTtl {
+                t.Fatalf("refresh ttl: wanted %s, got %s", testCase.wantedRefreshTtl, refreshTtl)
+            }
+            if 0 >= interval {
+                t.Fatal("a non-positive interval would panic time.NewTicker")
+            }
+
+            /* a ttl below the floor is a misconfiguration the lock cannot rescue — the lease expires before
+               any renewal can land — but it must not panic; every sane ttl renews with slack to spare */
+            if minimumRefreshInterval <= testCase.ttl || 0 >= testCase.ttl {
+                if 0 >= refreshTtl-interval {
+                    t.Fatalf("the refresh ttl %s gives no margin over the %s cadence", refreshTtl, interval)
+                }
+            }
+        })
+    }
+}
+
+/** @info A ttl of a few nanoseconds makes ttl/2 == 0 and time.NewTicker(0) panics on the refresh goroutine — a panic no recover can reach. The derived interval must be floored. */
+func TestRunExclusive_TinyTtlDoesNotPanicTheRefreshGoroutine(t *testing.T) {
+    ran := false
+
+    acquired, runErr := RunExclusive(
+        testRuntimeWithContext(context.Background()),
+        NewInMemoryLocker(clock.NewSystemClock()),
+        "tiny-ttl",
+        1*time.Nanosecond,
+        func(runtimecontract.Runtime) error {
+            ran = true
+            time.Sleep(5 * time.Millisecond)
+            return nil
+        },
+    )
+
+    if false == acquired {
+        t.Fatal("expected the lock to be acquired")
+    }
+    if false == ran {
+        t.Fatal("expected fn to run")
+    }
+    _ = runErr
+}
+
+/** @info A Refresh already blocked on an unresponsive backend when fn returns must be interrupted: closing refreshDone alone cannot reach it, so RunExclusive would wait on the goroutine forever while holding the lock. Cancelling the child context before Wait unblocks it, and the resulting error must read as shutdown, not as a lost lease. */
+func TestRunExclusive_DoesNotHangWhenARefreshIsInFlightAtReturn(t *testing.T) {
+    entered := make(chan struct{})
+    locker := &blockingRefreshLocker{entered: entered}
+
+    done := make(chan struct{})
+
+    go func() {
+        defer close(done)
+
+        _, runErr := RunExclusive(
+            testRuntimeWithContext(context.Background()),
+            locker,
+            "blocking",
+            2*time.Millisecond,
+            func(runtimecontract.Runtime) error {
+                <-entered
+                return nil
+            },
+        )
+
+        if nil != runErr {
+            t.Errorf("expected a clean run, got %v", runErr)
+        }
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("RunExclusive hung with a refresh in flight at fn return")
+    }
+}

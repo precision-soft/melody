@@ -7,10 +7,12 @@ require (
 	github.com/precision-soft/melody/integrations/amqp/v3 v3.2.0
 	github.com/precision-soft/melody/integrations/bunorm/migrate/v3 v3.0.0
 	github.com/precision-soft/melody/integrations/bunorm/pgsql/v3 v3.2.0
+	github.com/precision-soft/melody/integrations/bunorm/v3 v3.1.2
 	github.com/precision-soft/melody/integrations/outbox/v3 v3.0.0
 	github.com/precision-soft/melody/integrations/rueidis/v3 v3.3.0
 	github.com/precision-soft/melody/integrations/websocket/v3 v3.0.0
 	github.com/precision-soft/melody/v3 v3.9.0
+	github.com/redis/rueidis v1.0.71
 	github.com/uptrace/bun v1.2.16
 	github.com/uptrace/bun/dialect/pgdialect v1.2.16
 	github.com/uptrace/bun/driver/pgdriver v1.2.16
@@ -20,10 +22,8 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
-	github.com/precision-soft/melody/integrations/bunorm/v3 v3.0.0 // indirect
 	github.com/puzpuzpuz/xsync/v3 v3.5.1 // indirect
 	github.com/rabbitmq/amqp091-go v1.10.0 // indirect
-	github.com/redis/rueidis v1.0.71 // indirect
 	github.com/tmthrgd/go-hex v0.0.0-20190904060850-447a3041c3bc // indirect
 	github.com/urfave/cli/v3 v3.6.1 // indirect
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
@@ -50,3 +50,5 @@ replace github.com/precision-soft/melody/integrations/amqp/v3 => ../../integrati
 replace github.com/precision-soft/melody/integrations/websocket/v3 => ../../integrations/websocket/v3
 
 replace github.com/precision-soft/melody/integrations/bunorm/migrate/v3 => ../../integrations/bunorm/migrate/v3
+
+replace github.com/precision-soft/melody/integrations/bunorm/v3 => ../../integrations/bunorm/v3

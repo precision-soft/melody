@@ -14,11 +14,7 @@ import (
 
 var lockAcquireScript = rueidis.NewLuaScript(`local current = redis.call("get", KEYS[1])
 if current == false or current == ARGV[1] then
-    if tonumber(ARGV[2]) > 0 then
-        redis.call("set", KEYS[1], ARGV[1], "PX", tonumber(ARGV[2]))
-    else
-        redis.call("set", KEYS[1], ARGV[1])
-    end
+    redis.call("set", KEYS[1], ARGV[1], "PX", tonumber(ARGV[2]))
     return 1
 end
 return 0`)
@@ -57,11 +53,17 @@ type redisLock struct {
     token  string
 }
 
+/* Acquire requires a positive ttl. Redis locks are leases — the key's expiry IS the crash safety — so a non-positive ttl would write a key with no expiry at all, and a holder that dies before releasing would strand the lock forever: every later acquirer, on every instance, would skip its work with no error to show for it. Session-style behavior (hold until the connection drops) belongs to the MySQL GET_LOCK and PostgreSQL advisory lockers, whose Refresh is a liveness probe; this backend fails closed instead of pretending to offer it. */
 func (instance *redisLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
-    milliseconds := "0"
-    if 0 < instance.ttl {
-        milliseconds = strconv.FormatInt(floorPositiveMilliseconds(instance.ttl), 10)
+    if 0 >= instance.ttl {
+        return false, exception.NewError(
+            "redis lock requires a positive ttl; a redis lock is a lease and a non-positive ttl would never expire (session-style locks are the mysql/pgsql backends)",
+            map[string]any{"name": instance.name, "ttl": instance.ttl.String()},
+            nil,
+        )
     }
+
+    milliseconds := strconv.FormatInt(floorPositiveMilliseconds(instance.ttl), 10)
 
     result := lockAcquireScript.Exec(runtimeInstance.Context(), instance.client, []string{instance.name}, []string{instance.token, milliseconds})
 

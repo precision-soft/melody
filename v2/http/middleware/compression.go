@@ -107,7 +107,8 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
         config.SetLevel(gzip.DefaultCompression)
     }
 
-    if 0 == config.MinSize() {
+    /* a negative minimum would reach make([]byte, peekSize) below and panic on every request, so normalize the whole non-positive range, not just zero */
+    if 0 >= config.MinSize() {
         config.SetMinSize(1024)
     }
 

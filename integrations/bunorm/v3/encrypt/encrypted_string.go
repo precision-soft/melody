@@ -16,6 +16,11 @@ func (instance EncryptedString) String() string {
     return redactedPlaceholder
 }
 
+/* GoString redacts under the %#v verb too: fmt reaches for GoStringer there and would otherwise print the underlying string literal, so a struct dumped with %#v in a log line or a test failure would carry the plaintext. */
+func (instance EncryptedString) GoString() string {
+    return redactedPlaceholder
+}
+
 func (instance EncryptedString) LogValue() slog.Value {
     return slog.StringValue(redactedPlaceholder)
 }

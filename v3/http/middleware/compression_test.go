@@ -430,3 +430,47 @@ func TestAcceptsGzip_Cases(t *testing.T) {
         }
     }
 }
+
+/** @info Only a zero minimum size was normalized, so a negative one reached make([]byte, peekSize) and panicked on every request through the middleware. */
+func TestCompressionMiddleware_NegativeMinSizeIsNormalized(t *testing.T) {
+    config := NewCompressionConfig(
+        6,
+        -1,
+        nil,
+        nil,
+    )
+
+    middleware := CompressionMiddleware(config)
+
+    if 0 >= config.MinSize() {
+        t.Fatalf("expected a negative minimum size to be normalized, got %d", config.MinSize())
+    }
+
+    handler := middleware(
+        func(
+            runtimeInstance runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            response := &http.Response{}
+            response.SetStatusCode(200)
+            responseHeaders := make(nethttp.Header)
+            responseHeaders.Set("Content-Type", "text/plain")
+            response.SetHeaders(responseHeaders)
+            response.SetBodyReader(bytes.NewReader([]byte(strings.Repeat("hello world ", 200))))
+
+            return response, nil
+        },
+    )
+
+    req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    req.Header.Set("Accept-Encoding", "gzip")
+
+    resultResponse, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(req))
+    if nil != err {
+        t.Fatalf("expected nil error, got: %v", err)
+    }
+    if nil == resultResponse {
+        t.Fatalf("expected non-nil response")
+    }
+}

@@ -2,6 +2,7 @@ package encrypt
 
 import (
     "encoding/json"
+    "fmt"
     "strings"
     "testing"
 )
@@ -158,5 +159,48 @@ func TestEncryptedStringFor_RotationInsideTheCompartmentKeepsDecrypting(t *testi
 
     if "long lived row" != string(loaded) {
         t.Fatalf("expected the rotated compartment to decrypt the old row, got %q", string(loaded))
+    }
+}
+
+/* emptyNameCipherRef is the misuse the compartment marker must refuse: an empty name is the default cipher's
+reserved registry entry, not a compartment. */
+type emptyNameCipherRef struct{}
+
+func (instance emptyNameCipherRef) CipherName() string {
+    return ""
+}
+
+/** @info A marker with an empty CipherName() would resolve the DEFAULT cipher, silently giving a compartment-bound column the default key — the cross-compartment read the marker exists to prevent. */
+func TestEncryptedStringFor_EmptyCipherNameIsRejected(t *testing.T) {
+    UseCipher(NewFakeCipher())
+    defer UseCipher(nil)
+
+    column := EncryptedStringFor[emptyNameCipherRef]("secret")
+
+    if _, valueErr := column.Value(); nil == valueErr {
+        t.Fatal("expected an empty cipher name to be rejected rather than resolve the default cipher")
+    }
+
+    var scanned EncryptedStringFor[emptyNameCipherRef]
+    if scanErr := scanned.Scan("anything"); nil == scanErr {
+        t.Fatal("expected Scan with an empty cipher name to be rejected")
+    }
+}
+
+/** @info fmt reaches for GoStringer under %#v; without it the underlying string literal — the plaintext — is printed straight into logs and test failures. */
+func TestEncryptedTypes_RedactUnderTheGoStringVerb(t *testing.T) {
+    const plaintext = "RO49-SECRET-IBAN"
+
+    renderings := []string{
+        fmt.Sprintf("%#v", EncryptedString(plaintext)),
+        fmt.Sprintf("%#v", EncryptedDeterministicString(plaintext)),
+        fmt.Sprintf("%#v", EncryptedStringFor[emptyNameCipherRef](plaintext)),
+        fmt.Sprintf("%#v", EncryptedDeterministicStringFor[emptyNameCipherRef](plaintext)),
+    }
+
+    for _, rendering := range renderings {
+        if true == strings.Contains(rendering, plaintext) {
+            t.Fatalf("the plaintext leaked through %%#v: %s", rendering)
+        }
     }
 }

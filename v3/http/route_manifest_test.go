@@ -77,8 +77,8 @@ func TestBuildRouteManifest_OnlyExposedNamedRoutes(t *testing.T) {
         t.Fatalf("expected frontend zone, got %q", user.Zone)
     }
 
-    /* the router anchors requirement patterns, so the manifest carries the normalized form */
-    if `^\d+$` != user.Requirements["id"] {
+    /* the router wraps and anchors requirement patterns, so the manifest carries the normalized form */
+    if `^(?:\d+)$` != user.Requirements["id"] {
         t.Fatalf("expected requirements to be carried, got %+v", user.Requirements)
     }
 }

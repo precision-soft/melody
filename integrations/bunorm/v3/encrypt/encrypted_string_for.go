@@ -3,7 +3,10 @@ package encrypt
 import (
     "database/sql/driver"
     "encoding/json"
+    "fmt"
     "log/slog"
+
+    "github.com/precision-soft/melody/v3/exception"
 )
 
 /* EncryptedStringFor is EncryptedString bound to the named cipher selected by the CipherRef marker R, so a multi-context binary keeps one key compartment per context:
@@ -22,6 +25,11 @@ Install the compartment with encrypt.UseCipherNamed("crm", cipher). Each named c
 type EncryptedStringFor[R CipherRef] string
 
 func (instance EncryptedStringFor[R]) String() string {
+    return redactedPlaceholder
+}
+
+/* GoString redacts under the %#v verb too: fmt reaches for GoStringer there and would otherwise print the underlying string literal, so a struct dumped with %#v in a log line or a test failure would carry the plaintext. */
+func (instance EncryptedStringFor[R]) GoString() string {
     return redactedPlaceholder
 }
 
@@ -73,9 +81,18 @@ func (instance *EncryptedStringFor[R]) Scan(source any) error {
     return nil
 }
 
-/* refCipher resolves the named cipher a marker type selects; the marker is instantiated as its zero value, which is why CipherRef implementations should be zero-size value-receiver types. */
+/* refCipher resolves the named cipher a marker type selects; the marker is instantiated as its zero value, which is why CipherRef implementations should be zero-size value-receiver types. A marker whose CipherName() is empty is rejected rather than resolved: the empty name is the default cipher's reserved entry, so accepting it would quietly hand a compartment-bound column the default key — the exact cross-compartment read the marker exists to prevent. */
 func refCipher[R CipherRef]() (Cipher, error) {
     var ref R
 
-    return cipherByName(ref.CipherName())
+    name := ref.CipherName()
+    if "" == name {
+        return nil, exception.NewError(
+            "cipher reference name is empty; a CipherRef must name a compartment registered with encrypt.UseCipherNamed(...)",
+            map[string]any{"cipherRef": fmt.Sprintf("%T", ref)},
+            nil,
+        )
+    }
+
+    return cipherByName(name)
 }

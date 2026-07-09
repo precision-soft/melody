@@ -23,14 +23,16 @@ type ServerSentEventHub struct {
     closed             bool
     backplane          ServerSentEventBackplane
 
-    dropped           uint64
-    backplaneFailures uint64
+    dropped           atomic.Uint64
+    backplaneFailures atomic.Uint64
 }
 
 type ServerSentEventSubscriber struct {
     topic   string
     channel chan ServerSentEvent
-    dropped uint64
+
+    /* atomic.Uint64 rather than a bare uint64: a 64-bit atomic on a bare field requires 64-bit alignment, and this field lands at offset 12 on a 32-bit build (string 8 + chan 4), where atomic.AddUint64 panics with "unaligned 64-bit atomic operation". The wrapper type carries its own alignment guarantee on every architecture. */
+    dropped atomic.Uint64
 }
 
 func (instance *ServerSentEventSubscriber) Events() <-chan ServerSentEvent {
@@ -38,7 +40,7 @@ func (instance *ServerSentEventSubscriber) Events() <-chan ServerSentEvent {
 }
 
 func (instance *ServerSentEventSubscriber) DroppedCount() uint64 {
-    return atomic.LoadUint64(&instance.dropped)
+    return instance.dropped.Load()
 }
 
 func (instance *ServerSentEventHub) Subscribe(topic string, bufferSize int) *ServerSentEventSubscriber {
@@ -122,8 +124,8 @@ func (instance *ServerSentEventHub) DeliverLocal(topic string, event ServerSentE
         case subscriber.channel <- event:
             delivered++
         default:
-            atomic.AddUint64(&instance.dropped, 1)
-            atomic.AddUint64(&subscriber.dropped, 1)
+            instance.dropped.Add(1)
+            subscriber.dropped.Add(1)
         }
     }
 
@@ -131,11 +133,11 @@ func (instance *ServerSentEventHub) DeliverLocal(topic string, event ServerSentE
 }
 
 func (instance *ServerSentEventHub) BackplaneFailures() uint64 {
-    return atomic.LoadUint64(&instance.backplaneFailures)
+    return instance.backplaneFailures.Load()
 }
 
 func (instance *ServerSentEventHub) DroppedEventCount() uint64 {
-    return atomic.LoadUint64(&instance.dropped)
+    return instance.dropped.Load()
 }
 
 func (instance *ServerSentEventHub) SubscriberCount(topic string) int {
@@ -179,6 +181,6 @@ func (instance *ServerSentEventHub) replicate(topic string, event ServerSentEven
     }
 
     if publishErr := backplane.Publish(topic, event); nil != publishErr {
-        atomic.AddUint64(&instance.backplaneFailures, 1)
+        instance.backplaneFailures.Add(1)
     }
 }
