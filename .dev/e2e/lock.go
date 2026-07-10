@@ -1,6 +1,7 @@
 package main
 
 import (
+    "errors"
     "context"
     "fmt"
     "sync"
@@ -119,7 +120,26 @@ func runRunExclusiveCheck(address string) {
     if nil == failedErr {
         fail("run exclusive: fn's error was swallowed")
     }
+    if false == errors.Is(failedErr, sentinel) {
+        fail("run exclusive: fn's error reached the caller as %v, not as the error fn returned", failedErr)
+    }
     pass("run exclusive surfaced fn's error")
+
+    /* the claim above is "and the lock is still released": prove it, or a release that regressed would go unnoticed */
+    afterFailureRan, afterFailureErr := lock.RunExclusive(
+        newRuntime(),
+        locker,
+        name,
+        30*time.Second,
+        func(runtimecontract.Runtime) error { return nil },
+    )
+    if nil != afterFailureErr {
+        fail("run exclusive: the tick after a failing fn errored: %v", afterFailureErr)
+    }
+    if false == afterFailureRan {
+        fail("run exclusive: a failing fn left the lock held — the next tick was skipped")
+    }
+    pass("run exclusive released the lock even when fn failed")
 
     /* an unreachable store must fail closed: no run, and the error reaches the caller */
     brokenClient := openRedis(address)

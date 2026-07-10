@@ -122,10 +122,14 @@ func readLoop(
     }
 }
 
+/* maximumCallbackGraceFactor bounds, in ping intervals, how long a running OnMessage callback may go on excusing a timed-out ping. The excuse is legitimate — a pong is processed only inside connection.Read, which the reader leaves while the callback runs — but a callback that never returns would otherwise excuse every ping forever, and nothing else reaps a hijacked connection: the descriptor, the hub subscription and three goroutines would leak for the lifetime of the process, once per connection. Past the grace the connection is closed and the callback is left to finish (or not) on its own. */
+const maximumCallbackGraceFactor = 10
+
 /* connectionLiveness lets the ping loop distinguish a peer that is gone from a reader that is merely unable to answer: a pong is processed only inside connection.Read, which the read loop leaves while it runs a synchronous OnMessage callback. */
 type connectionLiveness struct {
-    lastActivityUnixNano atomic.Int64
-    callbacksRunning     atomic.Int64
+    lastActivityUnixNano    atomic.Int64
+    callbackStartedUnixNano atomic.Int64
+    callbacksRunning        atomic.Int64
 }
 
 func (instance *connectionLiveness) recordActivity() {
@@ -133,6 +137,7 @@ func (instance *connectionLiveness) recordActivity() {
 }
 
 func (instance *connectionLiveness) enterCallback() {
+    instance.callbackStartedUnixNano.Store(time.Now().UnixNano())
     instance.callbacksRunning.Add(1)
 }
 
@@ -141,10 +146,10 @@ func (instance *connectionLiveness) leaveCallback() {
     instance.recordActivity()
 }
 
-/* cannotAnswer reports whether a pong could not have been processed even by a perfectly healthy peer: the reader is inside a callback, or it returned from one so recently that the peer was demonstrably alive within the window. */
-func (instance *connectionLiveness) cannotAnswer(window time.Duration) bool {
+/* cannotAnswer reports whether a pong could not have been processed even by a perfectly healthy peer: the reader is inside a callback that is still within its grace, or it returned from one so recently that the peer was demonstrably alive within the window. A callback that has outrun the grace stops excusing anything — the peer's health is then unknowable, and holding the connection open on the strength of a stuck callback is what leaks it. */
+func (instance *connectionLiveness) cannotAnswer(window time.Duration, callbackGrace time.Duration) bool {
     if 0 < instance.callbacksRunning.Load() {
-        return true
+        return time.Since(time.Unix(0, instance.callbackStartedUnixNano.Load())) < callbackGrace
     }
 
     return time.Since(time.Unix(0, instance.lastActivityUnixNano.Load())) < window
@@ -180,7 +185,7 @@ func pingLoop(
                 return
             }
 
-            if true == errors.Is(pingErr, context.DeadlineExceeded) && true == liveness.cannotAnswer(2*interval) {
+            if true == errors.Is(pingErr, context.DeadlineExceeded) && true == liveness.cannotAnswer(2*interval, maximumCallbackGraceFactor*interval) {
                 continue
             }
 
@@ -216,8 +221,26 @@ func dispatchOnMessage(
     return false
 }
 
+/* closeHandshakeGrace bounds the closing handshake. connection.Close writes the close frame and then waits for the peer to send its own — a frame only the read loop ever reads. When the connection is being closed BECAUSE that read loop is wedged in a callback, the handshake can never complete, and coder/websocket waits five seconds before giving up: five seconds of a held handler goroutine and a live hub subscription, per connection. */
+const closeHandshakeGrace = 1 * time.Second
+
+/* closeNormally asks for a graceful close and gives the peer closeHandshakeGrace to answer. The handler's deferred CloseNow frees the socket once the grace lapses; the handshake goroutine unwinds on its own when the library's own timeout fires. */
 func closeNormally(connection *coderwebsocket.Conn) {
-    _ = connection.Close(coderwebsocket.StatusNormalClosure, "")
+    closed := make(chan struct{})
+
+    go func() {
+        defer close(closed)
+
+        _ = connection.Close(coderwebsocket.StatusNormalClosure, "")
+    }()
+
+    timer := time.NewTimer(closeHandshakeGrace)
+    defer timer.Stop()
+
+    select {
+    case <-closed:
+    case <-timer.C:
+    }
 }
 
 func writeMessageType(options Options) coderwebsocket.MessageType {

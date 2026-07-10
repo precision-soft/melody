@@ -145,6 +145,17 @@ func parseRuntimeFlagValue(argument string, flagName string) (string, bool, bool
 /* runtimeFlagNames lists the flags owned by the runtime itself: they never imply cli mode and are stripped from os.Args before the cli framework sees them. */
 var runtimeFlagNames = []string{"mode", "role"}
 
+/* runtimeFlagConsumesNextArgument mirrors parseRuntimeFlagFromArguments: a bare "--role" takes the following token as its value only when that token could BE a value. Consuming it unconditionally would delete the command's own next flag from os.Args — the parser would never have read it as the role, so the two must agree on what belongs to the runtime flag. */
+func runtimeFlagConsumesNextArgument(arguments []string, index int) bool {
+    if index+1 >= len(arguments) {
+        return false
+    }
+
+    nextValue := strings.TrimSpace(arguments[index+1])
+
+    return "" != nextValue && false == strings.HasPrefix(nextValue, "-")
+}
+
 func isRuntimeFlagArgument(argument string) (bool, bool) {
     for _, flagName := range runtimeFlagNames {
         if "-"+flagName == argument || "--"+flagName == argument {
@@ -179,7 +190,7 @@ func hasNonRuntimeFlagArguments(arguments []string) bool {
 
         matched, consumeNext := isRuntimeFlagArgument(argument)
         if true == matched {
-            skipNext = consumeNext
+            skipNext = consumeNext && runtimeFlagConsumesNextArgument(arguments, index)
             continue
         }
 
@@ -213,7 +224,7 @@ func stripRuntimeFlagsFromOsArgs() {
 
         matched, consumeNext := isRuntimeFlagArgument(argument)
         if true == matched {
-            skipNext = consumeNext
+            skipNext = consumeNext && runtimeFlagConsumesNextArgument(originalArguments, index)
             continue
         }
 

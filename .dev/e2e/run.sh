@@ -9,7 +9,8 @@
 # run exercises everything. Override any of them to point at other infrastructure, or clear one to skip
 # its section:
 #
-#   REDIS_ADDRESS= .dev/e2e/run.sh                 # skip the redis-backed sections
+#   REDIS_ADDRESS= .dev/e2e/run.sh                 # skip the redis-backed sections (the example http one too: it resets
+#                                                  # the rate limit counters straight in redis)
 #   EXAMPLE_BASE_URL= .dev/e2e/run.sh              # skip the live example http section
 #
 # The example http section drives the .example application the dev container already serves on :8080. It

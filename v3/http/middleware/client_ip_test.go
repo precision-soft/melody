@@ -133,3 +133,18 @@ func TestForwardedClientIpResolver_MatchesCidrAndExactEntries(t *testing.T) {
         t.Fatalf("expected the untrusted hop past the ipv6 CIDR match, got: %s", ip)
     }
 }
+
+/** @info A proxy may write the same client as 1.2.3.4 or as ::ffff:1.2.3.4. Left mapped, the two forms key two different rate limit buckets, and an IPv4 CIDR in the trusted proxy list never matches a 4-in-6 peer. */
+func TestForwardedClientIpResolver_UnmapsIpv4MappedAddresses(t *testing.T) {
+    resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
+
+    mapped := resolver(forwardedRequest("[::ffff:10.1.2.3]:4567", "::ffff:203.0.113.7"))
+    plain := resolver(forwardedRequest("10.1.2.3:4567", "203.0.113.7"))
+
+    if "203.0.113.7" != plain {
+        t.Fatalf("expected the plain client address, got %q", plain)
+    }
+    if mapped != plain {
+        t.Fatalf("an ipv4-mapped chain must key the same bucket as its plain form: %q vs %q", mapped, plain)
+    }
+}

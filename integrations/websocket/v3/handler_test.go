@@ -252,3 +252,58 @@ func TestStreamHandler_SlowOnMessageDoesNotDisconnectHealthyClient(t *testing.T)
 
     connection.Close(coderwebsocket.StatusNormalClosure, "")
 }
+
+/** @info A callback that never returns must not excuse pings forever: nothing else reaps a hijacked connection, so the descriptor, the hub subscription and the handler/read/ping goroutines would leak once per connection for the process lifetime. */
+func TestStreamHandler_StuckOnMessageStopsHoldingTheConnection(t *testing.T) {
+    hub := melodyhttp.NewServerSentEventHub()
+
+    releaseCallback := make(chan struct{})
+    defer close(releaseCallback)
+
+    handler := NewStreamHandler(hub, Options{
+        TopicResolver:  func(request httpcontract.Request) string { return "demo" },
+        OriginPatterns: []string{"*"},
+        IdleTimeout:    50 * time.Millisecond,
+        OnMessage: func(runtimeInstance runtimecontract.Runtime, messageType coderwebsocket.MessageType, payload []byte) {
+            <-releaseCallback
+        },
+    })
+
+    server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+        serviceContainer := container.NewContainer()
+        runtimeInstance := runtime.New(request.Context(), serviceContainer.NewScope(), serviceContainer)
+        melodyRequest := melodyhttp.NewRequest(request, nil, runtimeInstance, nil)
+        handler(runtimeInstance, writer, melodyRequest)
+    }))
+    defer server.Close()
+
+    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancel()
+
+    connection, _, dialErr := coderwebsocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+    if nil != dialErr {
+        t.Fatalf("dial: %v", dialErr)
+    }
+    defer connection.CloseNow()
+
+    subscribeDeadline := time.Now().Add(2 * time.Second)
+    for hub.SubscriberCount("demo") < 1 {
+        if true == time.Now().After(subscribeDeadline) {
+            t.Fatalf("the websocket handler did not subscribe to the hub in time")
+        }
+        time.Sleep(time.Millisecond)
+    }
+
+    if writeErr := connection.Write(ctx, coderwebsocket.MessageText, []byte("wedge")); nil != writeErr {
+        t.Fatalf("write: %v", writeErr)
+    }
+
+    /* the grace is ten intervals; give it that plus slack, then the subscription must be gone */
+    reapDeadline := time.Now().Add(3 * time.Second)
+    for 0 < hub.SubscriberCount("demo") {
+        if true == time.Now().After(reapDeadline) {
+            t.Fatalf("a connection wedged in OnMessage was never reaped: the hub subscription is still registered")
+        }
+        time.Sleep(5 * time.Millisecond)
+    }
+}

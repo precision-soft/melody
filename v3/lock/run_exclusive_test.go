@@ -355,3 +355,39 @@ func TestRunExclusive_DoesNotHangWhenARefreshIsInFlightAtReturn(t *testing.T) {
         t.Fatal("RunExclusive hung with a refresh in flight at fn return")
     }
 }
+
+/** @info A SIGTERM cancels the runtime the refresh loop calls the backend with, so a refresh in flight fails with that cancellation. That is the shutdown itself, not a lost lease: reporting it turns every graceful stop of a long-running exclusive command into an error a cron fleet reads as a failed run. */
+func TestRunExclusive_ContextCancellationIsShutdownNotLostLease(t *testing.T) {
+    parentContext, cancelParent := context.WithCancel(context.Background())
+    defer cancelParent()
+
+    runtimeInstance := testRuntimeWithContext(parentContext)
+    entered := make(chan struct{})
+    locker := &blockingRefreshLocker{entered: entered}
+
+    ran, err := RunExclusive(
+        runtimeInstance,
+        locker,
+        "shutdown",
+        20*time.Millisecond,
+        func(childRuntime runtimecontract.Runtime) error {
+            /* wait until a refresh is genuinely in flight, then shut the process down underneath it */
+            <-entered
+            cancelParent()
+
+            <-childRuntime.Context().Done()
+
+            /* let the refresh goroutine record its cancelled-call failure before fn returns and closes the done channel */
+            time.Sleep(50 * time.Millisecond)
+
+            return nil
+        },
+    )
+
+    if false == ran {
+        t.Fatalf("the holder must report that it ran")
+    }
+    if nil != err {
+        t.Fatalf("a cancelled refresh during shutdown must not be reported as a lost lease: %v", err)
+    }
+}

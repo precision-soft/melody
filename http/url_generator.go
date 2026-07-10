@@ -181,6 +181,21 @@ func (instance *UrlGenerator) GeneratePath(routeName string, parameters map[stri
                 }
             }
 
+            if regex, exists := requirements[wildcardName]; true == exists {
+                /* matchPath tests the same regex against the joined remainder, so a value it would refuse to match must not be generated: the generator would otherwise mint urls this very router answers with a 404 — and a requirement on a catch-all is a whitelist, the one place a traversal like "../../etc/passwd" is meant to be caught */
+                if false == regex.MatchString(strings.Trim(value, "/")) {
+                    return "", exception.NewError(
+                        "catch-all parameter requirement failed",
+                        exceptioncontract.Context{
+                            "routeName":     routeName,
+                            "parameterName": wildcardName,
+                            "value":         value,
+                        },
+                        nil,
+                    )
+                }
+            }
+
             if true == hasValue {
                 value = strings.Trim(value, "/")
                 if "" == value {

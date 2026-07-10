@@ -2,6 +2,7 @@ package httpclient
 
 import (
     "bytes"
+    "context"
     "encoding/json"
     "io"
     "math"
@@ -59,54 +60,109 @@ func NewHttpClient(config *HttpClientConfig) *HttpClient {
         ResponseHeaderTimeout: transportConfig.ResponseHeaderTimeout,
     }
 
-    return &HttpClient{
+    instance := &HttpClient{
         client: &nethttp.Client{
-            Timeout:       timeout,
-            Transport:     transport,
-            CheckRedirect: newCredentialStrippingRedirectPolicy(headers),
+            Timeout:   timeout,
+            Transport: transport,
         },
         baseUrl: config.BaseUrl(),
         headers: headers,
         timeout: timeout,
     }
+
+    instance.client.CheckRedirect = instance.credentialStrippingRedirectPolicy
+
+    return instance
 }
 
 /* defaultMaxRedirects mirrors net/http's own cap; it is stated here because the client installs its own policy. */
 const defaultMaxRedirects = 10
 
-/* newCredentialStrippingRedirectPolicy keeps net/http's ten-redirect cap but removes every credential the client attaches to each request once the redirect leaves the original origin. net/http strips only Authorization, WWW-Authenticate and Cookie, and only across domains — a client configured with an api-key header (X-Api-Key, X-Internal-Token, ...) would otherwise hand that secret to whatever host the first server points it at, which the operator of that server chooses. A scheme downgrade counts as leaving the origin: https -> http would put the credential on the wire in the clear. */
-func newCredentialStrippingRedirectPolicy(headers map[string]string) func(*nethttp.Request, []*nethttp.Request) error {
-    return func(request *nethttp.Request, via []*nethttp.Request) error {
-        if defaultMaxRedirects <= len(via) {
-            return exception.NewError(
-                "stopped after too many redirects",
-                exceptioncontract.Context{"redirects": len(via), "url": request.URL.String()},
-                nil,
-            )
-        }
+/* requestCredentialHeadersKeyType keys the per-request credential header names on the request context. The redirect policy only knows the header names the client was CONFIGURED with; the ones a caller attaches to a single request through WithHeader/WithHeaders are just as secret, and the context is the only channel that reaches a redirect the client itself creates. */
+type requestCredentialHeadersKeyType struct{}
 
-        if true == isSameOrigin(via[0].URL, request.URL) {
-            return nil
-        }
+var requestCredentialHeadersKey = requestCredentialHeadersKeyType{}
 
-        for headerName := range headers {
-            request.Header.Del(headerName)
-        }
+/* credentialStrippingRedirectPolicy keeps net/http's ten-redirect cap but removes every credential the client attaches to each request once the redirect leaves the original origin. net/http strips only Authorization, WWW-Authenticate and Cookie, and only across domains — a client configured with an api-key header (X-Api-Key, X-Internal-Token, ...) would otherwise hand that secret to whatever host the first server points it at, which the operator of that server chooses. A scheme downgrade counts as leaving the origin: https -> http would put the credential on the wire in the clear. It is a method rather than a closure over the header map because net/http runs it on the request goroutine while SetHeader may be writing that very map. */
+func (instance *HttpClient) credentialStrippingRedirectPolicy(request *nethttp.Request, via []*nethttp.Request) error {
+    if defaultMaxRedirects <= len(via) {
+        return exception.NewError(
+            "stopped after too many redirects",
+            exceptioncontract.Context{"redirects": len(via), "url": request.URL.String()},
+            nil,
+        )
+    }
 
-        request.Header.Del("Authorization")
-        request.Header.Del("Cookie")
-        request.Header.Del("Proxy-Authorization")
-
+    if true == isSameOrigin(via[0].URL, request.URL) {
         return nil
     }
+
+    instance.mutex.RLock()
+    for headerName := range instance.headers {
+        request.Header.Del(headerName)
+    }
+    instance.mutex.RUnlock()
+
+    if requestHeaderNames, ok := request.Context().Value(requestCredentialHeadersKey).([]string); true == ok {
+        for _, headerName := range requestHeaderNames {
+            request.Header.Del(headerName)
+        }
+    }
+
+    request.Header.Del("Authorization")
+    request.Header.Del("Cookie")
+    request.Header.Del("Proxy-Authorization")
+
+    return nil
 }
 
+/* withRequestCredentialHeaders carries the caller's per-request header names to the redirect policy, which net/http hands a request derived from this one. */
+func withRequestCredentialHeaders(request *nethttp.Request, headers map[string]string) *nethttp.Request {
+    if 0 == len(headers) {
+        return request
+    }
+
+    headerNames := make([]string, 0, len(headers))
+    for headerName := range headers {
+        headerNames = append(headerNames, headerName)
+    }
+
+    return request.WithContext(
+        context.WithValue(request.Context(), requestCredentialHeadersKey, headerNames),
+    )
+}
+
+/* isSameOrigin compares the scheme, the host and the EFFECTIVE port: "https://host" and "https://host:443" name one origin, and hosts are case-insensitive, so neither spelling may be read as a credential boundary the caller never crossed. */
 func isSameOrigin(origin *url.URL, target *url.URL) bool {
     if nil == origin || nil == target {
         return false
     }
 
-    return origin.Scheme == target.Scheme && origin.Host == target.Host
+    if false == strings.EqualFold(origin.Scheme, target.Scheme) {
+        return false
+    }
+
+    if false == strings.EqualFold(origin.Hostname(), target.Hostname()) {
+        return false
+    }
+
+    return effectivePort(origin) == effectivePort(target)
+}
+
+/* effectivePort resolves the port a url reaches, spelled out or implied by its scheme. */
+func effectivePort(value *url.URL) string {
+    if port := value.Port(); "" != port {
+        return port
+    }
+
+    switch strings.ToLower(value.Scheme) {
+    case "https":
+        return "443"
+    case "http":
+        return "80"
+    }
+
+    return ""
 }
 
 func (instance *HttpClient) Get(urlString string, options ...httpclientcontract.RequestOption) (httpclientcontract.Response, error) {
@@ -179,6 +235,8 @@ func (instance *HttpClient) Request(method string, urlString string, options ...
     for key, value := range requestConfig.Headers() {
         request.Header.Set(key, value)
     }
+
+    request = withRequestCredentialHeaders(request, requestConfig.Headers())
 
     if "" != requestConfig.ContentType() {
         request.Header.Set("Content-Type", requestConfig.ContentType())
@@ -296,6 +354,8 @@ func (instance *HttpClient) RequestStream(
     for key, value := range requestConfig.Headers() {
         requestInstance.Header.Set(key, value)
     }
+
+    requestInstance = withRequestCredentialHeaders(requestInstance, requestConfig.Headers())
 
     if "" != requestConfig.ContentType() {
         requestInstance.Header.Set("Content-Type", requestConfig.ContentType())

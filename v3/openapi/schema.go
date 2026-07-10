@@ -534,7 +534,8 @@ func applyValidation(schema *Schema, validateTag string) {
                     }
                 }
             }
-        case "regex", "pattern":
+        /* only "regex": the validator registers no constraint named "pattern" (validator.go registers ConstraintRegex == "regex"), so treating it as an alias advertised a satisfiable pattern for a field the validator rejects for every value. Like any other name this mirror does not model — a caller's custom constraint among them — it is now left out of the schema, which under-constrains the spec rather than contradicting it. */
+        case "regex":
             if "string" == schema.Type {
                 pattern := patternParam(params)
                 if _, compileErr := regexp.Compile(pattern); nil != compileErr {
@@ -840,7 +841,7 @@ func tagHasUnconsumedParameterizedParams(validateTag string) bool {
             if _, exists := params["value"]; false == exists {
                 return true
             }
-        case "regex", "pattern":
+        case "regex":
             _, hasPattern := params["pattern"]
             _, hasValue := params["value"]
             if false == hasPattern && false == hasValue {
@@ -1151,6 +1152,7 @@ func hasBalancedRuleBrackets(input string) bool {
             continue
         }
 
+        /* a ']' that reaches here closes no class: RE2 reads it as a literal, so it must not sink the whole tag (the class scanner above consumes the ones that do close a class). The validator's hasBalancedBrackets says the same, and this helper is its mirror. */
         switch character {
         case '(':
             parenDepth++
@@ -1159,8 +1161,6 @@ func hasBalancedRuleBrackets(input string) bool {
                 return false
             }
             parenDepth--
-        case ']':
-            return false
         case '{':
             curlyDepth++
         case '}':

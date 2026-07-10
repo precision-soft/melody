@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `generate_command.go` — the `crontab-no-user` template no longer demands `--user` for a heartbeat. That dialect renders no user column at all (busybox crond and per-user crontabs reject one), so no user is needed to place the heartbeat line; requiring one turned a valid configuration into a hard error.
 - `go.mod` — the module pinned `melody/v3 v3.0.0` while importing the `cli/contract.StringSliceFlag` symbol, which only exists from `v3.6.0`, so outside the repository workspace (`GOWORK=off`, or any consumer cloning just this module) the module did not resolve. The pin is raised to `v3.6.0` — the lowest framework version that provides every imported package — and the module-local `go.sum` is now complete for standalone builds.
 
 ## [v3.3.0] - 2026-06-25 - Kubernetes CronJob Template

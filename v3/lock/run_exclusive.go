@@ -124,9 +124,11 @@ func refreshWhileHeld(
             return nil
         case <-ticker.C:
             if refreshErr := lock.Refresh(runtimeInstance, refreshTtl); nil != refreshErr {
-                /* fn finished (or the caller cancelled) while this refresh was in flight: the failure is the shutdown itself, not a lost lease, and reporting it would turn a clean run into an error */
+                /* fn finished, or the caller cancelled — a SIGTERM cancels the very context the backend was called with, so the refresh in flight fails with the cancellation. Either way the failure is the shutdown itself, not a lost lease, and reporting it would turn a clean stop into an error. */
                 select {
                 case <-done:
+                    return nil
+                case <-runtimeInstance.Context().Done():
                     return nil
                 default:
                 }

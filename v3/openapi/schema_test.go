@@ -1398,3 +1398,26 @@ func TestBuildSchema_UncompilableRegexNotLoosenedByValuelessMax(t *testing.T) {
         t.Fatalf("expected maxLength 0 to survive a later value-less max, got %+v", property)
     }
 }
+
+/** @info The generator's bracket-balance helper is documented as an exact mirror of the validator's, so a tag the validator accepts must never be swept up by the syntax guard. RE2 reads a ']' that closes no character class as a literal, and the validator was taught this in CR #89; a generator still rejecting it advertises an unsatisfiable field for values the api happily accepts. */
+func TestApplyValidation_LiteralClosingBracketMatchesTheValidator(t *testing.T) {
+    schema := &Schema{Type: "string"}
+    applyValidation(schema, "regex(pattern=^a]b$)")
+
+    if nil != schema.MinLength && nil != schema.MaxLength && 1 == *schema.MinLength && 0 == *schema.MaxLength {
+        t.Fatalf("the generator declared unsatisfiable a field the validator accepts")
+    }
+    if "^a]b$" != schema.Pattern {
+        t.Fatalf("expected the regex to reach the schema pattern, got %q", schema.Pattern)
+    }
+}
+
+/** @info The runtime validator registers regex only under the name "regex" — there is no "pattern" constraint, and an unknown rule fails the field closed for every value. Advertising `pattern=...` as a satisfiable regex-constrained string published a contract the api rejects outright. */
+func TestApplyValidation_PatternIsNotARegexAlias(t *testing.T) {
+    schema := &Schema{Type: "string"}
+    applyValidation(schema, "pattern=^[0-9]+$")
+
+    if "^[0-9]+$" == schema.Pattern {
+        t.Fatalf("the generator invented a regex constraint the validator does not have")
+    }
+}

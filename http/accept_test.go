@@ -54,3 +54,29 @@ func TestPrefersHtml_ReturnsFalseForNilRequest(t *testing.T) {
         t.Fatalf("expected false for nil request")
     }
 }
+
+/** @info The q parameter is how a client ranks alternatives: "text/html;q=0.1, application/json" asks for json, and q=0 refuses a type outright. Reading the header by substring position alone served the representation the client down-weighted, or one it had explicitly rejected. */
+func TestPrefersHtml_HonoursQualityValues(t *testing.T) {
+    cases := []struct {
+        acceptHeader string
+        expected     bool
+    }{
+        {"text/html;q=0, application/json", false},
+        {"text/html;q=0.1, application/json", false},
+        {"text/html;q=0.9, application/json;q=0.8", true},
+        {"application/json, text/html", false},
+        {"text/html, application/json", true},
+        {"text/html", true},
+        {"application/json", false},
+        {"text/html;q=0.5, application/json;q=0.5", true},
+    }
+
+    for _, testCase := range cases {
+        request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/", testCase.acceptHeader)
+
+        actual := PrefersHtml(request)
+        if testCase.expected != actual {
+            t.Fatalf("Accept %q: expected prefersHtml=%v, got %v", testCase.acceptHeader, testCase.expected, actual)
+        }
+    }
+}

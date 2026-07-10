@@ -113,3 +113,36 @@ func TestValidateContexts_AcceptsDistinctContexts(t *testing.T) {
         {Name: "payment", Migrations: migrate.NewMigrations()},
     })
 }
+
+/** @info Every zero-value field of a per-context Options inherits from the base options — the ContextConfig doc says so, and CommandPrefix, ManagerFlagName and ManagerRegistryServiceId all do. ManagerName jumped straight to the context name, so a base pin was silently ignored and each context's commands targeted a manager merely named after it. */
+func TestEffectiveOptions_ManagerNameInheritsTheBasePin(t *testing.T) {
+    resolved := effectiveOptions(
+        ContextConfig{Name: "erp"},
+        Options{ManagerName: "primary"},
+    )
+
+    if "primary" != resolved.ManagerName {
+        t.Fatalf("expected the base ManagerName pin to be inherited, got %q", resolved.ManagerName)
+    }
+}
+
+/** @info With neither the context nor the base pinning it, the context name remains the default. */
+func TestEffectiveOptions_ManagerNameFallsBackToTheContextName(t *testing.T) {
+    resolved := effectiveOptions(ContextConfig{Name: "reporting"}, Options{})
+
+    if "reporting" != resolved.ManagerName {
+        t.Fatalf("expected the context name as the default manager, got %q", resolved.ManagerName)
+    }
+}
+
+/** @info A per-context pin still beats the base pin. */
+func TestEffectiveOptions_ContextManagerNameBeatsTheBasePin(t *testing.T) {
+    resolved := effectiveOptions(
+        ContextConfig{Name: "erp", Options: Options{ManagerName: "erp_database"}},
+        Options{ManagerName: "primary"},
+    )
+
+    if "erp_database" != resolved.ManagerName {
+        t.Fatalf("expected the per-context pin to win, got %q", resolved.ManagerName)
+    }
+}

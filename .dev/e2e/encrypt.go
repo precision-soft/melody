@@ -99,9 +99,12 @@ func runEncryptCompartmentCheck() {
     }
     pass("encrypt deterministic values are searchable inside a compartment and differ across compartments")
 
-    /* the plaintext must never leak through a rendering path */
-    if true == strings.Contains(fmt.Sprintf("%v %s %+v", crmColumn, crmColumn, crmColumn), plaintext) {
+    /* the plaintext must never leak through a rendering path; %#v is the verb that reaches for GoStringer, and the one that leaked */
+    if true == strings.Contains(fmt.Sprintf("%v %s %+v %#v", crmColumn, crmColumn, crmColumn, crmColumn), plaintext) {
         fail("encrypt: the plaintext leaked through a formatting verb")
+    }
+    if true == strings.Contains(fmt.Sprintf("%#v %v", firstDeterministic, firstDeterministic), plaintext) {
+        fail("encrypt: the plaintext leaked through a formatting verb on the deterministic column")
     }
 
     encoded, marshalErr := json.Marshal(map[string]any{"iban": crmColumn})

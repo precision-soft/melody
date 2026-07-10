@@ -206,8 +206,25 @@ func TestMysqlLock_AcquireVerifyErrorReleasesHeldLock(t *testing.T) {
         t.Logf("kill returned (tolerated): %v", killErr)
     }
 
-    /* the verify now fails for real: the lock object must drop the dead connection and take the lock afresh */
-    reacquired, reacquireErr := lock.Acquire(newLockRuntime())
+    /* the verify now fails for real: the lock object must drop the dead connection and take the lock afresh. KILL is
+    asynchronous — the server flags the thread and only releases its locks once that thread notices — so a single immediate
+    attempt races the cleanup and reads GET_LOCK as 0 (held, no error). Retry until the dead session lets go. */
+    var reacquired bool
+    var reacquireErr error
+
+    reacquireDeadline := time.Now().Add(10 * time.Second)
+    for {
+        reacquired, reacquireErr = lock.Acquire(newLockRuntime())
+        if nil != reacquireErr || true == reacquired {
+            break
+        }
+        if true == time.Now().After(reacquireDeadline) {
+            break
+        }
+
+        time.Sleep(20 * time.Millisecond)
+    }
+
     if nil != reacquireErr || false == reacquired {
         t.Fatalf("expected re-acquire after a genuine verify error: %v %v", reacquired, reacquireErr)
     }

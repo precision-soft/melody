@@ -7,6 +7,7 @@ import (
     "math"
     "net/http"
     "net/http/httptest"
+    "net/url"
     "strconv"
     "sync"
     "testing"
@@ -425,4 +426,93 @@ func TestHttpClient_MaxResponseBodyBytesAtMaxIntDoesNotOverflow(t *testing.T) {
     if "payload" != string(response.Body()) {
         t.Fatalf("expected the body to survive a MaxInt limit, got %q", string(response.Body()))
     }
+}
+
+/** @info Per-request credential headers (WithHeader/WithHeaders) must be stripped on a cross-origin redirect exactly like the client-wide ones: the redirect target is chosen by whoever operates the first server. */
+func TestHttpClient_StripsPerRequestCredentialHeadersOnCrossOriginRedirect(t *testing.T) {
+    var receivedApiKey string
+
+    target := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        receivedApiKey = request.Header.Get("X-Api-Key")
+        writer.WriteHeader(http.StatusOK)
+    }))
+    defer target.Close()
+
+    redirector := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        http.Redirect(writer, request, target.URL+"/stolen", http.StatusFound)
+    }))
+    defer redirector.Close()
+
+    client := NewHttpClient(NewHttpClientConfig("", 5*time.Second, nil))
+
+    if _, err := client.Get(redirector.URL, WithHeader("X-Api-Key", "super-secret")); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if "" != receivedApiKey {
+        t.Fatalf("the per-request api key leaked to the redirect target: %q", receivedApiKey)
+    }
+}
+
+/** @info An explicitly spelled default port names the same origin as an omitted one; treating it as cross-origin would strip credentials from an ordinary same-host redirect. */
+func TestHttpClient_KeepsCredentialHeadersOnSameOriginRedirectWithExplicitDefaultPort(t *testing.T) {
+    if false == isSameOrigin(mustParseUrl(t, "http://example.com:80/start"), mustParseUrl(t, "http://example.com/finish")) {
+        t.Fatalf("an explicit :80 must not make an http origin foreign to itself")
+    }
+
+    if false == isSameOrigin(mustParseUrl(t, "https://example.com/start"), mustParseUrl(t, "https://EXAMPLE.com:443/finish")) {
+        t.Fatalf("host case and an explicit :443 must not make an https origin foreign to itself")
+    }
+
+    if true == isSameOrigin(mustParseUrl(t, "https://example.com/start"), mustParseUrl(t, "http://example.com/finish")) {
+        t.Fatalf("a scheme downgrade leaves the origin")
+    }
+
+    if true == isSameOrigin(mustParseUrl(t, "https://example.com/start"), mustParseUrl(t, "https://example.com:8443/finish")) {
+        t.Fatalf("a different port leaves the origin")
+    }
+}
+
+func mustParseUrl(t *testing.T, value string) *url.URL {
+    t.Helper()
+
+    parsed, err := url.Parse(value)
+    if nil != err {
+        t.Fatalf("could not parse %q: %v", value, err)
+    }
+
+    return parsed
+}
+
+/** @info The redirect policy runs on the request goroutine; reading the client's header map there while SetHeader writes it is a concurrent map access, which the runtime kills the process for. Run with -race. */
+func TestHttpClient_RedirectPolicyDoesNotRaceWithSetHeader(t *testing.T) {
+    target := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        writer.WriteHeader(http.StatusOK)
+    }))
+    defer target.Close()
+
+    redirector := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        http.Redirect(writer, request, target.URL+"/moved", http.StatusFound)
+    }))
+    defer redirector.Close()
+
+    client := NewHttpClient(NewHttpClientConfig("", 5*time.Second, map[string]string{"X-Api-Key": "secret"}))
+
+    var waitGroup sync.WaitGroup
+
+    for index := 0; index < 8; index++ {
+        waitGroup.Add(2)
+
+        go func(index int) {
+            defer waitGroup.Done()
+            client.SetHeader("X-Worker-"+strconv.Itoa(index), strconv.Itoa(index))
+        }(index)
+
+        go func() {
+            defer waitGroup.Done()
+            _, _ = client.Get(redirector.URL)
+        }()
+    }
+
+    waitGroup.Wait()
 }

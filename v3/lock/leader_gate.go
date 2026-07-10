@@ -28,6 +28,9 @@ type LeaderGateOptions struct {
 
     /* OnLost runs on the Run goroutine right after leadership is lost to a failed renewal; cause is the renewal error. It does not run on a clean shutdown. */
     OnLost func(runtimeInstance runtimecontract.Runtime, cause error)
+
+    /* OnCampaignError runs on the Run goroutine for every campaign that could not even ask the store who leads — the gate then backs off and campaigns again, so without this hook the error is never seen. A store outage and a permanent misconfiguration (a redis locker built with a non-positive ttl, whose Acquire fails closed on every call) are indistinguishable from the outside: both look exactly like a deployment that quietly elects no leader and does no work. */
+    OnCampaignError func(runtimeInstance runtimecontract.Runtime, cause error)
 }
 
 func NewLeaderGate(locker lockcontract.Locker, name string, ttl time.Duration) *LeaderGate {
@@ -86,7 +89,7 @@ func (instance *LeaderGate) IsLeader() bool {
     return instance.isLeader.Load()
 }
 
-/* Run blocks until the runtime context is cancelled and always returns nil on a clean shutdown; start it with `go gate.Run(runtimeInstance)` for a long-running worker. Acquire errors (a store outage) never abort it — they back off doubling, capped at defaultMaxCampaignBackoff, and campaigning resumes. */
+/* Run blocks until the runtime context is cancelled and always returns nil on a clean shutdown; start it with `go gate.Run(runtimeInstance)` for a long-running worker. Acquire errors (a store outage) never abort it — they back off doubling, capped at defaultMaxCampaignBackoff, and campaigning resumes. Because they never abort it, they are also never returned: hook OnCampaignError to see them, or a permanent misconfiguration is indistinguishable from a deployment that simply has no work to lead. */
 func (instance *LeaderGate) Run(runtimeInstance runtimecontract.Runtime) error {
     if true == internal.IsNilInterface(runtimeInstance) {
         exception.Panic(exception.NewError("leader gate runtime is nil", nil, nil))
@@ -105,6 +108,15 @@ func (instance *LeaderGate) Run(runtimeInstance runtimecontract.Runtime) error {
 
         acquired, acquireErr := lock.Acquire(runtimeInstance)
         if nil != acquireErr {
+            /* a shutdown cancels the very context the backend was called with, so the campaign in flight fails with the cancellation: that is the stop itself, and reporting it would hand every graceful shutdown an error that reads like a store outage */
+            if nil != runContext.Err() {
+                return nil
+            }
+
+            if nil != instance.options.OnCampaignError {
+                instance.options.OnCampaignError(runtimeInstance, acquireErr)
+            }
+
             if false == sleepUnlessDone(runContext, campaignBackoff) {
                 return nil
             }

@@ -300,11 +300,13 @@ func orderDefinitions(definitions []*HttpMiddlewareDefinition) ([]*HttpMiddlewar
 
     sortReady()
 
-    result := make([]*HttpMiddlewareDefinition, 0, len(nodes))
+    result := make([]*HttpMiddlewareDefinition, 0, len(definitions))
+    processedNodes := 0
 
     for 0 < len(ready) {
         node := ready[0]
         ready = ready[1:]
+        processedNodes++
 
         result = append(result, node.duplicates...)
 
@@ -324,7 +326,8 @@ func orderDefinitions(definitions []*HttpMiddlewareDefinition) ([]*HttpMiddlewar
     }
 
     cycleDetected := false
-    if len(result) != len(nodes) {
+    /* count the NODES drained, not the definitions emitted: a node carries every duplicate of its name, so comparing the emitted definitions against the name-keyed node map reports a cycle for the duplicates allowDuplicates exists to permit */
+    if processedNodes != len(nodes) {
         cycleDetected = true
 
         result = make([]*HttpMiddlewareDefinition, 0, len(definitions))

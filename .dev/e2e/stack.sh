@@ -65,15 +65,23 @@ in_example() {
 section_start "EXCLUSIVE COMMAND ACROSS TWO INSTANCES" "${TAG_VALIDATE}" "e2e"
 
 EXCLUSIVE_OUTPUT_STRING="$(
-    in_example "go run . example:exclusive:demo --hold 4s > /tmp/exclusive-first.log 2>&1 &
+    in_example "rm -f /tmp/exclusive-first.log /tmp/exclusive-second.log
+        go run . example:exclusive:demo --hold 4s > /tmp/exclusive-first.log 2>&1 &
         FIRST_PID=\$!
-        sleep 2
+        # wait for the holder to be demonstrably inside the command body: a fixed sleep races the go build cache, and a
+        # contender that starts after the holder already released proves nothing about mutual exclusion
+        for _ in \$(seq 1 150); do
+            grep -q 'exclusive tick: started' /tmp/exclusive-first.log 2>/dev/null && break
+            sleep 0.2
+        done
         go run . example:exclusive:demo --hold 1s > /tmp/exclusive-second.log 2>&1
         SECOND_STATUS=\$?
         wait \${FIRST_PID}
         FIRST_STATUS=\$?
         echo \"first_status=\${FIRST_STATUS}\"
         echo \"second_status=\${SECOND_STATUS}\"
+        echo \"first_started=\$(grep -c 'exclusive tick: started' /tmp/exclusive-first.log 2>/dev/null || true)\"
+        echo \"second_started=\$(grep -c 'exclusive tick: started' /tmp/exclusive-second.log 2>/dev/null || true)\"
         echo '--- first ---'
         cat /tmp/exclusive-first.log
         echo '--- second ---'
@@ -94,6 +102,26 @@ if printf '%s' "${EXCLUSIVE_OUTPUT_STRING}" | grep -q 'second_status=0'; then
     check_pass "the instance that lost the lock exited zero (a cron fleet stays green)"
 else
     check_fail "the instance that lost the lock did not exit zero"
+fi
+
+# without these the section goes green when the HOLDER never ran: the contender alone would account for the single
+# "started" line, and mutual exclusion would never have been exercised at all
+if printf '%s' "${EXCLUSIVE_OUTPUT_STRING}" | grep -q 'first_status=0'; then
+    check_pass "the instance that held the lock exited zero"
+else
+    check_fail "the instance that held the lock did not exit zero"
+fi
+
+if printf '%s' "${EXCLUSIVE_OUTPUT_STRING}" | grep -q 'first_started=1'; then
+    check_pass "the holder is the instance that ran the body"
+else
+    check_fail "the holder never entered the command body, so exclusivity was never exercised"
+fi
+
+if printf '%s' "${EXCLUSIVE_OUTPUT_STRING}" | grep -q 'second_started=0'; then
+    check_pass "the contender was turned away while the holder was inside the body"
+else
+    check_fail "the contender entered the command body while the holder held the lock"
 fi
 
 section_end "EXCLUSIVE COMMAND ACROSS TWO INSTANCES" "success" "${TAG_VALIDATE}" "e2e"
@@ -161,10 +189,10 @@ section_end "PROCESS ROLE RESOLUTION" "success" "${TAG_VALIDATE}" "e2e"
 section_start "CRON CRONTAB-NO-USER TEMPLATE" "${TAG_VALIDATE}" "e2e"
 
 CRONTAB_WITH_USER_STRING="$(
-    in_example "go run . melody:cron:generate --out /tmp/crontab-with-user >/dev/null 2>&1; cat /tmp/crontab-with-user 2>/dev/null" || true
+    in_example "rm -f /tmp/crontab-with-user; go run . melody:cron:generate --out /tmp/crontab-with-user >/dev/null 2>&1; cat /tmp/crontab-with-user 2>/dev/null" || true
 )"
 CRONTAB_NO_USER_STRING="$(
-    in_example "go run . melody:cron:generate --template crontab-no-user --out /tmp/crontab-no-user >/dev/null 2>&1; cat /tmp/crontab-no-user 2>/dev/null" || true
+    in_example "rm -f /tmp/crontab-no-user; go run . melody:cron:generate --template crontab-no-user --out /tmp/crontab-no-user >/dev/null 2>&1; cat /tmp/crontab-no-user 2>/dev/null" || true
 )"
 
 if [[ "" = "${CRONTAB_NO_USER_STRING}" ]]; then

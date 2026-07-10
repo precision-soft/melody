@@ -248,3 +248,35 @@ func TestStripRuntimeFlagsFromOsArgs_StripsRoleFlags(t *testing.T) {
         }
     }
 }
+
+/** @info parseRuntimeFlagFromArguments refuses to read a token starting with "-" as the role's value, so the stripper must not delete it either: a bare `--role` followed by the command's own flag swallowed that flag out of os.Args, and the command ran without it. */
+func TestStripRuntimeFlagsFromOsArgs_DoesNotEatTheCommandsNextFlag(t *testing.T) {
+    originalArguments := os.Args
+    defer func() { os.Args = originalArguments }()
+
+    os.Args = []string{"melody-example", "report:generate", "--role", "--verbose", "target"}
+    stripRuntimeFlagsFromOsArgs()
+
+    expected := []string{"melody-example", "report:generate", "--verbose", "target"}
+    if len(expected) != len(os.Args) {
+        t.Fatalf("expected %v, got %v", expected, os.Args)
+    }
+    for index := range expected {
+        if expected[index] != os.Args[index] {
+            t.Fatalf("expected %v, got %v", expected, os.Args)
+        }
+    }
+}
+
+/** @info A bare `--role worker` still consumes its value. */
+func TestStripRuntimeFlagsFromOsArgs_ConsumesARealFlagValue(t *testing.T) {
+    originalArguments := os.Args
+    defer func() { os.Args = originalArguments }()
+
+    os.Args = []string{"melody-example", "app:info", "--role", "worker"}
+    stripRuntimeFlagsFromOsArgs()
+
+    if 2 != len(os.Args) || "app:info" != os.Args[1] {
+        t.Fatalf("expected the runtime flag and its value to be stripped, got %v", os.Args)
+    }
+}

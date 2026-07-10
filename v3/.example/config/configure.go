@@ -51,6 +51,9 @@ func Configure(app *melodyapplication.Application) {
         ConfigurationFactory: newCronConfiguration,
     }))
 
+    /* the SSE stream and the websocket handler both block on this hub; http.Server.Shutdown neither cancels an in-flight request's context nor tracks a hijacked connection, so without closing the hub a single connected client holds the whole shutdown timeout and is then cut mid-flight */
+    app.OnHttpShutdown(moduleInstance.serverSentEventHub.Shutdown)
+
     app.RegisterModule(melodywebsocket.NewModule(melodywebsocket.ModuleConfig{
         Hub:       moduleInstance.serverSentEventHub,
         Path:      "/ws",

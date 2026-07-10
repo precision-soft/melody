@@ -61,6 +61,15 @@ func (instance *Application) RegisterHttpHandlerDecorator(decorator applicationc
     instance.httpHandlerDecorators = append(instance.httpHandlerDecorators, decorator)
 }
 
+/* OnHttpShutdown registers a callback that runs as soon as the http server begins shutting down, before it waits for connections to drain. It is how an application unwinds handlers the server cannot: `http.Server.Shutdown` neither cancels the contexts of in-flight requests nor tracks hijacked connections, so a Server-Sent Events stream or a websocket blocks the whole shutdown timeout and is then cut mid-flight. Closing the hub those handlers select on (`ServerSentEventHub.Shutdown`) releases them at once. */
+func (instance *Application) OnHttpShutdown(hook func()) {
+    if nil == hook {
+        exception.Panic(exception.NewError("http shutdown hook may not be nil", nil, nil))
+    }
+
+    instance.httpShutdownHooks = append(instance.httpShutdownHooks, hook)
+}
+
 func (instance *Application) bootHttp() {
     kernelInstance := instance.kernel
 
@@ -102,6 +111,11 @@ func (instance *Application) runHttp(
     }
 
     applyHttpServerTimeouts(httpServer, configuration)
+
+    /* net/http runs these the moment Shutdown is called, on their own goroutines, so a streaming handler is released while the server drains the rest */
+    for _, hook := range instance.httpShutdownHooks {
+        httpServer.RegisterOnShutdown(hook)
+    }
 
     logger := logging.LoggerMustFromContainer(instance.kernel.ServiceContainer())
     logger.Info(

@@ -232,3 +232,134 @@ func TestLeaderGate_ReleasesOnShutdown(t *testing.T) {
         t.Fatalf("expected the lock to be free right after shutdown")
     }
 }
+
+/** @info A gate that can never acquire — a redis locker built with a non-positive ttl fails closed on every Acquire — is otherwise indistinguishable from a healthy follower: it campaigns, backs off and elects nobody, silently, forever. */
+func TestLeaderGate_CampaignErrorsReachTheHook(t *testing.T) {
+    runContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    runtimeInstance := testRuntimeWithContext(runContext)
+
+    observed := make(chan error, 1)
+
+    gate := NewLeaderGateWithOptions(
+        &acquireFailingLocker{},
+        "campaign",
+        20*time.Millisecond,
+        LeaderGateOptions{
+            RetryInterval: 5 * time.Millisecond,
+            OnCampaignError: func(callbackRuntime runtimecontract.Runtime, cause error) {
+                select {
+                case observed <- cause:
+                default:
+                }
+            },
+        },
+    )
+
+    go func() {
+        _ = gate.Run(runtimeInstance)
+    }()
+
+    select {
+    case cause := <-observed:
+        if nil == cause {
+            t.Errorf("the hook must carry the acquire error")
+        }
+    case <-time.After(2 * time.Second):
+        t.Errorf("a gate that can never acquire never reported why")
+    }
+
+    cancel()
+
+    if true == gate.IsLeader() {
+        t.Fatalf("a gate that never acquired must never claim leadership")
+    }
+}
+
+/** @info A shutdown cancels the context the backend is called with, so the campaign in flight fails with that cancellation. Reporting it would hand every graceful stop an error indistinguishable from a store outage. */
+func TestLeaderGate_ShutdownDoesNotReportACampaignError(t *testing.T) {
+    runContext, cancel := context.WithCancel(context.Background())
+    runtimeInstance := testRuntimeWithContext(runContext)
+
+    reported := make(chan error, 4)
+
+    acquireEntered := make(chan struct{}, 1)
+
+    gate := NewLeaderGateWithOptions(
+        &contextSensitiveAcquireLocker{entered: acquireEntered},
+        "campaign",
+        20*time.Millisecond,
+        LeaderGateOptions{
+            RetryInterval: 5 * time.Millisecond,
+            OnCampaignError: func(callbackRuntime runtimecontract.Runtime, cause error) {
+                select {
+                case reported <- cause:
+                default:
+                }
+            },
+        },
+    )
+
+    done := make(chan error, 1)
+    go func() {
+        done <- gate.Run(runtimeInstance)
+    }()
+
+    /* the campaign must be inside the backend call when the shutdown lands, or the loop simply exits before it ever errors */
+    select {
+    case <-acquireEntered:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("the gate never reached Acquire")
+    }
+
+    cancel()
+
+    select {
+    case runErr := <-done:
+        if nil != runErr {
+            t.Fatalf("a clean shutdown must return nil, got %v", runErr)
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatalf("the gate did not stop on a cancelled context")
+    }
+
+    select {
+    case cause := <-reported:
+        t.Fatalf("a graceful shutdown reported a campaign error: %v", cause)
+    default:
+    }
+}
+
+/* contextSensitiveAcquireLocker fails Acquire with the call's context error, as a real backend does once the context is cancelled. */
+type contextSensitiveAcquireLocker struct {
+    entered chan struct{}
+}
+
+func (instance *contextSensitiveAcquireLocker) CreateLock(name string, ttl time.Duration) lockcontract.Lock {
+    return &contextSensitiveAcquireLock{entered: instance.entered}
+}
+
+type contextSensitiveAcquireLock struct {
+    entered chan struct{}
+}
+
+func (instance *contextSensitiveAcquireLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+    select {
+    case instance.entered <- struct{}{}:
+    default:
+    }
+
+    /* block inside the backend call, the way a real round trip does, so the shutdown lands while the campaign is in flight */
+    <-runtimeInstance.Context().Done()
+
+    return false, exception.NewError("acquire failed", nil, runtimeInstance.Context().Err())
+}
+
+func (instance *contextSensitiveAcquireLock) Release(runtimeInstance runtimecontract.Runtime) error {
+    return nil
+}
+
+func (instance *contextSensitiveAcquireLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl time.Duration) error {
+    return nil
+}

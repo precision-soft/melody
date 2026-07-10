@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `lock_test.go` — the genuine-verify-error test no longer races MySQL's asynchronous `KILL`. The server flags the killed thread and releases its locks only once that thread notices, so the immediate re-acquire read `GET_LOCK` as still-held (`false`, no error) and the suite failed intermittently under load. The attempt now retries until the dead session lets go.
 - `lock.go` — the liveness verify on an idempotent re-`Acquire` runs on a fresh, bounded context, as `Refresh` already did. It ran on the caller's request context, so a transient cancellation was mistaken for a lost lock and actively `RELEASE_LOCK`ed a lock this process still held.
 
 ## [v3.1.1] - 2026-07-06 - Standalone Module Resolution and Connection-Retry Fixes

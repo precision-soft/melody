@@ -1,7 +1,9 @@
 package http
 
 import (
+    "errors"
     "io"
+    "io/fs"
     "net"
     nethttp "net/http"
     "net/netip"
@@ -328,12 +330,19 @@ func closeDiscardedResponseBody(response httpcontract.Response, logger loggingco
     }
 
     closeErr := closer.Close()
-    if nil != closeErr && nil != logger {
-        logger.Error(
-            "failed to close discarded response body",
-            exception.LogContext(closeErr),
-        )
+    if nil == closeErr || nil == logger {
+        return
     }
+
+    /* the response may already have been closed by the writer's own deferred Close, when the panic that discarded it unwound from inside WriteToHttpResponseWriter. Closing an os.File twice is safe and reports this; it is not a failure worth an error line on a path that is already reporting a panic. */
+    if true == errors.Is(closeErr, fs.ErrClosed) {
+        return
+    }
+
+    logger.Error(
+        "failed to close discarded response body",
+        exception.LogContext(closeErr),
+    )
 }
 
 func detectScheme(request *nethttp.Request) string {
@@ -369,7 +378,12 @@ func detectSchemeWithForwardedHeadersPolicy(request *nethttp.Request, policy htt
 
     forwardedProto := request.Header.Get("X-Forwarded-Proto")
     if "" != forwardedProto {
-        return strings.ToLower(forwardedProto)
+        /* a chain of proxies appends rather than replaces, so the header arrives as "https, http": the client-facing hop is the leftmost entry. Returning the whole list yields a scheme equal to neither "http" nor "https", and every downstream equality test — the Secure attribute on the cookies this response sets, above all — then reads the request as plaintext. */
+        if commaIndex := strings.IndexByte(forwardedProto, ','); -1 != commaIndex {
+            forwardedProto = forwardedProto[:commaIndex]
+        }
+
+        return strings.ToLower(strings.TrimSpace(forwardedProto))
     }
 
     return "http"

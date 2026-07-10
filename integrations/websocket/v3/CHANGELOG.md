@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `handler.go` — the keepalive ping loop no longer disconnects healthy clients. A pong is processed only inside `connection.Read`, which the read loop leaves while it runs a synchronous `OnMessage` callback, so a ping issued in that window always timed out and was read as the peer's death. A timed-out ping now counts as death only when the read loop is neither inside a callback nor has seen a client frame within two intervals; a write failure still fails immediately, since the socket itself is gone.
+- `handler.go` — a callback that never returns no longer holds its connection open forever. The excuse the ping loop grants a running `OnMessage` was unbounded, so a wedged callback answered every ping timeout with "the reader simply cannot answer": nothing else reaps a hijacked connection, and the descriptor, the hub subscription and the handler, read and ping goroutines leaked once per connection. The excuse now expires after ten ping intervals.
+- `handler.go` — the closing handshake is bounded. `connection.Close` waits for the peer's close frame, which only the read loop ever reads, so closing a connection *because* that read loop is wedged waited out the library's five-second timeout while still holding the handler goroutine and the hub subscription. The handshake now gets one second before the deferred `CloseNow` frees the socket.
 
 ## [v3.1.1] - 2026-07-06 - Standalone Module Resolution Fix
 

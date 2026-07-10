@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `encrypt/key_provider.go` — `StaticKeyProvider` redacts its keys under `fmt`. The `%#v` and `%v` verbs walk unexported fields, so a provider that reached a debug log — or an error context formatted later — printed every AES master key as raw bytes. This is the redaction class the encrypted column types already close, applied to the material those columns are protected with.
 - `encrypt/encrypted_string.go`, `encrypt/deterministic.go`, `encrypt/encrypted_string_for.go`, `encrypt/deterministic_for.go` — the encrypted column types now redact under the `%#v` verb too. `fmt` reaches for `GoStringer` there and, finding none, printed the underlying string literal, so a struct dumped with `%#v` into a log line or a test failure carried the plaintext — while `%v`, `String()`, `LogValue()` and `MarshalJSON()` all redacted correctly.
 - `encrypt/encrypted_string_for.go` — a `CipherRef` whose `CipherName()` is empty is now rejected instead of resolving the default cipher. The empty name is the default cipher's reserved registry entry, so a marker that returned it silently handed a compartment-bound column the default key — exactly the cross-compartment read the marker type exists to prevent.
 

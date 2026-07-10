@@ -49,6 +49,7 @@ import (
 
 func main() {
     sections := 0
+    infrastructureSections := 0
 
     section("WEBSOCKET FAN-OUT (in-process)")
     runWebsocketCheck()
@@ -61,6 +62,7 @@ func main() {
     redisAddress := os.Getenv("REDIS_ADDRESS")
 
     if address := redisAddress; "" != address {
+        infrastructureSections++
         section("CROSS-APP HMAC AUTH (live redis)")
         runHmacCheck(address)
         sections++
@@ -83,6 +85,7 @@ func main() {
     }
 
     if dsn := os.Getenv("POSTGRES_DSN"); "" != dsn {
+        infrastructureSections++
         section("OUTBOX (live postgres)")
         runOutboxCheck(dsn)
         sections++
@@ -97,18 +100,30 @@ func main() {
     }
 
     if dsn := os.Getenv("AMQP_DSN"); "" != dsn {
+        infrastructureSections++
         section("AMQP PUBLISH/CONSUME (live rabbitmq)")
         runAmqpCheck(dsn)
         sections++
     }
 
     if baseUrl := os.Getenv("EXAMPLE_BASE_URL"); "" != baseUrl {
-        section("EXAMPLE OVER HTTP (live example application)")
-        runExampleHttpCheck(baseUrl, os.Getenv("EXAMPLE_LOAD_BALANCER_URL"), redisAddress)
-        sections++
+        /* the section resets the example's rate limit counters straight in redis, so it needs redis as much as it needs the
+        application: without this it hard-failed on the very "clear REDIS_ADDRESS to skip the redis-backed sections" run that
+        run.sh documents */
+        if "" == redisAddress {
+            fmt.Println("\nSKIPPED: EXAMPLE OVER HTTP needs REDIS_ADDRESS to reset the rate limit counters")
+        } else {
+            infrastructureSections++
+            section("EXAMPLE OVER HTTP (live example application)")
+            runExampleHttpCheck(baseUrl, os.Getenv("EXAMPLE_LOAD_BALANCER_URL"), redisAddress)
+            sections++
+        }
     }
 
-    if 0 == sections {
+    /* the in-process sections (websocket, encrypt) always run, so they can never witness a missing backend: the guard has to
+    count only the sections a backend gates, or a run against an empty environment reports "ALL 2 SECTIONS PASSED" and the
+    eleven that matter are silently skipped */
+    if 0 == infrastructureSections {
         fail("no infrastructure env set — expected one or more of REDIS_ADDRESS / POSTGRES_DSN / AMQP_DSN")
     }
 

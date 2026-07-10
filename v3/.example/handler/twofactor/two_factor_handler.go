@@ -1,6 +1,8 @@
 package twofactor
 
 import (
+    "time"
+
     nethttp "net/http"
 
     "github.com/precision-soft/melody/v3/.example/presenter"
@@ -68,8 +70,14 @@ func EnrollHandler(store *store2fa.Store) melodyhttpcontract.Handler {
 /* VerifyHandler verifies a submitted second factor for a user: a TOTP code on the X-2FA-Code header is
 checked against the stored secret, or a single-use recovery code on X-2FA-Recovery-Code is atomically
 redeemed. It reports 200 on success and 401 on a wrong/replayed factor, exercising the same store the
-TotpSecondFactorAuthenticator uses. */
+TotpSecondFactorAuthenticator uses.
+
+An accepted TOTP code stays valid for its whole window, so — exactly as the framework's authenticator does — it is
+burned in a replay guard the moment it is accepted. The nonce is keyed on the NORMALIZED code, because Verify
+normalizes before comparing: keying on the raw code would let "409 643" replay a code already spent as "409643". */
 func VerifyHandler(store *store2fa.Store) melodyhttpcontract.Handler {
+    replayGuard := melodysecurity.NewMemoryNonceGuard()
+
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         user := queryString(request, "user")
         if "" == user {
@@ -112,6 +120,23 @@ func VerifyHandler(store *store2fa.Store) melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnauthorized, "invalid code"), nil
         }
 
+        seen, rememberErr := replayGuard.Remember(runtimeInstance, "2fa:"+user+":"+totp.NormalizeCode(code), totpCodeValidityWindow())
+        if nil != rememberErr {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "could not verify the code"), nil
+        }
+
+        if true == seen {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnauthorized, "code already used"), nil
+        }
+
         return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, map[string]any{"factor": "totp", "verified": true}), nil
     }
+}
+
+/* totpCodeValidityWindow is the span an accepted code stays verifiable — (2*skew+1) periods — and therefore how long a
+spent code must stay burned. It resolves through the totp package so it can never drift from what Verify honours. */
+func totpCodeValidityWindow() time.Duration {
+    resolved := totp.Config{}.Resolve()
+
+    return time.Duration(2*resolved.Skew+1) * time.Duration(resolved.Period) * time.Second
 }

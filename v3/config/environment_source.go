@@ -183,6 +183,9 @@ func (instance *EnvironmentSource) loadExistingDotEnvFile(values map[string]stri
 }
 
 func preprocessDotEnvContent(content string) (string, error) {
+    /* an editor that saves the file as UTF-8 with a byte order mark puts U+FEFF before the first key; it is not whitespace, so nothing downstream trims it and godotenv rejects the line as a malformed variable name */
+    content = strings.TrimPrefix(content, "\ufeff")
+
     scanner := bufio.NewScanner(strings.NewReader(content))
     scanner.Buffer(
         make([]byte, 0, 64*1024),
@@ -191,13 +194,16 @@ func preprocessDotEnvContent(content string) (string, error) {
 
     lines := make([]string, 0)
 
+    /* the quote state spans lines: godotenv accepts a quoted value that runs over several of them, and a scanner that forgot it was inside quotes would read a '#' in the value as a comment and drop a blank line out of the middle of it */
+    inQuotes := false
+    var quoteChar rune = 0
+
     for scanner.Scan() {
         line := scanner.Text()
 
         builder := strings.Builder{}
 
-        inQuotes := false
-        var quoteChar rune = 0
+        openedInQuotes := inQuotes
         var previousChar rune = 0
 
         for _, character := range line {
@@ -225,8 +231,14 @@ func preprocessDotEnvContent(content string) (string, error) {
             previousChar = character
         }
 
-        processed := strings.TrimRightFunc(builder.String(), unicode.IsSpace)
-        if "" == strings.TrimSpace(processed) {
+        processed := builder.String()
+
+        /* trailing whitespace inside an unterminated quoted value is part of the value, and a blank line there is a blank line of data — neither may be trimmed away or skipped */
+        if false == inQuotes {
+            processed = strings.TrimRightFunc(processed, unicode.IsSpace)
+        }
+
+        if false == inQuotes && false == openedInQuotes && "" == strings.TrimSpace(processed) {
             continue
         }
 

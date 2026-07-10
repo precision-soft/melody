@@ -202,6 +202,9 @@ func (instance *GenerateCommand) resolveRunOptions(
     /* @info the k8s template ignores the heartbeat (it logs to stdout and models liveness with a dedicated CronJob), so neither auto-enable a heartbeat nor demand a user for it here; an explicitly requested heartbeat still flows through so writeDestinations can warn that it is dropped */
     isK8s := TemplateNameK8s == template.Name()
 
+    /* @info the crontab-no-user dialect renders no user column at all (busybox crond and per-user crontabs reject one), so a user is never needed to place the heartbeat line — demanding one turned a valid configuration into a hard error */
+    templateRendersUserColumn := false == isK8s && TemplateNameCrontabNoUser != template.Name()
+
     outputPath := resolveDefault(commandContext, configuration, flagNameOutput, ParameterDestinationFile)
     if "" == outputPath {
         return nil, exception.NewError(
@@ -274,7 +277,7 @@ func (instance *GenerateCommand) resolveRunOptions(
     options.namespace = resolveDefault(commandContext, configuration, flagNameNamespace, ParameterNamespace)
     options.restartPolicy = resolveDefault(commandContext, configuration, flagNameRestartPolicy, ParameterRestartPolicy)
 
-    if true == options.heartbeatEnabled && false == isK8s && "" == options.defaultUserName {
+    if true == options.heartbeatEnabled && true == templateRendersUserColumn && "" == options.defaultUserName {
         return nil, exception.NewError(
             "cron: heartbeat is configured but no user is set; pass --user, register the melody.cron.user parameter, or remove the heartbeat",
             exceptioncontract.Context{

@@ -50,6 +50,15 @@ type StaticKeyProvider struct {
     keysById     map[string][]byte
 }
 
+/* GoString and String keep the master keys out of every rendering fmt can reach: %#v and %v walk unexported fields, so a provider dropped into a debug log — or into an error context that is formatted later — printed each key as raw bytes. The receivers are values so that both the provider and a pointer to it redact, and the current key id is kept because it names a key without revealing one. */
+func (instance StaticKeyProvider) GoString() string {
+    return instance.String()
+}
+
+func (instance StaticKeyProvider) String() string {
+    return "encrypt.StaticKeyProvider{currentKeyId:" + instance.currentKeyId + ", keysById:[redacted]}"
+}
+
 func (instance *StaticKeyProvider) CurrentKeyId() string {
     return instance.currentKeyId
 }

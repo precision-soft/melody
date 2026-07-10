@@ -41,7 +41,8 @@ func NewForwardedClientIpResolver(policy httpcontract.ForwardedHeadersPolicy) Cl
                 return DefaultClientIp(request)
             }
 
-            return hopAddress.String()
+            /* a proxy may write the same client as 1.2.3.4 or as ::ffff:1.2.3.4; unmapped, the two forms key one rate limit bucket instead of two */
+            return hopAddress.Unmap().String()
         }
 
         /* every hop was a trusted proxy: the client is the leftmost infrastructure address; fall back to the direct peer rather than guess */
@@ -82,6 +83,9 @@ func isTrustedProxyAddress(hostString string, trustedProxyList []string) bool {
     if nil != hostAddressErr {
         return false
     }
+
+    /* an IPv4-mapped IPv6 peer (::ffff:10.0.0.1) is the IPv4 address it names, so an IPv4 CIDR in the trusted proxy list must still match it */
+    hostAddress = hostAddress.Unmap()
 
     for _, trustedProxyString := range trustedProxyList {
         trimmedTrustedProxyString := strings.TrimSpace(trustedProxyString)

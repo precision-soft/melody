@@ -43,6 +43,11 @@ func effectiveOptions(contextConfig ContextConfig, baseOptions Options) Options 
     }
 
     if "" == resolved.ManagerName {
+        /* the base pin comes first, exactly as it does for every sibling field: skipping it here silently ignored a ManagerName the caller set once for all contexts, and routed each context's commands at a manager merely named after it */
+        resolved.ManagerName = baseOptions.ManagerName
+    }
+
+    if "" == resolved.ManagerName {
         resolved.ManagerName = contextConfig.Name
     }
 

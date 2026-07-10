@@ -771,3 +771,24 @@ func TestMatchPath_ParamLocale_SetsLocaleParam(t *testing.T) {
         t.Fatalf("expected _locale param to be 'fr', got: %s", params[RouteAttributeLocale])
     }
 }
+
+/** @info A chain of proxies appends to X-Forwarded-Proto rather than replacing it, so the header arrives as "https, http". The client-facing hop is the leftmost entry; returning the whole list yields a scheme equal to neither "http" nor "https", which quietly drops the Secure attribute from every cookie the response sets. */
+func TestDetectSchemeWithForwardedHeadersPolicy_UsesTheClientFacingProtoOfAChain(t *testing.T) {
+    for _, headerValue := range []string{"https, http", "https,http", " https , http "} {
+        netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
+        netRequest.RemoteAddr = "10.1.2.3:4567"
+        netRequest.Header.Set("X-Forwarded-Proto", headerValue)
+
+        scheme := detectSchemeWithForwardedHeadersPolicy(
+            netRequest,
+            httpcontract.ForwardedHeadersPolicy{
+                TrustForwardedHeaders: true,
+                TrustedProxyList:      []string{"10.0.0.0/8"},
+            },
+        )
+
+        if "https" != scheme {
+            t.Fatalf("expected https from %q, got %q", headerValue, scheme)
+        }
+    }
+}

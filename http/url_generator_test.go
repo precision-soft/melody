@@ -262,3 +262,37 @@ func TestGeneratePath_EscapesSlashInParam(t *testing.T) {
         t.Fatalf("expected slash to be escaped in param value, got: %s", pathValue)
     }
 }
+
+/** @info A requirement on a catch-all is enforced when matching, so honouring it while generating is what keeps the generator from minting urls its own router answers with a 404. */
+func TestGeneratePath_CatchAllRequirementFailure(t *testing.T) {
+    routeRegistry := NewRouteRegistry()
+    router := NewRouterWithRouteRegistry(routeRegistry)
+    urlGenerator := NewUrlGenerator(routeRegistry)
+
+    router.HandleWithOptions(
+        "/files/*path...",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return EmptyResponse(200), nil
+        },
+        NewRouteOptions(
+            "files",
+            []string{nethttp.MethodGet},
+            "",
+            nil,
+            map[string]string{"path": "[a-z/]+"},
+            nil,
+            nil,
+            0,
+            nil,
+        ),
+    )
+
+    if _, err := urlGenerator.GeneratePath("files", map[string]string{"path": "docs/readme"}); nil != err {
+        t.Fatalf("a catch-all value the router accepts must generate: %v", err)
+    }
+
+    generated, err := urlGenerator.GeneratePath("files", map[string]string{"path": "../../etc/passwd"})
+    if nil == err {
+        t.Fatalf("expected the catch-all requirement to reject the value, generated %q", generated)
+    }
+}

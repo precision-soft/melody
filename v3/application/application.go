@@ -31,6 +31,7 @@ type Application struct {
     httpRouteRegistrars   []RouteRegistrar
     httpMiddlewares       *HttpMiddleware
     httpHandlerDecorators []applicationcontract.HttpHandlerDecorator
+    httpShutdownHooks     []func()
     securityConfiguration *security.CompiledConfiguration
     routeRegistry         httpcontract.RouteRegistry
     moduleConfigurations  map[string]any
