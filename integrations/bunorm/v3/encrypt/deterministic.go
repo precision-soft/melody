@@ -12,6 +12,11 @@ func (instance EncryptedDeterministicString) String() string {
     return redactedPlaceholder
 }
 
+/* GoString redacts under the %#v verb too: fmt reaches for GoStringer there and would otherwise print the underlying string literal, so a struct dumped with %#v in a log line or a test failure would carry the plaintext. */
+func (instance EncryptedDeterministicString) GoString() string {
+    return redactedPlaceholder
+}
+
 func (instance EncryptedDeterministicString) LogValue() slog.Value {
     return slog.StringValue(redactedPlaceholder)
 }
@@ -21,11 +26,12 @@ func (instance EncryptedDeterministicString) MarshalJSON() ([]byte, error) {
 }
 
 func (instance EncryptedDeterministicString) Value() (driver.Value, error) {
-    if nil == packageCipher {
-        return nil, errCipherNotConfigured()
+    cipherInstance, cipherErr := cipherByName(defaultCipherName)
+    if nil != cipherErr {
+        return nil, cipherErr
     }
 
-    encoded, encryptErr := packageCipher.EncryptDeterministic(string(instance))
+    encoded, encryptErr := cipherInstance.EncryptDeterministic(string(instance))
     if nil != encryptErr {
         return nil, encryptErr
     }
@@ -44,11 +50,12 @@ func (instance *EncryptedDeterministicString) Scan(source any) error {
         return nil
     }
 
-    if nil == packageCipher {
-        return errCipherNotConfigured()
+    cipherInstance, cipherErr := cipherByName(defaultCipherName)
+    if nil != cipherErr {
+        return cipherErr
     }
 
-    plaintext, plaintextErr := packageCipher.Decrypt(raw)
+    plaintext, plaintextErr := cipherInstance.Decrypt(raw)
     if nil != plaintextErr {
         return plaintextErr
     }

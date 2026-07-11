@@ -3,6 +3,7 @@ package middleware
 import (
     "bytes"
     "compress/gzip"
+    "context"
     "io"
     nethttp "net/http"
     "strconv"
@@ -107,7 +108,8 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
         config.SetLevel(gzip.DefaultCompression)
     }
 
-    if 0 == config.MinSize() {
+    /* a negative minimum would reach make([]byte, peekSize) below and panic on every request, so normalize the whole non-positive range, not just zero */
+    if 0 >= config.MinSize() {
         config.SetMinSize(1024)
     }
 
@@ -187,7 +189,10 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
             source := io.MultiReader(bytes.NewReader(peekBuffer[:peeked]), originalReader)
 
             pipeReader, pipeWriter := io.Pipe()
-            go streamGzipCompressInto(pipeWriter, source, originalReader, config.Level())
+            compressionDone := make(chan struct{})
+            go streamGzipCompressInto(pipeWriter, source, originalReader, config.Level(), compressionDone)
+            /* if an outer middleware panics after next() returned, the kernel drops this response without closing its body, so the gzip goroutine would block forever in pipe.Write and pin the original reader's descriptor; tie the pipe reader to the request lifecycle so it is closed when the request unwinds */
+            go closePipeReaderOnRequestUnwind(httpRequest.Context(), pipeReader, compressionDone)
 
             response.SetBodyReader(pipeReader)
             response.Headers().Set("Content-Encoding", "gzip")
@@ -270,7 +275,18 @@ func closeBodyReaderQuiet(reader io.Reader) {
     _ = closer.Close()
 }
 
-func streamGzipCompressInto(pipeWriter *io.PipeWriter, source io.Reader, sourceCloser io.Reader, level int) {
+/* closePipeReaderOnRequestUnwind closes the gzip pipe reader when the request context is cancelled, so a compression goroutine whose response was abandoned by a panicking outer middleware cannot block forever in pipe.Write; it returns without touching the pipe once compression finishes normally, so the successful path does not disturb the served body */
+func closePipeReaderOnRequestUnwind(requestContext context.Context, pipeReader *io.PipeReader, compressionDone <-chan struct{}) {
+    select {
+    case <-compressionDone:
+        return
+    case <-requestContext.Done():
+        _ = pipeReader.CloseWithError(requestContext.Err())
+    }
+}
+
+func streamGzipCompressInto(pipeWriter *io.PipeWriter, source io.Reader, sourceCloser io.Reader, level int, compressionDone chan<- struct{}) {
+    defer close(compressionDone)
     defer closeBodyReaderQuiet(sourceCloser)
 
     gzipWriter, gzipErr := gzip.NewWriterLevel(pipeWriter, level)

@@ -89,15 +89,43 @@ func splitByTopLevelComma(valueString string) []string {
     return parts
 }
 
-/* @important tracks whether the scan is inside a regex character class [...] so the bracket/comma bookkeeping treats ')', ']', '}', '(', '{' and ',' as literal class members. A ']' is a literal (not a close) when it is the class's first content character — and the leading negation '^' does not count as content — mirroring regexp/syntax. */
+/* @important tracks whether the scan is inside a regex character class [...] so the bracket/comma bookkeeping treats ')', ']', '}', '(', '{' and ',' as literal class members. A ']' is a literal (not a close) when it is the class's first content character — and the leading negation '^' does not count as content — mirroring regexp/syntax. A POSIX named class ([:alpha:], [:^digit:], ...) opens on a '[' immediately followed by ':' and only ends on the ':]' pair, so the ']' that terminates the POSIX element is not mistaken for the enclosing class close. */
 type charClassScanner struct {
-    inClass      bool
-    contentSeen  bool
-    caretAllowed bool
+    inClass          bool
+    contentSeen      bool
+    caretAllowed     bool
+    inPosixClass     bool
+    posixOpenPending bool
+    posixColonSeen   bool
 }
 
 func (instance *charClassScanner) step(character rune) bool {
     if true == instance.inClass {
+        if true == instance.inPosixClass {
+            if (']' == character) && (true == instance.posixColonSeen) {
+                instance.inPosixClass = false
+                instance.posixColonSeen = false
+
+                return true
+            }
+
+            instance.posixColonSeen = ':' == character
+
+            return true
+        }
+
+        if true == instance.posixOpenPending {
+            instance.posixOpenPending = false
+
+            if ':' == character {
+                instance.inPosixClass = true
+                instance.posixColonSeen = false
+                instance.contentSeen = true
+
+                return true
+            }
+        }
+
         if ('^' == character) && (false == instance.contentSeen) && (true == instance.caretAllowed) {
             instance.caretAllowed = false
 
@@ -105,6 +133,13 @@ func (instance *charClassScanner) step(character rune) bool {
         }
 
         instance.caretAllowed = false
+
+        if '[' == character {
+            instance.posixOpenPending = true
+            instance.contentSeen = true
+
+            return true
+        }
 
         if (']' == character) && (true == instance.contentSeen) {
             instance.inClass = false
@@ -132,6 +167,8 @@ func (instance *charClassScanner) noteEscaped() {
     if true == instance.inClass {
         instance.caretAllowed = false
         instance.contentSeen = true
+        instance.posixOpenPending = false
+        instance.posixColonSeen = false
     }
 }
 
@@ -157,6 +194,7 @@ func hasBalancedBrackets(valueString string) bool {
             continue
         }
 
+        /* a ']' that reaches here closes no class: RE2 reads it as a literal, so it must not sink the whole tag (the class scanner above consumes the ones that do close a class) */
         switch character {
         case '(':
             parenDepth++
@@ -165,8 +203,6 @@ func hasBalancedBrackets(valueString string) bool {
                 return false
             }
             parenDepth--
-        case ']':
-            return false
         case '{':
             curlyDepth++
         case '}':
@@ -272,7 +308,7 @@ func splitByCommaOutsideRegexMeta(valueString string) []string {
     return parts
 }
 
-/* @important parseIntStrict reports a parse failure instead of silently falling back to a default, so a malformed numeric constraint parameter (for example min=notanumber) is rejected at constraint creation rather than degrading to a default bound the caller never asked for. A valid leading integer is still accepted (Sscanf stops at the first non-digit), so a fractional bound such as 99.5 keeps truncating to 99. Ported from the v3 fix. */
+/* @important parseIntStrict reports a parse failure instead of silently falling back to a default, so a malformed numeric constraint parameter (for example min=notanumber) is rejected at constraint creation rather than degrading to a default bound the caller never asked for. A valid leading integer is still accepted (Sscanf stops at the first non-digit), so a fractional bound such as 99.5 keeps truncating to 99. */
 func parseIntStrict(valueString string) (int, bool) {
     var result int
     if _, err := fmt.Sscanf(valueString, "%d", &result); nil != err {

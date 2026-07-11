@@ -4,6 +4,7 @@ import (
     "context"
 
     migrate "github.com/precision-soft/melody/integrations/bunorm/migrate/v3"
+    bunmigrate "github.com/uptrace/bun/migrate"
 )
 
 /* runMigrateCheck drives the bunorm migrate runner against live postgres: an up migration that creates
@@ -58,4 +59,52 @@ func runMigrateCheck(dsn string) {
         fail("migrate: table %q still present after the down migration", table)
     }
     pass("migrate down rolled the schema back (table dropped)")
+
+    runMigrateContextCheck()
+}
+
+/* runMigrateContextCheck asserts a multi-database binary gets one command family per migration context: each
+context carries its own command prefix, so db:crm:migrate and db:billing:migrate are distinct commands that
+can never be confused for one another, and a base prefix handed to RegisterContextCommands is honoured.
+The manager pin each family carries is covered by the package's own tests; what only shows up from the
+outside is the command surface a multi-database application actually exposes. */
+func runMigrateContextCheck() {
+    contexts := []migrate.ContextConfig{
+        {Name: "crm", Migrations: bunmigrate.NewMigrations()},
+        {Name: "billing", Migrations: bunmigrate.NewMigrations(), Options: migrate.Options{ManagerName: "billing-replica"}},
+    }
+
+    commands := migrate.RegisterContextCommands(contexts, migrate.Options{})
+
+    names := make(map[string]bool, len(commands))
+    for _, command := range commands {
+        if true == names[command.Name()] {
+            fail("migrate contexts: command %q was registered twice across contexts", command.Name())
+        }
+        names[command.Name()] = true
+    }
+
+    wantedNames := []string{
+        "db:crm:migrate", "db:crm:rollback", "db:crm:status",
+        "db:billing:migrate", "db:billing:rollback", "db:billing:status",
+    }
+    for _, wanted := range wantedNames {
+        if false == names[wanted] {
+            fail("migrate contexts: command %q was not registered", wanted)
+        }
+    }
+    pass("migrate registered one distinct command family per context (%d commands)", len(commands))
+
+    /* a base prefix handed to RegisterContextCommands carries into every context's family */
+    prefixed := migrate.RegisterContextCommands(contexts, migrate.Options{CommandPrefix: "schema"})
+
+    prefixedNames := make(map[string]bool, len(prefixed))
+    for _, command := range prefixed {
+        prefixedNames[command.Name()] = true
+    }
+
+    if false == prefixedNames["schema:crm:migrate"] || false == prefixedNames["schema:billing:migrate"] {
+        fail("migrate contexts: the base command prefix did not carry into the per-context families")
+    }
+    pass("migrate honoured the base command prefix across contexts (schema:<context>:migrate)")
 }

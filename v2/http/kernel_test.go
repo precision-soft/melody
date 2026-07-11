@@ -1,6 +1,7 @@
 package http
 
 import (
+    "io"
     nethttp "net/http"
     "net/http/httptest"
     "sync/atomic"
@@ -724,8 +725,97 @@ func TestKernel_HandlerPathResponseDispatchErrorRespectsAlreadyLogged(t *testing
         t.Fatalf("expected the response despite the dispatch error, got %d", rec.Code)
     }
 
-    /* @important the dispatcher already logs "event listener error" once and marks the returned wrapper as logged; the handler-response finalization block must respect that mark (logEventDispatchError) instead of re-logging it — the pre-fix inline logging produced two error lines for one failure */
+    /* @important the dispatcher already logs "event listener error" once and marks the returned wrapper as logged; the handler-response finalization block must respect that mark (logEventDispatchError) instead of re-logging it — inline logging here would produce two error lines for one failure */
     if 1 != atomic.LoadInt64(&countingLogger.errorCount) {
         t.Fatalf("expected the dispatch error to be logged exactly once on the handler-response path, got %d error logs", atomic.LoadInt64(&countingLogger.errorCount))
+    }
+}
+
+/* closeTrackingReader stands in for a file-backed response body (FileResponse / static ServeReader): the
+only thing that matters here is whether the kernel closed the descriptor. */
+type closeTrackingReader struct {
+    closed atomic.Bool
+}
+
+func (instance *closeTrackingReader) Read(buffer []byte) (int, error) {
+    return 0, io.EOF
+}
+
+func (instance *closeTrackingReader) Close() error {
+    instance.closed.Store(true)
+    return nil
+}
+
+/* panicOnceSessionStorage blows up on its first Save, the way a database driver does on a lost connection.
+writeResponse persists the session before WriteToHttpResponseWriter registers the body's deferred Close, so
+that panic unwinds with the response's descriptor still open. It succeeds afterwards so the kernel's recovery
+path can finish and write the error response. */
+type panicOnceSessionStorage struct {
+    panicked atomic.Bool
+}
+
+func (instance *panicOnceSessionStorage) Load(sessionId string) (map[string]any, bool, error) {
+    return nil, false, nil
+}
+
+func (instance *panicOnceSessionStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+    if true == instance.panicked.CompareAndSwap(false, true) {
+        panic("session backend exploded")
+    }
+
+    return nil
+}
+
+func (instance *panicOnceSessionStorage) Delete(sessionId string) error {
+    return nil
+}
+
+func (instance *panicOnceSessionStorage) Close() error {
+    return nil
+}
+
+/** @info writeResponse persists the session BEFORE WriteToHttpResponseWriter registers the body's deferred Close, so a panic in the session backend unwinds with the file-backed response assigned to finalResponse and its descriptor still open. The recover handler replaces finalResponse with an error response; unless it closes the discarded one, every such request leaks a file descriptor. */
+func TestKernel_PanicRecoveryClosesTheDiscardedFileBackedResponse(t *testing.T) {
+    bodyReader := &closeTrackingReader{}
+    storage := &panicOnceSessionStorage{}
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/file",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            sessionValue, exists := request.Attributes().Get(RequestAttributeSession)
+            if false == exists {
+                t.Fatal("expected the request to carry a session")
+            }
+
+            sessionInstance, ok := sessionValue.(sessioncontract.Session)
+            if false == ok {
+                t.Fatal("expected the session attribute to be a session")
+            }
+
+            /* dirty the session so writeResponse persists it — and panics doing so */
+            sessionInstance.Set("key", "value")
+
+            response := &Response{}
+            response.SetStatusCode(nethttp.StatusOK)
+            response.SetHeaders(make(nethttp.Header))
+            response.SetBodyReader(bodyReader)
+
+            return response, nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainerWithSessionStorage(storage)
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/file", nil))
+
+    if false == storage.panicked.Load() {
+        t.Fatal("the session backend never panicked; the test does not exercise the recovery path")
+    }
+
+    if false == bodyReader.closed.Load() {
+        t.Fatal("the discarded file-backed response body was never closed: one file descriptor leaks per request")
     }
 }

@@ -260,6 +260,13 @@ func craftHmacHeaderValue(t *testing.T, keyId string, secret []byte, app string,
         t.Fatalf("nonce: %v", nonceErr)
     }
 
+    return craftHmacHeaderValueWithNonce(t, keyId, secret, app, method, path, body, nonce)
+}
+
+/* craftHmacHeaderValueWithNonce is craftHmacHeaderValue with a caller-chosen nonce — it models an attacker who fully controls the envelope's nonce field (for example to spell another component's guard key). */
+func craftHmacHeaderValueWithNonce(t *testing.T, keyId string, secret []byte, app string, method string, path string, body []byte, nonce string) string {
+    t.Helper()
+
     now := time.Now()
     signedPath, signedQuery, _ := strings.Cut(path, "?")
 
@@ -347,8 +354,40 @@ func TestHmacTokenSource_RejectsEnvelopeTooCloseToExpiryForReplayGuard(t *testin
 
     envelope := hmacEnvelope{Nonce: "n-1", ExpiresAt: time.Now().Add(-time.Second).Unix()}
 
-    if guardErr := source.guardNonce(testRuntime(), envelope); nil == guardErr {
+    if guardErr := source.guardNonce(testRuntime(), "key-current", envelope); nil == guardErr {
         t.Fatal("expected an envelope past its guardable window to be rejected")
+    }
+}
+
+/* the HMAC replay guard records envelope nonces under an "hmac:"-namespaced key, so a caller-chosen
+   nonce can never collide with the TOTP replay guard's "2fa:" key space when one shared NonceGuard
+   backs both components. An attacker holding a valid key signs an envelope whose nonce spells the TOTP
+   guard key of alice's next code and sends it to an HMAC endpoint; the genuine second factor that
+   follows must still find that key unseen (unburned), so the namespacing is what closes the targeted
+   two-factor lockout. */
+func TestHmacTokenSource_NonceIsNamespacedAwayFromTotpGuard(t *testing.T) {
+    guard := NewMemoryNonceGuard()
+    source := NewHmacTokenSource(HmacTokenSourceConfig{Secrets: hmacTestSecrets(), Apps: hmacTestApps(), NonceGuard: guard})
+
+    /* the exact key the TOTP authenticator would record for alice's next accepted code */
+    totpGuardKey := "2fa:alice:000000"
+
+    /* the attacker forges a fully valid envelope whose nonce spells that TOTP key (key-current is bound to wms-service in the verifier) */
+    forged := craftHmacHeaderValueWithNonce(t, "key-current", []byte("current-shared-secret-value-0001"), "wms-service", "GET", "/internal/ping", nil, totpGuardKey)
+
+    token, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/ping", nil, DefaultHmacHeaderName, forged))
+    if false == token.IsAuthenticated() {
+        t.Fatal("expected the crafted envelope to authenticate: it carries a valid key bound to the claimed app")
+    }
+
+    /* the shared guard now holds the HMAC nonce; the TOTP authenticator's key of the same string must still be fresh */
+    seen, rememberErr := guard.Remember(testRuntime(), totpGuardKey, time.Minute)
+    if nil != rememberErr {
+        t.Fatalf("remember: %v", rememberErr)
+    }
+
+    if true == seen {
+        t.Fatal("expected the TOTP guard key to be unseen: the HMAC nonce must be namespaced away from the 2fa key space")
     }
 }
 

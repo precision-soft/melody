@@ -10,6 +10,9 @@ import (
 
 const TemplateNameCrontab = "crontab"
 
+/* TemplateNameCrontabNoUser renders the user-less crontab dialect: busybox crond (alpine images) and per-user `crontab` files reject the /etc/cron.d user column, so this variant omits it — no more cutting the column with sed in the image build. */
+const TemplateNameCrontabNoUser = "crontab-no-user"
+
 const crontabHeaderBlock = `#############################################################################
 #
 # GENERATED FILE
@@ -27,26 +30,58 @@ const crontabHeaderBlock = `####################################################
 #############################################################################
 `
 
+const crontabNoUserHeaderBlock = `#############################################################################
+#
+# GENERATED FILE
+# DO NOT EDIT LOCALLY
+#
+#############################################################################
+# Example of job definition (user-less dialect: busybox crond, per-user crontab):
+# .---------------- minute (0 - 59)
+# |  .------------- hour (0 - 23)
+# |  |  .---------- day of month (1 - 31)
+# |  |  |  .------- month (1 - 12) OR jan,feb,mar,apr ...
+# |  |  |  |  .---- day of week (0 - 6) (Sunday=0 or 7) OR sun,mon,tue,wed,thu,fri,sat
+# |  |  |  |  |
+# *  *  *  *  * command to be executed
+#############################################################################
+`
+
 const crontabFooterBlock = `#############################################################################
 `
 
-type CrontabTemplate struct{}
+type CrontabTemplate struct {
+    name              string
+    includeUserColumn bool
+}
 
-var defaultCrontabTemplate = &CrontabTemplate{}
+var defaultCrontabTemplate = &CrontabTemplate{
+    name:              TemplateNameCrontab,
+    includeUserColumn: true,
+}
+
+var defaultCrontabNoUserTemplate = &CrontabTemplate{
+    name:              TemplateNameCrontabNoUser,
+    includeUserColumn: false,
+}
 
 func (instance *CrontabTemplate) Name() string {
-    return TemplateNameCrontab
+    return instance.name
 }
 
 func (instance *CrontabTemplate) Render(entries []Entry, options RenderOptions) (string, error) {
     var builder strings.Builder
 
-    builder.WriteString(crontabHeaderBlock)
+    if true == instance.includeUserColumn {
+        builder.WriteString(crontabHeaderBlock)
+    } else {
+        builder.WriteString(crontabNoUserHeaderBlock)
+    }
 
     sectionsWritten := 0
 
     for _, entry := range entries {
-        line, lineErr := buildCrontabLine(entry)
+        line, lineErr := buildCrontabLine(entry, instance.includeUserColumn)
         if nil != lineErr {
             return "", lineErr
         }
@@ -62,16 +97,9 @@ func (instance *CrontabTemplate) Render(entries []Entry, options RenderOptions) 
     }
 
     if 0 < len(options.HeartbeatCommand) {
-        if "" == options.HeartbeatUser {
-            return "", exception.NewError(
-                "cron: heartbeat command requires a non-empty heartbeat user",
-                nil,
-                ErrHeartbeatUserMissing,
-            )
-        }
-
-        if userValidationErr := validateUserField("heartbeat user", options.HeartbeatUser); nil != userValidationErr {
-            return "", userValidationErr
+        userColumn, userColumnErr := instance.heartbeatUserColumn(options, "cron: heartbeat command requires a non-empty heartbeat user", nil)
+        if nil != userColumnErr {
+            return "", userColumnErr
         }
 
         if validationErr := ValidateNoForbiddenChars(options.HeartbeatCommand, CrontabForbiddenChars, "heartbeat command"); nil != validationErr {
@@ -82,20 +110,21 @@ func (instance *CrontabTemplate) Render(entries []Entry, options RenderOptions) 
             builder.WriteString("\n")
         }
 
-        builder.WriteString(fmt.Sprintf("* * * * * %s %s\n", options.HeartbeatUser, joinShellTokens(options.HeartbeatCommand)))
+        if true == instance.includeUserColumn {
+            builder.WriteString(fmt.Sprintf("* * * * * %s %s\n", userColumn, joinShellTokens(options.HeartbeatCommand)))
+        } else {
+            builder.WriteString(fmt.Sprintf("* * * * * %s\n", joinShellTokens(options.HeartbeatCommand)))
+        }
 
         sectionsWritten++
     } else if "" != options.HeartbeatPath {
-        if "" == options.HeartbeatUser {
-            return "", exception.NewError(
-                fmt.Sprintf("cron: heartbeat path %q requires a non-empty heartbeat user", options.HeartbeatPath),
-                exceptioncontract.Context{"heartbeatPath": options.HeartbeatPath},
-                ErrHeartbeatUserMissing,
-            )
-        }
-
-        if userValidationErr := validateUserField("heartbeat user", options.HeartbeatUser); nil != userValidationErr {
-            return "", userValidationErr
+        userColumn, userColumnErr := instance.heartbeatUserColumn(
+            options,
+            fmt.Sprintf("cron: heartbeat path %q requires a non-empty heartbeat user", options.HeartbeatPath),
+            exceptioncontract.Context{"heartbeatPath": options.HeartbeatPath},
+        )
+        if nil != userColumnErr {
+            return "", userColumnErr
         }
 
         if validationErr := ValidateNoForbiddenChars([]string{options.HeartbeatPath}, CrontabForbiddenChars, "heartbeat path"); nil != validationErr {
@@ -106,7 +135,11 @@ func (instance *CrontabTemplate) Render(entries []Entry, options RenderOptions) 
             builder.WriteString("\n")
         }
 
-        builder.WriteString(fmt.Sprintf("* * * * * %s /bin/touch %s\n", options.HeartbeatUser, shellQuoteIfNeeded(options.HeartbeatPath)))
+        if true == instance.includeUserColumn {
+            builder.WriteString(fmt.Sprintf("* * * * * %s /bin/touch %s\n", userColumn, shellQuoteIfNeeded(options.HeartbeatPath)))
+        } else {
+            builder.WriteString(fmt.Sprintf("* * * * * /bin/touch %s\n", shellQuoteIfNeeded(options.HeartbeatPath)))
+        }
 
         sectionsWritten++
     }
@@ -116,17 +149,40 @@ func (instance *CrontabTemplate) Render(entries []Entry, options RenderOptions) 
     return builder.String(), nil
 }
 
-func buildCrontabLine(entry Entry) (string, error) {
-    if "" == entry.User {
-        return "", exception.NewError(
-            fmt.Sprintf("cron: command %q has no user; set EntryConfig.User on the schedule, pass --user, or register the melody.cron.user parameter", entry.Name),
-            exceptioncontract.Context{"entry": entry.Name},
-            ErrEntryEmptyUser,
-        )
+/* heartbeatUserColumn resolves the heartbeat line's user: the /etc/cron.d dialect requires and validates it, the user-less dialect ignores it entirely. */
+func (instance *CrontabTemplate) heartbeatUserColumn(
+    options RenderOptions,
+    missingUserMessage string,
+    missingUserContext exceptioncontract.Context,
+) (string, error) {
+    if false == instance.includeUserColumn {
+        return "", nil
     }
 
-    if userValidationErr := validateUserField(fmt.Sprintf("entry %q user", entry.Name), entry.User); nil != userValidationErr {
+    if "" == options.HeartbeatUser {
+        return "", exception.NewError(missingUserMessage, missingUserContext, ErrHeartbeatUserMissing)
+    }
+
+    if userValidationErr := validateUserField("heartbeat user", options.HeartbeatUser); nil != userValidationErr {
         return "", userValidationErr
+    }
+
+    return options.HeartbeatUser, nil
+}
+
+func buildCrontabLine(entry Entry, includeUserColumn bool) (string, error) {
+    if true == includeUserColumn {
+        if "" == entry.User {
+            return "", exception.NewError(
+                fmt.Sprintf("cron: command %q has no user; set EntryConfig.User on the schedule, pass --user, or register the melody.cron.user parameter", entry.Name),
+                exceptioncontract.Context{"entry": entry.Name},
+                ErrEntryEmptyUser,
+            )
+        }
+
+        if userValidationErr := validateUserField(fmt.Sprintf("entry %q user", entry.Name), entry.User); nil != userValidationErr {
+            return "", userValidationErr
+        }
     }
 
     if scheduleValidationErr := validateScheduleFields(entry, CrontabForbiddenChars); nil != scheduleValidationErr {
@@ -172,6 +228,15 @@ func buildCrontabLine(entry Entry) (string, error) {
         }
 
         logRedirect = " >> " + singleQuote(entry.LogPath) + " 2>&1"
+    }
+
+    if false == includeUserColumn {
+        return fmt.Sprintf(
+            "%s %s%s",
+            entry.Schedule.Expression(),
+            commandPart,
+            logRedirect,
+        ), nil
     }
 
     return fmt.Sprintf(

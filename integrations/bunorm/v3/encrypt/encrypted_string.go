@@ -10,15 +10,14 @@ import (
 
 const redactedPlaceholder = "<redacted>"
 
-var packageCipher Cipher
-
-func UseCipher(cipherInstance Cipher) {
-    packageCipher = cipherInstance
-}
-
 type EncryptedString string
 
 func (instance EncryptedString) String() string {
+    return redactedPlaceholder
+}
+
+/* GoString redacts under the %#v verb too: fmt reaches for GoStringer there and would otherwise print the underlying string literal, so a struct dumped with %#v in a log line or a test failure would carry the plaintext. */
+func (instance EncryptedString) GoString() string {
     return redactedPlaceholder
 }
 
@@ -31,11 +30,12 @@ func (instance EncryptedString) MarshalJSON() ([]byte, error) {
 }
 
 func (instance EncryptedString) Value() (driver.Value, error) {
-    if nil == packageCipher {
-        return nil, errCipherNotConfigured()
+    cipherInstance, cipherErr := cipherByName(defaultCipherName)
+    if nil != cipherErr {
+        return nil, cipherErr
     }
 
-    encoded, encryptErr := packageCipher.Encrypt(string(instance))
+    encoded, encryptErr := cipherInstance.Encrypt(string(instance))
     if nil != encryptErr {
         return nil, encryptErr
     }
@@ -54,11 +54,12 @@ func (instance *EncryptedString) Scan(source any) error {
         return nil
     }
 
-    if nil == packageCipher {
-        return errCipherNotConfigured()
+    cipherInstance, cipherErr := cipherByName(defaultCipherName)
+    if nil != cipherErr {
+        return cipherErr
     }
 
-    plaintext, plaintextErr := packageCipher.Decrypt(raw)
+    plaintext, plaintextErr := cipherInstance.Decrypt(raw)
     if nil != plaintextErr {
         return plaintextErr
     }

@@ -58,6 +58,24 @@ func TestService_OriginAllowed_SubdomainWildcard(t *testing.T) {
     }
 }
 
+func TestService_OriginAllowed_SchemeQualifiedSubdomainWildcard(t *testing.T) {
+    service := NewService(Config{
+        AllowOrigins: []string{"https://*.example.com"},
+    })
+
+    if false == service.OriginAllowed("https://sub.example.com") {
+        t.Fatalf("expected scheme-qualified wildcard to match same scheme and subdomain")
+    }
+
+    if true == service.OriginAllowed("http://sub.example.com") {
+        t.Fatalf("expected scheme-qualified wildcard not to match on scheme mismatch")
+    }
+
+    if true == service.OriginAllowed("https://sub.evil.com") {
+        t.Fatalf("expected scheme-qualified wildcard not to match a different suffix")
+    }
+}
+
 func TestService_OriginAllowed_EmptyOriginListDefaultsToWildcard(t *testing.T) {
     service := NewService(Config{
         AllowOrigins: []string{},

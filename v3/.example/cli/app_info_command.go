@@ -3,6 +3,7 @@ package cli
 import (
     "fmt"
 
+    melodyapplication "github.com/precision-soft/melody/v3/application"
     melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
     melodyconfig "github.com/precision-soft/melody/v3/config"
     melodyhttp "github.com/precision-soft/melody/v3/http"
@@ -30,6 +31,10 @@ func (instance *AppInfoCommand) Flags() []melodyclicontract.Flag {
 func (instance *AppInfoCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
     configuration := melodyconfig.ConfigMustFromContainer(runtimeInstance.Container())
     fmt.Println("env:", configuration.Kernel().Env())
+
+    processRole := melodyapplication.ProcessRoleMustFromContainer(runtimeInstance.Container())
+    fmt.Println("process_role:", processRole)
+    fmt.Println("background_work:", melodyconfig.RoleAllowsBackgroundWork(processRole))
     fmt.Println("http_address:", configuration.Http().Address())
     fmt.Println("public_dir:", configuration.Http().PublicDir())
     fmt.Println("static_index_file:", configuration.Http().StaticIndexFile())

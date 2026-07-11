@@ -9,6 +9,7 @@ import (
 
 func newKernelConfiguration(
     defaultMode string,
+    processRole string,
     environment string,
     projectDir string,
     logsDir string,
@@ -23,6 +24,7 @@ func newKernelConfiguration(
 
     kernelConfigurationInstance := &kernelConfiguration{
         defaultMode: defaultMode,
+        processRole: processRole,
         env:         environment,
         projectDir:  projectDir,
         logsDir:     logsDir,
@@ -41,6 +43,7 @@ func newKernelConfiguration(
 
 type kernelConfiguration struct {
     defaultMode string
+    processRole string
     env         string
     projectDir  string
     logsDir     string
@@ -51,6 +54,10 @@ type kernelConfiguration struct {
 
 func (instance *kernelConfiguration) DefaultMode() string {
     return instance.defaultMode
+}
+
+func (instance *kernelConfiguration) ProcessRole() string {
+    return instance.processRole
 }
 
 func (instance *kernelConfiguration) Env() string {
@@ -81,6 +88,11 @@ func (instance *kernelConfiguration) validate() error {
     validateDefaultModeErr := instance.validateDefaultMode()
     if nil != validateDefaultModeErr {
         return validateDefaultModeErr
+    }
+
+    validateProcessRoleErr := instance.validateProcessRole()
+    if nil != validateProcessRoleErr {
+        return validateProcessRoleErr
     }
 
     validateEnvironmentErr := instance.validateEnvironment()
@@ -126,6 +138,26 @@ func (instance *kernelConfiguration) validateDefaultMode() error {
         "default mode is not supported",
         exceptioncontract.Context{
             "mode": defaultMode,
+        },
+        nil,
+    )
+}
+
+func (instance *kernelConfiguration) validateProcessRole() error {
+    processRole := instance.ProcessRole()
+    if "" == processRole {
+        return exception.NewError("process role may not be empty", nil, nil)
+    }
+
+    switch processRole {
+    case RoleWeb, RoleWorker, RoleAll:
+        return nil
+    }
+
+    return exception.NewError(
+        "process role is not supported",
+        exceptioncontract.Context{
+            "processRole": processRole,
         },
         nil,
     )

@@ -20,11 +20,28 @@ func NewEncryptDatabaseCommand(database *bun.DB, cipher Cipher) *EncryptDatabase
     }
 }
 
+/* NewEncryptDatabaseCommandWithName is NewEncryptDatabaseCommand under an explicit command name, so a multi-context binary can expose one bulk command per compartment (melody:encrypt:database:<context>). */
+func NewEncryptDatabaseCommandWithName(database *bun.DB, cipher Cipher, commandName string) *EncryptDatabaseCommand {
+    if "" == commandName {
+        exception.Panic(exception.NewError("encrypt database command name is empty", nil, nil))
+    }
+
+    return &EncryptDatabaseCommand{
+        migrator:    NewMigrator(database, cipher),
+        commandName: commandName,
+    }
+}
+
 type EncryptDatabaseCommand struct {
-    migrator *Migrator
+    migrator    *Migrator
+    commandName string
 }
 
 func (instance *EncryptDatabaseCommand) Name() string {
+    if "" != instance.commandName {
+        return instance.commandName
+    }
+
     return "melody:encrypt:database"
 }
 

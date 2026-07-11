@@ -162,6 +162,9 @@ func copyStringMap[T any](input map[string]T) map[string]T {
     return copied
 }
 
+/* causeChainCapacityHint bounds the pre-allocated slice capacity for the cause-chain builders. The walk still honours the caller's maxDepth, but the up-front allocation must not be driven by an unclamped caller value: a maxDepth meaning "unlimited" (for example math.MaxInt) would otherwise panic in makeslice, and merely large values would eagerly allocate gigabytes for a short chain. */
+const causeChainCapacityHint = 8
+
 func BuildCauseChain(causeErr error, maxDepth int) []string {
     if nil == causeErr {
         return nil
@@ -171,7 +174,12 @@ func BuildCauseChain(causeErr error, maxDepth int) []string {
         return []string{causeErr.Error()}
     }
 
-    chain := make([]string, 0, maxDepth)
+    capacity := maxDepth
+    if capacity > causeChainCapacityHint {
+        capacity = causeChainCapacityHint
+    }
+
+    chain := make([]string, 0, capacity)
 
     current := causeErr
     for depth := 0; depth < maxDepth && nil != current; depth++ {
@@ -191,13 +199,19 @@ func BuildCauseContextChain(causeErr error, maxDepth int) []map[string]any {
         maxDepth = 1
     }
 
-    chain := make([]map[string]any, 0, maxDepth)
+    capacity := maxDepth
+    if capacity > causeChainCapacityHint {
+        capacity = causeChainCapacityHint
+    }
+
+    chain := make([]map[string]any, 0, capacity)
     hasAnyContext := false
 
     current := causeErr
     for depth := 0; depth < maxDepth && nil != current; depth++ {
-        var causeException *Error
-        if true == errors.As(current, &causeException) {
+        /* @important assert on the immediate node, do not errors.As: a deep search jumps ahead to the nearest *Error while the cursor advances one link at a time, so a plain wrapper in front of an *Error would emit that *Error's context once per intervening level. One entry per link, matching BuildCauseChain. */
+        causeException, isException := current.(*Error)
+        if true == isException && nil != causeException {
             causeContext := causeException.Context()
             if nil != causeContext && 0 < len(causeContext) {
                 chain = append(chain, causeContext)

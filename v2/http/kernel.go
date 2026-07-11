@@ -285,6 +285,9 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 return
             }
 
+            /* the response that was in flight when the panic unwound; the error response replaces it below, and nothing else holds a reference to it */
+            panickedResponse := finalResponse
+
             alreadyLogged := false
             exceptionErr, isExceptionErr := recoveredErr.(*exception.Error)
             if true == isExceptionErr {
@@ -346,6 +349,11 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 } else {
                     exceptionEvent.SetResponse(JsonErrorResponse(statusCode, message))
                 }
+            }
+
+            /* @important the response built before the panic may own an open file (FileResponse/ServeReader); it is about to lose its only reference, so close it unless the exception handler chose to keep it */
+            if nil != panickedResponse && panickedResponse != exceptionEvent.Response() {
+                closeDiscardedResponseBody(panickedResponse, requestLogger)
             }
 
             finalResponse = exceptionEvent.Response()

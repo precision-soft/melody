@@ -3,6 +3,7 @@ package httpclient
 import (
     "io"
     nethttp "net/http"
+    "sync"
 
     httpclientcontract "github.com/precision-soft/melody/v3/httpclient/contract"
 )
@@ -18,6 +19,7 @@ func NewStreamResponse(statusCode int, headers nethttp.Header, body io.ReadClose
 type StreamResponse struct {
     statusCode int
     headers    nethttp.Header
+    bodyMutex  sync.Mutex
     body       io.ReadCloser
 }
 
@@ -30,16 +32,21 @@ func (instance *StreamResponse) Headers() nethttp.Header {
 }
 
 func (instance *StreamResponse) Body() io.ReadCloser {
+    instance.bodyMutex.Lock()
+    defer instance.bodyMutex.Unlock()
+
     return instance.body
 }
 
 func (instance *StreamResponse) Close() error {
-    if nil == instance.body {
-        return nil
-    }
-
+    instance.bodyMutex.Lock()
     body := instance.body
     instance.body = nil
+    instance.bodyMutex.Unlock()
+
+    if nil == body {
+        return nil
+    }
 
     return body.Close()
 }

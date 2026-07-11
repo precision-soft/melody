@@ -135,7 +135,7 @@ func (instance *HmacTokenSource) Resolve(
         return instance.reject(runtimeInstance, timeErr)
     }
 
-    if checkErr := instance.guardNonceAndBody(runtimeInstance, request, envelope); nil != checkErr {
+    if checkErr := instance.guardNonceAndBody(runtimeInstance, request, keyId, envelope); nil != checkErr {
         return instance.reject(runtimeInstance, checkErr)
     }
 
@@ -247,7 +247,7 @@ func (instance *HmacTokenSource) verifyBody(envelope hmacEnvelope, request httpc
     return nil
 }
 
-func (instance *HmacTokenSource) guardNonce(runtimeInstance runtimecontract.Runtime, envelope hmacEnvelope) error {
+func (instance *HmacTokenSource) guardNonce(runtimeInstance runtimecontract.Runtime, keyId string, envelope hmacEnvelope) error {
     if "" == envelope.Nonce {
         return exception.NewError("internal-auth envelope is missing a nonce", nil, nil)
     }
@@ -258,7 +258,7 @@ func (instance *HmacTokenSource) guardNonce(runtimeInstance runtimecontract.Runt
         return exception.NewError("internal-auth envelope is too close to expiry to guard against replay", nil, nil)
     }
 
-    seen, rememberErr := instance.nonceGuard.Remember(runtimeInstance, envelope.Nonce, ttl)
+    seen, rememberErr := instance.nonceGuard.Remember(runtimeInstance, hmacNonceGuardKey(keyId, envelope.Nonce), ttl)
     if nil != rememberErr {
         return exception.NewError("internal-auth nonce guard failed", nil, rememberErr)
     }
@@ -270,10 +270,16 @@ func (instance *HmacTokenSource) guardNonce(runtimeInstance runtimecontract.Runt
     return nil
 }
 
+/* hmacNonceGuardKey namespaces the caller-chosen envelope nonce before it reaches the shared NonceGuard. The nonce field is fully controlled by whoever signs the envelope, so recording it verbatim would let a holder of a valid key write into any other component's key space of the same guard — for example the TOTP replay guard, which keys "2fa:<user>:<code>". Prefixing with "hmac:<keyId>:" keeps HMAC nonces in their own space, so a caller-controlled nonce can never collide with the "2fa:" namespace or with another key id's nonces when one shared guard backs several components. */
+func hmacNonceGuardKey(keyId string, nonce string) string {
+    return "hmac:" + keyId + ":" + nonce
+}
+
 /* guardNonceAndBody runs the replay and body-hash checks in the order selected for this request. Nonce-first (the default) lets a captured-but-valid envelope force at most one body buffering, since a replay is rejected before readAndRestoreBody runs; body-first rejects a mismatched body without consuming the nonce, so an on-path party cannot burn a legitimate request's nonce by replaying its header with a mutated body. The signature has already been verified, so only a legitimate envelope ever reaches either check. */
 func (instance *HmacTokenSource) guardNonceAndBody(
     runtimeInstance runtimecontract.Runtime,
     request httpcontract.Request,
+    keyId string,
     envelope hmacEnvelope,
 ) error {
     if true == instance.effectiveVerifyBodyBeforeNonce(request) {
@@ -281,10 +287,10 @@ func (instance *HmacTokenSource) guardNonceAndBody(
             return bodyErr
         }
 
-        return instance.guardNonce(runtimeInstance, envelope)
+        return instance.guardNonce(runtimeInstance, keyId, envelope)
     }
 
-    if replayErr := instance.guardNonce(runtimeInstance, envelope); nil != replayErr {
+    if replayErr := instance.guardNonce(runtimeInstance, keyId, envelope); nil != replayErr {
         return replayErr
     }
 

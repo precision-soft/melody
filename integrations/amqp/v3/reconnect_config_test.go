@@ -43,7 +43,7 @@ func TestNextReconnectBackoff_ClampsZeroMaxBackoff(t *testing.T) {
 }
 
 func TestNextReconnectBackoff_ClampsOverflowingProduct(t *testing.T) {
-    /* @info a BackoffFactor large enough to push the float product past the int64 nanosecond range used to wrap the time.Duration conversion negative, skip the cap, and feed time.After a no-delay backoff; the result must stay clamped to MaxBackoff */
+    /* @info a BackoffFactor large enough to push the float product past the int64 nanosecond range would wrap the time.Duration conversion negative, skip the cap, and feed time.After a no-delay backoff; the result must stay clamped to MaxBackoff */
     config := ReconnectConfig{InitialBackoff: time.Second, MaxBackoff: 30 * time.Second, BackoffFactor: 1e10}
 
     next := nextReconnectBackoff(config, time.Second)

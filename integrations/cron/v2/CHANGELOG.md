@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v2.3.0] - 2026-07-11 - User-less Crontab Template
+
+### Added
+
+- `template_crontab.go`, `template.go` — new built-in template `crontab-no-user`: the user-less crontab dialect for busybox crond (alpine images) and per-user `crontab` files, which reject the `/etc/cron.d` user column the default `crontab` template emits — previously consumers cut the column with `sed` in the image build. Select it with `--template=crontab-no-user` or the `melody.cron.template` parameter; the user parameter/flag is ignored entirely in this dialect, everything else — schedules, log redirects, heartbeat, validation — is identical. Back-port from `v3`.
+
+### Fixed
+
+- `generate_command.go` — `melody:cron:generate` no longer aborts with `ErrHeartbeatUserMissing` when a heartbeat is configured for the `crontab-no-user` template. That template renders no user column (busybox crond, per-user crontab deployments), so a heartbeat had no user column to attach to and the pre-render check rejected an otherwise valid configuration.
+
 ## [v2.2.2] - 2026-07-06 - Standalone Module Resolution Fix
 
 ### Fixed
@@ -31,7 +41,9 @@ Identical to the corresponding v1 release except: module path is `github.com/pre
 
 Identical to the corresponding v1 release except: module path is `github.com/precision-soft/melody/integrations/cron/v2`; dependency pinned to `github.com/precision-soft/melody/v2`. See the [v1 changelog](../CHANGELOG.md#v100---2026-05-16---initial-release--cron-integration) for the full change list.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.2.2...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.3.0...HEAD
+
+[v2.3.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.2.2...integrations/cron/v2.3.0
 
 [v2.2.2]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.2.1...integrations/cron/v2.2.2
 

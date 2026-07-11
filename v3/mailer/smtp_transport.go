@@ -4,6 +4,7 @@ import (
     "crypto/tls"
     "net"
     "net/smtp"
+    "time"
 
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/logging"
@@ -26,6 +27,7 @@ func NewSmtpTransport(config SmtpConfig) *SmtpTransport {
         requireAuth: config.RequireAuth,
         implicitTls: config.ImplicitTls,
         tlsConfig:   config.TlsConfig,
+        dialTimeout: config.DialTimeout,
     }
 }
 
@@ -38,7 +40,13 @@ type SmtpConfig struct {
     RequireAuth bool
     ImplicitTls bool
     TlsConfig   *tls.Config
+
+    /* DialTimeout bounds the tcp connect, the tls handshake and the server's opening greeting; zero selects defaultSmtpDialTimeout. A server that accepts the connection and then never speaks would otherwise block the sending goroutine and hold the socket forever. */
+    DialTimeout time.Duration
 }
+
+/* defaultSmtpDialTimeout is the ceiling on connect + handshake + greeting when the caller does not set one. */
+const defaultSmtpDialTimeout = 30 * time.Second
 
 type SmtpTransport struct {
     address     string
@@ -49,6 +57,7 @@ type SmtpTransport struct {
     requireAuth bool
     implicitTls bool
     tlsConfig   *tls.Config
+    dialTimeout time.Duration
 }
 
 func (instance *SmtpTransport) Send(runtimeInstance runtimecontract.Runtime, message mailercontract.Message) error {
@@ -137,22 +146,53 @@ func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, 
 }
 
 func (instance *SmtpTransport) dial() (*smtp.Client, error) {
+    timeout := instance.dialTimeout
+    if 0 >= timeout {
+        timeout = defaultSmtpDialTimeout
+    }
+
+    dialer := &net.Dialer{Timeout: timeout}
+
     if true == instance.implicitTls {
-        connection, dialErr := tls.Dial("tcp", instance.address, instance.resolveTlsConfig())
+        connection, dialErr := tls.DialWithDialer(dialer, "tcp", instance.address, instance.resolveTlsConfig())
         if nil != dialErr {
             return nil, dialErr
         }
 
-        return smtp.NewClient(connection, instance.host)
+        return newSmtpClientWithGreetingDeadline(connection, instance.host, timeout)
     }
 
     /* @important dial the raw connection and build the client with instance.host explicitly, rather than smtp.Dial(address) which derives the client server name from the address host: startTls uses instance.host for the TLS SNI and PlainAuth is constructed with instance.host, so a configured Host that differs from the Address host (dialing by IP, through a tunnel, or a CNAME) must be the server name here too — otherwise smtp.PlainAuth.Start rejects the mismatch with "wrong host name" and authentication can never succeed. Mirrors the implicit-TLS branch, which already passes instance.host to NewClient. */
-    connection, dialErr := net.Dial("tcp", instance.address)
+    connection, dialErr := dialer.Dial("tcp", instance.address)
     if nil != dialErr {
         return nil, dialErr
     }
 
-    return smtp.NewClient(connection, instance.host)
+    return newSmtpClientWithGreetingDeadline(connection, instance.host, timeout)
+}
+
+/* newSmtpClientWithGreetingDeadline bounds the server's opening 220 greeting, which smtp.NewClient reads synchronously with no deadline of its own: a server that accepts the tcp connection and then says nothing would pin the sending goroutine and its socket indefinitely. The deadline is cleared once the greeting has been read, so the rest of the session is governed by the caller. */
+func newSmtpClientWithGreetingDeadline(connection net.Conn, host string, timeout time.Duration) (*smtp.Client, error) {
+    if deadlineErr := connection.SetDeadline(time.Now().Add(timeout)); nil != deadlineErr {
+        connection.Close()
+
+        return nil, deadlineErr
+    }
+
+    client, clientErr := smtp.NewClient(connection, host)
+    if nil != clientErr {
+        connection.Close()
+
+        return nil, clientErr
+    }
+
+    if clearErr := connection.SetDeadline(time.Time{}); nil != clearErr {
+        client.Close()
+
+        return nil, clearErr
+    }
+
+    return client, nil
 }
 
 func (instance *SmtpTransport) startTls(client *smtp.Client) error {

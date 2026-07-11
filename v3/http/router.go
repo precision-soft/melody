@@ -120,13 +120,8 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
             continue
         }
 
-        patternValue := value
-        if false == strings.HasPrefix(patternValue, "^") {
-            patternValue = "^" + patternValue
-        }
-        if false == strings.HasSuffix(patternValue, "$") {
-            patternValue = patternValue + "$"
-        }
+        /* the requirement must match the WHOLE parameter value, so it is wrapped in a non-capturing group before it is anchored: alternation binds looser than the anchors, and concatenating them onto "en|de|fr" would compile "^en|de|fr$" — read by the engine as (^en)|(de)|(fr$) — which matches "aden" and "en'; DROP TABLE users--" alike, turning a whitelist into a prefix/suffix test. A caller's own anchors survive the wrapping unharmed. */
+        patternValue := "^(?:" + value + ")$"
 
         requiredRegex, compileErr := regexp.Compile(patternValue)
         if nil != compileErr {

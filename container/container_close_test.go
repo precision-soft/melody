@@ -370,13 +370,13 @@ func TestContainer_Close_ValueTypeServiceClosedOnce(t *testing.T) {
     }
 }
 
-type cr40UnhashableValueCloser struct {
+type unhashableValueCloser struct {
     counter *int
     lock    *sync.Mutex
     payload any
 }
 
-func (instance cr40UnhashableValueCloser) Close() error {
+func (instance unhashableValueCloser) Close() error {
     instance.lock.Lock()
     defer instance.lock.Unlock()
 
@@ -391,31 +391,31 @@ func TestContainer_Close_ValueTypeServiceWithUnhashableContentDoesNotPanic(t *te
     var lock sync.Mutex
     count := 0
 
-    MustRegister[cr40UnhashableValueCloser](
+    MustRegister[unhashableValueCloser](
         serviceContainer,
-        "cr40.unhashable.value.closer",
-        func(resolver containercontract.Resolver) (cr40UnhashableValueCloser, error) {
-            return cr40UnhashableValueCloser{counter: &count, lock: &lock, payload: []int{1, 2, 3}}, nil
+        "unhashable.value.closer",
+        func(resolver containercontract.Resolver) (unhashableValueCloser, error) {
+            return unhashableValueCloser{counter: &count, lock: &lock, payload: []int{1, 2, 3}}, nil
         },
     )
 
-    _ = MustFromResolver[cr40UnhashableValueCloser](serviceContainer, "cr40.unhashable.value.closer")
-    _ = MustFromResolverByType[cr40UnhashableValueCloser](serviceContainer)
+    _ = MustFromResolver[unhashableValueCloser](serviceContainer, "unhashable.value.closer")
+    _ = MustFromResolverByType[unhashableValueCloser](serviceContainer)
 
     if err := serviceContainer.Close(); nil != err {
         t.Fatalf("unexpected close error: %v", err)
     }
 }
 
-/* @info OverrideProtectedInstance on a WithoutTypeRegistration value service must close once (CR #64) */
+/* @info OverrideProtectedInstance on a WithoutTypeRegistration value service must close once */
 
-type overrideValueCloserCR64 struct {
+type overrideValueCloser struct {
     counter *int
     lock    *sync.Mutex
     tags    []string
 }
 
-func (instance overrideValueCloserCR64) Close() error {
+func (instance overrideValueCloser) Close() error {
     instance.lock.Lock()
     defer instance.lock.Unlock()
 
@@ -430,18 +430,18 @@ func TestContainer_Close_OverrideProtectedInstanceWithoutTypeRegistrationClosesO
     var lock sync.Mutex
     count := 0
 
-    MustRegister[overrideValueCloserCR64](
+    MustRegister[overrideValueCloser](
         serviceContainer,
         "override.no.type.value.closer",
-        func(resolver containercontract.Resolver) (overrideValueCloserCR64, error) {
-            return overrideValueCloserCR64{counter: &count, lock: &lock, tags: []string{"a", "b"}}, nil
+        func(resolver containercontract.Resolver) (overrideValueCloser, error) {
+            return overrideValueCloser{counter: &count, lock: &lock, tags: []string{"a", "b"}}, nil
         },
         WithoutTypeRegistration(),
     )
 
     if overrideErr := serviceContainer.OverrideProtectedInstance(
         "override.no.type.value.closer",
-        overrideValueCloserCR64{counter: &count, lock: &lock, tags: []string{"x", "y"}},
+        overrideValueCloser{counter: &count, lock: &lock, tags: []string{"x", "y"}},
     ); nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
@@ -458,15 +458,15 @@ func TestContainer_Close_OverrideProtectedInstanceWithoutTypeRegistrationClosesO
     }
 }
 
-/* @info non-comparable value-type service resolved by name and by type must close exactly once (CR #65 back-port of v2/v3 alias-collapse) */
+/* @info a non-comparable value-type service resolved by name and by type must close exactly once */
 
-type cr65NonComparableValueCloser struct {
+type nonComparableValueCloser struct {
     counter *int
     lock    *sync.Mutex
     tags    []string
 }
 
-func (instance cr65NonComparableValueCloser) Close() error {
+func (instance nonComparableValueCloser) Close() error {
     instance.lock.Lock()
     defer instance.lock.Unlock()
 
@@ -481,16 +481,16 @@ func TestContainer_Close_NonComparableValueTypeServiceClosedOnce(t *testing.T) {
     var lock sync.Mutex
     count := 0
 
-    MustRegister[cr65NonComparableValueCloser](
+    MustRegister[nonComparableValueCloser](
         serviceContainer,
-        "cr65.non.comparable.value.closer",
-        func(resolver containercontract.Resolver) (cr65NonComparableValueCloser, error) {
-            return cr65NonComparableValueCloser{counter: &count, lock: &lock, tags: []string{"a", "b"}}, nil
+        "non.comparable.value.closer",
+        func(resolver containercontract.Resolver) (nonComparableValueCloser, error) {
+            return nonComparableValueCloser{counter: &count, lock: &lock, tags: []string{"a", "b"}}, nil
         },
     )
 
-    _ = MustFromResolver[cr65NonComparableValueCloser](serviceContainer, "cr65.non.comparable.value.closer")
-    _ = MustFromResolverByType[cr65NonComparableValueCloser](serviceContainer)
+    _ = MustFromResolver[nonComparableValueCloser](serviceContainer, "non.comparable.value.closer")
+    _ = MustFromResolverByType[nonComparableValueCloser](serviceContainer)
 
     if err := serviceContainer.Close(); nil != err {
         t.Fatalf("unexpected close error: %v", err)
@@ -504,7 +504,7 @@ func TestContainer_Close_NonComparableValueTypeServiceClosedOnce(t *testing.T) {
     }
 }
 
-/* @info a named service that depends by type on a type-registered service must close dependent-before-dependency (CR #65 back-port of v2/v3 alias-collapse) */
+/* @info a named service that depends by type on a type-registered service must close dependent-before-dependency */
 
 func TestContainer_Close_ClosesDependentsBeforeDependencies_NamedServiceDependsByTypeOnTypeRegisteredService(t *testing.T) {
     serviceContainer := NewContainer()

@@ -49,6 +49,11 @@ func Int(value any, name string) (int64, bool, error) {
             return 0, true, ParseError(name, "int", typedValue, nil)
         }
 
+        /* a float64 outside the int64 range converts to the "indefinite" value (-9223372036854775808) with no signal at all, so range-check before the conversion; the upper bound is written as a float because math.MaxInt64 is not representable as one */
+        if typedValue < math.MinInt64 || typedValue >= 9223372036854775808.0 {
+            return 0, true, ParseError(name, "int", typedValue, nil)
+        }
+
         return int64(typedValue), true, nil
     case string:
         parsedValue, err := strconv.ParseInt(strings.TrimSpace(typedValue), 10, 64)
@@ -107,6 +112,8 @@ func Float64(value any, name string) (float64, bool, error) {
     case float32:
         return float64(typedValue), true, nil
     case int:
+        return float64(typedValue), true, nil
+    case int64:
         return float64(typedValue), true, nil
     case string:
         parsedValue, err := strconv.ParseFloat(strings.TrimSpace(typedValue), 64)

@@ -7,7 +7,7 @@ import (
     "github.com/precision-soft/melody/integrations/bunorm/v2"
 )
 
-/* @info openWithRetry must tolerate a nil logger via EnsureLogger instead of nil-dereferencing on the info/warning path (CR #65 back-port of the v1/v3 guard) */
+/* @info openWithRetry must tolerate a nil logger via EnsureLogger instead of nil-dereferencing on the info/warning path */
 
 func TestProviderOpenWithRetryAndNilLoggerDoesNotPanic(t *testing.T) {
     provider := NewProvider(WithInsecure(true)).

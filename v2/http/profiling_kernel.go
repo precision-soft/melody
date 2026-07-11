@@ -4,7 +4,6 @@ import (
     "time"
 
     eventcontract "github.com/precision-soft/melody/v2/event/contract"
-    httpcontract "github.com/precision-soft/melody/v2/http/contract"
     kernelcontract "github.com/precision-soft/melody/v2/kernel/contract"
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
 )
@@ -32,12 +31,7 @@ func RegisterKernelHttpProfilerListener(eventDispatcher eventcontract.EventDispa
                 return nil
             }
 
-            requestContext := (httpcontract.RequestContext)(nil)
-
-            if nil != responseEvent.Request().Attributes() {
-                requestContext = responseEvent.Request().RequestContext()
-            }
-
+            requestContext := responseEvent.Request().RequestContext()
             if nil == requestContext {
                 return nil
             }

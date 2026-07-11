@@ -3,6 +3,7 @@ package application
 import (
     "context"
     "io/fs"
+    "os"
 
     applicationcontract "github.com/precision-soft/melody/v3/application/contract"
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
@@ -30,9 +31,11 @@ type Application struct {
     httpRouteRegistrars   []RouteRegistrar
     httpMiddlewares       *HttpMiddleware
     httpHandlerDecorators []applicationcontract.HttpHandlerDecorator
+    httpShutdownHooks     []func()
     securityConfiguration *security.CompiledConfiguration
     routeRegistry         httpcontract.RouteRegistry
     moduleConfigurations  map[string]any
+    bootCollisions        []bootCollision
 }
 
 func (instance *Application) Boot() kernelcontract.Kernel {
@@ -48,8 +51,20 @@ func (instance *Application) Boot() kernelcontract.Kernel {
 
     resolveErr := configuration.Resolve()
     if nil != resolveErr {
+        /* name the project directory in the failure: an unresolved parameter usually means the .env artifacts were not found there — melody derives the directory from the executable location (the working directory under go run), so a binary run from elsewhere fails exactly here with an otherwise unsuggestive "undefined environment key" */
+        projectDirectory := ""
+        if projectDirectoryParameter := configuration.Get(config.KernelProjectDir); nil != projectDirectoryParameter {
+            projectDirectory = projectDirectoryParameter.String()
+        }
+
         exception.Panic(
-            exception.NewError("could not resolve the config parameters on boot", nil, resolveErr),
+            exception.NewError(
+                "could not resolve the config parameters on boot",
+                exceptioncontract.Context{
+                    "projectDirectory": projectDirectory,
+                },
+                resolveErr,
+            ),
         )
     }
 
@@ -59,7 +74,11 @@ func (instance *Application) Boot() kernelcontract.Kernel {
 
     instance.bootContainer()
 
+    warnIgnoredProcessEnvironment(instance.bootLogger(), configuration, os.Environ())
+
     instance.bootCli()
+
+    instance.panicOnBootCollisions()
 
     instance.bootHttp()
 
@@ -84,6 +103,12 @@ func (instance *Application) RegisterParameter(
         )
     }
 
+    /* a duplicate is recorded for the aggregated boot report instead of panicking one at a time; the first registration wins until the guaranteed panic ends the boot */
+    if "" != name && nil != instance.configuration.Get(name) {
+        instance.recordBootCollision(bootCollisionKindParameter, name, 1)
+        return
+    }
+
     instance.configuration.RegisterRuntime(name, value)
 }
 
@@ -93,6 +118,11 @@ func (instance *Application) RegisterParameter(
    resolved from the container should instead read config through the resolver. */
 func (instance *Application) Configuration() configcontract.Configuration {
     return instance.configuration
+}
+
+/* ProcessRole is the resolved process role (config.RoleWeb, config.RoleWorker or config.RoleAll): an explicit --role flag wins over the MELODY_PROCESS_ROLE parameter, which defaults to all. Melody gates nothing on it — wiring code queries it to decide whether to register background runners (outbox relays, consumers) on this process; services resolve the same value through ServiceProcessRole. */
+func (instance *Application) ProcessRole() string {
+    return instance.runtimeFlags.Role()
 }
 
 func (instance *Application) Run() {
@@ -149,15 +179,9 @@ func (instance *Application) RegisterConfiguration(name string, configuration an
 
     _, exists := instance.moduleConfigurations[name]
     if true == exists {
-        exception.Panic(
-            exception.NewError(
-                "duplicate configuration name when registering module configuration",
-                exceptioncontract.Context{
-                    "configurationName": name,
-                },
-                nil,
-            ),
-        )
+        /* recorded for the aggregated boot report instead of panicking one at a time; the first registration wins until the guaranteed panic ends the boot */
+        instance.recordBootCollision(bootCollisionKindConfiguration, name, 1)
+        return
     }
 
     instance.moduleConfigurations[name] = configuration

@@ -562,7 +562,7 @@ func TestValidator_ParamsOnNonParameterizableConstraintFailClosed(t *testing.T) 
     validatorInstance := NewValidator()
     validatorInstance.RegisterConstraint("rigid", &rigidConstraint{})
 
-    /* @important pre-fix the params were silently discarded and the field validated with the registered singleton (fail-open); the rule must instead be rejected as invalid */
+    /* @important a parameterized constraint given parameters without its recognized key must be rejected as invalid rather than validated with the registered singleton (which would fail open) */
     err := validatorInstance.Validate(payloadWithRigidParams{Code: "anything"})
     validationErrors := requireValidationErrors(t, err)
 
@@ -585,4 +585,73 @@ func TestValidator_ParamsOnNonParameterizableBuiltInFailClosed(t *testing.T) {
 
     err := validatorInstance.Validate(payloadWithParameterizedEmail{Email: "valid@example.com"})
     requireValidationErrors(t, err)
+}
+
+type nestedItem struct {
+    Sku string `json:"sku" validate:"notBlank,regex=^[A-Z0-9]{8}$"`
+}
+
+type nestedOrder struct {
+    Items []nestedItem `json:"items" validate:"notEmpty"`
+    Bill  nestedItem   `json:"bill"`
+}
+
+type cyclicNode struct {
+    Name string      `json:"name" validate:"notBlank"`
+    Next *cyclicNode `json:"next"`
+}
+
+func findValidationErrorByField(validationErrors ValidationErrors, field string) validationcontract.ValidationError {
+    for _, candidate := range validationErrors {
+        if field == candidate.Field() {
+            return candidate
+        }
+    }
+
+    return nil
+}
+
+/** @info validate tags declared on nested struct fields and on slice-of-struct elements are enforced (the flat validator returned nil for these), with a path identifying the offending nested field. */
+func TestValidator_EnforcesNestedConstraints(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    payload := nestedOrder{
+        Items: []nestedItem{{Sku: ""}},
+        Bill:  nestedItem{Sku: "###"},
+    }
+
+    err := validatorInstance.Validate(payload)
+    validationErrors := requireValidationErrors(t, err)
+
+    if nil == findValidationErrorByField(validationErrors, "items[0].sku") {
+        t.Fatalf("expected an error on items[0].sku, got: %s", validationErrors.Error())
+    }
+
+    if nil == findValidationErrorByField(validationErrors, "bill.sku") {
+        t.Fatalf("expected an error on bill.sku, got: %s", validationErrors.Error())
+    }
+}
+
+/** @info a fully valid nested payload still passes so the cascade adds no false rejections. */
+func TestValidator_AcceptsValidNestedPayload(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    payload := nestedOrder{
+        Items: []nestedItem{{Sku: "ABCD1234"}},
+        Bill:  nestedItem{Sku: "ZZZZ9999"},
+    }
+
+    err := validatorInstance.Validate(payload)
+    requireNoValidationErrors(t, err)
+}
+
+/** @info a self-referential value must not hang or overflow the stack during the recursive cascade. */
+func TestValidator_CyclicPayloadTerminates(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    node := &cyclicNode{Name: "root"}
+    node.Next = node
+
+    err := validatorInstance.Validate(node)
+    requireNoValidationErrors(t, err)
 }

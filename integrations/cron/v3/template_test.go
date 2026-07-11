@@ -689,10 +689,10 @@ func TestRenderRejectsScheduleCommandContainingCarriageReturn(t *testing.T) {
     }
 }
 
-func TestBuiltinTemplatesReturnsCrontabAndK8s(t *testing.T) {
+func TestBuiltinTemplatesReturnsCrontabVariantsAndK8s(t *testing.T) {
     templates := BuiltinTemplates()
-    if 2 != len(templates) {
-        t.Fatalf("expected exactly two builtin templates, got %d", len(templates))
+    if 3 != len(templates) {
+        t.Fatalf("expected exactly three builtin templates, got %d", len(templates))
     }
 
     names := make(map[string]bool, len(templates))
@@ -702,6 +702,10 @@ func TestBuiltinTemplatesReturnsCrontabAndK8s(t *testing.T) {
 
     if false == names[TemplateNameCrontab] {
         t.Fatalf("expected builtin templates to include %q, got %v", TemplateNameCrontab, names)
+    }
+
+    if false == names[TemplateNameCrontabNoUser] {
+        t.Fatalf("expected builtin templates to include %q, got %v", TemplateNameCrontabNoUser, names)
     }
 
     if false == names[TemplateNameK8s] {
@@ -884,5 +888,88 @@ func TestRenderRejectsCarriageReturnInScheduleField(t *testing.T) {
 
     if false == strings.Contains(err.Error(), "Minute") {
         t.Fatalf("expected error to mention the offending field Minute, got: %v", err)
+    }
+}
+
+func TestCrontabNoUserTemplateOmitsTheUserColumn(t *testing.T) {
+    entries := []Entry{
+        {
+            Name:   "busybox-job",
+            User:   "www-data",
+            Binary: "/usr/local/bin/app",
+            Args:   []string{"tick"},
+            Schedule: &Schedule{
+                Minute: "0",
+                Hour:   "*",
+            },
+            LogPath: "/var/log/app/tick.log",
+        },
+    }
+
+    content, err := defaultCrontabNoUserTemplate.Render(entries, RenderOptions{})
+    if nil != err {
+        t.Fatalf("Render returned unexpected error: %v", err)
+    }
+
+    expectedLine := "0 * * * * /usr/local/bin/app tick >> '/var/log/app/tick.log' 2>&1"
+    if false == strings.Contains(content, expectedLine) {
+        t.Fatalf("expected line %q in:\n%s", expectedLine, content)
+    }
+
+    if true == strings.Contains(content, "www-data") {
+        t.Fatalf("expected the user column to be omitted, got:\n%s", content)
+    }
+
+    if false == strings.Contains(content, "user-less dialect") {
+        t.Fatalf("expected the user-less header, got:\n%s", content)
+    }
+}
+
+func TestCrontabNoUserTemplateAcceptsEntriesWithoutUser(t *testing.T) {
+    entries := []Entry{
+        {
+            Name:   "no-user-job",
+            Binary: "/usr/local/bin/app",
+            Args:   []string{"tick"},
+            Schedule: &Schedule{
+                Minute: "*/5",
+            },
+        },
+    }
+
+    content, err := defaultCrontabNoUserTemplate.Render(entries, RenderOptions{})
+    if nil != err {
+        t.Fatalf("expected the user-less dialect to accept an empty user, got: %v", err)
+    }
+
+    if false == strings.Contains(content, "*/5 * * * * /usr/local/bin/app tick") {
+        t.Fatalf("unexpected content:\n%s", content)
+    }
+}
+
+func TestCrontabNoUserTemplateHeartbeatWithoutUser(t *testing.T) {
+    content, err := defaultCrontabNoUserTemplate.Render(nil, RenderOptions{HeartbeatPath: "/var/run/cron.heartbeat"})
+    if nil != err {
+        t.Fatalf("expected the user-less heartbeat to render without a user, got: %v", err)
+    }
+
+    if false == strings.Contains(content, "* * * * * /bin/touch /var/run/cron.heartbeat") {
+        t.Fatalf("unexpected heartbeat line:\n%s", content)
+    }
+}
+
+func TestCrontabTemplateStillRequiresTheUser(t *testing.T) {
+    entries := []Entry{
+        {
+            Name:   "cron-d-job",
+            Binary: "/usr/local/bin/app",
+            Schedule: &Schedule{
+                Minute: "0",
+            },
+        },
+    }
+
+    if _, err := Render(entries, RenderOptions{}); nil == err {
+        t.Fatalf("expected the /etc/cron.d dialect to keep requiring a user")
     }
 }

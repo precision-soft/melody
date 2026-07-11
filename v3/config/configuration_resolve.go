@@ -1,6 +1,8 @@
 package config
 
 import (
+    "strings"
+
     "github.com/precision-soft/melody/v3/exception"
 )
 
@@ -27,6 +29,14 @@ func (instance *Configuration) Resolve() error {
 
                 continue
             }
+        }
+
+        if true == strings.Contains(stringValue, "%%") {
+            if nil == instance.parametersWithEscapedPercents {
+                instance.parametersWithEscapedPercents = map[string]bool{}
+            }
+
+            instance.parametersWithEscapedPercents[name] = true
         }
 
         value, resolveWithTemplatesErr := instance.resolveWithTemplates(
@@ -72,10 +82,25 @@ func (instance *Configuration) resolveWithTemplates(
         delete(resolving, currentKey)
     }()
 
+    /* the env-substitution branch performs a flat text replacement that the parameter-recursion cycle guard (the resolving map) does not cover, so a self-referential env value (direct APP_A=x%env(APP_A)% or indirect A=%env(B)%, B=y%env(A)%) would expand forever without ever reaching a fixed point; bound the passes by the number of resolvable keys plus a margin and report a circular reference the way the parameter path does */
+    maximumResolutionPasses := len(instance.parameters) + len(instance.environment.values) + 8
+
     previous := ""
     resolved := escapedValue
 
+    passes := 0
     for previous != resolved {
+        if passes >= maximumResolutionPasses {
+            return "", exception.NewError(
+                "circular reference detected while resolving placeholders",
+                map[string]any{
+                    "parameter": currentKey,
+                },
+                nil,
+            )
+        }
+        passes++
+
         previous = resolved
 
         singlePassResolved, resolveSinglePassErr := instance.resolveSinglePass(
@@ -117,11 +142,11 @@ func (instance *Configuration) resolveSinglePass(
 
         envValue, exists := instance.environment.Get(environmentKey)
         if false == exists {
+            /* @important do not embed the raw parameter value here: it commonly holds inline credentials (e.g. a DSN with a password) that would then reach logs unredacted via the exception cause-context chain; the environment key alone identifies the offending placeholder */
             err = exception.NewError(
                 "undefined environment key in template",
                 map[string]any{
                     "environmentKey": environmentKey,
-                    "value":          value,
                 },
                 nil,
             )
@@ -154,11 +179,11 @@ func (instance *Configuration) resolveSinglePass(
 
         referencedParameter := instance.getInternalParameter(parameterKey)
         if nil == referencedParameter {
+            /* @important do not embed the raw parameter value here: it commonly holds inline credentials (e.g. a DSN with a password) that would then reach logs unredacted via the exception cause-context chain; the parameter key alone identifies the offending placeholder */
             err = exception.NewError(
                 "undefined parameter key in template",
                 map[string]any{
                     "parameterKey": parameterKey,
-                    "value":        value,
                 },
                 nil,
             )

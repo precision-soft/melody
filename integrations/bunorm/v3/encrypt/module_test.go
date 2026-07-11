@@ -60,3 +60,47 @@ func TestModule_RegisterCliCommandsExposesEncryptDatabaseCommand(t *testing.T) {
         t.Fatalf("expected the melody:encrypt:database command, got %q", commands[0].Name())
     }
 }
+
+func TestModule_RegisterCliCommandsComposesLegacyAndContexts(t *testing.T) {
+    database := newMysqlDatabase()
+
+    module := NewModule(ModuleConfig{
+        Database: database,
+        Cipher:   NewFakeCipher(),
+        Contexts: []CommandContextConfig{
+            {Name: "platform", Database: database, Cipher: NewFakeCipher()},
+            {Name: "payment", Database: database, Cipher: NewFakeCipher()},
+        },
+    })
+
+    commands := module.RegisterCliCommands(nil)
+
+    names := make(map[string]bool, len(commands))
+    for _, command := range commands {
+        names[command.Name()] = true
+    }
+
+    if false == names["melody:encrypt:database"] {
+        t.Fatalf("expected the legacy unsuffixed command, got: %v", names)
+    }
+
+    if false == names["melody:encrypt:database:platform"] || false == names["melody:encrypt:database:payment"] {
+        t.Fatalf("expected the per-context commands, got: %v", names)
+    }
+}
+
+func TestModule_RegisterCliCommandsPanicsOnInvalidContext(t *testing.T) {
+    database := newMysqlDatabase()
+
+    assertPanics(t, func() {
+        NewModule(ModuleConfig{
+            Contexts: []CommandContextConfig{{Name: "", Database: database, Cipher: NewFakeCipher()}},
+        }).RegisterCliCommands(nil)
+    })
+
+    assertPanics(t, func() {
+        NewModule(ModuleConfig{
+            Contexts: []CommandContextConfig{{Name: "payment"}},
+        }).RegisterCliCommands(nil)
+    })
+}

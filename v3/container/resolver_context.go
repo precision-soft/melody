@@ -88,6 +88,9 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
         )
     }
 
+    /* @important snapshot the provider under the container mutex before serviceWithCreationGuardLocked releases it; the create closure runs unlocked, so reading the providers map there would race concurrent Register writes. */
+    provider, providerExists := instance.containerInstance.providers[serviceName]
+
     return instance.containerInstance.serviceWithCreationGuardLocked(
         requestedKey,
         serviceName,
@@ -106,8 +109,7 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
             return value, exists
         },
         func(resolver containercontract.Resolver) (any, error, *providerDebugInfo) {
-            provider, exists := instance.containerInstance.providers[serviceName]
-            if false == exists {
+            if false == providerExists {
                 return nil, exception.NewError(
                     "service is not registered",
                     exceptioncontract.Context{
@@ -242,6 +244,9 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
             return value, nil
         }
 
+        /* @important snapshot the provider under the container mutex before serviceWithCreationGuardLocked releases it; the create closure runs unlocked, so reading the providers map there would race concurrent Register writes. */
+        provider, providerExists := instance.containerInstance.providers[serviceName]
+
         return instance.containerInstance.serviceWithCreationGuardLocked(
             requestedKey,
             serviceName,
@@ -260,7 +265,6 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
                 return resolvedValue, exists
             },
             func(resolver containercontract.Resolver) (any, error, *providerDebugInfo) {
-                provider, providerExists := instance.containerInstance.providers[serviceName]
                 if false == providerExists {
                     return nil, exception.NewError(
                         "service is not registered",
@@ -297,6 +301,9 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
         )
     }
 
+    /* @important snapshot the provider under the container mutex before serviceWithCreationGuardLocked releases it; the create closure runs unlocked, so reading the typeProviders map there would race concurrent Register writes. */
+    provider, providerExists := instance.containerInstance.typeProviders[canonicalTargetType]
+
     return instance.containerInstance.serviceWithCreationGuardLocked(
         requestedKey,
         typeKey,
@@ -315,7 +322,6 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
             return value, exists
         },
         func(resolver containercontract.Resolver) (any, error, *providerDebugInfo) {
-            provider, providerExists := instance.containerInstance.typeProviders[canonicalTargetType]
             if false == providerExists {
                 return nil, exception.NewError(
                     "service type is not registered",

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v2.1.0] - 2026-07-11 - Distributed Rate Limiter and Forwarded-Client-IP Resolver
+
+### Added
+
+- `v2/rate_limit.go` — `NewRateLimiter(client, limit, window, options...)`: a Redis-backed fixed-window rate limiter implementing both `http/contract.RateLimiter` and the new `http/contract.RuntimeRateLimiter`, so N application instances enforce one shared limit — the distributed drop-in for the in-process middleware limiters, whose per-replica counters make a login rate limit meaningless behind a load balancer. The counter is one atomic Lua round trip (`INCR` + `PEXPIRE` on creation); the fixed window admits up to 2x the limit across a window edge. Store failures follow a configurable policy defaulting to fail-closed (deny when Redis is unreachable) — `WithRateLimiterFailureMode(FailureModeOpen)` selects availability instead; `WithRateLimiterOnError` observes failures on the void `Allow` path, `WithRateLimiterCallTimeout` (default 250ms) bounds it, and `WithRateLimiterKeyPrefix` namespaces the keys. Requires melody/v2 with `RuntimeRateLimiter` (unreleased at the time of this entry).
+
+### Fixed
+
+- `v2/rate_limit.go` — `WithRateLimiterCallTimeout` falls back to the default call timeout for a non-positive duration instead of building an already-cancelled context. That context forced every `Allow`/`Reset` onto the store-failure path — deny-all under `FailureModeClosed`, allow-all under `FailureModeOpen` — no matter whether Redis was actually reachable.
+
 ## [v2.0.2] - 2026-06-25 - Keep the Caller-Owned Client Open and Floor Sub-Millisecond TTL
 
 ### Fixed
@@ -33,7 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `v2/README.md` — documentation examples reformatted to be copy-paste runnable (wrapped in `main()` functions)
 - `Provider.Open()` signature unchanged in v2 (still accepts `containercontract.Resolver`) — contrast with v3 where it changes
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v2.0.2...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v2.1.0...HEAD
+
+[v2.1.0]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v2.0.2...integrations/rueidis/v2.1.0
 
 [v2.0.2]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v2.0.1...integrations/rueidis/v2.0.2
 

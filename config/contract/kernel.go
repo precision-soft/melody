@@ -7,6 +7,8 @@ import (
 type KernelConfiguration interface {
     DefaultMode() string
 
+    ProcessRole() string
+
     Env() string
 
     ProjectDir() string

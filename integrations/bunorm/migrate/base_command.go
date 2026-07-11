@@ -19,9 +19,14 @@ type baseCommand struct {
 }
 
 func (instance *baseCommand) managerFlag() clicontract.Flag {
+    usage := "manager name (defaults to registry default)"
+    if "" != instance.options.ManagerName {
+        usage = "manager name (defaults to the pinned manager: " + instance.options.ManagerName + ")"
+    }
+
     return &clicontract.StringFlag{
         Name:  instance.options.ManagerFlagName,
-        Usage: "manager name (defaults to registry default)",
+        Usage: usage,
         Value: "",
     }
 }
@@ -54,6 +59,10 @@ func (instance *baseCommand) resolveDatabase(
     }
 
     managerName := commandContext.String(instance.options.ManagerFlagName)
+    if "" == managerName {
+        managerName = instance.options.ManagerName
+    }
+
     if "" == managerName {
         defaultManager, defaultManagerErr := registry.DefaultManager()
         if nil != defaultManagerErr {

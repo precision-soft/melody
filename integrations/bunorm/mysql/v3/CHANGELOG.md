@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.1.2] - 2026-07-11 - Advisory Lock Name Hashing
+
+### Fixed
+
+- `lock_test.go` — the genuine-verify-error test no longer races MySQL's asynchronous `KILL`. The server flags the killed thread and releases its locks only once that thread notices, so the immediate re-acquire read `GET_LOCK` as still-held (`false`, no error) and the suite failed intermittently under load. The attempt now retries until the dead session lets go.
+- `lock.go` — the liveness verify on an idempotent re-`Acquire` runs on a fresh, bounded context, as `Refresh` already did. It ran on the caller's request context, so a transient cancellation was mistaken for a lost lock and actively `RELEASE_LOCK`ed a lock this process still held.
+- `lock.go` — the MySQL locker derives a bounded, `GET_LOCK`-compatible lock name, so a name longer than MySQL's 64-character user-level-lock limit no longer makes `Acquire` fail permanently — which had kept exclusive commands and the jobs they wrap from ever running. A name within the limit is unchanged.
+
 ## [v3.1.1] - 2026-07-06 - Standalone Module Resolution and Connection-Retry Fixes
 
 ### Fixed
@@ -63,7 +71,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Code duplicated into `integrations/bunorm/mysql/v3/`; v2 and v3 implementations maintained in parallel
 - Dependencies pinned to `bunorm/v3` and `melody/v3`
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.1.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.1.2...HEAD
+
+[v3.1.2]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.1.1...integrations/bunorm/mysql/v3.1.2
 
 [v3.1.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.1.0...integrations/bunorm/mysql/v3.1.1
 

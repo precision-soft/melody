@@ -2540,3 +2540,33 @@ func TestAtomicWriteFileRollsBackTemporaryOnRenameFailure(t *testing.T) {
         t.Fatalf("expected no temporary residue after rollback; found %q", entry.Name())
     }
 }
+
+/** @info The crontab-no-user dialect renders no user column at all, so the heartbeat line needs no user to place. Demanding --user turned a valid busybox-crond configuration into a hard error. */
+func TestRunCrontabNoUserTemplateWithHeartbeatAndNoUserSucceeds(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+    heartbeatPath := filepath.Join(tempDir, "heartbeat.crontab")
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("outbox:dispatch", &testSchedule{Minute: "*/5"}),
+    }
+
+    _, runErr := runGenerateCommand(
+        t,
+        commands,
+        []string{
+            "--out", outputPath,
+            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--binary", "/usr/local/bin/fakeapp",
+            "--template", "crontab-no-user",
+            "--heartbeat-path", heartbeatPath,
+        },
+    )
+
+    if true == errors.Is(runErr, ErrHeartbeatUserMissing) {
+        t.Fatalf("the crontab-no-user dialect has no user column; it must not demand a user")
+    }
+    if nil != runErr {
+        t.Fatalf("Run returned unexpected error: %v", runErr)
+    }
+}

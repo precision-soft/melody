@@ -207,7 +207,9 @@ func isEnabledForGroup(definition *HttpMiddlewareDefinition, group string) bool 
 }
 
 type definitionNode struct {
+    /* definition drives ordering (priority, before/after edges); duplicates share a name and therefore a node, so every one of them is kept here and emitted together at the node's position — keying the map on the name alone silently dropped all but the last, defeating allowDuplicates */
     definition *HttpMiddlewareDefinition
+    duplicates []*HttpMiddlewareDefinition
     inDegree   int
     out        []string
 }
@@ -225,8 +227,14 @@ func orderDefinitions(definitions []*HttpMiddlewareDefinition) ([]*HttpMiddlewar
             continue
         }
 
+        if existingNode, exists := nodes[definition.name]; true == exists {
+            existingNode.duplicates = append(existingNode.duplicates, definition)
+            continue
+        }
+
         nodes[definition.name] = &definitionNode{
             definition: definition,
+            duplicates: []*HttpMiddlewareDefinition{definition},
             inDegree:   0,
             out:        make([]string, 0),
         }
@@ -292,13 +300,15 @@ func orderDefinitions(definitions []*HttpMiddlewareDefinition) ([]*HttpMiddlewar
 
     sortReady()
 
-    result := make([]*HttpMiddlewareDefinition, 0, len(nodes))
+    result := make([]*HttpMiddlewareDefinition, 0, len(definitions))
+    processedNodes := 0
 
     for 0 < len(ready) {
         node := ready[0]
         ready = ready[1:]
+        processedNodes++
 
-        result = append(result, node.definition)
+        result = append(result, node.duplicates...)
 
         for _, toName := range node.out {
             toNode := nodes[toName]
@@ -316,7 +326,8 @@ func orderDefinitions(definitions []*HttpMiddlewareDefinition) ([]*HttpMiddlewar
     }
 
     cycleDetected := false
-    if len(result) != len(nodes) {
+    /* count the NODES drained, not the definitions emitted: a node carries every duplicate of its name, so comparing the emitted definitions against the name-keyed node map reports a cycle for the duplicates allowDuplicates exists to permit */
+    if processedNodes != len(nodes) {
         cycleDetected = true
 
         result = make([]*HttpMiddlewareDefinition, 0, len(definitions))

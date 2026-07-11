@@ -11,3 +11,5 @@
 /.claude/
 /CLAUDE.md
 /AUDIT_REPORT.md
+zz_*_test.go
+/.dev/e2e/e2e

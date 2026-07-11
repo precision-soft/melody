@@ -1,6 +1,7 @@
 package encrypt
 
 import (
+    "fmt"
     "regexp"
     "sort"
 
@@ -50,6 +51,20 @@ type StaticKeyProvider struct {
     keysById     map[string][]byte
 }
 
+/* GoString and String keep the master keys out of every rendering fmt can reach: %#v and %v walk unexported fields, so a provider dropped into a debug log — or into an error context that is formatted later — printed each key as raw bytes. The receivers are values so that both the provider and a pointer to it redact, and the current key id is kept because it names a key without revealing one. */
+func (instance StaticKeyProvider) GoString() string {
+    return instance.String()
+}
+
+func (instance StaticKeyProvider) String() string {
+    return "encrypt.StaticKeyProvider{currentKeyId:" + instance.currentKeyId + ", keysById:[redacted]}"
+}
+
+/* Format keeps the master keys redacted for the numeric verbs (%d %o %b %c %U) that fmt never routes through Stringer or GoStringer: fmt consults those interfaces only for %v %s %q %x %X and %#v, so a numeric verb would otherwise reflection-walk the unexported keysById field and dump the raw key bytes. Every verb is answered with the same redacted String() rendering, and the value receiver makes both the provider and a pointer to it satisfy fmt.Formatter. */
+func (instance StaticKeyProvider) Format(state fmt.State, verb rune) {
+    _, _ = state.Write([]byte(instance.String()))
+}
+
 func (instance *StaticKeyProvider) CurrentKeyId() string {
     return instance.currentKeyId
 }
@@ -77,3 +92,5 @@ func (instance *StaticKeyProvider) Key(keyId string) ([]byte, error) {
 }
 
 var _ KeyProvider = (*StaticKeyProvider)(nil)
+
+var _ fmt.Formatter = StaticKeyProvider{}

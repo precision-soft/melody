@@ -170,7 +170,8 @@ func TestCipher_EncryptPassesThroughCiphertextSealedUnderRetiredKey(t *testing.T
         t.Fatalf("seal: %v", sealErr)
     }
 
-    rotatedProvider := NewStaticKeyProvider("v2", map[string][]byte{"v2": newKey(2)})
+    /* the retired key v1 stays in the set (still decryptable) until re-encryption completes; only then is it removed */
+    rotatedProvider := NewStaticKeyProvider("v2", map[string][]byte{"v2": newKey(2), "v1": newKey(1)})
     rotatedCipher := NewCipher(rotatedProvider)
 
     encoded, encryptErr := rotatedCipher.Encrypt(sealed)
@@ -179,7 +180,37 @@ func TestCipher_EncryptPassesThroughCiphertextSealedUnderRetiredKey(t *testing.T
     }
 
     if sealed != encoded {
-        t.Fatalf("expected a value sealed under a retired key to pass through unchanged, not be double-encrypted")
+        t.Fatalf("expected a value sealed under a retired key still in the set to pass through unchanged, not be double-encrypted")
+    }
+}
+
+func TestCipher_EncryptSealsMarkerShapedPlaintextWithUnknownKeyId(t *testing.T) {
+    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    cipher := NewCipher(provider)
+
+    /* a client-supplied marker-shaped string naming a key id that is not in the set must not be stored verbatim, or every later Scan/Decrypt of the row fails with key-not-found */
+    forged := "<ENC>\x00gcm1\x00rogue:" + base64.RawStdEncoding.EncodeToString([]byte("forged payload bytes"))
+
+    if _, decryptErr := cipher.Decrypt(forged); nil == decryptErr {
+        t.Fatalf("precondition: the unknown-key forged value must not authenticate")
+    }
+
+    encoded, encryptErr := cipher.Encrypt(forged)
+    if nil != encryptErr {
+        t.Fatalf("encrypt: %v", encryptErr)
+    }
+
+    if forged == encoded {
+        t.Fatalf("expected the unknown-key marker-shaped plaintext to be sealed under the current key, not stored verbatim")
+    }
+
+    decrypted, decryptErr := cipher.Decrypt(encoded)
+    if nil != decryptErr {
+        t.Fatalf("decrypt: %v", decryptErr)
+    }
+
+    if forged != decrypted {
+        t.Fatalf("round-trip mismatch: %q", decrypted)
     }
 }
 

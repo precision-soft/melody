@@ -53,6 +53,51 @@ cipher.EncryptWithKeyId(value, "v2")
 
 Bulk re-encrypt a table after rotating keys with the `melody:encrypt:database` command (see below).
 
+## Multiple key compartments (multi-context binaries)
+
+`UseCipher` installs one process-wide default cipher — fine for one database, but a binary consolidating
+several apps should keep each context's keys in its own compartment instead of merging the key maps under
+a single current key. Install one named cipher per compartment and bind columns through a zero-size
+marker type:
+
+```go
+encrypt.UseCipherNamed("crm", encrypt.NewCipher(crmProvider))
+encrypt.UseCipherNamed("billing", encrypt.NewCipher(billingProvider))
+
+type CrmCipher struct{}
+
+func (instance CrmCipher) CipherName() string {
+    return "crm"
+}
+
+type Customer struct {
+    Iban encrypt.EncryptedStringFor[CrmCipher] `bun:"iban"`
+}
+```
+
+The marker parameterizes the generic column types `EncryptedStringFor[R]` and
+`EncryptedDeterministicStringFor[R]`, so the binding lives in the Go type — the only channel available,
+because `database/sql` gives `Value()`/`Scan()` no context. Compartments are isolated: the `crm` cipher
+can never decrypt a `billing` ciphertext, and key rotation inside one compartment keeps working through
+the key id embedded in each ciphertext. The plain `EncryptedString` keeps using the default cipher.
+
+Two designs were considered and rejected: per-column key ids over one merged `KeyProvider` (the
+compartments stay merged — either context can decrypt the other's rows, exactly the isolation loss the
+feature exists to prevent) and a cipher per `bunorm.Manager` (a `driver.Valuer` has no manager context;
+bun query hooks would miss raw SQL paths).
+
+For the bulk command with several compartments, declare command contexts on the module — each gets its
+own `melody:encrypt:database:<name>`:
+
+```go
+app.RegisterModule(encrypt.NewModule(encrypt.ModuleConfig{
+    Contexts: []encrypt.CommandContextConfig{
+        {Name: "crm", Database: crmDatabase, Cipher: crmCipher},
+        {Name: "billing", Database: billingDatabase, Cipher: billingCipher},
+    },
+}))
+```
+
 ## Searchable (deterministic) encryption
 
 Random nonces make a column un-queryable. For lookup columns, `EncryptedDeterministicString` derives the

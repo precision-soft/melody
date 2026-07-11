@@ -1,7 +1,9 @@
 package http
 
 import (
+    "errors"
     "io"
+    "io/fs"
     "net"
     nethttp "net/http"
     "net/netip"
@@ -328,12 +330,19 @@ func closeDiscardedResponseBody(response httpcontract.Response, logger loggingco
     }
 
     closeErr := closer.Close()
-    if nil != closeErr && nil != logger {
-        logger.Error(
-            "failed to close discarded response body",
-            exception.LogContext(closeErr),
-        )
+    if nil == closeErr || nil == logger {
+        return
     }
+
+    /* the response may already have been closed by the writer's own deferred Close, when the panic that discarded it unwound from inside WriteToHttpResponseWriter. Closing an os.File twice is safe and reports this; it is not a failure worth an error line on a path that is already reporting a panic. */
+    if true == errors.Is(closeErr, fs.ErrClosed) {
+        return
+    }
+
+    logger.Error(
+        "failed to close discarded response body",
+        exception.LogContext(closeErr),
+    )
 }
 
 func detectScheme(request *nethttp.Request) string {
@@ -369,7 +378,12 @@ func detectSchemeWithForwardedHeadersPolicy(request *nethttp.Request, policy htt
 
     forwardedProto := request.Header.Get("X-Forwarded-Proto")
     if "" != forwardedProto {
-        return strings.ToLower(forwardedProto)
+        /* a chain of proxies appends rather than replaces, so the header arrives as "https, http": the client-facing hop is the leftmost entry. Returning the whole list yields a scheme equal to neither "http" nor "https", and every downstream equality test — the Secure attribute on the cookies this response sets, above all — then reads the request as plaintext. */
+        if commaIndex := strings.IndexByte(forwardedProto, ','); -1 != commaIndex {
+            forwardedProto = forwardedProto[:commaIndex]
+        }
+
+        return strings.ToLower(strings.TrimSpace(forwardedProto))
     }
 
     return "http"
@@ -396,6 +410,9 @@ func isRequestFromTrustedProxy(request *nethttp.Request, trustedProxyList []stri
         return false
     }
 
+    /* an IPv4-mapped IPv6 peer (::ffff:10.0.0.1) is the IPv4 address it names, so an IPv4 CIDR in the trusted proxy list must still match it — mirrors the per-address check in http/middleware/client_ip.go */
+    remoteAddress = remoteAddress.Unmap()
+
     for _, trustedProxyString := range trustedProxyList {
         trimmedTrustedProxyString := strings.TrimSpace(trustedProxyString)
         if "" == trimmedTrustedProxyString {
@@ -404,6 +421,11 @@ func isRequestFromTrustedProxy(request *nethttp.Request, trustedProxyList []stri
 
         trustedPrefix, trustedPrefixErr := netip.ParsePrefix(trimmedTrustedProxyString)
         if nil == trustedPrefixErr {
+            /* a mapped prefix (::ffff:10.0.0.0/104) names the IPv4 range it embeds; unmap it so it still Contains the unmapped host — netip treats the two address families as unequal otherwise, mirroring http/middleware/client_ip.go */
+            if true == trustedPrefix.Addr().Is4In6() && trustedPrefix.Bits() >= 96 {
+                trustedPrefix = netip.PrefixFrom(trustedPrefix.Addr().Unmap(), trustedPrefix.Bits()-96)
+            }
+
             if true == trustedPrefix.Contains(remoteAddress) {
                 return true
             }
@@ -416,7 +438,7 @@ func isRequestFromTrustedProxy(request *nethttp.Request, trustedProxyList []stri
             continue
         }
 
-        if trustedAddress == remoteAddress {
+        if trustedAddress.Unmap() == remoteAddress {
             return true
         }
     }
@@ -497,6 +519,13 @@ func matchPath(
                 }
 
                 if "" != wildcardName {
+                    /* a requirement on a catch-all is a whitelist like any other; skipping it here would let the wildcard swallow anything while the single-segment and named-parameter branches below enforce theirs */
+                    if regex, exists := routeDefinition.requirements[wildcardName]; true == exists {
+                        if false == regex.MatchString(rest) {
+                            return nil, false
+                        }
+                    }
+
                     params[wildcardName] = rest
                     if RouteAttributeLocale == wildcardName {
                         params[RouteAttributeLocale] = rest

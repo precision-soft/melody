@@ -4,8 +4,12 @@ import (
     "context"
     "database/sql"
     "database/sql/driver"
+    "hash/fnv"
+    "strconv"
+    "strings"
     "sync"
     "time"
+    "unicode/utf8"
 
     "github.com/precision-soft/melody/v3/exception"
     lockcontract "github.com/precision-soft/melody/v3/lock/contract"
@@ -14,6 +18,9 @@ import (
 )
 
 const defaultLockReleaseTimeout = 5 * time.Second
+
+/* MySQL rejects user-level lock names longer than 64 characters (ER_USER_LOCK_WRONG_NAME on MySQL 8, so GET_LOCK errors on every attempt), which would make Acquire fail permanently for a long name and never let an exclusive command run. */
+const mysqlLockNameMaxLength = 64
 
 func NewLocker(database *bun.DB, options ...LockerOption) *Locker {
     if nil == database {
@@ -53,6 +60,7 @@ func (instance *Locker) CreateLock(name string, ttl time.Duration) lockcontract.
     return &mysqlLock{
         database:       instance.database,
         name:           name,
+        lockName:       boundedLockName(name),
         releaseTimeout: instance.releaseTimeout,
     }
 }
@@ -60,6 +68,7 @@ func (instance *Locker) CreateLock(name string, ttl time.Duration) lockcontract.
 type mysqlLock struct {
     database       *bun.DB
     name           string
+    lockName       string
     releaseTimeout time.Duration
 
     mutex      sync.Mutex
@@ -71,12 +80,17 @@ func (instance *mysqlLock) Acquire(runtimeInstance runtimecontract.Runtime) (boo
     defer instance.mutex.Unlock()
 
     if nil != instance.connection {
+        /* @important probe on a fresh, bounded context, exactly as Refresh does: the caller's request context may already be canceled, and a verify that fails for that reason would be mistaken for a lost lock and drive releaseAndCloseConnection() — actively releasing a lock this process still holds */
+        verifyCtx, cancelVerify := context.WithTimeout(context.Background(), instance.releaseTimeout)
+
         var held sql.NullBool
         verifyErr := instance.connection.QueryRowContext(
-            runtimeInstance.Context(),
+            verifyCtx,
             "SELECT IS_USED_LOCK(?) = CONNECTION_ID()",
-            instance.name,
+            instance.lockName,
         ).Scan(&held)
+        cancelVerify()
+
         if nil == verifyErr && true == held.Valid && true == held.Bool {
             return true, nil
         }
@@ -90,9 +104,9 @@ func (instance *mysqlLock) Acquire(runtimeInstance runtimecontract.Runtime) (boo
     }
 
     var acquired sql.NullInt64
-    queryErr := connection.QueryRowContext(runtimeInstance.Context(), "SELECT GET_LOCK(?, 0)", instance.name).Scan(&acquired)
+    queryErr := connection.QueryRowContext(runtimeInstance.Context(), "SELECT GET_LOCK(?, 0)", instance.lockName).Scan(&acquired)
     if nil != queryErr {
-        releaseOrphanedLock(connection, instance.name, instance.releaseTimeout)
+        releaseOrphanedLock(connection, instance.lockName, instance.releaseTimeout)
         connection.Close()
         return false, exception.NewError("mysql lock acquire failed", map[string]any{"name": instance.name}, queryErr)
     }
@@ -119,7 +133,7 @@ func (instance *mysqlLock) Release(runtimeInstance runtimecontract.Runtime) erro
     releaseCtx, cancel := context.WithTimeout(context.Background(), instance.releaseTimeout)
     defer cancel()
 
-    _, execErr := instance.connection.ExecContext(releaseCtx, "DO RELEASE_LOCK(?)", instance.name)
+    _, execErr := instance.connection.ExecContext(releaseCtx, "DO RELEASE_LOCK(?)", instance.lockName)
     closeErr := discardOrCloseConnection(instance.connection, execErr)
     instance.connection = nil
 
@@ -172,7 +186,7 @@ func (instance *mysqlLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl 
     queryErr := instance.connection.QueryRowContext(
         probeCtx,
         "SELECT IS_USED_LOCK(?) = CONNECTION_ID()",
-        instance.name,
+        instance.lockName,
     ).Scan(&held)
     if nil != queryErr {
         instance.releaseAndCloseConnection()
@@ -192,9 +206,38 @@ func (instance *mysqlLock) releaseAndCloseConnection() {
     releaseCtx, cancel := context.WithTimeout(context.Background(), instance.releaseTimeout)
     defer cancel()
 
-    _, execErr := instance.connection.ExecContext(releaseCtx, "DO RELEASE_LOCK(?)", instance.name)
+    _, execErr := instance.connection.ExecContext(releaseCtx, "DO RELEASE_LOCK(?)", instance.lockName)
     _ = discardOrCloseConnection(instance.connection, execErr)
     instance.connection = nil
+}
+
+/* boundedLockName folds a lock name into a form MySQL's GET_LOCK accepts. Names within mysqlLockNameMaxLength characters are passed through unchanged so existing short names keep their exact server-side identity; a longer name is reduced to a deterministic 64-character form — a rune-safe prefix of the original name for readability, joined to an fnv-64a hash of the full name for uniqueness — mirroring the way the pgsql advisory-lock locker hashes an arbitrary-length name onto its integer key. */
+func boundedLockName(name string) string {
+    if mysqlLockNameMaxLength >= utf8.RuneCountInString(name) {
+        return name
+    }
+
+    hasher := fnv.New64a()
+    _, _ = hasher.Write([]byte(name))
+    suffix := strconv.FormatUint(hasher.Sum64(), 16)
+
+    prefixBudget := mysqlLockNameMaxLength - len(suffix) - 1
+
+    var builder strings.Builder
+    prefixLength := 0
+    for _, character := range name {
+        if prefixLength >= prefixBudget {
+            break
+        }
+
+        builder.WriteRune(character)
+        prefixLength++
+    }
+
+    builder.WriteByte('-')
+    builder.WriteString(suffix)
+
+    return builder.String()
 }
 
 var _ lockcontract.Locker = (*Locker)(nil)

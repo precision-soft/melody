@@ -600,6 +600,87 @@ func TestConsumeLoop_NoDialerClosesOut(t *testing.T) {
     }
 }
 
+func TestConnectionAlive_ReportsLiveAndGone(t *testing.T) {
+    gone := &Transport{queue: "orders"}
+    if true == gone.connectionAlive() {
+        t.Fatalf("expected connectionAlive to report false without a connection")
+    }
+
+    live := &Transport{queue: "orders", connection: &amqp091.Connection{}}
+    if false == live.connectionAlive() {
+        t.Fatalf("expected connectionAlive to report true for a non-nil open connection")
+    }
+}
+
+/* @info a failed publish on a live static connection (no dialer) must be retried on a fresh channel — the live connection can still carry it — while a no-dialer transport whose connection is gone, or a closing transport, must not retry. */
+func TestPublishRetryable_LiveStaticConnectionRetriesWithoutDialer(t *testing.T) {
+    liveStatic := &Transport{queue: "orders", connection: &amqp091.Connection{}}
+    if false == liveStatic.publishRetryable() {
+        t.Fatalf("expected a publish on a live static connection to be retryable without a dialer")
+    }
+
+    gone := &Transport{queue: "orders"}
+    if true == gone.publishRetryable() {
+        t.Fatalf("expected no retry when there is no dialer and no live connection")
+    }
+
+    dialerBacked := &Transport{queue: "orders", dialer: func() (*amqp091.Connection, error) { return nil, nil }}
+    if false == dialerBacked.publishRetryable() {
+        t.Fatalf("expected a dialer-backed transport to stay retryable")
+    }
+
+    closing := &Transport{queue: "orders", connection: &amqp091.Connection{}, closing: true}
+    if true == closing.publishRetryable() {
+        t.Fatalf("expected a closing transport never to retry a publish")
+    }
+}
+
+/* @info a consumer built on a live static connection with no dialer must recover from a channel-only loss (queue deleted, broker basic.cancel, a PRECONDITION_FAILED that closes only the channel): the live connection can still open a fresh channel, so the loop must re-subscribe instead of closing out and stopping. */
+func TestConsumeLoop_StaticLiveConnectionRecoversFromChannelOnlyLoss(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    instance := &Transport{
+        queue:       "orders",
+        connection:  &amqp091.Connection{},
+        closeSignal: make(chan struct{}),
+        reconnect:   ReconnectConfig{InitialBackoff: 5 * time.Second, MaxBackoff: 5 * time.Second, BackoffFactor: 2},
+    }
+
+    deliveries := make(chan amqp091.Delivery)
+    close(deliveries)
+
+    out := make(chan messagebuscontract.Envelope)
+    done := make(chan struct{})
+
+    go func() {
+        instance.consumeLoop(newReconnectRuntime(ctx), nil, deliveries, out)
+        close(done)
+    }()
+
+    /* on the old code a nil dialer made consumeLoop return immediately and close out; on a live static connection it must instead park on the reconnect backoff, keeping the subscription open for recovery. */
+    select {
+    case _, open := <-out:
+        if false == open {
+            t.Fatalf("consumer closed out and stopped on a channel-only loss even though the static connection is still alive")
+        }
+
+        t.Fatalf("did not expect a delivery on a bare consume loop")
+    case <-done:
+        t.Fatalf("consumeLoop returned instead of recovering on the live static connection")
+    case <-time.After(200 * time.Millisecond):
+    }
+
+    /* clean shutdown still works: cancelling the runtime unblocks the backoff wait and closes out */
+    cancel()
+
+    select {
+    case <-done:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("consumeLoop did not return after context cancellation")
+    }
+}
+
 func TestDecode_StampsCurrentGeneration(t *testing.T) {
     registry := NewMessageRegistry()
     RegisterMessage[reconnectMessage](registry, "amqp.test.gen")
@@ -1083,6 +1164,38 @@ func TestRedeliveryCountFromHeader(t *testing.T) {
                 t.Fatalf("expected %d, got %d", testCase.expected, got)
             }
         })
+    }
+}
+
+/* the AMQP 0-9-1 prefetch-count field is encoded as uint16 by channel.Qos, so a configured prefetch above 65535 wraps on the wire — 65536 becomes 0, which RabbitMQ treats as UNLIMITED prefetch. newTransport must clamp the value to 65535 before it can reach Qos, otherwise the flow-control cap silently inverts into no cap at all. */
+func TestNewTransport_ClampsPrefetchToTheWireMaximum(t *testing.T) {
+    newInstance := func(prefetch int) *Transport {
+        return newTransport(TransportConfig{
+            Dialer:   func() (*amqp091.Connection, error) { return nil, nil },
+            Queue:    "orders",
+            Prefetch: prefetch,
+            Registry: NewMessageRegistry(),
+        }, nil)
+    }
+
+    if 65535 != newInstance(65536).prefetch {
+        t.Fatalf("expected a prefetch of 65536 to clamp to 65535 (uint16 wrap to 0 = unlimited), got %d", newInstance(65536).prefetch)
+    }
+
+    if 65535 != newInstance(70000).prefetch {
+        t.Fatalf("expected a prefetch of 70000 to clamp to 65535, got %d", newInstance(70000).prefetch)
+    }
+
+    if 65535 != newInstance(65535).prefetch {
+        t.Fatalf("expected a prefetch at the wire maximum to stay 65535, got %d", newInstance(65535).prefetch)
+    }
+
+    if 10 != newInstance(10).prefetch {
+        t.Fatalf("expected an in-range prefetch to be preserved, got %d", newInstance(10).prefetch)
+    }
+
+    if 1 != newInstance(0).prefetch {
+        t.Fatalf("expected a non-positive prefetch to stay clamped up to 1, got %d", newInstance(0).prefetch)
     }
 }
 

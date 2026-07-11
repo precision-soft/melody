@@ -5,6 +5,10 @@ var environmentKeyAliasMap = map[string][]string{
         DefaultModeKey,
         KernelDefaultMode,
     },
+    ProcessRoleKey: {
+        ProcessRoleKey,
+        KernelProcessRole,
+    },
     EnvKey: {
         EnvKey,
         KernelEnv,

@@ -6,6 +6,7 @@ import (
     "sort"
     "strings"
     "time"
+    "unicode/utf8"
 )
 
 const TableRowSeparatorToken = "__melody_table_separator__"
@@ -132,7 +133,7 @@ func (instance *TablePrinter) calculateColumnWidthsWithMaxWidth(block TableBlock
     widths := make([]int, columnCount)
 
     for index, column := range block.Columns {
-        widths[index] = len(column)
+        widths[index] = utf8.RuneCountInString(column)
     }
 
     for _, row := range block.Rows {
@@ -144,8 +145,9 @@ func (instance *TablePrinter) calculateColumnWidthsWithMaxWidth(block TableBlock
             if index >= len(row) {
                 continue
             }
-            if widths[index] < len(row[index]) {
-                widths[index] = len(row[index])
+            cellWidth := utf8.RuneCountInString(row[index])
+            if widths[index] < cellWidth {
+                widths[index] = cellWidth
             }
         }
     }
@@ -168,8 +170,9 @@ func (instance *TablePrinter) shrinkWidthsToFitMaxWidth(block TableBlock, widths
 
     for index := 0; index < columnCount; index++ {
         minWidth := defaultTableMinColumnWidth
-        if minWidth < len(block.Columns[index]) {
-            minWidth = len(block.Columns[index])
+        columnWidth := utf8.RuneCountInString(block.Columns[index])
+        if minWidth < columnWidth {
+            minWidth = columnWidth
         }
         minWidths[index] = minWidth
 
@@ -254,8 +257,9 @@ func (instance *TablePrinter) printRowWrapped(writer io.Writer, cells []string, 
                 value = wrappedCells[cellIndex][lineIndex]
             }
 
-            if len(value) < width {
-                value = value + strings.Repeat(" ", width-len(value))
+            valueWidth := utf8.RuneCountInString(value)
+            if valueWidth < width {
+                value = value + strings.Repeat(" ", width-valueWidth)
             }
             lineCells[cellIndex] = value
         }
@@ -287,14 +291,15 @@ func (instance *TablePrinter) wrapCellValue(value string, width int) []string {
             continue
         }
 
-        for 0 < len(splitLine) {
-            if len(splitLine) <= width {
-                lines = append(lines, splitLine)
+        splitRunes := []rune(splitLine)
+        for 0 < len(splitRunes) {
+            if len(splitRunes) <= width {
+                lines = append(lines, string(splitRunes))
                 break
             }
 
-            lines = append(lines, splitLine[:width])
-            splitLine = splitLine[width:]
+            lines = append(lines, string(splitRunes[:width]))
+            splitRunes = splitRunes[width:]
         }
     }
 

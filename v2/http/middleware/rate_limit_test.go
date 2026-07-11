@@ -7,6 +7,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v2/clock"
+    "github.com/precision-soft/melody/v2/exception"
     "github.com/precision-soft/melody/v2/http"
     httpcontract "github.com/precision-soft/melody/v2/http/contract"
     "github.com/precision-soft/melody/v2/internal/testhelper"
@@ -406,5 +407,152 @@ func TestTokenBucketLimiter_SeparateKeys(t *testing.T) {
 
     if true == limiter.Allow("key1") {
         t.Fatalf("expected key1 second request to be rejected")
+    }
+}
+
+func TestTokenBucketLimiter_ZeroWindowDoesNotFailOpen(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewTokenBucketLimiterWithClock(frozenClock, 1, 0)
+
+    if false == limiter.Allow("key1") {
+        t.Fatalf("expected the first request to be allowed")
+    }
+
+    if true == limiter.Allow("key1") {
+        t.Fatalf("expected the second request to be rejected: a zero window must not silently disable the limiter")
+    }
+}
+
+func TestSlidingWindowLimiter_ZeroWindowDoesNotFailOpen(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewSlidingWindowLimiterWithClock(frozenClock, 1, 0)
+
+    if false == limiter.Allow("key1") {
+        t.Fatalf("expected the first request to be allowed")
+    }
+
+    if true == limiter.Allow("key1") {
+        t.Fatalf("expected the second request to be rejected: a zero window must not silently disable the limiter")
+    }
+}
+
+func TestTokenBucketLimiter_NonPositiveRateDoesNotDenyAll(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewTokenBucketLimiterWithClock(frozenClock, 0, time.Minute)
+
+    if false == limiter.Allow("key1") {
+        t.Fatalf("expected at least one request to be allowed: a non-positive rate must be clamped, not deny all traffic")
+    }
+}
+
+func TestDefaultKeyExtractor_NormalizesTrailingSlashPaths(t *testing.T) {
+    limiter := NewTokenBucketLimiterWithClock(clock.NewFrozenClock(time.Now()), 10, time.Minute)
+    config := NewRateLimitConfig(limiter, nil, nil)
+    _ = RateLimitMiddleware(config)
+
+    keyFor := func(path string) string {
+        req := httptest.NewRequest(nethttp.MethodGet, path, nil)
+        req.RemoteAddr = "1.2.3.4:5555"
+
+        return config.KeyExtractor()(testhelper.NewHttpTestRequestFromHttpRequest(req))
+    }
+
+    canonical := keyFor("/login")
+    if "1.2.3.4:/login" != canonical {
+        t.Fatalf("unexpected canonical key: %s", canonical)
+    }
+
+    for _, path := range []string{"/login/", "/login//", "/login///"} {
+        if canonical != keyFor(path) {
+            t.Fatalf("expected %q to share the /login bucket, got %q", path, keyFor(path))
+        }
+    }
+}
+
+type fakeRuntimeRateLimiter struct {
+    allowCalls            int
+    allowWithRuntimeCalls int
+    allowed               bool
+    err                   error
+}
+
+func (instance *fakeRuntimeRateLimiter) Allow(key string) bool {
+    instance.allowCalls++
+    return instance.allowed
+}
+
+func (instance *fakeRuntimeRateLimiter) Reset(key string) {}
+
+func (instance *fakeRuntimeRateLimiter) AllowWithRuntime(
+    runtimeInstance runtimecontract.Runtime,
+    key string,
+) (bool, error) {
+    instance.allowWithRuntimeCalls++
+    return instance.allowed, instance.err
+}
+
+func TestRateLimitMiddleware_PrefersRuntimeRateLimiter(t *testing.T) {
+    limiter := &fakeRuntimeRateLimiter{allowed: true}
+
+    config := NewRateLimitConfig(limiter, nil, nil)
+    handler := RateLimitMiddleware(config)(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return http.TextResponse(200, "ok"), nil
+    })
+
+    req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+
+    if _, err := handler(nil, httptest.NewRecorder(), melodyRequest); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if 1 != limiter.allowWithRuntimeCalls || 0 != limiter.allowCalls {
+        t.Fatalf(
+            "expected the runtime path to be preferred: withRuntime=%d plain=%d",
+            limiter.allowWithRuntimeCalls,
+            limiter.allowCalls,
+        )
+    }
+}
+
+func TestRateLimitMiddleware_HonorsFailurePolicyDenialOnStoreError(t *testing.T) {
+    /* a fail-closed limiter reports the store failure AND returns allowed=false; the middleware must honor the denial */
+    limiter := &fakeRuntimeRateLimiter{allowed: false, err: exception.NewError("store unreachable", nil, nil)}
+
+    config := NewRateLimitConfig(limiter, nil, nil)
+    handler := RateLimitMiddleware(config)(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return http.TextResponse(200, "ok"), nil
+    })
+
+    req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+
+    _, err := handler(nil, httptest.NewRecorder(), melodyRequest)
+    if nil == err {
+        t.Fatalf("expected the limit-exceeded rejection to surface")
+    }
+}
+
+func TestRateLimitMiddleware_HonorsFailurePolicyAllowanceOnStoreError(t *testing.T) {
+    /* a fail-open limiter reports the store failure but returns allowed=true; the request must pass */
+    limiter := &fakeRuntimeRateLimiter{allowed: true, err: exception.NewError("store unreachable", nil, nil)}
+
+    config := NewRateLimitConfig(limiter, nil, nil)
+
+    nextCalled := false
+    handler := RateLimitMiddleware(config)(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        nextCalled = true
+        return http.TextResponse(200, "ok"), nil
+    })
+
+    req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+
+    if _, err := handler(nil, httptest.NewRecorder(), melodyRequest); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if false == nextCalled {
+        t.Fatalf("expected the fail-open allowance to reach the handler")
     }
 }

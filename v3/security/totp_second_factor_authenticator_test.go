@@ -134,6 +134,26 @@ func TestTotpSecondFactor_ReplayedCodeIsRejected(t *testing.T) {
     }
 }
 
+/** @info Verify normalizes whitespace out of a submitted code, so "123 456" and "123456" are the same code. The replay guard must key on the normalized form: keying on the raw header value would let a captured code be replayed by re-spacing it. */
+func TestTotpSecondFactor_ReplayedCodeIsRejectedWhenRespaced(t *testing.T) {
+    secret, _ := totp.GenerateSecret()
+    code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
+
+    authenticator := totpAuthenticator(secret, true, NewMemoryNonceGuard())
+
+    first, _ := authenticator.Authenticate(totpRequest(code))
+    if false == first.IsAuthenticated() {
+        t.Fatal("expected the first use of a valid code to authenticate")
+    }
+
+    respaced := code[:3] + " " + code[3:]
+
+    second, _ := authenticator.Authenticate(totpRequest(respaced))
+    if true == second.IsAuthenticated() {
+        t.Fatalf("expected the respaced alias %q of an already-used code to be rejected by the guard", respaced)
+    }
+}
+
 /* negative control: with no ReplayGuard configured the source defaults to an in-process guard, so a captured code still cannot be replayed out of the box. */
 func TestTotpSecondFactor_ReplayedCodeIsRejectedByDefaultGuard(t *testing.T) {
     secret, _ := totp.GenerateSecret()

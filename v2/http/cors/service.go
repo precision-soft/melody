@@ -121,6 +121,7 @@ func (instance *Service) OriginAllowed(origin string) bool {
 
     normalizedOrigin := normalizeOrigin(origin)
     originHost := extractOriginHost(normalizedOrigin)
+    originScheme := extractOriginScheme(normalizedOrigin)
 
     for _, allowedOrigin := range instance.allowOrigins {
         normalizedAllowedOrigin := strings.TrimSpace(allowedOrigin)
@@ -136,6 +137,29 @@ func (instance *Service) OriginAllowed(origin string) bool {
 
         if true == strings.EqualFold(normalizedOrigin, normalizedAllowedOrigin) {
             return true
+        }
+
+        wildcardScheme, wildcardSuffix, isSchemeWildcard := parseSchemeWildcard(normalizedAllowedOrigin)
+        if true == isSchemeWildcard {
+            if "" == originHost {
+                continue
+            }
+
+            if false == strings.EqualFold(originScheme, wildcardScheme) {
+                continue
+            }
+
+            allowedDomain := strings.ToLower(wildcardSuffix)
+            if "" == allowedDomain {
+                continue
+            }
+
+            suffix := "." + allowedDomain
+            if true == strings.HasSuffix(originHost, suffix) {
+                return true
+            }
+
+            continue
         }
 
         if true == strings.HasPrefix(normalizedAllowedOrigin, "*.") {
@@ -246,6 +270,45 @@ func extractOriginHost(origin string) string {
     }
 
     return strings.ToLower(host)
+}
+
+func extractOriginScheme(origin string) string {
+    if "" == origin {
+        return ""
+    }
+
+    parsedUrl, parseErr := url.Parse(origin)
+    if nil != parseErr {
+        return ""
+    }
+
+    return strings.ToLower(parsedUrl.Scheme)
+}
+
+/*
+parseSchemeWildcard recognizes a scheme-qualified wildcard pattern of the form
+"<scheme>://*.suffix" (for example "https://*.example.com"). It returns the
+scheme, the subdomain suffix, and true when the pattern is such a wildcard.
+Scheme-less patterns (for example "*.example.com") are not scheme wildcards and
+keep their scheme-agnostic host matching.
+*/
+func parseSchemeWildcard(pattern string) (string, string, bool) {
+    index := strings.Index(pattern, "://")
+    if -1 == index {
+        return "", "", false
+    }
+
+    scheme := pattern[:index]
+    if "" == scheme {
+        return "", "", false
+    }
+
+    rest := pattern[index+len("://"):]
+    if false == strings.HasPrefix(rest, "*.") {
+        return "", "", false
+    }
+
+    return scheme, strings.TrimPrefix(rest, "*."), true
 }
 
 func addVaryOrigin(headers nethttp.Header) {

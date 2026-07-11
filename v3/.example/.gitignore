@@ -6,6 +6,7 @@
 /melody_melody_env_embedded
 /melody_melody_env_embedded_melody_static_embedded
 /melody_melody_static_embedded
+/melody-example-e2e
 
 # shared assets (single source: <root>/.assets) synced into public/ at container startup
 /public/favicon.ico

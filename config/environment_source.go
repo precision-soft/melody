@@ -183,6 +183,9 @@ func (instance *EnvironmentSource) loadExistingDotEnvFile(values map[string]stri
 }
 
 func preprocessDotEnvContent(content string) (string, error) {
+    /* an editor that saves the file as UTF-8 with a byte order mark puts U+FEFF before the first key; it is not whitespace, so nothing downstream trims it and godotenv rejects the line as a malformed variable name */
+    content = strings.TrimPrefix(content, "\ufeff")
+
     scanner := bufio.NewScanner(strings.NewReader(content))
     scanner.Buffer(
         make([]byte, 0, 64*1024),
@@ -191,23 +194,34 @@ func preprocessDotEnvContent(content string) (string, error) {
 
     lines := make([]string, 0)
 
+    /* the quote state spans lines: godotenv accepts a quoted value that runs over several of them, and a scanner that forgot it was inside quotes would read a '#' in the value as a comment and drop a blank line out of the middle of it */
+    inQuotes := false
+    var quoteChar rune = 0
+
     for scanner.Scan() {
         line := scanner.Text()
 
         builder := strings.Builder{}
 
-        inQuotes := false
-        var quoteChar rune = 0
+        openedInQuotes := inQuotes
         var previousChar rune = 0
+
+        /* godotenv opens a quoted value only when the quote is the first non-space rune of the value portion, after the key separator (its hasQuotePrefix); a quote anywhere else in an unquoted value is literal data and must not flip the cross-line quote state. A line that continues a value opened on an earlier line is entirely inside that value already. */
+        sawSeparator := openedInQuotes
+        valueStarted := openedInQuotes
 
         for _, character := range line {
             if '"' == character || '\'' == character {
-                if false == inQuotes {
+                if true == inQuotes {
+                    /* godotenv skips a quote preceded by a backslash, so an escaped quote inside the value does not terminate it */
+                    if quoteChar == character && '\\' != previousChar {
+                        inQuotes = false
+                        quoteChar = 0
+                    }
+                } else if true == sawSeparator && false == valueStarted {
                     inQuotes = true
                     quoteChar = character
-                } else if true == (quoteChar == character) {
-                    inQuotes = false
-                    quoteChar = 0
+                    valueStarted = true
                 }
 
                 _, _ = builder.WriteRune(character)
@@ -215,9 +229,19 @@ func preprocessDotEnvContent(content string) (string, error) {
                 continue
             }
 
-            if '#' == character && false == inQuotes {
-                if 0 == previousChar || true == unicode.IsSpace(previousChar) {
-                    break
+            if false == inQuotes {
+                if '#' == character {
+                    if 0 == previousChar || true == unicode.IsSpace(previousChar) {
+                        break
+                    }
+                }
+
+                if false == sawSeparator {
+                    if '=' == character || ':' == character {
+                        sawSeparator = true
+                    }
+                } else if false == valueStarted && false == unicode.IsSpace(character) {
+                    valueStarted = true
                 }
             }
 
@@ -225,8 +249,14 @@ func preprocessDotEnvContent(content string) (string, error) {
             previousChar = character
         }
 
-        processed := strings.TrimRightFunc(builder.String(), unicode.IsSpace)
-        if "" == strings.TrimSpace(processed) {
+        processed := builder.String()
+
+        /* trailing whitespace inside an unterminated quoted value is part of the value, and a blank line there is a blank line of data — neither may be trimmed away or skipped */
+        if false == inQuotes {
+            processed = strings.TrimRightFunc(processed, unicode.IsSpace)
+        }
+
+        if false == inQuotes && false == openedInQuotes && "" == strings.TrimSpace(processed) {
             continue
         }
 

@@ -149,19 +149,19 @@ func TestEscapeRedisGlobMeta(t *testing.T) {
     }
 }
 
-/* @info backend close must not close the caller-owned client (CR #66 back-port from v2/v3) */
+/* @info backend close must not close the caller-owned client */
 
-type closeTrackingClientCR66 struct {
+type closeTrackingClient struct {
     rueidis.Client
     closed bool
 }
 
-func (instance *closeTrackingClientCR66) Close() {
+func (instance *closeTrackingClient) Close() {
     instance.closed = true
 }
 
 func TestBackendCloseDoesNotCloseCallerOwnedClient(t *testing.T) {
-    client := &closeTrackingClientCR66{}
+    client := &closeTrackingClient{}
 
     backend, backendErr := NewBackend(client, nil, "", 0, 0)
     if nil != backendErr {

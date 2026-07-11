@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.1.2] - 2026-07-11 - Connection Reaping, Close Handshake, and Scope-Lifetime Hardening
+
+### Fixed
+
+- `handler.go` — the keepalive ping loop no longer disconnects healthy clients. A pong is processed only inside `connection.Read`, which the read loop leaves while it runs a synchronous `OnMessage` callback, so a ping issued in that window always timed out and was read as the peer's death. A timed-out ping now counts as death only when the read loop is neither inside a callback nor has seen a client frame within two intervals; a write failure still fails immediately, since the socket itself is gone.
+- `handler.go` — a callback that never returns no longer holds its connection open forever. The excuse the ping loop grants a running `OnMessage` was unbounded, so a wedged callback answered every ping timeout with "the reader simply cannot answer": nothing else reaps a hijacked connection, and the descriptor, the hub subscription and the handler, read and ping goroutines leaked once per connection. The excuse now expires after ten ping intervals.
+- `handler.go` — the closing handshake is bounded. `connection.Close` waits for the peer's close frame, which only the read loop ever reads, so closing a connection *because* that read loop is wedged waited out the library's five-second timeout while still holding the handler goroutine and the hub subscription. The handshake now gets one second before the deferred `CloseNow` frees the socket.
+- `handler.go` — a still-running `OnMessage` callback no longer races the request-scope teardown. The handler waits, bounded by the close grace, for the read loop to exit before it returns, so a healthy in-flight callback cannot resolve a service against a scope the handler already closed.
+- `handler.go` — the keepalive ping loop can no longer reap a healthy connection at the instant an `OnMessage` callback returns. The activity mark is refreshed before the running-callback count is cleared, so the ping loop never sees a window with no callback in flight and a stale activity time.
+- `handler.go` — keepalive grace and activity windows are measured against a monotonic clock captured at connection accept. A wall-clock step could otherwise defeat the callback grace bound (leaking a connection) or reap a healthy one.
+
 ## [v3.1.1] - 2026-07-06 - Standalone Module Resolution Fix
 
 ### Fixed
@@ -34,7 +45,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `handler.go` — a panic in the user `OnMessage` callback no longer crashes the whole process. The callback runs on the connection's read goroutine, which is spawned outside the kernel's panic recovery, so a single malformed client frame that made `OnMessage` panic took the server down. The callback is now invoked through a recovering wrapper that logs the panic and closes the connection, matching how the kernel and event dispatcher recover user-code panics.
 - `handler.go` — a server-initiated termination (hub shutdown, subscriber unsubscribe, context cancellation) now performs the WebSocket close handshake (`Close(StatusNormalClosure, …)`) instead of only tearing down the socket with `CloseNow`, so a spec-conformant client sees a normal `1000` closure rather than abnormal `1006` — avoiding reconnect storms during a graceful rolling deploy. `CloseNow` remains the deferred backstop.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/websocket/v3.1.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/websocket/v3.1.2...HEAD
+
+[v3.1.2]: https://github.com/precision-soft/melody/compare/integrations/websocket/v3.1.1...integrations/websocket/v3.1.2
 
 [v3.1.1]: https://github.com/precision-soft/melody/compare/integrations/websocket/v3.1.0...integrations/websocket/v3.1.1
 

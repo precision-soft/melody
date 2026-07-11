@@ -2,8 +2,9 @@
 infrastructure — the behaviours that only show up end-to-end against a real broker, database or cache. It
 is DEV TOOLING, kept under .dev (not shipped in any module tag) and grouped with the other dev scripts.
 
-Run it against the dev compose stack (./dc up:all) from inside the dev container. Each section runs only
-when its backend env var is set, so you can exercise one or all:
+Run it against the dev compose stack (./dc up:all) with .dev/e2e/run.sh, which sets every backend env var
+and executes the harness inside the dev container. Each section runs only when its backend env var is set,
+so you can exercise one or all by invoking it by hand instead:
 
     docker exec \
       -e REDIS_ADDRESS=redis:6379 \
@@ -13,16 +14,21 @@ when its backend env var is set, so you can exercise one or all:
       sh -c 'export PATH=/usr/local/go/bin:$PATH; cd /app/.dev/e2e && go run .'
 
 Sections:
-  - WEBSOCKET FAN-OUT    (in-process) — handshake + hub broadcast delivered to two live sockets
-  - CROSS-APP HMAC AUTH  (redis)    — sign→verify, actor propagation, replay/audience/tamper rejection
-  - CACHE                (redis)    — set/get round-trip, time-to-live expiry, miss, atomic increment
-  - OUTBOX               (postgres) — transactional enqueue → relay drains to transport, poison dead-letter
-  - PGSQL ADVISORY LOCK  (postgres) — mutual exclusion, release hand-off
-  - MIGRATE              (postgres) — up creates+seeds a table, down rolls it back
-  - AMQP PUBLISH/CONSUME (rabbitmq) — round-trip publish → consume → ack, and delayed redelivery
+  - WEBSOCKET FAN-OUT      (in-process) — handshake + hub broadcast delivered to two live sockets
+  - ENCRYPT COMPARTMENTS   (in-process) — named-cipher isolation, redaction, unregistered compartment errors
+  - CROSS-APP HMAC AUTH    (redis)    — sign→verify, actor propagation, replay/audience/tamper rejection
+  - CACHE                  (redis)    — set/get round-trip, time-to-live expiry, miss, atomic increment
+  - RATE LIMIT             (redis)    — shared budget, window reset, fail-closed default, opt-in fail-open
+  - RUN EXCLUSIVE          (redis)    — one holder per tick, release on return, fail-closed on store outage
+  - LEADER GATE            (redis)    — one leader of two contenders, follower promoted on shutdown
+  - OUTBOX                 (postgres) — transactional enqueue → relay drains to transport, poison dead-letter
+  - PGSQL ADVISORY LOCK    (postgres) — mutual exclusion, release hand-off
+  - MIGRATE                (postgres) — up creates+seeds a table, down rolls it back; per-context isolation
+  - AMQP PUBLISH/CONSUME   (rabbitmq) — round-trip publish → consume → ack, and delayed redelivery
+  - EXAMPLE OVER HTTP      (example)  — forwarded-client-ip trust boundary and the rate limit over real HTTP
 
-The websocket section needs no backend and always runs; the rest run only when their env var is set.
-Exits non-zero on the first unexpected outcome. */
+The websocket and encrypt sections need no backend and always run; the rest run only when their env var is
+set. Exits non-zero on the first unexpected outcome. */
 package main
 
 import (
@@ -43,12 +49,20 @@ import (
 
 func main() {
     sections := 0
+    infrastructureSections := 0
 
     section("WEBSOCKET FAN-OUT (in-process)")
     runWebsocketCheck()
     sections++
 
-    if address := os.Getenv("REDIS_ADDRESS"); "" != address {
+    section("ENCRYPT COMPARTMENTS (in-process)")
+    runEncryptCompartmentCheck()
+    sections++
+
+    redisAddress := os.Getenv("REDIS_ADDRESS")
+
+    if address := redisAddress; "" != address {
+        infrastructureSections++
         section("CROSS-APP HMAC AUTH (live redis)")
         runHmacCheck(address)
         sections++
@@ -56,9 +70,22 @@ func main() {
         section("CACHE (live redis)")
         runCacheCheck(address)
         sections++
+
+        section("RATE LIMIT (live redis)")
+        runRateLimitCheck(address)
+        sections++
+
+        section("RUN EXCLUSIVE (live redis)")
+        runRunExclusiveCheck(address)
+        sections++
+
+        section("LEADER GATE (live redis)")
+        runLeaderGateCheck(address)
+        sections++
     }
 
     if dsn := os.Getenv("POSTGRES_DSN"); "" != dsn {
+        infrastructureSections++
         section("OUTBOX (live postgres)")
         runOutboxCheck(dsn)
         sections++
@@ -73,12 +100,30 @@ func main() {
     }
 
     if dsn := os.Getenv("AMQP_DSN"); "" != dsn {
+        infrastructureSections++
         section("AMQP PUBLISH/CONSUME (live rabbitmq)")
         runAmqpCheck(dsn)
         sections++
     }
 
-    if 0 == sections {
+    if baseUrl := os.Getenv("EXAMPLE_BASE_URL"); "" != baseUrl {
+        /* the section resets the example's rate limit counters straight in redis, so it needs redis as much as it needs the
+           application: without this it hard-failed on the very "clear REDIS_ADDRESS to skip the redis-backed sections" run that
+           run.sh documents */
+        if "" == redisAddress {
+            fmt.Println("\nSKIPPED: EXAMPLE OVER HTTP needs REDIS_ADDRESS to reset the rate limit counters")
+        } else {
+            infrastructureSections++
+            section("EXAMPLE OVER HTTP (live example application)")
+            runExampleHttpCheck(baseUrl, os.Getenv("EXAMPLE_LOAD_BALANCER_URL"), redisAddress)
+            sections++
+        }
+    }
+
+    /* the in-process sections (websocket, encrypt) always run, so they can never witness a missing backend: the guard has to
+       count only the sections a backend gates, or a run against an empty environment reports "ALL 2 SECTIONS PASSED" and the
+       eleven that matter are silently skipped */
+    if 0 == infrastructureSections {
         fail("no infrastructure env set — expected one or more of REDIS_ADDRESS / POSTGRES_DSN / AMQP_DSN")
     }
 
@@ -116,6 +161,10 @@ func section(title string) {
 
 func pass(format string, args ...any) {
     fmt.Printf("PASS  "+format+"\n", args...)
+}
+
+func skip(format string, args ...any) {
+    fmt.Printf("SKIP  "+format+"\n", args...)
 }
 
 func fail(format string, args ...any) {

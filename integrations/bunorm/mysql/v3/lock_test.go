@@ -5,8 +5,10 @@ import (
     "database/sql"
     "os"
     "strconv"
+    "strings"
     "testing"
     "time"
+    "unicode/utf8"
 
     _ "github.com/go-sql-driver/mysql"
     "github.com/precision-soft/melody/v3/container"
@@ -194,17 +196,97 @@ func TestMysqlLock_AcquireVerifyErrorReleasesHeldLock(t *testing.T) {
         t.Fatalf("expected acquire to succeed: %v %v", acquired, acquireErr)
     }
 
-    cancelledContext, cancel := context.WithCancel(context.Background())
-    cancel()
+    /* induce a GENUINE verify error by killing the pinned session; a canceled request context must NOT do this (see TestMysqlLock_AcquireCanceledRuntimeContextKeepsHeldLock) */
+    var ownerId sql.NullInt64
+    if ownerErr := sqldb.QueryRowContext(context.Background(), "SELECT IS_USED_LOCK(?)", name).Scan(&ownerId); nil != ownerErr {
+        t.Fatalf("read lock owner: %v", ownerErr)
+    }
+    if false == ownerId.Valid {
+        t.Fatalf("expected the lock to be held by a session")
+    }
+    if _, killErr := sqldb.ExecContext(context.Background(), "KILL "+strconv.FormatInt(ownerId.Int64, 10)); nil != killErr {
+        t.Logf("kill returned (tolerated): %v", killErr)
+    }
 
-    lock.Acquire(newLockRuntimeWithContext(cancelledContext))
+    /* the verify now fails for real: the lock object must drop the dead connection and take the lock afresh. KILL is
+       asynchronous — the server flags the thread and only releases its locks once that thread notices — so a single immediate
+       attempt races the cleanup and reads GET_LOCK as 0 (held, no error). Retry until the dead session lets go. */
+    var reacquired bool
+    var reacquireErr error
+
+    reacquireDeadline := time.Now().Add(10 * time.Second)
+    for {
+        reacquired, reacquireErr = lock.Acquire(newLockRuntime())
+        if nil != reacquireErr || true == reacquired {
+            break
+        }
+        if true == time.Now().After(reacquireDeadline) {
+            break
+        }
+
+        time.Sleep(20 * time.Millisecond)
+    }
+
+    if nil != reacquireErr || false == reacquired {
+        t.Fatalf("expected re-acquire after a genuine verify error: %v %v", reacquired, reacquireErr)
+    }
+
+    if releaseErr := lock.Release(newLockRuntime()); nil != releaseErr {
+        t.Fatalf("release: %v", releaseErr)
+    }
 
     var holder sql.NullInt64
     if holderErr := sqldb.QueryRowContext(context.Background(), "SELECT IS_USED_LOCK(?)", name).Scan(&holder); nil != holderErr {
         t.Fatalf("read lock holder: %v", holderErr)
     }
     if true == holder.Valid {
-        t.Fatalf("lock was orphaned: still held by session %d after the verify-error path", holder.Int64)
+        t.Fatalf("lock was orphaned: still held by session %d after release", holder.Int64)
+    }
+}
+
+/** @info Mirrors TestMysqlLock_RefreshCanceledRuntimeContextKeepsHeldLock: a canceled request context is a transient caller-side condition, not a lost lock. Re-acquiring under one must not be mistaken for a verify error and must not RELEASE_LOCK a lock this process still holds. */
+func TestMysqlLock_AcquireCanceledRuntimeContextKeepsHeldLock(t *testing.T) {
+    dsn := os.Getenv("MYSQL_DSN")
+    if "" == dsn {
+        t.Skip("MYSQL_DSN not set; skipping mysql lock integration test")
+    }
+
+    sqldb, openErr := sql.Open("mysql", dsn)
+    if nil != openErr {
+        t.Fatalf("open: %v", openErr)
+    }
+    defer sqldb.Close()
+
+    database := bun.NewDB(sqldb, mysqldialect.New())
+
+    locker := NewLocker(database)
+    name := "melody_lock_acquire_canceled_ctx"
+
+    lock := locker.CreateLock(name, 0)
+
+    acquired, acquireErr := lock.Acquire(newLockRuntime())
+    if nil != acquireErr || false == acquired {
+        t.Fatalf("expected acquire to succeed: %v %v", acquired, acquireErr)
+    }
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    reacquired, reacquireErr := lock.Acquire(newLockRuntimeWithContext(cancelledContext))
+    if nil != reacquireErr || false == reacquired {
+        t.Fatalf("expected the re-acquire on a canceled context to report the lock as still held: %v %v", reacquired, reacquireErr)
+    }
+
+    var holder sql.NullInt64
+    if holderErr := sqldb.QueryRowContext(context.Background(), "SELECT IS_USED_LOCK(?)", name).Scan(&holder); nil != holderErr {
+        t.Fatalf("read lock holder: %v", holderErr)
+    }
+    if false == holder.Valid {
+        t.Fatal("a canceled request context released a lock this process still held")
+    }
+
+    if releaseErr := lock.Release(newLockRuntime()); nil != releaseErr {
+        t.Fatalf("release: %v", releaseErr)
     }
 }
 
@@ -295,6 +377,25 @@ func TestMysqlLock_ReentrantAcquireDetectsLostLockWithoutRefresh(t *testing.T) {
         t.Logf("kill returned (tolerated): %v", killErr)
     }
 
+    /* @important KILL only flags the session; the GET_LOCK stays held until that session actually ends. Acquire probes with GET_LOCK(?, 0), which never waits, so the competitor below must not run before the kill has landed. */
+    lockFreed := false
+    for attempt := 0; attempt < 100; attempt++ {
+        var free sql.NullInt64
+        if freeErr := sqldb.QueryRowContext(runtimeInstance.Context(), "SELECT IS_FREE_LOCK(?)", name).Scan(&free); nil != freeErr {
+            t.Fatalf("read lock availability: %v", freeErr)
+        }
+        if true == free.Valid && 1 == free.Int64 {
+            lockFreed = true
+
+            break
+        }
+
+        time.Sleep(10 * time.Millisecond)
+    }
+    if false == lockFreed {
+        t.Fatalf("the killed session never released the lock")
+    }
+
     competitor := locker.CreateLock(name, 0)
     competitorAcquired, competitorErr := competitor.Acquire(runtimeInstance)
     if nil != competitorErr || false == competitorAcquired {
@@ -369,6 +470,62 @@ func TestNewLocker_DefaultReleaseTimeout(t *testing.T) {
 
     if defaultLockReleaseTimeout != locker.releaseTimeout {
         t.Fatalf("expected default release timeout %s, got %s", defaultLockReleaseTimeout, locker.releaseTimeout)
+    }
+}
+
+func TestBoundedLockName_ShortNamePassesThrough(t *testing.T) {
+    name := "melody:command:something"
+
+    if bounded := boundedLockName(name); bounded != name {
+        t.Fatalf("expected a name within the MySQL limit to pass through unchanged, got %q", bounded)
+    }
+}
+
+/** @info A lock name longer than MySQL's 64-character user-level-lock limit would make GET_LOCK error on every Acquire, so RunExclusive fails closed forever and the wrapped job never runs. boundedLockName must fold such a name onto a form MySQL accepts. */
+func TestBoundedLockName_LongNameFitsMysqlLimit(t *testing.T) {
+    name := "melody:command:" + strings.Repeat("a", 80)
+
+    if mysqlLockNameMaxLength >= utf8.RuneCountInString(name) {
+        t.Fatalf("test precondition: the name must exceed the MySQL limit")
+    }
+
+    bounded := boundedLockName(name)
+
+    if got := utf8.RuneCountInString(bounded); got > mysqlLockNameMaxLength {
+        t.Fatalf("bounded lock name has %d characters, exceeding the MySQL limit of %d", got, mysqlLockNameMaxLength)
+    }
+    if bounded == name {
+        t.Fatalf("expected a name over the limit to be reduced, got the raw name")
+    }
+}
+
+func TestBoundedLockName_DeterministicAndDistinct(t *testing.T) {
+    first := "melody:command:" + strings.Repeat("a", 80)
+    second := "melody:command:" + strings.Repeat("b", 80)
+
+    if boundedLockName(first) != boundedLockName(first) {
+        t.Fatalf("expected boundedLockName to be deterministic")
+    }
+    if boundedLockName(first) == boundedLockName(second) {
+        t.Fatalf("expected different long names to map to different bounded lock names")
+    }
+}
+
+func TestCreateLock_LongNameYieldsMysqlCompatibleLockName(t *testing.T) {
+    locker := NewLocker(newOfflineLockDatabase(t))
+
+    name := "melody:command:" + strings.Repeat("a", 80)
+
+    lock, isMysqlLock := locker.CreateLock(name, 0).(*mysqlLock)
+    if false == isMysqlLock {
+        t.Fatalf("expected a *mysqlLock")
+    }
+
+    if lock.name != name {
+        t.Fatalf("expected the raw name to be retained for diagnostics, got %q", lock.name)
+    }
+    if got := utf8.RuneCountInString(lock.lockName); got > mysqlLockNameMaxLength {
+        t.Fatalf("GET_LOCK would receive a %d-character name, which MySQL rejects", got)
     }
 }
 

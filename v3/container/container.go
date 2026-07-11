@@ -314,7 +314,7 @@ func (instance *container) register(
             map[string]any{
                 "serviceName": serviceName,
             },
-            nil,
+            ErrServiceIdAlreadyRegistered,
         )
     }
 
@@ -368,7 +368,7 @@ func (instance *container) registerType(
                     "serviceType":         canonicalType.String(),
                     "existingServiceName": existingServiceNames[0],
                 },
-                nil,
+                ErrServiceTypeAlreadyRegistered,
             )
         }
 
