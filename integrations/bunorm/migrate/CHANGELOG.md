@@ -47,6 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v1.2.0...HEAD
 
 [v1.2.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v1.1.1...integrations/bunorm/migrate/v1.2.0
+
 [v1.1.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v1.1.0...integrations/bunorm/migrate/v1.1.1
 
 [v1.1.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v1.0.0...integrations/bunorm/migrate/v1.1.0

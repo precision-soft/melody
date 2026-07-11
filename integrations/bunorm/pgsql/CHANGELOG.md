@@ -83,6 +83,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v1.1.4...HEAD
 
 [v1.1.4]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v1.1.3...integrations/bunorm/pgsql/v1.1.4
+
 [v1.1.3]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v1.1.2...integrations/bunorm/pgsql/v1.1.3
 
 [v1.1.2]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v1.1.1...integrations/bunorm/pgsql/v1.1.2

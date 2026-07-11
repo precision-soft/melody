@@ -378,7 +378,6 @@ func TestHttpClientConcurrentSettersAndRequests(t *testing.T) {
     waitGroup.Wait()
 }
 
-
 /** @info net/http strips only Authorization/Cookie, and only across domains. A client-configured api-key header would otherwise be handed to whatever host the first server redirects to — a host that server's operator chooses. */
 func TestHttpClient_StripsCredentialHeadersOnCrossOriginRedirect(t *testing.T) {
     var receivedApiKey string

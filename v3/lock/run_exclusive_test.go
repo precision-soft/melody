@@ -241,8 +241,8 @@ func TestRunExclusive_ReleasesEvenWhenCallerContextIsCancelled(t *testing.T) {
 /* recordingRefreshLocker captures the ttl each Refresh is asked to write, so a test can assert the lease
 margin the refresher gives a lease-style backend. */
 type recordingRefreshLocker struct {
-    inner        lockcontract.Locker
-    refreshTtl   chan time.Duration
+    inner      lockcontract.Locker
+    refreshTtl chan time.Duration
 }
 
 func (instance *recordingRefreshLocker) CreateLock(name string, ttl time.Duration) lockcontract.Lock {
@@ -308,9 +308,9 @@ func (instance *blockingRefreshLock) Refresh(runtimeInstance runtimecontract.Run
 /** @info A lease-style backend rewrites the lease to now+ttl on Refresh. Handing it the probe interval itself would renew the lease exactly as it expires, so every probe races its own expiry: fn is cancelled spuriously and the lapsed lease lets a second instance run alongside it. The probe must renew for a multiple of its own cadence, and the derived interval must never reach time.NewTicker as zero. */
 func TestResolveRefreshSchedule(t *testing.T) {
     for _, testCase := range []struct {
-        name            string
-        ttl             time.Duration
-        wantedInterval  time.Duration
+        name             string
+        ttl              time.Duration
+        wantedInterval   time.Duration
         wantedRefreshTtl time.Duration
     }{
         {"positive ttl refreshes at half of it", 30 * time.Second, 15 * time.Second, 30 * time.Second},

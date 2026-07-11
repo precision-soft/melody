@@ -104,6 +104,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [Unreleased]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.2.1...HEAD
 
 [v3.2.1]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.2.0...integrations/amqp/v3.2.1
+
 [v3.2.0]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.1.0...integrations/amqp/v3.2.0
 
 [v3.1.0]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.0.0...integrations/amqp/v3.1.0

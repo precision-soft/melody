@@ -208,10 +208,10 @@ func isEnabledForGroup(definition *HttpMiddlewareDefinition, group string) bool 
 
 type definitionNode struct {
     /* definition drives ordering (priority, before/after edges); duplicates share a name and therefore a node, so every one of them is kept here and emitted together at the node's position — keying the map on the name alone silently dropped all but the last, defeating allowDuplicates */
-    definition  *HttpMiddlewareDefinition
-    duplicates  []*HttpMiddlewareDefinition
-    inDegree    int
-    out         []string
+    definition *HttpMiddlewareDefinition
+    duplicates []*HttpMiddlewareDefinition
+    inDegree   int
+    out        []string
 }
 
 func orderDefinitions(definitions []*HttpMiddlewareDefinition) ([]*HttpMiddlewareDefinition, []string, bool) {

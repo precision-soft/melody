@@ -1,9 +1,9 @@
 package config
 
 import (
-    "strings"
     "os"
     "path/filepath"
+    "strings"
     "testing"
 
     configcontract "github.com/precision-soft/melody/v3/config/contract"

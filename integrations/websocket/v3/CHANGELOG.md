@@ -48,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [Unreleased]: https://github.com/precision-soft/melody/compare/integrations/websocket/v3.1.2...HEAD
 
 [v3.1.2]: https://github.com/precision-soft/melody/compare/integrations/websocket/v3.1.1...integrations/websocket/v3.1.2
+
 [v3.1.1]: https://github.com/precision-soft/melody/compare/integrations/websocket/v3.1.0...integrations/websocket/v3.1.1
 
 [v3.1.0]: https://github.com/precision-soft/melody/compare/integrations/websocket/v3.0.0...integrations/websocket/v3.1.0

@@ -105,6 +105,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.3.0...HEAD
 
 [v1.3.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.2.2...integrations/cron/v1.3.0
+
 [v1.2.2]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.2.1...integrations/cron/v1.2.2
 
 [v1.2.1]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.2.0...integrations/cron/v1.2.1

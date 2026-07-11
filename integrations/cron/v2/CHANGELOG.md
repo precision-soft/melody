@@ -44,6 +44,7 @@ Identical to the corresponding v1 release except: module path is `github.com/pre
 [Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.3.0...HEAD
 
 [v2.3.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.2.2...integrations/cron/v2.3.0
+
 [v2.2.2]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.2.1...integrations/cron/v2.2.2
 
 [v2.2.1]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.2.0...integrations/cron/v2.2.1

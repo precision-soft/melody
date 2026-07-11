@@ -171,10 +171,10 @@ func (instance *connectionLiveness) cannotAnswer(window time.Duration, callbackG
     now := instance.elapsed()
 
     if 0 < instance.callbacksRunning.Load() {
-        return now - time.Duration(instance.callbackStartedOffset.Load()) < callbackGrace
+        return now-time.Duration(instance.callbackStartedOffset.Load()) < callbackGrace
     }
 
-    return now - time.Duration(instance.lastActivityOffset.Load()) < window
+    return now-time.Duration(instance.lastActivityOffset.Load()) < window
 }
 
 /* @important keepalive ping loop: a half-open or silently-stalled client cannot be detected by reads alone on a broadcast stream that never expects client frames, so without this an idle connection would pin a goroutine forever. Each tick sends a ping bounded by the same interval; the read loop delivers the pong, so a still-connected client keeps the connection alive while an unresponsive one trips the timeout and cancels the connection context, unwinding the handler and read loop.
@@ -217,7 +217,6 @@ func pingLoop(
         }
     }
 }
-
 
 /* @important the read goroutine runs outside the kernel's panic recovery, so a panic in the user OnMessage callback would crash the whole process; recover it, log it, and signal the connection to close. */
 func dispatchOnMessage(

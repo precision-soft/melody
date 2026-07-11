@@ -245,9 +245,9 @@ func TestManagerRegistry_OpenOfOneManagerDoesNotBlockCacheHitsForAnother(t *test
 }
 
 /*
-    A panic inside Provider.Open must still delete the in-flight entry and close its
-    done channel, so that a caller that coalesced onto the same open is released with
-    an error instead of blocking forever on a done channel that is never closed.
+   A panic inside Provider.Open must still delete the in-flight entry and close its
+   done channel, so that a caller that coalesced onto the same open is released with
+   an error instead of blocking forever on a done channel that is never closed.
 */
 func TestManagerRegistry_PanicDuringOpenReleasesCoalescedWaiters(t *testing.T) {
     logger := &fakeLogger{}
@@ -288,8 +288,8 @@ func TestManagerRegistry_PanicDuringOpenReleasesCoalescedWaiters(t *testing.T) {
     }()
 
     /*
-        Give the coalescing caller time to observe the in-flight open and park on
-        the done channel before the first open is released to panic.
+       Give the coalescing caller time to observe the in-flight open and park on
+       the done channel before the first open is released to panic.
     */
     time.Sleep(100 * time.Millisecond)
 
@@ -308,9 +308,9 @@ func TestManagerRegistry_PanicDuringOpenReleasesCoalescedWaiters(t *testing.T) {
 }
 
 /*
-    closeRaceDialect is a minimal bun dialect assembled only from packages that
-    already ship inside the bun core module, so a real *bun.DB can be built for the
-    close-during-open regression without pulling in a database driver dependency.
+   closeRaceDialect is a minimal bun dialect assembled only from packages that
+   already ship inside the bun core module, so a real *bun.DB can be built for the
+   close-during-open regression without pulling in a database driver dependency.
 */
 type closeRaceDialect struct {
     schema.BaseDialect
@@ -360,10 +360,10 @@ func (instance *closeRaceDialect) DefaultSchema() string {
 }
 
 /*
-    closeRaceConnector signals its closeSignal channel exactly once when the *sql.DB
-    it backs is closed. database/sql invokes connector.Close from DB.Close when the
-    connector implements io.Closer, which lets the test observe that the registry
-    closed the freshly opened database rather than leaking its pool.
+   closeRaceConnector signals its closeSignal channel exactly once when the *sql.DB
+   it backs is closed. database/sql invokes connector.Close from DB.Close when the
+   connector implements io.Closer, which lets the test observe that the registry
+   closed the freshly opened database rather than leaking its pool.
 */
 type closeRaceConnector struct {
     closeSignal chan struct{}
@@ -395,8 +395,8 @@ func (instance *closeRaceDriver) Open(name string) (driver.Conn, error) {
 }
 
 /*
-    newCloseRaceDatabase returns a real *bun.DB whose Close is observable through the
-    returned channel, which is closed the moment the underlying database is closed.
+   newCloseRaceDatabase returns a real *bun.DB whose Close is observable through the
+   returned channel, which is closed the moment the underlying database is closed.
 */
 func newCloseRaceDatabase() (*bun.DB, chan struct{}) {
     closeSignal := make(chan struct{})
@@ -426,10 +426,10 @@ var (
 )
 
 /*
-    A Close that lands while a Provider.Open is still in flight must not leak the
-    connection pool of the database that open is about to return. The registry has to
-    close that freshly opened database and refuse to memoize it, handing the caller
-    ErrManagerRegistryClosed instead of a live manager.
+   A Close that lands while a Provider.Open is still in flight must not leak the
+   connection pool of the database that open is about to return. The registry has to
+   close that freshly opened database and refuse to memoize it, handing the caller
+   ErrManagerRegistryClosed instead of a live manager.
 */
 func TestManagerRegistry_CloseDuringInFlightOpenClosesDatabaseAndRefuses(t *testing.T) {
     logger := &fakeLogger{}
@@ -477,10 +477,10 @@ func TestManagerRegistry_CloseDuringInFlightOpenClosesDatabaseAndRefuses(t *test
     }()
 
     /*
-        Give Close time to take the registry lock and mark the registry closed before
-        the parked open is released. The open runs off-lock, so Close returns
-        immediately and wins the flag; the resumed open then observes a closed
-        registry.
+       Give Close time to take the registry lock and mark the registry closed before
+       the parked open is released. The open runs off-lock, so Close returns
+       immediately and wins the flag; the resumed open then observes a closed
+       registry.
     */
     time.Sleep(100 * time.Millisecond)
 

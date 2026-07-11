@@ -3,6 +3,7 @@ package config
 import (
     "time"
 
+    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
     "github.com/precision-soft/melody/v3/.example/handler"
     handlercategory "github.com/precision-soft/melody/v3/.example/handler/category"
     handlercurrency "github.com/precision-soft/melody/v3/.example/handler/currency"
@@ -16,7 +17,6 @@ import (
     handlertwofactor "github.com/precision-soft/melody/v3/.example/handler/twofactor"
     handleruser "github.com/precision-soft/melody/v3/.example/handler/user"
     handlerwebsocketdemo "github.com/precision-soft/melody/v3/.example/handler/websocketdemo"
-    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
     "github.com/precision-soft/melody/v3/.example/route"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodyhttp "github.com/precision-soft/melody/v3/http"
