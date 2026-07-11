@@ -3,7 +3,7 @@ module github.com/precision-soft/melody/integrations/rueidis/v3
 go 1.25.0
 
 require (
-	github.com/precision-soft/melody/v3 v3.9.0
+	github.com/precision-soft/melody/v3 v3.10.0
 	github.com/redis/rueidis v1.0.71
 )
 
