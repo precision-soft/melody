@@ -289,7 +289,7 @@ func (instance *markSentFailingRepository) MarkSent(_ context.Context, _ int64, 
     return errors.New("mark sent failed")
 }
 
-/* regression for the batch-mate false-poison data-loss fix (CR #84): delivery_attempts is charged per row at delivery time, not for the whole batch at claim time. So a row the relay never reaches — here the second row, because the first row's delivery aborts the run — is not charged a delivery attempt it never received, and therefore never climbs toward the poison cap while merely waiting behind a crashing batch-mate. Pre-fix the claim incremented the whole batch, so the untouched second row would already sit at 1. */
+/* delivery_attempts is charged per row at delivery time, not for the whole batch at claim time. So a row the relay never reaches — here the second row, because the first row's delivery aborts the run — is not charged a delivery attempt it never received, and therefore never climbs toward the poison cap while merely waiting behind a crashing batch-mate. */
 func TestRelay_UnreachedBatchMateIsNotChargedDeliveryAttempt(t *testing.T) {
     repository := &markSentFailingRepository{fakeRepository{due: []Pending{
         {Id: 1, TypeName: "string", Payload: []byte("a"), Attempts: 0, DeliveryAttempts: 0},

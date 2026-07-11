@@ -35,7 +35,13 @@ func NewForwardedClientIpResolver(policy httpcontract.ForwardedHeadersPolicy) Cl
             }
 
             /* the first untrusted hop from the right is the client the nearest trusted proxy attested; anything further left is client-controlled and must not be believed */
-            hopAddress, hopAddressErr := netip.ParseAddr(hop)
+            hopHostString := hop
+            if hostFromSplit, _, splitErr := net.SplitHostPort(hopHostString); nil == splitErr && "" != strings.TrimSpace(hostFromSplit) {
+                /* proxies such as IIS/ARR and Azure Application Gateway append host:port to X-Forwarded-For; strip the port exactly as the trusted-hop check does so the real client is not mistaken for garbage */
+                hopHostString = hostFromSplit
+            }
+
+            hopAddress, hopAddressErr := netip.ParseAddr(hopHostString)
             if nil != hopAddressErr {
                 /* an unparseable entry means the chain is garbage from here on; never return attacker-shaped input as a limiter key */
                 return DefaultClientIp(request)
@@ -95,6 +101,11 @@ func isTrustedProxyAddress(hostString string, trustedProxyList []string) bool {
 
         trustedPrefix, trustedPrefixErr := netip.ParsePrefix(trimmedTrustedProxyString)
         if nil == trustedPrefixErr {
+            /* a mapped prefix (::ffff:10.0.0.0/104) names the IPv4 range it embeds; unmap it so it still Contains the unmapped host — netip treats the two address families as unequal otherwise */
+            if true == trustedPrefix.Addr().Is4In6() && trustedPrefix.Bits() >= 96 {
+                trustedPrefix = netip.PrefixFrom(trustedPrefix.Addr().Unmap(), trustedPrefix.Bits()-96)
+            }
+
             if true == trustedPrefix.Contains(hostAddress) {
                 return true
             }
@@ -106,6 +117,9 @@ func isTrustedProxyAddress(hostString string, trustedProxyList []string) bool {
         if nil != trustedAddressErr {
             continue
         }
+
+        /* a mapped exact entry (::ffff:10.0.0.5) is the IPv4 address it names; unmap it so it still equals the unmapped host */
+        trustedAddress = trustedAddress.Unmap()
 
         if trustedAddress == hostAddress {
             return true

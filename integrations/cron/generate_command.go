@@ -181,6 +181,9 @@ func (instance *GenerateCommand) resolveRunOptions(
     }
     options.template = template
 
+    /* @info the crontab-no-user dialect renders no user column at all (busybox crond and per-user crontabs reject one), so a user is never needed to place the heartbeat line — demanding one turned a valid configuration into a hard error */
+    templateRendersUserColumn := TemplateNameCrontabNoUser != template.Name()
+
     outputPath := resolveDefault(commandContext, configuration, flagNameOutput, ParameterDestinationFile)
     if "" == outputPath {
         return nil, exception.NewError(
@@ -249,7 +252,7 @@ func (instance *GenerateCommand) resolveRunOptions(
     options.heartbeatRequested = commandContext.StringSlice(flagNameHeartbeatDestination)
     options.heartbeatEnabled = 0 < len(options.heartbeatCommand) || "" != options.heartbeatPath
 
-    if true == options.heartbeatEnabled && "" == options.defaultUserName {
+    if true == options.heartbeatEnabled && true == templateRendersUserColumn && "" == options.defaultUserName {
         return nil, exception.NewError(
             "cron: heartbeat is configured but no user is set; pass --user, register the melody.cron.user parameter, or remove the heartbeat",
             exceptioncontract.Context{

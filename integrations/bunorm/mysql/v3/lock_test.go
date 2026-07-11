@@ -5,8 +5,10 @@ import (
     "database/sql"
     "os"
     "strconv"
+    "strings"
     "testing"
     "time"
+    "unicode/utf8"
 
     _ "github.com/go-sql-driver/mysql"
     "github.com/precision-soft/melody/v3/container"
@@ -468,6 +470,62 @@ func TestNewLocker_DefaultReleaseTimeout(t *testing.T) {
 
     if defaultLockReleaseTimeout != locker.releaseTimeout {
         t.Fatalf("expected default release timeout %s, got %s", defaultLockReleaseTimeout, locker.releaseTimeout)
+    }
+}
+
+func TestBoundedLockName_ShortNamePassesThrough(t *testing.T) {
+    name := "melody:command:something"
+
+    if bounded := boundedLockName(name); bounded != name {
+        t.Fatalf("expected a name within the MySQL limit to pass through unchanged, got %q", bounded)
+    }
+}
+
+/** @info A lock name longer than MySQL's 64-character user-level-lock limit would make GET_LOCK error on every Acquire, so RunExclusive fails closed forever and the wrapped job never runs. boundedLockName must fold such a name onto a form MySQL accepts. */
+func TestBoundedLockName_LongNameFitsMysqlLimit(t *testing.T) {
+    name := "melody:command:" + strings.Repeat("a", 80)
+
+    if mysqlLockNameMaxLength >= utf8.RuneCountInString(name) {
+        t.Fatalf("test precondition: the name must exceed the MySQL limit")
+    }
+
+    bounded := boundedLockName(name)
+
+    if got := utf8.RuneCountInString(bounded); got > mysqlLockNameMaxLength {
+        t.Fatalf("bounded lock name has %d characters, exceeding the MySQL limit of %d", got, mysqlLockNameMaxLength)
+    }
+    if bounded == name {
+        t.Fatalf("expected a name over the limit to be reduced, got the raw name")
+    }
+}
+
+func TestBoundedLockName_DeterministicAndDistinct(t *testing.T) {
+    first := "melody:command:" + strings.Repeat("a", 80)
+    second := "melody:command:" + strings.Repeat("b", 80)
+
+    if boundedLockName(first) != boundedLockName(first) {
+        t.Fatalf("expected boundedLockName to be deterministic")
+    }
+    if boundedLockName(first) == boundedLockName(second) {
+        t.Fatalf("expected different long names to map to different bounded lock names")
+    }
+}
+
+func TestCreateLock_LongNameYieldsMysqlCompatibleLockName(t *testing.T) {
+    locker := NewLocker(newOfflineLockDatabase(t))
+
+    name := "melody:command:" + strings.Repeat("a", 80)
+
+    lock, isMysqlLock := locker.CreateLock(name, 0).(*mysqlLock)
+    if false == isMysqlLock {
+        t.Fatalf("expected a *mysqlLock")
+    }
+
+    if lock.name != name {
+        t.Fatalf("expected the raw name to be retained for diagnostics, got %q", lock.name)
+    }
+    if got := utf8.RuneCountInString(lock.lockName); got > mysqlLockNameMaxLength {
+        t.Fatalf("GET_LOCK would receive a %d-character name, which MySQL rejects", got)
     }
 }
 

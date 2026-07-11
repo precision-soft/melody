@@ -148,3 +148,33 @@ func TestForwardedClientIpResolver_UnmapsIpv4MappedAddresses(t *testing.T) {
         t.Fatalf("an ipv4-mapped chain must key the same bucket as its plain form: %q vs %q", mapped, plain)
     }
 }
+
+/** @info Proxies such as IIS/ARR and Azure Application Gateway append host:port to X-Forwarded-For. The untrusted client hop must be resolved to its bare address, not rejected as garbage — which would collapse every client into the proxy's own rate-limit bucket. */
+func TestForwardedClientIpResolver_ResolvesPortedForwardedHop(t *testing.T) {
+    resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
+
+    ip := resolver(forwardedRequest("10.0.0.1:5555", "203.0.113.7:54321"))
+    if "203.0.113.7" != ip {
+        t.Fatalf("expected the ported forwarded client, got: %s", ip)
+    }
+}
+
+/** @info A dual-stack proxy may write its hop as an IPv4-mapped address (::ffff:10.0.0.5) and the operator lists that literal in the trusted proxy list. The mapped trusted entry must still match the unmapped hop, otherwise the trusted hop is treated as the first untrusted client and the proxy's own address leaks as the limiter key. */
+func TestForwardedClientIpResolver_MatchesMappedTrustedExactEntry(t *testing.T) {
+    resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8", "::ffff:192.168.1.1"))
+
+    ip := resolver(forwardedRequest("10.0.0.1:5555", "203.0.113.7, ::ffff:192.168.1.1"))
+    if "203.0.113.7" != ip {
+        t.Fatalf("expected the client past the mapped trusted hop, got: %s", ip)
+    }
+}
+
+/** @info A trusted proxy CIDR written in IPv4-mapped form (::ffff:192.168.0.0/120) must still contain the unmapped direct peer, otherwise the peer is rejected as untrusted and the forwarded chain is never walked. */
+func TestForwardedClientIpResolver_MatchesMappedTrustedPrefix(t *testing.T) {
+    resolver := NewForwardedClientIpResolver(trustingPolicy("::ffff:192.168.0.0/120"))
+
+    ip := resolver(forwardedRequest("192.168.0.5:5555", "203.0.113.7"))
+    if "203.0.113.7" != ip {
+        t.Fatalf("expected the client behind the mapped trusted prefix, got: %s", ip)
+    }
+}

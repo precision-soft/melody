@@ -64,6 +64,10 @@ func NewLeaderGateWithOptions(
             resolved.RefreshInterval = ttl / 2
         }
     }
+    if 0 < ttl && resolved.RefreshInterval > ttl/2 {
+        /* a renewal cadence slower than half the lease lets the lease lapse before the first refresh, so a second instance can acquire and both report leadership: clamp an over-long override down to the safe derived cadence */
+        resolved.RefreshInterval = ttl / 2
+    }
     if minimumRefreshInterval > resolved.RefreshInterval {
         resolved.RefreshInterval = minimumRefreshInterval
     }
@@ -121,10 +125,7 @@ func (instance *LeaderGate) Run(runtimeInstance runtimecontract.Runtime) error {
                 return nil
             }
 
-            campaignBackoff = campaignBackoff * 2
-            if campaignBackoff > defaultMaxCampaignBackoff || 0 >= campaignBackoff {
-                campaignBackoff = defaultMaxCampaignBackoff
-            }
+            campaignBackoff = nextCampaignBackoff(campaignBackoff, instance.options.RetryInterval)
 
             continue
         }
@@ -184,6 +185,21 @@ func (instance *LeaderGate) lead(runtimeInstance runtimecontract.Runtime, lock l
             }
         }
     }
+}
+
+/* nextCampaignBackoff doubles the campaign backoff after an acquire error and caps it, but never below the configured RetryInterval: a RetryInterval slower than defaultMaxCampaignBackoff must never make outage retries faster than the healthy campaign cadence (which would hammer an already-struggling store and spam OnCampaignError). It also floors an overflowed doubling back to the cap. */
+func nextCampaignBackoff(current time.Duration, retryInterval time.Duration) time.Duration {
+    backoffCap := defaultMaxCampaignBackoff
+    if retryInterval > backoffCap {
+        backoffCap = retryInterval
+    }
+
+    next := current * 2
+    if next > backoffCap || 0 >= next {
+        next = backoffCap
+    }
+
+    return next
 }
 
 func sleepUnlessDone(runContext interface{ Done() <-chan struct{} }, delay time.Duration) bool {

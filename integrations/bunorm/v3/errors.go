@@ -15,3 +15,5 @@ var ErrProviderDefinitionNotFound = errors.New("provider definition not found")
 var ErrProviderIsRequired = errors.New("provider is required")
 
 var ErrLoggerIsRequired = errors.New("logger is required")
+
+var ErrManagerRegistryClosed = errors.New("manager registry is closed")

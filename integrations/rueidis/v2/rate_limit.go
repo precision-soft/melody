@@ -53,9 +53,13 @@ func WithRateLimiterOnError(onError func(error)) RateLimiterOption {
     }
 }
 
-/* WithRateLimiterCallTimeout bounds the store round trip on the plain Allow path, which carries no request context; AllowWithRuntime uses the runtime context instead. */
+/* WithRateLimiterCallTimeout bounds the store round trip on the plain Allow path, which carries no request context; AllowWithRuntime uses the runtime context instead. A non-positive timeout falls back to the default, following this package's zero-means-default convention, so a config-sourced unset value can never build an already-cancelled context that forces every call onto the store-failure path. */
 func WithRateLimiterCallTimeout(timeout time.Duration) RateLimiterOption {
     return func(instance *RateLimiter) {
+        if 0 >= timeout {
+            timeout = defaultRateLimiterCallTimeout
+        }
+
         instance.callTimeout = timeout
     }
 }

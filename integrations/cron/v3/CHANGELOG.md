@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.4.0] - 2026-07-11 - User-less Crontab Template and Heartbeat Gating
+
 ### Added
 
 - `template_crontab.go`, `template.go` — new built-in template `crontab-no-user`: the user-less crontab dialect for busybox crond (alpine images) and per-user `crontab` files, which reject the `/etc/cron.d` user column the default `crontab` template emits — previously consumers cut the column with `sed` in the image build. Select it with `--template=crontab-no-user` or the `melody.cron.template` parameter; the user parameter/flag is ignored entirely in this dialect (no per-entry or heartbeat user required), everything else — schedules, log redirects, heartbeat, validation of forbidden characters — is identical. The `/etc/cron.d` template and the k8s template are unchanged.
@@ -52,8 +54,9 @@ Identical to the corresponding v1 release except: module path is `github.com/pre
 
 Identical to the corresponding v1 release except: module path is `github.com/precision-soft/melody/integrations/cron/v3`; dependency pinned to `github.com/precision-soft/melody/v3`. See the [v1 changelog](../CHANGELOG.md#v100---2026-05-16---initial-release--cron-integration) for the full change list.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.3.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.4.0...HEAD
 
+[v3.4.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.3.1...integrations/cron/v3.4.0
 [v3.3.1]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.3.0...integrations/cron/v3.3.1
 
 [v3.3.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.2.0...integrations/cron/v3.3.0

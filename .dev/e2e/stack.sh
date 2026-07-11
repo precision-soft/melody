@@ -69,11 +69,26 @@ EXCLUSIVE_OUTPUT_STRING="$(
         go run . example:exclusive:demo --hold 4s > /tmp/exclusive-first.log 2>&1 &
         FIRST_PID=\$!
         # wait for the holder to be demonstrably inside the command body: a fixed sleep races the go build cache, and a
-        # contender that starts after the holder already released proves nothing about mutual exclusion
-        for _ in \$(seq 1 150); do
-            grep -q 'exclusive tick: started' /tmp/exclusive-first.log 2>/dev/null && break
+        # contender that starts after the holder already released proves nothing about mutual exclusion. On a COLD build
+        # cache the first 'go run .' compiles the whole framework, so the budget has to cover that; if the marker still
+        # never appears we must say so distinctly and NOT launch the contender — otherwise a build delay is misreported
+        # as a mutual-exclusion violation the lock never committed
+        HOLDER_MARKER_SEEN=0
+        for _ in \$(seq 1 900); do
+            if grep -q 'exclusive tick: started' /tmp/exclusive-first.log 2>/dev/null; then
+                HOLDER_MARKER_SEEN=1
+                break
+            fi
             sleep 0.2
         done
+        if [ \"\${HOLDER_MARKER_SEEN}\" -ne 1 ]; then
+            echo 'holder_marker_timeout=1'
+            echo '--- first ---'
+            cat /tmp/exclusive-first.log
+            kill \${FIRST_PID} 2>/dev/null || true
+            wait \${FIRST_PID} 2>/dev/null || true
+            exit 0
+        fi
         go run . example:exclusive:demo --hold 1s > /tmp/exclusive-second.log 2>&1
         SECOND_STATUS=\$?
         wait \${FIRST_PID}
@@ -89,6 +104,14 @@ EXCLUSIVE_OUTPUT_STRING="$(
 )"
 
 printf '%s\n' "${EXCLUSIVE_OUTPUT_STRING}"
+
+# the holder never printed the start marker within the wait budget (a cold go build cache still compiling): the
+# contender was NOT launched, so nothing about mutual exclusion was exercised. Fail with a distinct diagnostic
+# instead of letting the empty output trip the exclusivity assertions below and blame the lock primitive
+if printf '%s' "${EXCLUSIVE_OUTPUT_STRING}" | grep -q 'holder_marker_timeout=1'; then
+    check_fail "the holder never printed the start marker within the wait budget (cold build cache still compiling?) — mutual exclusion was not exercised, this is not a lock failure"
+    section_end "EXCLUSIVE COMMAND ACROSS TWO INSTANCES" "success" "${TAG_VALIDATE}" "e2e"
+else
 
 STARTED_COUNT_INTEGER="$(printf '%s' "${EXCLUSIVE_OUTPUT_STRING}" | grep -c 'exclusive tick: started' || true)"
 
@@ -126,6 +149,8 @@ fi
 
 section_end "EXCLUSIVE COMMAND ACROSS TWO INSTANCES" "success" "${TAG_VALIDATE}" "e2e"
 
+fi
+
 # ---------------------------------------------------------------------------------------------------
 # PROCESS ROLE — default, flag, .env, precedence, validation
 # ---------------------------------------------------------------------------------------------------
@@ -137,6 +162,11 @@ restore_example_env_local() {
 }
 
 trap restore_example_env_local EXIT
+
+# a prior run killed before its EXIT trap ran (SIGKILL, host/terminal death, or a docker failure the trap
+# swallows with || true) can leave MELODY_PROCESS_ROLE=web behind in .env.local on the repo bind mount, which
+# would poison the default-role check below. Clear it first — the same rm -f hygiene the other sections use
+restore_example_env_local
 
 DEFAULT_ROLE_STRING="$(in_example "go run . app:info 2>/dev/null | grep '^process_role:'" || true)"
 if [[ "${DEFAULT_ROLE_STRING}" = *"all"* ]]; then

@@ -7,11 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.2.0] - 2026-07-11 - Named Cipher Compartments and Manager Registry Hardening
+
 ### Fixed
 
+- `manager_registry.go` — a panic inside `Provider.Open` no longer wedges every later caller. `Manager` opens outside the registry lock and coalesces concurrent callers of the same name onto one open, so when a mis-parameterised provider panicked (the pgsql/mysql providers resolve parameters with `MustGet`) the deletion of the in-flight entry and the close of its done channel were skipped, and a recovered panic left every subsequent `Manager(name)` blocked forever on the never-closed channel. The open is now wrapped so the slot is always cleared and waiters are released with an error, while the panic still propagates to the direct caller.
+- `manager_registry.go` — a database opened while `Close` is running is no longer leaked. `Close` drains the manager map without an open still in flight, so an open completing afterwards memoised its `*bun.DB` into a registry nobody would drain again; `Manager` now closes the freshly opened database and returns `ErrManagerRegistryClosed` when it finds the registry closed on completion.
 - `encrypt/key_provider.go` — `StaticKeyProvider` redacts its keys under `fmt`. The `%#v` and `%v` verbs walk unexported fields, so a provider that reached a debug log — or an error context formatted later — printed every AES master key as raw bytes. This is the redaction class the encrypted column types already close, applied to the material those columns are protected with.
 - `encrypt/encrypted_string.go`, `encrypt/deterministic.go`, `encrypt/encrypted_string_for.go`, `encrypt/deterministic_for.go` — the encrypted column types now redact under the `%#v` verb too. `fmt` reaches for `GoStringer` there and, finding none, printed the underlying string literal, so a struct dumped with `%#v` into a log line or a test failure carried the plaintext — while `%v`, `String()`, `LogValue()` and `MarshalJSON()` all redacted correctly.
 - `encrypt/encrypted_string_for.go` — a `CipherRef` whose `CipherName()` is empty is now rejected instead of resolving the default cipher. The empty name is the default cipher's reserved registry entry, so a marker that returned it silently handed a compartment-bound column the default key — exactly the cross-compartment read the marker type exists to prevent.
+- `encrypt/key_provider.go` — `StaticKeyProvider` implements `fmt.Formatter`, so the numeric verbs (`%d`, `%o`, `%b`, `%c`, `%U`) can no longer bypass its redaction and print the raw AES-256 master key bytes. The `%#v`/`%v` redaction added earlier left these verbs, which walk the underlying byte slice directly, as an open channel.
+- `encrypt/cipher.go` — a client-supplied marker-shaped string naming an unknown key id is sealed under the current key by `Encrypt` rather than stored verbatim, so a row can no longer be poisoned into a permanent key-not-found on a later `Scan` or re-encrypt/decrypt run. Pass-through is granted only to a value that decrypts under a key currently in the key set (a retired key stays in the set until re-encryption completes).
+- `manager_registry.go` — `ManagerRegistry` no longer holds its internal lock across `Provider.Open`. A slow or unreachable database otherwise serialized `Manager`/`Database`/`Close` for every other database and stalled shutdown; concurrent openers of the same manager now coalesce onto one open, and a failed open is not cached.
 
 ### Added
 
@@ -95,8 +102,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dependencies pinned to `github.com/precision-soft/melody/v3` and other v3 module paths
 - README relative path links updated to reflect v3 directory structure
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.1.2...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.2.0...HEAD
 
+[v3.2.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.1.2...integrations/bunorm/v3.2.0
 [v3.1.2]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.1.1...integrations/bunorm/v3.1.2
 
 [v3.1.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.1.0...integrations/bunorm/v3.1.1

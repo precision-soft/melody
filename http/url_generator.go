@@ -75,6 +75,19 @@ func (instance *UrlGenerator) GeneratePath(routeName string, parameters map[stri
                 )
             }
 
+            if true == strings.Contains(value, "/") {
+                /* a ":param" spans exactly one path segment, and matchPath binds it to a single segment (never a "/"-joined remainder); emitting url.PathEscape here would encode the slash as %2F, which the net/http server decodes back to "/" before the kernel matches on request.URL.Path, so the generated link would resolve to a different route or 404. Reject the slash instead of minting a url this router cannot answer, mirroring the single-segment wildcard branch below. */
+                return "", exception.NewError(
+                    "route parameter value cannot contain slash",
+                    exceptioncontract.Context{
+                        "routeName":     routeName,
+                        "parameterName": paramName,
+                        "value":         value,
+                    },
+                    nil,
+                )
+            }
+
             if regex, exists := requirements[paramName]; true == exists {
                 if false == regex.MatchString(value) {
                     return "", exception.NewError(
@@ -181,9 +194,20 @@ func (instance *UrlGenerator) GeneratePath(routeName string, parameters map[stri
                 }
             }
 
+            catchAllSegments := make([]string, 0)
+            if true == hasValue {
+                for _, segment := range strings.Split(value, "/") {
+                    if "" == segment {
+                        continue
+                    }
+
+                    catchAllSegments = append(catchAllSegments, segment)
+                }
+            }
+
             if regex, exists := requirements[wildcardName]; true == exists {
-                /* matchPath tests the same regex against the joined remainder, so a value it would refuse to match must not be generated: the generator would otherwise mint urls this very router answers with a 404 — and a requirement on a catch-all is a whitelist, the one place a traversal like "../../etc/passwd" is meant to be caught */
-                if false == regex.MatchString(strings.Trim(value, "/")) {
+                /* matchPath tests the same regex against the remainder it actually receives — the emitted, non-empty segments joined by "/" — so the check must run on that collapsed remainder, not the merely edge-trimmed value: "a//b" emits "a/b", which matchPath accepts, so the generator must not refuse it. A requirement on a catch-all is a whitelist, the one place a traversal like "../../etc/passwd" is meant to be caught. */
+                if false == regex.MatchString(strings.Join(catchAllSegments, "/")) {
                     return "", exception.NewError(
                         "catch-all parameter requirement failed",
                         exceptioncontract.Context{
@@ -196,23 +220,12 @@ func (instance *UrlGenerator) GeneratePath(routeName string, parameters map[stri
                 }
             }
 
-            if true == hasValue {
-                value = strings.Trim(value, "/")
-                if "" == value {
-                    continue
-                }
-
-                segments := strings.Split(value, "/")
-                for _, segment := range segments {
-                    if "" == segment {
-                        continue
-                    }
-
-                    resultParts = append(resultParts, url.PathEscape(segment))
-                }
+            for _, segment := range catchAllSegments {
+                resultParts = append(resultParts, url.PathEscape(segment))
             }
 
-            continue
+            /* a catch-all consumes the rest of the path: registerRouteInTree and matchPath both treat "*name..." as terminal and ignore any pattern segments that follow it, so the generator must stop here rather than append those trailing literals — emitting them would mint a url this router answers with a 404 */
+            break
         }
 
         resultParts = append(resultParts, part)

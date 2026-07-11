@@ -331,6 +331,40 @@ func TestLeaderGate_ShutdownDoesNotReportACampaignError(t *testing.T) {
     }
 }
 
+/** @info A RetryInterval slower than the one-minute outage cap must not invert into faster-than-healthy retries: doubling the campaign backoff caps at the configured RetryInterval, never below it, so an outage never hammers the store more often than the healthy campaign cadence. */
+func TestLeaderGate_CampaignBackoffNeverFasterThanRetryInterval(t *testing.T) {
+    retryInterval := 5 * time.Minute
+
+    /* Run seeds the backoff with RetryInterval, so start from there and double repeatedly */
+    backoff := retryInterval
+    for attempt := 0; attempt < 8; attempt++ {
+        backoff = nextCampaignBackoff(backoff, retryInterval)
+        if backoff < retryInterval {
+            t.Fatalf("outage backoff %v fell below the healthy retry cadence %v after %d doublings", backoff, retryInterval, attempt+1)
+        }
+    }
+
+    /* a RetryInterval at or under the cap still caps at the cap, never runs away */
+    fast := 5 * time.Second
+    if capped := nextCampaignBackoff(defaultMaxCampaignBackoff, fast); capped != defaultMaxCampaignBackoff {
+        t.Fatalf("expected the backoff to hold at the cap %v, got %v", defaultMaxCampaignBackoff, capped)
+    }
+}
+
+/** @info An override RefreshInterval slower than half the lease ttl would let the lease lapse before the first renewal, so a second instance could acquire and both report leadership. NewLeaderGateWithOptions must clamp such an override down to the safe derived cadence (ttl/2). */
+func TestLeaderGate_RefreshIntervalClampedToHalfTtl(t *testing.T) {
+    locker := NewInMemoryLocker(clock.NewSystemClock())
+
+    ttl := 10 * time.Second
+    gate := NewLeaderGateWithOptions(locker, "worker:refresh-clamp", ttl, LeaderGateOptions{
+        RefreshInterval: 30 * time.Second,
+    })
+
+    if gate.options.RefreshInterval > ttl/2 {
+        t.Fatalf("expected the refresh cadence to be clamped to at most %v, got %v", ttl/2, gate.options.RefreshInterval)
+    }
+}
+
 /* contextSensitiveAcquireLocker fails Acquire with the call's context error, as a real backend does once the context is cancelled. */
 type contextSensitiveAcquireLocker struct {
     entered chan struct{}

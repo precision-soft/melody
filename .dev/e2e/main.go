@@ -163,6 +163,10 @@ func pass(format string, args ...any) {
     fmt.Printf("PASS  "+format+"\n", args...)
 }
 
+func skip(format string, args ...any) {
+    fmt.Printf("SKIP  "+format+"\n", args...)
+}
+
 func fail(format string, args ...any) {
     fmt.Fprintf(os.Stderr, "FAIL  "+format+"\n", args...)
     os.Exit(1)

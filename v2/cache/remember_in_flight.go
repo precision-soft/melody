@@ -54,7 +54,11 @@ func (instance *rememberInFlightCall) AddWaiter() {
     atomic.AddInt64(&instance.waitersCount, 1)
 }
 
-func (instance *rememberInFlightCall) RemoveWaiter() {
+/* RemoveWaiter takes the shard mutex around the decrement and the cancel decision so a late joiner can never slip in between the zero observation and cancelFunc; joiners inspect IsCanceled and call AddWaiter under the same mutex, so serializing here keeps a healthy joiner from inheriting a spurious cancellation. */
+func (instance *rememberInFlightCall) RemoveWaiter(shard *rememberInFlightShard) {
+    shard.mutex.Lock()
+    defer shard.mutex.Unlock()
+
     remainingWaiters := atomic.AddInt64(&instance.waitersCount, -1)
     if 0 != remainingWaiters {
         return

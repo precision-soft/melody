@@ -3,12 +3,15 @@ package middleware
 import (
     "bytes"
     "compress/gzip"
+    "context"
     "errors"
     "io"
     nethttp "net/http"
     "net/http/httptest"
     "strings"
+    "sync"
     "testing"
+    "time"
 
     "github.com/precision-soft/melody/v2/http"
     httpcontract "github.com/precision-soft/melody/v2/http/contract"
@@ -48,6 +51,76 @@ func (instance *failingReader) Read(p []byte) (int, error) {
     }
 
     return n, nil
+}
+
+type closeSignalReader struct {
+    reader     io.Reader
+    closeOnce  sync.Once
+    closedFlag chan struct{}
+}
+
+func newCloseSignalReader(data string) *closeSignalReader {
+    return &closeSignalReader{
+        reader:     bytes.NewReader([]byte(data)),
+        closedFlag: make(chan struct{}),
+    }
+}
+
+func (instance *closeSignalReader) Read(p []byte) (int, error) {
+    return instance.reader.Read(p)
+}
+
+func (instance *closeSignalReader) Close() error {
+    instance.closeOnce.Do(func() { close(instance.closedFlag) })
+    return nil
+}
+
+/** @info When a middleware outer to compression panics after next() returned, the kernel dropped the pipe-backed response without closing it, so the gzip goroutine blocked forever in pipe.Write and its deferred close of the original body reader (and its descriptor) never ran; tying the pipe reader to request-context cancellation must release it. */
+func TestCompressionMiddleware_ReleasesGzipGoroutineWhenRequestUnwinds(t *testing.T) {
+    config := NewCompressionConfig(6, 16, nil, nil)
+    middleware := CompressionMiddleware(config)
+
+    originalReader := newCloseSignalReader(strings.Repeat("a", 64))
+
+    handler := middleware(
+        func(
+            runtimeInstance runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            response := &http.Response{}
+            response.SetStatusCode(200)
+            responseHeaders := make(nethttp.Header)
+            responseHeaders.Set("Content-Type", "text/plain")
+            response.SetHeaders(responseHeaders)
+            response.SetBodyReader(originalReader)
+
+            return response, nil
+        },
+    )
+
+    requestContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    req := httptest.NewRequest(nethttp.MethodGet, "/test", nil).WithContext(requestContext)
+    req.Header.Set("Accept-Encoding", "gzip")
+
+    resultResponse, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(req))
+    if nil != err {
+        t.Fatalf("expected nil error, got: %v", err)
+    }
+    if "gzip" != resultResponse.Headers().Get("Content-Encoding") {
+        t.Fatalf("expected the response to be compressed, got encoding %q", resultResponse.Headers().Get("Content-Encoding"))
+    }
+
+    /* the pipe-backed body is deliberately never read, mirroring an outer-middleware panic that abandons the response; cancelling the request context must unblock the gzip goroutine so its deferred close of the original reader runs */
+    cancel()
+
+    select {
+    case <-originalReader.closedFlag:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("original body reader was never closed after the request unwound; the gzip goroutine leaked and pinned its descriptor")
+    }
 }
 
 func TestCompressionMiddleware_ReadAllError_ReturnsError(t *testing.T) {

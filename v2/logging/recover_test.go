@@ -113,7 +113,7 @@ func TestEchoExitToStderr_WritesOneLineForNonZeroExit(t *testing.T) {
         t.Fatalf("unexpected read error: %v", readErr)
     }
 
-    /* @important a fatal non-zero exit must leave a visible trace on stderr even when the configured logger writes elsewhere (e.g. a file logger): the pre-fix behavior exited completely silently on the AlreadyLogged path */
+    /* @important a fatal non-zero exit must leave a visible trace on stderr even when the configured logger writes elsewhere (e.g. a file logger), which would otherwise exit completely silently on the AlreadyLogged path */
     if false == strings.Contains(string(output), "melody: exiting with code 1") || false == strings.Contains(string(output), "http server error") {
         t.Fatalf("expected the exit echo line on stderr, got %q", string(output))
     }

@@ -7,9 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.2.1] - 2026-07-11 - Prefetch Clamp, DSN Redaction, and Channel Recovery
+
 ### Fixed
 
+- `connection.go` — `redactDialError` scrubs the `url.EscapeError`/`url.InvalidHostError` cause, not just the URL. `url.Error.Error()` renders the inner error too, so for a password containing a literal `%` the escape triple — the two characters after it — reached the connection-failure log line even after the URL field was redacted.
 - `connection.go` — `redactDsn` fails closed. `net/url` parses a scheme-less dsn such as `guest:secret@host` into a scheme of `guest` with no userinfo at all, so the function returned it verbatim and the password reached the connection-failure log line. A dsn it cannot prove it has stripped is now reported as `(redacted)`.
+- `transport.go` — a configured prefetch above 65535 is clamped to 65535 before `channel.Qos` is called. The prefetch crosses the wire as a `uint16`, so a larger value wrapped (65536 became 0), which RabbitMQ reads as unlimited prefetch — defeating the consumer flow-control cap the setting exists to impose.
+- `connection.go` — a connection failure on a malformed DSN no longer leaks the password. `amqp.DialConfig`'s own `url.Parse` error quotes the full raw DSN, so it is redacted before being wrapped as the exception cause.
+- `transport.go` — a consumer built on a live static connection (no `Dialer`) recovers from a channel-only loss by reopening a fresh channel instead of exiting. A queue deletion, a broker `basic.cancel` or a `PRECONDITION_FAILED` closes only the consume channel; `consumeLoop` previously read the missing dialer as terminal and returned, tearing down the consumer even though the connection was still alive and publishes on the same transport kept succeeding. It now returns only when the connection itself is gone (nil or `IsClosed`) with no dialer to redial, and reopens through the existing reset/backoff path on a live connection; clean shutdown still returns without spinning. The one-shot publish retry gets the same distinction but narrower: a failed publish on a live static connection is retried once on a fresh channel only for a channel-level failure — an unroutable return or a broker nack is never retried, since re-publishing would silently re-drop the message.
 
 ## [v3.2.0] - 2026-07-06 - Message-Id Round-Trip and Bucketed Delay Topology
 
@@ -95,8 +101,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `transport.go`, `server_sent_event_backplane.go` — `resetPublishChannel` is now identity-aware: it closes the cached publish channel only when it is still the one the failing caller used. Two publishers that both failed on the same dead channel could otherwise have the second caller's reset close the healthy channel the first caller had just reopened, turning a recoverable single-retry into a spurious publish error on an otherwise-healthy broker. `publishOnce` now returns the channel it used and `resetPublishChannel` compares identity before closing.
 - `transport.go` — `consumeChannelForAck` now applies the same `IsClosed()` guard as `ensureConsumeChannel`/`ensurePublishChannel`. It returned the cached consume channel without checking whether the broker had closed it, so when a channel-level loss occurred between a delivery and its `Ack`/`Nack` — before the consume loop reset the channel — the acknowledgement was attempted on the already-closed channel. It now treats a non-nil but closed channel as absent and returns the clean `"amqp consume channel is not open"` error, letting the still-unacknowledged message redeliver on the next consume generation (at-least-once preserved).
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.2.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.2.1...HEAD
 
+[v3.2.1]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.2.0...integrations/amqp/v3.2.1
 [v3.2.0]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.1.0...integrations/amqp/v3.2.0
 
 [v3.1.0]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.0.0...integrations/amqp/v3.1.0

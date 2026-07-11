@@ -179,3 +179,33 @@ func TestRateLimiter_AllowWithRuntimeReportsStoreFailure(t *testing.T) {
         t.Fatalf("expected the fail-closed default to deny alongside the returned error")
     }
 }
+
+func TestRateLimiter_NonPositiveCallTimeoutFallsBackToTheDefault(t *testing.T) {
+    /* a non-positive call timeout must not survive verbatim: context.WithTimeout(Background(), 0) is born cancelled, forcing every Allow/Reset onto the store-failure path forever */
+    cases := map[string]time.Duration{
+        "zero":     0,
+        "negative": -1 * time.Second,
+    }
+
+    for name, timeout := range cases {
+        t.Run(name, func(t *testing.T) {
+            instance := &RateLimiter{callTimeout: defaultRateLimiterCallTimeout}
+
+            WithRateLimiterCallTimeout(timeout)(instance)
+
+            if defaultRateLimiterCallTimeout != instance.callTimeout {
+                t.Fatalf("expected a %v call timeout to fall back to the default, got %v", timeout, instance.callTimeout)
+            }
+        })
+    }
+}
+
+func TestRateLimiter_PositiveCallTimeoutIsKept(t *testing.T) {
+    instance := &RateLimiter{callTimeout: defaultRateLimiterCallTimeout}
+
+    WithRateLimiterCallTimeout(750 * time.Millisecond)(instance)
+
+    if 750*time.Millisecond != instance.callTimeout {
+        t.Fatalf("expected a positive call timeout to be kept, got %v", instance.callTimeout)
+    }
+}

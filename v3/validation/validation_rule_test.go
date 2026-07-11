@@ -191,3 +191,24 @@ func TestParseValidationTag_RegexWithLiteralClosingBracketIsAccepted(t *testing.
         t.Fatalf("expected a regex with a literal ']' to parse, got: %v", err)
     }
 }
+
+/** @info A POSIX named class ([[:alpha:]]) carries its own ']' inside the bracket expression; treating that inner ']' as the class close split a valid RE2 pattern at an in-class comma and made the field reject every value. */
+func TestSplitByTopLevelComma_PosixNamedClassKeepsInClassComma(t *testing.T) {
+    parts := splitByTopLevelComma("regex=[[:alpha:],]")
+    if 1 != len(parts) {
+        t.Fatalf("a comma inside a class that carries a POSIX named element must stay protected, got %d parts: %#v", len(parts), parts)
+    }
+    if "regex=[[:alpha:],]" != parts[0] {
+        t.Fatalf("expected the regex value intact, got %#v", parts)
+    }
+}
+
+func TestParseValidationTag_PosixNamedClassRegexParses(t *testing.T) {
+    rules, err := parseValidationTag("regex=[[:alpha:],]")
+    if nil != err {
+        t.Fatalf("a regex with a POSIX named class must parse, got: %v", err)
+    }
+    if 1 != len(rules) || "regex" != rules[0].name || "[[:alpha:],]" != rules[0].params["value"] {
+        t.Fatalf("expected a single regex rule with the POSIX pattern intact, got %#v", rules)
+    }
+}

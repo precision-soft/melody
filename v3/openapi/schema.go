@@ -271,9 +271,68 @@ func addFieldProperty(
     applyValidation(propertySchema, field.Tag.Get("validate"))
     properties[jsonName] = propertySchema
 
-    if true == isRequired(field.Tag.Get("validate")) || true == pointerBoundRequiresPresence(field) {
+    if true == isRequired(field.Tag.Get("validate")) || true == pointerBoundRequiresPresence(field) || true == zeroValueRejectsAbsentProperty(field, propertySchema) {
         *required = append(*required, jsonName)
     }
+}
+
+/* @important validateInternal validates every tagged field even when the request omits the property (v3/validation/validator.go), so the Go zero value is checked against the field's constraints; a constraint the zero value fails turns an omitted property into a 400. The spec must then list the field required, exactly as notBlank/notEmpty (isRequired) and pointer greaterThan/lessThan (pointerBoundRequiresPresence) already do. This covers the remaining absent->zero->reject cases the validator enforces: a min floor of at least 1 on a genuine string rejects "" (the value-less min default is 1), a non-pointer greaterThan bound >= 0 rejects the numeric zero, and a non-pointer lessThan bound <= 0 rejects it too. A min of 0, a negative greaterThan bound, or a positive lessThan bound admits the zero value, so the field stays optional; a malformed bound is left to the unsatisfiable-field handling and not treated as required here. */
+func zeroValueRejectsAbsentProperty(field reflect.StructField, schema *Schema) bool {
+    isPointer := reflect.Ptr == field.Type.Kind()
+
+    for _, rule := range splitRules(field.Tag.Get("validate")) {
+        name, params := splitRule(rule)
+
+        switch name {
+        case "min":
+            if "string" != schema.Type || "" != schema.Format {
+                continue
+            }
+            bound := 1
+            if valueString, exists := params["value"]; true == exists {
+                parsed, parsedOk := parseLeadingInt(valueString)
+                if false == parsedOk {
+                    continue
+                }
+                bound = parsed
+            }
+            if bound >= 1 {
+                return true
+            }
+        case "greaterThan":
+            if true == isPointer || ("integer" != schema.Type && "number" != schema.Type) {
+                continue
+            }
+            bound := 0
+            if valueString, exists := params["value"]; true == exists {
+                parsed, parsedOk := parseLeadingInt(valueString)
+                if false == parsedOk {
+                    continue
+                }
+                bound = parsed
+            }
+            if bound >= 0 {
+                return true
+            }
+        case "lessThan":
+            if true == isPointer || ("integer" != schema.Type && "number" != schema.Type) {
+                continue
+            }
+            bound := 0
+            if valueString, exists := params["value"]; true == exists {
+                parsed, parsedOk := parseLeadingInt(valueString)
+                if false == parsedOk {
+                    continue
+                }
+                bound = parsed
+            }
+            if bound <= 0 {
+                return true
+            }
+        }
+    }
+
+    return false
 }
 
 func pointerBoundRequiresPresence(field reflect.StructField) bool {
@@ -399,9 +458,9 @@ func isRequired(validateTag string) bool {
     return false
 }
 
-/* parseLeadingInt must accept exactly the numeric bound strings the validator's parseIntStrict accepts (validation/validation_rule.go): the openapi mirror decides a field is unsatisfiable when a numeric bound is malformed, so if the two diverged the spec would advertise satisfiability the validator does not honour (or the reverse). Both use the same fmt.Sscanf("%d") acceptance; TestParseLeadingIntMatchesValidator locks the equivalence. Keep them in lockstep — change one only alongside the other and that test. */
-func parseLeadingInt(valueString string) (int64, bool) {
-    var result int64
+/* parseLeadingInt must accept exactly the numeric bound strings the validator's parseIntStrict accepts (validation/validation_rule.go): the openapi mirror decides a field is unsatisfiable when a numeric bound is malformed, so if the two diverged the spec would advertise satisfiability the validator does not honour (or the reverse). Both scan with fmt.Sscanf("%d") into the platform int — the same width parseIntStrict uses — so a bound in the 2^31..2^63-1 range that overflows a 32-bit int is rejected here exactly as the validator rejects it, instead of parsing into a wider int64 and wrapping to a satisfiable facet the validator refuses. TestParseLeadingIntMatchesValidator locks the equivalence. Keep them in lockstep — change one only alongside the other and that test. */
+func parseLeadingInt(valueString string) (int, bool) {
+    var result int
     if _, scanErr := fmt.Sscanf(valueString, "%d", &result); nil != scanErr {
         return 0, false
     }
@@ -417,7 +476,7 @@ func applyValidation(schema *Schema, validateTag string) {
     }
 
     if true == tagHasUnconsumedParameterizedParams(validateTag) {
-        /* @important a parameterizable constraint (min/max/greaterThan/lessThan/regex) that receives parameters without its recognized key ("value", or "pattern"/"value" for regex) fails closed in the validator post-CR85: WithParams returns an error and createConstraintWithParams returns invalid-rule before Constraint.Validate runs, so the field accepts no value of any kind — advertise it unsatisfiable, mirroring tagHasParamsOnNonParameterizable for the parameterizable constraints. A bare value-less constraint (no parameters at all) still resolves to the registered default and is handled by the per-case branches below. */
+        /* @important a parameterizable constraint (min/max/greaterThan/lessThan/regex) that receives parameters without its recognized key ("value", or "pattern"/"value" for regex) fails closed in the validator: WithParams returns an error and createConstraintWithParams returns invalid-rule before Constraint.Validate runs, so the field accepts no value of any kind — advertise it unsatisfiable, mirroring tagHasParamsOnNonParameterizable for the parameterizable constraints. A bare value-less constraint (no parameters at all) still resolves to the registered default and is handled by the per-case branches below. */
         markFieldUnsatisfiable(schema)
         return
     }
@@ -458,8 +517,8 @@ func applyValidation(schema *Schema, validateTag string) {
                 schema.Format = "email"
             }
         case "min":
-            /* @important known limitation: a length min/max on a NON-string field is mirrored only where cheaply provable unsatisfiable — an unparseable bound and a below-minimum max on integer/number/boolean (below). A valid-but-rejecting bound on a numeric/array/map/$ref field is left advertised as satisfiable: precise mirroring would need per-kind, per-int-width stringification-length modelling not worth it for an already-misconfigured tag. */
-            if "string" == schema.Type {
+            /* @important known limitation: a length min/max on a NON-string field is mirrored only where cheaply provable unsatisfiable — an unparseable bound and a below-minimum max on integer/number/boolean (below). A valid-but-rejecting bound on a numeric/array/map/$ref field is left advertised as satisfiable: precise mirroring would need per-kind, per-int-width stringification-length modelling not worth it for an already-misconfigured tag. The "" == schema.Format guard restricts the length facet to a genuine string: a []byte renders as a string with format byte and time.Time as a date-time string, but the validator's MinLength/MaxLength measure fmt.Sprintf("%v", value) (e.g. "[1 2 3]" for a []byte), not the base64/date-time text, so a facet here would over-constrain those fields — mirror the email branch and stay off them. */
+            if "string" == schema.Type && "" == schema.Format {
                 if valueString, exists := params["value"]; true == exists {
                     if parsed, parsedOk := parseLeadingInt(valueString); true == parsedOk {
                         value := int(parsed)
@@ -472,7 +531,7 @@ func applyValidation(schema *Schema, validateTag string) {
                             schema.MinLength = &value
                         }
                     } else {
-                        /* @important a malformed min value (e.g. min=abc) makes the validator fail the whole field closed (parseIntStrict rejects it, post-CR70), so the field accepts no value — flag it unsatisfiable rather than advertise a passable default the client would trust */
+                        /* @important a malformed min value (e.g. min=abc) makes the validator fail the whole field closed (parseIntStrict rejects it), so the field accepts no value — flag it unsatisfiable rather than advertise a passable default the client would trust */
                         rejectsAll = true
                     }
                 } else {
@@ -484,7 +543,7 @@ func applyValidation(schema *Schema, validateTag string) {
                 }
             }
         case "max":
-            if "string" == schema.Type {
+            if "string" == schema.Type && "" == schema.Format {
                 if valueString, exists := params["value"]; true == exists {
                     if parsed, parsedOk := parseLeadingInt(valueString); true == parsedOk {
                         value := int(parsed)
@@ -500,7 +559,7 @@ func applyValidation(schema *Schema, validateTag string) {
                             schema.MaxLength = &value
                         }
                     } else {
-                        /* @important a malformed max value makes the validator fail the whole field closed (post-CR70), so flag it unsatisfiable */
+                        /* @important a malformed max value makes the validator fail the whole field closed, so flag it unsatisfiable */
                         rejectsAll = true
                     }
                 } else {
@@ -536,7 +595,7 @@ func applyValidation(schema *Schema, validateTag string) {
             }
         /* only "regex": the validator registers no constraint named "pattern" (validator.go registers ConstraintRegex == "regex"), so treating it as an alias advertised a satisfiable pattern for a field the validator rejects for every value. Like any other name this mirror does not model — a caller's custom constraint among them — it is now left out of the schema, which under-constrains the spec rather than contradicting it. */
         case "regex":
-            if "string" == schema.Type {
+            if "string" == schema.Type && "" == schema.Format {
                 pattern := patternParam(params)
                 if _, compileErr := regexp.Compile(pattern); nil != compileErr {
                     /* @important a pattern that fails to compile is NOT emitted verbatim (an uncompilable pattern is invalid in the spec and most OpenAPI tooling rejects it). Regex.Validate (constraint_regex.go) short-circuits and accepts the empty string and a nil pointer BEFORE the invalid-pattern branch, rejecting only non-empty values — so the faithful advertisement is maxLength 0 (only the empty string satisfies) with the nullable advertisement left intact, not a fully unsatisfiable field. */
@@ -555,8 +614,8 @@ func applyValidation(schema *Schema, validateTag string) {
 
                 continue
             }
-            /* @important the validator enforces these character classes with an anchored pattern but short-circuits on an empty string (it accepts ""), so advertise the class with a * quantifier — which also matches "" — rather than + which would reject the "" the validator accepts */
-            if "string" == schema.Type {
+            /* @important the validator enforces these character classes with an anchored pattern but short-circuits on an empty string (it accepts ""), so advertise the class with a * quantifier — which also matches "" — rather than + which would reject the "" the validator accepts. The "" == schema.Format guard keeps the pattern off a []byte (format byte) or time.Time (date-time) field, where the validator's string constraint never sees a string value and silently accepts every blob, so a pattern would over-constrain a base64/date-time payload the server actually admits. */
+            if "string" == schema.Type && "" == schema.Format {
                 patterns = append(patterns, "^[a-zA-Z]*$")
             }
         case "numeric":
@@ -566,7 +625,7 @@ func applyValidation(schema *Schema, validateTag string) {
 
                 continue
             }
-            if "string" == schema.Type {
+            if "string" == schema.Type && "" == schema.Format {
                 patterns = append(patterns, "^[0-9]*$")
             }
         case "alphanumeric":
@@ -576,7 +635,7 @@ func applyValidation(schema *Schema, validateTag string) {
 
                 continue
             }
-            if "string" == schema.Type {
+            if "string" == schema.Type && "" == schema.Format {
                 patterns = append(patterns, "^[a-zA-Z0-9]*$")
             }
         case "notBlank":
@@ -643,7 +702,7 @@ func applyValidation(schema *Schema, validateTag string) {
                         schema.Minimum = &value
                         schema.ExclusiveMinimum = &exclusive
                     } else {
-                        /* @important a malformed greaterThan value makes the validator fail the whole field closed (post-CR70), so flag it unsatisfiable rather than advertise the > 0 default */
+                        /* @important a malformed greaterThan value makes the validator fail the whole field closed, so flag it unsatisfiable rather than advertise the > 0 default */
                         rejectsAll = true
                     }
                 } else {
@@ -667,7 +726,7 @@ func applyValidation(schema *Schema, validateTag string) {
                         schema.Maximum = &value
                         schema.ExclusiveMaximum = &exclusive
                     } else {
-                        /* @important a malformed lessThan value makes the validator fail the whole field closed (post-CR70), so flag it unsatisfiable rather than advertise the < 0 default */
+                        /* @important a malformed lessThan value makes the validator fail the whole field closed, so flag it unsatisfiable rather than advertise the < 0 default */
                         rejectsAll = true
                     }
                 } else {
@@ -700,7 +759,7 @@ func applyValidation(schema *Schema, validateTag string) {
     }
 }
 
-/* @important markFieldUnsatisfiable advertises a schema no value — null included — can satisfy, mirroring a validator that rejects the field outright for a malformed numeric/length tag, a negative max (both fail the field closed post-CR70), or a constraint applied to a kind the validator rejects (notEmpty on a struct, greaterThan/lessThan on a non-numeric — CR #74). It clears Nullable (the validator rejects null too, so an unsatisfiable field must not advertise null as valid) and then contradicts the value space via applyEmptyValueSpace. */
+/* @important markFieldUnsatisfiable advertises a schema no value — null included — can satisfy, mirroring a validator that rejects the field outright for a malformed numeric/length tag, a negative max (both fail the field closed), or a constraint applied to a kind the validator rejects (notEmpty on a struct, greaterThan/lessThan on a non-numeric). It clears Nullable (the validator rejects null too, so an unsatisfiable field must not advertise null as valid) and then contradicts the value space via applyEmptyValueSpace. */
 func markFieldUnsatisfiable(schema *Schema) {
     schema.Nullable = false
     applyEmptyValueSpace(schema)
@@ -828,7 +887,7 @@ func tagHasParamsOnNonParameterizable(validateTag string) bool {
     return false
 }
 
-/* @important reports whether a validate tag carries parameters a PARAMETERIZABLE constraint cannot consume: min/max/greaterThan/lessThan read only the "value" key and regex only "pattern"/"value", so a non-empty parameter set lacking the recognized key makes WithParams fail the rule closed (createConstraintWithParams returns invalid-rule before Constraint.Validate runs, post-CR85), and the field accepts no value of any kind. Mirrors tagHasParamsOnNonParameterizable for the parameterizable constraints. A bare constraint with no parameters is excluded (0 == len(params)) because it resolves to the registered default rather than failing closed. */
+/* @important reports whether a validate tag carries parameters a PARAMETERIZABLE constraint cannot consume: min/max/greaterThan/lessThan read only the "value" key and regex only "pattern"/"value", so a non-empty parameter set lacking the recognized key makes WithParams fail the rule closed (createConstraintWithParams returns invalid-rule before Constraint.Validate runs), and the field accepts no value of any kind. Mirrors tagHasParamsOnNonParameterizable for the parameterizable constraints. A bare constraint with no parameters is excluded (0 == len(params)) because it resolves to the registered default rather than failing closed. */
 func tagHasUnconsumedParameterizedParams(validateTag string) bool {
     for _, rule := range splitRules(validateTag) {
         name, params := splitRule(rule)
@@ -916,15 +975,45 @@ func splitRules(validateTag string) []string {
     return splitTopLevelRules(trimmed)
 }
 
-/* @important tracks whether the scan is inside a regex character class [...] so the bracket/comma bookkeeping treats ')', ']', '}', '(', '{' and ',' as literal class members. A ']' is a literal (not a close) when it is the class's first content character — and the leading negation '^' does not count as content — mirroring regexp/syntax. */
+/* @important tracks whether the scan is inside a regex character class [...] so the bracket/comma bookkeeping treats ')', ']', '}', '(', '{' and ',' as literal class members. A ']' is a literal (not a close) when it is the class's first content character — and the leading negation '^' does not count as content — mirroring regexp/syntax. A POSIX named element ([:alpha:], [.coll.], [=equiv=]) nested inside the class is tracked separately, because its closing ']' (which follows the ':', '.' or '=' delimiter) must not be mistaken for the ']' that closes the whole class — otherwise a valid tag such as regex=[[:alpha:],] would be split at the in-class comma. */
 type charClassScanner struct {
-    inClass      bool
-    contentSeen  bool
-    caretAllowed bool
+    inClass            bool
+    contentSeen        bool
+    caretAllowed       bool
+    posixOpenPending   bool
+    inPosixElement     bool
+    posixDelimiter     rune
+    posixDelimiterSeen bool
 }
 
 func (instance *charClassScanner) step(character rune) bool {
     if true == instance.inClass {
+        if true == instance.inPosixElement {
+            if (']' == character) && (true == instance.posixDelimiterSeen) {
+                instance.inPosixElement = false
+                instance.posixDelimiter = 0
+                instance.posixDelimiterSeen = false
+
+                return true
+            }
+
+            instance.posixDelimiterSeen = instance.posixDelimiter == character
+
+            return true
+        }
+
+        if true == instance.posixOpenPending {
+            instance.posixOpenPending = false
+            /* only [: :] is a POSIX class RE2 recognizes; [. .] collating and [= =] equivalence elements are NOT supported by RE2 (which treats '[' inside a class as a literal), so treating them as class openers over-extends the class and diverges from the validator-side scanner and from regexp.Compile */
+            if ':' == character {
+                instance.inPosixElement = true
+                instance.posixDelimiter = character
+                instance.posixDelimiterSeen = false
+
+                return true
+            }
+        }
+
         if ('^' == character) && (false == instance.contentSeen) && (true == instance.caretAllowed) {
             instance.caretAllowed = false
 
@@ -932,6 +1021,13 @@ func (instance *charClassScanner) step(character rune) bool {
         }
 
         instance.caretAllowed = false
+
+        if '[' == character {
+            instance.contentSeen = true
+            instance.posixOpenPending = true
+
+            return true
+        }
 
         if (']' == character) && (true == instance.contentSeen) {
             instance.inClass = false
@@ -948,6 +1044,10 @@ func (instance *charClassScanner) step(character rune) bool {
         instance.inClass = true
         instance.contentSeen = false
         instance.caretAllowed = true
+        instance.posixOpenPending = false
+        instance.inPosixElement = false
+        instance.posixDelimiter = 0
+        instance.posixDelimiterSeen = false
 
         return true
     }
@@ -959,6 +1059,8 @@ func (instance *charClassScanner) noteEscaped() {
     if true == instance.inClass {
         instance.caretAllowed = false
         instance.contentSeen = true
+        instance.posixOpenPending = false
+        instance.posixDelimiterSeen = false
     }
 }
 

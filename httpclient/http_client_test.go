@@ -9,9 +9,13 @@ import (
     "net/http/httptest"
     "net/url"
     "strconv"
+    "strings"
     "sync"
+    "sync/atomic"
     "testing"
     "time"
+
+    httpclientcontract "github.com/precision-soft/melody/httpclient/contract"
 )
 
 func TestHttpClientBuildsUrlAndAddsQuery(t *testing.T) {
@@ -546,4 +550,87 @@ func TestHttpClient_RedirectPolicyDoesNotRaceWithSetHeader(t *testing.T) {
     }
 
     waitGroup.Wait()
+}
+
+/** @info Variadic passing does not copy the slice: Post/Put/Patch append WithJson into a spare slot of the caller's slice, so two concurrent calls sharing one slice write the same backing-array slot and can deliver one call's body to the other's endpoint. Run with -race. */
+func TestHttpClientPost_DoesNotShareCallerOptionsSliceAcrossConcurrentCalls(t *testing.T) {
+    var corruption atomic.Bool
+
+    newBodyServer := func(expected string) *httptest.Server {
+        return httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+            bodyBytes, _ := io.ReadAll(request.Body)
+            if false == bytes.Contains(bodyBytes, []byte(expected)) {
+                corruption.Store(true)
+            }
+            writer.WriteHeader(http.StatusOK)
+        }))
+    }
+
+    serverA := newBodyServer(`"v":"A"`)
+    defer serverA.Close()
+    serverB := newBodyServer(`"v":"B"`)
+    defer serverB.Close()
+
+    client := NewHttpClient(NewHttpClientConfig("", 5*time.Second, nil))
+
+    for iteration := 0; iteration < 300; iteration++ {
+        shared := make([]httpclientcontract.RequestOption, 0, 4)
+        shared = append(shared, WithHeader("X-Shared", "1"))
+
+        var waitGroup sync.WaitGroup
+        waitGroup.Add(2)
+
+        go func() {
+            defer waitGroup.Done()
+            _, _ = client.Post(serverA.URL, map[string]any{"v": "A"}, shared...)
+        }()
+        go func() {
+            defer waitGroup.Done()
+            _, _ = client.Post(serverB.URL, map[string]any{"v": "B"}, shared...)
+        }()
+
+        waitGroup.Wait()
+    }
+
+    if true == corruption.Load() {
+        t.Fatalf("a request body was delivered to the wrong endpoint through a shared options slice")
+    }
+}
+
+/** @info Every other guard in the file treats a non-positive timeout as unset; a negative configured timeout must fall back to the 30s default, not build a client with no deadline at all. */
+func TestNewHttpClient_NegativeTimeoutFallsBackToDefault(t *testing.T) {
+    client := NewHttpClient(NewHttpClientConfig("", -1*time.Second, nil))
+
+    if 30*time.Second != client.client.Timeout {
+        t.Fatalf("expected a negative timeout to fall back to the 30s default, got %v", client.client.Timeout)
+    }
+    if 30*time.Second != client.timeout {
+        t.Fatalf("expected the stored timeout to fall back to the 30s default, got %v", client.timeout)
+    }
+}
+
+/** @info net/http auto-sets Referer to the full previous url, query string included, and does not strip it on a non-downgrade cross-origin hop; a secret placed in the url would otherwise reach the redirect target the first server chose. */
+func TestHttpClient_StripsRefererOnCrossOriginRedirect(t *testing.T) {
+    var receivedReferer string
+
+    target := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        receivedReferer = request.Header.Get("Referer")
+        writer.WriteHeader(http.StatusOK)
+    }))
+    defer target.Close()
+
+    redirector := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        http.Redirect(writer, request, target.URL+"/stolen", http.StatusFound)
+    }))
+    defer redirector.Close()
+
+    client := NewHttpClient(NewHttpClientConfig("", 5*time.Second, nil))
+
+    if _, err := client.Get(redirector.URL, WithQuery("access_token", "QUERY-SECRET")); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if true == strings.Contains(receivedReferer, "QUERY-SECRET") {
+        t.Fatalf("the url query secret leaked to the redirect target through Referer: %q", receivedReferer)
+    }
 }

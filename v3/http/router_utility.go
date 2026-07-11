@@ -410,6 +410,9 @@ func isRequestFromTrustedProxy(request *nethttp.Request, trustedProxyList []stri
         return false
     }
 
+    /* an IPv4-mapped IPv6 peer (::ffff:10.0.0.1) is the IPv4 address it names, so an IPv4 CIDR in the trusted proxy list must still match it — mirrors the per-address check in http/middleware/client_ip.go */
+    remoteAddress = remoteAddress.Unmap()
+
     for _, trustedProxyString := range trustedProxyList {
         trimmedTrustedProxyString := strings.TrimSpace(trustedProxyString)
         if "" == trimmedTrustedProxyString {
@@ -418,6 +421,11 @@ func isRequestFromTrustedProxy(request *nethttp.Request, trustedProxyList []stri
 
         trustedPrefix, trustedPrefixErr := netip.ParsePrefix(trimmedTrustedProxyString)
         if nil == trustedPrefixErr {
+            /* a mapped prefix (::ffff:10.0.0.0/104) names the IPv4 range it embeds; unmap it so it still Contains the unmapped host — netip treats the two address families as unequal otherwise, mirroring http/middleware/client_ip.go */
+            if true == trustedPrefix.Addr().Is4In6() && trustedPrefix.Bits() >= 96 {
+                trustedPrefix = netip.PrefixFrom(trustedPrefix.Addr().Unmap(), trustedPrefix.Bits()-96)
+            }
+
             if true == trustedPrefix.Contains(remoteAddress) {
                 return true
             }
@@ -430,7 +438,7 @@ func isRequestFromTrustedProxy(request *nethttp.Request, trustedProxyList []stri
             continue
         }
 
-        if trustedAddress == remoteAddress {
+        if trustedAddress.Unmap() == remoteAddress {
             return true
         }
     }

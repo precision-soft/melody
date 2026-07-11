@@ -521,7 +521,7 @@ func TestGenerate_NumericConstraintsAreNotEmittedOnStringFields(t *testing.T) {
         t.Fatalf("greaterThan must not set a numeric minimum on a string field: %+v", codeSchema)
     }
 
-    /* @important the validator rejects every value of a string field tagged greaterThan ("value must be numeric"), so the spec must advertise it unsatisfiable (an impossible length window) rather than as a satisfiable string a client would trust (CR #74) */
+    /* @important the validator rejects every value of a string field tagged greaterThan ("value must be numeric"), so the spec must advertise it unsatisfiable (an impossible length window) rather than as a satisfiable string a client would trust */
     if nil == codeSchema.MinLength || 1 != *codeSchema.MinLength || nil == codeSchema.MaxLength || 0 != *codeSchema.MaxLength {
         t.Fatalf("expected greaterThan on a string to advertise an unsatisfiable string (minLength 1, maxLength 0), got %+v", codeSchema)
     }

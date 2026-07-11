@@ -1,6 +1,7 @@
 package validation
 
 import (
+    "fmt"
     "reflect"
     "strings"
     "sync"
@@ -10,6 +11,15 @@ import (
     "github.com/precision-soft/melody/v2/internal"
     validationcontract "github.com/precision-soft/melody/v2/validation/contract"
 )
+
+/* @important maxNestedValidationDepth bounds the recursive descent into nested struct/slice/map/embedded values so a self-referential or deeply cyclic payload cannot overflow the stack; the visited-pointer set below short-circuits genuine reference cycles, and this depth cap is the belt-and-suspenders backstop for value cycles the pointer set cannot observe. */
+const maxNestedValidationDepth = 64
+
+/* @important cyclicReference identifies an already-visited pointer/map header during the recursive descent so a reference cycle (a self-referential linked node, a slice/map that reaches back to an ancestor) is validated once and then short-circuited instead of recursing forever. */
+type cyclicReference struct {
+    pointer uintptr
+    typ     reflect.Type
+}
 
 func NewValidator() *Validator {
     validator := &Validator{
@@ -99,24 +109,57 @@ func (instance *Validator) Validate(data any) error {
 }
 
 func (instance *Validator) validateInternal(data any) ValidationErrors {
+    if nil == data {
+        return nil
+    }
+
+    return instance.validateReflected(reflect.ValueOf(data), "", 0, make(map[cyclicReference]bool))
+}
+
+/* @important validateReflected drives the recursive cascade: it unwraps pointers/interfaces (skipping nil and already-visited references), then dispatches structs, slices/arrays and maps to their per-kind walkers so that validate tags declared on nested fields are enforced with a path that identifies the offending nested field. Scalar leaves have no tags of their own to enforce here (their owning struct applies the tag) and fall through untouched, so a flat payload with no nested tags produces exactly the same result as before. */
+func (instance *Validator) validateReflected(value reflect.Value, path string, depth int, visited map[cyclicReference]bool) ValidationErrors {
     var errors ValidationErrors
 
-    if nil == data {
+    if maxNestedValidationDepth < depth {
         return errors
     }
 
-    value := reflect.ValueOf(data)
-    if reflect.Ptr == value.Kind() {
+    if false == value.IsValid() {
+        return errors
+    }
+
+    switch value.Kind() {
+    case reflect.Interface:
         if true == value.IsNil() {
             return errors
         }
 
-        value = value.Elem()
-    }
+        return instance.validateReflected(value.Elem(), path, depth+1, visited)
+    case reflect.Ptr:
+        if true == value.IsNil() {
+            return errors
+        }
 
-    if reflect.Struct != value.Kind() {
+        reference := cyclicReference{pointer: value.Pointer(), typ: value.Type()}
+        if true == visited[reference] {
+            return errors
+        }
+        visited[reference] = true
+
+        return instance.validateReflected(value.Elem(), path, depth+1, visited)
+    case reflect.Struct:
+        return instance.validateStruct(value, path, depth, visited)
+    case reflect.Slice, reflect.Array:
+        return instance.validateSequence(value, path, depth, visited)
+    case reflect.Map:
+        return instance.validateMap(value, path, depth, visited)
+    default:
         return errors
     }
+}
+
+func (instance *Validator) validateStruct(value reflect.Value, path string, depth int, visited map[cyclicReference]bool) ValidationErrors {
+    var errors ValidationErrors
 
     valueType := value.Type()
 
@@ -125,11 +168,6 @@ func (instance *Validator) validateInternal(data any) ValidationErrors {
         fieldValue := value.Field(i)
 
         if false == field.IsExported() {
-            continue
-        }
-
-        validateTag := field.Tag.Get("validate")
-        if "" == validateTag || "-" == validateTag {
             continue
         }
 
@@ -142,33 +180,87 @@ func (instance *Validator) validateInternal(data any) ValidationErrors {
             }
         }
 
-        rules, err := parseValidationTag(validateTag)
-        if nil != err {
-            errors = append(
-                errors,
-                NewValidationError(
-                    fieldName,
-                    "invalid validation tag syntax",
-                    ErrorInvalidRuleSyntax,
-                    map[string]any{
-                        "tag": validateTag,
-                    },
-                ),
-            )
-
-            continue
+        fieldPath := fieldName
+        if "" != path {
+            fieldPath = path + "." + fieldName
         }
 
-        for _, rule := range rules {
-            validationError := instance.validateRule(
-                fieldValue.Interface(),
-                fieldName,
-                rule,
-            )
-            if nil != validationError {
-                errors = append(errors, validationError)
+        validateTag := field.Tag.Get("validate")
+        if "" != validateTag && "-" != validateTag {
+            rules, err := parseValidationTag(validateTag)
+            if nil != err {
+                errors = append(
+                    errors,
+                    NewValidationError(
+                        fieldPath,
+                        "invalid validation tag syntax",
+                        ErrorInvalidRuleSyntax,
+                        map[string]any{
+                            "tag": validateTag,
+                        },
+                    ),
+                )
+            } else {
+                for _, rule := range rules {
+                    validationError := instance.validateRule(
+                        fieldValue.Interface(),
+                        fieldPath,
+                        rule,
+                    )
+                    if nil != validationError {
+                        errors = append(errors, validationError)
+                    }
+                }
             }
         }
+
+        /* @important an embedded (anonymous) struct is promoted onto its parent, mirroring how the openapi schema mirror flattens embeds, so its nested fields keep the parent's path prefix instead of gaining the embed type name as a segment. */
+        recursionPath := fieldPath
+        if true == field.Anonymous {
+            recursionPath = path
+        }
+
+        errors = append(errors, instance.validateReflected(fieldValue, recursionPath, depth+1, visited)...)
+    }
+
+    return errors
+}
+
+func (instance *Validator) validateSequence(value reflect.Value, path string, depth int, visited map[cyclicReference]bool) ValidationErrors {
+    var errors ValidationErrors
+
+    if reflect.Slice == value.Kind() {
+        if reflect.Uint8 == value.Type().Elem().Kind() {
+            /* @important a byte slice is a scalar payload (the openapi mirror emits it as a string/byte), never a sequence of validatable elements, so it carries no nested tags to enforce. */
+            return errors
+        }
+
+        if true == value.IsNil() {
+            return errors
+        }
+    }
+
+    for i := 0; i < value.Len(); i++ {
+        elementPath := fmt.Sprintf("%s[%d]", path, i)
+
+        errors = append(errors, instance.validateReflected(value.Index(i), elementPath, depth+1, visited)...)
+    }
+
+    return errors
+}
+
+func (instance *Validator) validateMap(value reflect.Value, path string, depth int, visited map[cyclicReference]bool) ValidationErrors {
+    var errors ValidationErrors
+
+    if true == value.IsNil() {
+        return errors
+    }
+
+    iterator := value.MapRange()
+    for true == iterator.Next() {
+        elementPath := fmt.Sprintf("%s[%v]", path, iterator.Key().Interface())
+
+        errors = append(errors, instance.validateReflected(iterator.Value(), elementPath, depth+1, visited)...)
     }
 
     return errors

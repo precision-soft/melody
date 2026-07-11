@@ -24,6 +24,9 @@ const (
     headerDeadLetterAttemptCount = "x-dead-letter-attempt-count"
 
     defaultPublishReturnBuffer = 16
+
+    /* maxPrefetch caps the configured prefetch at the AMQP 0-9-1 prefetch-count wire limit. The field is encoded as uint16 by channel.Qos, so a larger value wraps on the wire — 65536 becomes 0, which RabbitMQ interprets as UNLIMITED prefetch, the exact opposite of the configured flow-control cap. */
+    maxPrefetch = 65535
 )
 
 type forwardReason int
@@ -60,6 +63,10 @@ func newTransport(config TransportConfig, general *ReconnectConfig) *Transport {
     prefetch := config.Prefetch
     if 0 >= prefetch {
         prefetch = 1
+    }
+
+    if prefetch > maxPrefetch {
+        prefetch = maxPrefetch
     }
 
     publishReturnBuffer := config.PublishReturnBuffer
@@ -395,18 +402,19 @@ func (instance *Transport) publish(
     routingKey string,
     publishing amqp091.Publishing,
 ) error {
-    usedChannel, publishErr := instance.publishOnce(ctx, exchange, routingKey, publishing)
+    usedChannel, retryable, publishErr := instance.publishOnce(ctx, exchange, routingKey, publishing)
     if nil == publishErr {
         return nil
     }
 
-    if nil == instance.dialer || true == instance.isClosing() {
+    /* only a channel-level failure is worth a second attempt on a fresh channel; a broker-semantic rejection (an unroutable return or a nack) is a permanent condition that a retry would only silently re-drop */
+    if false == retryable || false == instance.publishRetryable() {
         return publishErr
     }
 
     instance.resetPublishChannel(usedChannel)
 
-    _, retryErr := instance.publishOnce(ctx, exchange, routingKey, publishing)
+    _, _, retryErr := instance.publishOnce(ctx, exchange, routingKey, publishing)
 
     return retryErr
 }
@@ -417,10 +425,10 @@ func (instance *Transport) publishOnce(
     exchange string,
     routingKey string,
     publishing amqp091.Publishing,
-) (*amqp091.Channel, error) {
+) (*amqp091.Channel, bool, error) {
     channel, returns, channelErr := instance.ensurePublishChannel()
     if nil != channelErr {
-        return nil, channelErr
+        return nil, true, channelErr
     }
 
     instance.publishMutex.Lock()
@@ -430,16 +438,17 @@ func (instance *Transport) publishOnce(
 
     confirmation, publishErr := channel.PublishWithDeferredConfirmWithContext(ctx, exchange, routingKey, true, false, publishing)
     if nil != publishErr {
-        return channel, exception.NewError("amqp publish failed", map[string]any{"queue": instance.queue}, publishErr)
+        return channel, true, exception.NewError("amqp publish failed", map[string]any{"queue": instance.queue}, publishErr)
     }
 
     acked, waitErr := confirmation.WaitContext(ctx)
     if nil != waitErr {
-        return channel, exception.NewError("amqp publish confirmation wait failed", map[string]any{"queue": instance.queue}, waitErr)
+        return channel, true, exception.NewError("amqp publish confirmation wait failed", map[string]any{"queue": instance.queue}, waitErr)
     }
 
+    /* an unroutable return and a nack are the broker's verdict on the message, not a channel fault: they must never be retried, or the retry would silently re-drop the message on a fresh channel */
     if returned, wasReturned := drainPublishReturn(returns); true == wasReturned {
-        return channel, exception.NewError(
+        return channel, false, exception.NewError(
             "amqp publish was returned as unroutable",
             map[string]any{
                 "queue":      instance.queue,
@@ -453,10 +462,10 @@ func (instance *Transport) publishOnce(
     }
 
     if false == acked {
-        return channel, exception.NewError("amqp publish was nacked by the broker", map[string]any{"queue": instance.queue}, nil)
+        return channel, false, exception.NewError("amqp publish was nacked by the broker", map[string]any{"queue": instance.queue}, nil)
     }
 
-    return channel, nil
+    return channel, false, nil
 }
 
 /* @important closes the cached publish channel only when it is still the one the caller failed on, so a concurrent publisher that already reopened a healthy channel is not torn down. A nil failed channel (the caller never obtained one, e.g. ensurePublishChannel itself failed) identifies no specific channel, so it is a no-op rather than closing whatever channel is currently cached — a stale/closed cached channel is re-detected by ensurePublishChannel's IsClosed guard on the next publish. */
@@ -521,10 +530,11 @@ func (instance *Transport) consumeLoop(
             return
         }
 
-        if nil == instance.dialer {
+        /* @important a lost consume channel on a live static connection (no dialer) is recoverable: connect() still hands back the live connection and a fresh channel can be opened on it, mirroring server_sent_event_backplane.go liveConnection. Only give up when the connection itself is gone and no dialer can redial — there a re-subscribe can never recover. */
+        if nil == instance.dialer && false == instance.connectionAlive() {
             instance.logError(
                 runtimeInstance,
-                "amqp deliveries channel closed unexpectedly, consumer is stopping",
+                "amqp deliveries channel closed and the connection is gone with no dialer, consumer is stopping",
                 exception.NewError("amqp deliveries channel closed", map[string]any{"queue": instance.queue}, nil),
             )
 
@@ -755,6 +765,27 @@ func (instance *Transport) isClosing() bool {
     defer instance.mutex.Unlock()
 
     return instance.closing
+}
+
+/* connectionAlive reports whether the transport currently holds a usable connection: non-nil and not marked closed. A live connection can still open a fresh channel even when no dialer is configured, so a channel-only loss on it (queue deleted, basic.cancel, a PRECONDITION_FAILED that closes only the channel) is recoverable rather than terminal. */
+func (instance *Transport) connectionAlive() bool {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return nil != instance.connection && false == instance.connection.IsClosed()
+}
+
+/* publishRetryable reports whether a failed publish is worth one retry on a fresh channel: a closing transport never retries; otherwise a dialer can reconnect, or a live static connection (no dialer) can open a new channel on the same live connection. Only a no-dialer transport whose connection is gone gives up without retrying, since a fresh channel can never be opened there. */
+func (instance *Transport) publishRetryable() bool {
+    if true == instance.isClosing() {
+        return false
+    }
+
+    if nil != instance.dialer {
+        return true
+    }
+
+    return instance.connectionAlive()
 }
 
 func (instance *Transport) currentGeneration() uint64 {

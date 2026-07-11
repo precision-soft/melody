@@ -33,3 +33,39 @@ func TestStaticKeyProvider_RedactsKeysUnderEveryVerb(t *testing.T) {
         }
     }
 }
+
+/** @info fmt routes only %v %s %q %x %X and %#v through Stringer/GoStringer; the numeric verbs (%d %o %b %c %U) consult fmt.Formatter alone, so without it they reflection-walk the unexported keysById field and dump the raw master key bytes — %d as decimal codes (48 49 50 ...), %c as the verbatim key characters. The Format method must redact every verb on both the value and the pointer form. */
+func TestStaticKeyProvider_RedactsKeysUnderNumericVerbs(t *testing.T) {
+    provider := NewStaticKeyProvider("current", map[string][]byte{
+        "current": []byte("0123456789abcdef0123456789abcdef"),
+    })
+
+    redacted := provider.String()
+
+    cases := []struct {
+        name     string
+        rendered string
+    }{
+        {"decimal pointer", fmt.Sprintf("%d", provider)},
+        {"decimal value", fmt.Sprintf("%d", *provider)},
+        {"octal pointer", fmt.Sprintf("%o", provider)},
+        {"octal value", fmt.Sprintf("%o", *provider)},
+        {"binary pointer", fmt.Sprintf("%b", provider)},
+        {"binary value", fmt.Sprintf("%b", *provider)},
+        {"character pointer", fmt.Sprintf("%c", provider)},
+        {"character value", fmt.Sprintf("%c", *provider)},
+        {"unicode pointer", fmt.Sprintf("%U", provider)},
+        {"unicode value", fmt.Sprintf("%U", *provider)},
+    }
+
+    for _, testCase := range cases {
+        /* The unpatched code prints the byte "48" (the decimal code of '0') for %d and the character "a" for %c; the redacted form contains neither. */
+        if true == strings.Contains(testCase.rendered, "48 49 50 51") {
+            t.Fatalf("%s: a master key leaked as decimal bytes through fmt: %s", testCase.name, testCase.rendered)
+        }
+
+        if redacted != testCase.rendered {
+            t.Fatalf("%s: expected the redacted rendering %q, got %q", testCase.name, redacted, testCase.rendered)
+        }
+    }
+}

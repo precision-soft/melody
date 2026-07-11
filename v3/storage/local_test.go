@@ -236,7 +236,7 @@ func TestLocalStorage_PutRemovesPartialObjectOnReaderError(t *testing.T) {
     }
 }
 
-/* @info a failed overwrite must not destroy the previously stored object (CR #66 atomic put) */
+/* @info a failed overwrite must not destroy the previously stored object (atomic put) */
 
 func TestLocalStorage_FailedOverwritePreservesPriorObject(t *testing.T) {
     base := t.TempDir()

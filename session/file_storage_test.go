@@ -1,6 +1,7 @@
 package session
 
 import (
+    "math"
     "os"
     "path/filepath"
     "strconv"
@@ -453,5 +454,47 @@ func TestFileStorage_Save_RollsBackInMemoryEntryWhenFlushFails(t *testing.T) {
     }
     if false == exists || "old" != data["v"].(string) {
         t.Fatalf("a failed update must restore the previous in-memory value, got exists=%v data=%v", exists, data)
+    }
+}
+
+func TestFileStorage_Save_TtlBeyondYear2262IsKeptNotPurged(t *testing.T) {
+    directory := t.TempDir()
+    path := filepath.Join(directory, "session.json")
+
+    storage, err := NewFileStorageFromPath(path)
+    if nil != err {
+        t.Fatalf("unexpected storage error: %s", err.Error())
+    }
+    defer storage.Close()
+
+    /* @important a ttl that pushes the expiry past 2262-04-11 overflows time.Time.UnixNano to a negative int64; the session must be kept with a saturated far-future expiry exactly as InMemoryStorage keeps it, not treated as already expired and purged on the same Save */
+    if saveErr := storage.Save("forever", map[string]any{"k": "v"}, time.Duration(math.MaxInt64)); nil != saveErr {
+        t.Fatalf("unexpected save error: %s", saveErr.Error())
+    }
+
+    data, exists, loadErr := storage.Load("forever")
+    if nil != loadErr {
+        t.Fatalf("unexpected load error: %s", loadErr.Error())
+    }
+    if false == exists {
+        t.Fatalf("expected the session saved with a very large ttl to be kept, not purged as already expired")
+    }
+    if "v" != data["k"].(string) {
+        t.Fatalf("expected the persisted session data to survive, got %v", data)
+    }
+
+    /* @important it must also survive a reload from disk — an overflowed negative expiry would have been dropped from the snapshot on the same Save and never written to the file */
+    reader, err := NewFileStorageFromPath(path)
+    if nil != err {
+        t.Fatalf("unexpected reader storage error: %s", err.Error())
+    }
+    defer reader.Close()
+
+    reloadData, reloadExists, reloadErr := reader.Load("forever")
+    if nil != reloadErr {
+        t.Fatalf("unexpected reload error: %s", reloadErr.Error())
+    }
+    if false == reloadExists || "v" != reloadData["k"].(string) {
+        t.Fatalf("expected the session to persist across instances, got exists=%v data=%v", reloadExists, reloadData)
     }
 }

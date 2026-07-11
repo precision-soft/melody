@@ -26,10 +26,12 @@ func NewInMemoryLocker(clockInstance clockcontract.Clock) *InMemoryLocker {
 const inMemoryPurgeInterval = 512
 
 type InMemoryLocker struct {
-    clock      clockcontract.Clock
-    mutex      sync.Mutex
-    holders    map[string]inMemoryHolder
-    counter    uint64
+    clock   clockcontract.Clock
+    mutex   sync.Mutex
+    holders map[string]inMemoryHolder
+
+    /* atomic.Uint64 rather than a bare uint64: a 64-bit atomic on a bare field requires 64-bit alignment, and this field would not land on an 8-byte boundary on a 32-bit build (interface 8 + sync.Mutex 8 + map 4), where atomic.AddUint64 panics with "unaligned 64-bit atomic operation". The wrapper type carries its own alignment guarantee on every architecture. */
+    counter    atomic.Uint64
     purgeTicks int
 }
 
@@ -39,7 +41,7 @@ type inMemoryHolder struct {
 }
 
 func (instance *InMemoryLocker) CreateLock(name string, ttl time.Duration) lockcontract.Lock {
-    token := atomic.AddUint64(&instance.counter, 1)
+    token := instance.counter.Add(1)
 
     return &inMemoryLock{
         locker: instance,

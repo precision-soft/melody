@@ -64,12 +64,23 @@ func runExampleHttpCheck(baseUrl string, loadBalancerUrl string, redisAddress st
     }
     pass("example rate limit stayed closed for a new spoofed address inside the window")
 
+    runExampleLoadBalancerCheck(client, loadBalancerUrl, redisAddress)
+}
+
+/* runExampleLoadBalancerCheck drives the load-balancer half — the ONLY place the trusted-proxy chain is
+proven: through the load balancer the peer is nginx (a trusted proxy), so the forwarded chain is honoured and
+the budget is enforced against the resolved client address.
+
+Because it is the sole proof of that property, an unset EXAMPLE_LOAD_BALANCER_URL must announce a SKIP rather
+than pass silently — otherwise a regression in the forwarded-chain resolution goes green (the same false-green
+class the REDIS_ADDRESS skip already guards against: the direct-path checks still pass, this assertion never
+runs, and the section is reported fully passed). */
+func runExampleLoadBalancerCheck(client *http.Client, loadBalancerUrl string, redisAddress string) {
     if "" == loadBalancerUrl {
+        skip("example http: EXAMPLE_LOAD_BALANCER_URL is not set — the load balancer trusted-proxy half did not run")
         return
     }
 
-    /* through the load balancer the peer is nginx — a trusted proxy — so the forwarded chain is honoured and
-       the budget is enforced against the resolved client address */
     resetExampleRateLimitCounters(redisAddress)
 
     balancerSpentAt := 0

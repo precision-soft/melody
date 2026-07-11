@@ -31,11 +31,17 @@ func (instance *Configuration) validateNoUnresolvedPlaceholders() error {
         }
 
         if true == envPlaceholderPattern.MatchString(stringValue) || true == parameterPlaceholderPattern.MatchString(stringValue) {
+            /* @important report only the offending placeholder (an identifier such as "%env(DB_TLS)%"), never the resolved value: it commonly holds inline credentials that would otherwise reach logs unredacted via the exception cause-context chain */
+            offendingPlaceholder := envPlaceholderPattern.FindString(stringValue)
+            if "" == offendingPlaceholder {
+                offendingPlaceholder = parameterPlaceholderPattern.FindString(stringValue)
+            }
+
             return exception.NewError(
                 "parameter contains unresolved placeholders",
                 map[string]any{
                     "parameterName": parameterName,
-                    "value":         stringValue,
+                    "placeholder":   offendingPlaceholder,
                 },
                 nil,
             )

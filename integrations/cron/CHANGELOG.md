@@ -7,9 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.3.0] - 2026-07-11 - User-less Crontab Template
+
 ### Added
 
 - `template_crontab.go`, `template.go` — new built-in template `crontab-no-user`: the user-less crontab dialect for busybox crond (alpine images) and per-user `crontab` files, which reject the `/etc/cron.d` user column the default `crontab` template emits — previously consumers cut the column with `sed` in the image build. Select it with `--template=crontab-no-user` or the `melody.cron.template` parameter; the user parameter/flag is ignored entirely in this dialect, everything else — schedules, log redirects, heartbeat, validation — is identical. Back-port from `v3`.
+
+### Fixed
+
+- `generate_command.go` — `melody:cron:generate` no longer aborts with `ErrHeartbeatUserMissing` when a heartbeat is configured for the `crontab-no-user` template. That template renders no user column (busybox crond, per-user crontab deployments), so a heartbeat had no user column to attach to and the pre-render check rejected an otherwise valid configuration.
 
 ## [v1.2.2] - 2026-07-06 - Standalone Module Resolution Fix
 
@@ -96,8 +102,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `cli/contract/type.go` (root + v2/ + v3/) gains `type StringSliceFlag = urfavecli.StringSliceFlag` so the cron command (which uses repeatable string-slice flags for `--heartbeat-command` and `--heartbeat-destination`) consumes `clicontract.StringSliceFlag` like every other flag in the integration, without an extra `urfavecli` import in `generate_command.go`
 - `README.md` — added a "Cron expression validation" section that documents which checks the generator runs at generation time and which it deliberately leaves to the cron daemon at install time, with `crontab -T` recommended as the post-generation gate. Clarified the `EntryConfig.DestinationFile`-absolute-path semantics, documented the hardcoded `0644`/`0755` file modes, and added a new "Package surface" section listing every exported identifier. `v2/README.md` and `v3/README.md` now reference that section uniformly so they no longer cross-reference each other asymmetrically.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.2.2...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.3.0...HEAD
 
+[v1.3.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.2.2...integrations/cron/v1.3.0
 [v1.2.2]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.2.1...integrations/cron/v1.2.2
 
 [v1.2.1]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.2.0...integrations/cron/v1.2.1

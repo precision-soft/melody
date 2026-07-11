@@ -4,6 +4,7 @@ import (
     "bytes"
     "encoding/json"
     "io"
+    "math"
     "os"
     "path/filepath"
     "sync"
@@ -126,7 +127,13 @@ func (instance *FileStorage) Save(sessionId string, data map[string]any, ttl tim
 
     expiresAt := int64(0)
     if 0 < ttl {
-        expiresAt = time.Now().Add(ttl).UnixNano()
+        /* @important time.Time.UnixNano is only defined up to 2262-04-11 and wraps to a negative int64 past it; a caller using a very large ttl as a "never expire" value would otherwise land a negative ExpiresAt that Load and purgeExpiredLocked read as already lapsed and drop the session on the same Save, so saturate at the maximum representable instant the way InMemoryStorage keeps such sessions */
+        expiration := time.Now().Add(ttl)
+        if true == expiration.After(time.Unix(0, math.MaxInt64)) {
+            expiresAt = math.MaxInt64
+        } else {
+            expiresAt = expiration.UnixNano()
+        }
     }
 
     entry := fileSessionEntry{

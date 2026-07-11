@@ -410,6 +410,65 @@ func TestTokenBucketLimiter_SeparateKeys(t *testing.T) {
     }
 }
 
+func TestTokenBucketLimiter_ZeroWindowDoesNotFailOpen(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewTokenBucketLimiterWithClock(frozenClock, 1, 0)
+
+    if false == limiter.Allow("key1") {
+        t.Fatalf("expected the first request to be allowed")
+    }
+
+    if true == limiter.Allow("key1") {
+        t.Fatalf("expected the second request to be rejected: a zero window must not silently disable the limiter")
+    }
+}
+
+func TestSlidingWindowLimiter_ZeroWindowDoesNotFailOpen(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewSlidingWindowLimiterWithClock(frozenClock, 1, 0)
+
+    if false == limiter.Allow("key1") {
+        t.Fatalf("expected the first request to be allowed")
+    }
+
+    if true == limiter.Allow("key1") {
+        t.Fatalf("expected the second request to be rejected: a zero window must not silently disable the limiter")
+    }
+}
+
+func TestTokenBucketLimiter_NonPositiveRateDoesNotDenyAll(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewTokenBucketLimiterWithClock(frozenClock, 0, time.Minute)
+
+    if false == limiter.Allow("key1") {
+        t.Fatalf("expected at least one request to be allowed: a non-positive rate must be clamped, not deny all traffic")
+    }
+}
+
+func TestDefaultKeyExtractor_NormalizesTrailingSlashPaths(t *testing.T) {
+    limiter := NewTokenBucketLimiterWithClock(clock.NewFrozenClock(time.Now()), 10, time.Minute)
+    config := NewRateLimitConfig(limiter, nil, nil)
+    _ = RateLimitMiddleware(config)
+
+    keyFor := func(path string) string {
+        req := httptest.NewRequest(nethttp.MethodGet, path, nil)
+        req.RemoteAddr = "1.2.3.4:5555"
+
+        return config.KeyExtractor()(testhelper.NewHttpTestRequestFromHttpRequest(req))
+    }
+
+    canonical := keyFor("/login")
+    if "1.2.3.4:/login" != canonical {
+        t.Fatalf("unexpected canonical key: %s", canonical)
+    }
+
+    for _, path := range []string{"/login/", "/login//", "/login///"} {
+        if canonical != keyFor(path) {
+            t.Fatalf("expected %q to share the /login bucket, got %q", path, keyFor(path))
+        }
+    }
+}
+
 type fakeRuntimeRateLimiter struct {
     allowCalls            int
     allowWithRuntimeCalls int

@@ -7,9 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.4.0] - 2026-07-11 - Distributed Rate Limiter and Forwarded-Client-IP Resolver
+
 ### Fixed
 
 - `lock.go` — `Acquire` now fails closed on a non-positive ttl instead of writing a key with no expiry. A Redis lock is a lease: its expiry *is* the crash safety, so a ttl of zero produced a key that outlived the holder forever — after a `SIGKILL` or an out-of-memory kill, every later acquirer on every instance skipped its work silently, with no error and no expiry to recover from. Session-style locks (hold until the connection drops) remain the MySQL `GET_LOCK` and PostgreSQL advisory backends, whose `Refresh` is a liveness probe; this backend no longer pretends to offer them. The acquire script is correspondingly simpler — it always sets `PX`.
+- `rate_limit.go` — `WithRateLimiterCallTimeout` falls back to the default call timeout for a non-positive duration instead of building an already-cancelled context. That context forced every `Allow`/`Reset` onto the store-failure path — deny-all under `FailureModeClosed`, allow-all under `FailureModeOpen` — no matter whether Redis was actually reachable.
 
 ### Added
 
@@ -87,8 +90,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `v3/connection_params.go` — `ConnectionConfig` renamed to `ConnectionParams` with value semantics
 - Dependencies pinned to `github.com/precision-soft/melody/v3 v3.0.0`
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.3.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.4.0...HEAD
 
+[v3.4.0]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.3.0...integrations/rueidis/v3.4.0
 [v3.3.0]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.2.0...integrations/rueidis/v3.3.0
 
 [v3.2.0]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.1.0...integrations/rueidis/v3.2.0

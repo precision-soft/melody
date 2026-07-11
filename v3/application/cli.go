@@ -45,8 +45,8 @@ func ParseRuntimeFlags(defaultMode string) *RuntimeFlags {
 func ParseRuntimeFlagsWithRole(defaultMode string, defaultRole string) *RuntimeFlags {
     arguments := os.Args
 
-    parsedMode := parseRuntimeFlagFromArguments(arguments, "mode")
-    parsedRole := parseRuntimeFlagFromArguments(arguments, "role")
+    parsedMode, _ := parseRuntimeFlagFromArguments(arguments, "mode")
+    parsedRole, roleFlagPresent := parseRuntimeFlagFromArguments(arguments, "role")
 
     mode := defaultMode
     if "" != parsedMode {
@@ -72,8 +72,10 @@ func ParseRuntimeFlagsWithRole(defaultMode string, defaultRole string) *RuntimeF
     role := defaultRole
     if "" != parsedRole {
         role = parsedRole
-    }
-    if "" == role {
+    } else if true == roleFlagPresent {
+        /* an explicitly supplied but empty --role (e.g. `--role=` expanded from an unset env var, or a bare --role that cannot consume a dash-leading next token) fails closed at the validation below instead of silently widening to the most permissive RoleAll */
+        role = ""
+    } else if "" == role {
         role = config.RoleAll
     }
 
@@ -92,8 +94,10 @@ func ParseRuntimeFlagsWithRole(defaultMode string, defaultRole string) *RuntimeF
     return NewRuntimeFlagsWithRole(mode, role)
 }
 
-func parseRuntimeFlagFromArguments(arguments []string, flagName string) string {
+/* parseRuntimeFlagFromArguments returns the parsed value of a runtime flag and whether the flag was explicitly present. Scanning stops at a bare "--" end-of-options terminator, mirroring normalizeCliVerbosityArguments: tokens after "--" are literal command arguments, never runtime flags. The present flag distinguishes an absent flag from one supplied with an empty value (for instance `--role=`), so the caller can fail closed on the latter instead of silently applying a default. */
+func parseRuntimeFlagFromArguments(arguments []string, flagName string) (string, bool) {
     parsedValue := ""
+    present := false
 
     for index := 1; index < len(arguments); index++ {
         argument := strings.TrimSpace(arguments[index])
@@ -101,10 +105,16 @@ func parseRuntimeFlagFromArguments(arguments []string, flagName string) string {
             continue
         }
 
+        if "--" == argument {
+            break
+        }
+
         flagValue, matched, consumeNext := parseRuntimeFlagValue(argument, flagName)
         if false == matched {
             continue
         }
+
+        present = true
 
         if true == consumeNext {
             if index+1 < len(arguments) {
@@ -123,7 +133,7 @@ func parseRuntimeFlagFromArguments(arguments []string, flagName string) string {
         }
     }
 
-    return parsedValue
+    return parsedValue, present
 }
 
 func parseRuntimeFlagValue(argument string, flagName string) (string, bool, bool) {
@@ -220,6 +230,12 @@ func stripRuntimeFlagsFromOsArgs() {
         if true == skipNext {
             skipNext = false
             continue
+        }
+
+        if "--" == argument {
+            /* the bare "--" terminator ends runtime-flag stripping: everything from here on is a literal command argument, kept verbatim so the cli framework receives it intact */
+            cleanedArguments = append(cleanedArguments, originalArguments[index:]...)
+            break
         }
 
         matched, consumeNext := isRuntimeFlagArgument(argument)

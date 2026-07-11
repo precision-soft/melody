@@ -134,7 +134,7 @@ func TestReaderHasTrailingBytes_DetectsBodyLongerThanDeclaredSize(t *testing.T) 
 }
 
 func TestBoundedPutReader_StripsReaderAtAndDetectsOverReadAtCorrectSize(t *testing.T) {
-    /* @important regression for the v3.0.1 over-read guard mis-firing on io.ReaderAt+io.Seeker readers (bytes.Reader/strings.Reader/os.File): minio's single-shot putObject wraps such a reader in an io.SectionReader and uploads via ReadAt without advancing the caller's sequential cursor, so probing the original afterward reported trailing bytes on every valid Put and deleted the stored object. boundedPutReader must hand minio a reader that is neither io.ReaderAt nor io.Seeker so the sequential path is forced and the original cursor advances by exactly the consumed size. */
+    /* @important the over-read guard must not mis-fire on io.ReaderAt+io.Seeker readers (bytes.Reader/strings.Reader/os.File): minio's single-shot putObject wraps such a reader in an io.SectionReader and uploads via ReadAt without advancing the caller's sequential cursor, so probing the original afterward reports trailing bytes on every valid Put and deletes the stored object. boundedPutReader must hand minio a reader that is neither io.ReaderAt nor io.Seeker so the sequential path is forced and the original cursor advances by exactly the consumed size. */
     exactBody := "exactly-sized-body"
     original := strings.NewReader(exactBody)
     putReader := boundedPutReader(original, int64(len(exactBody)))

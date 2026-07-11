@@ -53,6 +53,11 @@ func RunExclusive(
 
     acquired, acquireErr := lock.Acquire(runtimeInstance)
     if nil != acquireErr {
+        /* a shutdown cancels the very context the backend was called with, so an Acquire in flight fails with the cancellation: that is the stop itself, and reporting it would turn a graceful stop into an error a cron fleet reads as a failed run */
+        if nil != runtimeInstance.Context().Err() {
+            return false, nil
+        }
+
         /* exclusivity fails closed: an unreachable store must not double-run the work */
         return false, acquireErr
     }

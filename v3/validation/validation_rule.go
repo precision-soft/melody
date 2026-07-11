@@ -13,15 +13,43 @@ type validationRule struct {
     params map[string]string
 }
 
-/* @important tracks whether the scan is inside a regex character class [...] so the bracket/comma bookkeeping treats ')', ']', '}', '(', '{' and ',' as literal class members. A ']' is a literal (not a close) when it is the class's first content character — and the leading negation '^' does not count as content — mirroring regexp/syntax. */
+/* @important tracks whether the scan is inside a regex character class [...] so the bracket/comma bookkeeping treats ')', ']', '}', '(', '{' and ',' as literal class members. A ']' is a literal (not a close) when it is the class's first content character — and the leading negation '^' does not count as content — mirroring regexp/syntax. A POSIX named class ([:alpha:], [:^digit:], ...) opens on a '[' immediately followed by ':' and only ends on the ':]' pair, so the ']' that terminates the POSIX element is not mistaken for the enclosing class close. */
 type charClassScanner struct {
-    inClass      bool
-    contentSeen  bool
-    caretAllowed bool
+    inClass          bool
+    contentSeen      bool
+    caretAllowed     bool
+    inPosixClass     bool
+    posixOpenPending bool
+    posixColonSeen   bool
 }
 
 func (instance *charClassScanner) step(character rune) bool {
     if true == instance.inClass {
+        if true == instance.inPosixClass {
+            if (']' == character) && (true == instance.posixColonSeen) {
+                instance.inPosixClass = false
+                instance.posixColonSeen = false
+
+                return true
+            }
+
+            instance.posixColonSeen = ':' == character
+
+            return true
+        }
+
+        if true == instance.posixOpenPending {
+            instance.posixOpenPending = false
+
+            if ':' == character {
+                instance.inPosixClass = true
+                instance.posixColonSeen = false
+                instance.contentSeen = true
+
+                return true
+            }
+        }
+
         if ('^' == character) && (false == instance.contentSeen) && (true == instance.caretAllowed) {
             instance.caretAllowed = false
 
@@ -29,6 +57,13 @@ func (instance *charClassScanner) step(character rune) bool {
         }
 
         instance.caretAllowed = false
+
+        if '[' == character {
+            instance.posixOpenPending = true
+            instance.contentSeen = true
+
+            return true
+        }
 
         if (']' == character) && (true == instance.contentSeen) {
             instance.inClass = false
@@ -56,6 +91,8 @@ func (instance *charClassScanner) noteEscaped() {
     if true == instance.inClass {
         instance.caretAllowed = false
         instance.contentSeen = true
+        instance.posixOpenPending = false
+        instance.posixColonSeen = false
     }
 }
 

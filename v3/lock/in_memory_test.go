@@ -2,6 +2,8 @@ package lock
 
 import (
     "context"
+    "reflect"
+    "sync/atomic"
     "testing"
     "time"
 
@@ -147,6 +149,26 @@ func TestInMemoryLocker_ReacquireIsReentrantForSameLock(t *testing.T) {
     secondAcquire, _ := held.Acquire(runtimeInstance)
     if false == firstAcquire || false == secondAcquire {
         t.Fatalf("expected same lock instance to re-acquire")
+    }
+}
+
+/** @info counter must be an alignment-safe atomic so CreateLock's 64-bit atomic increment does not panic on 32-bit builds (GOARCH=386/arm/mips). */
+func TestInMemoryLocker_CounterIsAlignmentSafeAtomic(t *testing.T) {
+    counterField, exists := reflect.TypeOf(InMemoryLocker{}).FieldByName("counter")
+    if false == exists {
+        t.Fatalf("expected InMemoryLocker to declare a counter field")
+    }
+
+    if counterField.Type != reflect.TypeOf(atomic.Uint64{}) {
+        t.Fatalf("counter must be atomic.Uint64 to guarantee 64-bit alignment on 32-bit builds, got %s", counterField.Type)
+    }
+
+    locker := NewInMemoryLocker(clock.NewSystemClock())
+
+    first := locker.CreateLock("token:1", time.Minute).(*inMemoryLock)
+    second := locker.CreateLock("token:2", time.Minute).(*inMemoryLock)
+    if second.token != first.token+1 {
+        t.Fatalf("expected CreateLock to hand out monotonic tokens, got %d then %d", first.token, second.token)
     }
 }
 

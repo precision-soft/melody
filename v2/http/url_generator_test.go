@@ -206,7 +206,8 @@ func TestGeneratePath_ParamWithSpecialCharacters_IsPathEscaped(t *testing.T) {
     }
 }
 
-func TestGeneratePath_ParamWithSlash_IsPathEscaped(t *testing.T) {
+/** @info A ":param" spans one path segment; a slash in its value would be emitted as %2F, which the net/http server decodes back to "/" before the kernel matches on request.URL.Path, so the link would resolve to a different route or 404. The generator must reject the slash rather than mint such a url. */
+func TestGeneratePath_RejectsSlashInParam(t *testing.T) {
     routeRegistry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(routeRegistry)
     urlGenerator := NewUrlGenerator(routeRegistry)
@@ -219,13 +220,9 @@ func TestGeneratePath_ParamWithSlash_IsPathEscaped(t *testing.T) {
         NewRouteOptions("page", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
     )
 
-    pathValue, err := urlGenerator.GeneratePath("page", map[string]string{"name": "a/b"})
-    if nil != err {
-        t.Fatalf("unexpected error: %v", err)
-    }
-
-    if "/page/a%2Fb" != pathValue {
-        t.Fatalf("expected slash to be escaped, got: %s", pathValue)
+    generated, err := urlGenerator.GeneratePath("page", map[string]string{"name": "a/b"})
+    if nil == err {
+        t.Fatalf("a single-segment param spanning a slash mints a %%2F url the router decodes to a different path; expected rejection, generated %q", generated)
     }
 }
 
@@ -290,5 +287,82 @@ func TestGeneratePath_CatchAllRequirementFailure(t *testing.T) {
     generated, err := urlGenerator.GeneratePath("files", map[string]string{"path": "../../etc/passwd"})
     if nil == err {
         t.Fatalf("expected the catch-all requirement to reject the value, generated %q", generated)
+    }
+}
+
+/** @info matchPath receives the catch-all remainder as the non-empty segments joined by "/", so the requirement must be tested against that collapsed remainder — an interior double slash the emission drops (here "a//b" -> "a/b") must not fail generation, or a value the router serves cannot be generated. */
+func TestGeneratePath_CatchAllRequirementMatchesEmittedRemainder(t *testing.T) {
+    routeRegistry := NewRouteRegistry()
+    router := NewRouterWithRouteRegistry(routeRegistry)
+    urlGenerator := NewUrlGenerator(routeRegistry)
+
+    router.HandleWithOptions(
+        "/files/*path...",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return EmptyResponse(200), nil
+        },
+        NewRouteOptions(
+            "files",
+            []string{nethttp.MethodGet},
+            "",
+            nil,
+            map[string]string{"path": "[a-z]+(?:/[a-z]+)*"},
+            nil,
+            nil,
+            0,
+            nil,
+        ),
+    )
+
+    pathValue, err := urlGenerator.GeneratePath("files", map[string]string{"path": "a//b"})
+    if nil != err {
+        t.Fatalf("an interior double slash collapses to the remainder the router accepts; expected generation to succeed: %v", err)
+    }
+
+    if "/files/a/b" != pathValue {
+        t.Fatalf("expected the emitted url to collapse the empty segment, got: %s", pathValue)
+    }
+}
+
+/** @info registerRouteInTree and matchPath treat "*name..." as terminal wherever it appears, dropping any pattern segments that follow it; the generator must stop there too, or it appends trailing literals onto a url its own router answers with a 404. */
+func TestGeneratePath_NonTerminalCatchAllDropsTrailingLiterals(t *testing.T) {
+    routeRegistry := NewRouteRegistry()
+    router := NewRouterWithRouteRegistry(routeRegistry)
+    urlGenerator := NewUrlGenerator(routeRegistry)
+
+    router.HandleWithOptions(
+        "/m/*p.../view",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return EmptyResponse(200), nil
+        },
+        NewRouteOptions(
+            "mid",
+            []string{nethttp.MethodGet},
+            "",
+            nil,
+            map[string]string{"p": "\\d+/\\d+"},
+            nil,
+            nil,
+            0,
+            nil,
+        ),
+    )
+
+    pathValue, err := urlGenerator.GeneratePath("mid", map[string]string{"p": "1/2"})
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if "/m/1/2" != pathValue {
+        t.Fatalf("expected the trailing literal to be dropped as registration drops it, got: %s", pathValue)
+    }
+
+    routes := routeRegistry.routesInternal()
+    if 0 == len(routes) {
+        t.Fatalf("expected the route to be registered")
+    }
+
+    if _, matched := matchPath(routes[0], splitPath(pathValue)); false == matched {
+        t.Fatalf("the generated catch-all url must be servable by its own router, %q did not match", pathValue)
     }
 }

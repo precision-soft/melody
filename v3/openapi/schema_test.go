@@ -119,7 +119,7 @@ func TestBuildSchema_ParenthesizedValidationConstraintsEmitted(t *testing.T) {
     }
 }
 
-/* @info character-class and non-empty constraints must reach the spec (CR #66) */
+/* @info character-class and non-empty constraints must reach the spec */
 
 func TestBuildSchema_CharacterClassConstraintsEmitPattern(t *testing.T) {
     components := map[string]*Schema{}
@@ -769,7 +769,7 @@ func TestParseLeadingIntMatchesValidator(t *testing.T) {
     cases := []struct {
         input  string
         wantOk bool
-        want   int64
+        want   int
     }{
         {"5", true, 5},
         {"-5", true, -5},
@@ -790,7 +790,7 @@ func TestParseLeadingIntMatchesValidator(t *testing.T) {
     }
 }
 
-/* @info a parenthesized parameter that lacks '=' (a stray-paren typo such as min(5)/notEmpty(foo)/email(x)) makes the validator's parseValidationTag reject the whole tag with a value-independent "invalid validation tag syntax" error, so the field accepts no value; the mirror's splitRule silently dropped the malformed pair and advertised a satisfiable schema, so this asserts the field is now advertised unsatisfiable (CR #83) */
+/* @info a parenthesized parameter that lacks '=' (a stray-paren typo such as min(5)/notEmpty(foo)/email(x)) makes the validator's parseValidationTag reject the whole tag with a value-independent "invalid validation tag syntax" error, so the field accepts no value; the mirror's splitRule silently dropped the malformed pair and advertised a satisfiable schema, so this asserts the field is now advertised unsatisfiable */
 func TestApplyValidation_InvalidTagSyntaxIsUnsatisfiable(t *testing.T) {
     for _, tag := range []string{"notEmpty(foo)", "min(x)", "min(5)", "email(x)"} {
         schema := &Schema{Type: "string"}
@@ -812,18 +812,18 @@ func TestApplyValidation_InvalidTagSyntaxIsUnsatisfiable(t *testing.T) {
     }
 }
 
-/* @info a malformed numeric/length tag makes the validator fail the field closed (post-CR70), so the spec advertises an unsatisfiable schema rather than a passable default (CR #71 supersedes CR #64/#65) */
+/* @info a malformed numeric/length tag makes the validator fail the field closed, so the spec advertises an unsatisfiable schema rather than a passable default */
 
-type malformedBoundRequestCR64 struct {
+type malformedBoundRequest struct {
     Name string `json:"name" validate:"max=abc"`
     Code string `json:"code" validate:"min=xyz"`
 }
 
 func TestBuildSchema_MalformedMinMaxBoundIsUnsatisfiable(t *testing.T) {
     components := map[string]*Schema{}
-    buildSchema(reflect.TypeOf(malformedBoundRequestCR64{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+    buildSchema(reflect.TypeOf(malformedBoundRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
 
-    schema := components["malformedBoundRequestCR64"]
+    schema := components["malformedBoundRequest"]
     if nil == schema {
         t.Fatalf("expected the request schema to be registered in components")
     }
@@ -837,16 +837,16 @@ func TestBuildSchema_MalformedMinMaxBoundIsUnsatisfiable(t *testing.T) {
     }
 }
 
-type malformedNumericBoundRequestCR65 struct {
+type malformedNumericBoundRequest struct {
     Floor   int `json:"floor" validate:"greaterThan=abc"`
     Ceiling int `json:"ceiling" validate:"lessThan=xyz"`
 }
 
 func TestBuildSchema_MalformedGreaterLessThanBoundIsUnsatisfiable(t *testing.T) {
     components := map[string]*Schema{}
-    buildSchema(reflect.TypeOf(malformedNumericBoundRequestCR65{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+    buildSchema(reflect.TypeOf(malformedNumericBoundRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
 
-    schema := components["malformedNumericBoundRequestCR65"]
+    schema := components["malformedNumericBoundRequest"]
     if nil == schema {
         t.Fatalf("expected the request schema to be registered in components")
     }
@@ -862,15 +862,15 @@ func TestBuildSchema_MalformedGreaterLessThanBoundIsUnsatisfiable(t *testing.T) 
     }
 }
 
-type byteEmailRequestCR65 struct {
+type byteEmailRequest struct {
     Blob []byte `json:"blob" validate:"email"`
 }
 
 func TestBuildSchema_EmailDoesNotClobberStructuralByteFormat(t *testing.T) {
     components := map[string]*Schema{}
-    buildSchema(reflect.TypeOf(byteEmailRequestCR65{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+    buildSchema(reflect.TypeOf(byteEmailRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
 
-    schema := components["byteEmailRequestCR65"]
+    schema := components["byteEmailRequest"]
     if nil == schema {
         t.Fatalf("expected the request schema to be registered in components")
     }
@@ -881,7 +881,7 @@ func TestBuildSchema_EmailDoesNotClobberStructuralByteFormat(t *testing.T) {
     }
 }
 
-/* @info notBlank/notEmpty reject a null pointer, so the spec must not advertise the field nullable (CR #71) */
+/* @info notBlank/notEmpty reject a null pointer, so the spec must not advertise the field nullable */
 
 func TestApplyValidation_NotBlankNotEmptyPointerFieldNotNullable(t *testing.T) {
     structType := reflect.StructOf([]reflect.StructField{
@@ -905,7 +905,7 @@ func TestApplyValidation_NotBlankNotEmptyPointerFieldNotNullable(t *testing.T) {
     }
 }
 
-/* @info a degenerate min=0 must not suppress the notEmpty/notBlank non-empty floor, in either tag order (CR #71) */
+/* @info a degenerate min=0 must not suppress the notEmpty/notBlank non-empty floor, in either tag order */
 
 func TestBuildSchema_DegenerateMinZeroDoesNotSuppressNotEmptyFloor(t *testing.T) {
     stringType := reflect.TypeOf("")
@@ -933,15 +933,15 @@ func TestBuildSchema_DegenerateMinZeroDoesNotSuppressNotEmptyFloor(t *testing.T)
     }
 }
 
-/* @info CR #74 — a constraint whose validator rejects the field's underlying kind outright (notEmpty on a struct, greaterThan/lessThan on a non-numeric) must advertise the field unsatisfiable, mirroring the scalar/time.Time handling closed in CR #72/#73 */
+/* @info a constraint whose validator rejects the field's underlying kind outright (notEmpty on a struct, greaterThan/lessThan on a non-numeric) must advertise the field unsatisfiable, mirroring the scalar/time.Time handling */
 
-type cr74InnerStruct struct {
+type nestedNamedStruct struct {
     Value string `json:"value"`
 }
 
-type cr74NotEmptyOnStructRequest struct {
-    Named    cr74InnerStruct  `json:"named" validate:"notEmpty"`
-    NamedPtr *cr74InnerStruct `json:"namedPtr" validate:"notEmpty"`
+type notEmptyOnStructRequest struct {
+    Named    nestedNamedStruct  `json:"named" validate:"notEmpty"`
+    NamedPtr *nestedNamedStruct `json:"namedPtr" validate:"notEmpty"`
     Inline   struct {
         Field string `json:"field"`
     } `json:"inline" validate:"notEmpty"`
@@ -954,9 +954,9 @@ func isImpossibleObject(schema *Schema) bool {
 
 func TestBuildSchema_NotEmptyOnStructIsUnsatisfiable(t *testing.T) {
     components := map[string]*Schema{}
-    buildSchema(reflect.TypeOf(cr74NotEmptyOnStructRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+    buildSchema(reflect.TypeOf(notEmptyOnStructRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
 
-    schema := components["cr74NotEmptyOnStructRequest"]
+    schema := components["notEmptyOnStructRequest"]
     if nil == schema {
         t.Fatalf("expected the request schema to be registered in components")
     }
@@ -966,7 +966,7 @@ func TestBuildSchema_NotEmptyOnStructIsUnsatisfiable(t *testing.T) {
     if nil == named || "" != named.Ref || 2 != len(named.AllOf) {
         t.Fatalf("expected named struct notEmpty to wrap the $ref in a contradictory allOf, got %+v", named)
     }
-    if "#/components/schemas/cr74InnerStruct" != named.AllOf[0].Ref || false == isImpossibleObject(named.AllOf[1]) {
+    if "#/components/schemas/nestedNamedStruct" != named.AllOf[0].Ref || false == isImpossibleObject(named.AllOf[1]) {
         t.Fatalf("expected allOf of [$ref, impossible object], got %+v", named)
     }
     if true == named.Nullable {
@@ -986,7 +986,7 @@ func TestBuildSchema_NotEmptyOnStructIsUnsatisfiable(t *testing.T) {
     }
 }
 
-type cr74NumericOnNonNumericRequest struct {
+type numericOnNonNumericRequest struct {
     Code  string         `json:"code" validate:"greaterThan=0"`
     Flag  bool           `json:"flag" validate:"lessThan=1"`
     Items []string       `json:"items" validate:"greaterThan=0"`
@@ -995,9 +995,9 @@ type cr74NumericOnNonNumericRequest struct {
 
 func TestBuildSchema_GreaterLessThanOnNonNumericIsUnsatisfiable(t *testing.T) {
     components := map[string]*Schema{}
-    buildSchema(reflect.TypeOf(cr74NumericOnNonNumericRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+    buildSchema(reflect.TypeOf(numericOnNonNumericRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
 
-    schema := components["cr74NumericOnNonNumericRequest"]
+    schema := components["numericOnNonNumericRequest"]
     if nil == schema {
         t.Fatalf("expected the request schema to be registered in components")
     }
@@ -1399,7 +1399,7 @@ func TestBuildSchema_UncompilableRegexNotLoosenedByValuelessMax(t *testing.T) {
     }
 }
 
-/** @info The generator's bracket-balance helper is documented as an exact mirror of the validator's, so a tag the validator accepts must never be swept up by the syntax guard. RE2 reads a ']' that closes no character class as a literal, and the validator was taught this in CR #89; a generator still rejecting it advertises an unsatisfiable field for values the api happily accepts. */
+/** @info The generator's bracket-balance helper is documented as an exact mirror of the validator's, so a tag the validator accepts must never be swept up by the syntax guard. RE2 reads a ']' that closes no character class as a literal, and the validator handles this; a generator still rejecting it advertises an unsatisfiable field for values the api happily accepts. */
 func TestApplyValidation_LiteralClosingBracketMatchesTheValidator(t *testing.T) {
     schema := &Schema{Type: "string"}
     applyValidation(schema, "regex(pattern=^a]b$)")
@@ -1419,5 +1419,126 @@ func TestApplyValidation_PatternIsNotARegexAlias(t *testing.T) {
 
     if "^[0-9]+$" == schema.Pattern {
         t.Fatalf("the generator invented a regex constraint the validator does not have")
+    }
+}
+
+/** @info a []byte renders as {string, byte}, but the validator's string facets never see a string there — Regex/alpha/numeric/alphanumeric ignore a []byte and accept every blob, and min/max measure fmt.Sprintf("%v", value) (e.g. "[1 2 3]") not the base64 text — so the mirror must not attach pattern/minLength/maxLength to a byte-format field, exactly as the email branch already declines format byte. Without the guard regex=^[a-z]+$ leaks a pattern, regex=a** advertises maxLength 0 (only the empty payload) and min/max/alpha over-constrain a blob the server actually accepts. */
+func TestApplyValidation_StringFacetsSkipByteSliceField(t *testing.T) {
+    byteType := reflect.TypeOf([]byte(nil))
+    structType := reflect.StructOf([]reflect.StructField{
+        {Name: "Pattern", Type: byteType, Tag: `json:"pattern" validate:"regex=^[a-z]+$"`},
+        {Name: "Broken", Type: byteType, Tag: `json:"broken" validate:"regex=a**"`},
+        {Name: "Alpha", Type: byteType, Tag: `json:"alpha" validate:"alpha"`},
+        {Name: "Numeric", Type: byteType, Tag: `json:"numeric" validate:"numeric"`},
+        {Name: "Alphanumeric", Type: byteType, Tag: `json:"alphanumeric" validate:"alphanumeric"`},
+        {Name: "Floor", Type: byteType, Tag: `json:"floor" validate:"min=4"`},
+        {Name: "Ceiling", Type: byteType, Tag: `json:"ceiling" validate:"max=8"`},
+    })
+
+    schema := buildSchema(structType, map[string]*Schema{}, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    for name := range schema.Properties {
+        property := schema.Properties[name]
+        if "string" != property.Type || "byte" != property.Format {
+            t.Fatalf("expected the []byte field %q to stay {string, byte}, got {%q, %q}", name, property.Type, property.Format)
+        }
+        if "" != property.Pattern || nil != property.AllOf {
+            t.Fatalf("expected no pattern facet on the []byte field %q, got pattern=%q allOf=%v", name, property.Pattern, property.AllOf)
+        }
+        if nil != property.MinLength || nil != property.MaxLength {
+            t.Fatalf("expected no length facet on the []byte field %q, got minLength=%v maxLength=%v", name, property.MinLength, property.MaxLength)
+        }
+    }
+}
+
+/** @info parseLeadingInt must return the platform int, the same width the validator's parseIntStrict uses, so a bound in the 2^31..2^63-1 range that overflows a 32-bit int is rejected identically on both sides instead of parsing into a wider int64 and wrapping to a satisfiable facet the validator refuses. The 32-bit overflow itself is unobservable on a 64-bit test host, so this asserts the concrete return kind, which pins the width divergence on every platform. */
+func TestParseLeadingIntReturnsPlatformIntWidth(t *testing.T) {
+    parsed, ok := parseLeadingInt("5")
+    if false == ok {
+        t.Fatalf("expected parseLeadingInt to accept a plain integer")
+    }
+    if reflect.Int != reflect.TypeOf(parsed).Kind() {
+        t.Fatalf("parseLeadingInt must return the platform int (matching the validator's parseIntStrict) so 32-bit overflow behaviour is identical, got %T", parsed)
+    }
+}
+
+/** @info validateInternal checks every tagged field even when the property is omitted, so a constraint the Go zero value fails (min>=1 on a string, a non-pointer greaterThan bound>=0, a non-pointer lessThan bound<=0) turns an absent property into a 400; the spec must list such a field required — as notBlank/notEmpty already do — while a min of 0, a negative greaterThan bound, or a positive lessThan bound admits the zero value and keeps the field optional. */
+func TestBuildSchema_ZeroValueRejectingConstraintsAreRequired(t *testing.T) {
+    stringType := reflect.TypeOf("")
+    intType := reflect.TypeOf(0)
+    structType := reflect.StructOf([]reflect.StructField{
+        {Name: "Name", Type: stringType, Tag: `json:"name" validate:"min=3"`},
+        {Name: "Slug", Type: stringType, Tag: `json:"slug" validate:"min"`},
+        {Name: "Count", Type: intType, Tag: `json:"count" validate:"greaterThan=5"`},
+        {Name: "Balance", Type: intType, Tag: `json:"balance" validate:"greaterThan"`},
+        {Name: "Depth", Type: intType, Tag: `json:"depth" validate:"lessThan"`},
+        {Name: "Optional", Type: stringType, Tag: `json:"optional" validate:"min=0"`},
+        {Name: "Below", Type: intType, Tag: `json:"below" validate:"greaterThan=-5"`},
+        {Name: "Above", Type: intType, Tag: `json:"above" validate:"lessThan=5"`},
+    })
+
+    schema := buildSchema(structType, map[string]*Schema{}, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    for _, name := range []string{"name", "slug", "count", "balance", "depth"} {
+        if false == containsString(schema.Required, name) {
+            t.Fatalf("expected %q to be required (the validator rejects the omitted zero value), required=%v", name, schema.Required)
+        }
+    }
+
+    for _, name := range []string{"optional", "below", "above"} {
+        if true == containsString(schema.Required, name) {
+            t.Fatalf("expected %q to stay optional (the zero value satisfies the bound), required=%v", name, schema.Required)
+        }
+    }
+}
+
+/** @info a POSIX named class ([:alpha:]) nested in a bracket expression has its own closing ']' that the character-class scanner must not read as the end of the whole class; otherwise regex=[[:alpha:],] is split at the in-class comma into an uncompilable pattern plus a stray ']' rule. The validator rejects such a tag for every value including "", so the mirror must keep the class intact and advertise the compilable pattern rather than a maxLength-0 (empty-string-satisfiable) field. This keeps the local scanner in lockstep with validation/validation_rule.go. */
+func TestApplyValidation_PosixClassKeepsTheClassIntact(t *testing.T) {
+    schema := &Schema{Type: "string"}
+    applyValidation(schema, `regex=[[:alpha:],]`)
+
+    if "[[:alpha:],]" != schema.Pattern {
+        t.Fatalf("expected the POSIX-class regex to reach the schema pattern intact, got pattern=%q maxLength=%v allOf=%v", schema.Pattern, schema.MaxLength, schema.AllOf)
+    }
+}
+
+/** @info RE2 recognises only [: :] as a POSIX named class; a [. .] collating element and a [= =] equivalence element are NOT supported, so RE2 (and regexp.Compile) read the inner '[' as an ordinary class literal. The character-class scanner must do the same: treating [. or [= as a POSIX opener makes it hunt for a ".]"/"=]" delimiter that never arrives, so the class over-extends to the end of the tag, hasBalancedRuleBrackets reports the tag unbalanced, and splitTopLevelRules splits regex=[a,b[.c] at the in-class comma into "regex=[a" (an uncompilable class advertised as maxLength 0, empty-string-only) plus a stray "b[.c]" rule — a contract the validator, which compiles the class whole and rejects every value including "", never honours. The plain and equivalence fields lock the [. and [= literal handling; the posix field pairs a real [:alpha:] class with a following in-class comma and a [. literal so the whole tag survives as one satisfiable pattern rather than closing early at the ':]' — matching validation/validation_rule.go. */
+func TestBuildSchema_CollatingEquivalenceOpenersStayLiteralInsideClass(t *testing.T) {
+    components := map[string]*Schema{}
+    names := map[reflect.Type]string{}
+    visited := map[reflect.Type]bool{}
+
+    stringType := reflect.TypeOf("")
+    requestType := reflect.StructOf([]reflect.StructField{
+        {Name: "Plain", Type: stringType, Tag: `json:"plain" validate:"regex=[a,b[.c]"`},
+        {Name: "Equiv", Type: stringType, Tag: `json:"equiv" validate:"regex=[a,b[=c]"`},
+        {Name: "Posix", Type: stringType, Tag: `json:"posix" validate:"regex=[[:alpha:],b[.c]"`},
+    })
+
+    schema := buildSchema(requestType, components, names, visited)
+
+    cases := []struct {
+        jsonName string
+        pattern  string
+    }{
+        {"plain", "[a,b[.c]"},
+        {"equiv", "[a,b[=c]"},
+        {"posix", "[[:alpha:],b[.c]"},
+    }
+
+    for _, testCase := range cases {
+        property := schema.Properties[testCase.jsonName]
+        if nil == property {
+            t.Fatalf("expected the %q property to exist", testCase.jsonName)
+        }
+        if testCase.pattern != property.Pattern {
+            t.Fatalf("expected %q to be mirrored as one regex rule with the full pattern %q (an in-class '[' is an RE2 literal, not a collating/equivalence opener), got pattern=%q allOf=%v maxLength=%v", testCase.jsonName, testCase.pattern, property.Pattern, property.AllOf, property.MaxLength)
+        }
+        if nil != property.AllOf {
+            t.Fatalf("expected %q to stay a single pattern rule, not split into allOf members, got allOf=%v", testCase.jsonName, property.AllOf)
+        }
+        if nil != property.MaxLength {
+            t.Fatalf("expected %q to advertise a satisfiable pattern (no maxLength 0 empty-string-only ceiling), got maxLength=%v", testCase.jsonName, *property.MaxLength)
+        }
     }
 }

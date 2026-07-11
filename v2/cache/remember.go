@@ -126,7 +126,7 @@ func rememberWithStampedeProtection(
         call.AddWaiter()
         shard.mutex.Unlock()
 
-        defer call.RemoveWaiter()
+        defer call.RemoveWaiter(shard)
         return call.Wait(waitTimeout, key)
     }
 
@@ -146,7 +146,7 @@ func rememberWithStampedeProtection(
         callback,
     )
 
-    defer call.RemoveWaiter()
+    defer call.RemoveWaiter(shard)
     return call.Wait(waitTimeout, key)
 }
 

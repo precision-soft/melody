@@ -4,6 +4,7 @@ import (
     "fmt"
     "net"
     nethttp "net/http"
+    "strings"
     "sync"
     "time"
 
@@ -26,6 +27,14 @@ func NewTokenBucketLimiterWithClock(clockInstance clockcontract.Clock, rate int,
         exception.Panic(
             exception.NewError("clock is required for token bucket limiter", nil, nil),
         )
+    }
+
+    /* a non-positive window makes Allow refill to full capacity on every request (window <= elapsed is always true), silently disabling the limiter; a non-positive rate denies all traffic. Normalize both, mirroring CompressionMiddleware's MinSize clamp. */
+    if 0 >= rate {
+        rate = 1
+    }
+    if 0 >= window {
+        window = time.Minute
     }
 
     limiter := &TokenBucketLimiter{
@@ -131,6 +140,14 @@ func NewSlidingWindowLimiterWithClock(clockInstance clockcontract.Clock, limit i
         exception.Panic(
             exception.NewError("clock is required for sliding window limiter", nil, nil),
         )
+    }
+
+    /* a non-positive window prunes every recorded request (windowStart >= now), so the limit is never reached and the limiter is silently disabled; a non-positive limit denies all traffic. Normalize both, mirroring CompressionMiddleware's MinSize clamp. */
+    if 0 >= limit {
+        limit = 1
+    }
+    if 0 >= window {
+        window = time.Minute
     }
 
     limiter := &SlidingWindowLimiter{
@@ -249,6 +266,20 @@ func DefaultClientIp(request httpcontract.Request) string {
     return host
 }
 
+/* normalizeBucketPath mirrors the router's splitPath trailing-slash normalization (router_utility.go) so /login, /login/ and /login// (which all execute the same handler) share one rate-limit bucket instead of minting a fresh full allowance per trailing-slash variant. */
+func normalizeBucketPath(path string) string {
+    if 1 < len(path) {
+        trimmedPath := strings.TrimRight(path, "/")
+        if "" == trimmedPath {
+            return "/"
+        }
+
+        return trimmedPath
+    }
+
+    return path
+}
+
 type RateLimitConfig struct {
     limiter          httpcontract.RateLimiter
     keyExtractor     KeyExtractor
@@ -309,7 +340,7 @@ func RateLimitMiddleware(config *RateLimitConfig) httpcontract.Middleware {
         config.SetKeyExtractor(func(request httpcontract.Request) string {
             ip := config.clientIp(request)
 
-            return fmt.Sprintf("%s:%s", ip, request.HttpRequest().URL.Path)
+            return fmt.Sprintf("%s:%s", ip, normalizeBucketPath(request.HttpRequest().URL.Path))
         })
     }
 

@@ -206,14 +206,22 @@ func preprocessDotEnvContent(content string) (string, error) {
         openedInQuotes := inQuotes
         var previousChar rune = 0
 
+        /* godotenv opens a quoted value only when the quote is the first non-space rune of the value portion, after the key separator (its hasQuotePrefix); a quote anywhere else in an unquoted value is literal data and must not flip the cross-line quote state. A line that continues a value opened on an earlier line is entirely inside that value already. */
+        sawSeparator := openedInQuotes
+        valueStarted := openedInQuotes
+
         for _, character := range line {
             if '"' == character || '\'' == character {
-                if false == inQuotes {
+                if true == inQuotes {
+                    /* godotenv skips a quote preceded by a backslash, so an escaped quote inside the value does not terminate it */
+                    if quoteChar == character && '\\' != previousChar {
+                        inQuotes = false
+                        quoteChar = 0
+                    }
+                } else if true == sawSeparator && false == valueStarted {
                     inQuotes = true
                     quoteChar = character
-                } else if true == (quoteChar == character) {
-                    inQuotes = false
-                    quoteChar = 0
+                    valueStarted = true
                 }
 
                 _, _ = builder.WriteRune(character)
@@ -221,9 +229,19 @@ func preprocessDotEnvContent(content string) (string, error) {
                 continue
             }
 
-            if '#' == character && false == inQuotes {
-                if 0 == previousChar || true == unicode.IsSpace(previousChar) {
-                    break
+            if false == inQuotes {
+                if '#' == character {
+                    if 0 == previousChar || true == unicode.IsSpace(previousChar) {
+                        break
+                    }
+                }
+
+                if false == sawSeparator {
+                    if '=' == character || ':' == character {
+                        sawSeparator = true
+                    }
+                } else if false == valueStarted && false == unicode.IsSpace(character) {
+                    valueStarted = true
                 }
             }
 

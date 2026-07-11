@@ -62,6 +62,29 @@ func (instance *refreshFailingLock) Refresh(runtimeInstance runtimecontract.Runt
     return exception.NewError("lease lost", nil, nil)
 }
 
+/* contextCancelledAcquireLock stands in for a backend round trip cut short by a SIGTERM: Acquire fails
+with the runtime cancellation wrapped in a store error, exactly as a real locker reports an in-flight
+Acquire when the context it was called with is cancelled underneath it. */
+type contextCancelledAcquireLocker struct{}
+
+func (instance *contextCancelledAcquireLocker) CreateLock(name string, ttl time.Duration) lockcontract.Lock {
+    return &contextCancelledAcquireLock{}
+}
+
+type contextCancelledAcquireLock struct{}
+
+func (instance *contextCancelledAcquireLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+    return false, exception.NewError("acquire aborted", nil, runtimeInstance.Context().Err())
+}
+
+func (instance *contextCancelledAcquireLock) Release(runtimeInstance runtimecontract.Runtime) error {
+    return nil
+}
+
+func (instance *contextCancelledAcquireLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl time.Duration) error {
+    return nil
+}
+
 func TestRunExclusive_RunsAndReleases(t *testing.T) {
     locker := NewInMemoryLocker(clock.NewSystemClock())
     runtimeInstance := testRuntime()
@@ -124,6 +147,27 @@ func TestRunExclusive_FailsClosedOnAcquireError(t *testing.T) {
 
     if true == ran || true == called {
         t.Fatalf("expected no run on acquire error: ran=%v called=%v", ran, called)
+    }
+}
+
+func TestRunExclusive_AcquireCancellationIsShutdownNotError(t *testing.T) {
+    /* a SIGTERM cancels the very context the backend was called with, so an in-flight Acquire fails with the cancellation wrapped in a store error; that is the stop itself and must read as a clean skip, never as an error a cron fleet reports as a failed run */
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    runtimeInstance := testRuntimeWithContext(cancelledContext)
+
+    called := false
+    ran, runErr := RunExclusive(runtimeInstance, &contextCancelledAcquireLocker{}, "cron:sigterm", time.Minute, func(childRuntime runtimecontract.Runtime) error {
+        called = true
+        return nil
+    })
+    if nil != runErr {
+        t.Fatalf("an acquire cancelled by shutdown must not surface as an error: %v", runErr)
+    }
+
+    if true == ran || true == called {
+        t.Fatalf("expected a clean skip on a shutdown-cancelled acquire: ran=%v called=%v", ran, called)
     }
 }
 

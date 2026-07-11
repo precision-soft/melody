@@ -185,7 +185,7 @@ func TestConsume_ExhaustedWithoutFailureTransportDropsMessage(t *testing.T) {
     }
 }
 
-/* @info configurable dead-letter bound: requeue forever by default, give up after N when set (CR #66) */
+/* @info configurable dead-letter bound: requeue forever by default, give up after N when set */
 
 type recordingNackTransport struct {
     nackCount    int

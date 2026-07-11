@@ -7,6 +7,7 @@ import (
     "sort"
     "strings"
     "time"
+    "unicode/utf8"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/cli/output"
@@ -112,7 +113,8 @@ func resolveErrorContextJson(resolveErr error, verbosityLevel int) string {
     }
 
     /* @important redact BEFORE marshalling: both fallbacks below print the value they were handed, so sanitizing only the happy path would leak exactly the stack and trace entries this function exists to strip whenever json.Marshal or json.Unmarshal fails */
-    redactedContext := sanitizeErrorContextValue(contextValue)
+    /* @important convert the defined exceptioncontract.Context type to its plain map[string]any underlying: sanitizeErrorContextValue matches only via value.(map[string]any), which fails for the named type, so without this the redaction is a no-op and the fallback leaks the raw stack and panicStack keys */
+    redactedContext := sanitizeErrorContextValue(map[string]any(contextValue))
 
     normalizedContextBytes, normalizeMarshalErr := json.Marshal(redactedContext)
     if nil != normalizeMarshalErr {
@@ -422,7 +424,30 @@ func truncateTableCellValue(value string) string {
         return value
     }
 
-    return value[:maxLength-3] + "..."
+    return value[:runeAwareByteLimit(value, maxLength-3)] + "..."
+}
+
+/* runeAwareByteLimit returns the largest byte offset that is not greater than limit and lands on a UTF-8 rune boundary, so slicing at it never splits a multibyte rune into invalid bytes */
+func runeAwareByteLimit(value string, limit int) int {
+    if 0 >= limit {
+        return 0
+    }
+
+    cut := 0
+
+    for cut < len(value) {
+        _, size := utf8.DecodeRuneInString(value[cut:])
+        if 0 == size {
+            break
+        }
+        if cut+size > limit {
+            break
+        }
+
+        cut = cut + size
+    }
+
+    return cut
 }
 
 func truncateTableCellValueByVerbosity(value string, verbosityLevel int) string {
@@ -514,8 +539,15 @@ func wrapFixedWidth(value string, width int) []string {
             break
         }
 
-        result = append(result, value[:width])
-        value = value[width:]
+        cut := runeAwareByteLimit(value, width)
+        if 0 == cut {
+            /* the next rune is wider than the wrap width, so keep it whole rather than splitting its bytes into invalid UTF-8 */
+            _, size := utf8.DecodeRuneInString(value)
+            cut = size
+        }
+
+        result = append(result, value[:cut])
+        value = value[cut:]
     }
 
     return result

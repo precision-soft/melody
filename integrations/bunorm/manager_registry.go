@@ -15,8 +15,21 @@ type ManagerRegistry struct {
     providerDefinitionByName      map[string]ProviderDefinition
     defaultProviderDefinitionName string
 
-    lock     sync.Mutex
-    managers map[string]*Manager
+    lock              sync.Mutex
+    managers          map[string]*Manager
+    pendingOpenByName map[string]*managerOpen
+    closed            bool
+}
+
+/*
+    managerOpen tracks a single in-flight Provider.Open for one definition name so
+    that concurrent openers of the same name coalesce onto one attempt instead of
+    each dialing the database while holding the registry-wide lock.
+*/
+type managerOpen struct {
+    done      chan struct{}
+    manager   *Manager
+    openError error
 }
 
 func NewManagerRegistry(resolver containercontract.Resolver, providerDefinitions ...ProviderDefinition) (*ManagerRegistry, error) {
@@ -66,6 +79,7 @@ func NewManagerRegistry(resolver containercontract.Resolver, providerDefinitions
         providerDefinitionByName:      providerDefinitionByName,
         defaultProviderDefinitionName: defaultProviderDefinitionName,
         managers:                      make(map[string]*Manager),
+        pendingOpenByName:             make(map[string]*managerOpen),
     }, nil
 }
 
@@ -106,26 +120,92 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
     }
 
     instance.lock.Lock()
-    defer instance.lock.Unlock()
 
     if manager, exists := instance.managers[name]; true == exists {
+        instance.lock.Unlock()
+
         return manager, nil
     }
 
     providerDefinition, exists := instance.providerDefinitionByName[name]
     if false == exists {
+        instance.lock.Unlock()
+
         return nil, ErrProviderDefinitionNotFound
     }
 
-    database, openErr := providerDefinition.Provider.Open(instance.resolver)
-    if nil != openErr {
-        return nil, openErr
+    if pendingOpen, inFlight := instance.pendingOpenByName[name]; true == inFlight {
+        instance.lock.Unlock()
+
+        <-pendingOpen.done
+
+        return pendingOpen.manager, pendingOpen.openError
     }
 
-    manager := NewManager(name, database)
-    instance.managers[name] = manager
+    pendingOpen := &managerOpen{done: make(chan struct{})}
+    instance.pendingOpenByName[name] = pendingOpen
 
-    return manager, nil
+    instance.lock.Unlock()
+
+    /*
+        Open the provider outside the registry-wide lock: dialing, pinging and any
+        uninterruptible retry sleeps of a down database must not serialize cache
+        hits for other managers or a concurrent Close. A failed open is never
+        memoized, so a later call retries.
+    */
+
+    settled := false
+    defer func() {
+        if true == settled {
+            return
+        }
+
+        recovered := recover()
+
+        instance.lock.Lock()
+        delete(instance.pendingOpenByName, name)
+        instance.lock.Unlock()
+
+        pendingOpen.openError = exception.NewError(
+            "bunorm manager provider panicked while opening",
+            map[string]any{"name": name},
+            nil,
+        )
+        close(pendingOpen.done)
+
+        if nil != recovered {
+            panic(recovered)
+        }
+    }()
+    database, openErr := providerDefinition.Provider.Open(instance.resolver)
+
+    instance.lock.Lock()
+
+    delete(instance.pendingOpenByName, name)
+
+    if nil != openErr {
+        pendingOpen.openError = openErr
+    } else if true == instance.closed {
+        /*
+            Close ran while this open was in flight: it already iterated the manager
+            map without this entry, so memoizing the manager now would leak its
+            connection pool. Close the freshly opened database and refuse.
+        */
+        _ = database.Close()
+        pendingOpen.openError = ErrManagerRegistryClosed
+    } else {
+        manager := NewManager(name, database)
+        instance.managers[name] = manager
+        pendingOpen.manager = manager
+    }
+
+    instance.lock.Unlock()
+
+    settled = true
+
+    close(pendingOpen.done)
+
+    return pendingOpen.manager, pendingOpen.openError
 }
 
 func (instance *ManagerRegistry) MustManager(name string) *Manager {
@@ -158,6 +238,8 @@ func (instance *ManagerRegistry) MustDatabase(name string) *bun.DB {
 func (instance *ManagerRegistry) Close() error {
     instance.lock.Lock()
     defer instance.lock.Unlock()
+
+    instance.closed = true
 
     var closeErr error
 

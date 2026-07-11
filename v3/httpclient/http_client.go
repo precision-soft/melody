@@ -38,7 +38,7 @@ type HttpClient struct {
 
 func NewHttpClient(config *HttpClientConfig) *HttpClient {
     timeout := config.Timeout()
-    if 0 == timeout {
+    if 0 >= timeout {
         timeout = 30 * time.Second
     }
 
@@ -113,6 +113,9 @@ func (instance *HttpClient) credentialStrippingRedirectPolicy(request *nethttp.R
     request.Header.Del("Cookie")
     request.Header.Del("Proxy-Authorization")
 
+    /* net/http auto-populates Referer with the full previous url, query string included; on a non-downgrade cross-origin hop it does not strip it, so a secret placed in the url (WithQuery) would reach the redirect target the first server chose. */
+    request.Header.Del("Referer")
+
     return nil
 }
 
@@ -170,19 +173,22 @@ func (instance *HttpClient) Get(urlString string, options ...httpclientcontract.
 }
 
 func (instance *HttpClient) Post(urlString string, body any, options ...httpclientcontract.RequestOption) (httpclientcontract.Response, error) {
-    options = append(options, WithJson(body))
+    /* clamp capacity so appending WithJson never writes into a spare slot of the caller's slice, which a concurrent Post/Put/Patch may share. */
+    options = append(options[:len(options):len(options)], WithJson(body))
 
     return instance.Request(nethttp.MethodPost, urlString, options...)
 }
 
 func (instance *HttpClient) Put(urlString string, body any, options ...httpclientcontract.RequestOption) (httpclientcontract.Response, error) {
-    options = append(options, WithJson(body))
+    /* clamp capacity so appending WithJson never writes into a spare slot of the caller's slice, which a concurrent Post/Put/Patch may share. */
+    options = append(options[:len(options):len(options)], WithJson(body))
 
     return instance.Request(nethttp.MethodPut, urlString, options...)
 }
 
 func (instance *HttpClient) Patch(urlString string, body any, options ...httpclientcontract.RequestOption) (httpclientcontract.Response, error) {
-    options = append(options, WithJson(body))
+    /* clamp capacity so appending WithJson never writes into a spare slot of the caller's slice, which a concurrent Post/Put/Patch may share. */
+    options = append(options[:len(options):len(options)], WithJson(body))
 
     return instance.Request(nethttp.MethodPatch, urlString, options...)
 }

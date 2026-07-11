@@ -144,19 +144,10 @@ func (instance *aes256Cipher) Decrypt(encoded string) (string, error) {
     return string(plaintext), nil
 }
 
-/* @important a marker-shaped plaintext must not be stored as-is: it would poison every later Scan/Decrypt. Pass through only values that authenticate under a known key; an unknown key id keeps the historical pass-through so a value sealed under a retired key is not destroyed by double encryption. */
+/* @important a marker-shaped plaintext must not be stored as-is: it would poison every later Scan/Decrypt. Pass through only values that authenticate under a key currently in the key set. A retired key stays in the set (still decryptable) until re-encryption completes and is only then removed, so a value sealed under it is not destroyed by double encryption; a marker-shaped value bearing an unknown key id is treated as ordinary plaintext and sealed under the current key instead of being stored verbatim. */
 func (instance *aes256Cipher) isPassThroughCiphertext(value string) bool {
     if false == looksEncrypted(value) {
         return false
-    }
-
-    keyId, hasKeyId := keyIdOf(value)
-    if false == hasKeyId {
-        return false
-    }
-
-    if _, keyErr := instance.keys.Key(keyId); nil != keyErr {
-        return true
     }
 
     _, decryptErr := instance.Decrypt(value)

@@ -114,15 +114,15 @@ func TestValidateContexts_AcceptsDistinctContexts(t *testing.T) {
     })
 }
 
-/** @info Every zero-value field of a per-context Options inherits from the base options — the ContextConfig doc says so, and CommandPrefix, ManagerFlagName and ManagerRegistryServiceId all do. ManagerName jumped straight to the context name, so a base pin was silently ignored and each context's commands targeted a manager merely named after it. */
-func TestEffectiveOptions_ManagerNameInheritsTheBasePin(t *testing.T) {
+/** @info ManagerName is intentionally per-context and must NOT inherit the base pin: a migration context targets the manager named after it (its own name), so it can never migrate the base-pinned database when no per-context pin is set. The sibling fields (CommandPrefix, ManagerFlagName, ManagerRegistryServiceId) still cascade from the base — only ManagerName stops cascading. */
+func TestEffectiveOptions_ManagerNameDoesNotInheritTheBasePin(t *testing.T) {
     resolved := effectiveOptions(
-        ContextConfig{Name: "erp"},
-        Options{ManagerName: "primary"},
+        ContextConfig{Name: "analytics"},
+        Options{ManagerName: "main"},
     )
 
-    if "primary" != resolved.ManagerName {
-        t.Fatalf("expected the base ManagerName pin to be inherited, got %q", resolved.ManagerName)
+    if "analytics" != resolved.ManagerName {
+        t.Fatalf("expected the context name (not the inherited base pin), got %q", resolved.ManagerName)
     }
 }
 

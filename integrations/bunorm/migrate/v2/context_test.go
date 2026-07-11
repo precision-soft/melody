@@ -113,3 +113,36 @@ func TestValidateContexts_AcceptsDistinctContexts(t *testing.T) {
         {Name: "payment", Migrations: migrate.NewMigrations()},
     })
 }
+
+/** @info ManagerName is intentionally per-context and must NOT inherit the base pin: a migration context targets the manager named after it (its own name), so it can never migrate the base-pinned database when no per-context pin is set. The sibling fields (CommandPrefix, ManagerFlagName, ManagerRegistryServiceId) still cascade from the base — only ManagerName stops cascading. */
+func TestEffectiveOptions_ManagerNameDoesNotInheritTheBasePin(t *testing.T) {
+    resolved := effectiveOptions(
+        ContextConfig{Name: "analytics"},
+        Options{ManagerName: "main"},
+    )
+
+    if "analytics" != resolved.ManagerName {
+        t.Fatalf("expected the context name (not the inherited base pin), got %q", resolved.ManagerName)
+    }
+}
+
+/** @info With neither the context nor the base pinning it, the context name remains the default. */
+func TestEffectiveOptions_ManagerNameFallsBackToTheContextName(t *testing.T) {
+    resolved := effectiveOptions(ContextConfig{Name: "reporting"}, Options{})
+
+    if "reporting" != resolved.ManagerName {
+        t.Fatalf("expected the context name as the default manager, got %q", resolved.ManagerName)
+    }
+}
+
+/** @info A per-context pin still beats the base pin. */
+func TestEffectiveOptions_ContextManagerNameBeatsTheBasePin(t *testing.T) {
+    resolved := effectiveOptions(
+        ContextConfig{Name: "erp", Options: Options{ManagerName: "erp_database"}},
+        Options{ManagerName: "primary"},
+    )
+
+    if "erp_database" != resolved.ManagerName {
+        t.Fatalf("expected the per-context pin to win, got %q", resolved.ManagerName)
+    }
+}

@@ -59,10 +59,16 @@ func NewStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpc
         defer cancel()
 
         /* the read loop is the only place the library observes client frames — including pongs — so the ping loop reads these to tell "the peer is gone" from "the reader cannot answer right now" */
-        liveness := &connectionLiveness{}
+        liveness := newConnectionLiveness()
         liveness.recordActivity()
 
-        go readLoop(connectionContext, cancel, connection, runtimeInstance, options, liveness)
+        /* the handler waits on readLoopDone before returning so a still-running OnMessage callback cannot outlive the request scope the kernel closes on return */
+        readLoopDone := make(chan struct{})
+        go func() {
+            defer close(readLoopDone)
+
+            readLoop(connectionContext, cancel, connection, runtimeInstance, options, liveness)
+        }()
 
         if 0 < options.IdleTimeout {
             go pingLoop(connectionContext, cancel, connection, options.IdleTimeout, liveness)
@@ -71,11 +77,11 @@ func NewStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpc
         for {
             select {
             case <-connectionContext.Done():
-                closeNormally(connection)
+                closeConnection(connection, liveness, readLoopDone)
                 return nil, nil
             case event, open := <-subscriber.Events():
                 if false == open {
-                    closeNormally(connection)
+                    closeConnection(connection, liveness, readLoopDone)
                     return nil, nil
                 }
 
@@ -84,6 +90,7 @@ func NewStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpc
                 writeCancel()
                 if nil != writeErr {
                     logDebug(runtimeInstance, "websocket write failed, closing connection", writeErr)
+                    closeConnection(connection, liveness, readLoopDone)
                     return nil, nil
                 }
             }
@@ -125,34 +132,49 @@ func readLoop(
 /* maximumCallbackGraceFactor bounds, in ping intervals, how long a running OnMessage callback may go on excusing a timed-out ping. The excuse is legitimate — a pong is processed only inside connection.Read, which the reader leaves while the callback runs — but a callback that never returns would otherwise excuse every ping forever, and nothing else reaps a hijacked connection: the descriptor, the hub subscription and three goroutines would leak for the lifetime of the process, once per connection. Past the grace the connection is closed and the callback is left to finish (or not) on its own. */
 const maximumCallbackGraceFactor = 10
 
-/* connectionLiveness lets the ping loop distinguish a peer that is gone from a reader that is merely unable to answer: a pong is processed only inside connection.Read, which the read loop leaves while it runs a synchronous OnMessage callback. */
+/* connectionLiveness lets the ping loop distinguish a peer that is gone from a reader that is merely unable to answer: a pong is processed only inside connection.Read, which the read loop leaves while it runs a synchronous OnMessage callback.
+
+The activity and callback-start marks are stored as nanoseconds elapsed since base, a monotonic reading captured when the connection is accepted. A wall-clock timestamp (time.Now().UnixNano() compared with time.Since(time.Unix(0, n))) is defenceless against a clock step: a backward step would let a wedged callback excuse pings past the grace and leak the connection, and a forward step would reap a healthy one. time.Since(base) reads the monotonic clock, so the windows hold across any wall-clock adjustment. */
 type connectionLiveness struct {
-    lastActivityUnixNano    atomic.Int64
-    callbackStartedUnixNano atomic.Int64
-    callbacksRunning        atomic.Int64
+    base                  time.Time
+    lastActivityOffset    atomic.Int64
+    callbackStartedOffset atomic.Int64
+    callbacksRunning      atomic.Int64
+}
+
+func newConnectionLiveness() *connectionLiveness {
+    return &connectionLiveness{base: time.Now()}
+}
+
+/* elapsed reports the monotonic time since the connection was accepted. */
+func (instance *connectionLiveness) elapsed() time.Duration {
+    return time.Since(instance.base)
 }
 
 func (instance *connectionLiveness) recordActivity() {
-    instance.lastActivityUnixNano.Store(time.Now().UnixNano())
+    instance.lastActivityOffset.Store(int64(instance.elapsed()))
 }
 
 func (instance *connectionLiveness) enterCallback() {
-    instance.callbackStartedUnixNano.Store(time.Now().UnixNano())
+    instance.callbackStartedOffset.Store(int64(instance.elapsed()))
     instance.callbacksRunning.Add(1)
 }
 
+/* leaveCallback refreshes the activity mark before it decrements the running count, never the reverse: a ping loop that observes callbacksRunning drop to zero must already see a fresh activity mark, or it would read the pre-callback timestamp as staleness and reap a healthy connection at the very moment the callback returns. */
 func (instance *connectionLiveness) leaveCallback() {
-    instance.callbacksRunning.Add(-1)
     instance.recordActivity()
+    instance.callbacksRunning.Add(-1)
 }
 
 /* cannotAnswer reports whether a pong could not have been processed even by a perfectly healthy peer: the reader is inside a callback that is still within its grace, or it returned from one so recently that the peer was demonstrably alive within the window. A callback that has outrun the grace stops excusing anything — the peer's health is then unknowable, and holding the connection open on the strength of a stuck callback is what leaks it. */
 func (instance *connectionLiveness) cannotAnswer(window time.Duration, callbackGrace time.Duration) bool {
+    now := instance.elapsed()
+
     if 0 < instance.callbacksRunning.Load() {
-        return time.Since(time.Unix(0, instance.callbackStartedUnixNano.Load())) < callbackGrace
+        return now - time.Duration(instance.callbackStartedOffset.Load()) < callbackGrace
     }
 
-    return time.Since(time.Unix(0, instance.lastActivityUnixNano.Load())) < window
+    return now - time.Duration(instance.lastActivityOffset.Load()) < window
 }
 
 /* @important keepalive ping loop: a half-open or silently-stalled client cannot be detected by reads alone on a broadcast stream that never expects client frames, so without this an idle connection would pin a goroutine forever. Each tick sends a ping bounded by the same interval; the read loop delivers the pong, so a still-connected client keeps the connection alive while an unresponsive one trips the timeout and cancels the connection context, unwinding the handler and read loop.
@@ -224,21 +246,25 @@ func dispatchOnMessage(
 /* closeHandshakeGrace bounds the closing handshake. connection.Close writes the close frame and then waits for the peer to send its own — a frame only the read loop ever reads. When the connection is being closed BECAUSE that read loop is wedged in a callback, the handshake can never complete, and coder/websocket waits five seconds before giving up: five seconds of a held handler goroutine and a live hub subscription, per connection. */
 const closeHandshakeGrace = 1 * time.Second
 
-/* closeNormally asks for a graceful close and gives the peer closeHandshakeGrace to answer. The handler's deferred CloseNow frees the socket once the grace lapses; the handshake goroutine unwinds on its own when the library's own timeout fires. */
-func closeNormally(connection *coderwebsocket.Conn) {
-    closed := make(chan struct{})
+/* closeConnection tears the socket down and then holds, bounded by closeHandshakeGrace, until the read loop has exited before the handler returns to the kernel.
 
-    go func() {
-        defer close(closed)
+The wait keeps the request scope alive. The runtime handed to a synchronous OnMessage callback is built over that scope, and the kernel closes the scope the instant the handler returns; a healthy in-flight callback would then resolve a service against a closed scope and panic. Holding until the read loop — and therefore the callback — has finished removes that race, unless the callback outruns the grace, the stuck-callback case the ping reaper already accepts.
 
-        _ = connection.Close(coderwebsocket.StatusNormalClosure, "")
-    }()
+The teardown path is chosen by whether a callback is in flight. When one is, the read loop is not inside connection.Read, so a graceful Close can never complete its handshake: it wins coder/websocket's close CAS and then holds the transport for the library's full five-second timeout, while the handler's deferred CloseNow loses that CAS and blocks the same span. CloseNow taken here wins the CAS and closes the transport at once, freeing the descriptor and the goroutines when the grace lapses rather than seconds later. With no callback in flight the read loop is blocked in Read (or already gone), so a graceful Close exchanges a close frame and the read loop's own cancel frees the transport promptly. */
+func closeConnection(connection *coderwebsocket.Conn, liveness *connectionLiveness, readLoopDone <-chan struct{}) {
+    if 0 < liveness.callbacksRunning.Load() {
+        _ = connection.CloseNow()
+    } else {
+        go func() {
+            _ = connection.Close(coderwebsocket.StatusNormalClosure, "")
+        }()
+    }
 
     timer := time.NewTimer(closeHandshakeGrace)
     defer timer.Stop()
 
     select {
-    case <-closed:
+    case <-readLoopDone:
     case <-timer.C:
     }
 }

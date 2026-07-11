@@ -45,6 +45,7 @@ func PrefersHtml(request httpcontract.Request) bool {
 func acceptQuality(acceptHeader string, mediaType string) (float64, int) {
     quality := -1.0
     position := -1
+    specificity := -1
 
     slashIndex := strings.IndexByte(mediaType, '/')
     typeWildcard := mediaType[:slashIndex+1] + "*"
@@ -53,7 +54,14 @@ func acceptQuality(acceptHeader string, mediaType string) (float64, int) {
         parameters := strings.Split(entry, ";")
         mediaRange := strings.ToLower(strings.TrimSpace(parameters[0]))
 
-        if mediaRange != mediaType && mediaRange != typeWildcard && "*/*" != mediaRange {
+        entrySpecificity := -1
+        if mediaRange == mediaType {
+            entrySpecificity = 2
+        } else if mediaRange == typeWildcard {
+            entrySpecificity = 1
+        } else if "*/*" == mediaRange {
+            entrySpecificity = 0
+        } else {
             continue
         }
 
@@ -72,8 +80,9 @@ func acceptQuality(acceptHeader string, mediaType string) (float64, int) {
             entryQuality = parsed
         }
 
-        /* the most specific range wins ties, so an exact match never loses to a catch-all range that follows it */
-        if entryQuality > quality || (entryQuality == quality && mediaRange == mediaType) {
+        /* the most specific matching range supplies the weight: a more specific match replaces a less specific one outright (so a wildcard can never override an exact type's q, including an explicit q=0 refusal), and equal-specificity ties fall to the higher q */
+        if entrySpecificity > specificity || (entrySpecificity == specificity && entryQuality > quality) {
+            specificity = entrySpecificity
             quality = entryQuality
             position = entryIndex
         }
