@@ -49,6 +49,7 @@ func Configure(app *melodyapplication.Application) {
     /* @info cron's Configuration is kernel-dependent (reads parameters), so it is supplied as a factory evaluated at command-registration time. */
     app.RegisterModule(melodycron.NewModule(melodycron.ModuleConfig{
         ConfigurationFactory: newCronConfiguration,
+        RunnerCommands:       cronRunnerCommands(),
     }))
 
     /* the SSE stream and the websocket handler both block on this hub; http.Server.Shutdown neither cancels an in-flight request's context nor tracks a hijacked connection, so without closing the hub a single connected client holds the whole shutdown timeout and is then cut mid-flight */

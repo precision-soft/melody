@@ -53,7 +53,7 @@ func WithRateLimiterOnError(onError func(error)) RateLimiterOption {
     }
 }
 
-/* WithRateLimiterCallTimeout bounds the store round trip on the plain Allow path, which carries no request context; AllowWithRuntime uses the runtime context instead. A non-positive timeout falls back to the default, following this package's zero-means-default convention, so a config-sourced unset value can never build an already-cancelled context that forces every call onto the store-failure path. */
+/* WithRateLimiterCallTimeout bounds the store round trip on both entry points: the plain Allow path, which carries no request context, and AllowWithRuntime, where it caps the runtime context so a request whose context has no deadline — melody's http kernel attaches none — still fails fast instead of hanging on an unresponsive store (the whole point of fail-closed on login/OTP routes). A non-positive timeout falls back to the default, following this package's zero-means-default convention, so a config-sourced unset value can never build an already-cancelled context that forces every call onto the store-failure path. */
 func WithRateLimiterCallTimeout(timeout time.Duration) RateLimiterOption {
     return func(instance *RateLimiter) {
         if 0 >= timeout {
@@ -122,7 +122,11 @@ func (instance *RateLimiter) Allow(key string) bool {
 }
 
 func (instance *RateLimiter) AllowWithRuntime(runtimeInstance runtimecontract.Runtime, key string) (bool, error) {
-    allowed, allowErr := instance.allow(runtimeInstance.Context(), key)
+    /* cap the runtime context with the call timeout: context.WithTimeout keeps whichever deadline is earlier, so a request that already carries a tighter deadline still wins, while a request whose context has no deadline — as melody's http kernel leaves it — is bounded here rather than hanging on an unresponsive store. */
+    callContext, cancel := context.WithTimeout(runtimeInstance.Context(), instance.callTimeout)
+    defer cancel()
+
+    allowed, allowErr := instance.allow(callContext, key)
     if nil != allowErr {
         instance.reportError(allowErr)
     }

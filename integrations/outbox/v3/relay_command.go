@@ -7,6 +7,8 @@ import (
     "time"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
+    "github.com/precision-soft/melody/v3/container"
+    containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     "github.com/precision-soft/melody/v3/logging"
@@ -30,8 +32,27 @@ func NewRelayCommand(relay *Relay) *RelayCommand {
     return &RelayCommand{relay: relay}
 }
 
+/* NewRelayCommandFromResolver builds the command against a lazily-resolved relay: the registered service.outbox.relay is resolved on the first batch rather than in the composition root, so a multi-database app can register the module with a resolver-backed relay factory and still get the built-in command without opening a database at boot. */
+func NewRelayCommandFromResolver(resolver containercontract.Resolver) *RelayCommand {
+    if nil == resolver {
+        exception.Panic(exception.NewError("outbox relay command resolver is nil", nil, nil))
+    }
+
+    return &RelayCommand{relayLazy: container.Lazy[*Relay](resolver, ServiceRelay)}
+}
+
 type RelayCommand struct {
-    relay *Relay
+    relay     *Relay
+    relayLazy *container.LazyService[*Relay]
+}
+
+/* resolveRelay returns the prebuilt relay, or resolves the lazy one on first use. */
+func (instance *RelayCommand) resolveRelay() *Relay {
+    if nil != instance.relayLazy {
+        return instance.relayLazy.Get()
+    }
+
+    return instance.relay
 }
 
 func (instance *RelayCommand) Name() string {
@@ -86,8 +107,10 @@ func (instance *RelayCommand) Run(
     batches := 0
     errorBackoff := interval
 
+    relay := instance.resolveRelay()
+
     for {
-        published, runErr := instance.relay.RunOnce(relayRuntime)
+        published, runErr := relay.RunOnce(relayRuntime)
 
         batches++
 

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `runner_command.go`, `schedule_matcher.go` — `NewRunnerCommand(configuration, commands...)` adds an in-process scheduler command `melody:cron:run`: it parses the same five-field `Schedule` the generator renders and invokes each registered command when its schedule is due, so a single-binary deployment with no external crontab or kubernetes drives its scheduled work from the one `Configuration` that already feeds the generator — the two can no longer drift. Each command runs on a fresh scope and a cancellable child context; a failing job is logged and the loop continues. `--once` evaluates every schedule against the current time, runs the due commands and exits. Multi-instance safety is composed in — wrap a command in `lock.NewExclusiveCommand`, or gate the runner behind a `lock.LeaderGate`, before listing it. Enable it through `ModuleConfig.RunnerCommands`.
+
 ## [v2.3.0] - 2026-07-11 - User-less Crontab Template
 
 ### Added

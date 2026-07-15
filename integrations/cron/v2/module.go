@@ -10,6 +10,9 @@ type ModuleConfig struct {
     Configuration         *Configuration
     ConfigurationFactory  func(kernelInstance kernelcontract.Kernel) *Configuration
     WithDefaultParameters bool
+
+    /* RunnerCommands, when set, adds the in-process melody:cron:run scheduler alongside the generator; the commands here are the same registered commands the Configuration schedules by name, so an entry naming a command absent from this list is a wiring error the runner reports at boot. Wrap a command in lock.NewExclusiveCommand for multi-instance safety before listing it. */
+    RunnerCommands []clicontract.Command
 }
 
 func NewModule(config ModuleConfig) *Module {
@@ -46,9 +49,15 @@ func (instance *Module) RegisterCliCommands(kernelInstance kernelcontract.Kernel
         return nil
     }
 
-    return []clicontract.Command{
+    commands := []clicontract.Command{
         NewGenerateCommand(configuration),
     }
+
+    if 0 < len(instance.config.RunnerCommands) {
+        commands = append(commands, NewRunnerCommand(configuration, instance.config.RunnerCommands...))
+    }
+
+    return commands
 }
 
 var (

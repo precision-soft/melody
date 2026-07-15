@@ -26,6 +26,7 @@ func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.
         cli.NewInternalSignCommand(instance.internalAuthSigner()),
         cli.NewTotpCodeCommand(),
         cli.NewMailSendCommand(instance.mailer),
+        cli.NewGrantDemoCommand(),
     }
 
     /* the outbox relay command is the production way to drain the outbox (a scheduler runs it on an

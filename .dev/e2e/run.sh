@@ -41,6 +41,8 @@ ensure_service_running "${SERVICE_NAME_STRING}"
 REDIS_ADDRESS="${REDIS_ADDRESS-redis:6379}"
 POSTGRES_DSN="${POSTGRES_DSN-postgres://melody:melody@postgres:5432/melody_test?sslmode=disable}"
 AMQP_DSN="${AMQP_DSN-amqp://guest:guest@rabbitmq:5672/}"
+SMTP_ADDRESS="${SMTP_ADDRESS-mailpit:1025}"
+MAILPIT_API_URL="${MAILPIT_API_URL-http://mailpit:8025}"
 EXAMPLE_BASE_URL="${EXAMPLE_BASE_URL-http://127.0.0.1:8080}"
 EXAMPLE_LOAD_BALANCER_URL="${EXAMPLE_LOAD_BALANCER_URL-http://load-balancer:80}"
 
@@ -53,6 +55,8 @@ COMMAND_STRING="$(
         " REDIS_ADDRESS='${REDIS_ADDRESS}'" \
         " POSTGRES_DSN='${POSTGRES_DSN}'" \
         " AMQP_DSN='${AMQP_DSN}'" \
+        " SMTP_ADDRESS='${SMTP_ADDRESS}'" \
+        " MAILPIT_API_URL='${MAILPIT_API_URL}'" \
         " EXAMPLE_BASE_URL='${EXAMPLE_BASE_URL}'" \
         " EXAMPLE_LOAD_BALANCER_URL='${EXAMPLE_LOAD_BALANCER_URL}'" \
         " && cd /app/.dev/e2e && go run ."

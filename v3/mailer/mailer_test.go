@@ -9,6 +9,10 @@ import (
 )
 
 func testRuntime() runtimecontract.Runtime {
+    return testRuntimeWithContext(context.Background())
+}
+
+func testRuntimeWithContext(ctx context.Context) runtimecontract.Runtime {
     serviceContainer := container.NewContainer()
-    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
 }

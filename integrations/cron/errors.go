@@ -16,4 +16,6 @@ var (
     ErrEntryEmptyCommand                  = errors.New("cron: entry has no command to run")
     ErrForbiddenCharacter                 = errors.New("cron: token contains forbidden character")
     ErrFieldContainsWhitespace            = errors.New("cron: field contains whitespace")
+    ErrInvalidSchedule                    = errors.New("cron: schedule field is not a valid cron expression")
+    ErrUnknownScheduledCommand            = errors.New("cron: scheduled command has no matching registered command")
 )

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `container/lazy.go` — `container.Lazy[T](resolver, serviceName)` and `container.LazyByType[T](resolver)` return a `LazyService[T]` handle that defers resolving a service until its first `Get()` and memoizes the outcome, so a component assembled during the boot phase can hold a service whose provider is registered but not yet safe to resolve at that phase, without hand-rolling a `sync.Once` proxy. `Resolve()` is the non-panicking variant.
+
+### Fixed
+
+- `application/application.go`, `application/environment_local.go` — a boot that fails to resolve config parameters because no `.env` was found now says so. A compiled binary run from a directory without a `.env` (the executable-directory branch returns it unchanged; `go run` falls back to the working directory when no `go.mod` is found) resolved against an empty environment and failed with an unsuggestive `undefined environment key`; the resolution-failure panic now appends the directory it looked in and the two remedies (embed with `-tags melody_env_embedded`, or place `.env` beside the binary). An app whose parameters all have defaults still boots without a `.env` — the hint is added only on an actual resolution failure.
+- `application/cli.go` — the runtime `--mode`/`--role` flags are recognized only before the cli subcommand. They were matched and stripped anywhere in argv, so a command declaring its own `--role`/`--mode` flag was silently broken: the runtime captured the value (panicking `invalid role` on anything but `web`/`worker`/`all`) and deleted the flag before the command parsed it. Stripping and parsing now stop at the first positional argument (the command name) — `--mode`/`--role` are documented as always preceding the command — so a command's own flags that follow the command name are left intact. The `invalid mode`/`invalid role` panics now name the likely collision.
+
 ## [v1.16.0] - 2026-07-11 - Platform-Ergonomics Back-ports and Cross-Version Correctness & Security Hardening
 
 ### Fixed

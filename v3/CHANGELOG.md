@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `container/lazy.go` — `container.Lazy[T](resolver, serviceName)` and `container.LazyByType[T](resolver)` return a `LazyService[T]` handle that defers resolving a service until its first `Get()` and memoizes the outcome. A component assembled during the boot phase — a cli command, an http middleware — can hold a service whose provider is registered but not yet safe to resolve at that phase, without hand-rolling a `sync.Once` proxy for each one. `Resolve()` is the non-panicking variant.
+- `lock/lazy_locker.go` — `lock.NewLazyLocker(resolver)` returns a `Locker` that defers resolving `service.lock.locker` until the first `CreateLock`, the deferred-resolution proxy over the framework's own contract every consumer would otherwise write by hand.
+- `mailer/smtp_transport.go` — `SmtpConfig.Timeout` bounds every step of the smtp session after the greeting (auth, mail/rcpt/data, the payload write and quit) by resetting a per-step connection deadline before each one. Zero falls back to `DialTimeout`, then to the package default.
+
+### Fixed
+
+- `application/application.go`, `application/environment_local.go` — a boot that fails to resolve config parameters because no `.env` was found now says so. A compiled binary run from a directory without a `.env` (the executable-directory branch returns it unchanged; `go run` falls back to the working directory when no `go.mod` is found) resolved against an empty environment and failed with an unsuggestive `undefined environment key`; the resolution-failure panic now appends the directory it looked in and the two remedies (embed with `-tags melody_env_embedded`, or place `.env` beside the binary). An app whose parameters all have defaults still boots without a `.env` — the hint is added only on an actual resolution failure.
+- `application/cli.go` — the runtime `--mode`/`--role` flags are recognized only before the cli subcommand. They were matched and stripped anywhere in argv, so a command declaring its own `--role`/`--mode` flag was silently broken: the runtime captured the value (panicking `invalid role` on anything but `web`/`worker`/`all`) and deleted the flag before the command parsed it. Stripping and parsing now stop at the first positional argument (the command name) — `--mode`/`--role` are documented as always preceding the command — so a command's own flags that follow the command name are left intact. The `invalid mode`/`invalid role` panics now name the likely collision.
+- `mailer/smtp_transport.go` — the smtp session is bounded past the opening greeting. `DialTimeout` bounded the tcp connect, the tls handshake and the 220 greeting, after which the deadline was cleared and the rest of the conversation ran unbounded: a relay that greeted promptly then stalled mid-session (overloaded, a firewall black-holing traffic after the handshake, a slow-loris on DATA) pinned the sending goroutine and its socket forever — acute when mail is sent inline from a request handler. A per-step deadline now governs every command and the payload write, and a cancelled `runtime.Context()` closes the connection to unblock an in-flight command, since `net/smtp` has no context api.
+
 ## [v3.10.0] - 2026-07-11 - Lock Primitives, Distributed Rate Limiting, Process Roles, Multi-Context Migrate, Cipher Compartments, and Boot Diagnostics
 
 ### Fixed

@@ -2,6 +2,7 @@ package mailer
 
 import (
     "bufio"
+    "context"
     "crypto/ecdsa"
     "crypto/elliptic"
     "crypto/rand"
@@ -283,7 +284,7 @@ func TestSmtpTransport_DialTimesOutWhenTheServerNeverGreets(t *testing.T) {
 
     finished := make(chan error, 1)
     go func() {
-        _, dialErr := transport.dial()
+        _, _, dialErr := transport.dial()
         finished <- dialErr
     }()
 
@@ -296,5 +297,137 @@ func TestSmtpTransport_DialTimesOutWhenTheServerNeverGreets(t *testing.T) {
         }
     case <-time.After(3 * time.Second):
         t.Fatal("dial hung on a server that accepted the connection and never sent a greeting")
+    }
+}
+
+/** @info the greeting deadline only bounds the opening handshake; a relay that greets promptly then stalls mid-session (here on DATA) must still be bounded by the per-step session deadline, or the sending goroutine hangs forever. */
+func TestSmtpTransport_TimesOutWhenServerStallsMidSession(t *testing.T) {
+    listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+    if nil != listenErr {
+        t.Fatalf("listen: %v", listenErr)
+    }
+    defer listener.Close()
+
+    released := make(chan struct{})
+    defer close(released)
+
+    go serveStallOnDataSmtp(listener, released)
+
+    transport := NewSmtpTransport(SmtpConfig{
+        Address: listener.Addr().String(),
+        Host:    "127.0.0.1",
+        Timeout: 150 * time.Millisecond,
+    })
+
+    finished := make(chan error, 1)
+    go func() {
+        finished <- transport.Send(testRuntime(), mailercontract.Message{
+            From:    mailercontract.Address{Email: "shop@example.com"},
+            To:      []mailercontract.Address{{Email: "ada@example.com"}},
+            Subject: "Hello",
+            Text:    "body",
+        })
+    }()
+
+    select {
+    case sendErr := <-finished:
+        if nil == sendErr {
+            t.Fatal("expected a timeout error when the server stalls mid-session")
+        }
+    case <-time.After(3 * time.Second):
+        t.Fatal("send hung on a server that greeted then stalled mid-session")
+    }
+}
+
+/** @info net/smtp has no context api, so a cancelled runtime context can only reach an in-flight command by closing the connection; the session timeout here is long, so only the cancellation can unblock the stalled DATA. */
+func TestSmtpTransport_ContextCancellationAbortsSession(t *testing.T) {
+    listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+    if nil != listenErr {
+        t.Fatalf("listen: %v", listenErr)
+    }
+    defer listener.Close()
+
+    released := make(chan struct{})
+    defer close(released)
+
+    go serveStallOnDataSmtp(listener, released)
+
+    transport := NewSmtpTransport(SmtpConfig{
+        Address: listener.Addr().String(),
+        Host:    "127.0.0.1",
+        Timeout: 10 * time.Second,
+    })
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    finished := make(chan error, 1)
+    go func() {
+        finished <- transport.Send(testRuntimeWithContext(ctx), mailercontract.Message{
+            From:    mailercontract.Address{Email: "shop@example.com"},
+            To:      []mailercontract.Address{{Email: "ada@example.com"}},
+            Subject: "Hello",
+            Text:    "body",
+        })
+    }()
+
+    go func() {
+        <-time.After(200 * time.Millisecond)
+        cancel()
+    }()
+
+    select {
+    case sendErr := <-finished:
+        if nil == sendErr {
+            t.Fatal("expected an error when the runtime context is cancelled mid-session")
+        }
+    case <-time.After(3 * time.Second):
+        t.Fatal("send ignored the cancelled runtime context and hung mid-session")
+    }
+}
+
+/* serveStallOnDataSmtp greets, completes EHLO and accepts MAIL/RCPT, then stalls after the client issues DATA — it never sends the 354 continuation — until released is closed or a safety timeout elapses, modelling a relay that black-holes traffic once the conversation is under way. */
+func serveStallOnDataSmtp(listener net.Listener, released <-chan struct{}) {
+    connection, acceptErr := listener.Accept()
+    if nil != acceptErr {
+        return
+    }
+    defer connection.Close()
+
+    reader := bufio.NewReader(connection)
+    writeLine := func(line string) {
+        connection.Write([]byte(line + "\r\n"))
+    }
+
+    writeLine("220 fake ESMTP")
+
+    for {
+        line, readErr := reader.ReadString('\n')
+        if nil != readErr {
+            return
+        }
+
+        command := strings.ToUpper(strings.TrimSpace(line))
+        switch {
+        case strings.HasPrefix(command, "EHLO") || strings.HasPrefix(command, "HELO"):
+            writeLine("250-fake greets you")
+            writeLine("250 SIZE 35882577")
+        case strings.HasPrefix(command, "MAIL"):
+            writeLine("250 ok")
+        case strings.HasPrefix(command, "RCPT"):
+            writeLine("250 ok")
+        case strings.HasPrefix(command, "DATA"):
+            select {
+            case <-released:
+            case <-time.After(5 * time.Second):
+            }
+
+            return
+        case strings.HasPrefix(command, "QUIT"):
+            writeLine("221 bye")
+            return
+        default:
+            writeLine("250 ok")
+        }
     }
 }

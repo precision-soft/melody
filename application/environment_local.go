@@ -20,3 +20,12 @@ func newEnvironmentSource(
 
     return config.NewEnvironmentSource(fileSystem, ".")
 }
+
+/* missingEnvironmentFileHint returns an actionable remedy when the project directory holds no .env in the on-disk (non-embedded) build, and the empty string otherwise. Boot appends it to a configuration-resolution failure — a compiled binary run from a directory with no .env, or go run falling back to the working directory when no go.mod is found — so the otherwise unsuggestive "undefined environment key" names the real cause. Missing .env is only a hint on a failure, never a failure in itself: an app whose parameters all have defaults boots without one. */
+func missingEnvironmentFileHint(projectDirectory string) string {
+    if "" == projectDirectory || true == workingDirectoryHasEnvironmentFile(projectDirectory) {
+        return ""
+    }
+
+    return "; no .env was found next to the executable at " + projectDirectory + " — build with -tags melody_env_embedded to embed it, or place .env beside the binary"
+}

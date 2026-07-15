@@ -251,6 +251,42 @@ fi
 section_end "CRON CRONTAB-NO-USER TEMPLATE" "success" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
+# CRON IN-PROCESS RUNNER — the same Configuration drives melody:cron:run, which ticks in-process
+# ---------------------------------------------------------------------------------------------------
+
+section_start "CRON IN-PROCESS RUNNER" "${TAG_VALIDATE}" "e2e"
+
+RUNNER_ONCE_STRING="$(
+    in_example "go run . melody:cron:run --once >/dev/null 2>&1; echo status=\$?" || true
+)"
+
+if printf '%s' "${RUNNER_ONCE_STRING}" | grep -q 'status=0'; then
+    check_pass "melody:cron:run --once evaluated the schedule in-process and exited cleanly"
+else
+    check_fail "melody:cron:run --once did not exit cleanly (${RUNNER_ONCE_STRING:-<empty>})"
+fi
+
+section_end "CRON IN-PROCESS RUNNER" "success" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
+# COMMAND-OWNED ROLE FLAG — a command's own --role after the command name is not the runtime process role
+# ---------------------------------------------------------------------------------------------------
+
+section_start "COMMAND-OWNED ROLE FLAG" "${TAG_VALIDATE}" "e2e"
+
+GRANT_OUTPUT_STRING="$(
+    in_example "go run . example:grant:demo --role admin --user ada 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'" || true
+)"
+
+if printf '%s' "${GRANT_OUTPUT_STRING}" | grep -q 'granted role "admin" to user "ada"'; then
+    check_pass "a command's own --role after the command name reaches the command (not the runtime role parser)"
+else
+    check_fail "the command-owned --role flag did not reach the command (${GRANT_OUTPUT_STRING:-<empty>})"
+fi
+
+section_end "COMMAND-OWNED ROLE FLAG" "success" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
 
 if [[ 0 -lt ${CHECK_FAILURE_COUNT_INTEGER} ]]; then
     fail "${CHECK_FAILURE_COUNT_INTEGER} stack check(s) failed"

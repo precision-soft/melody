@@ -11,7 +11,7 @@ require (
 	github.com/precision-soft/melody/integrations/outbox/v3 v3.0.0
 	github.com/precision-soft/melody/integrations/rueidis/v3 v3.3.0
 	github.com/precision-soft/melody/integrations/websocket/v3 v3.0.0
-	github.com/precision-soft/melody/v3 v3.9.0
+	github.com/precision-soft/melody/v3 v3.10.0
 	github.com/redis/rueidis v1.0.71
 	github.com/uptrace/bun v1.2.16
 	github.com/uptrace/bun/dialect/pgdialect v1.2.16

@@ -146,6 +146,21 @@ go run . melody:cron:generate --out ./generated_conf/cron/crontab
 
 The example registers two scheduled commands in [`config/cli.go`](./config/cli.go) (`product:list` every 6 hours, `app:info` daily at noon) plus a heartbeat enabled via `APP_CRON_HEARTBEAT_AUTO_ENABLED=true` in [`.env`](./.env) (the path is auto-derived from `melody.cron.logs_dir`), so the generated crontab is not empty.
 
+The same `cron.Configuration` also drives an **in-process scheduler** for single-binary deployments with no external crontab. `melody:cron:run` ticks in-process and invokes each scheduled command when it is due; `--once` evaluates every schedule against the current time, runs the due commands and exits:
+
+```bash
+cd v3/.example
+go run . melody:cron:run --once      # kick whatever is due now, then exit
+go run . melody:cron:run             # run the scheduler loop until interrupted
+```
+
+`example:grant:demo` shows that an application command may declare its own `--role` flag: the runtime's `--role`/`--mode` are recognized only before the command name, so the command receives its flag intact:
+
+```bash
+go run . example:grant:demo --role admin --user ada    # the command's own --role
+go run . --role worker app:info                        # the runtime process role
+```
+
 ---
 
 ## Platform integrations (optional, env-gated)

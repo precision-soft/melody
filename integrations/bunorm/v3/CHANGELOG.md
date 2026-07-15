@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `encrypt/module.go` — `encrypt.ModuleConfig` (and each `CommandContextConfig`) accepts a `DatabaseFactory func(resolver) (*bun.DB, error)` as an alternative to a prebuilt `Database`. The factory is evaluated at `RegisterCliCommands` time, when the container is available, rather than eagerly in `main.go` before `Boot()`, so an app whose `*bun.DB` is resolved from a `ManagerRegistry` per context can wire the built-in `melody:encrypt:database[:<name>]` bulk command against a registry-resolved database instead of hand-rolling it. The factory wins when both are set.
+
 ## [v3.2.0] - 2026-07-11 - Named Cipher Compartments and Manager Registry Hardening
 
 ### Fixed

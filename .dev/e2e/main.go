@@ -25,6 +25,7 @@ Sections:
   - PGSQL ADVISORY LOCK    (postgres) — mutual exclusion, release hand-off
   - MIGRATE                (postgres) — up creates+seeds a table, down rolls it back; per-context isolation
   - AMQP PUBLISH/CONSUME   (rabbitmq) — round-trip publish → consume → ack, and delayed redelivery
+  - MAIL                   (mailpit)  — smtp transport sends a whole session under the per-step deadline; mailpit confirms receipt
   - EXAMPLE OVER HTTP      (example)  — forwarded-client-ip trust boundary and the rate limit over real HTTP
 
 The websocket and encrypt sections need no backend and always run; the rest run only when their env var is
@@ -103,6 +104,18 @@ func main() {
         infrastructureSections++
         section("AMQP PUBLISH/CONSUME (live rabbitmq)")
         runAmqpCheck(dsn)
+        sections++
+    }
+
+    if smtpAddress := os.Getenv("SMTP_ADDRESS"); "" != smtpAddress {
+        mailpitApiUrl := os.Getenv("MAILPIT_API_URL")
+        if "" == mailpitApiUrl {
+            mailpitApiUrl = "http://mailpit:8025"
+        }
+
+        infrastructureSections++
+        section("MAIL (live mailpit)")
+        runMailCheck(smtpAddress, mailpitApiUrl)
         sections++
     }
 

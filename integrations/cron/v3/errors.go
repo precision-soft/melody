@@ -20,4 +20,6 @@ var (
     ErrK8sInvalidName                     = errors.New("cron: command name does not yield a valid k8s resource name")
     ErrK8sDuplicateName                   = errors.New("cron: two commands map to the same k8s resource name")
     ErrK8sInvalidRestartPolicy            = errors.New("cron: k8s restartPolicy must be OnFailure or Never")
+    ErrInvalidSchedule                    = errors.New("cron: schedule field is not a valid cron expression")
+    ErrUnknownScheduledCommand            = errors.New("cron: scheduled command has no matching registered command")
 )

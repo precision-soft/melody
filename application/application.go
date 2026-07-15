@@ -56,7 +56,7 @@ func (instance *Application) Boot() kernelcontract.Kernel {
 
         exception.Panic(
             exception.NewError(
-                "could not resolve the config parameters on boot",
+                "could not resolve the config parameters on boot"+missingEnvironmentFileHint(projectDirectory),
                 exceptioncontract.Context{
                     "projectDirectory": projectDirectory,
                 },

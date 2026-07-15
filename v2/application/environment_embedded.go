@@ -28,3 +28,10 @@ func newEnvironmentSource(
 
     return config.NewEnvironmentSource(embeddedEnvFiles, ".")
 }
+
+/* missingEnvironmentFileHint has no on-disk .env to point at in the embedded build: the environment is read from the embedded fs (a nil fs already fails loudly in newEnvironmentSource), so a resolution failure here is never a missing-file-beside-the-binary problem. */
+func missingEnvironmentFileHint(projectDirectory string) string {
+    _ = projectDirectory
+
+    return ""
+}

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `module.go`, `relay_command.go` — `ModuleConfig` accepts a `StoreFactory`/`RelayFactory func(resolver) (*Store/*Relay, error)` as an alternative to a prebuilt `Store`/`Relay`. The factories are registered as the service providers (resolved lazily) and `NewRelayCommandFromResolver` resolves the relay on its first batch, so an app whose `*bun.DB` is resolved from a registry per context — not available before `Boot()` — can register the module and use the built-in `melody:outbox:relay` command without a prebuilt object at composition-root time. The factory wins when both are set.
+- `lazy.go` — `NewLazyRepository(resolver)` returns a `Repository` that defers resolving the registered `service.outbox.store` until its first call, so a component assembled during boot can hold the outbox repository before the container is safe to resolve. The concrete `*Store` (with `Enqueue`/`EnsureSchema`) is reachable the same way through the generic `container.Lazy[*Store]`.
+
 ## [v3.0.0] - 2026-07-06 - Initial Release — Transactional Outbox with Relay Module and Command
 
 ### Added
