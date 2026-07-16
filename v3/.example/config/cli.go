@@ -3,16 +3,16 @@ package config
 import (
     "time"
 
-    outbox "github.com/precision-soft/melody/integrations/outbox/v3"
-    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
     "github.com/precision-soft/melody/v3/.example/cli"
+    "github.com/precision-soft/melody/v3/.example/service"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
+    melodycontainer "github.com/precision-soft/melody/v3/container"
     melodykernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     melodylock "github.com/precision-soft/melody/v3/lock"
 )
 
-/* RegisterCliCommands contributes only the application's own commands. The core commands (melody:routes:manifest, melody:openapi:generate, melody:messagebus:consume) are auto-registered by the framework once their services are configured, so they are not listed here. */
+/* RegisterCliCommands contributes only the application's own commands. The core commands (melody:routes:manifest, melody:openapi:generate, melody:messagebus:consume) are auto-registered by the framework once their services are configured, and the melody:outbox:relay command comes from the outbox module (see configure.go), so they are not listed here. */
 func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.Kernel) []melodyclicontract.Command {
     commands := []melodyclicontract.Command{
         cli.NewAppInfoCommand(),
@@ -26,31 +26,21 @@ func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.
         cli.NewInternalSignCommand(instance.internalAuthSigner()),
         cli.NewTotpCodeCommand(),
         cli.NewMailSendCommand(instance.mailer),
-        cli.NewGrantDemoCommand(),
+        /* @info the grant demo holds the user service through a container.Lazy handle built here, at command-registration time: the handle defers the resolution to the command's first run, so this boot-phase composition never races the container. */
+        cli.NewGrantDemoCommand(
+            melodycontainer.Lazy[*service.UserService](kernelInstance.ServiceContainer(), service.ServiceUserService),
+        ),
     }
 
-    /* the outbox relay command is the production way to drain the outbox (a scheduler runs it on an
-       interval); it is contributed only when the outbox is wired (a database is configured). */
-    if nil != instance.outboxRelay {
-        commands = append(commands, outbox.NewRelayCommand(instance.outboxRelay))
-    }
-
-    /* @info per-tick dedup demo: with redis configured the demo command is wrapped as an exclusive
-       command over the shared locker — run it from two shells at once and exactly one executes, the
-       other exits zero with a "skipped" log line. The ttl is crash-safety only; the lock is refreshed
-       while the command runs and released the moment it returns. Without redis it runs unwrapped. */
-    if nil != instance.redisClient {
-        commands = append(
-            commands,
-            melodylock.NewExclusiveCommand(
-                cli.NewExclusiveDemoCommand(),
-                melodyrueidis.NewLocker(instance.redisClient),
-                30*time.Second,
-            ),
-        )
-    } else {
-        commands = append(commands, cli.NewExclusiveDemoCommand())
-    }
+    /* @info per-tick dedup demo: the demo command is wrapped as an exclusive command over lock.NewLazyLocker, which resolves the registered service.lock.locker (redis when configured, otherwise mysql, otherwise in-memory — see registerLockerService) at the first CreateLock instead of here — run it from two shells at once against a shared locker and exactly one executes, the other exits zero with a "skipped" log line. The ttl is crash-safety only; the lock is refreshed while the command runs and released the moment it returns. */
+    commands = append(
+        commands,
+        melodylock.NewExclusiveCommand(
+            cli.NewExclusiveDemoCommand(),
+            melodylock.NewLazyLocker(kernelInstance.ServiceContainer()),
+            30*time.Second,
+        ),
+    )
 
     return commands
 }

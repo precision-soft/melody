@@ -2,6 +2,7 @@ package mailer
 
 import (
     "crypto/tls"
+    "io"
     "net"
     "net/smtp"
     "time"
@@ -45,7 +46,7 @@ type SmtpConfig struct {
     /* DialTimeout bounds the tcp connect, the tls handshake and the server's opening greeting; zero selects defaultSmtpDialTimeout. A server that accepts the connection and then never speaks would otherwise block the sending goroutine and hold the socket forever. */
     DialTimeout time.Duration
 
-    /* Timeout bounds every step of the smtp session after the greeting — auth, the mail/rcpt/data commands, the payload write and the quit — by resetting a per-step deadline before each one. Zero falls back to DialTimeout, then to defaultSmtpDialTimeout. The greeting only bounds the opening handshake, so a relay that greets promptly then stalls mid-conversation (overloaded, a firewall black-holing traffic after the handshake, a slow-loris on DATA) would otherwise pin the sending goroutine and its socket indefinitely — which matters most when mail is sent inline from a request handler. */
+    /* Timeout bounds every step of the smtp session after the greeting — auth, the mail/rcpt/data commands, each chunk of the payload write and the quit — by resetting a per-step deadline before each one. The payload is written in fixed-size chunks with the deadline re-armed per chunk, so the ceiling measures progress rather than total transfer time: a large message on a slow-but-alive link completes regardless of its size, while a stalled peer still fails within one Timeout. Zero falls back to DialTimeout, then to defaultSmtpDialTimeout. The greeting only bounds the opening handshake, so a relay that greets promptly then stalls mid-conversation (overloaded, a firewall black-holing traffic after the handshake, a slow-loris on DATA) would otherwise pin the sending goroutine and its socket indefinitely — which matters most when mail is sent inline from a request handler. */
     Timeout time.Duration
 }
 
@@ -79,6 +80,11 @@ type SmtpTransport struct {
 }
 
 func (instance *SmtpTransport) Send(runtimeInstance runtimecontract.Runtime, message mailercontract.Message) error {
+    /* the runtime's context drives mid-session cancellation, so a nil runtime is rejected up front instead of reaching the cancellation watcher. */
+    if nil == runtimeInstance {
+        return exception.NewError("runtime may not be nil", nil, nil)
+    }
+
     payload, renderErr := RenderMessage(message)
     if nil != renderErr {
         return renderErr
@@ -104,11 +110,12 @@ func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, 
     defer close(watcherDone)
     go watchRuntimeCancellation(runtimeInstance, connection, watcherDone)
 
-    if false == instance.implicitTls {
-        if deadlineErr := instance.resetSessionDeadline(connection); nil != deadlineErr {
-            return deadlineErr
-        }
+    /* the session deadline is armed before the first command regardless of the tls mode: the client sends its initial EHLO lazily on its first operation (Extension, Auth or Mail) and the greeting deadline has already been cleared, so on the implicit-tls path that hello would otherwise run with no deadline at all. */
+    if deadlineErr := instance.resetSessionDeadline(connection); nil != deadlineErr {
+        return deadlineErr
+    }
 
+    if false == instance.implicitTls {
         if upgradeErr := instance.startTls(client); nil != upgradeErr {
             return upgradeErr
         }
@@ -171,12 +178,8 @@ func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, 
         return exception.NewError("smtp data command failed", map[string]any{"address": instance.address}, dataErr)
     }
 
-    if deadlineErr := instance.resetSessionDeadline(connection); nil != deadlineErr {
-        return deadlineErr
-    }
-
-    if _, writeErr := writer.Write(payload); nil != writeErr {
-        return exception.NewError("smtp payload write failed", map[string]any{"address": instance.address}, writeErr)
+    if writeErr := instance.writePayload(connection, writer, payload); nil != writeErr {
+        return writeErr
     }
 
     if deadlineErr := instance.resetSessionDeadline(connection); nil != deadlineErr {
@@ -194,6 +197,29 @@ func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, 
     if quitErr := client.Quit(); nil != quitErr {
         if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
             logger.Warning("smtp quit failed after the message was accepted", map[string]any{"address": instance.address})
+        }
+    }
+
+    return nil
+}
+
+/* smtpPayloadChunkSize is the unit of payload progress the session deadline bounds: the payload is written in chunks of this size with the deadline re-armed before each one, so the ceiling applies to per-chunk progress rather than to the whole transfer. */
+const smtpPayloadChunkSize = 32 * 1024
+
+/* writePayload streams the payload to the DATA writer in fixed-size chunks, re-arming the per-step session deadline before each chunk: a single absolute deadline over the whole body would kill a large message on a slow-but-alive link once the total transfer time exceeded the timeout even though bytes kept flowing, while the per-chunk deadline lets a slow-but-steady peer complete regardless of the message size and still cuts a genuinely stalled peer within one timeout. */
+func (instance *SmtpTransport) writePayload(connection net.Conn, writer io.Writer, payload []byte) error {
+    for offset := 0; offset < len(payload); offset += smtpPayloadChunkSize {
+        end := offset + smtpPayloadChunkSize
+        if end > len(payload) {
+            end = len(payload)
+        }
+
+        if deadlineErr := instance.resetSessionDeadline(connection); nil != deadlineErr {
+            return deadlineErr
+        }
+
+        if _, writeErr := writer.Write(payload[offset:end]); nil != writeErr {
+            return exception.NewError("smtp payload write failed", map[string]any{"address": instance.address}, writeErr)
         }
     }
 
@@ -299,12 +325,20 @@ func (instance *SmtpTransport) startTls(client *smtp.Client) error {
     return nil
 }
 
+/* resolveTlsConfig supplies the tls configuration for both the implicit-tls dial and the STARTTLS upgrade. A user config that sets neither ServerName nor InsecureSkipVerify would fail the STARTTLS handshake ("either ServerName or InsecureSkipVerify must be specified"), so the transport host is filled in on a clone — the caller's config may be shared and is never mutated. */
 func (instance *SmtpTransport) resolveTlsConfig() *tls.Config {
-    if nil != instance.tlsConfig {
-        return instance.tlsConfig
+    if nil == instance.tlsConfig {
+        return &tls.Config{ServerName: instance.host}
     }
 
-    return &tls.Config{ServerName: instance.host}
+    if "" == instance.tlsConfig.ServerName && false == instance.tlsConfig.InsecureSkipVerify {
+        cloned := instance.tlsConfig.Clone()
+        cloned.ServerName = instance.host
+
+        return cloned
+    }
+
+    return instance.tlsConfig
 }
 
 func hostFromAddress(address string) string {

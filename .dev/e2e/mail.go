@@ -32,45 +32,81 @@ func runMailCheck(smtpAddress string, mailpitApiUrl string) {
         Html:    "<h1>Hello</h1><p>from the melody e2e harness</p>",
     }
 
-    if sendErr := transport.Send(newRuntime(), message); nil != sendErr {
+    if sendErr := sendWithRetry(transport, message); nil != sendErr {
         fail("mail send through the smtp transport failed: %v", sendErr)
     }
 
     pass("sent a message through the smtp transport to %s under a per-step session deadline", smtpAddress)
 
-    if false == waitForMailpitMessage(mailpitApiUrl, subject) {
+    received, lastPollErr := waitForMailpitMessage(mailpitApiUrl, subject)
+    if false == received {
+        if nil != lastPollErr {
+            fail("mailpit never received the message with subject %q at %s (last poll error: %v)", subject, mailpitApiUrl, lastPollErr)
+        }
+
         fail("mailpit never received the message with subject %q at %s", subject, mailpitApiUrl)
     }
 
     pass("mailpit received the message with subject %q", subject)
 }
 
-func waitForMailpitMessage(mailpitApiUrl string, subject string) bool {
+/* sendWithRetry absorbs the short window where mailpit accepted the container start but is not yet
+listening; a persistent failure still surfaces after the attempts are exhausted. */
+func sendWithRetry(transport mailercontract.Transport, message mailercontract.Message) error {
+    var sendErr error
+
+    for attempt := 0; attempt < 5; attempt++ {
+        if 0 < attempt {
+            time.Sleep(time.Second)
+        }
+
+        sendErr = transport.Send(newRuntime(), message)
+        if nil == sendErr {
+            return nil
+        }
+    }
+
+    return sendErr
+}
+
+/* waitForMailpitMessage reports whether the subject showed up before the deadline; the last poll error is
+returned so an unreachable or broken mailpit api is distinguishable from a message that never arrived. */
+func waitForMailpitMessage(mailpitApiUrl string, subject string) (bool, error) {
     deadline := time.Now().Add(10 * time.Second)
 
+    var lastPollErr error
+
     for time.Now().Before(deadline) {
-        if true == mailpitHasSubject(mailpitApiUrl, subject) {
-            return true
+        found, pollErr := mailpitHasSubject(mailpitApiUrl, subject)
+        if true == found {
+            return true, nil
+        }
+        if nil != pollErr {
+            lastPollErr = pollErr
         }
 
         time.Sleep(250 * time.Millisecond)
     }
 
-    return false
+    return false, lastPollErr
 }
 
-func mailpitHasSubject(mailpitApiUrl string, subject string) bool {
+func mailpitHasSubject(mailpitApiUrl string, subject string) (bool, error) {
     endpoint := strings.TrimRight(mailpitApiUrl, "/") + "/api/v1/messages"
 
     response, getErr := http.Get(endpoint)
     if nil != getErr {
-        return false
+        return false, getErr
     }
     defer response.Body.Close()
 
+    if http.StatusOK != response.StatusCode {
+        return false, fmt.Errorf("mailpit api responded with status %d", response.StatusCode)
+    }
+
     body, readErr := io.ReadAll(response.Body)
     if nil != readErr {
-        return false
+        return false, readErr
     }
 
     var payload struct {
@@ -80,14 +116,14 @@ func mailpitHasSubject(mailpitApiUrl string, subject string) bool {
     }
 
     if unmarshalErr := json.Unmarshal(body, &payload); nil != unmarshalErr {
-        return false
+        return false, unmarshalErr
     }
 
     for _, mailpitMessage := range payload.Messages {
         if subject == mailpitMessage.Subject {
-            return true
+            return true, nil
         }
     }
 
-    return false
+    return false, nil
 }

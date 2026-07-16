@@ -13,6 +13,9 @@ type ModuleConfig struct {
 
     /* RunnerCommands, when set, adds the in-process melody:cron:run scheduler alongside the generator; the commands here are the same registered commands the Configuration schedules by name, so an entry naming a command absent from this list is a wiring error the runner reports at boot. Wrap a command in lock.NewExclusiveCommand for multi-instance safety before listing it. */
     RunnerCommands []clicontract.Command
+
+    /* RunnerDialect selects the runner's day-of-month / day-of-week combination rule: the zero value and RunnerDialectCrontab follow vixie crond, where a star-based day field (plain or stepped wildcard) is unrestricted and the day fields combine with and; RunnerDialectKubernetes follows the robfig scheduler behind the k8s template, where only the plain wildcard is unrestricted and a stepped wildcard day field combines with or. Two genuinely restricted day fields combine with or in both dialects. Any other value panics at boot with ErrUnknownRunnerDialect. */
+    RunnerDialect RunnerDialect
 }
 
 func NewModule(config ModuleConfig) *Module {
@@ -52,7 +55,7 @@ func (instance *Module) RegisterCliCommands(kernelInstance kernelcontract.Kernel
     commands := Commands(configuration)
 
     if 0 < len(instance.config.RunnerCommands) {
-        commands = append(commands, NewRunnerCommand(configuration, instance.config.RunnerCommands...))
+        commands = append(commands, NewRunnerCommand(configuration, instance.config.RunnerDialect, instance.config.RunnerCommands...))
     }
 
     return commands

@@ -5,8 +5,16 @@ import (
 
     melodymysql "github.com/precision-soft/melody/integrations/bunorm/mysql/v3"
     melodybunorm "github.com/precision-soft/melody/integrations/bunorm/v3"
+    melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
+    melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
+    bun "github.com/uptrace/bun"
 )
+
+/* serviceDatabase is the container name of the example's shared *bun.DB; the outbox store factory and the
+encrypt database factory resolve it at their first use instead of receiving the prebuilt handle at
+composition-root time. */
+const serviceDatabase = "service-example-database"
 
 func (instance *Module) buildDatabase() {
     host := instance.environmentValue(environmentKeyMysqlHost)
@@ -42,4 +50,20 @@ func (instance *Module) buildDatabase() {
     }
 
     instance.database = database
+}
+
+/* registerDatabaseService publishes the eagerly-opened *bun.DB under serviceDatabase so the lazy factories
+(outbox store, encrypt bulk command) can resolve it from the container; without a configured database the
+service stays unregistered and a factory's first use reports the missing service instead of failing boot. */
+func (instance *Module) registerDatabaseService(registrar melodyapplicationcontract.ServiceRegistrar) {
+    if nil == instance.database {
+        return
+    }
+
+    registrar.RegisterService(
+        serviceDatabase,
+        func(resolver melodycontainercontract.Resolver) (*bun.DB, error) {
+            return instance.database, nil
+        },
+    )
 }

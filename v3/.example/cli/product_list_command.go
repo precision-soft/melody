@@ -10,6 +10,10 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
+const productListFlagLimit = "limit"
+
+const productListDefaultLimit = 5
+
 type ProductListCommand struct{}
 
 func NewProductListCommand() *ProductListCommand {
@@ -24,11 +28,23 @@ func (instance *ProductListCommand) Description() string {
     return "prints products in a table"
 }
 
+/* Flags declares --limit with a non-zero default: an unset flag reads back the declared value both under
+the cli entry point and under melody:cron:run, whose dispatcher hands every scheduled command its declared
+flags — the printed "product list: limit=…" line makes the honored default observable on a scheduled tick. */
 func (instance *ProductListCommand) Flags() []melodyclicontract.Flag {
-    return []melodyclicontract.Flag{}
+    return []melodyclicontract.Flag{
+        &melodyclicontract.IntFlag{
+            Name:  productListFlagLimit,
+            Usage: "maximum number of products to print (the declared default applies when the flag is not passed)",
+            Value: productListDefaultLimit,
+        },
+    }
 }
 
 func (instance *ProductListCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
+    limit := int(commandContext.Int(productListFlagLimit))
+    fmt.Printf("product list: limit=%d\n", limit)
+
     productService := service.MustGetProductService(runtimeInstance.Container())
     categoryService := service.MustGetCategoryService(runtimeInstance.Container())
     currencyService := service.MustGetCurrencyService(runtimeInstance.Container())
@@ -36,6 +52,10 @@ func (instance *ProductListCommand) Run(runtimeInstance melodyruntimecontract.Ru
     products, listErr := productService.List()
     if nil != listErr {
         return listErr
+    }
+
+    if 0 < limit && limit < len(products) {
+        products = products[:limit]
     }
 
     headers := []string{

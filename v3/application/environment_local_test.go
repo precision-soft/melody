@@ -17,8 +17,12 @@ func TestMissingEnvironmentFileHint_NamesTheRemedyWhenNoEnvFile(t *testing.T) {
         t.Fatalf("expected an actionable hint when the directory has no .env")
     }
 
-    if false == strings.Contains(hint, directory) {
-        t.Fatalf("expected the hint to name the directory, got %q", hint)
+    if false == strings.Contains(hint, "no .env or .env.local file was found in "+directory) {
+        t.Fatalf("expected the hint to name the directory itself, got %q", hint)
+    }
+
+    if true == strings.Contains(hint, "next to the executable") || true == strings.Contains(hint, "beside the binary") {
+        t.Fatalf("expected the hint not to claim the directory holds the executable (go run resolves the working directory), got %q", hint)
     }
 
     if false == strings.Contains(hint, "melody_env_embedded") {

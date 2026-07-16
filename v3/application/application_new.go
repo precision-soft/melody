@@ -177,12 +177,21 @@ func computeProjectDirectory() (string, error) {
     return absoluteExecutableDirectory, nil
 }
 
+/* workingDirectoryHasEnvironmentFile reports whether the directory holds a .env or .env.local regular file. A directory named .env is not an environment file. A stat error other than not-exist cannot prove the file absent, so it counts as present: callers use absence to emit a missing-.env hint or to walk away from the working directory when resolving the project root, and both are the wrong move while the file may in fact be there. */
 func workingDirectoryHasEnvironmentFile(directoryPath string) bool {
     candidates := []string{".env", ".env.local"}
 
     for _, candidate := range candidates {
-        _, statErr := os.Stat(filepath.Join(directoryPath, candidate))
+        fileInfo, statErr := os.Stat(filepath.Join(directoryPath, candidate))
         if nil == statErr {
+            if false == fileInfo.IsDir() {
+                return true
+            }
+
+            continue
+        }
+
+        if false == os.IsNotExist(statErr) {
             return true
         }
     }

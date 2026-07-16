@@ -8,12 +8,12 @@ import (
     "github.com/precision-soft/melody/v3/internal"
 )
 
-/* LazyService defers resolving a container service until its first use and memoizes the outcome. A component assembled during the boot phase — a cli command, an http middleware — can hold a service whose provider is registered but not yet safe to resolve at that phase, without hand-rolling a sync.Once proxy for each one. A genuinely app-specific proxy over the app's own interface is still built on this handle; the framework ships the proxies over its own contracts (for example lock.NewLazyLocker). */
+/* LazyService defers resolving a container service until its first use and memoizes success only — a failed resolution is retried on the next call, mirroring the container's own resolver. A component assembled during the boot phase — a cli command, an http middleware — can hold a service whose provider is registered but not yet safe to resolve at that phase, without hand-rolling a deferred-resolution proxy for each one. A genuinely app-specific proxy over the app's own interface is still built on this handle; the framework ships the proxies over its own contracts (for example lock.NewLazyLocker). */
 type LazyService[T any] struct {
-    resolve func() (T, error)
-    once    sync.Once
-    value   T
-    err     error
+    resolve  func() (T, error)
+    mutex    sync.Mutex
+    resolved bool
+    value    T
 }
 
 /* Lazy returns a handle that resolves serviceName from the resolver on first use, the deferred form of FromResolver / MustFromResolver. */
@@ -34,7 +34,7 @@ func LazyByType[T any](resolver containercontract.Resolver) *LazyService[T] {
     }
 }
 
-/* Get resolves the service on the first call and returns the memoized value on every later call, panicking if resolution fails or yields nil — the deferred equivalent of MustFromResolver. */
+/* Get resolves the service and returns the memoized value once a resolution has succeeded, panicking if the resolution fails or yields nil — the deferred equivalent of MustFromResolver; because a failure is not memoized, the next call retries the resolution. */
 func (instance *LazyService[T]) Get() T {
     value, resolveErr := instance.Resolve()
     if nil != resolveErr {
@@ -48,11 +48,24 @@ func (instance *LazyService[T]) Get() T {
     return value
 }
 
-/* Resolve resolves the service on the first call and memoizes the outcome — value and error alike — so a resolution is attempted exactly once; use Get for the panic-on-failure path. */
+/* Resolve resolves the service and memoizes success only: at most one resolution is in flight at a time, a successful value is returned on every later call without re-running the resolver, and a failed resolution returns the error without memoizing it, so the next call retries — a transient outage at first use does not poison the handle; use Get for the panic-on-failure path. */
 func (instance *LazyService[T]) Resolve() (T, error) {
-    instance.once.Do(func() {
-        instance.value, instance.err = instance.resolve()
-    })
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
 
-    return instance.value, instance.err
+    if true == instance.resolved {
+        return instance.value, nil
+    }
+
+    value, resolveErr := instance.resolve()
+    if nil != resolveErr {
+        var zero T
+
+        return zero, resolveErr
+    }
+
+    instance.value = value
+    instance.resolved = true
+
+    return instance.value, nil
 }

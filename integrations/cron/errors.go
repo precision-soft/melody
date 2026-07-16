@@ -18,4 +18,6 @@ var (
     ErrFieldContainsWhitespace            = errors.New("cron: field contains whitespace")
     ErrInvalidSchedule                    = errors.New("cron: schedule field is not a valid cron expression")
     ErrUnknownScheduledCommand            = errors.New("cron: scheduled command has no matching registered command")
+    ErrUnsupportedRunnerEntry             = errors.New("cron: the in-process runner supports only name-scheduled single-instance entries")
+    ErrUnknownRunnerDialect               = errors.New("cron: unknown runner dialect")
 )

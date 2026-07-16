@@ -8,7 +8,7 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* ExclusiveDemoCommand simulates a cron-launched job that must run on exactly one instance per tick: config/cli.go wraps it in lock.NewExclusiveCommand over the Redis locker, so launching it from two shells at once runs the body once while the other exits zero with a "skipped" log line. */
+/* ExclusiveDemoCommand simulates a cron-launched job that must run on exactly one instance per tick: config/cli.go wraps it in lock.NewExclusiveCommand over lock.NewLazyLocker, which resolves the registered locker (redis when configured) at the first CreateLock rather than at boot, so launching it from two shells at once runs the body once while the other exits zero with a "skipped" log line. */
 type ExclusiveDemoCommand struct{}
 
 func NewExclusiveDemoCommand() *ExclusiveDemoCommand {
@@ -20,7 +20,7 @@ func (instance *ExclusiveDemoCommand) Name() string {
 }
 
 func (instance *ExclusiveDemoCommand) Description() string {
-    return "holds the demo lock for --hold and prints the tick; wrapped as an exclusive command when redis is configured"
+    return "holds the demo lock for --hold and prints the tick; wrapped as an exclusive command over the lazily-resolved locker"
 }
 
 func (instance *ExclusiveDemoCommand) Flags() []melodyclicontract.Flag {

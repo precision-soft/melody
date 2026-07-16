@@ -435,3 +435,60 @@ func TestParseRuntimeFlags_PanicsOnBareRoleWithoutValue(t *testing.T) {
         _ = ParseRuntimeFlags(config.ModeHttp)
     })
 }
+
+/** @info An explicitly present but empty `--mode=` (e.g. expanded from an unset env var) must fail closed like an invalid mode instead of silently booting the configured default. */
+func TestParseRuntimeFlags_PanicsOnExplicitlyEmptyMode(t *testing.T) {
+    originalArguments := os.Args
+    t.Cleanup(func() {
+        os.Args = originalArguments
+    })
+
+    os.Args = []string{"app", "--mode="}
+
+    testhelper.AssertPanics(t, func() {
+        _ = ParseRuntimeFlags(config.ModeHttp)
+    })
+}
+
+/** @info When a runtime flag is supplied more than once before the subcommand, the last occurrence wins. */
+func TestParseRuntimeFlags_LastRoleOccurrenceWins(t *testing.T) {
+    originalArguments := os.Args
+    t.Cleanup(func() {
+        os.Args = originalArguments
+    })
+
+    os.Args = []string{"app", "--role", "web", "--role", "worker", "someCommand"}
+
+    flags := ParseRuntimeFlags(config.ModeHttp)
+    if config.RoleWorker != flags.Role() {
+        t.Fatalf("expected role %q, got %q", config.RoleWorker, flags.Role())
+    }
+}
+
+/** @info Last-wins holds even when the last occurrence is explicitly empty: `--role=web --role=` resolves to the empty value and fails closed, instead of the earlier web silently surviving. */
+func TestParseRuntimeFlags_PanicsWhenLastRoleOccurrenceIsEmpty(t *testing.T) {
+    originalArguments := os.Args
+    t.Cleanup(func() {
+        os.Args = originalArguments
+    })
+
+    os.Args = []string{"app", "--role=web", "--role=", "someCommand"}
+
+    testhelper.AssertPanics(t, func() {
+        _ = ParseRuntimeFlags(config.ModeHttp)
+    })
+}
+
+/** @info A bare `--role` before the subcommand consumes the following token as its value even when that token was meant as the command name, so an unintended value like a command name fails role validation. */
+func TestParseRuntimeFlags_BareRoleBeforeCommandConsumesIt(t *testing.T) {
+    originalArguments := os.Args
+    t.Cleanup(func() {
+        os.Args = originalArguments
+    })
+
+    os.Args = []string{"app", "--role=web", "--role", "someCommand"}
+
+    testhelper.AssertPanics(t, func() {
+        _ = ParseRuntimeFlags(config.ModeHttp)
+    })
+}

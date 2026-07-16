@@ -73,3 +73,21 @@ func TestComputeBackoffDelay(t *testing.T) {
         }
     }
 }
+
+/** @info negative delays and a sub-1 multiplier are degenerate (an immediate sleep, a decaying delay) and
+resolve to the defaults instead of collapsing the backoff. */
+func TestComputeBackoffDelayDegenerateValuesFallBackToDefaults(t *testing.T) {
+    provider := &Provider{retryConfig: NewRetryConfig(3, -time.Second, -time.Second, 0.5)}
+
+    if 500*time.Millisecond != provider.computeBackoffDelay(1) {
+        t.Fatalf("expected a negative initial delay to fall back to the default 500ms, got %s", provider.computeBackoffDelay(1))
+    }
+
+    if 1*time.Second != provider.computeBackoffDelay(2) {
+        t.Fatalf("expected a 0.5 multiplier to fall back to the default 2.0, got %s", provider.computeBackoffDelay(2))
+    }
+
+    if 5*time.Second != provider.computeBackoffDelay(10) {
+        t.Fatalf("expected a negative max delay to fall back to the default 5s clamp, got %s", provider.computeBackoffDelay(10))
+    }
+}

@@ -34,6 +34,24 @@ func TestProviderOpenWithRetryAndNilLoggerDoesNotPanic(t *testing.T) {
     }
 }
 
+func TestComputeBackoffDelayDegenerateValuesFallBackToDefaults(t *testing.T) {
+    provider := NewProvider(
+        WithRetryConfig(NewRetryConfig(3, -time.Second, -time.Second, 0.5)),
+    )
+
+    if 500*time.Millisecond != provider.computeBackoffDelay(1) {
+        t.Fatalf("expected a negative initial delay to fall back to the default 500ms, got %s", provider.computeBackoffDelay(1))
+    }
+
+    if 1*time.Second != provider.computeBackoffDelay(2) {
+        t.Fatalf("expected a 0.5 multiplier to fall back to the default 2.0, got %s", provider.computeBackoffDelay(2))
+    }
+
+    if 5*time.Second != provider.computeBackoffDelay(10) {
+        t.Fatalf("expected a negative max delay to fall back to the default 5s clamp, got %s", provider.computeBackoffDelay(10))
+    }
+}
+
 func TestProviderOpenWithZeroConnectTimeoutConnects(t *testing.T) {
     host := os.Getenv("PGSQL_HOST")
     if "" == host {

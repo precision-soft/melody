@@ -1,6 +1,7 @@
 package container
 
 import (
+    "errors"
     "sync"
     "testing"
 
@@ -57,6 +58,45 @@ func TestLazyService_ResolveReportsMissingService(t *testing.T) {
     _, resolveErr := lazy.Resolve()
     if nil == resolveErr {
         t.Fatalf("expected an error resolving an unregistered service")
+    }
+}
+
+func TestLazyService_RetriesResolutionAfterFailure(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    resolveCount := 0
+    MustRegister[string](serviceContainer, "service.lazy.flaky", func(resolver containercontract.Resolver) (string, error) {
+        resolveCount++
+
+        if 1 == resolveCount {
+            return "", errors.New("store not reachable yet")
+        }
+
+        return "recovered", nil
+    })
+
+    lazy := Lazy[string](serviceContainer, "service.lazy.flaky")
+
+    _, firstErr := lazy.Resolve()
+    if nil == firstErr {
+        t.Fatalf("expected the first resolution failure to surface")
+    }
+
+    value, secondErr := lazy.Resolve()
+    if nil != secondErr {
+        t.Fatalf("expected the second resolution to retry the resolver and succeed, got %v", secondErr)
+    }
+
+    if "recovered" != value {
+        t.Fatalf("expected the recovered value, got %q", value)
+    }
+
+    if "recovered" != lazy.Get() {
+        t.Fatalf("expected the memoized value after the successful resolution")
+    }
+
+    if 2 != resolveCount {
+        t.Fatalf("expected the success to be memoized after two attempts, got %d", resolveCount)
     }
 }
 

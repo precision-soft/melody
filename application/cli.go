@@ -45,16 +45,17 @@ func ParseRuntimeFlags(defaultMode string) *RuntimeFlags {
 func ParseRuntimeFlagsWithRole(defaultMode string, defaultRole string) *RuntimeFlags {
     arguments := os.Args
 
-    parsedMode, _ := parseRuntimeFlagFromArguments(arguments, "mode")
+    parsedMode, modeFlagPresent := parseRuntimeFlagFromArguments(arguments, "mode")
     parsedRole, roleFlagPresent := parseRuntimeFlagFromArguments(arguments, "role")
 
     mode := defaultMode
     if "" != parsedMode {
         mode = parsedMode
-    } else {
-        if true == hasNonRuntimeFlagArguments(arguments) {
-            mode = config.ModeCli
-        }
+    } else if true == modeFlagPresent {
+        /* an explicitly supplied but empty --mode (e.g. `--mode=` expanded from an unset env var, or a bare --mode that cannot consume a dash-leading next token) fails closed at the validation below instead of silently booting the configured default mode */
+        mode = ""
+    } else if true == hasNonRuntimeFlagArguments(arguments) {
+        mode = config.ModeCli
     }
 
     if config.ModeHttp != mode && config.ModeCli != mode {
@@ -94,7 +95,7 @@ func ParseRuntimeFlagsWithRole(defaultMode string, defaultRole string) *RuntimeF
     return NewRuntimeFlagsWithRole(mode, role)
 }
 
-/* parseRuntimeFlagFromArguments returns the parsed value of a runtime flag and whether the flag was explicitly present. Scanning is confined to the runtime-flag region before the cli subcommand (see subcommandBoundaryIndex): --mode and --role always precede the command, so a --role/--mode that follows the command name is the command's own flag and is left for it to parse. The present flag distinguishes an absent flag from one supplied with an empty value (for instance `--role=`), so the caller can fail closed on the latter instead of silently applying a default. */
+/* parseRuntimeFlagFromArguments returns the parsed value of a runtime flag and whether the flag was explicitly present. Scanning is confined to the runtime-flag region before the cli subcommand (see subcommandBoundaryIndex): --mode and --role always precede the command, so a --role/--mode that follows the command name is the command's own flag and is left for it to parse. When the flag is supplied more than once the last occurrence wins, even when that occurrence is explicitly empty — an earlier value never survives a later occurrence. The present flag distinguishes an absent flag from one supplied with an empty value (for instance `--role=`), so the caller can fail closed on the latter instead of silently applying a default. */
 func parseRuntimeFlagFromArguments(arguments []string, flagName string) (string, bool) {
     boundary := subcommandBoundaryIndex(arguments)
 
@@ -115,6 +116,9 @@ func parseRuntimeFlagFromArguments(arguments []string, flagName string) (string,
         present = true
 
         if true == consumeNext {
+            /* a bare flag with no consumable next token contributes the empty value: last-wins must not let an earlier occurrence survive */
+            parsedValue = ""
+
             if index+1 < boundary {
                 nextValue := strings.TrimSpace(arguments[index+1])
                 if "" != nextValue && false == strings.HasPrefix(nextValue, "-") {
@@ -126,9 +130,7 @@ func parseRuntimeFlagFromArguments(arguments []string, flagName string) (string,
             continue
         }
 
-        if "" != flagValue {
-            parsedValue = flagValue
-        }
+        parsedValue = flagValue
     }
 
     return parsedValue, present

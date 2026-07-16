@@ -171,7 +171,7 @@ func (instance *RateLimiter) reportError(err error) {
     instance.onError(err)
 }
 
-/* floorPositiveMilliseconds guarantees a positive duration never collapses to 0 milliseconds, which Redis would treat as an invalid or immediate expiry. */
+/* floorPositiveMilliseconds guarantees a positive window never collapses to a 0 PEXPIRE argument, which Redis rejects. */
 func floorPositiveMilliseconds(ttl time.Duration) int64 {
     milliseconds := ttl.Milliseconds()
     if 0 == milliseconds {

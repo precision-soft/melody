@@ -4,10 +4,11 @@ import (
     applicationcontract "github.com/precision-soft/melody/v3/application/contract"
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
+    "github.com/precision-soft/melody/v3/exception"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
 )
 
-/* ModuleConfig wires the outbox services into the application. Build the Store (NewStore) and the Relay (NewRelay) in the composition root and hand them in, or — for an app whose database is resolved from a registry per context and is not available before Boot — supply a StoreFactory / RelayFactory instead: the factory is registered as the service provider and runs when the service is first resolved (the relay command resolves its relay lazily too), so a multi-database binary can use the built-in melody:outbox:relay command without a prebuilt *bun.DB at composition-root time. The factory wins when both a prebuilt object and a factory are set. */
+/* ModuleConfig wires the outbox services into the application. Build the Store (NewStore) and the Relay (NewRelay) in the composition root and hand them in, or — for an app whose database is resolved from a registry per context and is not available before Boot — supply a StoreFactory / RelayFactory instead: the factory is registered as the service provider and runs when the service is first resolved (the relay command resolves its relay lazily too), so a multi-database binary can use the built-in melody:outbox:relay command without a prebuilt *bun.DB at composition-root time. Setting both a prebuilt object and its factory is ambiguous and panics at RegisterServices. A database or store opened inside a StoreFactory / RelayFactory is not closed by the container at shutdown — only the *Store / *Relay the factory returns is registered — so a factory should resolve container-owned services (or register the closeable resource as its own service) rather than open private connections. */
 type ModuleConfig struct {
     Store *Store
 
@@ -35,6 +36,14 @@ func (instance *Module) Description() string {
 }
 
 func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRegistrar) {
+    if nil != instance.config.Store && nil != instance.config.StoreFactory {
+        exception.Panic(exception.NewError("outbox module received both a store and a store factory - set exactly one", nil, nil))
+    }
+
+    if nil != instance.config.Relay && nil != instance.config.RelayFactory {
+        exception.Panic(exception.NewError("outbox module received both a relay and a relay factory - set exactly one", nil, nil))
+    }
+
     if nil != instance.config.StoreFactory {
         registrar.RegisterService(ServiceStore, instance.config.StoreFactory)
     } else if nil != instance.config.Store {

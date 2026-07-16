@@ -273,18 +273,21 @@ func (instance *Provider) open(resolver containercontract.Resolver) (*bun.DB, er
 }
 
 func (instance *Provider) computeBackoffDelay(attempt uint32) time.Duration {
+    /* non-positive delays and a multiplier below 1 fall back to the defaults: a negative delay makes
+       time.Sleep return immediately and a sub-1 multiplier decays the delay toward zero, both collapsing
+       the backoff into a re-dial storm; a multiplier of exactly 1 stays a valid constant backoff. */
     initialDelay := instance.retryConfig.InitialDelay
-    if 0 == initialDelay {
+    if 0 >= initialDelay {
         initialDelay = 500 * time.Millisecond
     }
 
     maxDelay := instance.retryConfig.MaxDelay
-    if 0 == maxDelay {
+    if 0 >= maxDelay {
         maxDelay = 5 * time.Second
     }
 
     backoffMultiplier := instance.retryConfig.BackoffMultiplier
-    if 0.0 == backoffMultiplier {
+    if 1 > backoffMultiplier {
         backoffMultiplier = 2.0
     }
 

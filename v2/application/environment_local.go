@@ -27,5 +27,5 @@ func missingEnvironmentFileHint(projectDirectory string) string {
         return ""
     }
 
-    return "; no .env was found next to the executable at " + projectDirectory + " — build with -tags melody_env_embedded to embed it, or place .env beside the binary"
+    return "; no .env or .env.local file was found in " + projectDirectory + " — create one there, or build with -tags melody_env_embedded to embed it"
 }

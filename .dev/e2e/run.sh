@@ -5,9 +5,9 @@
 #   ./dc up:all          # bring the backends up first
 #   .dev/e2e/run.sh      # every section
 #
-# Each section of the harness is gated on its backend env var; this script sets them all, so the default
-# run exercises everything. Override any of them to point at other infrastructure, or clear one to skip
-# its section:
+# Each section of the harness is gated on its backend env var; the shared defaults in common.sh set them
+# all, so the default run exercises everything. Override any of them to point at other infrastructure, or
+# clear one to skip its section:
 #
 #   REDIS_ADDRESS= .dev/e2e/run.sh                 # skip the redis-backed sections (the example http one too: it resets
 #                                                  # the rate limit counters straight in redis)
@@ -21,48 +21,14 @@ set -euo pipefail
 IFS=$'\n\t'
 
 SCRIPT_DIRECTORY_STRING="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPOSITORY_ROOT_DIRECTORY_STRING="$(cd -P "${SCRIPT_DIRECTORY_STRING}/../.." && pwd)"
 
-. "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/utility.sh"
+. "${SCRIPT_DIRECTORY_STRING}/common.sh"
 
-SERVICE_NAME_STRING="dev"
-
-require_docker
-require_docker_daemon
-
-if ! docker_compose_service_exists "${SERVICE_NAME_STRING}"; then
-    fail "missing docker compose service: ${SERVICE_NAME_STRING}"
-fi
-
-ensure_service_running "${SERVICE_NAME_STRING}"
-
-# every value is overridable from the environment; the defaults address the compose services by their
-# service name on the compose network, as seen from inside the dev container
-REDIS_ADDRESS="${REDIS_ADDRESS-redis:6379}"
-POSTGRES_DSN="${POSTGRES_DSN-postgres://melody:melody@postgres:5432/melody_test?sslmode=disable}"
-AMQP_DSN="${AMQP_DSN-amqp://guest:guest@rabbitmq:5672/}"
-SMTP_ADDRESS="${SMTP_ADDRESS-mailpit:1025}"
-MAILPIT_API_URL="${MAILPIT_API_URL-http://mailpit:8025}"
-EXAMPLE_BASE_URL="${EXAMPLE_BASE_URL-http://127.0.0.1:8080}"
-EXAMPLE_LOAD_BALANCER_URL="${EXAMPLE_LOAD_BALANCER_URL-http://load-balancer:80}"
+e2e_require_dev_service
 
 section_start "MELODY LIVE E2E HARNESS" "${TAG_VALIDATE}" "e2e"
 
-COMMAND_STRING="$(
-    printf '%s' \
-        "export PATH=/usr/local/go/bin:\$PATH" \
-        " GOWORK=off" \
-        " REDIS_ADDRESS='${REDIS_ADDRESS}'" \
-        " POSTGRES_DSN='${POSTGRES_DSN}'" \
-        " AMQP_DSN='${AMQP_DSN}'" \
-        " SMTP_ADDRESS='${SMTP_ADDRESS}'" \
-        " MAILPIT_API_URL='${MAILPIT_API_URL}'" \
-        " EXAMPLE_BASE_URL='${EXAMPLE_BASE_URL}'" \
-        " EXAMPLE_LOAD_BALANCER_URL='${EXAMPLE_LOAD_BALANCER_URL}'" \
-        " && cd /app/.dev/e2e && go run ."
-)"
-
-if run_in_service_shell "${SERVICE_NAME_STRING}" "${COMMAND_STRING}"; then
+if run_in_dev "${E2E_HARNESS_DIRECTORY_STRING}" "go run ."; then
     section_end "MELODY LIVE E2E HARNESS" "success" "${TAG_VALIDATE}" "e2e"
     exit 0
 fi

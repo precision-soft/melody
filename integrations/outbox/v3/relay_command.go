@@ -46,13 +46,13 @@ type RelayCommand struct {
     relayLazy *container.LazyService[*Relay]
 }
 
-/* resolveRelay returns the prebuilt relay, or resolves the lazy one on first use. */
-func (instance *RelayCommand) resolveRelay() *Relay {
+/* resolveRelay returns the prebuilt relay, or resolves the lazy one — a successful resolution is memoized, a failed one is reported so the run loop treats it like a failed batch, backs off and retries instead of exiting. */
+func (instance *RelayCommand) resolveRelay() (*Relay, error) {
     if nil != instance.relayLazy {
-        return instance.relayLazy.Get()
+        return instance.relayLazy.Resolve()
     }
 
-    return instance.relay
+    return instance.relay, nil
 }
 
 func (instance *RelayCommand) Name() string {
@@ -107,10 +107,13 @@ func (instance *RelayCommand) Run(
     batches := 0
     errorBackoff := interval
 
-    relay := instance.resolveRelay()
-
     for {
-        published, runErr := relay.RunOnce(relayRuntime)
+        /* the relay is resolved inside the loop: with a lazy relay a store outage at start-up surfaces here as an error that follows the same backoff-and-retry path as a failed batch, and a later successful resolution proceeds normally. */
+        published := 0
+        relay, runErr := instance.resolveRelay()
+        if nil == runErr {
+            published, runErr = relay.RunOnce(relayRuntime)
+        }
 
         batches++
 
