@@ -1045,6 +1045,361 @@ func TestReconcileWallClock_PlainDayRunsEveryMinuteExactlyOnce(t *testing.T) {
     }
 }
 
+type exitCoderCommand struct {
+    commandName string
+}
+
+func (instance *exitCoderCommand) Name() string {
+    return instance.commandName
+}
+
+func (instance *exitCoderCommand) Description() string {
+    return "exit coder command"
+}
+
+func (instance *exitCoderCommand) Flags() []clicontract.Flag {
+    return nil
+}
+
+func (instance *exitCoderCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+    return exception.NewExitError(3, exception.NewError("the job failed with an exit code", nil, nil))
+}
+
+/** @info the returned error carries an exit code, which the cli library's default handler turns into os.Exit; the runner must return it as a plain failure instead — a red run here does not merely fail, it kills the whole test process. */
+func TestRunnerCommand_ExitCoderErrorIsReturnedInsteadOfExitingTheScheduler(t *testing.T) {
+    exiting := &exitCoderCommand{commandName: "job:exiting"}
+    healthy := newRecordingCommand("job:healthy")
+
+    configuration := NewConfiguration().
+        Schedule("job:exiting", &EntryConfig{Schedule: &Schedule{Minute: "0"}}).
+        Schedule("job:healthy", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, exiting, healthy)
+
+    at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
+    runErr := runner.runDue(newRunnerTestRuntime(context.Background()), at)
+    if nil == runErr {
+        t.Fatal("expected the exit-coded failure to surface as an aggregate error")
+    }
+
+    aggregate, isExceptionError := runErr.(*exception.Error)
+    if false == isExceptionError {
+        t.Fatalf("expected an exception error from runDue, got %T", runErr)
+    }
+
+    if false == strings.Contains(fmt.Sprintf("%v", aggregate.Context()["commands"]), "job:exiting") {
+        t.Fatalf("expected the exit-coded command to be aggregated as failed, got %v", aggregate.Context()["commands"])
+    }
+
+    if 1 != healthy.runCount {
+        t.Fatalf("expected the healthy command to still run, ran %d", healthy.runCount)
+    }
+}
+
+func TestRunnerCommand_DuplicateCommandNamePanicsAtConstruction(t *testing.T) {
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatal("expected a panic for two runner commands sharing one name")
+        }
+
+        recoveredErr, isError := recovered.(error)
+        if false == isError {
+            t.Fatalf("expected the panic value to be an error, got %T", recovered)
+        }
+
+        if false == errors.Is(recoveredErr, ErrDuplicateRunnerCommand) {
+            t.Fatalf("expected ErrDuplicateRunnerCommand, got %v", recoveredErr)
+        }
+    }()
+
+    configuration := NewConfiguration().
+        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    NewRunnerCommand(configuration, RunnerDialectCrontab, newRecordingCommand("job:top"), newRecordingCommand("job:top"))
+}
+
+type memoizedFlagsCommand struct {
+    commandName string
+    flags       []clicontract.Flag
+}
+
+func newMemoizedFlagsCommand(name string) *memoizedFlagsCommand {
+    return &memoizedFlagsCommand{
+        commandName: name,
+        flags: []clicontract.Flag{
+            &clicontract.IntFlag{Name: probeFlagNameBatchSize, Value: 100},
+        },
+    }
+}
+
+func (instance *memoizedFlagsCommand) Name() string {
+    return instance.commandName
+}
+
+func (instance *memoizedFlagsCommand) Description() string {
+    return "memoized flags command"
+}
+
+func (instance *memoizedFlagsCommand) Flags() []clicontract.Flag {
+    return instance.flags
+}
+
+func (instance *memoizedFlagsCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+    return nil
+}
+
+/** @info the cli library writes parse state into the flag instances, so a command handing the runner the same instances on every Flags() call would make overlapping invocations race on them; the wiring error surfaces at construction. */
+func TestRunnerCommand_SharedFlagInstancesPanicAtConstruction(t *testing.T) {
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatal("expected a panic for a command returning shared flag instances")
+        }
+
+        recoveredErr, isError := recovered.(error)
+        if false == isError {
+            t.Fatalf("expected the panic value to be an error, got %T", recovered)
+        }
+
+        if false == errors.Is(recoveredErr, ErrSharedRunnerCommandFlags) {
+            t.Fatalf("expected ErrSharedRunnerCommandFlags, got %v", recoveredErr)
+        }
+    }()
+
+    configuration := NewConfiguration().
+        Schedule("job:memoized", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    NewRunnerCommand(configuration, RunnerDialectCrontab, newMemoizedFlagsCommand("job:memoized"))
+}
+
+/** @info an entry naming a system user stays runnable in-process — the one Configuration keeps driving both the generated manifests and the runner — and the runner records the affected command for the warning Run logs. */
+func TestRunnerCommand_UserEntryIsAcceptedAndRecordedForTheWarning(t *testing.T) {
+    job := newRecordingCommand("job:user")
+
+    configuration := NewConfiguration().
+        Schedule("job:user", &EntryConfig{Schedule: &Schedule{Minute: "0"}, User: "app"})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+
+    if 1 != len(runner.userIgnoredCommands) || "job:user" != runner.userIgnoredCommands[0] {
+        t.Fatalf("expected the user-carrying entry to be recorded for the warning, got %v", runner.userIgnoredCommands)
+    }
+
+    at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
+    if runErr := runner.runDue(newRunnerTestRuntime(context.Background()), at); nil != runErr {
+        t.Fatalf("unexpected error: %v", runErr)
+    }
+
+    if 1 != job.runCount {
+        t.Fatalf("expected the user-carrying entry to run as the process user, ran %d", job.runCount)
+    }
+}
+
+/** @info the fake clock returns an instant just before a minute boundary once, for both the chain anchor and the first arming; a second read after the boundary would manufacture a two-minute jump on which a wildcard entry pinned to the boundary minute never fires. */
+func TestRunnerCommand_LoopAnchorsAndArmsFromOneClockRead(t *testing.T) {
+    ran := make(chan struct{}, 1)
+    job := &signalingCommand{commandName: "job:boundary", ran: ran}
+
+    configuration := NewConfiguration().
+        Schedule("job:boundary", &EntryConfig{Schedule: &Schedule{Minute: "30"}})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+
+    boundaryMinute := time.Date(2026, time.July, 15, 9, 30, 0, 0, time.UTC)
+
+    var nowCallCount atomic.Int32
+    runner.now = func() time.Time {
+        if 1 == nowCallCount.Add(1) {
+            return boundaryMinute.Add(-10 * time.Millisecond)
+        }
+
+        return boundaryMinute.Add(100 * time.Millisecond)
+    }
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    finished := make(chan error, 1)
+    go func() {
+        finished <- runner.runLoop(newRunnerTestRuntime(ctx))
+    }()
+
+    select {
+    case <-ran:
+    case <-time.After(2 * time.Second):
+        t.Fatal("expected the first wake to evaluate the boundary minute the anchor was derived from")
+    }
+
+    cancel()
+
+    select {
+    case <-finished:
+    case <-time.After(3 * time.Second):
+        t.Fatal("runner loop ignored the cancelled context")
+    }
+}
+
+type countingCommand struct {
+    commandName string
+    runCount    atomic.Int32
+    ran         chan struct{}
+}
+
+func (instance *countingCommand) Name() string {
+    return instance.commandName
+}
+
+func (instance *countingCommand) Description() string {
+    return "counting command"
+}
+
+func (instance *countingCommand) Flags() []clicontract.Flag {
+    return nil
+}
+
+func (instance *countingCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+    instance.runCount.Add(1)
+
+    select {
+    case instance.ran <- struct{}{}:
+    default:
+    }
+
+    return nil
+}
+
+/** @info a backward wall step inside the armed window makes the loop arm a second time for the minute it just dispatched (the evaluation is pinned to the armed minute, so the step does not move it): the fake clock wakes for 10:00 from 09:59:59.900, steps back to 09:59:59.890, and the re-arm renders 10:00 again. The wildcard entry must run once for that minute, not twice seconds apart — the repeated wall minute of a fall-back is the other case, and a whole hour of other minutes runs in between there. */
+func TestRunnerCommand_LoopDoesNotRedispatchTheMinuteItJustDispatched(t *testing.T) {
+    ran := make(chan struct{}, 8)
+    job := &countingCommand{commandName: "job:every-minute", ran: ran}
+
+    configuration := NewConfiguration().
+        Schedule("job:every-minute", &EntryConfig{})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+
+    boundary := time.Date(2026, time.July, 15, 10, 0, 0, 0, time.UTC)
+
+    var nowCallCount atomic.Int32
+    runner.now = func() time.Time {
+        switch nowCallCount.Add(1) {
+        case 1:
+            return boundary.Add(-100 * time.Millisecond)
+        case 2:
+            /* the wall clock stepped back inside the armed window, so the re-arm targets the same minute again */
+            return boundary.Add(-110 * time.Millisecond)
+        }
+
+        return boundary.Add(50 * time.Millisecond)
+    }
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    finished := make(chan error, 1)
+    go func() {
+        finished <- runner.runLoop(newRunnerTestRuntime(ctx))
+    }()
+
+    select {
+    case <-ran:
+    case <-time.After(3 * time.Second):
+        t.Fatal("expected the wildcard entry to run for the armed minute")
+    }
+
+    select {
+    case <-ran:
+        t.Fatal("expected the re-armed wake at the already-dispatched minute to be skipped, not to run the entry a second time")
+    case <-time.After(500 * time.Millisecond):
+    }
+
+    cancel()
+
+    select {
+    case <-finished:
+    case <-time.After(3 * time.Second):
+        t.Fatal("runner loop ignored the cancelled context")
+    }
+
+    if 1 != job.runCount.Load() {
+        t.Fatalf("expected the wildcard entry to run exactly once for the repeated wall minute, ran %d", job.runCount.Load())
+    }
+}
+
+/** @info drives the real runner loop across the Europe/Bucharest 2026-10-25 fall-back: the first wake fires the 03:30 fixed-time entry on the first pass of the repeated hour, the second wake lands on the repeat (04:00 EEST renders as 03:00 EET, a backward jump), and the third wake re-reaches the pinned 03:30 on the repeat — the dispatch class filter must keep the fixed-time entry suppressed there while the wildcard entry follows every wake. */
+func TestRunnerCommand_LoopSuppressesAFixedTimeEntryAcrossTheFallBackRepeat(t *testing.T) {
+    bucharest, locationErr := time.LoadLocation("Europe/Bucharest")
+    if nil != locationErr {
+        t.Fatalf("unexpected location error: %v", locationErr)
+    }
+
+    fixedRan := make(chan struct{}, 16)
+    fixedJob := &countingCommand{commandName: "job:fixed", ran: fixedRan}
+
+    wildcardRan := make(chan struct{}, 16)
+    wildcardJob := &countingCommand{commandName: "job:wildcard", ran: wildcardRan}
+
+    configuration := NewConfiguration().
+        Schedule("job:fixed", &EntryConfig{Schedule: &Schedule{Minute: "30", Hour: "3"}}).
+        Schedule("job:wildcard", &EntryConfig{})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, fixedJob, wildcardJob)
+
+    /* 03:30 EEST, then 30 absolute minutes later 04:00 EEST (which renders as 03:00 EET), then 30 more to the repeated 03:30 EET — each approached 10ms before the boundary; after the third wake the clock rests just past 03:30 EET so the fourth arming waits a full minute and cancellation wins. The instant is built from the unambiguous 02:30 EEST, since 03:30 renders twice on this day. */
+    firstPass := time.Date(2026, time.October, 25, 2, 30, 0, 0, bucharest).Add(time.Hour)
+    if 3 != firstPass.Hour() || 30 != firstPass.Minute() {
+        t.Fatalf("expected the first pass to render 03:30 EEST, got %v", firstPass)
+    }
+    wakes := []time.Time{
+        firstPass.Add(-10 * time.Millisecond),
+        firstPass.Add(30*time.Minute - 10*time.Millisecond),
+        firstPass.Add(60*time.Minute - 10*time.Millisecond),
+    }
+
+    var nowCallCount atomic.Int32
+    runner.now = func() time.Time {
+        callIndex := int(nowCallCount.Add(1))
+        if callIndex <= len(wakes) {
+            return wakes[callIndex-1]
+        }
+
+        return firstPass.Add(60*time.Minute + 100*time.Millisecond)
+    }
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    finished := make(chan error, 1)
+    go func() {
+        finished <- runner.runLoop(newRunnerTestRuntime(ctx))
+    }()
+
+    for wildcardWake := 0; wildcardWake < 3; wildcardWake++ {
+        select {
+        case <-wildcardRan:
+        case <-time.After(3 * time.Second):
+            t.Fatalf("expected the wildcard entry to follow wake %d", wildcardWake+1)
+        }
+    }
+
+    cancel()
+
+    select {
+    case <-finished:
+    case <-time.After(3 * time.Second):
+        t.Fatal("runner loop ignored the cancelled context")
+    }
+
+    if 1 != fixedJob.runCount.Load() {
+        t.Fatalf("expected the 03:30 fixed-time entry to run exactly once across the fall-back repeat, ran %d", fixedJob.runCount.Load())
+    }
+
+    if 3 != wildcardJob.runCount.Load() {
+        t.Fatalf("expected the wildcard entry to run on every wake, ran %d", wildcardJob.runCount.Load())
+    }
+}
+
 func TestRunnerCommand_LoopStopsOnContextCancellation(t *testing.T) {
     job := newRecordingCommand("job:top")
 

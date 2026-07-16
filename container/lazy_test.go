@@ -4,6 +4,7 @@ import (
     "errors"
     "sync"
     "testing"
+    "time"
 
     containercontract "github.com/precision-soft/melody/container/contract"
 )
@@ -39,6 +40,7 @@ func TestLazyService_DefersResolutionUntilFirstGet(t *testing.T) {
 func TestLazyService_ResolvesProviderRegisteredAfterTheHandle(t *testing.T) {
     serviceContainer := NewContainer()
 
+    /* the handle is built before the provider exists — exactly the boot-phase ordering the helper is for: a cli command captures the lazy handle while services are still being registered. */
     lazy := Lazy[string](serviceContainer, "service.lazy.late")
 
     MustRegister[string](serviceContainer, "service.lazy.late", func(resolver containercontract.Resolver) (string, error) {
@@ -97,6 +99,87 @@ func TestLazyService_RetriesResolutionAfterFailure(t *testing.T) {
 
     if 2 != resolveCount {
         t.Fatalf("expected the success to be memoized after two attempts, got %d", resolveCount)
+    }
+}
+
+/** @info the resolver runs outside the handle's lock, so a resolver that reaches back into the same handle — a provider chain that cycles through a lazy handle — recurses into the resolution machinery, where a cycle guard can answer with an error; under a lock held across the resolution it would deadlock instead, unreachable by any cycle detection. */
+func TestLazyService_ResolverReachingBackIntoTheHandleIsNotDeadlocked(t *testing.T) {
+    depth := 0
+    var handle *LazyService[string]
+    handle = &LazyService[string]{
+        resolve: func() (string, error) {
+            depth++
+            if 1 < depth {
+                return "", errors.New("cycle detected by the resolution stack")
+            }
+
+            _, innerErr := handle.Resolve()
+            if nil != innerErr {
+                return "", innerErr
+            }
+
+            return "unreachable", nil
+        },
+    }
+
+    resolved := make(chan error, 1)
+    go func() {
+        _, resolveErr := handle.Resolve()
+        resolved <- resolveErr
+    }()
+
+    select {
+    case resolveErr := <-resolved:
+        if nil == resolveErr {
+            t.Fatal("expected the reentrant resolution to surface the cycle error")
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatal("expected the reentrant resolution to return instead of deadlocking on the handle's lock")
+    }
+}
+
+type lazyProbeItem struct {
+    name string
+}
+
+/** @info a resolution yielding nil without an error must not be memoized as success: Get keeps its documented retry-on-failure promise only if the next call re-runs the resolver instead of returning the poisoned nil forever. */
+func TestLazyService_NilYieldIsNotMemoized(t *testing.T) {
+    resolveCount := 0
+    handle := &LazyService[*lazyProbeItem]{
+        resolve: func() (*lazyProbeItem, error) {
+            resolveCount++
+            if 1 == resolveCount {
+                return nil, nil
+            }
+
+            return &lazyProbeItem{name: "real"}, nil
+        },
+    }
+
+    firstValue, firstErr := handle.Resolve()
+    if nil != firstErr {
+        t.Fatalf("expected the nil yield to pass through without an error, got %v", firstErr)
+    }
+
+    if nil != firstValue {
+        t.Fatalf("expected the first resolution to yield nil, got %+v", firstValue)
+    }
+
+    secondValue, secondErr := handle.Resolve()
+    if nil != secondErr {
+        t.Fatalf("expected the second resolution to retry the resolver, got %v", secondErr)
+    }
+
+    if nil == secondValue || "real" != secondValue.name {
+        t.Fatalf("expected the retried resolution to yield the real value, got %+v", secondValue)
+    }
+
+    if "real" != handle.Get().name {
+        t.Fatalf("expected the memoized value after the successful resolution")
+    }
+
+    if 2 != resolveCount {
+        t.Fatalf("expected the nil yield not to be memoized and the success to be, got %d resolutions", resolveCount)
     }
 }
 

@@ -27,8 +27,11 @@ func TestWatchSignals_FirstSignalCancels_SecondForcesExit(t *testing.T) {
             signalContextExit = func(code int) {
                 exitCalls <- code
             }
+            originalDebounce := signalContextForceExitDebounce
+            signalContextForceExitDebounce = 0
             defer func() {
                 signalContextExit = originalExit
+                signalContextForceExitDebounce = originalDebounce
             }()
 
             signalChannel := make(chan os.Signal, 2)
@@ -109,6 +112,64 @@ func TestNewSignalContext_StopCancelsAndReleasesWatcher(t *testing.T) {
     case <-signalContext.Done():
     case <-time.After(2 * time.Second):
         t.Fatalf("expected stop to cancel the context")
+    }
+}
+
+/** @info a second signal landing inside the debounce window is a duplicate delivery of the same logical shutdown request — a supervisor and a terminal both forwarding one interrupt — and must be absorbed so the graceful shutdown continues; a signal past the window is the operator's escalation and still forces the exit. */
+func TestWatchSignals_NearSimultaneousDuplicateIsAbsorbed(t *testing.T) {
+    exitCalls := make(chan int, 1)
+    originalExit := signalContextExit
+    signalContextExit = func(code int) {
+        exitCalls <- code
+    }
+    originalDebounce := signalContextForceExitDebounce
+    signalContextForceExitDebounce = 200 * time.Millisecond
+    defer func() {
+        signalContextExit = originalExit
+        signalContextForceExitDebounce = originalDebounce
+    }()
+
+    signalChannel := make(chan os.Signal, 2)
+    stopChannel := make(chan struct{})
+    doneChannel := make(chan struct{})
+
+    signalContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    /* both deliveries of the one logical interrupt sit buffered before the watcher runs, the worst case for the duplicate window */
+    signalChannel <- syscall.SIGTERM
+    signalChannel <- syscall.SIGTERM
+
+    go watchSignals(signalChannel, cancel, stopChannel, doneChannel)
+    defer close(stopChannel)
+
+    select {
+    case <-signalContext.Done():
+    case <-time.After(2 * time.Second):
+        t.Fatalf("expected the first signal to cancel the context")
+    }
+
+    select {
+    case code := <-exitCalls:
+        t.Fatalf("expected the near-simultaneous duplicate to be absorbed, got exit code %d", code)
+    case <-time.After(300 * time.Millisecond):
+    }
+
+    signalChannel <- syscall.SIGTERM
+
+    select {
+    case code := <-exitCalls:
+        if 143 != code {
+            t.Fatalf("expected forced exit code 143, got %d", code)
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatalf("expected a signal past the debounce window to force the exit")
+    }
+
+    select {
+    case <-doneChannel:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("expected the watcher goroutine to finish after the forced exit")
     }
 }
 

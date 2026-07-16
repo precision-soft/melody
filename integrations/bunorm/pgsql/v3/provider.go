@@ -224,8 +224,11 @@ func (instance *Provider) computeBackoffDelay(attempt uint32) time.Duration {
         maxDelay = defaults.MaxDelay
     }
 
+    /* the not-at-least-1 form is deliberate: NaN fails every comparison, so `1 > NaN` would let a NaN
+       multiplier through, poison the float-space growth below and collapse the backoff into an immediate
+       re-dial storm once the NaN converts to a negative duration. */
     backoffMultiplier := instance.retryConfig.BackoffMultiplier
-    if 1 > backoffMultiplier {
+    if false == (backoffMultiplier >= 1) {
         backoffMultiplier = defaults.BackoffMultiplier
     }
 

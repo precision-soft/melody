@@ -184,7 +184,7 @@ The lock service follows a single priority: Redis if configured, otherwise MySQL
 
 Several wirings deliberately defer their resolution to first use instead of the composition root:
 
-- `example:exclusive:demo` is wrapped in `lock.NewExclusiveCommand` over `lock.NewLazyLocker`, which resolves the registered locker at the first `CreateLock` — run it from two shells at once and exactly one executes while the other exits zero.
+- `example:exclusive:demo` is wrapped in `lock.NewExclusiveCommand` over `lock.NewLazyLocker`, which resolves the registered locker at the first `CreateLock` — with a distributed locker configured (Redis or MySQL), run it from two shells at once and exactly one executes while the other exits zero. Under the in-memory fallback the exclusivity is per-process, so two separate shells both execute.
 - The transactional-outbox module ([`config/outbox.go`](./config/outbox.go)) is registered in the `StoreFactory`/`RelayFactory` shape: the store (which ensures the `melody_outbox` schema) and the relay (which opens the transport) are built from the container at first use, and the module contributes the `melody:outbox:relay` command over the same lazily-resolved relay. Demo endpoints: `POST /outbox/enqueue`, `POST /outbox/relay`, `GET /outbox/status`.
 - The encrypt module resolves the shared `*bun.DB` through a `DatabaseFactory` evaluated at the first `melody:encrypt:database` run, so http- and worker-mode processes register the command without touching the database.
 

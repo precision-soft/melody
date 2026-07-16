@@ -189,11 +189,14 @@ fi
 restore_example_env_local
 trap - EXIT
 
-run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . --role nonsense app:info >/dev/null 2>&1"
-if [[ 0 -eq ${RUN_IN_DEV_STATUS_INTEGER} ]]; then
-    check_fail "an unsupported --role value was accepted"
+# the rejection must be THE role validation, not any unrelated non-zero exit (a compile error, a missing
+# .env), so the diagnostic text is asserted alongside the status
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . --role nonsense app:info 2>&1 | grep -c 'invalid role' || true; echo status_marker_done"
+UNSUPPORTED_ROLE_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+if printf '%s' "${UNSUPPORTED_ROLE_OUTPUT_STRING}" | head -1 | grep -q '^[1-9]'; then
+    check_pass "an unsupported --role value is rejected with the invalid-role diagnostic"
 else
-    check_pass "an unsupported --role value is rejected"
+    check_fail "an unsupported --role value did not produce the invalid-role diagnostic (${UNSUPPORTED_ROLE_OUTPUT_STRING:-<empty>})"
 fi
 
 section_end "PROCESS ROLE RESOLUTION" "success" "${TAG_VALIDATE}" "e2e"
@@ -241,13 +244,28 @@ section_end "CRON CRONTAB-NO-USER TEMPLATE" "success" "${TAG_VALIDATE}" "e2e"
 
 section_start "CRON IN-PROCESS RUNNER" "${TAG_VALIDATE}" "e2e"
 
-run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . melody:cron:run --once >/dev/null 2>&1; echo status=\$?"
+# a clean exit alone would also pass with a runner that never parsed the Configuration; the example
+# schedules product:list with a system user, which the in-process runner reports with a warning at Run
+# (written to the example's MELODY_LOG_PATH file, var/log/dev.log), so that marker proves the runner
+# resolved the entries from the one shared Configuration. The marker count is read before and after —
+# the log file persists across runs, so an old marker would be a vacuous pass. Whether an entry actually
+# fires depends on the wall minute, so firing itself is asserted by the unit tests
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "BEFORE_COUNT=\$(grep -c 'cron runner ignores EntryConfig.User' var/log/dev.log 2>/dev/null || true); go run . melody:cron:run --once >/dev/null 2>&1; echo status=\$?; AFTER_COUNT=\$(grep -c 'cron runner ignores EntryConfig.User' var/log/dev.log 2>/dev/null || true); echo \"user_warning_before=\${BEFORE_COUNT:-0}\"; echo \"user_warning_after=\${AFTER_COUNT:-0}\""
 RUNNER_ONCE_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 
 if printf '%s' "${RUNNER_ONCE_STRING}" | grep -q 'status=0'; then
     check_pass "melody:cron:run --once evaluated the schedule in-process and exited cleanly"
 else
     check_fail "melody:cron:run --once did not exit cleanly (${RUNNER_ONCE_STRING:-<empty>})"
+fi
+
+RUNNER_WARNING_BEFORE_INTEGER="$(printf '%s' "${RUNNER_ONCE_STRING}" | grep -o 'user_warning_before=[0-9]*' | head -1 | cut -d= -f2)"
+RUNNER_WARNING_AFTER_INTEGER="$(printf '%s' "${RUNNER_ONCE_STRING}" | grep -o 'user_warning_after=[0-9]*' | head -1 | cut -d= -f2)"
+
+if [[ "${RUNNER_WARNING_AFTER_INTEGER:-0}" -gt "${RUNNER_WARNING_BEFORE_INTEGER:-0}" ]]; then
+    check_pass "the runner resolved the shared Configuration (it reported the user-carrying product:list entry, ${RUNNER_WARNING_BEFORE_INTEGER:-0} -> ${RUNNER_WARNING_AFTER_INTEGER:-0})"
+else
+    check_fail "the runner did not report the user-carrying entry (${RUNNER_WARNING_BEFORE_INTEGER:-0} -> ${RUNNER_WARNING_AFTER_INTEGER:-0}), so nothing proves it parsed the Configuration"
 fi
 
 section_end "CRON IN-PROCESS RUNNER" "success" "${TAG_VALIDATE}" "e2e"
@@ -367,13 +385,28 @@ fi
 
 section_start "ENCRYPT FACTORY COMMAND" "${TAG_VALIDATE}" "e2e"
 
-run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . melody:encrypt:database --table melody_example_two_factor --primary-key user_identifier --column secret --column recovery_codes --mode encrypt >/tmp/encrypt-database.log 2>&1; echo status=\$?"
+# the completion log line is asserted alongside the exit code: a zero exit alone would also pass with a
+# command that failed to wire the migration at all, while the "migration finished" marker (written to the
+# example's MELODY_LOG_PATH file, var/log/dev.log) proves the bulk path ran end to end over the
+# factory-resolved database. The marker count is read before and after — the log file persists across
+# runs, so an old marker would be a vacuous pass. The processed row count in that line is legitimately
+# zero when the table holds no plaintext rows, so it is not asserted
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "BEFORE_COUNT=\$(grep -c 'encrypt database migration finished' var/log/dev.log 2>/dev/null || true); go run . melody:encrypt:database --table melody_example_two_factor --primary-key user_identifier --column secret --column recovery_codes --mode encrypt >/tmp/encrypt-database.log 2>&1; echo status=\$?; AFTER_COUNT=\$(grep -c 'encrypt database migration finished' var/log/dev.log 2>/dev/null || true); echo \"migration_finished_before=\${BEFORE_COUNT:-0}\"; echo \"migration_finished_after=\${AFTER_COUNT:-0}\""
 ENCRYPT_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 
 if printf '%s' "${ENCRYPT_OUTPUT_STRING}" | grep -q 'status=0'; then
     check_pass "melody:encrypt:database resolved its database through the factory and exited zero"
 else
     check_fail "melody:encrypt:database did not exit zero (${ENCRYPT_OUTPUT_STRING:-<empty>})"
+fi
+
+ENCRYPT_MARKER_BEFORE_INTEGER="$(printf '%s' "${ENCRYPT_OUTPUT_STRING}" | grep -o 'migration_finished_before=[0-9]*' | head -1 | cut -d= -f2)"
+ENCRYPT_MARKER_AFTER_INTEGER="$(printf '%s' "${ENCRYPT_OUTPUT_STRING}" | grep -o 'migration_finished_after=[0-9]*' | head -1 | cut -d= -f2)"
+
+if [[ "${ENCRYPT_MARKER_AFTER_INTEGER:-0}" -gt "${ENCRYPT_MARKER_BEFORE_INTEGER:-0}" ]]; then
+    check_pass "the bulk migration ran to completion over the factory-resolved database (${ENCRYPT_MARKER_BEFORE_INTEGER:-0} -> ${ENCRYPT_MARKER_AFTER_INTEGER:-0})"
+else
+    check_fail "the migration-finished marker did not appear (${ENCRYPT_MARKER_BEFORE_INTEGER:-0} -> ${ENCRYPT_MARKER_AFTER_INTEGER:-0}), so nothing proves the bulk path ran"
 fi
 
 section_end "ENCRYPT FACTORY COMMAND" "success" "${TAG_VALIDATE}" "e2e"
@@ -449,6 +482,11 @@ run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "WORK_DIRECTORY=/tmp/example-si
         rm -rf \"\${WORK_DIRECTORY}\" /tmp/example-signal.log /tmp/example-signal-build.log
         exit 0
     fi
+    if kill -0 \${APP_PID} 2>/dev/null; then
+        echo alive_before_signal=1
+    else
+        echo alive_before_signal=0
+    fi
     kill -INT \${APP_PID}
     FORCED=0
     for _ in \$(seq 1 150); do
@@ -477,6 +515,14 @@ if printf '%s' "${SIGNAL_OUTPUT_STRING}" | grep -q 'build_failed=1'; then
 elif ! printf '%s' "${SIGNAL_OUTPUT_STRING}" | grep -q 'ready=1'; then
     check_fail "the built example never answered /health within the readiness budget, so the signal path was not exercised"
 else
+    # a zero exit proves nothing if the app had already left on its own before the SIGINT was sent, so the
+    # liveness probe taken right before the kill is asserted first
+    if printf '%s' "${SIGNAL_OUTPUT_STRING}" | grep -q 'alive_before_signal=1'; then
+        check_pass "the example was still serving when the SIGINT was sent (the exit below is attributable to the signal)"
+    else
+        check_fail "the example had already exited before the SIGINT was sent, so the graceful path was not exercised"
+    fi
+
     if printf '%s' "${SIGNAL_OUTPUT_STRING}" | grep -q 'forced=0'; then
         check_pass "the example left on its own after one SIGINT (no SIGKILL was needed)"
     else

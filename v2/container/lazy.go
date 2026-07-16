@@ -8,7 +8,7 @@ import (
     "github.com/precision-soft/melody/v2/internal"
 )
 
-/* LazyService defers resolving a container service until its first use and memoizes success only — a failed resolution is retried on the next call, mirroring the container's own resolver. A component assembled during the boot phase — a cli command, an http middleware — can hold a service whose provider is registered but not yet safe to resolve at that phase, without hand-rolling a deferred-resolution proxy for each one. A genuinely app-specific proxy over the app's own interface is still built on this handle. */
+/* LazyService defers resolving a container service until its first use and memoizes success only — a failed or nil resolution is retried on the next call, mirroring the container's own resolver. A component assembled during the boot phase — a cli command, an http middleware — can hold a service whose provider is registered but not yet safe to resolve at that phase, without hand-rolling a deferred-resolution proxy for each one. A genuinely app-specific proxy over the app's own interface is still built on this handle. */
 type LazyService[T any] struct {
     resolve  func() (T, error)
     mutex    sync.Mutex
@@ -34,7 +34,7 @@ func LazyByType[T any](resolver containercontract.Resolver) *LazyService[T] {
     }
 }
 
-/* Get resolves the service and returns the memoized value once a resolution has succeeded, panicking if the resolution fails or yields nil — the deferred equivalent of MustFromResolver; because a failure is not memoized, the next call retries the resolution. */
+/* Get resolves the service and returns the memoized value once a resolution has succeeded, panicking if the resolution fails or yields nil — the deferred equivalent of MustFromResolver; because neither a failure nor a nil yield is memoized, the next call retries the resolution. */
 func (instance *LazyService[T]) Get() T {
     value, resolveErr := instance.Resolve()
     if nil != resolveErr {
@@ -48,14 +48,16 @@ func (instance *LazyService[T]) Get() T {
     return value
 }
 
-/* Resolve resolves the service and memoizes success only: at most one resolution is in flight at a time, a successful value is returned on every later call without re-running the resolver, and a failed resolution returns the error without memoizing it, so the next call retries — a transient outage at first use does not poison the handle; use Get for the panic-on-failure path. */
+/* Resolve resolves the service and memoizes success only: a successfully resolved non-nil value is returned on every later call without re-running the resolver, while a failed resolution returns the error without memoizing it and a nil yield is likewise passed through unmemoized, so the next call retries either — a transient outage at first use does not poison the handle; use Get for the panic-on-failure path. The resolver runs outside the handle's lock: a resolver that reaches back into the container — or into another lazy handle — must not deadlock against the handle's own synchronization, and the container's cycle detection stays reachable. When several first uses race, each may run the resolver and the first to store wins; the container's own memoization makes the duplicates converge for shared services. */
 func (instance *LazyService[T]) Resolve() (T, error) {
     instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
     if true == instance.resolved {
-        return instance.value, nil
+        value := instance.value
+        instance.mutex.Unlock()
+
+        return value, nil
     }
+    instance.mutex.Unlock()
 
     value, resolveErr := instance.resolve()
     if nil != resolveErr {
@@ -64,8 +66,17 @@ func (instance *LazyService[T]) Resolve() (T, error) {
         return zero, resolveErr
     }
 
-    instance.value = value
-    instance.resolved = true
+    if true == internal.IsNilInterface(value) {
+        return value, nil
+    }
+
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if false == instance.resolved {
+        instance.value = value
+        instance.resolved = true
+    }
 
     return instance.value, nil
 }

@@ -107,12 +107,8 @@ func main() {
         sections++
     }
 
-    if smtpAddress := os.Getenv("SMTP_ADDRESS"); "" != smtpAddress {
-        mailpitApiUrl := os.Getenv("MAILPIT_API_URL")
-        if "" == mailpitApiUrl {
-            mailpitApiUrl = "http://mailpit:8025"
-        }
-
+    /* the section needs both halves — the smtp endpoint to send through and the mailpit api to verify the receipt — so clearing either variable skips it, per the clear-to-skip contract every backend variable follows; silently substituting a default for a cleared MAILPIT_API_URL would point the check at infrastructure the run explicitly opted out of. */
+    if smtpAddress, mailpitApiUrl := os.Getenv("SMTP_ADDRESS"), os.Getenv("MAILPIT_API_URL"); "" != smtpAddress && "" != mailpitApiUrl {
         infrastructureSections++
         section("MAIL (live mailpit)")
         runMailCheck(smtpAddress, mailpitApiUrl)

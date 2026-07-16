@@ -1,6 +1,8 @@
 package encrypt
 
 import (
+    "sync"
+
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/logging"
@@ -69,10 +71,14 @@ type EncryptDatabaseCommand struct {
     databaseResolver func() (*bun.DB, error)
     cipher           Cipher
     commandName      string
+    resolveMutex     sync.Mutex
 }
 
-/* resolveMigrator returns the eagerly-built migrator, or builds it from the database resolver at the first run and memoizes the success, so a resolved database is reused across runs while a failed resolution surfaces as the run error and is retried on the next run. */
+/* resolveMigrator returns the eagerly-built migrator, or builds it from the database resolver at the first run and memoizes the success, so a resolved database is reused across runs while a failed resolution surfaces as the run error and is retried on the next run. The memoization is synchronized and the resolver runs under the lock: concurrent runs — the in-process cron runner dispatches overlapping executions of one command — share one migrator and one resolver-opened database instead of racing the memo and leaking the loser's connection pool. */
 func (instance *EncryptDatabaseCommand) resolveMigrator() (*Migrator, error) {
+    instance.resolveMutex.Lock()
+    defer instance.resolveMutex.Unlock()
+
     if nil != instance.migrator {
         return instance.migrator, nil
     }

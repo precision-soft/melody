@@ -2,6 +2,7 @@ package rueidis
 
 import (
     "errors"
+    "math"
     "testing"
     "time"
 )
@@ -89,5 +90,18 @@ func TestComputeBackoffDelayDegenerateValuesFallBackToDefaults(t *testing.T) {
 
     if 5*time.Second != provider.computeBackoffDelay(10) {
         t.Fatalf("expected a negative max delay to fall back to the default 5s clamp, got %s", provider.computeBackoffDelay(10))
+    }
+}
+
+/** @info NaN fails every comparison, so a NaN multiplier would slip through a `1 > x` clamp, poison the float-space growth and convert to a negative duration — an immediate re-dial storm; the not-at-least-1 clamp resolves it to the default. */
+func TestComputeBackoffDelayNaNMultiplierFallsBackToDefault(t *testing.T) {
+    provider := &Provider{retryConfig: NewRetryConfig(3, -time.Second, -time.Second, math.NaN())}
+
+    if 1*time.Second != provider.computeBackoffDelay(2) {
+        t.Fatalf("expected a NaN multiplier to fall back to the default 2.0, got %s", provider.computeBackoffDelay(2))
+    }
+
+    if 5*time.Second != provider.computeBackoffDelay(10) {
+        t.Fatalf("expected the NaN fallback to keep the default 5s clamp, got %s", provider.computeBackoffDelay(10))
     }
 }

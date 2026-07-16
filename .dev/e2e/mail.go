@@ -91,10 +91,13 @@ func waitForMailpitMessage(mailpitApiUrl string, subject string) (bool, error) {
     return false, lastPollErr
 }
 
+/* mailpitHttpClient bounds each receipt poll: the default client has no timeout, so a mailpit that accepts the connection and stalls would hang the poll loop — and the whole harness — past its own deadline. */
+var mailpitHttpClient = &http.Client{Timeout: 5 * time.Second}
+
 func mailpitHasSubject(mailpitApiUrl string, subject string) (bool, error) {
     endpoint := strings.TrimRight(mailpitApiUrl, "/") + "/api/v1/messages"
 
-    response, getErr := http.Get(endpoint)
+    response, getErr := mailpitHttpClient.Get(endpoint)
     if nil != getErr {
         return false, getErr
     }

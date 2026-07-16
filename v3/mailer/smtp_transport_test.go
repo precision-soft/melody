@@ -286,7 +286,7 @@ func TestSmtpTransport_DialTimesOutWhenTheServerNeverGreets(t *testing.T) {
 
     finished := make(chan error, 1)
     go func() {
-        _, _, dialErr := transport.dial()
+        _, _, dialErr := transport.dial(context.Background())
         finished <- dialErr
     }()
 
@@ -790,5 +790,158 @@ func serveStallOnDataSmtp(listener net.Listener, released <-chan struct{}) {
         default:
             writeLine("250 ok")
         }
+    }
+}
+
+/** @info the dot-acknowledgment ceiling derives from the per-step timeout with a floor, so a default-configured transport leaves a scanning relay a realistic acceptance window; an explicit value always wins. */
+func TestSmtpTransport_DataTerminationTimeoutDerivation(t *testing.T) {
+    cases := []struct {
+        name     string
+        config   SmtpConfig
+        expected time.Duration
+    }{
+        {
+            name:     "tight per-step timeout is floored at two minutes",
+            config:   SmtpConfig{Address: "smtp:25", Timeout: 5 * time.Second},
+            expected: 2 * time.Minute,
+        },
+        {
+            name:     "wide per-step timeout derives four steps",
+            config:   SmtpConfig{Address: "smtp:25", Timeout: 40 * time.Second},
+            expected: 160 * time.Second,
+        },
+        {
+            name:     "explicit value wins over the derivation",
+            config:   SmtpConfig{Address: "smtp:25", Timeout: 40 * time.Second, DataTerminationTimeout: 90 * time.Second},
+            expected: 90 * time.Second,
+        },
+    }
+
+    for _, testCase := range cases {
+        t.Run(testCase.name, func(t *testing.T) {
+            transport := NewSmtpTransport(testCase.config)
+            if testCase.expected != transport.dataTerminationTimeout {
+                t.Fatalf("expected the dot-acknowledgment ceiling %v, got %v", testCase.expected, transport.dataTerminationTimeout)
+            }
+        })
+    }
+}
+
+/** @info a relay that runs content inspection delays the dot acknowledgment far beyond any other reply; the per-step timeout must not cut that step, or a message the server may already have queued is reported as a failure and retried into a duplicate. */
+func TestSmtpTransport_SlowDotAcknowledgmentSucceedsWithinItsOwnCeiling(t *testing.T) {
+    listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+    if nil != listenErr {
+        t.Fatalf("listen: %v", listenErr)
+    }
+    defer listener.Close()
+
+    go serveDelayedDotAcknowledgmentSmtp(listener, 700*time.Millisecond)
+
+    transport := NewSmtpTransport(SmtpConfig{
+        Address:                listener.Addr().String(),
+        Host:                   "127.0.0.1",
+        Timeout:                200 * time.Millisecond,
+        DataTerminationTimeout: 5 * time.Second,
+    })
+
+    finished := make(chan error, 1)
+    go func() {
+        finished <- transport.Send(testRuntime(), mailercontract.Message{
+            From:    mailercontract.Address{Email: "shop@example.com"},
+            To:      []mailercontract.Address{{Email: "ada@example.com"}},
+            Subject: "Hello",
+            Text:    "body",
+        })
+    }()
+
+    select {
+    case sendErr := <-finished:
+        if nil != sendErr {
+            t.Fatalf("expected the slow dot acknowledgment to succeed under its own ceiling, got %v", sendErr)
+        }
+    case <-time.After(5 * time.Second):
+        t.Fatal("send hung on a server that delayed only the dot acknowledgment")
+    }
+}
+
+/* serveDelayedDotAcknowledgmentSmtp answers every step promptly and delays only the 250 after the message-ending dot, modelling a relay that runs its content inspection before accepting. */
+func serveDelayedDotAcknowledgmentSmtp(listener net.Listener, delay time.Duration) {
+    connection, acceptErr := listener.Accept()
+    if nil != acceptErr {
+        return
+    }
+    defer connection.Close()
+
+    reader := bufio.NewReader(connection)
+    writeLine := func(line string) {
+        connection.Write([]byte(line + "\r\n"))
+    }
+
+    writeLine("220 fake ESMTP")
+
+    inData := false
+
+    for {
+        line, readErr := reader.ReadString('\n')
+        if nil != readErr {
+            return
+        }
+
+        if true == inData {
+            if "." == strings.TrimRight(line, "\r\n") {
+                time.Sleep(delay)
+                writeLine("250 queued")
+                inData = false
+            }
+
+            continue
+        }
+
+        command := strings.ToUpper(strings.TrimSpace(line))
+        switch {
+        case strings.HasPrefix(command, "EHLO") || strings.HasPrefix(command, "HELO"):
+            writeLine("250-fake greets you")
+            writeLine("250 SIZE 35882577")
+        case strings.HasPrefix(command, "DATA"):
+            writeLine("354 end with .")
+            inData = true
+        case strings.HasPrefix(command, "QUIT"):
+            writeLine("221 bye")
+            return
+        default:
+            writeLine("250 ok")
+        }
+    }
+}
+
+/** @info the cancellation watcher only covers the running session, so the dial itself must honor the runtime context — a shutdown during a connect to an unresponsive relay must not stall for the full dial timeout. */
+func TestSmtpTransport_CancelledContextAbortsDial(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    /* TEST-NET-3 is reserved and unroutable, so an uncancelled connect would hang until the dial timeout */
+    transport := NewSmtpTransport(SmtpConfig{
+        Address:     "203.0.113.1:25",
+        Host:        "203.0.113.1",
+        DialTimeout: 5 * time.Second,
+    })
+
+    finished := make(chan error, 1)
+    go func() {
+        finished <- transport.Send(testRuntimeWithContext(ctx), mailercontract.Message{
+            From:    mailercontract.Address{Email: "shop@example.com"},
+            To:      []mailercontract.Address{{Email: "ada@example.com"}},
+            Subject: "Hello",
+            Text:    "body",
+        })
+    }()
+
+    select {
+    case sendErr := <-finished:
+        if nil == sendErr {
+            t.Fatal("expected the cancelled context to abort the dial with an error")
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatal("send ignored the cancelled context and stalled in the dial")
     }
 }

@@ -31,8 +31,10 @@ EXAMPLE_DIRECTORY_STRING="/app/v3/.example"
 EXAMPLE_ENV_LOCAL_PATH_STRING="${EXAMPLE_DIRECTORY_STRING}/.env.local"
 
 # backend env defaults — the single source of truth for every e2e script. Each value is overridable from
-# the environment (clear one to skip the sections it gates); the defaults address the compose services by
-# their service name on the compose network, as seen from inside the dev container.
+# the environment, and the defaults address the compose services by their service name on the compose
+# network, as seen from inside the dev container. The clear-to-skip contract (clear one to skip the
+# sections it gates) applies to run.sh's in-process harness; stack.sh exercises the full compose stack
+# and requires every backend up, so clearing a variable there does not skip its sections.
 REDIS_ADDRESS="${REDIS_ADDRESS-redis:6379}"
 POSTGRES_DSN="${POSTGRES_DSN-postgres://melody:melody@postgres:5432/melody_test?sslmode=disable}"
 AMQP_DSN="${AMQP_DSN-amqp://guest:guest@rabbitmq:5672/}"

@@ -371,6 +371,129 @@ func TestScheduleMatcher_TwoRestrictedDayFieldsCombineWithOrInBothDialects(t *te
     }
 }
 
+/** @info the robfig scheduler keeps its star bit on the plain and the unit-stepped wildcard and on any list containing them, so those shapes are unrestricted under the kubernetes dialect and the day fields combine with and; only a stepped wildcard with a step above one stays restricted and combines with or. */
+func TestScheduleMatcher_KubernetesDialectKeepsTheStarBitShapesUnrestricted(t *testing.T) {
+    assertJuly2026Weekdays(t)
+
+    cases := []struct {
+        name     string
+        schedule *Schedule
+        at       time.Time
+        expected bool
+    }{
+        {
+            name:     "unit-stepped wildcard day of month keeps the and rule on a Monday",
+            schedule: &Schedule{Minute: "0", Hour: "0", DayOfMonth: "*/1", DayOfWeek: "1"},
+            at:       time.Date(2026, time.July, 20, 0, 0, 0, 0, time.UTC),
+            expected: true,
+        },
+        {
+            name:     "unit-stepped wildcard day of month keeps the and rule off a Monday",
+            schedule: &Schedule{Minute: "0", Hour: "0", DayOfMonth: "*/1", DayOfWeek: "1"},
+            at:       time.Date(2026, time.July, 15, 0, 0, 0, 0, time.UTC),
+            expected: false,
+        },
+        {
+            name:     "list containing the wildcard keeps the and rule on a Monday",
+            schedule: &Schedule{Minute: "0", Hour: "0", DayOfMonth: "5,*", DayOfWeek: "1"},
+            at:       time.Date(2026, time.July, 20, 0, 0, 0, 0, time.UTC),
+            expected: true,
+        },
+        {
+            name:     "list containing the wildcard keeps the and rule off a Monday",
+            schedule: &Schedule{Minute: "0", Hour: "0", DayOfMonth: "5,*", DayOfWeek: "1"},
+            at:       time.Date(2026, time.July, 15, 0, 0, 0, 0, time.UTC),
+            expected: false,
+        },
+        {
+            name:     "unit-stepped wildcard day of week keeps the and rule on the pinned day",
+            schedule: &Schedule{Minute: "0", Hour: "0", DayOfMonth: "15", DayOfWeek: "*/1"},
+            at:       time.Date(2026, time.July, 15, 0, 0, 0, 0, time.UTC),
+            expected: true,
+        },
+        {
+            name:     "unit-stepped wildcard day of week keeps the and rule off the pinned day",
+            schedule: &Schedule{Minute: "0", Hour: "0", DayOfMonth: "15", DayOfWeek: "*/1"},
+            at:       time.Date(2026, time.July, 14, 0, 0, 0, 0, time.UTC),
+            expected: false,
+        },
+        {
+            name:     "wide-stepped wildcard day of month stays restricted and combines with or",
+            schedule: &Schedule{Minute: "0", Hour: "0", DayOfMonth: "*/2", DayOfWeek: "1"},
+            at:       time.Date(2026, time.July, 20, 0, 0, 0, 0, time.UTC),
+            expected: true,
+        },
+    }
+
+    for _, testCase := range cases {
+        t.Run(testCase.name, func(t *testing.T) {
+            matcher, matcherErr := newScheduleMatcher(testCase.schedule, RunnerDialectKubernetes)
+            if nil != matcherErr {
+                t.Fatalf("unexpected parse error: %v", matcherErr)
+            }
+
+            if got := matcher.Matches(testCase.at); got != testCase.expected {
+                t.Fatalf("Matches(%s) = %t, want %t", testCase.at.Format(time.RFC3339), got, testCase.expected)
+            }
+        })
+    }
+}
+
+/** @info the robfig scheduler bounds day of week at 6, so the kubernetes dialect must reject the Sunday alias 7 a crontab accepts — otherwise an in-process-green schedule renders a CronJob manifest the cluster rejects. */
+func TestScheduleMatcher_KubernetesDialectRejectsDayOfWeekSeven(t *testing.T) {
+    schedule := &Schedule{Minute: "0", Hour: "12", DayOfWeek: "7"}
+
+    if _, crontabErr := newScheduleMatcher(schedule, RunnerDialectCrontab); nil != crontabErr {
+        t.Fatalf("expected the crontab dialect to keep accepting the Sunday alias 7, got %v", crontabErr)
+    }
+
+    if _, kubernetesErr := newScheduleMatcher(schedule, RunnerDialectKubernetes); nil == kubernetesErr {
+        t.Fatal("expected the kubernetes dialect to reject day of week 7")
+    }
+}
+
+/** @info shapes no target scheduler runs must fail at parse: a sign-prefixed number parses under strconv but not under crond, unicode whitespace survives per-item trimming into an unrunnable crontab token, and a step beyond the field's cardinality would overflow the expansion loop into minutes the range never allowed. */
+func TestScheduleMatcher_RejectsUngeneratableShapes(t *testing.T) {
+    cases := []struct {
+        name     string
+        schedule *Schedule
+    }{
+        {name: "sign-prefixed single value", schedule: &Schedule{Minute: "+5"}},
+        {name: "sign-prefixed range bound", schedule: &Schedule{Minute: "+1-5"}},
+        {name: "sign-prefixed step", schedule: &Schedule{Minute: "*/+2"}},
+        {name: "no-break space in a list", schedule: &Schedule{Minute: "1,\u00a05"}},
+        {name: "vertical tab in a range", schedule: &Schedule{Minute: "1\v-5"}},
+        {name: "form feed in a list", schedule: &Schedule{Minute: "1,\f5"}},
+        {name: "step beyond the minute cardinality", schedule: &Schedule{Minute: "*/61"}},
+        {name: "huge step over a narrow range", schedule: &Schedule{Minute: "50-59/9223372036854775800"}},
+    }
+
+    for _, testCase := range cases {
+        t.Run(testCase.name, func(t *testing.T) {
+            _, matcherErr := newScheduleMatcher(testCase.schedule, "")
+            if nil == matcherErr {
+                t.Fatalf("expected a parse error for %q", testCase.name)
+            }
+        })
+    }
+}
+
+/** @info a step of exactly the field's cardinality is every scheduler's degenerate "just the low value" and stays accepted, admitting only the range's low value. */
+func TestScheduleMatcher_StepAtTheFieldCardinalityAdmitsOnlyTheLowValue(t *testing.T) {
+    matcher, matcherErr := newScheduleMatcher(&Schedule{Minute: "*/60"}, "")
+    if nil != matcherErr {
+        t.Fatalf("unexpected parse error: %v", matcherErr)
+    }
+
+    if false == matcher.Matches(time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)) {
+        t.Fatal("expected minute 0 to match a cardinality-wide step")
+    }
+
+    if true == matcher.Matches(time.Date(2026, time.July, 15, 9, 30, 0, 0, time.UTC)) {
+        t.Fatal("expected minute 30 not to match a cardinality-wide step")
+    }
+}
+
 func TestScheduleMatcher_UnknownDialectIsRejected(t *testing.T) {
     _, matcherErr := newScheduleMatcher(nil, RunnerDialect("solaris"))
     if nil == matcherErr {
