@@ -183,6 +183,7 @@ func TestLazyService_NilYieldIsNotMemoized(t *testing.T) {
     }
 }
 
+/* @info what this guards is race-freedom, and nothing else: the value assertion holds whether or not Resolve synchronizes its memo — a shared container service is memoized by the container too, so every caller observes the one instance either way — which means a lost mutex here is invisible without the detector. The ci race job and .dev/validate/all.sh therefore run this package under -race, and this test is only meaningful there. */
 func TestLazyService_GetIsSafeForConcurrentUse(t *testing.T) {
     serviceContainer := NewContainer()
 

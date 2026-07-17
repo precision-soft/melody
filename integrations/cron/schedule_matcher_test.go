@@ -2,6 +2,8 @@ package cron
 
 import (
     "errors"
+    "fmt"
+    "strings"
     "testing"
     "time"
 )
@@ -464,8 +466,9 @@ func TestScheduleMatcher_RejectsUngeneratableShapes(t *testing.T) {
         {name: "no-break space in a list", schedule: &Schedule{Minute: "1,\u00a05"}},
         {name: "vertical tab in a range", schedule: &Schedule{Minute: "1\v-5"}},
         {name: "form feed in a list", schedule: &Schedule{Minute: "1,\f5"}},
-        {name: "step beyond the minute cardinality", schedule: &Schedule{Minute: "*/61"}},
-        {name: "huge step over a narrow range", schedule: &Schedule{Minute: "50-59/9223372036854775800"}},
+        {name: "leading whitespace", schedule: &Schedule{Minute: " 5"}},
+        {name: "trailing whitespace", schedule: &Schedule{Minute: "5 "}},
+        {name: "trailing tab", schedule: &Schedule{Minute: "5\t"}},
     }
 
     for _, testCase := range cases {
@@ -479,18 +482,135 @@ func TestScheduleMatcher_RejectsUngeneratableShapes(t *testing.T) {
 }
 
 /** @info a step of exactly the field's cardinality is every scheduler's degenerate "just the low value" and stays accepted, admitting only the range's low value. */
-func TestScheduleMatcher_StepAtTheFieldCardinalityAdmitsOnlyTheLowValue(t *testing.T) {
-    matcher, matcherErr := newScheduleMatcher(&Schedule{Minute: "*/60"}, "")
+/** @info a step wider than the field is what crond does with it, not an error: busybox crond accepts `* / 90` (spaced here to keep this comment intact) and its expansion strides past the high bound on the first hop, so only the range's low value ever fires. The matcher clamps rather than rejects — rejecting would refuse a schedule the generator renders and crond runs — and the clamp is also what keeps a step near the integer maximum from overflowing the expansion loop into values the range never allowed. */
+func TestScheduleMatcher_StepWiderThanTheFieldAdmitsOnlyTheLowValue(t *testing.T) {
+    cases := []struct {
+        name        string
+        minute      string
+        matchMinute int
+        missMinute  int
+    }{
+        {name: "step at the field cardinality", minute: "*/60", matchMinute: 0, missMinute: 30},
+        {name: "step wider than the field", minute: "*/90", matchMinute: 0, missMinute: 30},
+        {name: "huge step over a narrow range", minute: "50-59/9223372036854775800", matchMinute: 50, missMinute: 51},
+        {name: "huge step that would overflow the loop", minute: "50-59/9223372036854775807", matchMinute: 50, missMinute: 2},
+    }
+
+    for _, testCase := range cases {
+        t.Run(testCase.name, func(t *testing.T) {
+            matcher, matcherErr := newScheduleMatcher(&Schedule{Minute: testCase.minute}, "")
+            if nil != matcherErr {
+                t.Fatalf("expected a wide step to be accepted as crond accepts it, got %v", matcherErr)
+            }
+
+            if false == matcher.Matches(time.Date(2026, time.July, 15, 9, testCase.matchMinute, 0, 0, time.UTC)) {
+                t.Fatalf("expected minute %d to match", testCase.matchMinute)
+            }
+
+            if true == matcher.Matches(time.Date(2026, time.July, 15, 9, testCase.missMinute, 0, 0, time.UTC)) {
+                t.Fatalf("expected minute %d not to match — a wide step admits only the low value", testCase.missMinute)
+            }
+        })
+    }
+}
+
+/** @info the matcher and the generator are two halves of one documented rule: every schedule that runs in-process must be generatable. Whatever the matcher accepts, the generator must accept too — the reverse does not hold, since the generator deliberately does not parse the expression (it never learns that minute 99 is out of range). This is the guard that catches one half being tightened without the other. */
+func TestScheduleMatcher_AcceptedFieldsAreAlwaysGeneratable(t *testing.T) {
+    fields := []string{
+        "*", "5", "*/15", "*/60", "*/90", "5-10", "5-59/2", "1,5", "0", "59",
+        "50-59/9223372036854775800",
+    }
+
+    for _, field := range fields {
+        t.Run(field, func(t *testing.T) {
+            schedule := &Schedule{Minute: field}
+
+            if _, matcherErr := newScheduleMatcher(schedule, ""); nil != matcherErr {
+                t.Skipf("the matcher rejects %q, so the generator is free to reject it too", field)
+            }
+
+            generatorErr := validateScheduleFields(Entry{Name: "job", Schedule: schedule}, CrontabForbiddenChars)
+            if nil != generatorErr {
+                t.Fatalf("the matcher accepts %q but the generator rejects it, so a schedule that runs in-process cannot be generated: %v", field, generatorErr)
+            }
+        })
+    }
+}
+
+/** @info a step on a single value ("5/15") is the one shape the two target schedulers genuinely disagree on — robfig reads it as the range from that value up, crond fires only the value — so neither half picks a meaning: the matcher rejects it and the generator rejects it too, naming the unambiguous rewrite. Both halves must agree, or the k8s template emits a manifest the runner refuses to boot on. */
+func TestScheduleMatcher_SteppedSingleValueIsRejectedByBothHalves(t *testing.T) {
+    cases := []struct {
+        name     string
+        schedule *Schedule
+    }{
+        {name: "stepped single minute", schedule: &Schedule{Minute: "5/15"}},
+        {name: "stepped single hour", schedule: &Schedule{Minute: "0", Hour: "2/6"}},
+        {name: "stepped single value inside a list", schedule: &Schedule{Minute: "1,5/15"}},
+    }
+
+    for _, testCase := range cases {
+        t.Run(testCase.name, func(t *testing.T) {
+            if _, matcherErr := newScheduleMatcher(testCase.schedule, ""); nil == matcherErr {
+                t.Fatal("the matcher accepted a step on a single value")
+            }
+
+            generatorErr := validateScheduleFields(Entry{Name: "job", Schedule: testCase.schedule}, CrontabForbiddenChars)
+            if nil == generatorErr {
+                t.Fatal("the generator accepted a step on a single value, so it would emit a schedule the runner refuses to boot on")
+            }
+
+            if false == errors.Is(generatorErr, ErrSteppedSingleValue) {
+                t.Fatalf("expected ErrSteppedSingleValue, got %v", generatorErr)
+            }
+
+            /* the error must name the rewrite, since that is the whole point of refusing an ambiguous shape */
+            if false == strings.Contains(generatorErr.Error(), "-") {
+                t.Fatalf("expected the error to suggest an explicit range, got %v", generatorErr)
+            }
+        })
+    }
+}
+
+/** @info the unambiguous rewrite the rejection points at must actually be accepted by both halves — an error that names an equally-refused alternative would be a dead end. */
+func TestScheduleMatcher_TheSuggestedExplicitRangeIsAccepted(t *testing.T) {
+    schedule := &Schedule{Minute: "5-59/15"}
+
+    matcher, matcherErr := newScheduleMatcher(schedule, "")
     if nil != matcherErr {
-        t.Fatalf("unexpected parse error: %v", matcherErr)
+        t.Fatalf("expected the explicit range to be accepted by the matcher, got %v", matcherErr)
     }
 
-    if false == matcher.Matches(time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)) {
-        t.Fatal("expected minute 0 to match a cardinality-wide step")
+    if generatorErr := validateScheduleFields(Entry{Name: "job", Schedule: schedule}, CrontabForbiddenChars); nil != generatorErr {
+        t.Fatalf("expected the explicit range to be accepted by the generator, got %v", generatorErr)
     }
 
-    if true == matcher.Matches(time.Date(2026, time.July, 15, 9, 30, 0, 0, time.UTC)) {
-        t.Fatal("expected minute 30 not to match a cardinality-wide step")
+    for _, minute := range []int{5, 20, 35, 50} {
+        if false == matcher.Matches(time.Date(2026, time.July, 15, 9, minute, 0, 0, time.UTC)) {
+            t.Fatalf("expected minute %d to match 5-59/15", minute)
+        }
+    }
+
+    if true == matcher.Matches(time.Date(2026, time.July, 15, 9, 6, 0, 0, time.UTC)) {
+        t.Fatal("expected minute 6 not to match 5-59/15")
+    }
+}
+
+/** @info the whitespace rule is one rule at one width across both halves: crond fails the whole crontab with a parse error on a token carrying any space — a vertical tab or a no-break space included — and drops every entry in the file, so neither half may let one through. */
+func TestScheduleMatcher_WhitespaceIsRejectedByBothHalves(t *testing.T) {
+    fields := []string{" 5", "5 ", "1, 5", "1,\u00a05", "1\v-5", "1,\f5", "5\t", "1\u20285"}
+
+    for _, field := range fields {
+        t.Run(fmt.Sprintf("%q", field), func(t *testing.T) {
+            schedule := &Schedule{Minute: field}
+
+            if _, matcherErr := newScheduleMatcher(schedule, ""); nil == matcherErr {
+                t.Fatalf("the matcher accepted a field carrying whitespace: %q", field)
+            }
+
+            if generatorErr := validateScheduleFields(Entry{Name: "job", Schedule: schedule}, CrontabForbiddenChars); nil == generatorErr {
+                t.Fatalf("the generator accepted a field carrying whitespace, so it would render a crontab crond refuses to parse: %q", field)
+            }
+        })
     }
 }
 

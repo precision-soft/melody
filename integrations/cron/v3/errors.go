@@ -16,6 +16,7 @@ var (
     ErrEntryEmptyCommand                  = errors.New("cron: entry has no command to run")
     ErrForbiddenCharacter                 = errors.New("cron: token contains forbidden character")
     ErrFieldContainsWhitespace            = errors.New("cron: field contains whitespace")
+    ErrSteppedSingleValue                 = errors.New("cron: field steps a single value, which the target schedulers read differently")
     ErrK8sImageMissing                    = errors.New("cron: the k8s template requires a container image")
     ErrK8sInvalidName                     = errors.New("cron: command name does not yield a valid k8s resource name")
     ErrK8sDuplicateName                   = errors.New("cron: two commands map to the same k8s resource name")

@@ -30,12 +30,14 @@ func (instance *ProductListCommand) Description() string {
 
 /* Flags declares --limit with a non-zero default: an unset flag reads back the declared value both under
 the cli entry point and under melody:cron:run, whose dispatcher hands every scheduled command its declared
-flags — the printed "product list: limit=…" line makes the honored default observable on a scheduled tick. */
+flags — the printed "product list: limit=…" line makes the honored default observable on a scheduled tick.
+A non-positive value prints every product, the same convention the framework's own melody:outbox:relay
+--limit follows. */
 func (instance *ProductListCommand) Flags() []melodyclicontract.Flag {
     return []melodyclicontract.Flag{
         &melodyclicontract.IntFlag{
             Name:  productListFlagLimit,
-            Usage: "maximum number of products to print (the declared default applies when the flag is not passed)",
+            Usage: "maximum number of products to print; 0 prints them all (the declared default applies when the flag is not passed)",
             Value: productListDefaultLimit,
         },
     }

@@ -286,19 +286,83 @@ func TestSmtpTransport_DialTimesOutWhenTheServerNeverGreets(t *testing.T) {
 
     finished := make(chan error, 1)
     go func() {
-        _, _, dialErr := transport.dial(context.Background())
-        finished <- dialErr
+        finished <- transport.Send(testRuntime(), mailercontract.Message{
+            From:    mailercontract.Address{Email: "shop@example.com"},
+            To:      []mailercontract.Address{{Email: "ada@example.com"}},
+            Subject: "Hello",
+            Text:    "body",
+        })
     }()
 
     <-accepted
 
     select {
-    case dialErr := <-finished:
-        if nil == dialErr {
+    case sendErr := <-finished:
+        if nil == sendErr {
             t.Fatal("expected the silent server to produce a dial error")
         }
     case <-time.After(3 * time.Second):
         t.Fatal("dial hung on a server that accepted the connection and never sent a greeting")
+    }
+}
+
+/** @info the greeting is read after the connect, so only the cancellation watcher can unblock it — the connect's own context-awareness is already spent. A relay that accepts the connection and then says nothing must not pin the sender until the dial timeout when the runtime is cancelled. */
+func TestSmtpTransport_CancellationInterruptsTheGreetingRead(t *testing.T) {
+    listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+    if nil != listenErr {
+        t.Fatalf("listen: %v", listenErr)
+    }
+    defer listener.Close()
+
+    accepted := make(chan struct{})
+
+    go func() {
+        connection, acceptErr := listener.Accept()
+        if nil != acceptErr {
+            return
+        }
+
+        close(accepted)
+
+        /* accept, then stay silent well past the cancellation below: no 220 greeting ever arrives */
+        <-time.After(10 * time.Second)
+        connection.Close()
+    }()
+
+    /* the dial timeout is long, so only the cancellation can end this send */
+    transport := NewSmtpTransport(SmtpConfig{
+        Address:     listener.Addr().String(),
+        Host:        "127.0.0.1",
+        DialTimeout: 10 * time.Second,
+    })
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    finished := make(chan error, 1)
+    go func() {
+        finished <- transport.Send(testRuntimeWithContext(ctx), mailercontract.Message{
+            From:    mailercontract.Address{Email: "shop@example.com"},
+            To:      []mailercontract.Address{{Email: "ada@example.com"}},
+            Subject: "Hello",
+            Text:    "body",
+        })
+    }()
+
+    <-accepted
+
+    go func() {
+        <-time.After(200 * time.Millisecond)
+        cancel()
+    }()
+
+    select {
+    case sendErr := <-finished:
+        if nil == sendErr {
+            t.Fatal("expected an error when the runtime context is cancelled during the greeting read")
+        }
+    case <-time.After(3 * time.Second):
+        t.Fatal("send ignored the cancelled runtime context and stalled in the greeting read")
     }
 }
 

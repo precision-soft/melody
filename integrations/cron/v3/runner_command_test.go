@@ -211,6 +211,8 @@ type blockingCommand struct {
     commandName    string
     started        chan struct{}
     completedCount atomic.Int32
+    /* completionDelay holds the job inside Run after its context is cancelled, so a loop that returns without waiting for its in-flight jobs is observed returning FIRST rather than winning a race it usually loses */
+    completionDelay time.Duration
 }
 
 func (instance *blockingCommand) Name() string {
@@ -232,6 +234,10 @@ func (instance *blockingCommand) Run(runtimeInstance runtimecontract.Runtime, co
     }
 
     <-runtimeInstance.Context().Done()
+
+    if 0 < instance.completionDelay {
+        time.Sleep(instance.completionDelay)
+    }
 
     instance.completedCount.Add(1)
 
@@ -575,10 +581,10 @@ func TestRunnerCommand_LoopTicksWhileAJobIsStillRunning(t *testing.T) {
     }
 }
 
-/** @info the job finishes only after the cancellation reaches its child context, so a completion observed once the loop returned proves the loop waited for the in-flight job instead of abandoning it. */
+/** @info the job holds itself inside Run for completionDelay AFTER the cancellation reaches its child context, so the two events are ordered rather than raced: a loop that abandons its in-flight jobs returns while the job is still sleeping, and the assertion below sees completedCount==0 every time. Without that delay both goroutines wake on the same cancel() and the job wins by luck, so the test passed even with inFlight.Wait() removed. */
 func TestRunnerCommand_LoopWaitsForInFlightJobsOnCancellation(t *testing.T) {
     started := make(chan struct{}, 1)
-    job := &blockingCommand{commandName: "job:blocking", started: started}
+    job := &blockingCommand{commandName: "job:blocking", started: started, completionDelay: 250 * time.Millisecond}
 
     configuration := NewConfiguration().
         Schedule("job:blocking", &EntryConfig{})

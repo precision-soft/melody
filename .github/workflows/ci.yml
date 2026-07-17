@@ -31,6 +31,31 @@ jobs:
                         (cd "${module_directory}" && go vet ./... && go test ./...)
                     done
 
+    # the race detector over the concurrency-carrying packages of the core majors
+    # and the cron runner. The matrix job runs them without it, so a lost mutex or
+    # an unsynchronized memo stays green there: these packages hold goroutines that
+    # outlive a call (the lazy service memo, the signal watcher, the smtp
+    # cancellation watcher, the cron runner's parallel dispatch), and only the
+    # detector can see them race. Needs no service containers.
+    race:
+        runs-on: ubuntu-latest
+        steps:
+            -   uses: actions/checkout@v4
+            -   uses: actions/setup-go@v5
+                with:
+                    go-version-file: go.work
+                    cache: true
+            -   name: race detector on the concurrency-carrying core packages
+                run: |
+                    set -euo pipefail
+                    for major_directory in . v2 v3; do
+                        (cd "${major_directory}" && go test -race -count=1 ./container/... ./application/... ./config/... ./event/...)
+                    done
+                    (cd v3 && go test -race -count=1 ./mailer/... ./lock/...)
+                    for cron_directory in integrations/cron integrations/cron/v2 integrations/cron/v3; do
+                        (cd "${cron_directory}" && go test -race -count=1 ./...)
+                    done
+
     # the env-gated live suites the matrix job cannot exercise: real RabbitMQ,
     # Redis, MySQL, PostgreSQL and S3 (localstack) service containers, -race on
     # the concurrency-critical ones. Mirrors the manual container run.

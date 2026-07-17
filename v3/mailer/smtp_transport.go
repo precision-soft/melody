@@ -127,16 +127,25 @@ func (instance *SmtpTransport) Send(runtimeInstance runtimecontract.Runtime, mes
 }
 
 func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, from string, recipientList []string, payload []byte) error {
-    client, connection, dialErr := instance.dial(runtimeInstance.Context())
+    connection, dialErr := instance.connect(runtimeInstance.Context())
     if nil != dialErr {
         return exception.NewError("smtp dial failed", map[string]any{"address": instance.address}, dialErr)
     }
-    defer client.Close()
 
-    /* net/smtp has no context api, so once the session runs a cancelled runtime context can only reach an in-flight command by closing the connection out from under it: the blocked read or write then returns an error and the session unwinds (the dial itself is context-aware). The watcher is torn down before the deferred Close runs, so a clean delivery never races its own shutdown. */
+    /* net/smtp has no context api, so once the session runs a cancelled runtime context can only reach an in-flight read or write by closing the connection out from under it: the blocked call then returns an error and the session unwinds (the connect itself is context-aware). The watcher is armed before the greeting is read, so the whole session — the greeting included — is cancellable; a relay that accepts the connection and then says nothing no longer pins the sender until the dial timeout. */
     watcherDone := make(chan struct{})
-    defer close(watcherDone)
     go watchRuntimeCancellation(runtimeInstance, connection, watcherDone)
+
+    client, clientErr := newSmtpClientWithGreetingDeadline(connection, instance.host, instance.resolveDialTimeout())
+    if nil != clientErr {
+        close(watcherDone)
+
+        return exception.NewError("smtp dial failed", map[string]any{"address": instance.address}, clientErr)
+    }
+
+    /* the deferred order is deliberate: close(watcherDone) is registered last so it runs FIRST, stopping the watcher before client.Close() closes the connection — otherwise a clean delivery would race its own shutdown. */
+    defer client.Close()
+    defer close(watcherDone)
 
     /* the hello runs as its own step under a fresh deadline instead of riding lazily on the first client operation: left implicit, it would share one deadline with whichever command triggers it — the STARTTLS extension probe on the plain path, MAIL on the implicit-tls path — and every later client call is one round trip only because the hello is already done. */
     if deadlineErr := instance.resetSessionDeadline(connection); nil != deadlineErr {
@@ -282,43 +291,27 @@ func watchRuntimeCancellation(runtimeInstance runtimecontract.Runtime, connectio
     }
 }
 
-/* dial connects under the runtime context, so a cancelled runtime aborts a dial still connecting instead of stalling until the dial timeout — the cancellation watcher only covers the session, which does not exist yet while dialing. */
-func (instance *SmtpTransport) dial(ctx context.Context) (*smtp.Client, net.Conn, error) {
-    timeout := instance.dialTimeout
-    if 0 >= timeout {
-        timeout = defaultSmtpDialTimeout
+/* resolveDialTimeout is the ceiling on the connect, the tls handshake and the opening greeting. */
+func (instance *SmtpTransport) resolveDialTimeout() time.Duration {
+    if 0 >= instance.dialTimeout {
+        return defaultSmtpDialTimeout
     }
 
-    dialer := &net.Dialer{Timeout: timeout}
+    return instance.dialTimeout
+}
+
+/* connect opens the transport connection under the runtime context, so a cancelled runtime aborts a connect still in flight instead of stalling until the dial timeout. It stops at the connection: the greeting read that follows is a session step, and the caller arms the cancellation watcher over it before reading. */
+func (instance *SmtpTransport) connect(ctx context.Context) (net.Conn, error) {
+    dialer := &net.Dialer{Timeout: instance.resolveDialTimeout()}
 
     if true == instance.implicitTls {
         tlsDialer := &tls.Dialer{NetDialer: dialer, Config: instance.resolveTlsConfig()}
 
-        connection, dialErr := tlsDialer.DialContext(ctx, "tcp", instance.address)
-        if nil != dialErr {
-            return nil, nil, dialErr
-        }
-
-        client, clientErr := newSmtpClientWithGreetingDeadline(connection, instance.host, timeout)
-        if nil != clientErr {
-            return nil, nil, clientErr
-        }
-
-        return client, connection, nil
+        return tlsDialer.DialContext(ctx, "tcp", instance.address)
     }
 
-    /* @important dial the raw connection and build the client with instance.host explicitly, rather than smtp.Dial(address) which derives the client server name from the address host: startTls uses instance.host for the TLS SNI and PlainAuth is constructed with instance.host, so a configured Host that differs from the Address host (dialing by IP, through a tunnel, or a CNAME) must be the server name here too — otherwise smtp.PlainAuth.Start rejects the mismatch with "wrong host name" and authentication can never succeed. Mirrors the implicit-TLS branch, which already passes instance.host to NewClient. */
-    connection, dialErr := dialer.DialContext(ctx, "tcp", instance.address)
-    if nil != dialErr {
-        return nil, nil, dialErr
-    }
-
-    client, clientErr := newSmtpClientWithGreetingDeadline(connection, instance.host, timeout)
-    if nil != clientErr {
-        return nil, nil, clientErr
-    }
-
-    return client, connection, nil
+    /* @important dial the raw connection and build the client with instance.host explicitly, rather than smtp.Dial(address) which derives the client server name from the address host: startTls uses instance.host for the TLS SNI and PlainAuth is constructed with instance.host, so a configured Host that differs from the Address host (dialing by IP, through a tunnel, or a CNAME) must be the server name here too — otherwise smtp.PlainAuth.Start rejects the mismatch with "wrong host name" and authentication can never succeed. The implicit-TLS branch passes instance.host to NewClient the same way. */
+    return dialer.DialContext(ctx, "tcp", instance.address)
 }
 
 /* newSmtpClientWithGreetingDeadline bounds the server's opening 220 greeting, which smtp.NewClient reads synchronously with no deadline of its own: a server that accepts the tcp connection and then says nothing would pin the sending goroutine and its socket indefinitely. The deadline is cleared once the greeting has been read, so the rest of the session is governed by the caller. */

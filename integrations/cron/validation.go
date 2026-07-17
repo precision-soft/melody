@@ -3,6 +3,7 @@ package cron
 import (
     "fmt"
     "strings"
+    "unicode"
 
     "github.com/precision-soft/melody/exception"
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
@@ -59,6 +60,48 @@ func validateUserField(label string, value string) error {
     )
 }
 
+/* steppedSingleValueItem reports the first list item that puts a step on a single value ("5/15"), the one shape the two target schedulers genuinely disagree on: robfig reads it as the range from that value to the field maximum, crond fires only the value itself. The in-process matcher rejects it rather than pick a meaning, so the generator rejects it too — otherwise it would emit a manifest the runner refuses to boot on. A step over a range or the wildcard is unambiguous and passes. */
+func steppedSingleValueItem(expression string) (string, bool) {
+    for _, item := range strings.Split(expression, ",") {
+        slashIndex := strings.Index(item, "/")
+        if -1 == slashIndex {
+            continue
+        }
+
+        base := item[:slashIndex]
+        if "*" == base || true == strings.Contains(base, "-") {
+            continue
+        }
+
+        return item, true
+    }
+
+    return "", false
+}
+
+/* exampleSteppedRangeOf renders the unambiguous rewrite the error suggests: the stepped item's own base and step spread over the field's range, which both schedulers read identically. */
+func exampleSteppedRangeOf(item string, fieldName string) string {
+    slashIndex := strings.Index(item, "/")
+    if -1 == slashIndex {
+        return item
+    }
+
+    maximums := map[string]string{
+        "Minute":     "59",
+        "Hour":       "23",
+        "DayOfMonth": "31",
+        "Month":      "12",
+        "DayOfWeek":  "6",
+    }
+
+    maximum, known := maximums[fieldName]
+    if false == known {
+        return item
+    }
+
+    return item[:slashIndex] + "-" + maximum + item[slashIndex:]
+}
+
 func validateScheduleFields(entry Entry, forbidden []ForbiddenChar) error {
     if nil == entry.Schedule {
         return nil
@@ -76,15 +119,37 @@ func validateScheduleFields(entry Entry, forbidden []ForbiddenChar) error {
     }
 
     for _, field := range fields {
-        if true == strings.ContainsAny(field.value, " \t\n\r") {
+        /* any unicode space counts, not just the ascii four: crond splits the line on a vertical tab or a no-break space the same way it splits on a plain one and fails the whole file with a parse error, dropping every entry in it — and the in-process matcher rejects the same field, so the two halves stay one rule. */
+        if -1 != strings.IndexFunc(field.value, unicode.IsSpace) {
             return exception.NewError(
-                fmt.Sprintf("cron: entry %q has whitespace in Schedule.%s (%q); crontab fields must be single tokens", entry.Name, field.name, field.value),
+                fmt.Sprintf("cron: entry %q has whitespace in Schedule.%s (%q); schedule fields must be single tokens", entry.Name, field.name, field.value),
                 exceptioncontract.Context{
                     "entry": entry.Name,
                     "field": field.name,
                     "value": field.value,
                 },
                 ErrFieldContainsWhitespace,
+            )
+        }
+
+        if steppedItem, stepped := steppedSingleValueItem(field.value); true == stepped {
+            return exception.NewError(
+                fmt.Sprintf(
+                    "cron: entry %q steps a single value in Schedule.%s (%q); the two target schedulers read that shape differently — the robfig scheduler behind the k8s template takes %q as the whole range from that value up, while crond fires only that one value — so write the range you mean explicitly (for example %q instead of %q)",
+                    entry.Name,
+                    field.name,
+                    field.value,
+                    steppedItem,
+                    exampleSteppedRangeOf(steppedItem, field.name),
+                    steppedItem,
+                ),
+                exceptioncontract.Context{
+                    "entry": entry.Name,
+                    "field": field.name,
+                    "value": field.value,
+                    "item":  steppedItem,
+                },
+                ErrSteppedSingleValue,
             )
         }
 

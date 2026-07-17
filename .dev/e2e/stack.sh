@@ -189,14 +189,22 @@ fi
 restore_example_env_local
 trap - EXIT
 
-# the rejection must be THE role validation, not any unrelated non-zero exit (a compile error, a missing
-# .env), so the diagnostic text is asserted alongside the status
-run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . --role nonsense app:info 2>&1 | grep -c 'invalid role' || true; echo status_marker_done"
+# this check exists to prove the runtime FAILS CLOSED on an unsupported role, so BOTH halves are asserted:
+# the process must exit non-zero (a fail-open that merely logged the diagnostic and booted with the widest
+# role would satisfy the text alone), and the diagnostic must be the role validation's (any unrelated
+# non-zero exit — a compile error, a missing .env — would satisfy the status alone). The exit status is
+# carried out of the container explicitly: `go run` sits in a pipeline, whose status is the last command's
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . --role nonsense app:info >/tmp/role-reject.log 2>&1; echo \"role_exit_status=\$?\"; grep -c 'invalid role' /tmp/role-reject.log 2>/dev/null | sed 's/^/role_diagnostic_count=/' || true"
 UNSUPPORTED_ROLE_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
-if printf '%s' "${UNSUPPORTED_ROLE_OUTPUT_STRING}" | head -1 | grep -q '^[1-9]'; then
-    check_pass "an unsupported --role value is rejected with the invalid-role diagnostic"
+UNSUPPORTED_ROLE_STATUS_STRING="$(printf '%s' "${UNSUPPORTED_ROLE_OUTPUT_STRING}" | grep -o 'role_exit_status=[0-9]*' | head -1 | cut -d= -f2 || true)"
+UNSUPPORTED_ROLE_COUNT_STRING="$(printf '%s' "${UNSUPPORTED_ROLE_OUTPUT_STRING}" | grep -o 'role_diagnostic_count=[0-9]*' | head -1 | cut -d= -f2 || true)"
+
+if [[ "${UNSUPPORTED_ROLE_STATUS_STRING:-0}" -ne 0 && "${UNSUPPORTED_ROLE_COUNT_STRING:-0}" -gt 0 ]]; then
+    check_pass "an unsupported --role value fails closed: non-zero exit (${UNSUPPORTED_ROLE_STATUS_STRING}) carrying the invalid-role diagnostic"
+elif [[ "${UNSUPPORTED_ROLE_STATUS_STRING:-0}" -eq 0 ]]; then
+    check_fail "an unsupported --role value exited ZERO — the runtime failed open and booted with an unvalidated role (${UNSUPPORTED_ROLE_OUTPUT_STRING:-<empty>})"
 else
-    check_fail "an unsupported --role value did not produce the invalid-role diagnostic (${UNSUPPORTED_ROLE_OUTPUT_STRING:-<empty>})"
+    check_fail "an unsupported --role value exited non-zero but without the invalid-role diagnostic, so the rejection came from somewhere else (${UNSUPPORTED_ROLE_OUTPUT_STRING:-<empty>})"
 fi
 
 section_end "PROCESS ROLE RESOLUTION" "success" "${TAG_VALIDATE}" "e2e"
@@ -259,8 +267,8 @@ else
     check_fail "melody:cron:run --once did not exit cleanly (${RUNNER_ONCE_STRING:-<empty>})"
 fi
 
-RUNNER_WARNING_BEFORE_INTEGER="$(printf '%s' "${RUNNER_ONCE_STRING}" | grep -o 'user_warning_before=[0-9]*' | head -1 | cut -d= -f2)"
-RUNNER_WARNING_AFTER_INTEGER="$(printf '%s' "${RUNNER_ONCE_STRING}" | grep -o 'user_warning_after=[0-9]*' | head -1 | cut -d= -f2)"
+RUNNER_WARNING_BEFORE_INTEGER="$(printf '%s' "${RUNNER_ONCE_STRING}" | grep -o 'user_warning_before=[0-9]*' | head -1 | cut -d= -f2 || true)"
+RUNNER_WARNING_AFTER_INTEGER="$(printf '%s' "${RUNNER_ONCE_STRING}" | grep -o 'user_warning_after=[0-9]*' | head -1 | cut -d= -f2 || true)"
 
 if [[ "${RUNNER_WARNING_AFTER_INTEGER:-0}" -gt "${RUNNER_WARNING_BEFORE_INTEGER:-0}" ]]; then
     check_pass "the runner resolved the shared Configuration (it reported the user-carrying product:list entry, ${RUNNER_WARNING_BEFORE_INTEGER:-0} -> ${RUNNER_WARNING_AFTER_INTEGER:-0})"
@@ -365,8 +373,8 @@ else
     check_fail "melody:outbox:relay --limit 1 did not exit zero"
 fi
 
-OUTBOX_BEFORE_SENT_INTEGER="$(printf '%s' "${OUTBOX_OUTPUT_STRING}" | grep -o 'before_sent=[0-9]*' | head -1 | cut -d= -f2)"
-OUTBOX_AFTER_SENT_INTEGER="$(printf '%s' "${OUTBOX_OUTPUT_STRING}" | grep -o 'after_sent=[0-9]*' | head -1 | cut -d= -f2)"
+OUTBOX_BEFORE_SENT_INTEGER="$(printf '%s' "${OUTBOX_OUTPUT_STRING}" | grep -o 'before_sent=[0-9]*' | head -1 | cut -d= -f2 || true)"
+OUTBOX_AFTER_SENT_INTEGER="$(printf '%s' "${OUTBOX_OUTPUT_STRING}" | grep -o 'after_sent=[0-9]*' | head -1 | cut -d= -f2 || true)"
 
 if printf '%s' "${OUTBOX_OUTPUT_STRING}" | grep -q '"sent":' \
     && [[ "${OUTBOX_AFTER_SENT_INTEGER:-0}" -gt "${OUTBOX_BEFORE_SENT_INTEGER:-0}" ]]; then
@@ -400,8 +408,8 @@ else
     check_fail "melody:encrypt:database did not exit zero (${ENCRYPT_OUTPUT_STRING:-<empty>})"
 fi
 
-ENCRYPT_MARKER_BEFORE_INTEGER="$(printf '%s' "${ENCRYPT_OUTPUT_STRING}" | grep -o 'migration_finished_before=[0-9]*' | head -1 | cut -d= -f2)"
-ENCRYPT_MARKER_AFTER_INTEGER="$(printf '%s' "${ENCRYPT_OUTPUT_STRING}" | grep -o 'migration_finished_after=[0-9]*' | head -1 | cut -d= -f2)"
+ENCRYPT_MARKER_BEFORE_INTEGER="$(printf '%s' "${ENCRYPT_OUTPUT_STRING}" | grep -o 'migration_finished_before=[0-9]*' | head -1 | cut -d= -f2 || true)"
+ENCRYPT_MARKER_AFTER_INTEGER="$(printf '%s' "${ENCRYPT_OUTPUT_STRING}" | grep -o 'migration_finished_after=[0-9]*' | head -1 | cut -d= -f2 || true)"
 
 if [[ "${ENCRYPT_MARKER_AFTER_INTEGER:-0}" -gt "${ENCRYPT_MARKER_BEFORE_INTEGER:-0}" ]]; then
     check_pass "the bulk migration ran to completion over the factory-resolved database (${ENCRYPT_MARKER_BEFORE_INTEGER:-0} -> ${ENCRYPT_MARKER_AFTER_INTEGER:-0})"

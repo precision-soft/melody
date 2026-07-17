@@ -177,22 +177,21 @@ func (instance *scheduleMatcher) fixedTime() bool {
 
 /* parseCronField expands one field into the set of values it admits, bounded to [minimum, maximum]. It supports the wildcard, a stepped wildcard, single values, low-high ranges, stepped ranges and comma-separated lists of those. */
 func parseCronField(expression string, minimum int, maximum int) (cronFieldMatcher, error) {
-    trimmed := strings.TrimSpace(expression)
-    if "" == trimmed {
+    if "" == expression {
         return cronFieldMatcher{}, invalidScheduleError(expression, "field is empty")
     }
 
-    /* a field with embedded whitespace would be split into extra columns by the generated crontab line, so the generator hard-rejects it; the matcher rejects it too — any unicode whitespace, since a crontab token with a vertical tab or a no-break space inside is just as unrunnable — keeping every in-process schedule generatable. */
-    if -1 != strings.IndexFunc(trimmed, unicode.IsSpace) {
-        return cronFieldMatcher{}, invalidScheduleError(expression, "field contains embedded whitespace")
+    /* whitespace anywhere in a field — leading, trailing or embedded — is rejected rather than trimmed away: the generated crontab line splits on it, so crond fails to parse the line and drops every entry in the file. The generator hard-rejects the same field, and repairing it here would admit a schedule that runs in-process but cannot be generated. Any unicode space counts, since a token carrying a vertical tab or a no-break space is just as unparsable to crond as one carrying a plain space. */
+    if -1 != strings.IndexFunc(expression, unicode.IsSpace) {
+        return cronFieldMatcher{}, invalidScheduleError(expression, "field contains whitespace")
     }
 
     matcher := cronFieldMatcher{
         allowed:   make(map[int]bool),
-        starBased: strings.HasPrefix(trimmed, "*"),
+        starBased: strings.HasPrefix(expression, "*"),
     }
 
-    for _, part := range strings.Split(trimmed, ",") {
+    for _, part := range strings.Split(expression, ",") {
         if "" == part {
             return cronFieldMatcher{}, invalidScheduleError(expression, "list contains an empty item")
         }
@@ -208,12 +207,12 @@ func parseCronField(expression string, minimum int, maximum int) (cronFieldMatch
                 return cronFieldMatcher{}, invalidScheduleError(expression, "step must be a positive integer")
             }
 
-            /* a step above the field's cardinality admits only the range's low value while pretending to stride, and a huge one would overflow the expansion loop into values the range never allowed; a step of exactly the cardinality (every scheduler's degenerate "just the low value") stays accepted. */
-            if stepValue > maximum-minimum+1 {
-                return cronFieldMatcher{}, invalidScheduleError(expression, "step is out of range")
+            /* a step wider than the field is clamped to the field's cardinality rather than rejected: crond accepts such a step and simply admits the range's low value alone (its expansion strides past the high bound on the first hop), so rejecting it would refuse a schedule the generator renders and crond runs. The clamp keeps the expansion loop below the overflow a step near the integer maximum would otherwise cause. */
+            step = stepValue
+            if step > maximum-minimum+1 {
+                step = maximum - minimum + 1
             }
 
-            step = stepValue
             stepped = true
         }
 
