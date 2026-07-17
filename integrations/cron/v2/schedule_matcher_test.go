@@ -537,7 +537,7 @@ func TestScheduleMatcher_AcceptedFieldsAreAlwaysGeneratable(t *testing.T) {
     }
 }
 
-/** @info a step on a single value ("5/15") is the one shape the two target schedulers genuinely disagree on — robfig reads it as the range from that value up, crond fires only the value — so neither half picks a meaning: the matcher rejects it and the generator rejects it too, naming the unambiguous rewrite. Both halves must agree, or the k8s template emits a manifest the runner refuses to boot on. */
+/** @info a step on a single value ("5/15") is the one shape no two target schedulers agree on — measured: vixie crond rejects it as a bad field and refuses the WHOLE crontab (every entry in the file dies), busybox crond accepts it, robfig reads it as the range from that value up — so neither half picks a meaning: the matcher rejects it and the generator rejects it too, naming the rewrite all three read alike. */
 func TestScheduleMatcher_SteppedSingleValueIsRejectedByBothHalves(t *testing.T) {
     cases := []struct {
         name     string
@@ -595,7 +595,7 @@ func TestScheduleMatcher_TheSuggestedExplicitRangeIsAccepted(t *testing.T) {
     }
 }
 
-/** @info the whitespace rule is one rule at one width across both halves: crond fails the whole crontab with a parse error on a token carrying any space — a vertical tab or a no-break space included — and drops every entry in the file, so neither half may let one through. */
+/** @info the whitespace rule is one rule at one width across both halves. Embedded whitespace is the correctness half — measured against vixie crond, an ascii space, a vertical tab and a no-break space inside a field each fail the WHOLE crontab with "bad minute", dropping every entry in the file. Leading and trailing whitespace crond itself tolerates; both halves still refuse it, because the generator always has, and a matcher that repaired it would admit a schedule that cannot be generated. */
 func TestScheduleMatcher_WhitespaceIsRejectedByBothHalves(t *testing.T) {
     fields := []string{" 5", "5 ", "1, 5", "1,\u00a05", "1\v-5", "1,\f5", "5\t", "1\u20285"}
 

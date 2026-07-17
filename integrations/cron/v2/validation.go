@@ -60,7 +60,7 @@ func validateUserField(label string, value string) error {
     )
 }
 
-/* steppedSingleValueItem reports the first list item that puts a step on a single value ("5/15"), the one shape the two target schedulers genuinely disagree on: robfig reads it as the range from that value to the field maximum, crond fires only the value itself. The in-process matcher rejects it rather than pick a meaning, so the generator rejects it too — otherwise it would emit a manifest the runner refuses to boot on. A step over a range or the wildcard is unambiguous and passes. */
+/* steppedSingleValueItem reports the first list item that puts a step on a single value ("5/15"), the one shape no two target schedulers agree on: vixie crond rejects it as a bad field and refuses the entire crontab, taking every other entry in the file down with it; busybox crond accepts it; the robfig scheduler behind the k8s template reads it as the range from that value to the field maximum. The in-process matcher rejects it rather than pick a meaning, so the generator rejects it too — the explicit range the error names ("5-59/15") is read identically by all three. A step over a range or the wildcard is unambiguous and passes. */
 func steppedSingleValueItem(expression string) (string, bool) {
     for _, item := range strings.Split(expression, ",") {
         slashIndex := strings.Index(item, "/")
@@ -79,7 +79,7 @@ func steppedSingleValueItem(expression string) (string, bool) {
     return "", false
 }
 
-/* exampleSteppedRangeOf renders the unambiguous rewrite the error suggests: the stepped item's own base and step spread over the field's range, which both schedulers read identically. */
+/* exampleSteppedRangeOf renders the unambiguous rewrite the error suggests: the stepped item's own base and step spread over the field's range, which every target scheduler reads identically. */
 func exampleSteppedRangeOf(item string, fieldName string) string {
     slashIndex := strings.Index(item, "/")
     if -1 == slashIndex {
@@ -119,7 +119,7 @@ func validateScheduleFields(entry Entry, forbidden []ForbiddenChar) error {
     }
 
     for _, field := range fields {
-        /* any unicode space counts, not just the ascii four: crond splits the line on a vertical tab or a no-break space the same way it splits on a plain one and fails the whole file with a parse error, dropping every entry in it — and the in-process matcher rejects the same field, so the two halves stay one rule. */
+        /* any unicode space counts, not just the ascii four: crond splits the line on a vertical tab or a no-break space the same way it splits on a plain one and then refuses the whole file with a parse error, dropping every entry in it — measured against vixie crond, which fails on each of the three alike. A leading or trailing space crond would tolerate; it is refused here because this rule and the in-process matcher's are one rule, and the matcher must not admit a schedule the generator cannot render. */
         if -1 != strings.IndexFunc(field.value, unicode.IsSpace) {
             return exception.NewError(
                 fmt.Sprintf("cron: entry %q has whitespace in Schedule.%s (%q); schedule fields must be single tokens", entry.Name, field.name, field.value),
@@ -135,7 +135,7 @@ func validateScheduleFields(entry Entry, forbidden []ForbiddenChar) error {
         if steppedItem, stepped := steppedSingleValueItem(field.value); true == stepped {
             return exception.NewError(
                 fmt.Sprintf(
-                    "cron: entry %q steps a single value in Schedule.%s (%q); the two target schedulers read that shape differently — the robfig scheduler behind the k8s template takes %q as the whole range from that value up, while crond fires only that one value — so write the range you mean explicitly (for example %q instead of %q)",
+                    "cron: entry %q steps a single value in Schedule.%s (%q); the target schedulers do not agree on that shape — vixie crond rejects %q outright as a bad field and refuses the whole crontab with it, busybox crond accepts it, and the robfig scheduler behind the k8s template reads it as the whole range from that value up — so write the range you mean explicitly (for example %q instead of %q), which every one of them reads the same way",
                     entry.Name,
                     field.name,
                     field.value,

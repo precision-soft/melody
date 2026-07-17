@@ -181,7 +181,7 @@ func parseCronField(expression string, minimum int, maximum int) (cronFieldMatch
         return cronFieldMatcher{}, invalidScheduleError(expression, "field is empty")
     }
 
-    /* whitespace anywhere in a field — leading, trailing or embedded — is rejected rather than trimmed away: the generated crontab line splits on it, so crond fails to parse the line and drops every entry in the file. The generator hard-rejects the same field, and repairing it here would admit a schedule that runs in-process but cannot be generated. Any unicode space counts, since a token carrying a vertical tab or a no-break space is just as unparsable to crond as one carrying a plain space. */
+    /* whitespace anywhere in a field — leading, trailing or embedded — is rejected rather than trimmed away, for two different reasons. Embedded whitespace is a correctness matter: the generated crontab line splits on it, so the field crond reads is not the field that was written, and it refuses the whole file with a parse error — every entry in it stops, not just this one. Any unicode space counts there, a vertical tab and a no-break space failing crond exactly as a plain space does. Leading and trailing whitespace crond would itself tolerate, but the generator refuses the field, and the two halves are one rule: repairing it here would admit a schedule that runs in-process yet cannot be generated. */
     if -1 != strings.IndexFunc(expression, unicode.IsSpace) {
         return cronFieldMatcher{}, invalidScheduleError(expression, "field contains whitespace")
     }
