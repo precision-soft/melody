@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v2.4.0] - 2026-07-17 - In-Process Cron Runner
+
 ### Added
 
 - `runner_command.go`, `schedule_matcher.go` — `NewRunnerCommand(configuration, dialect, commands...)` adds an in-process scheduler command `melody:cron:run`: it parses the same five-field `Schedule` the generator renders and invokes each registered command when its schedule is due, so a single-binary deployment with no external crontab or kubernetes drives its scheduled work from the one `Configuration` that already feeds the generator. Each command is dispatched through the cli library with its declared flags — unset flags read their declared defaults, `CommandContext.Writer`/`ErrWriter` are usable and `Args()` is initialized, the same surface a command sees under the cli entry point — on a fresh scope and a cancellable child context; a failing or panicking job is logged (a scope-close failure joined onto its error) and the loop continues. Entries sharing a minute run concurrently, each in its own goroutine — like crontab starting an independent process per entry — so one slow job
@@ -52,7 +54,9 @@ Identical to the corresponding v1 release except: module path is `github.com/pre
 
 Identical to the corresponding v1 release except: module path is `github.com/precision-soft/melody/integrations/cron/v2`; dependency pinned to `github.com/precision-soft/melody/v2`. See the [v1 changelog](../CHANGELOG.md#v100---2026-05-16---initial-release--cron-integration) for the full change list.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.3.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.4.0...HEAD
+
+[v2.4.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.3.0...integrations/cron/v2.4.0
 
 [v2.3.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.2.2...integrations/cron/v2.3.0
 

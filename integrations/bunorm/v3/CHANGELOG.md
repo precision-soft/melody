@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.3.0] - 2026-07-17 - Encrypt Database Factory
+
 ### Added
 
 - `encrypt/module.go`, `encrypt/encrypt_database_command.go` — `encrypt.ModuleConfig` (and each `CommandContextConfig`) accepts a `DatabaseFactory func(resolver) (*bun.DB, error)` as an alternative to a prebuilt `Database`. The factory is evaluated lazily at the first command run, against the service container captured at registration — after `Boot()` has registered the framework core services — so an app whose `*bun.DB` is resolved from a `ManagerRegistry` per context can wire the built-in `melody:encrypt:database[:<name>]` bulk command against a registry-resolved database instead of hand-rolling it, and an http- or worker-mode process does not open the encrypt databases at boot. Setting both `Database` and `DatabaseFactory` (top-level or on a `CommandContextConfig` entry) is an ambiguous configuration and panics at registration with a message naming the offending context; a factory failure surfaces as the command-run error (carrying the context name), a factory with a nil kernel
@@ -108,7 +110,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dependencies pinned to `github.com/precision-soft/melody/v3` and other v3 module paths
 - README relative path links updated to reflect v3 directory structure
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.2.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.3.0...HEAD
+
+[v3.3.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.2.0...integrations/bunorm/v3.3.0
 
 [v3.2.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.1.2...integrations/bunorm/v3.2.0
 

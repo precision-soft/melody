@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.11.0] - 2026-07-17 - Lazy Service Resolution, SMTP Session Deadlines, Signal-Context Force-Exit and Runtime-Flag Scoping
+
 ### Added
 
 - `container/lazy.go` — `container.Lazy[T](resolver, serviceName)` and `container.LazyByType[T](resolver)` return a `LazyService[T]` handle that defers resolving a service until its first `Get()` and memoizes success — a failed resolution is returned (or panics, for `Get()`) without being memoized and is retried on the next call, mirroring the container resolver, so a transient outage at first use does not poison the handle. A component assembled during the boot phase — a cli command, an http middleware — can hold a service whose provider is registered but not yet safe to resolve at that phase, without hand-rolling a `sync.Once` proxy for each one. `Resolve()` is the non-panicking variant.
@@ -650,7 +652,9 @@ Lock-step release — no `v3/` changes this cycle. Tag SHA differs from `v3.0.0`
 - `application/application.go`, `application/application_new.go` — application context in constructor; `New(ctx context.Context, ...)` takes a caller-supplied context used for the full application lifecycle
 - `application/contract/service_module.go` — `ServiceModule` simplification; single `Register(container)` method replacing split register/configure lifecycle
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v3.10.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/v3.11.0...HEAD
+
+[v3.11.0]: https://github.com/precision-soft/melody/compare/v3.10.0...v3.11.0
 
 [v3.10.0]: https://github.com/precision-soft/melody/compare/v3.9.0...v3.10.0
 

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.17.0] - 2026-07-17 - Lazy Service Resolution and Signal-Context Force-Exit
+
 ### Added
 
 - `container/lazy.go` — `container.Lazy[T](resolver, serviceName)` and `container.LazyByType[T](resolver)` return a `LazyService[T]` handle that defers resolving a service until its first `Get()` and memoizes success — a failed resolution is returned (or panics, for `Get()`) without being memoized and is retried on the next call, mirroring the container resolver — so a component assembled during the boot phase can hold a service whose provider is registered but not yet safe to resolve at that phase, without hand-rolling a `sync.Once` proxy. `Resolve()` is the non-panicking variant.
@@ -559,7 +561,9 @@ Lock-step release — no `v1/` changes this cycle. Tag published to keep the cor
 - `session/` — session management with file-based and in-memory storage backends
 - `validation/` — validation framework with `greaterThan`, `notEmpty`, `notBlank`, `alpha`, `alphanumeric`, `email`, `numeric`, `regex`, `minLength`, `maxLength` constraints
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v1.16.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/v1.17.0...HEAD
+
+[v1.17.0]: https://github.com/precision-soft/melody/compare/v1.16.0...v1.17.0
 
 [v1.16.0]: https://github.com/precision-soft/melody/compare/v1.15.0...v1.16.0
 

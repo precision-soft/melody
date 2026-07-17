@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.1.0] - 2026-07-17 - Store and Relay Factories with Lazy Resolution
+
 ### Added
 
 - `module.go`, `relay_command.go` — `ModuleConfig` accepts a `StoreFactory`/`RelayFactory func(resolver) (*Store/*Relay, error)` as an alternative to a prebuilt `Store`/`Relay`. The factories are registered as the service providers (resolved lazily) and `NewRelayCommandFromResolver` resolves the relay inside the run loop — a resolution failure follows the same doubling error backoff as a failed batch and the relay proceeds once a later resolution succeeds — so an app whose `*bun.DB` is resolved from a registry per context — not available before `Boot()` — can register the module and use the built-in `melody:outbox:relay` command without a prebuilt object at composition-root time. Setting both a prebuilt object and its factory (`Store`+`StoreFactory` or `Relay`+`RelayFactory`) is an ambiguous configuration and panics at `RegisterServices`, before any service is registered. A database or store opened inside a factory is not closed by the container at shutdown — factories should resolve
@@ -25,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   AMQP transport publishes as the message id, so a consumer can deduplicate the redelivery an at-least-once outbox can produce after a transport-success-then-crash. An optional core `lock/contract.Locker` (e.g. the Redis locker) additionally leases the relay so only one instance drains at a time; the lease is refreshed as the batch progresses (twice per `LockTtl`) and the run aborts if it can no longer be held, so a batch that outlives the ttl cannot be taken over and double-published mid-run. The exponential backoff is overflow-safe: a very large `MaxBackoff` and factor cannot wrap the duration negative and defeat the cap. Messages are stored and rebuilt through an application-supplied `MessageCodec`, and persistence sits behind a `Repository` interface that the `Store` implements, keeping the relay's retry/dead-letter logic unit-testable
   without a database. The reference design is Curatorium's `payment` outbox (15s base backoff, 12 attempts, Redis lease, dead-letter). Depends on the core `melody/v3` and `github.com/uptrace/bun`.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/outbox/v3.0.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/outbox/v3.1.0...HEAD
+
+[v3.1.0]: https://github.com/precision-soft/melody/compare/integrations/outbox/v3.0.0...integrations/outbox/v3.1.0
 
 [v3.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations/outbox/v3.0.0

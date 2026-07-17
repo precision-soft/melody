@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.4.0] - 2026-07-17 - In-Process Cron Runner
+
 ### Added
 
 - `runner_command.go`, `schedule_matcher.go` — `NewRunnerCommand(configuration, dialect, commands...)` adds an in-process scheduler command `melody:cron:run`: it parses the same five-field `Schedule` the generator renders and invokes each registered command when its schedule is due, so a single-binary deployment with no external crontab or kubernetes drives its scheduled work from the one `Configuration` that already feeds the generator. Each command is dispatched through the cli library with its declared flags — unset flags read their declared defaults, `CommandContext.Writer`/`ErrWriter` are usable and `Args()` is initialized, the same surface a command sees under the cli entry point — on a fresh scope and a cancellable child context; a failing or panicking job is logged (a scope-close failure joined onto its error) and the loop continues. Entries sharing a minute run concurrently, each in its own goroutine — like crontab starting an independent process per entry — so one slow job
@@ -113,7 +115,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `cli/contract/type.go` (root + v2/ + v3/) gains `type StringSliceFlag = urfavecli.StringSliceFlag` so the cron command (which uses repeatable string-slice flags for `--heartbeat-command` and `--heartbeat-destination`) consumes `clicontract.StringSliceFlag` like every other flag in the integration, without an extra `urfavecli` import in `generate_command.go`
 - `README.md` — added a "Cron expression validation" section that documents which checks the generator runs at generation time and which it deliberately leaves to the cron daemon at install time, with `crontab -T` recommended as the post-generation gate. Clarified the `EntryConfig.DestinationFile`-absolute-path semantics, documented the hardcoded `0644`/`0755` file modes, and added a new "Package surface" section listing every exported identifier. `v2/README.md` and `v3/README.md` now reference that section uniformly so they no longer cross-reference each other asymmetrically.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.3.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.4.0...HEAD
+
+[v1.4.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.3.0...integrations/cron/v1.4.0
 
 [v1.3.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.2.2...integrations/cron/v1.3.0
 
