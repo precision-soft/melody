@@ -137,6 +137,32 @@ func TestRateLimiter_AllowWithRuntimeSharesTheCounter(t *testing.T) {
     }
 }
 
+/** @info the runtime context melody's http kernel hands a request carries no deadline, so before the call timeout bounded AllowWithRuntime a tiny timeout was ignored and the call rode the runtime context unbounded; a 1ns timeout must now bound it and fail closed. */
+func TestRateLimiter_AllowWithRuntimeAppliesCallTimeout(t *testing.T) {
+    client := rateLimiterTestClient(t)
+    runtimeInstance := rateLimiterTestRuntime()
+
+    key := "timeout:" + t.Name()
+
+    limiter := NewRateLimiter(
+        client,
+        100,
+        time.Minute,
+        WithRateLimiterKeyPrefix("melody:test:rate_limit:"),
+        WithRateLimiterCallTimeout(time.Nanosecond),
+    )
+    defer limiter.Reset(key)
+
+    allowed, allowErr := limiter.AllowWithRuntime(runtimeInstance, key)
+    if nil == allowErr {
+        t.Fatalf("expected the 1ns call timeout to bound AllowWithRuntime and surface a deadline error")
+    }
+
+    if true == allowed {
+        t.Fatalf("expected the fail-closed default to deny when the call timeout is exceeded")
+    }
+}
+
 func TestRateLimiter_FailClosedDeniesOnStoreFailure(t *testing.T) {
     client := closedTestClient(t)
 

@@ -3,6 +3,7 @@ package config
 import (
     "time"
 
+    outboxintegration "github.com/precision-soft/melody/integrations/outbox/v3"
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
     "github.com/precision-soft/melody/v3/.example/handler"
     handlercategory "github.com/precision-soft/melody/v3/.example/handler/category"
@@ -19,6 +20,7 @@ import (
     handlerwebsocketdemo "github.com/precision-soft/melody/v3/.example/handler/websocketdemo"
     "github.com/precision-soft/melody/v3/.example/route"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
+    melodycontainer "github.com/precision-soft/melody/v3/container"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     melodyhttpmiddleware "github.com/precision-soft/melody/v3/http/middleware"
@@ -118,10 +120,16 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
         router.HandleNamed("example.twofactor.verify", "POST", "/twofactor/verify", handlertwofactor.VerifyHandler(instance.twoFactorStore))
     }
 
-    if nil != instance.outboxRelay {
-        router.HandleNamed("example.outbox.enqueue", "POST", "/outbox/enqueue", handleroutbox.EnqueueHandler(instance.database, instance.outboxStore))
-        router.HandleNamed("example.outbox.relay", "POST", "/outbox/relay", handleroutbox.RelayHandler(instance.outboxRelay))
-        router.HandleNamed("example.outbox.status", "GET", "/outbox/status", handleroutbox.StatusHandler(instance.database))
+    /* @info the outbox handlers hold container.Lazy handles built at route-registration time: the store and
+       relay services (provided by the outbox module's factories, see configure.go) are resolved at the first
+       request, so registering the routes never touches the outbox schema or the transport. */
+    if nil != instance.database {
+        outboxStore := melodycontainer.Lazy[*outboxintegration.Store](kernelInstance.ServiceContainer(), outboxintegration.ServiceStore)
+        outboxRelay := melodycontainer.Lazy[*outboxintegration.Relay](kernelInstance.ServiceContainer(), outboxintegration.ServiceRelay)
+
+        router.HandleNamed("example.outbox.enqueue", "POST", "/outbox/enqueue", handleroutbox.EnqueueHandler(instance.database, outboxStore))
+        router.HandleNamed("example.outbox.relay", "POST", "/outbox/relay", handleroutbox.RelayHandler(outboxRelay))
+        router.HandleNamed("example.outbox.status", "GET", "/outbox/status", handleroutbox.StatusHandler(instance.database, outboxStore))
     }
 
     if nil != instance.storage {

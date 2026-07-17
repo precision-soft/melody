@@ -6,7 +6,6 @@ import (
     minio "github.com/minio/minio-go/v7"
     melodyawss3 "github.com/precision-soft/melody/integrations/awss3/v3"
     melodyencrypt "github.com/precision-soft/melody/integrations/bunorm/v3/encrypt"
-    outbox "github.com/precision-soft/melody/integrations/outbox/v3"
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
     "github.com/precision-soft/melody/v3/.example/twofactor"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
@@ -41,9 +40,6 @@ type Module struct {
     impersonatedUsers melodysecuritycontract.ImpersonatedUserResolver
 
     twoFactorStore *twofactor.Store
-
-    outboxStore *outbox.Store
-    outboxRelay *outbox.Relay
 
     translator melodytranslationcontract.Translator
 
@@ -82,7 +78,6 @@ func NewExampleModule(configuration melodyconfigcontract.Configuration) *Module 
     moduleInstance.buildInternalAuth()
     moduleInstance.buildImpersonation()
     moduleInstance.buildTwoFactor()
-    moduleInstance.buildOutbox()
     moduleInstance.buildTranslation()
     moduleInstance.buildOpenApi()
     moduleInstance.buildMailer()

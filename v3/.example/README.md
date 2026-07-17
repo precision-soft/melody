@@ -146,6 +146,23 @@ go run . melody:cron:generate --out ./generated_conf/cron/crontab
 
 The example registers two scheduled commands in [`config/cli.go`](./config/cli.go) (`product:list` every 6 hours, `app:info` daily at noon) plus a heartbeat enabled via `APP_CRON_HEARTBEAT_AUTO_ENABLED=true` in [`.env`](./.env) (the path is auto-derived from `melody.cron.logs_dir`), so the generated crontab is not empty.
 
+The same `cron.Configuration` also drives an **in-process scheduler** for single-binary deployments with no external crontab. `melody:cron:run` ticks in-process and invokes each scheduled command when it is due; `--once` evaluates every schedule against the current time, runs the due commands and exits:
+
+```bash
+cd v3/.example
+go run . melody:cron:run --once      # kick whatever is due now, then exit
+go run . melody:cron:run             # run the scheduler loop until interrupted
+```
+
+The runner dispatches each scheduled command with its declared flags, so declared defaults are honored on a scheduled tick exactly as under the cli entry point: `product:list` declares `--limit` with a default of `5` and prints the value it read (`product list: limit=5`), whether invoked directly or by the runner.
+
+`example:grant:demo` shows that an application command may declare its own `--role` flag: the runtime's `--role`/`--mode` are recognized only before the command name, so the command receives its flag intact. It also holds the example's user service through a `container.Lazy` handle built at command-registration time — the service is resolved at the command's first run, not during the boot phase:
+
+```bash
+go run . example:grant:demo --role admin --user ada    # the command's own --role
+go run . --role worker app:info                        # the runtime process role
+```
+
 ---
 
 ## Platform integrations (optional, env-gated)
@@ -164,6 +181,12 @@ The example wires **every v3 platform integration**. Each backend that needs ext
 | [`bunorm`](../../integrations/bunorm/v3/) — bun ORM `*bun.DB`, transparent column encryption, field-level audit trail                            | `MYSQL_HOST`                                 | —                        | `GET /database/demo`, `GET /database/audit/demo` |
 
 The lock service follows a single priority: Redis if configured, otherwise MySQL, otherwise in-memory. `GET /database/demo` writes an `encrypt.EncryptedString` column and reads it back — the response shows the decrypted value next to the raw ciphertext stored in MySQL (`<ENC>…`), demonstrating transparent encryption-at-rest.
+
+Several wirings deliberately defer their resolution to first use instead of the composition root:
+
+- `example:exclusive:demo` is wrapped in `lock.NewExclusiveCommand` over `lock.NewLazyLocker`, which resolves the registered locker at the first `CreateLock` — with a distributed locker configured (Redis or MySQL), run it from two shells at once and exactly one executes while the other exits zero. Under the in-memory fallback the exclusivity is per-process, so two separate shells both execute.
+- The transactional-outbox module ([`config/outbox.go`](./config/outbox.go)) is registered in the `StoreFactory`/`RelayFactory` shape: the store (which ensures the `melody_outbox` schema) and the relay (which opens the transport) are built from the container at first use, and the module contributes the `melody:outbox:relay` command over the same lazily-resolved relay. Demo endpoints: `POST /outbox/enqueue`, `POST /outbox/relay`, `GET /outbox/status`.
+- The encrypt module resolves the shared `*bun.DB` through a `DatabaseFactory` evaluated at the first `melody:encrypt:database` run, so http- and worker-mode processes register the command without touching the database.
 
 ### Running fully against containers
 

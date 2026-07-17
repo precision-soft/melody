@@ -6,6 +6,7 @@ import (
     melodycron "github.com/precision-soft/melody/integrations/cron/v3"
     melodyopentelemetry "github.com/precision-soft/melody/integrations/opentelemetry/v3"
     melodyotlp "github.com/precision-soft/melody/integrations/opentelemetry/v3/otlp"
+    melodyoutbox "github.com/precision-soft/melody/integrations/outbox/v3"
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
     melodyrueidiscache "github.com/precision-soft/melody/integrations/rueidis/v3/cache"
     melodywebsocket "github.com/precision-soft/melody/integrations/websocket/v3"
@@ -41,14 +42,28 @@ func Configure(app *melodyapplication.Application) {
         }))
     }
 
+    /* @info the encrypt bulk command resolves its database through the factory at the first run — after
+       Boot — so registering the command costs nothing in http or worker mode, and a boot without MYSQL_HOST
+       stays clean (the first run then reports the missing database service). */
     app.RegisterModule(melodyencrypt.NewModule(melodyencrypt.ModuleConfig{
-        Database: moduleInstance.database,
-        Cipher:   moduleInstance.cipher,
+        DatabaseFactory: moduleInstance.encryptDatabaseFactory,
+        Cipher:          moduleInstance.cipher,
     }))
+
+    /* @info transactional-outbox module in the factory shape: the store and relay are registered as service
+       providers that resolve the shared *bun.DB from the container at first use, and the module contributes
+       the melody:outbox:relay command over the same lazily-resolved relay. */
+    if nil != moduleInstance.database {
+        app.RegisterModule(melodyoutbox.NewModule(melodyoutbox.ModuleConfig{
+            StoreFactory: moduleInstance.outboxStoreFactory,
+            RelayFactory: moduleInstance.outboxRelayFactory,
+        }))
+    }
 
     /* @info cron's Configuration is kernel-dependent (reads parameters), so it is supplied as a factory evaluated at command-registration time. */
     app.RegisterModule(melodycron.NewModule(melodycron.ModuleConfig{
         ConfigurationFactory: newCronConfiguration,
+        RunnerCommands:       cronRunnerCommands(),
     }))
 
     /* the SSE stream and the websocket handler both block on this hub; http.Server.Shutdown neither cancels an in-flight request's context nor tracks a hijacked connection, so without closing the hub a single connected client holds the whole shutdown timeout and is then cut mid-flight */

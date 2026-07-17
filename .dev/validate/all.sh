@@ -134,6 +134,35 @@ run_live_go_suites() {
         run_batch_in_service_shell "${SERVICE_NAME_STRING}" "${BATCH_COMMAND_LIST[@]}"
 }
 
+# the race detector over the concurrency-carrying packages of the core majors and the cron runner, mirroring
+# the ci race job. The build-tag matrix above runs these without it, so a lost mutex or an unsynchronized memo
+# stays green there: these packages hold goroutines that outlive a call (the lazy service memo, the signal
+# watcher, the smtp cancellation watcher, the cron runner's parallel dispatch), and only the detector sees
+# them race. No service containers needed.
+RACE_SUITE_SPECIFICATION_STRING_LIST=(
+    ". ./container/... ./application/... ./config/... ./event/..."
+    "v2 ./container/... ./application/... ./config/... ./event/..."
+    "v3 ./container/... ./application/... ./config/... ./event/... ./mailer/... ./lock/..."
+    "integrations/cron ./..."
+    "integrations/cron/v2 ./..."
+    "integrations/cron/v3 ./..."
+)
+
+run_race_go_suites() {
+    local BATCH_COMMAND_LIST=()
+
+    local RACE_SUITE_SPECIFICATION_STRING
+    for RACE_SUITE_SPECIFICATION_STRING in "${RACE_SUITE_SPECIFICATION_STRING_LIST[@]}"; do
+        local RACE_MODULE_RELATIVE_PATH_STRING="${RACE_SUITE_SPECIFICATION_STRING%% *}"
+        local RACE_PACKAGE_LIST_STRING="${RACE_SUITE_SPECIFICATION_STRING#* }"
+
+        BATCH_COMMAND_LIST+=("cd ${CONTAINER_ROOT_PATH}/${RACE_MODULE_RELATIVE_PATH_STRING} && go test -race -count=1 ${RACE_PACKAGE_LIST_STRING}")
+    done
+
+    run_section "melody race detector on the concurrency-carrying core packages (mirrors the ci race job)" "${TAG_VALIDATE}" "go" -- \
+        run_batch_in_service_shell "${SERVICE_NAME_STRING}" "${BATCH_COMMAND_LIST[@]}"
+}
+
 get_versioned_module_directory_list() {
     local CANDIDATE_DIR_STRING
     for CANDIDATE_DIR_STRING in "${REPOSITORY_ROOT_DIRECTORY_STRING}"/v[0-9]*/; do
@@ -282,6 +311,8 @@ main() {
             fi
             run_go_checks "${INTEGRATION_MODULE_DIRECTORY_STRING}" "melody integration module: ${INTEGRATION_MODULE_DIRECTORY_STRING#${ROOT_DIRECTORY_STRING}/}"
         done < <(get_integration_module_directory_list)
+
+        run_race_go_suites
 
         run_live_go_suites
 

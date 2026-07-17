@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.17.0] - 2026-07-17 - Lazy Service Resolution and Signal-Context Force-Exit
+
+### Added
+
+- `container/lazy.go` — `container.Lazy[T](resolver, serviceName)` and `container.LazyByType[T](resolver)` return a `LazyService[T]` handle that defers resolving a service until its first `Get()` and memoizes success — a failed resolution is returned (or panics, for `Get()`) without being memoized and is retried on the next call, mirroring the container resolver — so a component assembled during the boot phase can hold a service whose provider is registered but not yet safe to resolve at that phase, without hand-rolling a `sync.Once` proxy. `Resolve()` is the non-panicking variant.
+- `application/signal_context.go` — `NewSignalContext` (ported from v3) returns a context cancelled by the first SIGINT/SIGTERM, giving the application a graceful shutdown window; a second signal while that shutdown is still running prints one line to stderr and forces the process to exit with the conventional 128+signal code (130 for SIGINT, 143 for SIGTERM), so an operator facing a hung shutdown is never reduced to SIGKILL. The returned stop function unregisters the notifications, cancels the context and releases the watcher goroutine, and is safe to call more than once and from concurrent goroutines.
+
+### Fixed
+
+- `application/signal_context.go` — the stop function closes its stop channel before unregistering the signal notifications, so a signal buffered just before the unregistration can no longer force-exit a process that has already stopped cleanly: the watcher's guards key on the stop channel, and closing it first makes any such delivery provably stale. A second signal landing within half a second of the first is absorbed as a duplicate delivery of the same logical shutdown request — a supervisor and a terminal both forwarding one interrupt land within milliseconds of each other — so near-simultaneous duplicates no longer skip the graceful shutdown entirely, while an operator's deliberate second interrupt past that window still forces the exit.
+- `container/lazy.go` — `LazyService.Resolve` runs the resolver outside the handle's lock. Held across the resolution, the lock deadlocked any resolver that reached back into the same handle (a provider chain cycling through a lazy handle); a handle built over a live resolver context now surfaces such a cycle as the container's circular-dependency error instead of hanging, while a handle built over the container itself still blocks on the container's own creation wait, since every `container.Get` mints a fresh resolution context — that is a property of the container's resolution and is unchanged here; concurrent first uses may now each run the resolver, the first to store wins, and the container's own memoization makes the duplicates converge for shared services. A resolution yielding nil without an error is likewise no longer memoized as success: `Get` panicked on the poisoned nil forever, despite its documented retry-on-failure promise — both a failure and a nil yield now retry on
+  the next call.
+- `application/application_new.go`, `application/environment_local.go` — the missing-.env detection covers every file the source loads without a `.env`: `.env.local` and the development-environment pair (`.env.dev`, `.env.dev.local`). A project configured solely through `.env.dev` boots and loads it, but a plain unresolved key was blamed on missing environment files ("no .env or .env.local file was found") that were in fact found and loaded — and the `go run` project-root pinning walked away from a working directory holding only `.env.dev`.
+- `application/application.go`, `application/environment_local.go` — a boot that fails to resolve config parameters because no `.env` was found now says so. A compiled binary run from a directory without a `.env` (the executable-directory branch returns it unchanged; `go run` falls back to the working directory when no `go.mod` is found) resolved against an empty environment and failed with an unsuggestive `undefined environment key`; the resolution-failure panic now appends the directory it looked in and the remedy (create a `.env` or `.env.local` file there, or embed with `-tags melody_env_embedded`). An app whose parameters all have defaults still boots without a `.env` — the hint is added only on an actual resolution failure. The detection behind the hint counts only a regular file — a directory named `.env` is not an environment file — and a stat error that cannot prove absence (a permission failure) suppresses the hint instead of misdirecting the operator; the `go run`
+  project-root pinning follows the same detection.
+- `application/cli.go` — the runtime `--mode`/`--role` flags are recognized only before the cli subcommand. They were matched and stripped anywhere in argv, so a command declaring its own `--role`/`--mode` flag was silently broken: the runtime captured the value (panicking `invalid role` on anything but `web`/`worker`/`all`) and deleted the flag before the command parsed it. Stripping and parsing now stop at the first positional argument (the command name) — `--mode`/`--role` are documented as always preceding the command — so a command's own flags that follow the command name are left intact. The `invalid mode`/`invalid role` panics now name the likely collision. Repeated runtime flags resolve uniformly to the last occurrence — a later explicitly empty one no longer lets an earlier value survive — and an explicitly empty `--mode=` (an unset environment variable expanding to nothing) fails closed with the invalid-mode panic instead of silently booting the default mode, matching
+  `--role=`.
+
 ## [v1.16.0] - 2026-07-11 - Platform-Ergonomics Back-ports and Cross-Version Correctness & Security Hardening
 
 ### Fixed
@@ -543,7 +561,9 @@ Lock-step release — no `v1/` changes this cycle. Tag published to keep the cor
 - `session/` — session management with file-based and in-memory storage backends
 - `validation/` — validation framework with `greaterThan`, `notEmpty`, `notBlank`, `alpha`, `alphanumeric`, `email`, `numeric`, `regex`, `minLength`, `maxLength` constraints
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v1.16.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/v1.17.0...HEAD
+
+[v1.17.0]: https://github.com/precision-soft/melody/compare/v1.16.0...v1.17.0
 
 [v1.16.0]: https://github.com/precision-soft/melody/compare/v1.15.0...v1.16.0
 

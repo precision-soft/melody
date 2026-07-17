@@ -12,51 +12,33 @@
 #   - PROCESS ROLE       the default role, --role, the .env value, --role winning over it, and the panic
 #                        an unsupported role must raise
 #   - CRON NO-USER       melody:cron:generate --template crontab-no-user emits entries with no user column
+#   - CRON RUNNER        melody:cron:run boots from the same Configuration, evaluates the schedule and
+#                        exits cleanly on --once
+#   - COMMAND ROLE FLAG  a command's own --role after the command name reaches the command instead of
+#                        being consumed as the runtime process role
+#   - LAZY SERVICE       example:grant:demo resolves its user service through the container.Lazy handle at
+#                        first run — the lazy-resolution marker and the grant line print from one invocation
+#   - OUTBOX FACTORIES   /outbox/enqueue on the dev-supervised example writes through the lazily-resolved
+#                        store, melody:outbox:relay publishes it from a separate process and /outbox/status
+#                        shows the sent count grow
+#   - ENCRYPT FACTORY    melody:encrypt:database resolves its database through the module factory at the
+#                        first run and bulk-encrypts the two-factor columns
+#   - CRON RUNNER FLAG   product:list reads its declared --limit default when the flag is not passed and
+#                        the explicit value when it is
+#   - SIGNAL SHUTDOWN    a built example serving http exits zero on a single SIGINT (the graceful path
+#                        through NewSignalContext)
 #
-# Everything runs inside the dev container against the compose stack. The example's .env.local is written
-# and restored by the process-role check; it is git-ignored.
+# Everything runs inside the dev container against the compose stack, through the helpers in common.sh.
+# The example's .env.local is written and restored by the process-role check; it is git-ignored.
 
 set -euo pipefail
 IFS=$'\n\t'
 
 SCRIPT_DIRECTORY_STRING="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPOSITORY_ROOT_DIRECTORY_STRING="$(cd -P "${SCRIPT_DIRECTORY_STRING}/../.." && pwd)"
 
-. "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/utility.sh"
+. "${SCRIPT_DIRECTORY_STRING}/common.sh"
 
-SERVICE_NAME_STRING="dev"
-EXAMPLE_DIRECTORY_STRING="/app/v3/.example"
-EXAMPLE_ENV_LOCAL_PATH_STRING="${EXAMPLE_DIRECTORY_STRING}/.env.local"
-
-# the cd is a statement of its own: joining it to the command with && would make a trailing & background the
-# whole chain, leaving the foreground shell outside the example directory
-GO_PREFIX_STRING="export PATH=/usr/local/go/bin:\$PATH; cd ${EXAMPLE_DIRECTORY_STRING} || exit 1;"
-
-CHECK_FAILURE_COUNT_INTEGER=0
-
-require_docker
-require_docker_daemon
-
-if ! docker_compose_service_exists "${SERVICE_NAME_STRING}"; then
-    fail "missing docker compose service: ${SERVICE_NAME_STRING}"
-fi
-
-ensure_service_running "${SERVICE_NAME_STRING}"
-
-check_pass() {
-    printf 'PASS  %s\n' "${1}"
-}
-
-check_fail() {
-    printf 'FAIL  %s\n' "${1}" >&2
-    CHECK_FAILURE_COUNT_INTEGER="$((CHECK_FAILURE_COUNT_INTEGER + 1))"
-}
-
-# run_in_service_shell echoes the docker command it runs, which would end up inside every command
-# substitution below; capture through docker_compose_no_log so only the container's own output comes back
-in_example() {
-    docker_compose_no_log exec -T "${SERVICE_NAME_STRING}" bash -c "${GO_PREFIX_STRING} ${1}" </dev/null
-}
+e2e_require_dev_service
 
 # ---------------------------------------------------------------------------------------------------
 # EXCLUSIVE COMMAND — two instances, one run
@@ -64,44 +46,43 @@ in_example() {
 
 section_start "EXCLUSIVE COMMAND ACROSS TWO INSTANCES" "${TAG_VALIDATE}" "e2e"
 
-EXCLUSIVE_OUTPUT_STRING="$(
-    in_example "rm -f /tmp/exclusive-first.log /tmp/exclusive-second.log
-        go run . example:exclusive:demo --hold 4s > /tmp/exclusive-first.log 2>&1 &
-        FIRST_PID=\$!
-        # wait for the holder to be demonstrably inside the command body: a fixed sleep races the go build cache, and a
-        # contender that starts after the holder already released proves nothing about mutual exclusion. On a COLD build
-        # cache the first 'go run .' compiles the whole framework, so the budget has to cover that; if the marker still
-        # never appears we must say so distinctly and NOT launch the contender — otherwise a build delay is misreported
-        # as a mutual-exclusion violation the lock never committed
-        HOLDER_MARKER_SEEN=0
-        for _ in \$(seq 1 900); do
-            if grep -q 'exclusive tick: started' /tmp/exclusive-first.log 2>/dev/null; then
-                HOLDER_MARKER_SEEN=1
-                break
-            fi
-            sleep 0.2
-        done
-        if [ \"\${HOLDER_MARKER_SEEN}\" -ne 1 ]; then
-            echo 'holder_marker_timeout=1'
-            echo '--- first ---'
-            cat /tmp/exclusive-first.log
-            kill \${FIRST_PID} 2>/dev/null || true
-            wait \${FIRST_PID} 2>/dev/null || true
-            exit 0
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "rm -f /tmp/exclusive-first.log /tmp/exclusive-second.log
+    go run . example:exclusive:demo --hold 4s > /tmp/exclusive-first.log 2>&1 &
+    FIRST_PID=\$!
+    # wait for the holder to be demonstrably inside the command body: a fixed sleep races the go build cache, and a
+    # contender that starts after the holder already released proves nothing about mutual exclusion. On a COLD build
+    # cache the first 'go run .' compiles the whole framework, so the budget has to cover that; if the marker still
+    # never appears we must say so distinctly and NOT launch the contender — otherwise a build delay is misreported
+    # as a mutual-exclusion violation the lock never committed
+    HOLDER_MARKER_SEEN=0
+    for _ in \$(seq 1 900); do
+        if grep -q 'exclusive tick: started' /tmp/exclusive-first.log 2>/dev/null; then
+            HOLDER_MARKER_SEEN=1
+            break
         fi
-        go run . example:exclusive:demo --hold 1s > /tmp/exclusive-second.log 2>&1
-        SECOND_STATUS=\$?
-        wait \${FIRST_PID}
-        FIRST_STATUS=\$?
-        echo \"first_status=\${FIRST_STATUS}\"
-        echo \"second_status=\${SECOND_STATUS}\"
-        echo \"first_started=\$(grep -c 'exclusive tick: started' /tmp/exclusive-first.log 2>/dev/null || true)\"
-        echo \"second_started=\$(grep -c 'exclusive tick: started' /tmp/exclusive-second.log 2>/dev/null || true)\"
+        sleep 0.2
+    done
+    if [ \"\${HOLDER_MARKER_SEEN}\" -ne 1 ]; then
+        echo 'holder_marker_timeout=1'
         echo '--- first ---'
         cat /tmp/exclusive-first.log
-        echo '--- second ---'
-        cat /tmp/exclusive-second.log" || true
-)"
+        kill \${FIRST_PID} 2>/dev/null || true
+        wait \${FIRST_PID} 2>/dev/null || true
+        exit 0
+    fi
+    go run . example:exclusive:demo --hold 1s > /tmp/exclusive-second.log 2>&1
+    SECOND_STATUS=\$?
+    wait \${FIRST_PID}
+    FIRST_STATUS=\$?
+    echo \"first_status=\${FIRST_STATUS}\"
+    echo \"second_status=\${SECOND_STATUS}\"
+    echo \"first_started=\$(grep -c 'exclusive tick: started' /tmp/exclusive-first.log 2>/dev/null || true)\"
+    echo \"second_started=\$(grep -c 'exclusive tick: started' /tmp/exclusive-second.log 2>/dev/null || true)\"
+    echo '--- first ---'
+    cat /tmp/exclusive-first.log
+    echo '--- second ---'
+    cat /tmp/exclusive-second.log"
+EXCLUSIVE_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 
 printf '%s\n' "${EXCLUSIVE_OUTPUT_STRING}"
 
@@ -158,7 +139,7 @@ fi
 section_start "PROCESS ROLE RESOLUTION" "${TAG_VALIDATE}" "e2e"
 
 restore_example_env_local() {
-    docker_compose_no_log exec -T "${SERVICE_NAME_STRING}" rm -f "${EXAMPLE_ENV_LOCAL_PATH_STRING}" </dev/null || true
+    docker_compose_no_log exec -T "${E2E_SERVICE_NAME_STRING}" rm -f "${EXAMPLE_ENV_LOCAL_PATH_STRING}" </dev/null || true
 }
 
 trap restore_example_env_local EXIT
@@ -168,14 +149,16 @@ trap restore_example_env_local EXIT
 # would poison the default-role check below. Clear it first — the same rm -f hygiene the other sections use
 restore_example_env_local
 
-DEFAULT_ROLE_STRING="$(in_example "go run . app:info 2>/dev/null | grep '^process_role:'" || true)"
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . app:info 2>/dev/null | grep '^process_role:'"
+DEFAULT_ROLE_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 if [[ "${DEFAULT_ROLE_STRING}" = *"all"* ]]; then
     check_pass "the default process role is 'all' (${DEFAULT_ROLE_STRING})"
 else
     check_fail "the default process role was ${DEFAULT_ROLE_STRING:-<empty>}, wanted 'all'"
 fi
 
-FLAG_ROLE_STRING="$(in_example "go run . --role worker app:info 2>/dev/null | grep '^process_role:'" || true)"
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . --role worker app:info 2>/dev/null | grep '^process_role:'"
+FLAG_ROLE_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 if [[ "${FLAG_ROLE_STRING}" = *"worker"* ]]; then
     check_pass "--role worker selects the worker role (${FLAG_ROLE_STRING})"
 else
@@ -184,17 +167,19 @@ fi
 
 # melody resolves config from .env files, never from the process environment, so the env value under test
 # has to land in .env.local (which overrides .env and is git-ignored)
-docker_compose_no_log exec -T "${SERVICE_NAME_STRING}" \
+docker_compose_no_log exec -T "${E2E_SERVICE_NAME_STRING}" \
     bash -c "printf 'MELODY_PROCESS_ROLE=web\n' > ${EXAMPLE_ENV_LOCAL_PATH_STRING}" </dev/null
 
-ENV_ROLE_STRING="$(in_example "go run . app:info 2>/dev/null | grep '^process_role:'" || true)"
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . app:info 2>/dev/null | grep '^process_role:'"
+ENV_ROLE_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 if [[ "${ENV_ROLE_STRING}" = *"web"* ]]; then
     check_pass "MELODY_PROCESS_ROLE from .env selects the web role (${ENV_ROLE_STRING})"
 else
     check_fail "MELODY_PROCESS_ROLE=web produced ${ENV_ROLE_STRING:-<empty>}, wanted 'web'"
 fi
 
-PRECEDENCE_ROLE_STRING="$(in_example "go run . --role worker app:info 2>/dev/null | grep '^process_role:'" || true)"
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . --role worker app:info 2>/dev/null | grep '^process_role:'"
+PRECEDENCE_ROLE_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 if [[ "${PRECEDENCE_ROLE_STRING}" = *"worker"* ]]; then
     check_pass "an explicit --role beats MELODY_PROCESS_ROLE (${PRECEDENCE_ROLE_STRING})"
 else
@@ -204,10 +189,22 @@ fi
 restore_example_env_local
 trap - EXIT
 
-if in_example "go run . --role nonsense app:info" >/dev/null 2>&1; then
-    check_fail "an unsupported --role value was accepted"
+# this check exists to prove the runtime FAILS CLOSED on an unsupported role, so BOTH halves are asserted:
+# the process must exit non-zero (a fail-open that merely logged the diagnostic and booted with the widest
+# role would satisfy the text alone), and the diagnostic must be the role validation's (any unrelated
+# non-zero exit — a compile error, a missing .env — would satisfy the status alone). The exit status is
+# carried out of the container explicitly: `go run` sits in a pipeline, whose status is the last command's
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . --role nonsense app:info >/tmp/role-reject.log 2>&1; echo \"role_exit_status=\$?\"; grep -c 'invalid role' /tmp/role-reject.log 2>/dev/null | sed 's/^/role_diagnostic_count=/' || true"
+UNSUPPORTED_ROLE_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+UNSUPPORTED_ROLE_STATUS_STRING="$(printf '%s' "${UNSUPPORTED_ROLE_OUTPUT_STRING}" | grep -o 'role_exit_status=[0-9]*' | head -1 | cut -d= -f2 || true)"
+UNSUPPORTED_ROLE_COUNT_STRING="$(printf '%s' "${UNSUPPORTED_ROLE_OUTPUT_STRING}" | grep -o 'role_diagnostic_count=[0-9]*' | head -1 | cut -d= -f2 || true)"
+
+if [[ "${UNSUPPORTED_ROLE_STATUS_STRING:-0}" -ne 0 && "${UNSUPPORTED_ROLE_COUNT_STRING:-0}" -gt 0 ]]; then
+    check_pass "an unsupported --role value fails closed: non-zero exit (${UNSUPPORTED_ROLE_STATUS_STRING}) carrying the invalid-role diagnostic"
+elif [[ "${UNSUPPORTED_ROLE_STATUS_STRING:-0}" -eq 0 ]]; then
+    check_fail "an unsupported --role value exited ZERO — the runtime failed open and booted with an unvalidated role (${UNSUPPORTED_ROLE_OUTPUT_STRING:-<empty>})"
 else
-    check_pass "an unsupported --role value is rejected"
+    check_fail "an unsupported --role value exited non-zero but without the invalid-role diagnostic, so the rejection came from somewhere else (${UNSUPPORTED_ROLE_OUTPUT_STRING:-<empty>})"
 fi
 
 section_end "PROCESS ROLE RESOLUTION" "success" "${TAG_VALIDATE}" "e2e"
@@ -218,12 +215,11 @@ section_end "PROCESS ROLE RESOLUTION" "success" "${TAG_VALIDATE}" "e2e"
 
 section_start "CRON CRONTAB-NO-USER TEMPLATE" "${TAG_VALIDATE}" "e2e"
 
-CRONTAB_WITH_USER_STRING="$(
-    in_example "rm -f /tmp/crontab-with-user; go run . melody:cron:generate --out /tmp/crontab-with-user >/dev/null 2>&1; cat /tmp/crontab-with-user 2>/dev/null" || true
-)"
-CRONTAB_NO_USER_STRING="$(
-    in_example "rm -f /tmp/crontab-no-user; go run . melody:cron:generate --template crontab-no-user --out /tmp/crontab-no-user >/dev/null 2>&1; cat /tmp/crontab-no-user 2>/dev/null" || true
-)"
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "rm -f /tmp/crontab-with-user; go run . melody:cron:generate --out /tmp/crontab-with-user >/dev/null 2>&1; cat /tmp/crontab-with-user 2>/dev/null"
+CRONTAB_WITH_USER_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "rm -f /tmp/crontab-no-user; go run . melody:cron:generate --template crontab-no-user --out /tmp/crontab-no-user >/dev/null 2>&1; cat /tmp/crontab-no-user 2>/dev/null"
+CRONTAB_NO_USER_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 
 if [[ "" = "${CRONTAB_NO_USER_STRING}" ]]; then
     check_fail "the crontab-no-user template produced no output"
@@ -251,9 +247,305 @@ fi
 section_end "CRON CRONTAB-NO-USER TEMPLATE" "success" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
+# CRON IN-PROCESS RUNNER — the same Configuration drives melody:cron:run, which ticks in-process
+# ---------------------------------------------------------------------------------------------------
 
-if [[ 0 -lt ${CHECK_FAILURE_COUNT_INTEGER} ]]; then
-    fail "${CHECK_FAILURE_COUNT_INTEGER} stack check(s) failed"
+section_start "CRON IN-PROCESS RUNNER" "${TAG_VALIDATE}" "e2e"
+
+# a clean exit alone would also pass with a runner that never parsed the Configuration; the example
+# schedules product:list with a system user, which the in-process runner reports with a warning at Run
+# (written to the example's MELODY_LOG_PATH file, var/log/dev.log), so that marker proves the runner
+# resolved the entries from the one shared Configuration. The marker count is read before and after —
+# the log file persists across runs, so an old marker would be a vacuous pass. Whether an entry actually
+# fires depends on the wall minute, so firing itself is asserted by the unit tests
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "BEFORE_COUNT=\$(grep -c 'cron runner ignores EntryConfig.User' var/log/dev.log 2>/dev/null || true); go run . melody:cron:run --once >/dev/null 2>&1; echo status=\$?; AFTER_COUNT=\$(grep -c 'cron runner ignores EntryConfig.User' var/log/dev.log 2>/dev/null || true); echo \"user_warning_before=\${BEFORE_COUNT:-0}\"; echo \"user_warning_after=\${AFTER_COUNT:-0}\""
+RUNNER_ONCE_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+
+if printf '%s' "${RUNNER_ONCE_STRING}" | grep -q 'status=0'; then
+    check_pass "melody:cron:run --once evaluated the schedule in-process and exited cleanly"
+else
+    check_fail "melody:cron:run --once did not exit cleanly (${RUNNER_ONCE_STRING:-<empty>})"
 fi
 
-printf '\nALL STACK CHECKS PASSED\n'
+RUNNER_WARNING_BEFORE_INTEGER="$(printf '%s' "${RUNNER_ONCE_STRING}" | grep -o 'user_warning_before=[0-9]*' | head -1 | cut -d= -f2 || true)"
+RUNNER_WARNING_AFTER_INTEGER="$(printf '%s' "${RUNNER_ONCE_STRING}" | grep -o 'user_warning_after=[0-9]*' | head -1 | cut -d= -f2 || true)"
+
+if [[ "${RUNNER_WARNING_AFTER_INTEGER:-0}" -gt "${RUNNER_WARNING_BEFORE_INTEGER:-0}" ]]; then
+    check_pass "the runner resolved the shared Configuration (it reported the user-carrying product:list entry, ${RUNNER_WARNING_BEFORE_INTEGER:-0} -> ${RUNNER_WARNING_AFTER_INTEGER:-0})"
+else
+    check_fail "the runner did not report the user-carrying entry (${RUNNER_WARNING_BEFORE_INTEGER:-0} -> ${RUNNER_WARNING_AFTER_INTEGER:-0}), so nothing proves it parsed the Configuration"
+fi
+
+section_end "CRON IN-PROCESS RUNNER" "success" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
+# COMMAND-OWNED ROLE FLAG — a command's own --role after the command name is not the runtime process role
+# ---------------------------------------------------------------------------------------------------
+
+section_start "COMMAND-OWNED ROLE FLAG" "${TAG_VALIDATE}" "e2e"
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:grant:demo --role admin --user ada 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+GRANT_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+
+if printf '%s' "${GRANT_OUTPUT_STRING}" | grep -q 'granted role "admin" to user "ada"'; then
+    check_pass "a command's own --role after the command name reaches the command (not the runtime role parser)"
+else
+    check_fail "the command-owned --role flag did not reach the command (${GRANT_OUTPUT_STRING:-<empty>})"
+fi
+
+section_end "COMMAND-OWNED ROLE FLAG" "success" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
+# LAZY SERVICE RESOLUTION — the container.Lazy handle resolves the user service at first run, not at boot
+# ---------------------------------------------------------------------------------------------------
+
+section_start "LAZY SERVICE RESOLUTION" "${TAG_VALIDATE}" "e2e"
+
+# one invocation on purpose: the lazy-resolution marker and the grant line must come from the SAME run,
+# proving the handle resolved inside the command body and the command still completed its work afterwards
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:grant:demo --role admin --user ada 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+LAZY_GRANT_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+
+if printf '%s' "${LAZY_GRANT_OUTPUT_STRING}" | grep -q 'user service resolved lazily: user "ada" known=false'; then
+    check_pass "the user service resolved lazily inside the command body (unknown user reported)"
+else
+    check_fail "the lazy-resolution marker did not print (${LAZY_GRANT_OUTPUT_STRING:-<empty>})"
+fi
+
+if printf '%s' "${LAZY_GRANT_OUTPUT_STRING}" | grep -q 'granted role "admin" to user "ada"'; then
+    check_pass "the same invocation still completed the grant after the lazy resolve"
+else
+    check_fail "the grant line did not print from the lazy-resolution invocation (${LAZY_GRANT_OUTPUT_STRING:-<empty>})"
+fi
+
+section_end "LAZY SERVICE RESOLUTION" "success" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
+# OUTBOX FACTORIES END-TO-END — http enqueue on the supervised app, relay from a separate cli process
+# ---------------------------------------------------------------------------------------------------
+
+section_start "OUTBOX FACTORIES END-TO-END" "${TAG_VALIDATE}" "e2e"
+
+# the http half runs against the example the dev container already supervises on EXAMPLE_BASE_URL (the
+# same loopback address run.sh uses); wget is the http client the dev image ships (no curl). The relay
+# half is a separate cli process, so store and relay factories are exercised across process boundaries.
+# The sent count is read before and after: /outbox/status going green on rows sent by EARLIER runs would
+# be a vacuous pass, so the assertion is that the count GREW, not that it exists
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "STATUS_BODY=\$(wget -q -O- \"\${EXAMPLE_BASE_URL}/outbox/status\" 2>/dev/null || true)
+    case \"\${STATUS_BODY}\" in
+        *'\"success\":true'*) echo outbox_reachable=1 ;;
+        *) echo outbox_reachable=0 ;;
+    esac
+    BEFORE_SENT=\$(printf '%s' \"\${STATUS_BODY}\" | grep -o '\"sent\":[0-9]*' | head -1 | cut -d: -f2)
+    echo \"before_sent=\${BEFORE_SENT:-0}\"
+    wget -q -O- --post-data='' \"\${EXAMPLE_BASE_URL}/outbox/enqueue?reference=stack-e2e\" 2>/dev/null || true
+    echo ''
+    # the outbox available_at has second precision, so the relay claims the row only once it is a full second old
+    sleep 2
+    go run . melody:outbox:relay --limit 1 >/tmp/outbox-relay.log 2>&1
+    echo \"relay_status=\$?\"
+    AFTER_BODY=\$(wget -q -O- \"\${EXAMPLE_BASE_URL}/outbox/status\" 2>/dev/null || true)
+    printf '%s\n' \"\${AFTER_BODY}\"
+    AFTER_SENT=\$(printf '%s' \"\${AFTER_BODY}\" | grep -o '\"sent\":[0-9]*' | head -1 | cut -d: -f2)
+    echo \"after_sent=\${AFTER_SENT:-0}\""
+OUTBOX_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+
+printf '%s\n' "${OUTBOX_OUTPUT_STRING}"
+
+# the supervised app is the other half of this check: when it is down (or serving a binary too old to have
+# the outbox routes) nothing about the factories is exercised, so say that distinctly instead of letting
+# the empty responses trip the assertions below. Reflex restarts the supervised app on any .go/.env change;
+# `./dc restart dev` forces a resync when in doubt
+if ! printf '%s' "${OUTBOX_OUTPUT_STRING}" | grep -q 'outbox_reachable=1'; then
+    check_fail "the dev-supervised example on EXAMPLE_BASE_URL is unreachable or lacks the outbox routes (stale supervised binary? reflex restarts it on .go/.env changes; ./dc restart dev forces a resync) — the outbox factories were not exercised"
+    section_end "OUTBOX FACTORIES END-TO-END" "success" "${TAG_VALIDATE}" "e2e"
+else
+
+if printf '%s' "${OUTBOX_OUTPUT_STRING}" | grep -q '"enqueued":true'; then
+    check_pass "the http enqueue wrote through the lazily-resolved outbox store"
+else
+    check_fail "the http enqueue did not report \"enqueued\":true"
+fi
+
+if printf '%s' "${OUTBOX_OUTPUT_STRING}" | grep -q 'relay_status=0'; then
+    check_pass "melody:outbox:relay --limit 1 ran as a separate process and exited zero"
+else
+    check_fail "melody:outbox:relay --limit 1 did not exit zero"
+fi
+
+OUTBOX_BEFORE_SENT_INTEGER="$(printf '%s' "${OUTBOX_OUTPUT_STRING}" | grep -o 'before_sent=[0-9]*' | head -1 | cut -d= -f2 || true)"
+OUTBOX_AFTER_SENT_INTEGER="$(printf '%s' "${OUTBOX_OUTPUT_STRING}" | grep -o 'after_sent=[0-9]*' | head -1 | cut -d= -f2 || true)"
+
+if printf '%s' "${OUTBOX_OUTPUT_STRING}" | grep -q '"sent":' \
+    && [[ "${OUTBOX_AFTER_SENT_INTEGER:-0}" -gt "${OUTBOX_BEFORE_SENT_INTEGER:-0}" ]]; then
+    check_pass "/outbox/status shows the sent count grew (${OUTBOX_BEFORE_SENT_INTEGER:-0} -> ${OUTBOX_AFTER_SENT_INTEGER:-0})"
+else
+    check_fail "the sent count did not grow (${OUTBOX_BEFORE_SENT_INTEGER:-0} -> ${OUTBOX_AFTER_SENT_INTEGER:-0}) — the relay published nothing"
+fi
+
+section_end "OUTBOX FACTORIES END-TO-END" "success" "${TAG_VALIDATE}" "e2e"
+
+fi
+
+# ---------------------------------------------------------------------------------------------------
+# ENCRYPT FACTORY COMMAND — the bulk command resolves its database through the module factory at first run
+# ---------------------------------------------------------------------------------------------------
+
+section_start "ENCRYPT FACTORY COMMAND" "${TAG_VALIDATE}" "e2e"
+
+# the completion log line is asserted alongside the exit code: a zero exit alone would also pass with a
+# command that failed to wire the migration at all, while the "migration finished" marker (written to the
+# example's MELODY_LOG_PATH file, var/log/dev.log) proves the bulk path ran end to end over the
+# factory-resolved database. The marker count is read before and after — the log file persists across
+# runs, so an old marker would be a vacuous pass. The processed row count in that line is legitimately
+# zero when the table holds no plaintext rows, so it is not asserted
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "BEFORE_COUNT=\$(grep -c 'encrypt database migration finished' var/log/dev.log 2>/dev/null || true); go run . melody:encrypt:database --table melody_example_two_factor --primary-key user_identifier --column secret --column recovery_codes --mode encrypt >/tmp/encrypt-database.log 2>&1; echo status=\$?; AFTER_COUNT=\$(grep -c 'encrypt database migration finished' var/log/dev.log 2>/dev/null || true); echo \"migration_finished_before=\${BEFORE_COUNT:-0}\"; echo \"migration_finished_after=\${AFTER_COUNT:-0}\""
+ENCRYPT_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+
+if printf '%s' "${ENCRYPT_OUTPUT_STRING}" | grep -q 'status=0'; then
+    check_pass "melody:encrypt:database resolved its database through the factory and exited zero"
+else
+    check_fail "melody:encrypt:database did not exit zero (${ENCRYPT_OUTPUT_STRING:-<empty>})"
+fi
+
+ENCRYPT_MARKER_BEFORE_INTEGER="$(printf '%s' "${ENCRYPT_OUTPUT_STRING}" | grep -o 'migration_finished_before=[0-9]*' | head -1 | cut -d= -f2 || true)"
+ENCRYPT_MARKER_AFTER_INTEGER="$(printf '%s' "${ENCRYPT_OUTPUT_STRING}" | grep -o 'migration_finished_after=[0-9]*' | head -1 | cut -d= -f2 || true)"
+
+if [[ "${ENCRYPT_MARKER_AFTER_INTEGER:-0}" -gt "${ENCRYPT_MARKER_BEFORE_INTEGER:-0}" ]]; then
+    check_pass "the bulk migration ran to completion over the factory-resolved database (${ENCRYPT_MARKER_BEFORE_INTEGER:-0} -> ${ENCRYPT_MARKER_AFTER_INTEGER:-0})"
+else
+    check_fail "the migration-finished marker did not appear (${ENCRYPT_MARKER_BEFORE_INTEGER:-0} -> ${ENCRYPT_MARKER_AFTER_INTEGER:-0}), so nothing proves the bulk path ran"
+fi
+
+section_end "ENCRYPT FACTORY COMMAND" "success" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
+# CRON RUNNER FLAG DEFAULT — an unset flag reads back its declared default; an explicit value still wins
+# ---------------------------------------------------------------------------------------------------
+
+section_start "CRON RUNNER FLAG DEFAULT" "${TAG_VALIDATE}" "e2e"
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . product:list 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+PRODUCT_DEFAULT_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+
+if printf '%s' "${PRODUCT_DEFAULT_OUTPUT_STRING}" | grep -q 'product list: limit=5'; then
+    check_pass "product:list without --limit reads back the declared default (limit=5)"
+else
+    check_fail "product:list without --limit did not honor the declared default of 5"
+fi
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . product:list --limit 2 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+PRODUCT_EXPLICIT_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+
+if printf '%s' "${PRODUCT_EXPLICIT_OUTPUT_STRING}" | grep -q 'product list: limit=2'; then
+    check_pass "product:list --limit 2 overrides the declared default (limit=2)"
+else
+    check_fail "product:list --limit 2 did not override the declared default"
+fi
+
+section_end "CRON RUNNER FLAG DEFAULT" "success" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
+# GRACEFUL SIGNAL SHUTDOWN — one SIGINT while serving http exits zero through NewSignalContext
+# ---------------------------------------------------------------------------------------------------
+
+section_start "GRACEFUL SIGNAL SHUTDOWN" "${TAG_VALIDATE}" "e2e"
+
+# melody derives the project directory from the executable location, so the binary is built into its own
+# directory beside a copy of the example's .env; a .env.local there overrides the http address to a port
+# the dev-supervised app does not hold (it owns 8080). Building outside the bind mount also keeps reflex
+# from restarting the supervised app mid-check. Only the FIRST signal is exercised: the second-signal
+# force-exit needs a hung shutdown, which the unit tests cover
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "WORK_DIRECTORY=/tmp/example-signal-e2e
+    rm -rf \"\${WORK_DIRECTORY}\"
+    mkdir -p \"\${WORK_DIRECTORY}\"
+    if ! go build -o \"\${WORK_DIRECTORY}/example-signal\" . >/tmp/example-signal-build.log 2>&1; then
+        echo build_failed=1
+        cat /tmp/example-signal-build.log
+        exit 0
+    fi
+    cp .env \"\${WORK_DIRECTORY}/.env\"
+    cp -r public \"\${WORK_DIRECTORY}/public\"
+    printf 'MELODY_HTTP_ADDRESS=:18080\n' > \"\${WORK_DIRECTORY}/.env.local\"
+    cd \"\${WORK_DIRECTORY}\" || exit 1
+    ./example-signal > /tmp/example-signal.log 2>&1 &
+    APP_PID=\$!
+    READY=0
+    for _ in \$(seq 1 150); do
+        if wget -q -O /dev/null http://127.0.0.1:18080/health 2>/dev/null; then
+            READY=1
+            break
+        fi
+        if ! kill -0 \${APP_PID} 2>/dev/null; then
+            break
+        fi
+        sleep 0.2
+    done
+    echo \"ready=\${READY}\"
+    if [ \"\${READY}\" -ne 1 ]; then
+        echo '--- app log ---'
+        tail -30 /tmp/example-signal.log
+        kill \${APP_PID} 2>/dev/null || true
+        wait \${APP_PID} 2>/dev/null || true
+        rm -rf \"\${WORK_DIRECTORY}\" /tmp/example-signal.log /tmp/example-signal-build.log
+        exit 0
+    fi
+    if kill -0 \${APP_PID} 2>/dev/null; then
+        echo alive_before_signal=1
+    else
+        echo alive_before_signal=0
+    fi
+    kill -INT \${APP_PID}
+    FORCED=0
+    for _ in \$(seq 1 150); do
+        if ! kill -0 \${APP_PID} 2>/dev/null; then
+            break
+        fi
+        sleep 0.2
+    done
+    if kill -0 \${APP_PID} 2>/dev/null; then
+        FORCED=1
+        kill -KILL \${APP_PID} 2>/dev/null || true
+    fi
+    wait \${APP_PID}
+    APP_STATUS=\$?
+    echo \"forced=\${FORCED}\"
+    echo \"signal_exit_status=\${APP_STATUS}\"
+    rm -rf \"\${WORK_DIRECTORY}\" /tmp/example-signal.log /tmp/example-signal-build.log"
+SIGNAL_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+
+printf '%s\n' "${SIGNAL_OUTPUT_STRING}"
+
+# each precondition fails distinctly: a build error or an app that never served /health means the signal
+# path was never exercised, and blaming the graceful shutdown for either would point at the wrong layer
+if printf '%s' "${SIGNAL_OUTPUT_STRING}" | grep -q 'build_failed=1'; then
+    check_fail "the example did not build, so the signal path was not exercised"
+elif ! printf '%s' "${SIGNAL_OUTPUT_STRING}" | grep -q 'ready=1'; then
+    check_fail "the built example never answered /health within the readiness budget, so the signal path was not exercised"
+else
+    # a zero exit proves nothing if the app had already left on its own before the SIGINT was sent, so the
+    # liveness probe taken right before the kill is asserted first
+    if printf '%s' "${SIGNAL_OUTPUT_STRING}" | grep -q 'alive_before_signal=1'; then
+        check_pass "the example was still serving when the SIGINT was sent (the exit below is attributable to the signal)"
+    else
+        check_fail "the example had already exited before the SIGINT was sent, so the graceful path was not exercised"
+    fi
+
+    if printf '%s' "${SIGNAL_OUTPUT_STRING}" | grep -q 'forced=0'; then
+        check_pass "the example left on its own after one SIGINT (no SIGKILL was needed)"
+    else
+        check_fail "the example was still running after the shutdown budget and had to be SIGKILLed"
+    fi
+
+    if printf '%s' "${SIGNAL_OUTPUT_STRING}" | grep -q 'signal_exit_status=0'; then
+        check_pass "one SIGINT while serving http exited zero (the graceful path through NewSignalContext)"
+    else
+        check_fail "the example did not exit zero on one SIGINT ($(printf '%s' "${SIGNAL_OUTPUT_STRING}" | grep -o 'signal_exit_status=[0-9]*' || echo 'no exit status captured'))"
+    fi
+fi
+
+section_end "GRACEFUL SIGNAL SHUTDOWN" "success" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
+
+finish_checks "stack"

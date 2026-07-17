@@ -1,14 +1,14 @@
 package main
 
 import (
-    "context"
-
     "github.com/precision-soft/melody/.example/config"
     "github.com/precision-soft/melody/application"
 )
 
 func main() {
-    ctx := context.Background()
+    /* the signal context gives the application a graceful shutdown window on the first SIGINT or SIGTERM; a second signal during a hung shutdown forces the process down */
+    ctx, stop := application.NewSignalContext()
+    defer stop()
 
     app := application.NewApplication(
         embeddedEnvFiles,

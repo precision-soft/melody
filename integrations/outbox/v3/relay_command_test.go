@@ -8,6 +8,7 @@ import (
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/container"
+    containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
@@ -108,6 +109,66 @@ func TestRelayCommand_BacksOffAfterFailureAndRecovers(t *testing.T) {
 
     if 2 != repository.claims {
         t.Fatalf("expected exactly two claim attempts (fail then recover), got %d", repository.claims)
+    }
+}
+
+func TestRelayCommand_RetriesRelayResolutionWithBackoff(t *testing.T) {
+    serviceContainer := container.NewContainer()
+
+    repository := &fakeRepository{
+        due: []Pending{
+            {Id: 1, TypeName: "string", Payload: []byte("hello"), Attempts: 0, DeliveryAttempts: 1},
+        },
+    }
+    transport := &fakeTransport{}
+
+    resolveCount := 0
+    failuresLeft := 2
+    container.MustRegister[*Relay](serviceContainer, ServiceRelay, func(resolver containercontract.Resolver) (*Relay, error) {
+        resolveCount++
+
+        if 0 < failuresLeft {
+            failuresLeft--
+
+            return nil, errors.New("database not reachable yet")
+        }
+
+        return NewRelay(RelayConfig{
+            Repository: repository,
+            Transport:  transport,
+            Codec:      &stringCodec{},
+        }), nil
+    })
+
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    relayCommand := NewRelayCommandFromResolver(serviceContainer)
+
+    var runErr error
+    command := &clicontract.CommandContext{
+        Name:  relayCommand.Name(),
+        Flags: relayCommand.Flags(),
+        Action: func(ctx context.Context, commandContext *clicontract.CommandContext) error {
+            runErr = relayCommand.Run(runtimeInstance, commandContext)
+
+            return nil
+        },
+    }
+
+    if commandErr := command.Run(context.Background(), []string{relayCommand.Name(), "--limit", "3", "--interval", "1ms"}); nil != commandErr {
+        t.Fatalf("unexpected command run error: %v", commandErr)
+    }
+
+    if nil != runErr {
+        t.Fatalf("expected the relay command to survive the resolution failures and drain, got %v", runErr)
+    }
+
+    if 3 != resolveCount {
+        t.Fatalf("expected two failed resolutions and one success, got %d attempts", resolveCount)
+    }
+
+    if 1 != len(transport.sent) {
+        t.Fatalf("expected exactly one published message after recovery, got %d", len(transport.sent))
     }
 }
 

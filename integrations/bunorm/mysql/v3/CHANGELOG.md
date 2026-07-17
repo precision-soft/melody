@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.1.3] - 2026-07-17 - Connection-Retry Backoff Clamps
+
+### Fixed
+
+- `provider.go` — the connection retry backoff rejects degenerate values: a non-positive `InitialDelay` or `MaxDelay` and a `BackoffMultiplier` that is not at least 1 — a NaN included, which fails every comparison and so slipped through a below-1 check, poisoned the float-space growth and converted to a negative duration — fall back to the defaults instead of collapsing every retry into an immediate re-dial (a negative delay made the sleep return immediately; a sub-1 multiplier decayed the delay toward zero). A multiplier of exactly 1 remains a valid constant backoff.
+
 ## [v3.1.2] - 2026-07-11 - Advisory Lock Name Hashing
 
 ### Fixed
@@ -71,7 +77,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Code duplicated into `integrations/bunorm/mysql/v3/`; v2 and v3 implementations maintained in parallel
 - Dependencies pinned to `bunorm/v3` and `melody/v3`
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.1.2...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.1.3...HEAD
+
+[v3.1.3]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.1.2...integrations/bunorm/mysql/v3.1.3
 
 [v3.1.2]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.1.1...integrations/bunorm/mysql/v3.1.2
 

@@ -80,6 +80,7 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
 
     instance.registerStorageService(registrar)
     instance.registerLockerService(registrar)
+    instance.registerDatabaseService(registrar)
 
     registrar.RegisterService(
         repository.ServiceCategoryRepository,

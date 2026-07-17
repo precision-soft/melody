@@ -170,12 +170,26 @@ func computeProjectDirectory() (string, error) {
     return absoluteExecutableDirectory, nil
 }
 
+/* workingDirectoryHasEnvironmentFile reports whether the directory holds any environment file the source would load — .env, .env.local, or the development-environment pair that applies when no .env names another environment. A project configured solely through .env.dev boots fine without a .env, so ignoring that shape would emit a missing-.env hint that misattributes a plain unresolved key, or walk away from a working directory that is in fact the project root. A directory named like an environment file is not one. A stat error other than not-exist cannot prove the file absent, so it counts as present: both callers act on absence, and acting is the wrong move while the file may in fact be there. */
 func workingDirectoryHasEnvironmentFile(directoryPath string) bool {
-    candidates := []string{".env", ".env.local"}
+    candidates := []string{
+        ".env",
+        ".env.local",
+        ".env." + config.EnvDevelopment,
+        ".env." + config.EnvDevelopment + ".local",
+    }
 
     for _, candidate := range candidates {
-        _, statErr := os.Stat(filepath.Join(directoryPath, candidate))
+        fileInfo, statErr := os.Stat(filepath.Join(directoryPath, candidate))
         if nil == statErr {
+            if false == fileInfo.IsDir() {
+                return true
+            }
+
+            continue
+        }
+
+        if false == os.IsNotExist(statErr) {
             return true
         }
     }

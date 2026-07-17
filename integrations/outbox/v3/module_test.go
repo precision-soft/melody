@@ -1,10 +1,29 @@
 package outbox
 
 import (
+    "fmt"
+    "strings"
     "testing"
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
 )
+
+func assertPanicsWithMessage(t *testing.T, expected string, callback func()) {
+    t.Helper()
+
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatalf("expected a panic containing %q", expected)
+        }
+
+        if false == strings.Contains(fmt.Sprintf("%v", recovered), expected) {
+            t.Fatalf("expected the panic to mention %q, got %v", expected, recovered)
+        }
+    }()
+
+    callback()
+}
 
 type spyServiceRegistrar struct {
     names []string
@@ -68,6 +87,40 @@ func TestModule_RegisterServicesSkipsNilServices(t *testing.T) {
 
     if 0 != len(registrar.names) {
         t.Fatalf("expected no services registered from an empty config, got %v", registrar.names)
+    }
+}
+
+func TestModule_RegisterServicesPanicsOnStoreAndFactoryBothSet(t *testing.T) {
+    registrar := &spyServiceRegistrar{}
+
+    assertPanicsWithMessage(t, "outbox module received both a store and a store factory - set exactly one", func() {
+        NewModule(ModuleConfig{
+            Store: &Store{},
+            StoreFactory: func(resolver containercontract.Resolver) (*Store, error) {
+                return &Store{}, nil
+            },
+        }).RegisterServices(registrar)
+    })
+
+    if 0 != len(registrar.names) {
+        t.Fatalf("expected no service registered before the panic, got %v", registrar.names)
+    }
+}
+
+func TestModule_RegisterServicesPanicsOnRelayAndFactoryBothSet(t *testing.T) {
+    registrar := &spyServiceRegistrar{}
+
+    assertPanicsWithMessage(t, "outbox module received both a relay and a relay factory - set exactly one", func() {
+        NewModule(ModuleConfig{
+            Relay: newModuleTestRelay(),
+            RelayFactory: func(resolver containercontract.Resolver) (*Relay, error) {
+                return newModuleTestRelay(), nil
+            },
+        }).RegisterServices(registrar)
+    })
+
+    if 0 != len(registrar.names) {
+        t.Fatalf("expected no service registered before the panic, got %v", registrar.names)
     }
 }
 

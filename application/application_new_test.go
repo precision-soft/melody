@@ -74,3 +74,32 @@ func TestWorkingDirectoryHasEnvironmentFile_ReturnsFalseWhenAbsent(t *testing.T)
         t.Fatalf("expected false when no .env files are present")
     }
 }
+
+/** @info A directory named .env is not an environment file: it must not suppress the missing-.env hint nor pin the working directory as the project root. */
+func TestWorkingDirectoryHasEnvironmentFile_IgnoresDirectoryNamedDotEnv(t *testing.T) {
+    directory := t.TempDir()
+
+    err := os.Mkdir(filepath.Join(directory, ".env"), 0o755)
+    if nil != err {
+        t.Fatalf("failed to create .env directory: %v", err)
+    }
+
+    if true == workingDirectoryHasEnvironmentFile(directory) {
+        t.Fatalf("expected false when .env is a directory")
+    }
+}
+
+/** @info A stat error other than not-exist cannot prove the file absent, so it counts as present; stat-ing through a regular file yields such an error (ENOTDIR) without needing permission tricks. */
+func TestWorkingDirectoryHasEnvironmentFile_TreatsUnprovableStatErrorAsPresent(t *testing.T) {
+    directory := t.TempDir()
+
+    occupiedPath := filepath.Join(directory, "occupied")
+    err := os.WriteFile(occupiedPath, []byte("not a directory"), 0o600)
+    if nil != err {
+        t.Fatalf("failed to create file: %v", err)
+    }
+
+    if false == workingDirectoryHasEnvironmentFile(occupiedPath) {
+        t.Fatalf("expected true when the stat error cannot prove absence")
+    }
+}

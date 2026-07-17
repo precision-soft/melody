@@ -7,49 +7,73 @@ import (
     amqp "github.com/precision-soft/melody/integrations/amqp/v3"
     outbox "github.com/precision-soft/melody/integrations/outbox/v3"
     "github.com/precision-soft/melody/v3/.example/message"
+    melodycontainer "github.com/precision-soft/melody/v3/container"
+    melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
     melodymessagebus "github.com/precision-soft/melody/v3/messagebus"
     melodymessagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
+    bun "github.com/uptrace/bun"
 )
 
 const outboxDemoType = "outbox_demo"
 
-/* the outbox demo wires the transactional-outbox relay: a message enqueued in the same transaction as a
-business write (atomicity is the whole point) is later drained to the message transport by the relay, with
-a stable id so a consumer can deduplicate the at-least-once delivery. Wired only when a database is
-configured; the relay publishes to a dedicated amqp queue (or an in-memory transport without AMQP_DSN). */
-func (instance *Module) buildOutbox() {
-    if nil == instance.database {
-        return
+/* the outbox demo wires the transactional-outbox relay through the module's factory shape (see
+configure.go): a message enqueued in the same transaction as a business write (atomicity is the whole
+point) is later drained to the message transport by the relay, with a stable id so a consumer can
+deduplicate the at-least-once delivery. The factories below are registered as the service providers, so
+the store and the relay are built from the container at first use — a process that never touches the
+outbox never opens its schema or its transport. */
+
+/* outboxStoreFactory is the service.outbox.store provider: it resolves the shared *bun.DB from the
+container and ensures the outbox schema at the first resolution, not at boot. The relay publishes each
+row to a dedicated amqp queue (or an in-memory transport without AMQP_DSN). */
+func (instance *Module) outboxStoreFactory(resolver melodycontainercontract.Resolver) (*outbox.Store, error) {
+    database, resolveErr := melodycontainer.FromResolver[*bun.DB](resolver, serviceDatabase)
+    if nil != resolveErr {
+        return nil, resolveErr
     }
 
-    codec := &outboxDemoCodec{}
-
-    store := outbox.NewStore(instance.database, codec)
+    store := outbox.NewStore(database, &outboxDemoCodec{})
     if schemaErr := store.EnsureSchema(context.Background()); nil != schemaErr {
-        return
+        return nil, schemaErr
     }
 
-    instance.outboxStore = store
-    instance.outboxRelay = outbox.NewRelay(outbox.RelayConfig{
-        Repository: store,
-        Transport:  instance.buildOutboxTransport(),
-        Codec:      codec,
-        BatchSize:  50,
-    })
+    return store, nil
 }
 
-func (instance *Module) buildOutboxTransport() melodymessagebuscontract.Transport {
+/* outboxRelayFactory is the service.outbox.relay provider: it resolves the registered store and opens the
+transport when the relay is first used — the built-in melody:outbox:relay command resolves its relay the
+same way, so an http-mode process registers the command without paying for the amqp connection. */
+func (instance *Module) outboxRelayFactory(resolver melodycontainercontract.Resolver) (*outbox.Relay, error) {
+    store, resolveErr := melodycontainer.FromResolver[*outbox.Store](resolver, outbox.ServiceStore)
+    if nil != resolveErr {
+        return nil, resolveErr
+    }
+
+    transport, transportErr := instance.buildOutboxTransport()
+    if nil != transportErr {
+        return nil, transportErr
+    }
+
+    return outbox.NewRelay(outbox.RelayConfig{
+        Repository: store,
+        Transport:  transport,
+        Codec:      &outboxDemoCodec{},
+        BatchSize:  50,
+    }), nil
+}
+
+func (instance *Module) buildOutboxTransport() (melodymessagebuscontract.Transport, error) {
     dsn := instance.environmentValue(environmentKeyAmqpDsn)
     if "" == dsn {
-        return melodymessagebus.NewInMemoryTransport(64)
+        return melodymessagebus.NewInMemoryTransport(64), nil
     }
 
     provider := amqp.NewProvider()
 
     connection, openErr := provider.Open(dsn)
     if nil != openErr {
-        exception.Panic(exception.FromError(openErr))
+        return nil, openErr
     }
 
     registry := amqp.NewMessageRegistry()
@@ -61,7 +85,7 @@ func (instance *Module) buildOutboxTransport() melodymessagebuscontract.Transpor
         Queue:      "outbox_demo",
         Registry:   registry,
         DeadLetter: true,
-    })
+    }), nil
 }
 
 /* outboxDemoCodec serializes the demo message to and from the outbox row payload. */

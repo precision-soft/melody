@@ -7,6 +7,8 @@ import (
     "time"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
+    "github.com/precision-soft/melody/v3/container"
+    containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     "github.com/precision-soft/melody/v3/logging"
@@ -30,8 +32,27 @@ func NewRelayCommand(relay *Relay) *RelayCommand {
     return &RelayCommand{relay: relay}
 }
 
+/* NewRelayCommandFromResolver builds the command against a lazily-resolved relay: the registered service.outbox.relay is resolved on the first batch rather than in the composition root, so a multi-database app can register the module with a resolver-backed relay factory and still get the built-in command without opening a database at boot. */
+func NewRelayCommandFromResolver(resolver containercontract.Resolver) *RelayCommand {
+    if nil == resolver {
+        exception.Panic(exception.NewError("outbox relay command resolver is nil", nil, nil))
+    }
+
+    return &RelayCommand{relayLazy: container.Lazy[*Relay](resolver, ServiceRelay)}
+}
+
 type RelayCommand struct {
-    relay *Relay
+    relay     *Relay
+    relayLazy *container.LazyService[*Relay]
+}
+
+/* resolveRelay returns the prebuilt relay, or resolves the lazy one — a successful resolution is memoized, a failed one is reported so the run loop treats it like a failed batch, backs off and retries instead of exiting. */
+func (instance *RelayCommand) resolveRelay() (*Relay, error) {
+    if nil != instance.relayLazy {
+        return instance.relayLazy.Resolve()
+    }
+
+    return instance.relay, nil
 }
 
 func (instance *RelayCommand) Name() string {
@@ -87,7 +108,12 @@ func (instance *RelayCommand) Run(
     errorBackoff := interval
 
     for {
-        published, runErr := instance.relay.RunOnce(relayRuntime)
+        /* the relay is resolved inside the loop: with a lazy relay a store outage at start-up surfaces here as an error that follows the same backoff-and-retry path as a failed batch, and a later successful resolution proceeds normally. */
+        published := 0
+        relay, runErr := instance.resolveRelay()
+        if nil == runErr {
+            published, runErr = relay.RunOnce(relayRuntime)
+        }
 
         batches++
 

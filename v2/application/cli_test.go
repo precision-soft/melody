@@ -68,11 +68,12 @@ func TestStripRuntimeFlagsFromOsArgs(t *testing.T) {
         os.Args = originalArguments
     })
 
+    /* the leading -mode is a runtime flag and is stripped; the --mode=cli that follows the subcommand is the command's own flag and is left intact */
     os.Args = []string{"app", "-mode", "http", "serve", "--mode=cli", "other"}
 
     stripRuntimeFlagsFromOsArgs()
 
-    expected := []string{"app", "serve", "other"}
+    expected := []string{"app", "serve", "--mode=cli", "other"}
     if len(expected) != len(os.Args) {
         t.Fatalf("expected %d args, got %d: %+v", len(expected), len(os.Args), os.Args)
     }
@@ -233,11 +234,12 @@ func TestStripRuntimeFlagsFromOsArgs_StripsRoleFlags(t *testing.T) {
         os.Args = originalArguments
     })
 
+    /* the leading --role worker is a runtime flag and is stripped; the --role=web and -mode=cli that follow the subcommand are the command's own flags and are left intact */
     os.Args = []string{"app", "--role", "worker", "someCommand", "--role=web", "-mode=cli", "other"}
 
     stripRuntimeFlagsFromOsArgs()
 
-    expected := []string{"app", "someCommand", "other"}
+    expected := []string{"app", "someCommand", "--role=web", "-mode=cli", "other"}
     if len(expected) != len(os.Args) {
         t.Fatalf("expected %d args, got %d: %+v", len(expected), len(os.Args), os.Args)
     }
@@ -249,15 +251,15 @@ func TestStripRuntimeFlagsFromOsArgs_StripsRoleFlags(t *testing.T) {
     }
 }
 
-/** @info parseRuntimeFlagFromArguments refuses to read a token starting with "-" as the role's value, so the stripper must not delete it either: a bare `--role` followed by the command's own flag swallowed that flag out of os.Args, and the command ran without it. */
-func TestStripRuntimeFlagsFromOsArgs_DoesNotEatTheCommandsNextFlag(t *testing.T) {
+/** @info a --role that follows the subcommand is the command's own flag: it and everything after the command name is left intact, so the command receives its --role and its --verbose. */
+func TestStripRuntimeFlagsFromOsArgs_LeavesTheCommandsOwnFlags(t *testing.T) {
     originalArguments := os.Args
     defer func() { os.Args = originalArguments }()
 
     os.Args = []string{"melody-example", "report:generate", "--role", "--verbose", "target"}
     stripRuntimeFlagsFromOsArgs()
 
-    expected := []string{"melody-example", "report:generate", "--verbose", "target"}
+    expected := []string{"melody-example", "report:generate", "--role", "--verbose", "target"}
     if len(expected) != len(os.Args) {
         t.Fatalf("expected %v, got %v", expected, os.Args)
     }
@@ -268,16 +270,98 @@ func TestStripRuntimeFlagsFromOsArgs_DoesNotEatTheCommandsNextFlag(t *testing.T)
     }
 }
 
-/** @info A bare `--role worker` still consumes its value. */
+/** @info a bare `--role worker` before the subcommand still consumes its value and both are stripped. */
 func TestStripRuntimeFlagsFromOsArgs_ConsumesARealFlagValue(t *testing.T) {
     originalArguments := os.Args
     defer func() { os.Args = originalArguments }()
 
-    os.Args = []string{"melody-example", "app:info", "--role", "worker"}
+    os.Args = []string{"melody-example", "--role", "worker", "app:info"}
     stripRuntimeFlagsFromOsArgs()
 
     if 2 != len(os.Args) || "app:info" != os.Args[1] {
         t.Fatalf("expected the runtime flag and its value to be stripped, got %v", os.Args)
+    }
+}
+
+/** @info a command that declares its own --role flag is no longer broken by the runtime: an --role after the subcommand name is left in os.Args for the command to parse. */
+func TestStripRuntimeFlagsFromOsArgs_PreservesCommandOwnRoleFlag(t *testing.T) {
+    originalArguments := os.Args
+    t.Cleanup(func() {
+        os.Args = originalArguments
+    })
+
+    os.Args = []string{"app", "create:user", "--role", "admin"}
+
+    stripRuntimeFlagsFromOsArgs()
+
+    expected := []string{"app", "create:user", "--role", "admin"}
+    if len(expected) != len(os.Args) {
+        t.Fatalf("expected %+v, got %+v", expected, os.Args)
+    }
+
+    for index := 0; index < len(expected); index++ {
+        if expected[index] != os.Args[index] {
+            t.Fatalf("expected %+v, got %+v", expected, os.Args)
+        }
+    }
+}
+
+/** @info only the runtime --role that precedes the subcommand is stripped; the command keeps its own --role after the command name. */
+func TestStripRuntimeFlagsFromOsArgs_StripsOnlyTheLeadingRole(t *testing.T) {
+    originalArguments := os.Args
+    t.Cleanup(func() {
+        os.Args = originalArguments
+    })
+
+    os.Args = []string{"app", "--role", "worker", "create:user", "--role", "admin"}
+
+    stripRuntimeFlagsFromOsArgs()
+
+    expected := []string{"app", "create:user", "--role", "admin"}
+    if len(expected) != len(os.Args) {
+        t.Fatalf("expected %+v, got %+v", expected, os.Args)
+    }
+
+    for index := 0; index < len(expected); index++ {
+        if expected[index] != os.Args[index] {
+            t.Fatalf("expected %+v, got %+v", expected, os.Args)
+        }
+    }
+}
+
+/** @info a command's own --role after the subcommand is not read as the process role, so an app value like "admin" no longer panics the runtime; the process role stays the default and the command's flag is left for the command. */
+func TestParseRuntimeFlags_IgnoresRoleAfterTheSubcommand(t *testing.T) {
+    originalArguments := os.Args
+    t.Cleanup(func() {
+        os.Args = originalArguments
+    })
+
+    os.Args = []string{"app", "create:user", "--role", "admin"}
+
+    flags := ParseRuntimeFlagsWithRole(config.ModeHttp, config.RoleAll)
+
+    if config.RoleAll != flags.Role() {
+        t.Fatalf("expected the default role, got %q", flags.Role())
+    }
+
+    if config.ModeCli != flags.Mode() {
+        t.Fatalf("expected cli mode, got %q", flags.Mode())
+    }
+}
+
+/** @info the runtime --role that precedes the subcommand still wins; the command's own --role after the command name is ignored by the runtime parser. */
+func TestParseRuntimeFlags_UsesTheLeadingRoleNotTheCommandFlag(t *testing.T) {
+    originalArguments := os.Args
+    t.Cleanup(func() {
+        os.Args = originalArguments
+    })
+
+    os.Args = []string{"app", "--role", "worker", "create:user", "--role", "admin"}
+
+    flags := ParseRuntimeFlagsWithRole(config.ModeHttp, config.RoleAll)
+
+    if config.RoleWorker != flags.Role() {
+        t.Fatalf("expected the leading worker role, got %q", flags.Role())
     }
 }
 
@@ -346,6 +430,63 @@ func TestParseRuntimeFlags_PanicsOnBareRoleWithoutValue(t *testing.T) {
     })
 
     os.Args = []string{"app", "--role", "--mode=http"}
+
+    testhelper.AssertPanics(t, func() {
+        _ = ParseRuntimeFlags(config.ModeHttp)
+    })
+}
+
+/** @info An explicitly present but empty `--mode=` (e.g. expanded from an unset env var) must fail closed like an invalid mode instead of silently booting the configured default. */
+func TestParseRuntimeFlags_PanicsOnExplicitlyEmptyMode(t *testing.T) {
+    originalArguments := os.Args
+    t.Cleanup(func() {
+        os.Args = originalArguments
+    })
+
+    os.Args = []string{"app", "--mode="}
+
+    testhelper.AssertPanics(t, func() {
+        _ = ParseRuntimeFlags(config.ModeHttp)
+    })
+}
+
+/** @info When a runtime flag is supplied more than once before the subcommand, the last occurrence wins. */
+func TestParseRuntimeFlags_LastRoleOccurrenceWins(t *testing.T) {
+    originalArguments := os.Args
+    t.Cleanup(func() {
+        os.Args = originalArguments
+    })
+
+    os.Args = []string{"app", "--role", "web", "--role", "worker", "someCommand"}
+
+    flags := ParseRuntimeFlags(config.ModeHttp)
+    if config.RoleWorker != flags.Role() {
+        t.Fatalf("expected role %q, got %q", config.RoleWorker, flags.Role())
+    }
+}
+
+/** @info Last-wins holds even when the last occurrence is explicitly empty: `--role=web --role=` resolves to the empty value and fails closed, instead of the earlier web silently surviving. */
+func TestParseRuntimeFlags_PanicsWhenLastRoleOccurrenceIsEmpty(t *testing.T) {
+    originalArguments := os.Args
+    t.Cleanup(func() {
+        os.Args = originalArguments
+    })
+
+    os.Args = []string{"app", "--role=web", "--role=", "someCommand"}
+
+    testhelper.AssertPanics(t, func() {
+        _ = ParseRuntimeFlags(config.ModeHttp)
+    })
+}
+
+/** @info A bare `--role` before the subcommand consumes the following token as its value even when that token was meant as the command name, so an unintended value like a command name fails role validation. */
+func TestParseRuntimeFlags_BareRoleBeforeCommandConsumesIt(t *testing.T) {
+    originalArguments := os.Args
+    t.Cleanup(func() {
+        os.Args = originalArguments
+    })
+
+    os.Args = []string{"app", "--role=web", "--role", "someCommand"}
 
     testhelper.AssertPanics(t, func() {
         _ = ParseRuntimeFlags(config.ModeHttp)

@@ -129,6 +129,11 @@ services:
         ports:
             - "${MAILPIT_SMTP_HOST_PORT:-1026}:1025"
             - "${MAILPIT_UI_HOST_PORT:-8026}:8025"
+        healthcheck:
+            test: [ 'CMD', '/mailpit', 'readyz' ]
+            interval: 5s
+            timeout: 5s
+            retries: 20
 
     prometheus:
         image: prom/prometheus:v2.54.1

@@ -32,19 +32,21 @@ func newMysqlDatabase() *bun.DB {
 }
 
 func TestModule_RegisterCliCommandsReturnsNilWithoutDependencies(t *testing.T) {
+    if commands := NewModule(ModuleConfig{}).RegisterCliCommands(nil); nil != commands {
+        t.Fatalf("expected no commands for the fully-unset legacy shape, got %d", len(commands))
+    }
+}
+
+func TestModule_RegisterCliCommandsPanicsOnPartialTopLevelConfig(t *testing.T) {
     cipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)}))
 
-    if commands := NewModule(ModuleConfig{}).RegisterCliCommands(nil); nil != commands {
-        t.Fatalf("expected no commands without database or cipher, got %d", len(commands))
-    }
+    assertPanics(t, func() {
+        NewModule(ModuleConfig{Database: newMysqlDatabase()}).RegisterCliCommands(nil)
+    })
 
-    if commands := NewModule(ModuleConfig{Database: newMysqlDatabase()}).RegisterCliCommands(nil); nil != commands {
-        t.Fatalf("expected no commands without cipher, got %d", len(commands))
-    }
-
-    if commands := NewModule(ModuleConfig{Cipher: cipher}).RegisterCliCommands(nil); nil != commands {
-        t.Fatalf("expected no commands without database, got %d", len(commands))
-    }
+    assertPanics(t, func() {
+        NewModule(ModuleConfig{Cipher: cipher}).RegisterCliCommands(nil)
+    })
 }
 
 func TestModule_RegisterCliCommandsExposesEncryptDatabaseCommand(t *testing.T) {

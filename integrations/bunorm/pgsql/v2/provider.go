@@ -242,18 +242,24 @@ func (instance *Provider) toConnectionContext(
 }
 
 func (instance *Provider) computeBackoffDelay(attempt uint32) time.Duration {
+    /* non-positive delays and a multiplier below 1 fall back to the defaults: a negative delay makes
+       time.Sleep return immediately and a sub-1 multiplier decays the delay toward zero, both collapsing
+       the backoff into a re-dial storm; a multiplier of exactly 1 stays a valid constant backoff. */
     initialDelay := instance.retryConfig.InitialDelay
-    if 0 == initialDelay {
+    if 0 >= initialDelay {
         initialDelay = 500 * time.Millisecond
     }
 
     maxDelay := instance.retryConfig.MaxDelay
-    if 0 == maxDelay {
+    if 0 >= maxDelay {
         maxDelay = 5 * time.Second
     }
 
+    /* the not-at-least-1 form is deliberate: NaN fails every comparison, so `1 > NaN` would let a NaN
+       multiplier through, poison the float-space growth below and collapse the backoff into an immediate
+       re-dial storm once the NaN converts to a negative duration. */
     backoffMultiplier := instance.retryConfig.BackoffMultiplier
-    if 0.0 == backoffMultiplier {
+    if false == (backoffMultiplier >= 1) {
         backoffMultiplier = 2.0
     }
 
