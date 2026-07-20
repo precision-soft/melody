@@ -148,5 +148,4 @@ func main() {
 
 - `cli.Register(...)` fails fast via the [`exception`](../../exception) package if the root command context, command, or runtime instance is nil.
 - Command names are normalized using `strings.TrimSpace(...)`. Empty names and duplicates are rejected.
-- Registered command execution will close `runtimeInstance.Scope()` and `runtimeInstance.Container()` after `Run(...)` and may return aggregated shutdown errors.
-  EOF
+- Registered command execution will close `runtimeInstance.Scope()` and `runtimeInstance.Container()` after `Run(...)` and may return aggregated shutdown errors. EOF

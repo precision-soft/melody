@@ -2,8 +2,7 @@
 
 All notable changes to `precision-soft/melody` will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
@@ -65,7 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `http/router_utility.go` — scheme detection unmaps an IPv4-mapped IPv6 peer (`::ffff:a.b.c.d`) before testing it against the trusted-proxy list, so a reverse proxy that presents itself in 4-in-6 form is trusted and its `X-Forwarded-Proto` honoured. Without the unmapping the peer matched no trusted entry, the header was ignored, and every session cookie set behind such a proxy silently lost its `Secure` attribute — the same unmapping the client-IP resolver already does.
 - `http/middleware/client_ip.go` — `NewForwardedClientIpResolver` strips a `host:port` suffix from the untrusted `X-Forwarded-For` hop it returns. Proxies such as IIS/ARR and Azure Application Gateway append the client's source port, so the resolver read `1.2.3.4:52122` as unparseable and fell back to the trusted proxy's own address, collapsing every client onto one per-IP rate-limit bucket.
 - `http/middleware/client_ip.go` — a trusted-proxy entry written in IPv4-mapped IPv6 form (an exact `::ffff:10.0.0.5`, or a `::ffff:.../104` prefix) again matches its unmapped host. The comparison unmaps both sides, so a dual-stack front proxy configured this way resumes hop-skipping instead of being treated as untrusted.
-- `http/middleware/rate_limit.go` — the `TokenBucket` and `SlidingWindow` limiters clamp a non-positive window and a non-positive rate/limit. A missing or zero window otherwise disabled rate limiting entirely — a silent fail-**open** — and a negative rate denied every request; both now fall back to a sane floor.
+- `http/middleware/rate_limit.go` — the `TokenBucket` and `SlidingWindow` limiters clamp a non-positive window and a non-positive rate/limit. A missing or zero window otherwise disabled rate limiting entirely — a silent fail- **open** — and a negative rate denied every request; both now fall back to a sane floor.
 - `http/middleware/rate_limit.go` — the default bucket key normalizes the request path exactly as the router does (trailing slashes trimmed), so `/login`, `/login/` and `/login//` share one bucket. Previously each trailing-slash variant keyed its own bucket, handing a caller a fresh allowance per spelling of the same route.
 - `httpclient/stream_response.go` — `StreamResponse.Body` and `Close` are mutex-guarded. A watchdog goroutine aborting an indefinite stream while the consumer read it raced the body field, and a `Close` that nilled it could leave the reader dereferencing a nil body; access is now serialized.
 - `http/middleware/compression.go` — the gzip middleware ties its compression pipe to the request context and releases it when the request unwinds. A middleware sitting outside compression that panicked after the handler returned skipped the pipe's normal close, leaking the writer goroutine and the original response body's file descriptor on every such request.
@@ -246,7 +245,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `http/accept.go` — `PrefersHtml` refactored to short-circuit when `text/html` is absent from the `Accept` header, skipping the `application/json` scan and reducing the common-case complexity from O(2N) to O(N); v1/v2/v3 implementations are now byte-identical apart from the melody import path
+- `http/accept.go` — `PrefersHtml` refactored to short-circuit when `text/html` is absent from the `Accept` header, skipping the `application/json` scan and reducing the common-case complexity from O (2N) to O (N); v1/v2/v3 implementations are now byte-identical apart from the melody import path
 - `logging/default_logger.go` — rename abbreviated loop variables `i` and `v` to `index` and `value` in `joinPairs`
 - `http/response.go` — rename abbreviated loop and parameter variables `r`, `b` to `runeChar`, `byteChar` in `asciiFallbackFilename`, `rfc5987EncodeFilename`, and `isRfc5987AttrChar`
 - `.example/` — flattened `domain/` and `infra/` layers into top-level packages (`cache/`, `cli/`, `entity/`, `event/`, `handler/`, `page/`, `presenter/`, `repository/`, `route/`, `security/`, `service/`, `subscriber/`, `url/`). Renamed `bootstrap/` to `config/`. Flat layout. Domain and in-memory repositories collapsed into a single `repository/` package

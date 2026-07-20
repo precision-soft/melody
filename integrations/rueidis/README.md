@@ -10,8 +10,7 @@ This integration provides:
 
 Entry point: [`NewProvider`](./provider.go)
 
-The provider reads parameters (address, username, password) using the names you pass to the constructor.
-If you provide a comma-separated list of addresses, each item is used as an init address.
+The provider reads parameters (address, username, password) using the names you pass to the constructor. If you provide a comma-separated list of addresses, each item is used as an init address.
 
 Optional configuration:
 
@@ -59,8 +58,7 @@ func main() {
 
 Entry point: [`cache.NewBackendService`](./cache/backend_service.go)
 
-`BackendService` is a singleton wrapper intended for service container registration.
-It holds a `Backend` (built with `context.Background()`) and implements [`cache/contract.Backend`](../../cache/contract/backend.go) by forwarding each call to the underlying `Backend`.
+`BackendService` is a singleton wrapper intended for service container registration. It holds a `Backend` (built with `context.Background()`) and implements [`cache/contract.Backend`](../../cache/contract/backend.go) by forwarding each call to the underlying `Backend`.
 
 Use `WithContext` to obtain a `*Backend` bound to a specific context. From there you can use either surface:
 
@@ -83,8 +81,7 @@ func main() {
 
 Helper: [`cache.BackendFromRuntime`](./cache/backend_service.go)
 
-Returns a `*Backend` bound to the runtime request context, following the same
-pattern as Melody's repository `FromRuntime` helpers:
+Returns a `*Backend` bound to the runtime request context, following the same pattern as Melody's repository `FromRuntime` helpers:
 
 ```go
 package main
@@ -99,8 +96,7 @@ func main() {
 
 ### Service registration
 
-Register the Redis client, cache backend service, and Melody's generic cache backend
-in your application bootstrap:
+Register the Redis client, cache backend service, and Melody's generic cache backend in your application bootstrap:
 
 ```go
 package main

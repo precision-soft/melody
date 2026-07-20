@@ -2,10 +2,19 @@
 
 All notable changes to `precision-soft/melody/integrations/bunorm/v3` will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [v3.4.0] - 2026-07-20 - Audit Entity Id Derivation and Transaction Binding
+
+### Added
+
+- `audit/storage.go` — public `WithDatabase(ctx, database)` binds a database or transaction handle onto the context so that `Recorder.Record{Insert,Update,Delete}` writes its audit entry through that handle. A caller running its own unit-of-work transaction records with `WithDatabase(ctx, tx)`, keeping the audit entry atomic with the data change without routing the write through a `Tracker` (which already binds its own transaction internally).
+
+### Changed
+
+- `audit/track.go` — `Insert`, `Update` and `Delete` derive the audit entry's `entityId` from the model's bun primary key when the caller passes an empty id, so an autoincrement key (unknown before the INSERT populates the model) is recorded with the real id instead of an empty string and an entity's history stays queryable by id. A caller-supplied id still wins; a composite key is joined with `:`; a model that is not a struct pointer, has no primary key, or reaches a primary-key field through a nil pointer yields no derived id.
 
 ## [v3.3.0] - 2026-07-17 - Encrypt Database Factory
 
@@ -110,7 +119,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dependencies pinned to `github.com/precision-soft/melody/v3` and other v3 module paths
 - README relative path links updated to reflect v3 directory structure
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.3.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.4.0...HEAD
+
+[v3.4.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.3.0...integrations/bunorm/v3.4.0
 
 [v3.3.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.2.0...integrations/bunorm/v3.3.0
 

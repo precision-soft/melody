@@ -1,8 +1,6 @@
 # encrypt — transparent column encryption for bun
 
-Go-native field encryption at rest for [bun](https://bun.uptrace.dev/) models, using **AES-256-GCM**.
-Designed as a **drop-in over existing plaintext tables**: deploy it, and existing plaintext rows keep
-reading while new writes are encrypted — no separate migration step required to start.
+Go-native field encryption at rest for [bun](https://bun.uptrace.dev/) models, using **AES-256-GCM**. Designed as a **drop-in over existing plaintext tables**: deploy it, and existing plaintext rows keep reading while new writes are encrypted — no separate migration step required to start.
 
 ## Encoding & drop-in behaviour
 
@@ -38,8 +36,7 @@ type User struct {
 
 `EncryptedString` masks its plaintext in `fmt`/`slog`/error output (`String`/`LogValue` return
 `<redacted>`); use an explicit `string(value)` conversion to read the real value. It **fails closed** —
-`Value`/`Scan` return an error if no cipher is configured, so a misconfigured app never silently writes
-plaintext into an "encrypted" column.
+`Value`/`Scan` return an error if no cipher is configured, so a misconfigured app never silently writes plaintext into an "encrypted" column.
 
 ## Key rotation
 
@@ -55,10 +52,7 @@ Bulk re-encrypt a table after rotating keys with the `melody:encrypt:database` c
 
 ## Multiple key compartments (multi-context binaries)
 
-`UseCipher` installs one process-wide default cipher — fine for one database, but a binary consolidating
-several apps should keep each context's keys in its own compartment instead of merging the key maps under
-a single current key. Install one named cipher per compartment and bind columns through a zero-size
-marker type:
+`UseCipher` installs one process-wide default cipher — fine for one database, but a binary consolidating several apps should keep each context's keys in its own compartment instead of merging the key maps under a single current key. Install one named cipher per compartment and bind columns through a zero-size marker type:
 
 ```go
 encrypt.UseCipherNamed("crm", encrypt.NewCipher(crmProvider))
@@ -76,18 +70,11 @@ type Customer struct {
 ```
 
 The marker parameterizes the generic column types `EncryptedStringFor[R]` and
-`EncryptedDeterministicStringFor[R]`, so the binding lives in the Go type — the only channel available,
-because `database/sql` gives `Value()`/`Scan()` no context. Compartments are isolated: the `crm` cipher
-can never decrypt a `billing` ciphertext, and key rotation inside one compartment keeps working through
-the key id embedded in each ciphertext. The plain `EncryptedString` keeps using the default cipher.
+`EncryptedDeterministicStringFor[R]`, so the binding lives in the Go type — the only channel available, because `database/sql` gives `Value()`/`Scan()` no context. Compartments are isolated: the `crm` cipher can never decrypt a `billing` ciphertext, and key rotation inside one compartment keeps working through the key id embedded in each ciphertext. The plain `EncryptedString` keeps using the default cipher.
 
-Two designs were considered and rejected: per-column key ids over one merged `KeyProvider` (the
-compartments stay merged — either context can decrypt the other's rows, exactly the isolation loss the
-feature exists to prevent) and a cipher per `bunorm.Manager` (a `driver.Valuer` has no manager context;
-bun query hooks would miss raw SQL paths).
+Two designs were considered and rejected: per-column key ids over one merged `KeyProvider` (the compartments stay merged — either context can decrypt the other's rows, exactly the isolation loss the feature exists to prevent) and a cipher per `bunorm.Manager` (a `driver.Valuer` has no manager context; bun query hooks would miss raw SQL paths).
 
-For the bulk command with several compartments, declare command contexts on the module — each gets its
-own `melody:encrypt:database:<name>`:
+For the bulk command with several compartments, declare command contexts on the module — each gets its own `melody:encrypt:database:<name>`:
 
 ```go
 app.RegisterModule(encrypt.NewModule(encrypt.ModuleConfig{
@@ -100,8 +87,7 @@ app.RegisterModule(encrypt.NewModule(encrypt.ModuleConfig{
 
 ## Searchable (deterministic) encryption
 
-Random nonces make a column un-queryable. For lookup columns, `EncryptedDeterministicString` derives the
-nonce from the plaintext, so equal plaintext yields equal ciphertext under a key:
+Random nonces make a column un-queryable. For lookup columns, `EncryptedDeterministicString` derives the nonce from the plaintext, so equal plaintext yields equal ciphertext under a key:
 
 ```go
 type User struct {
@@ -114,9 +100,7 @@ db.NewSelect().Model(&user).Where("email IN (?)", bun.In(candidates)).Scan(ctx)
 ```
 
 `CiphertextCandidates` returns `[][]byte` (not `[]string`) on purpose: the ciphertext marker carries `\0`
-glue bytes, and bun inlines a `string` argument into the SQL text through a formatter that drops embedded
-NUL bytes — which would corrupt the right-hand side and break the match. As `[][]byte` each candidate is
-emitted as an `X'…'` binary literal, so every byte survives and the lookup compares equal to the stored
+glue bytes, and bun inlines a `string` argument into the SQL text through a formatter that drops embedded NUL bytes — which would corrupt the right-hand side and break the match. As `[][]byte` each candidate is emitted as an `X'…'` binary literal, so every byte survives and the lookup compares equal to the stored
 `EncryptedDeterministicString` column (whose `Value()` is likewise a binary `[]byte`).
 
 > ⚠️ Deterministic mode **reveals plaintext equality** (equal values produce identical ciphertext). The
@@ -147,8 +131,7 @@ melody melody:encrypt:database --table=users --column=email --mode=reencrypt --t
 
 ## Register as a module
 
-The `melody:encrypt:database` command is **not** registered automatically — like every Melody command it
-has to be wired into the application. The integration ships a self-registering module so a single call does it:
+The `melody:encrypt:database` command is **not** registered automatically — like every Melody command it has to be wired into the application. The integration ships a self-registering module so a single call does it:
 
 ```go
 app.RegisterModule(encrypt.NewModule(encrypt.ModuleConfig{
@@ -157,11 +140,8 @@ app.RegisterModule(encrypt.NewModule(encrypt.ModuleConfig{
 }))
 ```
 
-This implements [`CliModule`](../../../../v3/application/contract/cli_module.go) and registers the command
-through `RegisterCliCommands`. Registration is skipped when `Database` or `Cipher` is nil. If you wire the
-application's `RegisterCliCommands` by hand instead, append the slice from `encrypt.Commands(database, cipher)`.
+This implements [`CliModule`](../../../../v3/application/contract/cli_module.go) and registers the command through `RegisterCliCommands`. Registration is skipped when `Database` or `Cipher` is nil. If you wire the application's `RegisterCliCommands` by hand instead, append the slice from `encrypt.Commands(database, cipher)`.
 
 ## Testing / dev
 
-`encrypt.NewFakeCipher()` is an identity cipher (no confidentiality) for tests and local development.
-Never install it in production.
+`encrypt.NewFakeCipher()` is an identity cipher (no confidentiality) for tests and local development. Never install it in production.

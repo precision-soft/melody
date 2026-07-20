@@ -2,8 +2,7 @@
 
 ## Supported versions
 
-Melody is developed as three parallel module lines. **v3 is the actively maintained version**; v1 and v2 are
-in maintenance mode but still receive security fixes.
+Melody is developed as three parallel module lines. **v3 is the actively maintained version**; v1 and v2 are in maintenance mode but still receive security fixes.
 
 | Version line                                 | Status                   | Security fixes |
 |----------------------------------------------|--------------------------|----------------|
@@ -11,8 +10,7 @@ in maintenance mode but still receive security fixes.
 | v2.x (`github.com/precision-soft/melody/v2`) | Maintenance (fixes only) | Yes            |
 | v1.x (`github.com/precision-soft/melody`)    | Maintenance (fixes only) | Yes            |
 
-Security fixes are applied to all three lines. Other bug fixes and all new features land on v3 only
-(see [`CONTRIBUTING.md`](./CONTRIBUTING.md)).
+Security fixes are applied to all three lines. Other bug fixes and all new features land on v3 only (see [`CONTRIBUTING.md`](./CONTRIBUTING.md)).
 
 ## Reporting a vulnerability
 
@@ -26,7 +24,7 @@ Please report vulnerabilities privately through GitHub's private vulnerability r
 
 Include in your report:
 
-- The affected version line(s) and tag/commit.
+- The affected version line (s) and tag/commit.
 - Go version and operating system.
 - A minimal reproduction (proof of concept where possible).
 - The observed impact and your assessment of severity.

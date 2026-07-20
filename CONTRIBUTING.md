@@ -12,12 +12,10 @@ Melody ships as three parallel Go module lines (see the [`README.md`](./README.m
 Rules for contributions:
 
 - **New features:** v3 only. Do not add features to v1 or v2.
-- **Bug fixes:** apply to v3. **Back-port to v1 and v2 only when the fix is security-related or a critical
-  correctness issue.** Other fixes stay on v3.
+- **Bug fixes:** apply to v3. **Back-port to v1 and v2 only when the fix is security-related or a critical correctness issue.** Other fixes stay on v3.
 - **Breaking changes:** instead of changing a v3 API in place, mark the old form with a `/* Deprecated: ... */`
   doc comment and keep it working; breaking changes accumulate toward a future v4.
-- The three versions are **intentionally duplicated** so each binds to one framework version. Do not try to
-  consolidate or de-duplicate them — such pull requests will not be accepted.
+- The three versions are **intentionally duplicated** so each binds to one framework version. Do not try to consolidate or de-duplicate them — such pull requests will not be accepted.
 
 When a change touches multiple version lines, keep each line's edit self-contained and update each line's
 `CHANGELOG.md`.
@@ -30,8 +28,7 @@ Prerequisites:
 - Make (optional; used only if you rely on repository scripts)
 - Docker (optional; used only for the repository development shell under [`.dev/`](./.dev/))
 
-The quickest way into the development shell is the [`./dc`](./dc) wrapper, which also installs the
-repository git hooks:
+The quickest way into the development shell is the [`./dc`](./dc) wrapper, which also installs the repository git hooks:
 
 ```bash
 ./dc up:minimal   # core development shell
@@ -43,12 +40,9 @@ Inside the shell, the convenience functions described under
 
 ### Overriding host ports
 
-The committed [`.dev/docker/.env`](./.dev/docker/.env) maps each container to a default host port
-(the HTTP load balancer to `80`, the example app to `8180`, and the `up:all` services to `5673`,
-`15673`, `6380`, `3307`, `4566`). Every one of these is a `${VAR:-default}` lookup, so you can move
-any of them without editing the committed file: create an uncommitted `.dev/docker/.env.local`
-(gitignored, loaded after `.env` so it wins) and set only the ports you need to change. This is the
-supported way to run the melody dev stack alongside other local stacks that already use those ports.
+The committed [`.dev/docker/.env`](./.dev/docker/.env) maps each container to a default host port (the HTTP load balancer to `80`, the example app to `8180`, and the `up:all` services to `5673`,
+`15673`, `6380`, `3307`, `4566`). Every one of these is a `${VAR:-default}` lookup, so you can move any of them without editing the committed file: create an uncommitted `.dev/docker/.env.local`
+(gitignored, loaded after `.env` so it wins) and set only the ports you need to change. This is the supported way to run the melody dev stack alongside other local stacks that already use those ports.
 
 ```bash
 # .dev/docker/.env.local  (gitignored, per-developer)
@@ -215,6 +209,5 @@ If the issue is security-sensitive, do not file it publicly; follow [`SECURITY.m
 
 ## Security and support
 
-- For security issues, follow [`SECURITY.md`](./SECURITY.md): report privately through GitHub's private
-  vulnerability reporting with a minimal reproduction and impact assessment. Do not open a public issue.
+- For security issues, follow [`SECURITY.md`](./SECURITY.md): report privately through GitHub's private vulnerability reporting with a minimal reproduction and impact assessment. Do not open a public issue.
 - For non-security questions, use the standard issue tracker and include context (version, steps, logs).

@@ -25,8 +25,7 @@ The [`logging`](../../logging) package provides Melody’s structured logging pr
 
 The log-level label output is customizable at application level via [`LoggingConfiguration`](../../logging/contract/config.go).
 
-By default all levels use their string names (`"debug"`, `"info"`, `"warning"`, `"error"`, `"emergency"`).
-To override, register a `LoggingConfiguration` from a [`ConfigModule`](../../application/contract/config_module.go):
+By default all levels use their string names (`"debug"`, `"info"`, `"warning"`, `"error"`, `"emergency"`). To override, register a `LoggingConfiguration` from a [`ConfigModule`](../../application/contract/config_module.go):
 
 ```go
 func (instance *appModule) RegisterConfigurations(registrar applicationcontract.ConfigRegistrar) {

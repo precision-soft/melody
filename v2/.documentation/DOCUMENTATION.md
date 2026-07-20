@@ -2,8 +2,7 @@
 
 This document defines the canonical documentation rules for the Melody repository.
 
-It is the only place where documentation-writing guidelines, checklists, and author instructions may live.
-User-facing documentation files must not contain meta-text, writing prompts, or author instructions.
+It is the only place where documentation-writing guidelines, checklists, and author instructions may live. User-facing documentation files must not contain meta-text, writing prompts, or author instructions.
 
 All documentation files are written in English.
 
@@ -84,8 +83,7 @@ These documents must be short, factual, and scoped strictly to the package and i
 
 ### Traceability (required)
 
-All references in Markdown must include **relative links** to the corresponding source code locations
-(files or directories) whenever the text references:
+All references in Markdown must include **relative links** to the corresponding source code locations (files or directories) whenever the text references:
 
 - a package or subpackage
 - a source file
@@ -101,8 +99,7 @@ This is required to prevent documentation–code drift and to make navigation de
 
 ### Code examples
 
-All code snippets and examples in Markdown must strictly follow the same code style rules as the Melody framework itself.
-Examples are treated as production code, not pseudo-code.
+All code snippets and examples in Markdown must strictly follow the same code style rules as the Melody framework itself. Examples are treated as production code, not pseudo-code.
 
 This includes (non-exhaustive):
 
@@ -140,13 +137,11 @@ Each package document must:
 
 ### Subpackages
 
-If the package contains relevant subpackages, include a “Subpackages” section listing all subpackages (no selective lists).
-For each subpackage, include a short description of its purpose and boundary (userland vs framework).
+If the package contains relevant subpackages, include a “Subpackages” section listing all subpackages (no selective lists). For each subpackage, include a short description of its purpose and boundary (userland vs framework).
 
 ### Configuration
 
-If the package has any user-configurable knobs (via `.env` artifacts, module methods, config structs, or container wiring),
-include a “Configuration” section describing:
+If the package has any user-configurable knobs (via `.env` artifacts, module methods, config structs, or container wiring), include a “Configuration” section describing:
 
 - Available options
 - Defaults
@@ -167,8 +162,7 @@ Internal-only packages must not include usage examples.
 
 ### API reference: semantic grouping
 
-Exported API must be grouped semantically (for example: Routing, Middleware, Url generation, Responses, Constraints, Stores).
-Avoid flat, undifferentiated lists.
+Exported API must be grouped semantically (for example: Routing, Middleware, Url generation, Responses, Constraints, Stores). Avoid flat, undifferentiated lists.
 
 Functions, types, and errors should be grouped consistently within the package’s domain.
 
@@ -182,8 +176,7 @@ If a feature can be both constructed and retrieved from container/scope/runtime,
 
 ### Userland API at the end (uniform)
 
-For packages that expose userland API, include a “Userland API” section placed at the end of the document.
-This section lists only the exports intended for userland use, grouped semantically.
+For packages that expose userland API, include a “Userland API” section placed at the end of the document. This section lists only the exports intended for userland use, grouped semantically.
 
 Internal-only packages must not include a “Userland API” section.
 

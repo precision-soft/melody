@@ -8,8 +8,7 @@ What does this change do, and why?
 - [ ] v2 (security / critical correctness fix only)
 - [ ] v1 (security / critical correctness fix only)
 
-New features go to **v3 only**. Back-port a fix to v1/v2 only when it is security-related or a critical
-correctness issue. See [`CONTRIBUTING.md`](../CONTRIBUTING.md#versioning-and-where-to-make-changes).
+New features go to **v3 only**. Back-port a fix to v1/v2 only when it is security-related or a critical correctness issue. See [`CONTRIBUTING.md`](../CONTRIBUTING.md#versioning-and-where-to-make-changes).
 
 # Checklist
 

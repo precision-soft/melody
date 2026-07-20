@@ -1,11 +1,8 @@
 # Melody integrations
 
-Integrations are optional modules that connect Melody to third-party systems (databases, Redis, message
-brokers, object storage, observability). Each integration is a **separate Go module** with its own version
-line, so you only pull in what you use.
+Integrations are optional modules that connect Melody to third-party systems (databases, Redis, message brokers, object storage, observability). Each integration is a **separate Go module** with its own version line, so you only pull in what you use.
 
-**v3 is the actively maintained line.** New integration features land on v3; v1/v2 bindings receive fixes
-only (see the repository [`CONTRIBUTING.md`](../CONTRIBUTING.md) and [`SECURITY.md`](../SECURITY.md)).
+**v3 is the actively maintained line.** New integration features land on v3; v1/v2 bindings receive fixes only (see the repository [`CONTRIBUTING.md`](../CONTRIBUTING.md) and [`SECURITY.md`](../SECURITY.md)).
 
 ## Available integrations
 
@@ -25,6 +22,4 @@ only (see the repository [`CONTRIBUTING.md`](../CONTRIBUTING.md) and [`SECURITY.
 
 ## Usage
 
-Each integration ships a `module.go` with `Register*` helpers that follow the same plug-and-play pattern, so
-wiring one looks the same as wiring any other. See each integration's README for import paths and a minimal
-example, and [`../v3/.example`](../v3/.example) for all of them wired together in one runnable application.
+Each integration ships a `module.go` with `Register*` helpers that follow the same plug-and-play pattern, so wiring one looks the same as wiring any other. See each integration's README for import paths and a minimal example, and [`../v3/.example`](../v3/.example) for all of them wired together in one runnable application.

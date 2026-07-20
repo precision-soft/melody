@@ -71,8 +71,7 @@ These services are typically registered by the application/kernel wiring. Userla
 ### Runtime parameter injection
 
 When a controller function declares a parameter of type
-[`runtimecontract.Runtime`](../../runtime/contract),
-Melody injects the current `runtimeInstance` directly (it is **not** resolved from the scope/container by type).
+[`runtimecontract.Runtime`](../../runtime/contract), Melody injects the current `runtimeInstance` directly (it is **not** resolved from the scope/container by type).
 
 This allows controllers to access request-scoped state via `runtimeInstance.Scope()` without registering `runtimecontract.Runtime` as a service.
 

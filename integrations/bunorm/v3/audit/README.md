@@ -5,10 +5,7 @@ models. Go-native equivalent of a Doctrine unit-of-work audit listener.
 
 ## Change set
 
-`ChangeSet(before, after)` diffs two struct values by `bun` column name, recording only changed fields
-(relations and `bun.BaseModel` are skipped; the exported fields of other embedded structs are flattened in,
-matching how bun promotes their columns). Sensitive fields are recorded as changed but masked
-to `<redacted>`:
+`ChangeSet(before, after)` diffs two struct values by `bun` column name, recording only changed fields (relations and `bun.BaseModel` are skipped; the exported fields of other embedded structs are flattened in, matching how bun promotes their columns). Sensitive fields are recorded as changed but masked to `<redacted>`:
 
 - tag a field `audit:"redact"`, or
 - type it `encrypt.EncryptedString` (auto-redacted).
@@ -19,8 +16,7 @@ Additional fields can be dropped globally or per entity via the `Registry` (see 
 
 ### Automatic capture (recommended)
 
-`Tracker` runs the bun write and records the matching entry in one call. Updates load the current row by
-primary key first, so the diff has true before-values:
+`Tracker` runs the bun write and records the matching entry in one call. Updates load the current row by primary key first, so the diff has true before-values:
 
 ```go
 recorder := audit.NewRecorder(auditDb, audit.DefaultTable)
@@ -30,12 +26,16 @@ ctx := audit.WithActor(ctx, "user-42")
 tracker.Update(ctx, "user", "42", &user) // SELECT old, UPDATE, record diff — all in one transaction
 ```
 
+Pass `""` as the id to let the `Tracker` derive it from the model's bun primary key after the write — the common case for an autoincrement key, unknown until the INSERT populates the model. A caller-supplied id still wins, and a composite key is joined with `:`.
+
 > bun exposes no unit-of-work changeset, and a global query hook cannot recover old values for an
 > arbitrary `UPDATE`, so automatic capture is driven through these helpers (writes go through the model
 > with a primary key). Each `Tracker` operation runs the data write and the audit-entry insert in a single
 > transaction (`RunInTx`): if the audit row fails to persist, the data change is rolled back, so a mutation
 > is never committed without its audit record. The lower-level `Recorder.Record{Insert,Update,Delete}` API
-> is available when you already hold before/after yourself.
+> is available when you already hold before/after yourself; wrap the context in `audit.WithDatabase(ctx, tx)`
+> to have those calls write the audit entry through your own unit-of-work transaction, keeping it atomic
+> with the data change.
 
 ### Actor
 

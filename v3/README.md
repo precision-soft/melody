@@ -61,15 +61,11 @@ curl http://localhost:8080/health
 # {"status":"ok"}
 ```
 
-For a realistic, fully wired application — modules, services, security, sessions, events, CLI commands, and
-every platform integration — see [`.example/README.md`](./.example/README.md).
+For a realistic, fully wired application — modules, services, security, sessions, events, CLI commands, and every platform integration — see [`.example/README.md`](./.example/README.md).
 
 ## Project status
 
-v3 is the actively maintained version. All new features land on v3; v1 and v2 are in maintenance mode and
-receive security and critical correctness fixes only. Within v3, APIs that need to change are first marked
-with a `/* Deprecated: ... */` doc comment and kept working, with a future v4 cut once enough breaking changes accumulate. See the
-repository [`README.md`](../README.md#versions--project-status) and [`CONTRIBUTING.md`](../CONTRIBUTING.md).
+v3 is the actively maintained version. All new features land on v3; v1 and v2 are in maintenance mode and receive security and critical correctness fixes only. Within v3, APIs that need to change are first marked with a `/* Deprecated: ... */` doc comment and kept working, with a future v4 cut once enough breaking changes accumulate. See the repository [`README.md`](../README.md#versions--project-status) and [`CONTRIBUTING.md`](../CONTRIBUTING.md).
 
 ## Why Melody
 
@@ -89,8 +85,7 @@ At a high level, a Melody application is assembled as follows:
 - **CLI** ([code](./cli/)) runs commands inside the same runtime/container infrastructure.
 - Cross-cutting packages are wired as services: [logging](./logging/), [event](./event/), [validation](./validation/), [cache](./cache/), [session](./session/), [security](./security/).
 
-The HTTP and CLI entrypoints share the same runtime and container; boot wiring happens once, then each
-request or command runs in its own scope:
+The HTTP and CLI entrypoints share the same runtime and container; boot wiring happens once, then each request or command runs in its own scope:
 
 ```
   Application                  boot order:

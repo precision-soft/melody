@@ -9,6 +9,20 @@ import (
     "testing"
 )
 
+func TestWithDatabase_BindsHandleForRecorder(t *testing.T) {
+    bound := newTestDatabase()
+    fallback := newTestDatabase()
+
+    ctx := WithDatabase(context.Background(), bound)
+    if resolved := databaseFromContext(ctx, fallback); bound != resolved {
+        t.Fatalf("a bound handle must resolve back, got the fallback")
+    }
+
+    if resolved := databaseFromContext(context.Background(), fallback); fallback != resolved {
+        t.Fatalf("an unbound context must resolve the fallback")
+    }
+}
+
 func TestFileStorage_AppendsJsonLines(t *testing.T) {
     path := filepath.Join(t.TempDir(), "audit.log")
     storage := NewFileStorage(path)

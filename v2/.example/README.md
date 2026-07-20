@@ -247,11 +247,11 @@ go build -tags "melody_static_embedded" -o example-app .
 Ship:
 
 - `example-app` binary
-- `.env` file(s)
+- `.env` file (s)
 
 Required at runtime:
 
-- `.env` file(s)
+- `.env` file (s)
 
 Not required:
 
@@ -293,7 +293,7 @@ go build -o example-app .
 Ship:
 
 - `example-app` binary
-- `.env` file(s)
+- `.env` file (s)
 - [`public/`](./public/) directory
 
 Required at runtime:

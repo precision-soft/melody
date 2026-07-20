@@ -16,6 +16,14 @@ type Storage interface {
 
 type databaseContextKey struct{}
 
+/* WithDatabase binds a database/transaction handle onto the context so a Recorder's Record{Insert,
+   Update,Delete} writes its entry through it — typically the caller's already-open transaction — keeping
+   the audit entry atomic with the data change without forcing the write through the Tracker. A caller
+   that runs its own write inside a unit-of-work transaction records with WithDatabase(ctx, tx). */
+func WithDatabase(ctx context.Context, database bun.IDB) context.Context {
+    return withDatabase(ctx, database)
+}
+
 func withDatabase(ctx context.Context, database bun.IDB) context.Context {
     return context.WithValue(ctx, databaseContextKey{}, database)
 }

@@ -2,8 +2,7 @@
 
 All notable changes to `precision-soft/melody/v2` will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
@@ -66,7 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `http/profiling_kernel.go` — the profiling listener emits the `http.request.profile` event whenever a request carries a request context, instead of skipping a request whose `Attributes()` is nil. A nil attribute bag is a normal state, not an absent context, so those requests silently went unprofiled.
 - `http/middleware/client_ip.go` — `NewForwardedClientIpResolver` strips a `host:port` suffix from the untrusted `X-Forwarded-For` hop it returns. Proxies such as IIS/ARR and Azure Application Gateway append the client's source port, so the resolver read `1.2.3.4:52122` as unparseable and fell back to the trusted proxy's own address, collapsing every client onto one per-IP rate-limit bucket.
 - `http/middleware/client_ip.go` — a trusted-proxy entry written in IPv4-mapped IPv6 form (an exact `::ffff:10.0.0.5`, or a `::ffff:.../104` prefix) again matches its unmapped host. The comparison unmaps both sides, so a dual-stack front proxy configured this way resumes hop-skipping instead of being treated as untrusted.
-- `http/middleware/rate_limit.go` — the `TokenBucket` and `SlidingWindow` limiters clamp a non-positive window and a non-positive rate/limit. A missing or zero window otherwise disabled rate limiting entirely — a silent fail-**open** — and a negative rate denied every request; both now fall back to a sane floor.
+- `http/middleware/rate_limit.go` — the `TokenBucket` and `SlidingWindow` limiters clamp a non-positive window and a non-positive rate/limit. A missing or zero window otherwise disabled rate limiting entirely — a silent fail- **open** — and a negative rate denied every request; both now fall back to a sane floor.
 - `http/middleware/rate_limit.go` — the default bucket key normalizes the request path exactly as the router does (trailing slashes trimmed), so `/login`, `/login/` and `/login//` share one bucket. Previously each trailing-slash variant keyed its own bucket, handing a caller a fresh allowance per spelling of the same route.
 - `httpclient/stream_response.go` — `StreamResponse.Body` and `Close` are mutex-guarded. A watchdog goroutine aborting an indefinite stream while the consumer read it raced the body field, and a `Close` that nilled it could leave the reader dereferencing a nil body; access is now serialized.
 - `http/middleware/compression.go` — the gzip middleware ties its compression pipe to the request context and releases it when the request unwinds. A middleware sitting outside compression that panicked after the handler returned skipped the pipe's normal close, leaking the writer goroutine and the original response body's file descriptor on every such request.

@@ -67,9 +67,7 @@ curl http://localhost:8080/health
 
 ### Next steps
 
-- Read the [example application](./v3/.example/README.md) — a realistic catalog app wiring modules,
-  services, security, sessions, events, CLI commands, and every platform integration. Run the whole
-  showcase (example + every backing service) with one command from the repository root:
+- Read the [example application](./v3/.example/README.md) — a realistic catalog app wiring modules, services, security, sessions, events, CLI commands, and every platform integration. Run the whole showcase (example + every backing service) with one command from the repository root:
 
   ```bash
   ./dc up:all --build
@@ -108,18 +106,14 @@ Melody ships as three parallel Go module lines:
 | v2           | `github.com/precision-soft/melody/v2` ([`./v2/`](./v2/)) | Maintenance — fixes only.                                    |
 | v1           | `github.com/precision-soft/melody` (repository root)     | Maintenance — fixes only.                                    |
 
-Three versions exist for historical reasons: earlier major versions introduced changes that were not
-backwards compatible, and each was maintained in parallel. **Going forward, all new features land on v3 only.**
+Three versions exist for historical reasons: earlier major versions introduced changes that were not backwards compatible, and each was maintained in parallel. **Going forward, all new features land on v3 only.**
 v1 and v2 receive security and critical correctness fixes (see [`SECURITY.md`](./SECURITY.md) and
 [`CONTRIBUTING.md`](./CONTRIBUTING.md)).
 
 Within v3, evolution follows the standard Go approach: APIs that need to change are first marked with a
-`/* Deprecated: ... */` doc comment and kept working, and a future **v4** will be cut once enough breaking
-changes have accumulated.
+`/* Deprecated: ... */` doc comment and kept working, and a future **v4** will be cut once enough breaking changes have accumulated.
 
-The three versions are intentionally **self-contained duplicates** rather than shared code, so that every
-module and integration binds to exactly one framework version. **This duplication is by design and is not
-to be consolidated.**
+The three versions are intentionally **self-contained duplicates** rather than shared code, so that every module and integration binds to exactly one framework version. **This duplication is by design and is not to be consolidated.**
 
 ## Extensibility
 
@@ -135,11 +129,9 @@ Some APIs are intentionally closed to keep behavior deterministic and to avoid d
 
 ## Integrations
 
-Optional modules connect Melody to third-party systems (databases, Redis, message brokers, object storage,
-observability). Each is a separate Go module, so you only pull in what you use.
+Optional modules connect Melody to third-party systems (databases, Redis, message brokers, object storage, observability). Each is a separate Go module, so you only pull in what you use.
 
-See the [integrations index](./integrations/) for the full list, supported version lines, and per-integration
-documentation.
+See the [integrations index](./integrations/) for the full list, supported version lines, and per-integration documentation.
 
 ## Build tags
 
