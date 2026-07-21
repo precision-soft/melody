@@ -17,6 +17,14 @@ func (instance *spyParameterRegistrar) RegisterParameter(name string, value any)
     instance.names = append(instance.names, name)
 }
 
+func (instance *spyParameterRegistrar) RegisterSecretParameter(name string, value any) {
+    instance.names = append(instance.names, name)
+}
+
+/* marking an existing parameter registers nothing, so the recorded names stay the set the module contributed */
+func (instance *spyParameterRegistrar) MarkParameterSecret(name string) {
+}
+
 func TestModule_NameAndDescription(t *testing.T) {
     module := NewModule(ModuleConfig{})
 

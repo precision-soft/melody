@@ -52,6 +52,18 @@ func (instance *stubParameter) Int() (int, error) {
     return 0, errors.New("not implemented")
 }
 
+func (instance *stubParameter) IsSecret() bool {
+    return false
+}
+
+func (instance *stubParameter) Float() (float64, error) {
+    return 0, errors.New("not implemented")
+}
+
+func (instance *stubParameter) Duration() (time.Duration, error) {
+    return 0, errors.New("not implemented")
+}
+
 type stubConfiguration struct {
     parameters map[string]string
 }
@@ -70,6 +82,13 @@ func (instance *stubConfiguration) MustGet(name string) configcontract.Parameter
 }
 
 func (instance *stubConfiguration) RegisterRuntime(name string, value any) {
+}
+
+func (instance *stubConfiguration) RegisterRuntimeSecret(name string, value any) {
+}
+
+func (instance *stubConfiguration) MarkSecret(name string) bool {
+    return false
 }
 
 func (instance *stubConfiguration) Resolve() error {

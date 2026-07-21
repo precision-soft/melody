@@ -15,12 +15,30 @@ func (instance *spyServiceRegistrar) RegisterService(serviceName string, provide
     instance.names = append(instance.names, serviceName)
 }
 
+func (instance *spyServiceRegistrar) Register(serviceName string, provider any, options ...containercontract.RegisterOption) error {
+    instance.RegisterService(serviceName, provider, options...)
+
+    return nil
+}
+
+func (instance *spyServiceRegistrar) MustRegister(serviceName string, provider any, options ...containercontract.RegisterOption) {
+    instance.RegisterService(serviceName, provider, options...)
+}
+
 type spyParameterRegistrar struct {
     names []string
 }
 
 func (instance *spyParameterRegistrar) RegisterParameter(name string, value any) {
     instance.names = append(instance.names, name)
+}
+
+func (instance *spyParameterRegistrar) RegisterSecretParameter(name string, value any) {
+    instance.names = append(instance.names, name)
+}
+
+/* marking an existing parameter registers nothing, so the recorded names stay the set the module contributed */
+func (instance *spyParameterRegistrar) MarkParameterSecret(name string) {
 }
 
 func containsName(names []string, want string) bool {
