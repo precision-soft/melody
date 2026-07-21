@@ -2,14 +2,12 @@ package config
 
 import (
     "github.com/precision-soft/melody/v3/.example/cache"
-    "github.com/precision-soft/melody/v3/.example/repository"
-    "github.com/precision-soft/melody/v3/.example/service"
+    "github.com/precision-soft/melody/v3/.example/generated"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodycache "github.com/precision-soft/melody/v3/cache"
     melodycachecontract "github.com/precision-soft/melody/v3/cache/contract"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
-    melodyevent "github.com/precision-soft/melody/v3/event"
     melodymailer "github.com/precision-soft/melody/v3/mailer"
     melodymailercontract "github.com/precision-soft/melody/v3/mailer/contract"
     melodymessagebus "github.com/precision-soft/melody/v3/messagebus"
@@ -82,77 +80,8 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
     instance.registerLockerService(registrar)
     instance.registerDatabaseService(registrar)
 
-    registrar.RegisterService(
-        repository.ServiceCategoryRepository,
-        repository.CategoryRepositoryProvider(),
-    )
-
-    registrar.RegisterService(
-        repository.ServiceCurrencyRepository,
-        repository.CurrencyRepositoryProvider(),
-    )
-
-    registrar.RegisterService(
-        repository.ServiceProductRepository,
-        repository.ProductRepositoryProvider(),
-    )
-
-    registrar.RegisterService(
-        repository.ServiceUserRepository,
-        repository.UserRepositoryProvider(),
-    )
-
-    registrar.RegisterService(
-        service.ServiceCategoryService,
-        func(resolver melodycontainercontract.Resolver) (*service.CategoryService, error) {
-            categoryRepository := repository.MustGetCategoryRepository(resolver)
-            cacheInstance := melodycache.CacheMustFromResolver(resolver)
-            eventDispatcher := melodyevent.EventDispatcherMustFromResolver(resolver)
-
-            return service.NewCategoryService(categoryRepository, cacheInstance, eventDispatcher), nil
-        },
-    )
-
-    registrar.RegisterService(
-        service.ServiceCurrencyService,
-        func(resolver melodycontainercontract.Resolver) (*service.CurrencyService, error) {
-            currencyRepository := repository.MustGetCurrencyRepository(resolver)
-            cacheInstance := melodycache.CacheMustFromResolver(resolver)
-            eventDispatcher := melodyevent.EventDispatcherMustFromResolver(resolver)
-
-            return service.NewCurrencyService(currencyRepository, cacheInstance, eventDispatcher), nil
-        },
-    )
-
-    registrar.RegisterService(
-        service.ServiceUserService,
-        func(resolver melodycontainercontract.Resolver) (*service.UserService, error) {
-            userRepository := repository.MustGetUserRepository(resolver)
-            cacheInstance := melodycache.CacheMustFromResolver(resolver)
-            eventDispatcher := melodyevent.EventDispatcherMustFromResolver(resolver)
-
-            return service.NewUserService(userRepository, cacheInstance, eventDispatcher), nil
-        },
-    )
-
-    registrar.RegisterService(
-        service.ServiceProductService,
-        func(resolver melodycontainercontract.Resolver) (*service.ProductService, error) {
-            productRepository := repository.MustGetProductRepository(resolver)
-            categoryService := service.MustGetCategoryService(resolver)
-            currencyService := service.MustGetCurrencyService(resolver)
-            cacheInstance := melodycache.CacheMustFromResolver(resolver)
-            eventDispatcher := melodyevent.EventDispatcherMustFromResolver(resolver)
-
-            return service.NewProductService(
-                productRepository,
-                categoryService,
-                currencyService,
-                cacheInstance,
-                eventDispatcher,
-            ), nil
-        },
-    )
+    /* @info the repositories, the domain services and the reporting services are not registered here: melody:wiring:generate scans the packages declared in NewWiringBindSet, resolves every constructor argument that is a service from the container and every scalar from the parameter it is bound to, and renders the registrations below. Adding one is a matter of writing the constructor and regenerating. Regenerate with `go run . melody:wiring:generate --package generated --function RegisterGeneratedServices --out generated/wiring_gen.go`. */
+    generated.RegisterGeneratedServices(registrar)
 }
 
 var _ melodyapplicationcontract.ServiceModule = (*Module)(nil)

@@ -20,6 +20,17 @@ func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.P
     registrar.RegisterParameter("app.max_items_per_page", "%APP_MAX_ITEMS_PER_PAGE%")
     registrar.RegisterParameter("app.catalog_title", "%APP_CATALOG_TITLE%")
     registrar.RegisterParameter("app.cron.product_user", "%APP_CRON_PRODUCT_USER%")
+
+    /* @info the reporting interval is optional in the environment: the default processor falls back to the parameter below when APP_REPORTING_REFRESH_INTERVAL is unset, which is how a deployment overrides it without every environment having to define it */
+    registrar.RegisterParameter("app.reporting.default_refresh_interval", "5m")
+    registrar.RegisterParameter(
+        "app.reporting.refresh_interval",
+        "%env(default:app.reporting.default_refresh_interval:APP_REPORTING_REFRESH_INTERVAL)%",
+    )
+
+    /* @info the credentials melody registers automatically from .env are marked here, so melody:debug:parameters redacts them along with anything whose template reads them */
+    registrar.MarkParameterSecret("MYSQL_PASSWORD")
+    registrar.MarkParameterSecret("S3_SECRET_KEY")
 }
 
 var _ melodyapplicationcontract.ParameterModule = (*Module)(nil)

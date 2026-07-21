@@ -15,8 +15,11 @@ import (
 )
 
 var (
-    envPlaceholderPattern       = regexp.MustCompile(`%env\(([A-Za-z_][A-Za-z0-9_]*)\)%`)
+    /* the optional "default:<fallback>:" prefix marks an environment key whose absence is tolerated: "%env(default::KEY)%" falls back to the empty string and "%env(default:some.parameter:KEY)%" falls back to another parameter. Without the prefix an undefined key stays a hard error, so a plain "%env(KEY)%" never silently degrades to empty. */
+    envPlaceholderPattern       = regexp.MustCompile(`%env\((default:([A-Za-z_][A-Za-z0-9_.]*)?:)?([A-Za-z_][A-Za-z0-9_]*)\)%`)
     parameterPlaceholderPattern = regexp.MustCompile(`%([A-Za-z_][A-Za-z0-9_.]+)%`)
+    /* matches anything shaped like an environment placeholder so that a spelling the strict pattern rejects (a "default:" prefix with a single colon, an invalid key) is reported instead of surviving as literal text */
+    envPlaceholderShapePattern = regexp.MustCompile(`%env\([^)]*\)%`)
 )
 
 const (
@@ -155,6 +158,15 @@ func (instance *Configuration) MustGet(name string) configcontract.Parameter {
 }
 
 func (instance *Configuration) RegisterRuntime(name string, value any) {
+    instance.registerRuntimeParameter(name, value, false)
+}
+
+/* RegisterRuntimeSecret registers a parameter that holds a credential, so that the commands which render the configuration redact it. The value is stored and resolved like any other: the marking governs display, not storage, and it travels to every parameter whose template reads this one. */
+func (instance *Configuration) RegisterRuntimeSecret(name string, value any) {
+    instance.registerRuntimeParameter(name, value, true)
+}
+
+func (instance *Configuration) registerRuntimeParameter(name string, value any, isSecret bool) {
     if "" == name {
         exception.Panic(
             exception.NewError("cannot register parameters with empty names", nil, nil),
@@ -190,7 +202,27 @@ func (instance *Configuration) RegisterRuntime(name string, value any) {
         )
     }
 
-    instance.parameters[name] = NewParameter("", value, value, false)
+    parameter := NewParameter("", value, value, false)
+    parameter.isSecret = isSecret
+
+    instance.parameters[name] = parameter
+}
+
+/* MarkSecret marks an already registered parameter as holding a credential. The parameters melody registers automatically from the .env artifacts are the ones most likely to hold one, and they exist before any module runs, so marking them is separate from declaring them.
+
+An absent parameter is left alone rather than reported: an environment key is legitimately undefined in some environments, and refusing to boot over one would make the marking unusable exactly where it matters. The secret column of melody:debug:parameters is what confirms a marking took effect. */
+func (instance *Configuration) MarkSecret(name string) bool {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    parameter := instance.getInternalParameter(name)
+    if nil == parameter {
+        return false
+    }
+
+    parameter.isSecret = true
+
+    return true
 }
 
 func (instance *Configuration) Names() []string {

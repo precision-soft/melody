@@ -7,6 +7,10 @@ type Configuration interface {
 
     RegisterRuntime(name string, value any)
 
+    RegisterRuntimeSecret(name string, value any)
+
+    MarkSecret(name string) bool
+
     Resolve() error
 
     Cli() CliConfiguration

@@ -20,6 +20,7 @@ const (
     ServiceUserService = "service-example-user-service"
 )
 
+//melody:service ServiceUserService
 func NewUserService(
     userRepository repository.UserRepository,
     cacheInstance melodycachecontract.Cache,

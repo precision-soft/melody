@@ -1,6 +1,7 @@
 package config
 
 import (
+    "errors"
     "fmt"
     "strings"
     "testing"
@@ -117,5 +118,205 @@ func assertContextOmitsSecret(t *testing.T, context map[string]any, secret strin
 
     if true == strings.Contains(fmt.Sprintf("%v", context), secret) {
         t.Fatalf("error context leaked the inline credential: %v", context)
+    }
+}
+
+func TestEnvPlaceholderPattern_AcceptsDefaultProcessorForms(t *testing.T) {
+    if false == envPlaceholderPattern.MatchString("%env(default::AWS_ENDPOINT_URL)%") {
+        t.Fatalf("expected pattern to accept the empty fallback form")
+    }
+
+    if false == envPlaceholderPattern.MatchString("%env(default:app.fallback:AWS_ENDPOINT_URL)%") {
+        t.Fatalf("expected pattern to accept the parameter fallback form")
+    }
+}
+
+/* @info a single colon is the most likely misspelling of the default processor; the strict pattern cannot match it, so without the shape guard it would survive resolution as literal text and reach the service as the string "%env(default:KEY)%" */
+func TestResolveSinglePass_MalformedEnvPlaceholderIsReported(t *testing.T) {
+    configuration := &Configuration{
+        environment: &Environment{
+            values: map[string]string{},
+        },
+        parameters: ParameterMap{},
+    }
+
+    _, err := configuration.resolveWithTemplates(
+        "%env(default:AWS_ENDPOINT_URL)%",
+        "aws.endpoint_url",
+        make(map[string]bool),
+    )
+    if nil == err {
+        t.Fatalf("expected a malformed placeholder error")
+    }
+
+    context := contextOfError(t, err)
+
+    if "%env(default:AWS_ENDPOINT_URL)%" != context["placeholder"] {
+        t.Fatalf("expected the offending placeholder in the context, got %v", context["placeholder"])
+    }
+}
+
+func TestResolveWithTemplates_DefaultProcessorYieldsEmptyStringForUndefinedKey(t *testing.T) {
+    configuration := &Configuration{
+        environment: &Environment{
+            values: map[string]string{},
+        },
+        parameters: ParameterMap{},
+    }
+
+    value, err := configuration.resolveWithTemplates(
+        "%env(default::AWS_ENDPOINT_URL)%",
+        "aws.endpoint_url",
+        make(map[string]bool),
+    )
+    if nil != err {
+        t.Fatalf("expected the undefined key to be tolerated, got %v", err)
+    }
+
+    if "" != value {
+        t.Fatalf("expected an empty value, got %q", value)
+    }
+}
+
+func TestResolveWithTemplates_DefaultProcessorFallsBackToParameter(t *testing.T) {
+    configuration := &Configuration{
+        environment: &Environment{
+            values: map[string]string{},
+        },
+        parameters: ParameterMap{
+            "aws.default_endpoint": NewParameter("", "http://localstack:4566", "http://localstack:4566", false),
+        },
+    }
+
+    value, err := configuration.resolveWithTemplates(
+        "%env(default:aws.default_endpoint:AWS_ENDPOINT_URL)%",
+        "aws.endpoint_url",
+        make(map[string]bool),
+    )
+    if nil != err {
+        t.Fatalf("expected the fallback parameter to resolve, got %v", err)
+    }
+
+    if "http://localstack:4566" != value {
+        t.Fatalf("expected the fallback parameter value, got %q", value)
+    }
+}
+
+func TestResolveWithTemplates_DefaultProcessorPrefersDefinedEnvironmentValue(t *testing.T) {
+    configuration := &Configuration{
+        environment: &Environment{
+            values: map[string]string{
+                "AWS_ENDPOINT_URL": "https://s3.eu-central-1.amazonaws.com",
+            },
+        },
+        parameters: ParameterMap{
+            "aws.default_endpoint": NewParameter("", "http://localstack:4566", "http://localstack:4566", false),
+        },
+    }
+
+    value, err := configuration.resolveWithTemplates(
+        "%env(default:aws.default_endpoint:AWS_ENDPOINT_URL)%",
+        "aws.endpoint_url",
+        make(map[string]bool),
+    )
+    if nil != err {
+        t.Fatalf("expected resolution to succeed, got %v", err)
+    }
+
+    if "https://s3.eu-central-1.amazonaws.com" != value {
+        t.Fatalf("expected the environment value to win over the fallback, got %q", value)
+    }
+}
+
+/* @info the default processor must stay opt-in: a plain placeholder that silently degraded to an empty string would boot the application with an unset credential instead of refusing to start */
+func TestResolveWithTemplates_PlainPlaceholderStillFailsForUndefinedKey(t *testing.T) {
+    configuration := &Configuration{
+        environment: &Environment{
+            values: map[string]string{},
+        },
+        parameters: ParameterMap{},
+    }
+
+    _, err := configuration.resolveWithTemplates(
+        "%env(AWS_ENDPOINT_URL)%",
+        "aws.endpoint_url",
+        make(map[string]bool),
+    )
+    if nil == err {
+        t.Fatalf("expected an undefined environment key error")
+    }
+
+    context := contextOfError(t, err)
+
+    if "AWS_ENDPOINT_URL" != context["environmentKey"] {
+        t.Fatalf("expected the offending environment key in the context, got %v", context["environmentKey"])
+    }
+}
+
+/* @info the fallback is handed back as a parameter placeholder, so an undefined fallback must surface the parameter branch error rather than resolve to the literal text */
+func TestResolveWithTemplates_DefaultProcessorReportsUndefinedFallbackParameter(t *testing.T) {
+    configuration := &Configuration{
+        environment: &Environment{
+            values: map[string]string{},
+        },
+        parameters: ParameterMap{},
+    }
+
+    _, err := configuration.resolveWithTemplates(
+        "%env(default:aws.missing_fallback:AWS_ENDPOINT_URL)%",
+        "aws.endpoint_url",
+        make(map[string]bool),
+    )
+    if nil == err {
+        t.Fatalf("expected an undefined parameter key error")
+    }
+
+    context := contextOfError(t, err)
+
+    if "aws.missing_fallback" != context["parameterKey"] {
+        t.Fatalf("expected the offending fallback key in the context, got %v", context["parameterKey"])
+    }
+}
+
+/* @info a value holding a literal percent — a generated password is the common case — is written with the percent doubled; without the escape it reads as a parameter reference and the boot fails, which is what the resolution and validation messages have to point at */
+func TestConfiguration_EnvironmentValueWithLiteralPercentIsWrittenDoubled(t *testing.T) {
+    configuration, newConfigurationErr := NewConfiguration(
+        &Environment{
+            values: map[string]string{
+                "DATABASE_PASSWORD": "pa%%ss%%word",
+            },
+        },
+        "/srv/app",
+    )
+    if nil != newConfigurationErr {
+        t.Fatalf("expected the escaped value to resolve, got %v", newConfigurationErr)
+    }
+
+    if "pa%ss%word" != configuration.Get("DATABASE_PASSWORD").String() {
+        t.Fatalf("unexpected resolved value %q", configuration.Get("DATABASE_PASSWORD").String())
+    }
+}
+
+func TestConfiguration_UnescapedLiteralPercentFailsWithAnActionableMessage(t *testing.T) {
+    _, newConfigurationErr := NewConfiguration(
+        &Environment{
+            values: map[string]string{
+                "DATABASE_PASSWORD": "pa%ss%word",
+            },
+        },
+        "/srv/app",
+    )
+    if nil == newConfigurationErr {
+        t.Fatalf("expected the unescaped value to fail the boot")
+    }
+
+    /* the boot error wraps the resolution failure, and Error() reports only its own message, so the actionable one is found by walking the cause chain */
+    messages := ""
+    for err := newConfigurationErr; nil != err; err = errors.Unwrap(err) {
+        messages = messages + err.Error() + "\n"
+    }
+
+    if false == strings.Contains(messages, "%%") {
+        t.Fatalf("expected the cause chain to point at the escape, got %s", messages)
     }
 }

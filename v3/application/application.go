@@ -91,6 +91,39 @@ func (instance *Application) RegisterParameter(
     name string,
     value any,
 ) {
+    instance.registerParameter(name, value, false)
+}
+
+/* RegisterSecretParameter declares a parameter holding a credential. It is registered and resolved like any other; the marking only keeps it, and every parameter whose template reads it, out of the rendered configuration. */
+func (instance *Application) RegisterSecretParameter(
+    name string,
+    value any,
+) {
+    instance.registerParameter(name, value, true)
+}
+
+/* MarkParameterSecret marks a parameter that already exists — typically one melody registered automatically from the .env artifacts — as holding a credential. A name that matches nothing is left alone, since an environment key is legitimately undefined in some environments. */
+func (instance *Application) MarkParameterSecret(name string) {
+    if true == instance.booted {
+        exception.Panic(
+            exception.NewError(
+                "cannot mark a parameter secret after application boot",
+                exceptioncontract.Context{
+                    "parameterName": name,
+                },
+                nil,
+            ),
+        )
+    }
+
+    instance.configuration.MarkSecret(name)
+}
+
+func (instance *Application) registerParameter(
+    name string,
+    value any,
+    isSecret bool,
+) {
     if true == instance.booted {
         exception.Panic(
             exception.NewError(
@@ -106,6 +139,12 @@ func (instance *Application) RegisterParameter(
     /* a duplicate is recorded for the aggregated boot report instead of panicking one at a time; the first registration wins until the guaranteed panic ends the boot */
     if "" != name && nil != instance.configuration.Get(name) {
         instance.recordBootCollision(bootCollisionKindParameter, name, 1)
+        return
+    }
+
+    if true == isSecret {
+        instance.configuration.RegisterRuntimeSecret(name, value)
+
         return
     }
 

@@ -35,27 +35,47 @@ func (instance *Application) RegisterService(
     provider any,
     options ...containercontract.RegisterOption,
 ) {
+    instance.MustRegister(serviceName, provider, options...)
+}
+
+/* Register makes the application a container registrar, so a module may reach for the container's own registration helpers — container.MustRegisterType and the generated wiring built on it — instead of only the name-based RegisterService. A duplicate is absorbed into the aggregated boot report rather than returned, so a module that registers a service the framework already provides reports it the same way whichever entry point it used. */
+func (instance *Application) Register(
+    serviceName string,
+    provider any,
+    options ...containercontract.RegisterOption,
+) error {
     if true == instance.booted {
         exception.Panic(exception.NewError("may not register services after boot", nil, nil))
     }
 
     registerErr := instance.kernel.ServiceContainer().Register(serviceName, provider, options...)
     if nil == registerErr {
-        return
+        return nil
     }
 
     /* duplicates are recorded for the aggregated boot report instead of panicking one at a time (the first registration wins until the guaranteed panic ends the boot); any other registration failure stays fail-fast */
     if true == errors.Is(registerErr, container.ErrServiceIdAlreadyRegistered) {
         instance.recordBootCollision(bootCollisionKindService, serviceName, 1)
-        return
+        return nil
     }
 
     if true == errors.Is(registerErr, container.ErrServiceTypeAlreadyRegistered) {
         instance.recordBootCollision(bootCollisionKindServiceType, serviceName, 1)
-        return
+        return nil
     }
 
-    exception.Panic(exception.FromError(registerErr))
+    return registerErr
+}
+
+func (instance *Application) MustRegister(
+    serviceName string,
+    provider any,
+    options ...containercontract.RegisterOption,
+) {
+    registerErr := instance.Register(serviceName, provider, options...)
+    if nil != registerErr {
+        exception.Panic(exception.FromError(registerErr))
+    }
 }
 
 func (instance *Application) bootContainer() {

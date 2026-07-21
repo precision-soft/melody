@@ -128,20 +128,42 @@ func (instance *Configuration) resolveSinglePass(
     resolved := value
     var err error
 
+    for _, candidate := range envPlaceholderShapePattern.FindAllString(resolved, -1) {
+        if true == envPlaceholderPattern.MatchString(candidate) {
+            continue
+        }
+
+        /* @important the placeholder text names an environment key, never its value, so it is safe to carry into the error context */
+        return "", exception.NewError(
+            "malformed environment placeholder in template; the only supported form besides %env(KEY)% is %env(default:<fallback parameter>:KEY)%, and a type cast belongs on the typed accessor (Bool, Int, Float, Duration) rather than in the placeholder",
+            map[string]any{
+                "parameter":   currentKey,
+                "placeholder": candidate,
+            },
+            nil,
+        )
+    }
+
     resolved = envPlaceholderPattern.ReplaceAllStringFunc(resolved, func(match string) string {
         if nil != err {
             return match
         }
 
         submatches := envPlaceholderPattern.FindStringSubmatch(match)
-        if 2 > len(submatches) {
+        if 4 > len(submatches) {
             return match
         }
 
-        environmentKey := submatches[1]
+        hasDefaultProcessor := "" != submatches[1]
+        fallbackParameterKey := submatches[2]
+        environmentKey := submatches[3]
 
         envValue, exists := instance.environment.Get(environmentKey)
-        if false == exists {
+        if true == exists {
+            return envValue
+        }
+
+        if false == hasDefaultProcessor {
             /* @important do not embed the raw parameter value here: it commonly holds inline credentials (e.g. a DSN with a password) that would then reach logs unredacted via the exception cause-context chain; the environment key alone identifies the offending placeholder */
             err = exception.NewError(
                 "undefined environment key in template",
@@ -154,7 +176,12 @@ func (instance *Configuration) resolveSinglePass(
             return match
         }
 
-        return envValue
+        if "" == fallbackParameterKey {
+            return ""
+        }
+
+        /* hand the fallback back as a parameter placeholder instead of resolving it here: the parameter branch below already carries the recursion, the circular-reference guard and the undefined-key reporting, and the enclosing fixed-point loop runs another pass over this output */
+        return "%" + fallbackParameterKey + "%"
     })
 
     if nil != err {
@@ -181,9 +208,10 @@ func (instance *Configuration) resolveSinglePass(
         if nil == referencedParameter {
             /* @important do not embed the raw parameter value here: it commonly holds inline credentials (e.g. a DSN with a password) that would then reach logs unredacted via the exception cause-context chain; the parameter key alone identifies the offending placeholder */
             err = exception.NewError(
-                "undefined parameter key in template",
+                "undefined parameter key in template; a value that contains a literal percent rather than a reference must double it (a password written as pa%%ss%%word resolves to pa%ss%word)",
                 map[string]any{
                     "parameterKey": parameterKey,
+                    "parameter":    currentKey,
                 },
                 nil,
             )
@@ -216,6 +244,14 @@ func (instance *Configuration) resolveSinglePass(
         }
 
         referencedParameter.value = resolvedReferencedValue
+
+        /* a template that reads a secret carries it into its own value — a dsn assembled from a declared password is the common case — so the secret marking has to travel with it, otherwise redaction would cover the password parameter while the dsn beside it prints in full */
+        if true == referencedParameter.isSecret {
+            currentParameter := instance.getInternalParameter(currentKey)
+            if nil != currentParameter {
+                currentParameter.isSecret = true
+            }
+        }
 
         return resolvedReferencedValue
     })

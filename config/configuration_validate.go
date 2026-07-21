@@ -38,7 +38,7 @@ func (instance *Configuration) validateNoUnresolvedPlaceholders() error {
             }
 
             return exception.NewError(
-                "parameter contains unresolved placeholders",
+                "parameter contains unresolved placeholders; a value that contains a literal percent rather than a reference must double it (a password written as pa%%ss%%word resolves to pa%ss%word)",
                 map[string]any{
                     "parameterName": parameterName,
                     "placeholder":   offendingPlaceholder,

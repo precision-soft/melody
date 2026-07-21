@@ -8,9 +8,9 @@ import (
 
     "github.com/precision-soft/melody/v3/.example/entity"
 
-    melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
 )
 
+//melody:service ServiceProductRepository
 func NewInMemoryProductRepository() ProductRepository {
     now := time.Now()
 
@@ -255,9 +255,3 @@ func (instance *inMemoryProductRepository) nextId() string {
 }
 
 var _ ProductRepository = (*inMemoryProductRepository)(nil)
-
-func ProductRepositoryProvider() melodycontainercontract.Provider[ProductRepository] {
-    return func(resolver melodycontainercontract.Resolver) (ProductRepository, error) {
-        return NewInMemoryProductRepository(), nil
-    }
-}

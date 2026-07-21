@@ -7,9 +7,9 @@ import (
 
     "github.com/precision-soft/melody/v3/.example/entity"
 
-    melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
 )
 
+//melody:service ServiceCurrencyRepository
 func NewInMemoryCurrencyRepository() CurrencyRepository {
     return &inMemoryCurrencyRepository{
         currencies: []*entity.Currency{
@@ -152,9 +152,3 @@ func (instance *inMemoryCurrencyRepository) nextId() string {
 }
 
 var _ CurrencyRepository = (*inMemoryCurrencyRepository)(nil)
-
-func CurrencyRepositoryProvider() melodycontainercontract.Provider[CurrencyRepository] {
-    return func(resolver melodycontainercontract.Resolver) (CurrencyRepository, error) {
-        return NewInMemoryCurrencyRepository(), nil
-    }
-}

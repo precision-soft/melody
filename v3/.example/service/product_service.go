@@ -20,6 +20,7 @@ const (
     ServiceProductService = "service-example-product-service"
 )
 
+//melody:service ServiceProductService
 func NewProductService(
     productRepository repository.ProductRepository,
     categoryService *CategoryService,

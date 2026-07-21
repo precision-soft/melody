@@ -19,6 +19,7 @@ const (
     ServiceCurrencyService = "service-example-currency-service"
 )
 
+//melody:service ServiceCurrencyService
 func NewCurrencyService(
     currencyRepository repository.CurrencyRepository,
     cacheInstance melodycachecontract.Cache,
