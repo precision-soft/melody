@@ -102,7 +102,7 @@ func TestLazyService_RetriesResolutionAfterFailure(t *testing.T) {
     }
 }
 
-/** @info the resolver runs outside the handle's lock, so a resolver that reaches back into the same handle — a provider chain that cycles through a lazy handle — recurses into the resolution machinery, where a cycle guard can answer with an error; under a lock held across the resolution it would deadlock instead, unreachable by any cycle detection. */
+/* @info the resolver runs outside the handle's lock, so a resolver that reaches back into the same handle — a provider chain that cycles through a lazy handle — recurses into the resolution machinery, where a cycle guard can answer with an error; under a lock held across the resolution it would deadlock instead, unreachable by any cycle detection. */
 func TestLazyService_ResolverReachingBackIntoTheHandleIsNotDeadlocked(t *testing.T) {
     depth := 0
     var handle *LazyService[string]
@@ -142,7 +142,7 @@ type lazyProbeItem struct {
     name string
 }
 
-/** @info a resolution yielding nil without an error must not be memoized as success: Get keeps its documented retry-on-failure promise only if the next call re-runs the resolver instead of returning the poisoned nil forever. */
+/* @info a resolution yielding nil without an error must not be memoized as success: Get keeps its documented retry-on-failure promise only if the next call re-runs the resolver instead of returning the poisoned nil forever. */
 func TestLazyService_NilYieldIsNotMemoized(t *testing.T) {
     resolveCount := 0
     handle := &LazyService[*lazyProbeItem]{

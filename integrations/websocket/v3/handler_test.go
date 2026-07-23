@@ -187,7 +187,7 @@ func TestDispatchOnMessage_RecoversPanicFromCallback(t *testing.T) {
     }
 }
 
-/** @info A pong is processed only inside connection.Read, and the read loop is not inside Read while it runs a synchronous OnMessage callback. A ping issued in that window always times out, so treating that timeout as death disconnects perfectly healthy clients whenever a callback outlives the ping interval. */
+/* @info A pong is processed only inside connection.Read, and the read loop is not inside Read while it runs a synchronous OnMessage callback. A ping issued in that window always times out, so treating that timeout as death disconnects perfectly healthy clients whenever a callback outlives the ping interval. */
 func TestStreamHandler_SlowOnMessageDoesNotDisconnectHealthyClient(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub()
 
@@ -254,7 +254,7 @@ func TestStreamHandler_SlowOnMessageDoesNotDisconnectHealthyClient(t *testing.T)
     connection.Close(coderwebsocket.StatusNormalClosure, "")
 }
 
-/** @info A callback that never returns must not excuse pings forever: nothing else reaps a hijacked connection, so the descriptor, the hub subscription and the handler/read/ping goroutines would leak once per connection for the process lifetime. */
+/* @info A callback that never returns must not excuse pings forever: nothing else reaps a hijacked connection, so the descriptor, the hub subscription and the handler/read/ping goroutines would leak once per connection for the process lifetime. */
 func TestStreamHandler_StuckOnMessageStopsHoldingTheConnection(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub()
 
@@ -309,7 +309,7 @@ func TestStreamHandler_StuckOnMessageStopsHoldingTheConnection(t *testing.T) {
     }
 }
 
-/** @info A synchronous OnMessage callback holds the scope-backed runtime handed to it. If the handler returns to the kernel while the callback is still running, the kernel's deferred scope teardown races the callback and its next service resolution hits a closed scope. The handler must wait for the read loop — hence the callback — before returning. */
+/* @info A synchronous OnMessage callback holds the scope-backed runtime handed to it. If the handler returns to the kernel while the callback is still running, the kernel's deferred scope teardown races the callback and its next service resolution hits a closed scope. The handler must wait for the read loop — hence the callback — before returning. */
 func TestStreamHandler_InFlightCallbackDoesNotRaceScopeTeardown(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub()
 
@@ -386,7 +386,7 @@ func TestStreamHandler_InFlightCallbackDoesNotRaceScopeTeardown(t *testing.T) {
     }
 }
 
-/** @info A connection reaped while wedged in a callback must free its descriptor and handler goroutine when the close grace lapses, not seconds later. An abandoned graceful close otherwise wins coder/websocket's close CAS and holds the transport for the library's full handshake timeout, while the deferred CloseNow loses that CAS and blocks the same span. */
+/* @info A connection reaped while wedged in a callback must free its descriptor and handler goroutine when the close grace lapses, not seconds later. An abandoned graceful close otherwise wins coder/websocket's close CAS and holds the transport for the library's full handshake timeout, while the deferred CloseNow loses that CAS and blocks the same span. */
 func TestStreamHandler_WedgedCallbackReleasesConnectionAtGraceNotFiveSeconds(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub()
 
@@ -454,7 +454,7 @@ func TestStreamHandler_WedgedCallbackReleasesConnectionAtGraceNotFiveSeconds(t *
     }
 }
 
-/** @info leaveCallback must refresh the activity mark before it clears the running-callback count. If it clears the count first, a ping loop sampling cannotAnswer in that window sees no callback running yet still reads the stale pre-callback activity mark, and reaps a healthy connection at the instant its callback returns. */
+/* @info leaveCallback must refresh the activity mark before it clears the running-callback count. If it clears the count first, a ping loop sampling cannotAnswer in that window sees no callback running yet still reads the stale pre-callback activity mark, and reaps a healthy connection at the instant its callback returns. */
 func TestConnectionLiveness_LeaveCallbackRefreshesActivityBeforeClearingCallback(t *testing.T) {
     previousProcs := goruntime.GOMAXPROCS(0)
     if previousProcs < 2 {
@@ -521,7 +521,7 @@ func TestConnectionLiveness_LeaveCallbackRefreshesActivityBeforeClearingCallback
     close(stop)
 }
 
-/** @info The liveness windows must be measured against a monotonic base captured at accept time, not the wall clock. A wall-clock timestamp (time.Since(time.Unix(0, n))) lets a backward clock step excuse a wedged callback past the grace and leak the connection, or a forward step reap a healthy one. */
+/* @info The liveness windows must be measured against a monotonic base captured at accept time, not the wall clock. A wall-clock timestamp (time.Since(time.Unix(0, n))) lets a backward clock step excuse a wedged callback past the grace and leak the connection, or a forward step reap a healthy one. */
 func TestConnectionLiveness_GraceUsesMonotonicBase(t *testing.T) {
     liveness := newConnectionLiveness()
 

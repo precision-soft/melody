@@ -29,7 +29,7 @@ func TestLazyRepository_DoesNotResolveAtConstruction(t *testing.T) {
     }
 }
 
-/** @info the relay drives the Repository from an error-driven backoff-and-retry loop, so a store that cannot be resolved must surface as the call's error — a panic would take the relay process down on a transient resolution outage — and a later successful resolution must proceed. */
+/* @info the relay drives the Repository from an error-driven backoff-and-retry loop, so a store that cannot be resolved must surface as the call's error — a panic would take the relay process down on a transient resolution outage — and a later successful resolution must proceed. */
 func TestLazyRepository_ResolutionFailureSurfacesAsAnErrorAndIsRetried(t *testing.T) {
     serviceContainer := container.NewContainer()
 

@@ -15,17 +15,17 @@ import (
 
 type fakeConnector struct{}
 
-func (fakeConnector) Connect(context.Context) (driver.Conn, error) {
+func (instance fakeConnector) Connect(context.Context) (driver.Conn, error) {
     return nil, errors.New("fake connector never connects")
 }
 
-func (fakeConnector) Driver() driver.Driver {
+func (instance fakeConnector) Driver() driver.Driver {
     return fakeDriver{}
 }
 
 type fakeDriver struct{}
 
-func (fakeDriver) Open(string) (driver.Conn, error) {
+func (instance fakeDriver) Open(string) (driver.Conn, error) {
     return nil, errors.New("fake driver never opens")
 }
 

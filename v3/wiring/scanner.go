@@ -71,9 +71,6 @@ var scalarTypeNames = map[string]bool{
     "rune":    true,
 }
 
-var qualifiedScalarTypes = map[string]bool{
-    "time.Duration": true,
-}
 
 /* ScanResult carries what a scan found together with what it deliberately left out, so the generator can report the skipped constructors instead of silently narrowing its coverage. */
 type ScanResult struct {
@@ -358,6 +355,10 @@ func describeConstructor(
         return nil, "the returned type is any, which cannot identify a service"
     }
 
+    if true == isScalarType(returnType) {
+        return nil, "the returned type is a scalar, not a service"
+    }
+
     returnsError := false
     if 2 == returnCount {
         errorType := describeType(results.List[len(results.List)-1].Type, importPath, packageName, fileImports)
@@ -446,6 +447,11 @@ func describeType(
             return nil
         }
 
+        /* a dot import makes an unqualified exported name ambiguous — it may belong to the scanned package or to the dot-imported one, and the parser alone cannot tell — so the type is unrenderable rather than misattributed */
+        if _, hasDotImport := fileImports["."]; true == hasDotImport {
+            return nil
+        }
+
         return &TypeReference{
             Expression: packageName + "." + typedExpression.Name,
             Qualifier:  packageName,
@@ -481,7 +487,18 @@ func isScalarType(typeReference *TypeReference) bool {
         return true
     }
 
-    return qualifiedScalarTypes[typeReference.Expression]
+    return isStandardDuration(typeReference)
+}
+
+/* isStandardDuration matches time.Duration by the resolved import path, so the spelled qualifier — an aliased stdlib import, a foreign package that happens to be called time — cannot mislead the classification. */
+func isStandardDuration(typeReference *TypeReference) bool {
+    if "time" != typeReference.ImportPath {
+        return false
+    }
+
+    separatorIndex := strings.LastIndex(typeReference.Expression, ".")
+
+    return 0 <= separatorIndex && "Duration" == typeReference.Expression[separatorIndex+1:]
 }
 
 func collectImports(fileNode *ast.File) map[string]string {
@@ -501,7 +518,10 @@ func collectImports(fileNode *ast.File) map[string]string {
         fileImports[alias] = importPath
     }
 
-    /* the qualifier a file uses is the package name, which the last path segment does not always spell: a major-version directory (melody/v3), a gopkg.in versioned base (yaml.v3), a hyphenated repository (go-redis). The conventional names those shapes resolve to are added as fallbacks, an explicit alias or an exact base always winning over a guess. */
+    /* the qualifier a file uses is the package name, which the last path segment does not always spell: a major-version directory (melody/v3), a gopkg.in versioned base (yaml.v3), a hyphenated repository (go-redis). The conventional names those shapes resolve to are added as fallbacks — an explicit alias or an exact base always wins over a guess, and a guess two imports both produce is ambiguous and added for neither. */
+    candidatePathByName := make(map[string]string)
+    candidateCountByName := make(map[string]int)
+
     for _, importSpec := range fileNode.Imports {
         if nil != importSpec.Name {
             continue
@@ -513,9 +533,18 @@ func collectImports(fileNode *ast.File) map[string]string {
         }
 
         for _, candidate := range packageNameCandidates(importPath) {
-            if _, exists := fileImports[candidate]; false == exists {
-                fileImports[candidate] = importPath
-            }
+            candidatePathByName[candidate] = importPath
+            candidateCountByName[candidate] = candidateCountByName[candidate] + 1
+        }
+    }
+
+    for candidate, count := range candidateCountByName {
+        if 1 != count {
+            continue
+        }
+
+        if _, exists := fileImports[candidate]; false == exists {
+            fileImports[candidate] = candidatePathByName[candidate]
         }
     }
 

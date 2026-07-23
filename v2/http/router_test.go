@@ -24,15 +24,15 @@ func TestRouter_HandleAndServeHttp_HappyPath(t *testing.T) {
 
     handler := NewKernel(router).ServeHttp(newHttpTestContainer())
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/hello", nil)
-    rec := httptest.NewRecorder()
+    request := httptest.NewRequest(nethttp.MethodGet, "/hello", nil)
+    recorder := httptest.NewRecorder()
 
-    handler.ServeHTTP(rec, req)
+    handler.ServeHTTP(recorder, request)
 
-    if 200 != rec.Code {
+    if 200 != recorder.Code {
         t.Fatalf("unexpected status")
     }
-    if "ok" != rec.Body.String() {
+    if "ok" != recorder.Body.String() {
         t.Fatalf("unexpected body")
     }
 }
@@ -50,12 +50,12 @@ func TestRouter_MethodNotAllowed(t *testing.T) {
 
     handler := NewKernel(router).ServeHttp(newHttpTestContainer())
 
-    req := httptest.NewRequest(nethttp.MethodPost, "/hello", nil)
-    rec := httptest.NewRecorder()
+    request := httptest.NewRequest(nethttp.MethodPost, "/hello", nil)
+    recorder := httptest.NewRecorder()
 
-    handler.ServeHTTP(rec, req)
+    handler.ServeHTTP(recorder, request)
 
-    if 405 != rec.Code {
+    if 405 != recorder.Code {
         t.Fatalf("unexpected status")
     }
 }
@@ -65,12 +65,12 @@ func TestRouter_NotFound(t *testing.T) {
 
     handler := NewKernel(router).ServeHttp(newHttpTestContainer())
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/missing", nil)
-    rec := httptest.NewRecorder()
+    request := httptest.NewRequest(nethttp.MethodGet, "/missing", nil)
+    recorder := httptest.NewRecorder()
 
-    handler.ServeHTTP(rec, req)
+    handler.ServeHTTP(recorder, request)
 
-    if 404 != rec.Code {
+    if 404 != recorder.Code {
         t.Fatalf("unexpected status")
     }
 }
@@ -89,12 +89,12 @@ func TestRouter_PanicConvertedTo500(t *testing.T) {
 
     handler := NewKernel(router).ServeHttp(newHttpTestContainer())
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/panic", nil)
-    rec := httptest.NewRecorder()
+    request := httptest.NewRequest(nethttp.MethodGet, "/panic", nil)
+    recorder := httptest.NewRecorder()
 
-    handler.ServeHTTP(rec, req)
+    handler.ServeHTTP(recorder, request)
 
-    if 500 != rec.Code {
+    if 500 != recorder.Code {
         t.Fatalf("unexpected status")
     }
 }
@@ -112,12 +112,12 @@ func TestRouter_HandlerErrorConvertedTo500(t *testing.T) {
 
     handler := NewKernel(router).ServeHttp(newHttpTestContainer())
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/err", nil)
-    rec := httptest.NewRecorder()
+    request := httptest.NewRequest(nethttp.MethodGet, "/err", nil)
+    recorder := httptest.NewRecorder()
 
-    handler.ServeHTTP(rec, req)
+    handler.ServeHTTP(recorder, request)
 
-    if 500 != rec.Code {
+    if 500 != recorder.Code {
         t.Fatalf("unexpected status")
     }
 }
@@ -140,20 +140,20 @@ func TestRouter_ParamExtraction(t *testing.T) {
 
     handler := NewKernel(router).ServeHttp(newHttpTestContainer())
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/user/123", nil)
-    rec := httptest.NewRecorder()
+    request := httptest.NewRequest(nethttp.MethodGet, "/user/123", nil)
+    recorder := httptest.NewRecorder()
 
-    handler.ServeHTTP(rec, req)
+    handler.ServeHTTP(recorder, request)
 
-    if 200 != rec.Code {
+    if 200 != recorder.Code {
         t.Fatalf("unexpected status")
     }
-    if "123" != rec.Body.String() {
+    if "123" != recorder.Body.String() {
         t.Fatalf("unexpected body")
     }
 }
 
-/** @info A requirement is a whitelist for one path segment. Anchors bind looser than alternation, so concatenating "^" and "$" onto "en|de|fr" yields (^en)|(de)|(fr$) — which accepts "aden", "frfr" and any string ending in "fr". The requirement must be wrapped in a non-capturing group so the anchors apply to the whole alternation. */
+/* @info A requirement is a whitelist for one path segment. Anchors bind looser than alternation, so concatenating "^" and "$" onto "en|de|fr" yields (^en)|(de)|(fr$) — which accepts "aden", "frfr" and any string ending in "fr". The requirement must be wrapped in a non-capturing group so the anchors apply to the whole alternation. */
 func TestRouter_RequirementWithAlternationMatchesTheWholeSegment(t *testing.T) {
     router := NewRouter()
 
@@ -198,7 +198,7 @@ func TestRouter_RequirementWithAlternationMatchesTheWholeSegment(t *testing.T) {
     }
 }
 
-/** @info The catch-all branch assigned the joined remainder to the wildcard without consulting the route's requirements, while the single-segment and named-parameter branches enforced theirs — a whitelist that silently failed open on ":path...". */
+/* @info The catch-all branch assigned the joined remainder to the wildcard without consulting the route's requirements, while the single-segment and named-parameter branches enforced theirs — a whitelist that silently failed open on ":path...". */
 func TestRouter_RequirementIsEnforcedOnCatchAllWildcard(t *testing.T) {
     router := NewRouter()
 

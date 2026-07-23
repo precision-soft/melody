@@ -17,7 +17,7 @@ func TestValidateUserFieldRejectsForbiddenCharacter(t *testing.T) {
 }
 
 func TestValidateNoForbiddenCharsRejectsForbiddenChar(t *testing.T) {
-    err := ValidateNoForbiddenChars([]string{"clean", "with%percent"}, CrontabForbiddenChars, "test context")
+    err := ValidateNoForbiddenCharacters([]string{"clean", "with%percent"}, CrontabForbiddenCharacters, "test context")
     if nil == err {
         t.Fatalf("expected error for token containing %%")
     }
@@ -32,18 +32,18 @@ func TestValidateNoForbiddenCharsRejectsForbiddenChar(t *testing.T) {
 }
 
 func TestValidateNoForbiddenCharsAllowsCleanTokens(t *testing.T) {
-    err := ValidateNoForbiddenChars([]string{"safe", "tokens", "only"}, CrontabForbiddenChars, "test context")
+    err := ValidateNoForbiddenCharacters([]string{"safe", "tokens", "only"}, CrontabForbiddenCharacters, "test context")
     if nil != err {
         t.Fatalf("expected nil error for clean tokens, got: %v", err)
     }
 }
 
 func TestValidateNoForbiddenCharsWithCustomList(t *testing.T) {
-    custom := []ForbiddenChar{
+    custom := []ForbiddenCharacter{
         {Char: '\t', Reason: "tabs break YAML"},
     }
 
-    err := ValidateNoForbiddenChars([]string{"has\ttab"}, custom, "yaml entry")
+    err := ValidateNoForbiddenCharacters([]string{"has\ttab"}, custom, "yaml entry")
     if nil == err {
         t.Fatalf("expected error for tab character")
     }
@@ -54,7 +54,7 @@ func TestValidateNoForbiddenCharsWithCustomList(t *testing.T) {
 }
 
 func TestValidateNoForbiddenCharsEmptyTokensReturnsNil(t *testing.T) {
-    err := ValidateNoForbiddenChars(nil, CrontabForbiddenChars, "test context")
+    err := ValidateNoForbiddenCharacters(nil, CrontabForbiddenCharacters, "test context")
     if nil != err {
         t.Fatalf("expected nil error for empty tokens, got: %v", err)
     }

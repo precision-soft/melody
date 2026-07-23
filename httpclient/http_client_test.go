@@ -378,7 +378,7 @@ func TestHttpClientConcurrentSettersAndRequests(t *testing.T) {
     waitGroup.Wait()
 }
 
-/** @info net/http strips only Authorization/Cookie, and only across domains. A client-configured api-key header would otherwise be handed to whatever host the first server redirects to — a host that server's operator chooses. */
+/* @info net/http strips only Authorization/Cookie, and only across domains. A client-configured api-key header would otherwise be handed to whatever host the first server redirects to — a host that server's operator chooses. */
 func TestHttpClient_StripsCredentialHeadersOnCrossOriginRedirect(t *testing.T) {
     var receivedApiKey string
     var receivedAuthorization string
@@ -413,7 +413,7 @@ func TestHttpClient_StripsCredentialHeadersOnCrossOriginRedirect(t *testing.T) {
     }
 }
 
-/** @info A same-origin redirect is not a credential boundary; stripping there would break ordinary /login -> /home flows. */
+/* @info A same-origin redirect is not a credential boundary; stripping there would break ordinary /login -> /home flows. */
 func TestHttpClient_KeepsCredentialHeadersOnSameOriginRedirect(t *testing.T) {
     var receivedApiKey string
 
@@ -443,7 +443,7 @@ func TestHttpClient_KeepsCredentialHeadersOnSameOriginRedirect(t *testing.T) {
     }
 }
 
-/** @info int64(math.MaxInt)+1 wraps negative, so io.LimitReader would read zero bytes and hand back an empty body with no error. */
+/* @info int64(math.MaxInt)+1 wraps negative, so io.LimitReader would read zero bytes and hand back an empty body with no error. */
 func TestHttpClient_MaxResponseBodyBytesAtMaxIntDoesNotOverflow(t *testing.T) {
     server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
         writer.Write([]byte("payload"))
@@ -462,7 +462,7 @@ func TestHttpClient_MaxResponseBodyBytesAtMaxIntDoesNotOverflow(t *testing.T) {
     }
 }
 
-/** @info Per-request credential headers (WithHeader/WithHeaders) must be stripped on a cross-origin redirect exactly like the client-wide ones: the redirect target is chosen by whoever operates the first server. */
+/* @info Per-request credential headers (WithHeader/WithHeaders) must be stripped on a cross-origin redirect exactly like the client-wide ones: the redirect target is chosen by whoever operates the first server. */
 func TestHttpClient_StripsPerRequestCredentialHeadersOnCrossOriginRedirect(t *testing.T) {
     var receivedApiKey string
 
@@ -488,7 +488,7 @@ func TestHttpClient_StripsPerRequestCredentialHeadersOnCrossOriginRedirect(t *te
     }
 }
 
-/** @info An explicitly spelled default port names the same origin as an omitted one; treating it as cross-origin would strip credentials from an ordinary same-host redirect. */
+/* @info An explicitly spelled default port names the same origin as an omitted one; treating it as cross-origin would strip credentials from an ordinary same-host redirect. */
 func TestHttpClient_KeepsCredentialHeadersOnSameOriginRedirectWithExplicitDefaultPort(t *testing.T) {
     if false == isSameOrigin(mustParseUrl(t, "http://example.com:80/start"), mustParseUrl(t, "http://example.com/finish")) {
         t.Fatalf("an explicit :80 must not make an http origin foreign to itself")
@@ -518,7 +518,7 @@ func mustParseUrl(t *testing.T, value string) *url.URL {
     return parsed
 }
 
-/** @info The redirect policy runs on the request goroutine; reading the client's header map there while SetHeader writes it is a concurrent map access, which the runtime kills the process for. Run with -race. */
+/* @info The redirect policy runs on the request goroutine; reading the client's header map there while SetHeader writes it is a concurrent map access, which the runtime kills the process for. Run with -race. */
 func TestHttpClient_RedirectPolicyDoesNotRaceWithSetHeader(t *testing.T) {
     target := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
         writer.WriteHeader(http.StatusOK)
@@ -551,7 +551,7 @@ func TestHttpClient_RedirectPolicyDoesNotRaceWithSetHeader(t *testing.T) {
     waitGroup.Wait()
 }
 
-/** @info Variadic passing does not copy the slice: Post/Put/Patch append WithJson into a spare slot of the caller's slice, so two concurrent calls sharing one slice write the same backing-array slot and can deliver one call's body to the other's endpoint. Run with -race. */
+/* @info Variadic passing does not copy the slice: Post/Put/Patch append WithJson into a spare slot of the caller's slice, so two concurrent calls sharing one slice write the same backing-array slot and can deliver one call's body to the other's endpoint. Run with -race. */
 func TestHttpClientPost_DoesNotShareCallerOptionsSliceAcrossConcurrentCalls(t *testing.T) {
     var corruption atomic.Bool
 
@@ -596,7 +596,7 @@ func TestHttpClientPost_DoesNotShareCallerOptionsSliceAcrossConcurrentCalls(t *t
     }
 }
 
-/** @info Every other guard in the file treats a non-positive timeout as unset; a negative configured timeout must fall back to the 30s default, not build a client with no deadline at all. */
+/* @info Every other guard in the file treats a non-positive timeout as unset; a negative configured timeout must fall back to the 30s default, not build a client with no deadline at all. */
 func TestNewHttpClient_NegativeTimeoutFallsBackToDefault(t *testing.T) {
     client := NewHttpClient(NewHttpClientConfig("", -1*time.Second, nil))
 
@@ -608,7 +608,7 @@ func TestNewHttpClient_NegativeTimeoutFallsBackToDefault(t *testing.T) {
     }
 }
 
-/** @info net/http auto-sets Referer to the full previous url, query string included, and does not strip it on a non-downgrade cross-origin hop; a secret placed in the url would otherwise reach the redirect target the first server chose. */
+/* @info net/http auto-sets Referer to the full previous url, query string included, and does not strip it on a non-downgrade cross-origin hop; a secret placed in the url would otherwise reach the redirect target the first server chose. */
 func TestHttpClient_StripsRefererOnCrossOriginRedirect(t *testing.T) {
     var receivedReferer string
 

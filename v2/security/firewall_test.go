@@ -24,10 +24,10 @@ func (instance *firewallTestRequestContext) RequestId() string    { return insta
 func (instance *firewallTestRequestContext) StartedAt() time.Time { return instance.startedAtValue }
 
 func newFirewallTestRequest(path string) httpcontract.Request {
-    req := httptest.NewRequest(nethttp.MethodGet, "http://example.com"+path, nil)
+    request := httptest.NewRequest(nethttp.MethodGet, "http://example.com"+path, nil)
 
     return http.NewRequest(
-        req,
+        request,
         nil,
         nil,
         &firewallTestRequestContext{

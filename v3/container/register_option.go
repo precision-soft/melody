@@ -17,7 +17,7 @@ func WithTypeRegistration(isStrict bool) containercontract.RegisterOption {
     }
 }
 
-/* WithCollectionPriority orders the registration inside AllImplementing collections: a higher priority is collected — and therefore dispatched by whatever consumes the collection — earlier. Registrations sharing a priority keep the stable type-and-name order, so adding a priority to one service never reshuffles the rest. */
+/* WithCollectionPriority orders the registration inside AllImplementing collections: a higher priority is collected — and therefore dispatched by whatever consumes the collection — earlier. The unset priority is zero, so a negative one sorts after every service that declared nothing; registrations sharing a priority keep the stable type-and-name order, so adding a priority to one service never reshuffles the rest. Only a type-registered service can be collected, so the option is meaningless together with WithoutTypeRegistration. */
 func WithCollectionPriority(priority int) containercontract.RegisterOption {
     return func(option *containercontract.RegisterOptions) {
         option.CollectionPriority = priority

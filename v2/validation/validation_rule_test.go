@@ -100,14 +100,14 @@ func TestParseValidationTagParenthesizedRegexWithCommaGroup(t *testing.T) {
     }
 }
 
-/** @info A ']' outside a character class is a literal in RE2, so a regex constraint containing one is a valid pattern; rejecting the tag made the field un-validatable on every request. */
+/* @info A ']' outside a character class is a literal in RE2, so a regex constraint containing one is a valid pattern; rejecting the tag made the field un-validatable on every request. */
 func TestParseValidationTag_RegexWithLiteralClosingBracketIsAccepted(t *testing.T) {
     if _, err := parseValidationTag(`regex(pattern=^a]b$)`); nil != err {
         t.Fatalf("expected a regex with a literal ']' to parse, got: %v", err)
     }
 }
 
-/** @info A POSIX named class ([[:alpha:]]) carries its own ']' inside the bracket expression; treating that inner ']' as the class close split a valid RE2 pattern at an in-class comma and made the field reject every value. */
+/* @info A POSIX named class ([[:alpha:]]) carries its own ']' inside the bracket expression; treating that inner ']' as the class close split a valid RE2 pattern at an in-class comma and made the field reject every value. */
 func TestSplitByTopLevelComma_PosixNamedClassKeepsInClassComma(t *testing.T) {
     parts := splitByTopLevelComma("regex=[[:alpha:],]")
     if 1 != len(parts) {

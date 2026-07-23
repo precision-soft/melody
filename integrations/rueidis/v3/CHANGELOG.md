@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- `connection_parameters.go` — `ConnectionParameters` and `NewConnectionParameters` spell the names out; the abbreviated forms remain as deprecated aliases, so nothing breaks at compile time.
+
 ## [v3.4.1] - 2026-07-17 - Rate-Limiter Call Timeout and Retry-Backoff Clamps
 
 ### Fixed

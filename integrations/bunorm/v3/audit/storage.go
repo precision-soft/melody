@@ -16,7 +16,7 @@ type Storage interface {
 
 type databaseContextKey struct{}
 
-/* boundDatabase is a handle bound onto the context, together with the database it was opened on when the binding was made by a Tracker rather than by the caller. The origin is what lets a storage over a separate audit database ignore the tracker's business transaction instead of redirecting its rows into the business database. */
+/* boundDatabase is a handle bound onto the context, together with the database it was opened on when the binding was made by a Tracker rather than by the caller. The origin is compared by handle identity: a storage keeps the tracker's transaction only when it was built over the same *bun.DB instance the Tracker holds, so tracker-side atomicity requires sharing that handle — a second handle onto the same physical database writes outside the transaction. */
 type boundDatabase struct {
     handle bun.IDB
     origin *bun.DB

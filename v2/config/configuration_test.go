@@ -283,7 +283,7 @@ func TestParameterPlaceholderPattern_AcceptsDottedIdentifiers(t *testing.T) {
     }
 }
 
-/** @info A value that escapes a literal percent with %% resolves to text of the shape %NAME%, which the post-resolution scan then rejected as an "unresolved placeholder" — failing the whole boot for a correctly escaped literal. */
+/* @info A value that escapes a literal percent with %% resolves to text of the shape %NAME%, which the post-resolution scan then rejected as an "unresolved placeholder" — failing the whole boot for a correctly escaped literal. */
 func TestConfiguration_EscapedPercentLiteralDoesNotFailValidation(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{
         CliDescriptionKey: "%%APP_NAME%% stays literal",

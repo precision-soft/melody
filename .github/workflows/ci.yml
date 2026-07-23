@@ -39,7 +39,7 @@ jobs:
             -   name: vet the e2e harness module (outside the workspace)
                 if: matrix.tags == ''
                 env:
-                    GOWORK: off
+                    GOWORK: "off"
                 run: |
                     set -euo pipefail
                     (cd .dev/e2e && go vet ./...)

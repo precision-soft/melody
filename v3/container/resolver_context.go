@@ -23,6 +23,7 @@ func newResolverContext(containerInstance *container) *resolverContext {
         contextId:         containerInstance.resolverContextIdCounter.Add(1),
         rootRequestedKey:  "",
         stack:             make([]string, 0, 8),
+        stackTypes:        make([]reflect.Type, 0, 8),
     }
 }
 
@@ -33,6 +34,7 @@ func newScopeResolverContext(containerInstance *container, scopeInstance *scope)
         contextId:         containerInstance.resolverContextIdCounter.Add(1),
         rootRequestedKey:  "",
         stack:             make([]string, 0, 8),
+        stackTypes:        make([]reflect.Type, 0, 8),
     }
 }
 
@@ -42,6 +44,8 @@ type resolverContext struct {
     contextId         uint64
     rootRequestedKey  string
     stack             []string
+    /* stackTypes runs parallel to stack: the canonical type of a type node, nil for a name node. The collection exclusion compares type identity through it, because two distinct types from same-named packages share a String() and a string comparison would exclude a service that is not on the path at all. */
+    stackTypes []reflect.Type
 }
 
 func (instance *resolverContext) Get(serviceName string) (any, error) {
@@ -61,7 +65,7 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
         parentKey = instance.stack[len(instance.stack)-1]
     }
 
-    pushKeyErr := instance.pushKey(nodeKey)
+    pushKeyErr := instance.pushKey(nodeKey, nil)
     if nil != pushKeyErr {
         return nil, pushKeyErr
     }
@@ -192,7 +196,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
         parentKey = instance.stack[len(instance.stack)-1]
     }
 
-    pushKeyErr := instance.pushKey(nodeKey)
+    pushKeyErr := instance.pushKey(nodeKey, canonicalTargetType)
     if nil != pushKeyErr {
         return nil, pushKeyErr
     }
@@ -404,29 +408,24 @@ func (instance *resolverContext) ReferencesImplementing(interfaceType reflect.Ty
     return instance.containerInstance.ReferencesImplementing(interfaceType)
 }
 
-/* isResolvingReference reports whether the referenced service sits anywhere on this context's resolution stack — under its name or under its type. It is what lets a collection exclude the very service whose provider is collecting: the composite dispatcher that is itself one of the handlers it dispatches to. */
+/* isResolvingReference reports whether the reference is the service this context is creating right now — the innermost node of the resolution stack. Only that service is excluded from a collection: it is the composite dispatcher collecting the handlers it belongs to. A reference deeper on the path is not excluded, so collecting it runs into the creation guard and fails loudly as the circular dependency it is — excluding it instead would freeze a collection whose content depends on which service happened to boot first. The type arm compares reflect.Type identity, never the type's String(), which two types from same-named packages share. */
 func (instance *resolverContext) isResolvingReference(reference containercontract.ServiceReference) bool {
-    nameKey := "service:" + reference.ServiceName
-
-    typeKey := ""
-    if nil != reference.ServiceType {
-        typeKey = "type:" + reference.ServiceType.String()
+    if 0 == len(instance.stack) {
+        return false
     }
 
-    for _, key := range instance.stack {
-        if key == nameKey {
-            return true
-        }
+    topIndex := len(instance.stack) - 1
 
-        if "" != typeKey && key == typeKey {
-            return true
-        }
+    if instance.stack[topIndex] == "service:"+reference.ServiceName {
+        return true
     }
 
-    return false
+    topType := instance.stackTypes[topIndex]
+
+    return nil != topType && topType == reference.ServiceType
 }
 
-func (instance *resolverContext) pushKey(creatingKey string) error {
+func (instance *resolverContext) pushKey(creatingKey string, creatingType reflect.Type) error {
     if "" == creatingKey {
         return exception.NewError(
             "creating key is empty",
@@ -449,6 +448,7 @@ func (instance *resolverContext) pushKey(creatingKey string) error {
     }
 
     instance.stack = append(instance.stack, creatingKey)
+    instance.stackTypes = append(instance.stackTypes, creatingType)
 
     return nil
 }
@@ -459,6 +459,7 @@ func (instance *resolverContext) popKey() {
     }
 
     instance.stack = instance.stack[:len(instance.stack)-1]
+    instance.stackTypes = instance.stackTypes[:len(instance.stackTypes)-1]
 }
 
 func (instance *resolverContext) stackStringWithRepeat(repeatedKey string) string {

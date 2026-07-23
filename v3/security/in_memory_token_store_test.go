@@ -17,7 +17,7 @@ func tokenStoreRuntime() runtimecontract.Runtime {
     return runtime.New(context.Background(), c.NewScope(), c)
 }
 
-/* regression: the originating actor must survive the store's claim clone (Put + Lookup), otherwise the opaque-token path silently drops F1 propagation. */
+/* the originating actor must survive the store's claim clone (Put + Lookup), otherwise the opaque-token path silently drops F1 propagation. */
 func TestInMemoryTokenStore_PreservesOriginatingActor(t *testing.T) {
     store := NewInMemoryTokenStore()
 
@@ -151,7 +151,7 @@ func TestInMemoryTokenStore_LookupDeepCopiesNestedAttributeMap(t *testing.T) {
     }
 }
 
-/* regression: the impersonator subtree carried on an originating actor must be deep-copied by the store clone, otherwise a Lookup caller (or a caller mutating its claims after Put) corrupts the stored impersonator's roles and concurrent Lookups race on the shared *ActorData. */
+/* the impersonator subtree carried on an originating actor must be deep-copied by the store clone, otherwise a Lookup caller (or a caller mutating its claims after Put) corrupts the stored impersonator's roles and concurrent Lookups race on the shared *ActorData. */
 func TestInMemoryTokenStore_LookupDeepCopiesImpersonatorSubtree(t *testing.T) {
     store := NewInMemoryTokenStore()
     rt := tokenStoreRuntime()
@@ -187,7 +187,7 @@ func TestInMemoryTokenStore_LookupDeepCopiesImpersonatorSubtree(t *testing.T) {
     }
 }
 
-/* regression: mutating the caller's nested impersonator after Put must not reach the stored entry. */
+/* mutating the caller's nested impersonator after Put must not reach the stored entry. */
 func TestInMemoryTokenStore_PutDeepCopiesImpersonatorSubtree(t *testing.T) {
     store := NewInMemoryTokenStore()
     rt := tokenStoreRuntime()

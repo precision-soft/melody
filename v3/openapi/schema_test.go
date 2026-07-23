@@ -383,7 +383,7 @@ func TestBuildSchema_NegativeMinClampedNegativeMaxUnsatisfiable(t *testing.T) {
     }
 }
 
-/** @info a negative max admits no non-null value, but MaxLength.Validate passes a nil pointer (dereferenceValue returns absent), so the validator still accepts null on a NULLABLE field. The mirror must therefore contradict only the value space and preserve the nullable advertisement — matching the integer/number/boolean branch — rather than clearing Nullable and advertising a null the validator accepts as invalid. A non-nullable field stays fully unsatisfiable. */
+/* @info a negative max admits no non-null value, but MaxLength.Validate passes a nil pointer (dereferenceValue returns absent), so the validator still accepts null on a NULLABLE field. The mirror must therefore contradict only the value space and preserve the nullable advertisement — matching the integer/number/boolean branch — rather than clearing Nullable and advertising a null the validator accepts as invalid. A non-nullable field stays fully unsatisfiable. */
 func TestApplyValidation_NegativeMaxOnNullableStringKeepsNullValid(t *testing.T) {
     nullable := &Schema{Type: "string", Nullable: true}
     applyValidation(nullable, "max(value=-1)")
@@ -1399,7 +1399,7 @@ func TestBuildSchema_UncompilableRegexNotLoosenedByValuelessMax(t *testing.T) {
     }
 }
 
-/** @info The generator's bracket-balance helper is documented as an exact mirror of the validator's, so a tag the validator accepts must never be swept up by the syntax guard. RE2 reads a ']' that closes no character class as a literal, and the validator handles this; a generator still rejecting it advertises an unsatisfiable field for values the api happily accepts. */
+/* @info The generator's bracket-balance helper is documented as an exact mirror of the validator's, so a tag the validator accepts must never be swept up by the syntax guard. RE2 reads a ']' that closes no character class as a literal, and the validator handles this; a generator still rejecting it advertises an unsatisfiable field for values the api happily accepts. */
 func TestApplyValidation_LiteralClosingBracketMatchesTheValidator(t *testing.T) {
     schema := &Schema{Type: "string"}
     applyValidation(schema, "regex(pattern=^a]b$)")
@@ -1412,7 +1412,7 @@ func TestApplyValidation_LiteralClosingBracketMatchesTheValidator(t *testing.T) 
     }
 }
 
-/** @info The runtime validator registers regex only under the name "regex" — there is no "pattern" constraint, and an unknown rule fails the field closed for every value. Advertising `pattern=...` as a satisfiable regex-constrained string published a contract the api rejects outright. */
+/* @info The runtime validator registers regex only under the name "regex" — there is no "pattern" constraint, and an unknown rule fails the field closed for every value. Advertising `pattern=...` as a satisfiable regex-constrained string published a contract the api rejects outright. */
 func TestApplyValidation_PatternIsNotARegexAlias(t *testing.T) {
     schema := &Schema{Type: "string"}
     applyValidation(schema, "pattern=^[0-9]+$")
@@ -1422,7 +1422,7 @@ func TestApplyValidation_PatternIsNotARegexAlias(t *testing.T) {
     }
 }
 
-/** @info a []byte renders as {string, byte}, but the validator's string facets never see a string there — Regex/alpha/numeric/alphanumeric ignore a []byte and accept every blob, and min/max measure fmt.Sprintf("%v", value) (e.g. "[1 2 3]") not the base64 text — so the mirror must not attach pattern/minLength/maxLength to a byte-format field, exactly as the email branch already declines format byte. Without the guard regex=^[a-z]+$ leaks a pattern, regex=a** advertises maxLength 0 (only the empty payload) and min/max/alpha over-constrain a blob the server actually accepts. */
+/* @info a []byte renders as {string, byte}, but the validator's string facets never see a string there — Regex/alpha/numeric/alphanumeric ignore a []byte and accept every blob, and min/max measure fmt.Sprintf("%v", value) (e.g. "[1 2 3]") not the base64 text — so the mirror must not attach pattern/minLength/maxLength to a byte-format field, exactly as the email branch already declines format byte. Without the guard regex=^[a-z]+$ leaks a pattern, regex=a** advertises maxLength 0 (only the empty payload) and min/max/alpha over-constrain a blob the server actually accepts. */
 func TestApplyValidation_StringFacetsSkipByteSliceField(t *testing.T) {
     byteType := reflect.TypeOf([]byte(nil))
     structType := reflect.StructOf([]reflect.StructField{
@@ -1451,7 +1451,7 @@ func TestApplyValidation_StringFacetsSkipByteSliceField(t *testing.T) {
     }
 }
 
-/** @info parseLeadingInt must return the platform int, the same width the validator's parseIntStrict uses, so a bound in the 2^31..2^63-1 range that overflows a 32-bit int is rejected identically on both sides instead of parsing into a wider int64 and wrapping to a satisfiable facet the validator refuses. The 32-bit overflow itself is unobservable on a 64-bit test host, so this asserts the concrete return kind, which pins the width divergence on every platform. */
+/* @info parseLeadingInt must return the platform int, the same width the validator's parseIntStrict uses, so a bound in the 2^31..2^63-1 range that overflows a 32-bit int is rejected identically on both sides instead of parsing into a wider int64 and wrapping to a satisfiable facet the validator refuses. The 32-bit overflow itself is unobservable on a 64-bit test host, so this asserts the concrete return kind, which pins the width divergence on every platform. */
 func TestParseLeadingIntReturnsPlatformIntWidth(t *testing.T) {
     parsed, ok := parseLeadingInt("5")
     if false == ok {
@@ -1462,7 +1462,7 @@ func TestParseLeadingIntReturnsPlatformIntWidth(t *testing.T) {
     }
 }
 
-/** @info validateInternal checks every tagged field even when the property is omitted, so a constraint the Go zero value fails (min>=1 on a string, a non-pointer greaterThan bound>=0, a non-pointer lessThan bound<=0) turns an absent property into a 400; the spec must list such a field required — as notBlank/notEmpty already do — while a min of 0, a negative greaterThan bound, or a positive lessThan bound admits the zero value and keeps the field optional. */
+/* @info validateInternal checks every tagged field even when the property is omitted, so a constraint the Go zero value fails (min>=1 on a string, a non-pointer greaterThan bound>=0, a non-pointer lessThan bound<=0) turns an absent property into a 400; the spec must list such a field required — as notBlank/notEmpty already do — while a min of 0, a negative greaterThan bound, or a positive lessThan bound admits the zero value and keeps the field optional. */
 func TestBuildSchema_ZeroValueRejectingConstraintsAreRequired(t *testing.T) {
     stringType := reflect.TypeOf("")
     intType := reflect.TypeOf(0)
@@ -1492,7 +1492,7 @@ func TestBuildSchema_ZeroValueRejectingConstraintsAreRequired(t *testing.T) {
     }
 }
 
-/** @info a pointer string field has no zero value the length constraint would measure: an omitted property leaves it nil, the validator's dereference reports absence and accepts the payload, so advertising the field required would force clients to send what the server does not demand. */
+/* @info a pointer string field has no zero value the length constraint would measure: an omitted property leaves it nil, the validator's dereference reports absence and accepts the payload, so advertising the field required would force clients to send what the server does not demand. */
 func TestBuildSchema_PointerMinFieldStaysOptional(t *testing.T) {
     pointerStringType := reflect.TypeOf((*string)(nil))
     structType := reflect.StructOf([]reflect.StructField{
@@ -1509,7 +1509,7 @@ func TestBuildSchema_PointerMinFieldStaysOptional(t *testing.T) {
     }
 }
 
-/** @info a POSIX named class ([:alpha:]) nested in a bracket expression has its own closing ']' that the character-class scanner must not read as the end of the whole class; otherwise regex=[[:alpha:],] is split at the in-class comma into an uncompilable pattern plus a stray ']' rule. The validator rejects such a tag for every value including "", so the mirror must keep the class intact and advertise the compilable pattern rather than a maxLength-0 (empty-string-satisfiable) field. This keeps the local scanner in lockstep with validation/validation_rule.go. */
+/* @info a POSIX named class ([:alpha:]) nested in a bracket expression has its own closing ']' that the character-class scanner must not read as the end of the whole class; otherwise regex=[[:alpha:],] is split at the in-class comma into an uncompilable pattern plus a stray ']' rule. The validator rejects such a tag for every value including "", so the mirror must keep the class intact and advertise the compilable pattern rather than a maxLength-0 (empty-string-satisfiable) field. This keeps the local scanner in lockstep with validation/validation_rule.go. */
 func TestApplyValidation_PosixClassKeepsTheClassIntact(t *testing.T) {
     schema := &Schema{Type: "string"}
     applyValidation(schema, `regex=[[:alpha:],]`)
@@ -1519,7 +1519,7 @@ func TestApplyValidation_PosixClassKeepsTheClassIntact(t *testing.T) {
     }
 }
 
-/** @info RE2 recognises only [: :] as a POSIX named class; a [. .] collating element and a [= =] equivalence element are NOT supported, so RE2 (and regexp.Compile) read the inner '[' as an ordinary class literal. The character-class scanner must do the same: treating [. or [= as a POSIX opener makes it hunt for a ".]"/"=]" delimiter that never arrives, so the class over-extends to the end of the tag, hasBalancedRuleBrackets reports the tag unbalanced, and splitTopLevelRules splits regex=[a,b[.c] at the in-class comma into "regex=[a" (an uncompilable class advertised as maxLength 0, empty-string-only) plus a stray "b[.c]" rule — a contract the validator, which compiles the class whole and rejects every value including "", never honours. The plain and equivalence fields lock the [. and [= literal handling; the posix field pairs a real [:alpha:] class with a following in-class comma and a [. literal so the whole tag survives as one satisfiable pattern rather than closing early at the ':]' — matching validation/validation_rule.go. */
+/* @info RE2 recognises only [: :] as a POSIX named class; a [. .] collating element and a [= =] equivalence element are NOT supported, so RE2 (and regexp.Compile) read the inner '[' as an ordinary class literal. The character-class scanner must do the same: treating [. or [= as a POSIX opener makes it hunt for a ".]"/"=]" delimiter that never arrives, so the class over-extends to the end of the tag, hasBalancedRuleBrackets reports the tag unbalanced, and splitTopLevelRules splits regex=[a,b[.c] at the in-class comma into "regex=[a" (an uncompilable class advertised as maxLength 0, empty-string-only) plus a stray "b[.c]" rule — a contract the validator, which compiles the class whole and rejects every value including "", never honours. The plain and equivalence fields lock the [. and [= literal handling; the posix field pairs a real [:alpha:] class with a following in-class comma and a [. literal so the whole tag survives as one satisfiable pattern rather than closing early at the ':]' — matching validation/validation_rule.go. */
 func TestBuildSchema_CollatingEquivalenceOpenersStayLiteralInsideClass(t *testing.T) {
     components := map[string]*Schema{}
     names := map[reflect.Type]string{}

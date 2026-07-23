@@ -23,7 +23,7 @@ func TestRedisLock_MutualExclusionReleaseAndRefresh(t *testing.T) {
     }
 
     provider := NewProvider()
-    client, openErr := provider.Open(NewConnectionParams(address, "", ""))
+    client, openErr := provider.Open(NewConnectionParameters(address, "", ""))
     if nil != openErr {
         t.Fatalf("open: %v", openErr)
     }
@@ -70,7 +70,7 @@ func TestRedisLock_RefreshFailsWhenLostToAnotherClient(t *testing.T) {
     }
 
     provider := NewProvider()
-    client, openErr := provider.Open(NewConnectionParams(address, "", ""))
+    client, openErr := provider.Open(NewConnectionParameters(address, "", ""))
     if nil != openErr {
         t.Fatalf("open: %v", openErr)
     }
@@ -103,7 +103,7 @@ func TestRedisLock_ReacquireIsReentrantForSameLock(t *testing.T) {
     }
 
     provider := NewProvider()
-    client, openErr := provider.Open(NewConnectionParams(address, "", ""))
+    client, openErr := provider.Open(NewConnectionParameters(address, "", ""))
     if nil != openErr {
         t.Fatalf("open: %v", openErr)
     }

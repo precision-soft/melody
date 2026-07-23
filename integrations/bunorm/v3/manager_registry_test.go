@@ -44,7 +44,7 @@ type fakeProvider struct {
     openCount int
 }
 
-func (instance *fakeProvider) Open(params ConnectionParams, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *fakeProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.openCount = instance.openCount + 1
     return nil, nil
 }
@@ -56,7 +56,7 @@ type blockingProvider struct {
     releaseOpen chan struct{}
 }
 
-func (instance *blockingProvider) Open(params ConnectionParams, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *blockingProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     close(instance.openStarted)
     <-instance.releaseOpen
 
@@ -71,7 +71,7 @@ type panickingProvider struct {
     startOnce   sync.Once
 }
 
-func (instance *panickingProvider) Open(params ConnectionParams, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *panickingProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.startOnce.Do(
         func() {
             close(instance.openStarted)
@@ -411,7 +411,7 @@ type closeRaceProvider struct {
     releaseOpen chan struct{}
 }
 
-func (instance *closeRaceProvider) Open(params ConnectionParams, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *closeRaceProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     close(instance.openStarted)
     <-instance.releaseOpen
 

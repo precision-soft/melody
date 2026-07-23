@@ -163,12 +163,17 @@ func (instance *Configuration) resolveEnvironmentPlaceholder(
     resolvingParameters map[string]bool,
     resolvingEnvironmentKeys map[string]bool,
 ) (string, int, error) {
-    closeOffset := strings.Index(fragment, ")%")
-    if 0 > closeOffset {
+    /* the candidate ends where the placeholder grammar ends: scanning ahead to an arbitrary ")%" would let a distant closer — the end of a different, well-formed placeholder — turn a literal "%env(" into a malformed-placeholder boot failure, and would carry raw template text into the error context */
+    innerEnd := len("%env(")
+    for innerEnd < len(fragment) && true == isEnvPlaceholderInnerCharacter(fragment[innerEnd]) {
+        innerEnd = innerEnd + 1
+    }
+
+    if innerEnd+1 >= len(fragment) || ')' != fragment[innerEnd] || '%' != fragment[innerEnd+1] {
         return "", 0, nil
     }
 
-    candidate := fragment[:closeOffset+2]
+    candidate := fragment[:innerEnd+2]
 
     submatches := envPlaceholderPattern.FindStringSubmatch(candidate)
     if nil == submatches || candidate != submatches[0] {
@@ -288,6 +293,11 @@ func (instance *Configuration) resolveParameterReference(
         )
     }
 
+    /* the project directory is a filesystem path, not a template: a literal percent in it must survive a reference, exactly as Resolve leaves the parameter itself unscanned */
+    if KernelProjectDir == parameterKey {
+        return environmentValueString, nil
+    }
+
     resolvedReferencedValue, resolveErr := instance.resolveTemplate(
         environmentValueString,
         parameterKey,
@@ -338,4 +348,8 @@ func isParameterNameStartCharacter(character byte) bool {
 
 func isParameterNameCharacter(character byte) bool {
     return true == isParameterNameStartCharacter(character) || ('0' <= character && '9' >= character) || '.' == character
+}
+
+func isEnvPlaceholderInnerCharacter(character byte) bool {
+    return true == isParameterNameCharacter(character) || ':' == character
 }

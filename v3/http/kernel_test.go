@@ -49,17 +49,17 @@ func TestKernel_ResponseListenerReplacesResponseOnSuccessPath(t *testing.T) {
 
     handler := NewKernel(router).ServeHttp(serviceContainer)
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/hello", nil)
-    rec := httptest.NewRecorder()
+    request := httptest.NewRequest(nethttp.MethodGet, "/hello", nil)
+    recorder := httptest.NewRecorder()
 
-    handler.ServeHTTP(rec, req)
+    handler.ServeHTTP(recorder, request)
 
-    if nethttp.StatusAccepted != rec.Code {
-        t.Fatalf("expected listener-replaced status %d, got %d", nethttp.StatusAccepted, rec.Code)
+    if nethttp.StatusAccepted != recorder.Code {
+        t.Fatalf("expected listener-replaced status %d, got %d", nethttp.StatusAccepted, recorder.Code)
     }
 
-    if "replaced" != rec.Body.String() {
-        t.Fatalf("expected listener-replaced body, got %q", rec.Body.String())
+    if "replaced" != recorder.Body.String() {
+        t.Fatalf("expected listener-replaced body, got %q", recorder.Body.String())
     }
 }
 
@@ -92,17 +92,17 @@ func TestKernel_ResponseListenerReplacesResponseOnPanicRecoveryPath(t *testing.T
 
     handler := NewKernel(router).ServeHttp(serviceContainer)
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/boom", nil)
-    rec := httptest.NewRecorder()
+    request := httptest.NewRequest(nethttp.MethodGet, "/boom", nil)
+    recorder := httptest.NewRecorder()
 
-    handler.ServeHTTP(rec, req)
+    handler.ServeHTTP(recorder, request)
 
-    if nethttp.StatusAccepted != rec.Code {
-        t.Fatalf("expected listener-replaced status %d on panic-recovery path, got %d", nethttp.StatusAccepted, rec.Code)
+    if nethttp.StatusAccepted != recorder.Code {
+        t.Fatalf("expected listener-replaced status %d on panic-recovery path, got %d", nethttp.StatusAccepted, recorder.Code)
     }
 
-    if "recovered-replaced" != rec.Body.String() {
-        t.Fatalf("expected listener-replaced body on panic-recovery path, got %q", rec.Body.String())
+    if "recovered-replaced" != recorder.Body.String() {
+        t.Fatalf("expected listener-replaced body on panic-recovery path, got %q", recorder.Body.String())
     }
 }
 
@@ -436,10 +436,10 @@ func TestKernel_FailsClosedWhenKernelRequestDispatchErrors(t *testing.T) {
 
     handler := NewKernel(router).ServeHttp(serviceContainer)
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/guarded", nil)
-    rec := httptest.NewRecorder()
+    request := httptest.NewRequest(nethttp.MethodGet, "/guarded", nil)
+    recorder := httptest.NewRecorder()
 
-    handler.ServeHTTP(rec, req)
+    handler.ServeHTTP(recorder, request)
 
     if true == accessControlRan {
         t.Fatalf("expected the lower-priority listener to be skipped by the dispatcher abort")
@@ -449,8 +449,8 @@ func TestKernel_FailsClosedWhenKernelRequestDispatchErrors(t *testing.T) {
         t.Fatalf("expected the handler not to run when the kernel.request dispatch aborted with partially-run listeners")
     }
 
-    if nethttp.StatusInternalServerError != rec.Code {
-        t.Fatalf("expected a fail-closed 500 when the kernel.request dispatch errored, got %d", rec.Code)
+    if nethttp.StatusInternalServerError != recorder.Code {
+        t.Fatalf("expected a fail-closed 500 when the kernel.request dispatch errored, got %d", recorder.Code)
     }
 }
 
@@ -493,10 +493,10 @@ func TestKernel_FailsClosedWhenKernelControllerDispatchErrors(t *testing.T) {
 
     handler := NewKernel(router).ServeHttp(serviceContainer)
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/guarded", nil)
-    rec := httptest.NewRecorder()
+    request := httptest.NewRequest(nethttp.MethodGet, "/guarded", nil)
+    recorder := httptest.NewRecorder()
 
-    handler.ServeHTTP(rec, req)
+    handler.ServeHTTP(recorder, request)
 
     if true == lowerPriorityRan {
         t.Fatalf("expected the lower-priority kernel.controller listener to be skipped by the dispatcher abort")
@@ -506,8 +506,8 @@ func TestKernel_FailsClosedWhenKernelControllerDispatchErrors(t *testing.T) {
         t.Fatalf("expected the handler not to run when the kernel.controller dispatch aborted with partially-run listeners")
     }
 
-    if nethttp.StatusInternalServerError != rec.Code {
-        t.Fatalf("expected a fail-closed 500 when the kernel.controller dispatch errored, got %d", rec.Code)
+    if nethttp.StatusInternalServerError != recorder.Code {
+        t.Fatalf("expected a fail-closed 500 when the kernel.controller dispatch errored, got %d", recorder.Code)
     }
 }
 
@@ -542,13 +542,13 @@ func TestKernel_KernelRequestListenerResponseStillWinsOverDispatchError(t *testi
 
     handler := NewKernel(router).ServeHttp(serviceContainer)
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/denied", nil)
-    rec := httptest.NewRecorder()
+    request := httptest.NewRequest(nethttp.MethodGet, "/denied", nil)
+    recorder := httptest.NewRecorder()
 
-    handler.ServeHTTP(rec, req)
+    handler.ServeHTTP(recorder, request)
 
-    if nethttp.StatusUnauthorized != rec.Code {
-        t.Fatalf("expected the listener-set 401 to win over the synthesized 500, got %d", rec.Code)
+    if nethttp.StatusUnauthorized != recorder.Code {
+        t.Fatalf("expected the listener-set 401 to win over the synthesized 500, got %d", recorder.Code)
     }
 }
 
@@ -575,17 +575,17 @@ func TestKernel_ResponseListenerErrorDoesNotDropResponse(t *testing.T) {
 
     handler := NewKernel(router).ServeHttp(serviceContainer)
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/still-served", nil)
-    rec := httptest.NewRecorder()
+    request := httptest.NewRequest(nethttp.MethodGet, "/still-served", nil)
+    recorder := httptest.NewRecorder()
 
-    handler.ServeHTTP(rec, req)
+    handler.ServeHTTP(recorder, request)
 
-    if nethttp.StatusOK != rec.Code {
-        t.Fatalf("expected the response to be written despite the kernel.response dispatch error, got %d", rec.Code)
+    if nethttp.StatusOK != recorder.Code {
+        t.Fatalf("expected the response to be written despite the kernel.response dispatch error, got %d", recorder.Code)
     }
 
-    if "served" != rec.Body.String() {
-        t.Fatalf("expected the handler body to be written, got %q", rec.Body.String())
+    if "served" != recorder.Body.String() {
+        t.Fatalf("expected the handler body to be written, got %q", recorder.Body.String())
     }
 }
 
@@ -629,21 +629,21 @@ func TestKernel_SessionSaveFailureDegradesToResponseWithoutPanic(t *testing.T) {
 
     handler := NewKernel(router).ServeHttp(serviceContainer)
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/session-write", nil)
-    rec := httptest.NewRecorder()
+    request := httptest.NewRequest(nethttp.MethodGet, "/session-write", nil)
+    recorder := httptest.NewRecorder()
 
-    handler.ServeHTTP(rec, req)
+    handler.ServeHTTP(recorder, request)
 
-    if nethttp.StatusOK != rec.Code {
-        t.Fatalf("expected the response to be delivered despite the session-store outage, got %d", rec.Code)
+    if nethttp.StatusOK != recorder.Code {
+        t.Fatalf("expected the response to be delivered despite the session-store outage, got %d", recorder.Code)
     }
 
-    if "ok" != rec.Body.String() {
-        t.Fatalf("expected the handler body despite the session-store outage, got %q", rec.Body.String())
+    if "ok" != recorder.Body.String() {
+        t.Fatalf("expected the handler body despite the session-store outage, got %q", recorder.Body.String())
     }
 
-    if "" != rec.Header().Get("Set-Cookie") {
-        t.Fatalf("expected no session cookie when the session could not be persisted, got %q", rec.Header().Get("Set-Cookie"))
+    if "" != recorder.Header().Get("Set-Cookie") {
+        t.Fatalf("expected no session cookie when the session could not be persisted, got %q", recorder.Header().Get("Set-Cookie"))
     }
 }
 
@@ -665,13 +665,13 @@ func TestKernel_SessionSaveFailureOnPanicRecoveryPathStillDelivers500(t *testing
 
     handler := NewKernel(router).ServeHttp(serviceContainer)
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/session-write-boom", nil)
-    rec := httptest.NewRecorder()
+    request := httptest.NewRequest(nethttp.MethodGet, "/session-write-boom", nil)
+    recorder := httptest.NewRecorder()
 
-    handler.ServeHTTP(rec, req)
+    handler.ServeHTTP(recorder, request)
 
-    if nethttp.StatusInternalServerError != rec.Code {
-        t.Fatalf("expected the recovered 500 to be delivered despite the session-store outage, got %d", rec.Code)
+    if nethttp.StatusInternalServerError != recorder.Code {
+        t.Fatalf("expected the recovered 500 to be delivered despite the session-store outage, got %d", recorder.Code)
     }
 }
 
@@ -720,13 +720,13 @@ func TestKernel_HandlerPathResponseDispatchErrorRespectsAlreadyLogged(t *testing
 
     handler := NewKernel(router).ServeHttp(serviceContainer)
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/logged-once", nil)
-    rec := httptest.NewRecorder()
+    request := httptest.NewRequest(nethttp.MethodGet, "/logged-once", nil)
+    recorder := httptest.NewRecorder()
 
-    handler.ServeHTTP(rec, req)
+    handler.ServeHTTP(recorder, request)
 
-    if nethttp.StatusOK != rec.Code {
-        t.Fatalf("expected the response despite the dispatch error, got %d", rec.Code)
+    if nethttp.StatusOK != recorder.Code {
+        t.Fatalf("expected the response despite the dispatch error, got %d", recorder.Code)
     }
 
     /* @important the dispatcher already logs "event listener error" once and marks the returned wrapper as logged; the handler-response finalization block must respect that mark (logEventDispatchError) instead of re-logging it — inline logging here would produce two error lines for one failure */
@@ -778,7 +778,7 @@ func (instance *panicOnceSessionStorage) Close() error {
     return nil
 }
 
-/** @info writeResponse persists the session BEFORE WriteToHttpResponseWriter registers the body's deferred Close, so a panic in the session backend unwinds with the file-backed response assigned to finalResponse and its descriptor still open. The recover handler replaces finalResponse with an error response; unless it closes the discarded one, every such request leaks a file descriptor. */
+/* @info writeResponse persists the session BEFORE WriteToHttpResponseWriter registers the body's deferred Close, so a panic in the session backend unwinds with the file-backed response assigned to finalResponse and its descriptor still open. The recover handler replaces finalResponse with an error response; unless it closes the discarded one, every such request leaks a file descriptor. */
 func TestKernel_PanicRecoveryClosesTheDiscardedFileBackedResponse(t *testing.T) {
     bodyReader := &closeTrackingReader{}
     storage := &panicOnceSessionStorage{}

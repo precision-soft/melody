@@ -10,13 +10,13 @@ import (
 )
 
 func forwardedRequest(remoteAddr string, forwardedFor string) httpcontract.Request {
-    req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
-    req.RemoteAddr = remoteAddr
+    request := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    request.RemoteAddr = remoteAddr
     if "" != forwardedFor {
-        req.Header.Set("X-Forwarded-For", forwardedFor)
+        request.Header.Set("X-Forwarded-For", forwardedFor)
     }
 
-    return testhelper.NewHttpTestRequestFromHttpRequest(req)
+    return testhelper.NewHttpTestRequestFromHttpRequest(request)
 }
 
 func trustingPolicy(trustedProxies ...string) httpcontract.ForwardedHeadersPolicy {
@@ -134,7 +134,7 @@ func TestForwardedClientIpResolver_MatchesCidrAndExactEntries(t *testing.T) {
     }
 }
 
-/** @info A proxy may write the same client as 1.2.3.4 or as ::ffff:1.2.3.4. Left mapped, the two forms key two different rate limit buckets, and an IPv4 CIDR in the trusted proxy list never matches a 4-in-6 peer. */
+/* @info A proxy may write the same client as 1.2.3.4 or as ::ffff:1.2.3.4. Left mapped, the two forms key two different rate limit buckets, and an IPv4 CIDR in the trusted proxy list never matches a 4-in-6 peer. */
 func TestForwardedClientIpResolver_UnmapsIpv4MappedAddresses(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
 
@@ -149,7 +149,7 @@ func TestForwardedClientIpResolver_UnmapsIpv4MappedAddresses(t *testing.T) {
     }
 }
 
-/** @info Proxies such as IIS/ARR and Azure Application Gateway append host:port to X-Forwarded-For. The untrusted client hop must be resolved to its bare address, not rejected as garbage — which would collapse every client into the proxy's own rate-limit bucket. */
+/* @info Proxies such as IIS/ARR and Azure Application Gateway append host:port to X-Forwarded-For. The untrusted client hop must be resolved to its bare address, not rejected as garbage — which would collapse every client into the proxy's own rate-limit bucket. */
 func TestForwardedClientIpResolver_ResolvesPortedForwardedHop(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
 
@@ -159,7 +159,7 @@ func TestForwardedClientIpResolver_ResolvesPortedForwardedHop(t *testing.T) {
     }
 }
 
-/** @info A dual-stack proxy may write its hop as an IPv4-mapped address (::ffff:10.0.0.5) and the operator lists that literal in the trusted proxy list. The mapped trusted entry must still match the unmapped hop, otherwise the trusted hop is treated as the first untrusted client and the proxy's own address leaks as the limiter key. */
+/* @info A dual-stack proxy may write its hop as an IPv4-mapped address (::ffff:10.0.0.5) and the operator lists that literal in the trusted proxy list. The mapped trusted entry must still match the unmapped hop, otherwise the trusted hop is treated as the first untrusted client and the proxy's own address leaks as the limiter key. */
 func TestForwardedClientIpResolver_MatchesMappedTrustedExactEntry(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8", "::ffff:192.168.1.1"))
 
@@ -169,7 +169,7 @@ func TestForwardedClientIpResolver_MatchesMappedTrustedExactEntry(t *testing.T) 
     }
 }
 
-/** @info A trusted proxy CIDR written in IPv4-mapped form (::ffff:192.168.0.0/120) must still contain the unmapped direct peer, otherwise the peer is rejected as untrusted and the forwarded chain is never walked. */
+/* @info A trusted proxy CIDR written in IPv4-mapped form (::ffff:192.168.0.0/120) must still contain the unmapped direct peer, otherwise the peer is rejected as untrusted and the forwarded chain is never walked. */
 func TestForwardedClientIpResolver_MatchesMappedTrustedPrefix(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("::ffff:192.168.0.0/120"))
 

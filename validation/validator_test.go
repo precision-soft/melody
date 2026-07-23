@@ -662,7 +662,7 @@ func findValidationErrorByField(validationErrors ValidationErrors, field string)
     return nil
 }
 
-/** @info validate tags declared on nested struct fields and on slice-of-struct elements are enforced (the flat validator returned nil for these), with a path identifying the offending nested field. */
+/* @info validate tags declared on nested struct fields and on slice-of-struct elements are enforced, with a path identifying the offending nested field. */
 func TestValidator_EnforcesNestedConstraints(t *testing.T) {
     validatorInstance := NewValidator()
 
@@ -683,7 +683,7 @@ func TestValidator_EnforcesNestedConstraints(t *testing.T) {
     }
 }
 
-/** @info a fully valid nested payload still passes so the cascade adds no false rejections. */
+/* @info a fully valid nested payload still passes so the cascade adds no false rejections. */
 func TestValidator_AcceptsValidNestedPayload(t *testing.T) {
     validatorInstance := NewValidator()
 
@@ -696,7 +696,7 @@ func TestValidator_AcceptsValidNestedPayload(t *testing.T) {
     requireNoValidationErrors(t, err)
 }
 
-/** @info a self-referential value must not hang or overflow the stack during the recursive cascade. */
+/* @info a self-referential value must not hang or overflow the stack during the recursive cascade. */
 func TestValidator_CyclicPayloadTerminates(t *testing.T) {
     validatorInstance := NewValidator()
 
@@ -819,5 +819,24 @@ func TestValidateStruct_ToleratesANilPointerEmbed(t *testing.T) {
     validateErr := validator.Validate(&nilEmbedPayload{Name: "ok"})
     if nil != validateErr {
         t.Fatalf("expected the nil embed to be tolerated, got %v", validateErr)
+    }
+}
+
+type TaggedEmbed struct {
+    Name string `json:"embedName"`
+}
+
+type taggedEmbedPayload struct {
+    TaggedEmbed `validate:"notEmpty"`
+    Title       string `json:"title"`
+}
+
+/* @info a constraint declared on the embed itself runs against the embed value: the promoted fields are payload-populated, so the tag is satisfiable and must not vanish with the flattening */
+func TestValidateStruct_AppliesTheTagDeclaredOnAPromotedEmbed(t *testing.T) {
+    validator := NewValidator()
+
+    validateErr := validator.Validate(&taggedEmbedPayload{})
+    if nil == validateErr {
+        t.Fatalf("expected the embed's own tag to run")
     }
 }

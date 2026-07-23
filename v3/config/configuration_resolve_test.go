@@ -549,3 +549,55 @@ func TestResolveTemplate_SingleCharacterParameterReferenceResolves(t *testing.T)
     }
 }
 
+
+/* @info the candidate ends where the placeholder grammar ends: a literal %env( must stay data even when a different, well-formed placeholder closes later in the same value */
+func TestResolveTemplate_LiteralEnvPrefixBesideARealPlaceholderIsData(t *testing.T) {
+    configuration := &Configuration{
+        environment: &Environment{
+            values: map[string]string{
+                "APP_NAME": "melody",
+            },
+        },
+        parameters: ParameterMap{},
+    }
+
+    value, resolveErr := configuration.resolveTemplate(
+        "write %env( around the key; app=%env(APP_NAME)%",
+        "app.hint",
+        make(map[string]bool),
+        make(map[string]bool),
+    )
+    if nil != resolveErr {
+        t.Fatalf("expected the literal prefix to stay data, got %v", resolveErr)
+    }
+
+    if "write %env( around the key; app=melody" != value {
+        t.Fatalf("unexpected resolved value %q", value)
+    }
+}
+
+/* @info the project directory is a filesystem path, not a template: a literal percent in it survives a reference and the parameter itself is never overwritten */
+func TestResolveTemplate_ProjectDirectoryReferenceIsData(t *testing.T) {
+    projectDirectoryParameter := NewParameter("", "/srv/app%1", "/srv/app%1", true)
+
+    configuration := &Configuration{
+        environment: &Environment{values: map[string]string{}},
+        parameters: ParameterMap{
+            KernelProjectDir: projectDirectoryParameter,
+            "kernel.logs_dir": NewParameter("", "%kernel.project_dir%/var/log", "", true),
+        },
+    }
+
+    resolveErr := configuration.Resolve()
+    if nil != resolveErr {
+        t.Fatalf("expected the reference to resolve, got %v", resolveErr)
+    }
+
+    if "/srv/app%1/var/log" != configuration.getInternalParameter("kernel.logs_dir").String() {
+        t.Fatalf("unexpected logs dir %q", configuration.getInternalParameter("kernel.logs_dir").String())
+    }
+
+    if "/srv/app%1" != projectDirectoryParameter.String() {
+        t.Fatalf("expected the project directory to stay untouched, got %q", projectDirectoryParameter.String())
+    }
+}

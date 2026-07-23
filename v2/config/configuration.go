@@ -154,7 +154,7 @@ func (instance *Configuration) RegisterRuntime(name string, value any) {
     instance.registerRuntimeParameter(name, value, false)
 }
 
-/* RegisterRuntimeSecret registers a parameter that holds a credential, so that the commands which render the configuration redact it. The value is stored and resolved like any other: the marking governs display, not storage, and it travels to every parameter whose template reads this one. */
+/* RegisterRuntimeSecret registers a parameter that holds a credential, so that the commands which render the configuration redact it. The value is stored and resolved like any other: the marking governs display, not storage, and it travels to every parameter whose template reads this one. It does not travel backwards: the parameter melody auto-registered from the environment key this template reads holds the same credential and needs its own MarkSecret. */
 func (instance *Configuration) RegisterRuntimeSecret(name string, value any) {
     instance.registerRuntimeParameter(name, value, true)
 }

@@ -158,7 +158,9 @@ func collectStructFields(
             if 0 == embedCount[embeddedType] {
                 embedQueue = append(embedQueue, embeddedType)
             }
-            embedCount[embeddedType]++
+            if 2 > embedCount[embeddedType] {
+                embedCount[embeddedType]++
+            }
             continue
         }
 
@@ -216,7 +218,11 @@ func collectStructFields(
                     if 0 == nextCount[childType] {
                         nextLevel = append(nextLevel, childType)
                     }
+                    /* two copies decide every dominance tie, so the count is capped there instead of doubling through stacked diamonds */
                     nextCount[childType] += multiplicity
+                    if 2 < nextCount[childType] {
+                        nextCount[childType] = 2
+                    }
                     continue
                 }
 

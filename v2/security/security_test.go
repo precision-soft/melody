@@ -37,14 +37,14 @@ func (instance *securityTestRequestContext) StartedAt() time.Time {
 }
 
 func newSecurityTestRequest(method string, path string, headers map[string]string, runtimeInstance runtimecontract.Runtime) httpcontract.Request {
-    req := httptest.NewRequest(method, "http://example.com"+path, nil)
+    request := httptest.NewRequest(method, "http://example.com"+path, nil)
 
     for key, value := range headers {
-        req.Header.Set(key, value)
+        request.Header.Set(key, value)
     }
 
     return http.NewRequest(
-        req,
+        request,
         nil,
         runtimeInstance,
         &securityTestRequestContext{

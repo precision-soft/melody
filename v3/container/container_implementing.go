@@ -68,13 +68,16 @@ func (instance *container) ReferencesImplementing(interfaceType reflect.Type) []
 
     instance.mutex.RUnlock()
 
+    /* the type comparison goes through String() and falls through to the name on a tie: comparing type identity first would make two distinct types that share a String() (same-named packages) mutually unordered against each other yet name-ordered against their own kind, which breaks the strict weak ordering sort requires and lets map iteration leak into the result */
     sort.Slice(references, func(first int, second int) bool {
         if references[first].priority != references[second].priority {
             return references[first].priority > references[second].priority
         }
 
-        if references[first].reference.ServiceType != references[second].reference.ServiceType {
-            return references[first].reference.ServiceType.String() < references[second].reference.ServiceType.String()
+        firstTypeString := references[first].reference.ServiceType.String()
+        secondTypeString := references[second].reference.ServiceType.String()
+        if firstTypeString != secondTypeString {
+            return firstTypeString < secondTypeString
         }
 
         return references[first].reference.ServiceName < references[second].reference.ServiceName

@@ -13,18 +13,18 @@ import (
 func TestTextResponse_WritesBodyAndStatus(t *testing.T) {
     response := TextResponse(201, "created")
 
-    rec := httptest.NewRecorder()
+    recorder := httptest.NewRecorder()
 
-    err := WriteToHttpResponseWriter(nil, nil, rec, response)
+    err := WriteToHttpResponseWriter(nil, nil, recorder, response)
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
 
-    if 201 != rec.Code {
+    if 201 != recorder.Code {
         t.Fatalf("unexpected status")
     }
 
-    if "created" != rec.Body.String() {
+    if "created" != recorder.Body.String() {
         t.Fatalf("unexpected body")
     }
 }
@@ -40,22 +40,22 @@ func TestJsonResponse_WritesJson(t *testing.T) {
         t.Fatalf("unexpected error: %v", err)
     }
 
-    rec := httptest.NewRecorder()
+    recorder := httptest.NewRecorder()
 
-    err = WriteToHttpResponseWriter(nil, nil, rec, response)
+    err = WriteToHttpResponseWriter(nil, nil, recorder, response)
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
 
-    if 200 != rec.Code {
+    if 200 != recorder.Code {
         t.Fatalf("unexpected status")
     }
 
-    if "" == rec.Body.String() {
+    if "" == recorder.Body.String() {
         t.Fatalf("expected body")
     }
 
-    contentType := rec.Header().Get("Content-Type")
+    contentType := recorder.Header().Get("Content-Type")
     if "" == contentType {
         t.Fatalf("expected content-type header")
     }
@@ -273,40 +273,40 @@ func TestAttachmentResponse_AsciiOnlyFilenameOmitsRfcExtension(t *testing.T) {
 func TestHtmlResponse_ContentType(t *testing.T) {
     response := HtmlResponse(200, "<h1>Hello</h1>")
 
-    rec := httptest.NewRecorder()
-    err := WriteToHttpResponseWriter(nil, nil, rec, response)
+    recorder := httptest.NewRecorder()
+    err := WriteToHttpResponseWriter(nil, nil, recorder, response)
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
 
-    if 200 != rec.Code {
-        t.Fatalf("unexpected status code: %d", rec.Code)
+    if 200 != recorder.Code {
+        t.Fatalf("unexpected status code: %d", recorder.Code)
     }
 
-    contentType := rec.Header().Get("Content-Type")
+    contentType := recorder.Header().Get("Content-Type")
     if ContentTypeTextHtml != contentType {
         t.Fatalf("unexpected content-type: %s", contentType)
     }
 
-    if "<h1>Hello</h1>" != rec.Body.String() {
-        t.Fatalf("unexpected body: %s", rec.Body.String())
+    if "<h1>Hello</h1>" != recorder.Body.String() {
+        t.Fatalf("unexpected body: %s", recorder.Body.String())
     }
 }
 
 func TestJsonErrorResponse_ContainsErrorField(t *testing.T) {
     response := JsonErrorResponse(500, "something went wrong")
 
-    rec := httptest.NewRecorder()
-    err := WriteToHttpResponseWriter(nil, nil, rec, response)
+    recorder := httptest.NewRecorder()
+    err := WriteToHttpResponseWriter(nil, nil, recorder, response)
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
 
-    if 500 != rec.Code {
-        t.Fatalf("unexpected status code: %d", rec.Code)
+    if 500 != recorder.Code {
+        t.Fatalf("unexpected status code: %d", recorder.Code)
     }
 
-    body := rec.Body.String()
+    body := recorder.Body.String()
     if false == strings.Contains(body, "something went wrong") {
         t.Fatalf("expected error message in body, got: %s", body)
     }

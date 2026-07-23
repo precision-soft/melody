@@ -9,7 +9,7 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
 )
 
-/** @info truncateTableCellValue must not split a multibyte UTF-8 rune when it cuts an over-long cell */
+/* @info truncateTableCellValue must not split a multibyte UTF-8 rune when it cuts an over-long cell */
 func TestTruncateTableCellValue_KeepsRunesIntactOnMultibyteOverflow(t *testing.T) {
     value := strings.Repeat("ș", 115) /* 230 bytes, over the 220 byte cap; the 217 byte cut lands mid rune */
 
@@ -26,7 +26,7 @@ func TestTruncateTableCellValue_KeepsRunesIntactOnMultibyteOverflow(t *testing.T
     }
 }
 
-/** @info wrapFixedWidth must not split a multibyte UTF-8 rune at the wrap boundary */
+/* @info wrapFixedWidth must not split a multibyte UTF-8 rune at the wrap boundary */
 func TestWrapFixedWidth_KeepsRunesIntactAtBoundary(t *testing.T) {
     /* the leading ASCII byte shifts every 2 byte rune onto an odd offset, so the even width boundary lands mid rune on the unpatched code */
     value := "a" + strings.Repeat("ș", 60) /* 121 bytes */
@@ -44,7 +44,7 @@ func TestWrapFixedWidth_KeepsRunesIntactAtBoundary(t *testing.T) {
     }
 }
 
-/** @info resolveErrorContextJson must strip stack keys even when marshalling fails and it falls back to fmt */
+/* @info resolveErrorContextJson must strip stack keys even when marshalling fails and it falls back to fmt */
 func TestResolveErrorContextJson_RedactsStackOnMarshalFailure(t *testing.T) {
     contextValue := exceptioncontract.Context{
         "stack":      "SECRET_STACK_TRACE",

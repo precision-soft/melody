@@ -9,28 +9,39 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
 )
 
-type ForbiddenChar struct {
+type ForbiddenCharacter struct {
     Char   rune
     Reason string
 }
 
-var CrontabForbiddenChars = []ForbiddenChar{
+/* Deprecated: use ForbiddenCharacter. */
+type ForbiddenChar = ForbiddenCharacter
+
+var CrontabForbiddenCharacters = []ForbiddenCharacter{
     {Char: '%', Reason: "reserved by crontab as a line-continuation character (translated to a newline before the shell sees it); remove it at the source"},
     {Char: '\n', Reason: "terminates the crontab line; a literal newline inside a token splits one entry into multiple invalid lines"},
     {Char: '\r', Reason: "terminates the crontab line on many cron daemons; remove it before passing the token to the generator"},
 }
 
-func ValidateNoForbiddenChars(tokens []string, forbidden []ForbiddenChar, context string) error {
+/* Deprecated: use CrontabForbiddenCharacters. */
+var CrontabForbiddenChars = CrontabForbiddenCharacters
+
+/* Deprecated: use ValidateNoForbiddenCharacters. */
+func ValidateNoForbiddenChars(tokens []string, forbidden []ForbiddenCharacter, context string) error {
+    return ValidateNoForbiddenCharacters(tokens, forbidden, context)
+}
+
+func ValidateNoForbiddenCharacters(tokens []string, forbidden []ForbiddenCharacter, context string) error {
     for _, token := range tokens {
-        for _, char := range forbidden {
-            if true == strings.ContainsRune(token, char.Char) {
+        for _, character := range forbidden {
+            if true == strings.ContainsRune(token, character.Char) {
                 return exception.NewError(
-                    fmt.Sprintf("cron: token %q in %s contains forbidden character %q: %s", token, context, char.Char, char.Reason),
+                    fmt.Sprintf("cron: token %q in %s contains forbidden character %q: %s", token, context, character.Char, character.Reason),
                     exceptioncontract.Context{
                         "token":     token,
                         "context":   context,
-                        "character": string(char.Char),
-                        "reason":    char.Reason,
+                        "character": string(character.Char),
+                        "reason":    character.Reason,
                     },
                     ErrForbiddenCharacter,
                 )
@@ -53,9 +64,9 @@ func validateUserField(label string, value string) error {
         )
     }
 
-    return ValidateNoForbiddenChars(
+    return ValidateNoForbiddenCharacters(
         []string{value},
-        CrontabForbiddenChars,
+        CrontabForbiddenCharacters,
         label,
     )
 }
@@ -102,7 +113,7 @@ func exampleSteppedRangeOf(item string, fieldName string) string {
     return item[:slashIndex] + "-" + maximum + item[slashIndex:]
 }
 
-func validateScheduleFields(entry Entry, forbidden []ForbiddenChar) error {
+func validateScheduleFields(entry Entry, forbidden []ForbiddenCharacter) error {
     if nil == entry.Schedule {
         return nil
     }
@@ -153,7 +164,7 @@ func validateScheduleFields(entry Entry, forbidden []ForbiddenChar) error {
             )
         }
 
-        forbiddenErr := ValidateNoForbiddenChars(
+        forbiddenErr := ValidateNoForbiddenCharacters(
             []string{field.value},
             forbidden,
             fmt.Sprintf("entry %q Schedule.%s", entry.Name, field.name),

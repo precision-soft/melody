@@ -1,6 +1,6 @@
 package bunorm
 
-type ConnectionParams struct {
+type ConnectionParameters struct {
     Host     string
     Port     string
     Database string
@@ -8,7 +8,7 @@ type ConnectionParams struct {
     Password string
 }
 
-func (instance *ConnectionParams) SafeContext() map[string]any {
+func (instance *ConnectionParameters) SafeContext() map[string]any {
     return map[string]any{
         "host":     instance.Host,
         "port":     instance.Port,
@@ -16,3 +16,6 @@ func (instance *ConnectionParams) SafeContext() map[string]any {
         "user":     instance.User,
     }
 }
+
+/* Deprecated: use ConnectionParameters. */
+type ConnectionParams = ConnectionParameters

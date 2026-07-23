@@ -251,7 +251,7 @@ func TestStripRuntimeFlagsFromOsArgs_StripsRoleFlags(t *testing.T) {
     }
 }
 
-/** @info a --role that follows the subcommand is the command's own flag: it and everything after the command name is left intact, so the command receives its --role and its --verbose. */
+/* @info a --role that follows the subcommand is the command's own flag: it and everything after the command name is left intact, so the command receives its --role and its --verbose. */
 func TestStripRuntimeFlagsFromOsArgs_LeavesTheCommandsOwnFlags(t *testing.T) {
     originalArguments := os.Args
     defer func() { os.Args = originalArguments }()
@@ -270,7 +270,7 @@ func TestStripRuntimeFlagsFromOsArgs_LeavesTheCommandsOwnFlags(t *testing.T) {
     }
 }
 
-/** @info a bare `--role worker` before the subcommand still consumes its value and both are stripped. */
+/* @info a bare `--role worker` before the subcommand still consumes its value and both are stripped. */
 func TestStripRuntimeFlagsFromOsArgs_ConsumesARealFlagValue(t *testing.T) {
     originalArguments := os.Args
     defer func() { os.Args = originalArguments }()
@@ -283,7 +283,7 @@ func TestStripRuntimeFlagsFromOsArgs_ConsumesARealFlagValue(t *testing.T) {
     }
 }
 
-/** @info a command that declares its own --role flag is no longer broken by the runtime: an --role after the subcommand name is left in os.Args for the command to parse. */
+/* @info a command's own --role after the subcommand name is left in os.Args for the command to parse: an --role after the subcommand name is left in os.Args for the command to parse. */
 func TestStripRuntimeFlagsFromOsArgs_PreservesCommandOwnRoleFlag(t *testing.T) {
     originalArguments := os.Args
     t.Cleanup(func() {
@@ -306,7 +306,7 @@ func TestStripRuntimeFlagsFromOsArgs_PreservesCommandOwnRoleFlag(t *testing.T) {
     }
 }
 
-/** @info only the runtime --role that precedes the subcommand is stripped; the command keeps its own --role after the command name. */
+/* @info only the runtime --role that precedes the subcommand is stripped; the command keeps its own --role after the command name. */
 func TestStripRuntimeFlagsFromOsArgs_StripsOnlyTheLeadingRole(t *testing.T) {
     originalArguments := os.Args
     t.Cleanup(func() {
@@ -329,7 +329,7 @@ func TestStripRuntimeFlagsFromOsArgs_StripsOnlyTheLeadingRole(t *testing.T) {
     }
 }
 
-/** @info a command's own --role after the subcommand is not read as the process role, so an app value like "admin" no longer panics the runtime; the process role stays the default and the command's flag is left for the command. */
+/* @info a command's own --role after the subcommand is not read as the process role, so an app value like "admin" does not panic the runtime; the process role stays the default and the command's flag is left for the command. */
 func TestParseRuntimeFlags_IgnoresRoleAfterTheSubcommand(t *testing.T) {
     originalArguments := os.Args
     t.Cleanup(func() {
@@ -349,7 +349,7 @@ func TestParseRuntimeFlags_IgnoresRoleAfterTheSubcommand(t *testing.T) {
     }
 }
 
-/** @info the runtime --role that precedes the subcommand still wins; the command's own --role after the command name is ignored by the runtime parser. */
+/* @info the runtime --role that precedes the subcommand still wins; the command's own --role after the command name is ignored by the runtime parser. */
 func TestParseRuntimeFlags_UsesTheLeadingRoleNotTheCommandFlag(t *testing.T) {
     originalArguments := os.Args
     t.Cleanup(func() {
@@ -365,7 +365,7 @@ func TestParseRuntimeFlags_UsesTheLeadingRoleNotTheCommandFlag(t *testing.T) {
     }
 }
 
-/** @info A bare "--" end-of-options terminator makes every following token a literal command argument, exactly as the cli verbosity normalizer treats it. Before the terminator was honored the parser read `--role=manager` past the terminator and the boot panicked on the invalid role, stealing the command's own positional argument. */
+/* @info A bare "--" end-of-options terminator makes every following token a literal command argument, exactly as the cli verbosity normalizer treats it. */
 func TestParseRuntimeFlags_TerminatorStopsRoleParsing(t *testing.T) {
     originalArguments := os.Args
     t.Cleanup(func() {
@@ -385,7 +385,7 @@ func TestParseRuntimeFlags_TerminatorStopsRoleParsing(t *testing.T) {
     }
 }
 
-/** @info Tokens after the bare "--" terminator are literal command arguments and must survive stripping intact; before the terminator was honored `--role=web` was deleted from os.Args and the command never received it. */
+/* @info Tokens after the bare "--" terminator are literal command arguments and must survive stripping intact.Args and the command never received it. */
 func TestStripRuntimeFlagsFromOsArgs_TerminatorKeepsLiteralArguments(t *testing.T) {
     originalArguments := os.Args
     t.Cleanup(func() {
@@ -408,7 +408,7 @@ func TestStripRuntimeFlagsFromOsArgs_TerminatorKeepsLiteralArguments(t *testing.
     }
 }
 
-/** @info An explicitly present but empty `--role=` (e.g. expanded from an unset env var) must fail closed like any invalid role instead of silently widening to the most permissive RoleAll. */
+/* @info An explicitly present but empty `--role=` (e.g. expanded from an unset env var) must fail closed like any invalid role instead of silently widening to the most permissive RoleAll. */
 func TestParseRuntimeFlags_PanicsOnExplicitlyEmptyRole(t *testing.T) {
     originalArguments := os.Args
     t.Cleanup(func() {
@@ -422,7 +422,7 @@ func TestParseRuntimeFlags_PanicsOnExplicitlyEmptyRole(t *testing.T) {
     })
 }
 
-/** @info A bare `--role` that cannot consume its dash-leading next token is still explicitly present with no value, so it must fail closed rather than silently resolve to RoleAll. */
+/* @info A bare `--role` that cannot consume its dash-leading next token is still explicitly present with no value, so it must fail closed rather than silently resolve to RoleAll. */
 func TestParseRuntimeFlags_PanicsOnBareRoleWithoutValue(t *testing.T) {
     originalArguments := os.Args
     t.Cleanup(func() {
@@ -436,7 +436,7 @@ func TestParseRuntimeFlags_PanicsOnBareRoleWithoutValue(t *testing.T) {
     })
 }
 
-/** @info An explicitly present but empty `--mode=` (e.g. expanded from an unset env var) must fail closed like an invalid mode instead of silently booting the configured default. */
+/* @info An explicitly present but empty `--mode=` (e.g. expanded from an unset env var) must fail closed like an invalid mode instead of silently booting the configured default. */
 func TestParseRuntimeFlags_PanicsOnExplicitlyEmptyMode(t *testing.T) {
     originalArguments := os.Args
     t.Cleanup(func() {
@@ -450,7 +450,7 @@ func TestParseRuntimeFlags_PanicsOnExplicitlyEmptyMode(t *testing.T) {
     })
 }
 
-/** @info When a runtime flag is supplied more than once before the subcommand, the last occurrence wins. */
+/* @info When a runtime flag is supplied more than once before the subcommand, the last occurrence wins. */
 func TestParseRuntimeFlags_LastRoleOccurrenceWins(t *testing.T) {
     originalArguments := os.Args
     t.Cleanup(func() {
@@ -465,7 +465,7 @@ func TestParseRuntimeFlags_LastRoleOccurrenceWins(t *testing.T) {
     }
 }
 
-/** @info Last-wins holds even when the last occurrence is explicitly empty: `--role=web --role=` resolves to the empty value and fails closed, instead of the earlier web silently surviving. */
+/* @info Last-wins holds even when the last occurrence is explicitly empty: `--role=web --role=` resolves to the empty value and fails closed, instead of the earlier web silently surviving. */
 func TestParseRuntimeFlags_PanicsWhenLastRoleOccurrenceIsEmpty(t *testing.T) {
     originalArguments := os.Args
     t.Cleanup(func() {
@@ -479,7 +479,7 @@ func TestParseRuntimeFlags_PanicsWhenLastRoleOccurrenceIsEmpty(t *testing.T) {
     })
 }
 
-/** @info A bare `--role` before the subcommand consumes the following token as its value even when that token was meant as the command name, so an unintended value like a command name fails role validation. */
+/* @info A bare `--role` before the subcommand consumes the following token as its value even when that token was meant as the command name, so an unintended value like a command name fails role validation. */
 func TestParseRuntimeFlags_BareRoleBeforeCommandConsumesIt(t *testing.T) {
     originalArguments := os.Args
     t.Cleanup(func() {

@@ -312,6 +312,10 @@ func (instance *scope) ReferencesImplementing(interfaceType reflect.Type) []cont
     return containerInstance.ReferencesImplementing(interfaceType)
 }
 
+func (instance *scope) isScopeClosed() bool {
+    return nil == instance.container.Load()
+}
+
 func (instance *scope) lookupInstanceByName(serviceName string) (any, bool, error) {
     if "" == serviceName {
         return nil, false, exception.NewError(

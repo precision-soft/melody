@@ -201,12 +201,17 @@ func (instance *Validator) validateStruct(value reflect.Value, path string, dept
                 }
 
                 if true == isPromotedValidationEmbed(field) {
+                    /* the embed's own tag runs against the embed value: its promoted fields are payload-populated, so a constraint declared on the embed is satisfiable and must not vanish with the flattening. An unexported embed's value cannot pass through Interface — only its promoted exported fields can — so its tag stays out of reach. */
+                    if true == field.IsExported() {
+                        errors = append(errors, instance.applyFieldRules(field, fieldValue, embeddedFieldPath(field, path))...)
+                    }
+
                     embeddedType := dereferencedValidationStructType(field.Type)
                     if true == embeddedSeen[embeddedType] {
                         continue
                     }
 
-                    /* @info a type reached by several equal-depth paths has its fields duplicated once per path, so a diamond annihilates in the dominance pick, mirroring encoding/json */
+                    /* a type reached by several equal-depth paths has its fields duplicated per path so a diamond annihilates in the dominance pick, as in encoding/json; two copies decide every tie, so the count is capped there instead of doubling through stacked diamonds */
                     nextItem, exists := nextByType[embeddedType]
                     if false == exists {
                         nextItem = &embeddedLevelItem{
@@ -216,7 +221,11 @@ func (instance *Validator) validateStruct(value reflect.Value, path string, dept
                         nextByType[embeddedType] = nextItem
                         nextLevel = append(nextLevel, nextItem)
                     }
+
                     nextItem.count = nextItem.count + item.count
+                    if 2 < nextItem.count {
+                        nextItem.count = 2
+                    }
 
                     continue
                 }
@@ -238,7 +247,12 @@ func (instance *Validator) validateStruct(value reflect.Value, path string, dept
                     order = append(order, jsonName)
                 }
 
-                for copyIndex := 0; copyIndex < item.count; copyIndex++ {
+                duplicateCount := item.count
+                if 2 < duplicateCount {
+                    duplicateCount = 2
+                }
+
+                for copyIndex := 0; copyIndex < duplicateCount; copyIndex++ {
                     candidatesByName[jsonName] = append(candidatesByName[jsonName], visibleFieldCandidate{
                         field: field,
                         value: fieldValue,
@@ -287,36 +301,52 @@ func (instance *Validator) validateVisibleField(
         fieldPath = path + "." + jsonName
     }
 
-    validateTag := candidate.field.Tag.Get("validate")
-    if "" != validateTag && "-" != validateTag {
-        rules, err := parseValidationTag(validateTag)
-        if nil != err {
-            errors = append(
-                errors,
-                NewValidationError(
-                    fieldPath,
-                    "invalid validation tag syntax",
-                    ErrorInvalidRuleSyntax,
-                    map[string]any{
-                        "tag": validateTag,
-                    },
-                ),
-            )
-        } else {
-            for _, rule := range rules {
-                validationError := instance.validateRule(
-                    candidate.value.Interface(),
-                    fieldPath,
-                    rule,
-                )
-                if nil != validationError {
-                    errors = append(errors, validationError)
-                }
-            }
+    errors = append(errors, instance.applyFieldRules(candidate.field, candidate.value, fieldPath)...)
+
+    return append(errors, instance.validateReflected(candidate.value, fieldPath, depth+1, visited)...)
+}
+
+func (instance *Validator) applyFieldRules(field reflect.StructField, value reflect.Value, fieldPath string) ValidationErrors {
+    var errors ValidationErrors
+
+    if false == value.IsValid() {
+        return errors
+    }
+
+    validateTag := field.Tag.Get("validate")
+    if "" == validateTag || "-" == validateTag {
+        return errors
+    }
+
+    rules, err := parseValidationTag(validateTag)
+    if nil != err {
+        return append(errors, NewValidationError(
+            fieldPath,
+            "invalid validation tag syntax",
+            ErrorInvalidRuleSyntax,
+            map[string]any{
+                "tag": validateTag,
+            },
+        ))
+    }
+
+    for _, rule := range rules {
+        validationError := instance.validateRule(value.Interface(), fieldPath, rule)
+        if nil != validationError {
+            errors = append(errors, validationError)
         }
     }
 
-    return append(errors, instance.validateReflected(candidate.value, fieldPath, depth+1, visited)...)
+    return errors
+}
+
+/* embeddedFieldPath names the embed the way an error can point at it: by its field name under the parent's path, since the embed itself has no json name of its own. */
+func embeddedFieldPath(field reflect.StructField, path string) string {
+    if "" == path {
+        return field.Name
+    }
+
+    return path + "." + field.Name
 }
 
 /* dominantVisibleField mirrors the openapi mirror's dominantEmbeddedField (openapi/schema.go): a single candidate wins outright, exactly one explicitly json-named candidate beats the untagged ones, and anything else is the ambiguity encoding/json drops — no field is populated, so none is validated. */

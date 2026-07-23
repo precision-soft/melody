@@ -110,11 +110,63 @@ func renderType(typeReference *TypeReference, importAliases *importAliasTable) s
     return prefix + alias + "." + strings.TrimPrefix(expression, typeReference.Qualifier+".")
 }
 
+/* assignVariableNames renames the generated locals away from everything else the provider body references — the closure parameters, the fixed helper names, the import aliases of the types it spells, and one another's derived Err/Value forms. An argument named after its package qualifier (repository repository.ProductRepository) is idiomatic Go and would otherwise shadow the alias. */
+func assignVariableNames(
+    constructor *Constructor,
+    resolvedArguments []*resolvedArgument,
+    importAliases *importAliasTable,
+) {
+    forbidden := map[string]bool{
+        "resolver":                   true,
+        "registrar":                  true,
+        "configuration":              true,
+        "zeroValue":                  true,
+        containerContractImportAlias: true,
+        containerImportAlias:         true,
+        configImportAlias:            true,
+        exceptionImportAlias:         true,
+        mathImportAlias:              true,
+    }
+
+    forbidden[importAliases.alias(constructor.ImportPath)] = true
+
+    if "" != constructor.ReturnType.ImportPath {
+        forbidden[importAliases.alias(constructor.ReturnType.ImportPath)] = true
+    }
+
+    for _, resolved := range resolvedArguments {
+        /* a scalar never renders its type, so asking for its alias would drag an unused import into the file */
+        if true == resolved.argument.IsScalar {
+            continue
+        }
+
+        if "" != resolved.argument.Type.ImportPath {
+            forbidden[importAliases.alias(resolved.argument.Type.ImportPath)] = true
+        }
+    }
+
+    for _, resolved := range resolvedArguments {
+        candidate := resolved.argument.Name
+
+        for suffix := 2; true == forbidden[candidate] || true == forbidden[candidate+"Err"] || true == forbidden[candidate+"Value"]; suffix = suffix + 1 {
+            candidate = resolved.argument.Name + strconv.Itoa(suffix)
+        }
+
+        resolved.variableName = candidate
+
+        forbidden[candidate] = true
+        forbidden[candidate+"Err"] = true
+        forbidden[candidate+"Value"] = true
+    }
+}
+
 func renderProvider(
     constructor *Constructor,
     resolvedArguments []*resolvedArgument,
     importAliases *importAliasTable,
 ) string {
+    assignVariableNames(constructor, resolvedArguments, importAliases)
+
     returnTypeExpression := renderType(constructor.ReturnType, importAliases)
     constructorExpression := importAliases.alias(constructor.ImportPath) + "." + constructor.Name
 
@@ -149,7 +201,7 @@ func renderProvider(
         }
 
         if true == resolved.argument.IsScalar {
-            if _, isFallible := scalarAccessor(resolved.argument.Type.Expression); true == isFallible {
+            if _, isFallible := scalarAccessor(resolved.argument.Type); true == isFallible {
                 hasFallibleArgument = true
             }
         }
@@ -224,7 +276,7 @@ func renderArgument(
         return builder.String()
     }
 
-    accessor, isFallible := scalarAccessor(resolved.argument.Type.Expression)
+    accessor, isFallible := scalarAccessor(resolved.argument.Type)
 
     parameterExpression := "configuration.MustGet(" + strconv.Quote(resolved.parameterName) + ")"
 
@@ -235,7 +287,7 @@ func renderArgument(
     }
 
     /* the accessor returns the widest type of its family, so only a narrower argument needs a conversion; naming the variable directly otherwise keeps the generated provider free of a pointless intermediate */
-    if false == scalarNeedsConversion(resolved.argument.Type.Expression) {
+    if false == scalarNeedsConversion(resolved.argument.Type) {
         builder.WriteString(body + resolved.variableName + ", " + errorVariable + " := " + parameterExpression + "." + accessor + "\n")
         builder.WriteString(body + "if nil != " + errorVariable + " {\n")
         builder.WriteString(body + indent + "return " + errorReturnExpression + ", " + errorVariable + "\n")
@@ -272,7 +324,12 @@ func renderNarrowingGuard(
 
     condition := valueVariable + " < " + integerRange.lowerBound
     if "" != integerRange.upperBound {
-        condition = condition + " || " + integerRange.upperBound + " < " + valueVariable
+        comparedValue := valueVariable
+        if "" != integerRange.upperBoundValueConversion {
+            comparedValue = integerRange.upperBoundValueConversion + "(" + valueVariable + ")"
+        }
+
+        condition = condition + " || " + integerRange.upperBound + " < " + comparedValue
     }
 
     if true == strings.Contains(condition, mathImportAlias+".") {
@@ -299,6 +356,8 @@ func renderNarrowingGuard(
 type scalarIntegerBounds struct {
     lowerBound string
     upperBound string
+    /* math.MaxUint32 overflows a 32-bit int, so that comparison runs through int64 */
+    upperBoundValueConversion string
 }
 
 /* scalarIntegerRange yields the bounds of an integer type narrower than the int the accessor returns. An empty upper bound means the int cannot exceed it, so only the lower one is checked. */
@@ -317,7 +376,7 @@ func scalarIntegerRange(typeExpression string) (*scalarIntegerBounds, bool) {
     case "uint16":
         return &scalarIntegerBounds{lowerBound: "0", upperBound: mathQualifier + "MaxUint16"}, true
     case "uint32":
-        return &scalarIntegerBounds{lowerBound: "0", upperBound: mathQualifier + "MaxUint32"}, true
+        return &scalarIntegerBounds{lowerBound: "0", upperBound: mathQualifier + "MaxUint32", upperBoundValueConversion: "int64"}, true
     case "uint", "uint64":
         return &scalarIntegerBounds{lowerBound: "0", upperBound: ""}, true
     default:
@@ -325,25 +384,31 @@ func scalarIntegerRange(typeExpression string) (*scalarIntegerBounds, bool) {
     }
 }
 
-/* scalarAccessor maps a Go type onto the parameter accessor that reads it, and reports whether that accessor returns an error. A string is read through MustString: the generator has already verified the parameter is declared, so the only remaining failure is a declaration holding a non-string, which is a wiring mistake rather than a runtime condition. */
-func scalarAccessor(typeExpression string) (string, bool) {
-    switch typeExpression {
+/* scalarAccessor maps a scalar argument onto the parameter accessor that reads it, and reports whether that accessor returns an error. The stdlib duration is recognized by the import path its qualifier resolves to, so an aliased time import keeps its accessor. A string is read through MustString: the generator has already verified the parameter is declared, so the only remaining failure is a declaration holding a non-string, which is a wiring mistake rather than a runtime condition. */
+func scalarAccessor(typeReference *TypeReference) (string, bool) {
+    if true == isStandardDuration(typeReference) {
+        return "Duration()", true
+    }
+
+    switch typeReference.Expression {
     case "string":
         return "MustString()", false
     case "bool":
         return "Bool()", true
     case "float32", "float64":
         return "Float()", true
-    case "time.Duration":
-        return "Duration()", true
     default:
         return "Int()", true
     }
 }
 
-func scalarNeedsConversion(typeExpression string) bool {
-    switch typeExpression {
-    case "string", "bool", "int", "float64", "time.Duration":
+func scalarNeedsConversion(typeReference *TypeReference) bool {
+    if true == isStandardDuration(typeReference) {
+        return false
+    }
+
+    switch typeReference.Expression {
+    case "string", "bool", "int", "float64":
         return false
     default:
         return true

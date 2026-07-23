@@ -84,6 +84,8 @@ func (instance *Application) Boot() kernelcontract.Kernel {
 
     instance.bootHttp()
 
+    instance.warnUnappliedSecretMarks()
+
     instance.booted = true
 
     return instance.kernel
@@ -104,7 +106,7 @@ func (instance *Application) RegisterSecretParameter(
     instance.registerParameter(name, value, true)
 }
 
-/* MarkParameterSecret marks a parameter that already exists — typically one melody registered automatically from the .env artifacts — as holding a credential. A name that matches nothing does not fail the boot, since an environment key is legitimately undefined in some environments; it is retried once every registration has run and warned about if it still matched nothing, so a misspelled name is visible instead of silently redacting nothing. */
+/* MarkParameterSecret marks a parameter that already exists — typically one melody registered automatically from the .env artifacts — as holding a credential. A name that matches nothing does not fail the boot, since an environment key is legitimately undefined in some environments; it is retried before the configuration resolves and again at the end of the boot, and warned about only then, so a misspelled name is visible instead of silently redacting nothing. */
 func (instance *Application) MarkParameterSecret(name string) {
     if true == instance.booted {
         exception.Panic(
@@ -123,8 +125,21 @@ func (instance *Application) MarkParameterSecret(name string) {
     }
 }
 
-/* applyUnappliedSecretMarks retries the markings that matched nothing when they were declared — the parameter may have been registered after the marking ran — and warns about each one that still matches nothing, which is what turns a misspelled name into a visible signal instead of an unredacted credential. It runs after every module registered its parameters and before the configuration resolves, so a retried marking still propagates into the parameters whose templates read the secret. */
+/* applyUnappliedSecretMarks retries the markings that matched nothing when they were declared. It runs after every module registered its parameters and before the configuration resolves, so a retried marking still propagates into the parameters whose templates read the secret; what still matches nothing stays queued, since a later boot phase may yet register the parameter. */
 func (instance *Application) applyUnappliedSecretMarks() {
+    remaining := make([]string, 0, len(instance.unappliedSecretMarks))
+
+    for _, name := range instance.unappliedSecretMarks {
+        if false == instance.configuration.MarkSecret(name) {
+            remaining = append(remaining, name)
+        }
+    }
+
+    instance.unappliedSecretMarks = remaining
+}
+
+/* warnUnappliedSecretMarks runs when every boot phase that can register a parameter has finished: a marking that still matches nothing is a misspelled name or a key undefined in this environment, and the warning is what keeps it from silently redacting nothing. */
+func (instance *Application) warnUnappliedSecretMarks() {
     for _, name := range instance.unappliedSecretMarks {
         if true == instance.configuration.MarkSecret(name) {
             continue

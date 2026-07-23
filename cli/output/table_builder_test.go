@@ -4,7 +4,7 @@ import (
     "testing"
 )
 
-/** @info The block builder must not hold &Blocks[len-1]: a later AddBlock reallocates the slice, so rows added through the earlier builder would land in the old backing array and vanish. */
+/* @info The block builder must not hold &Blocks[len-1]: a later AddBlock reallocates the slice, so rows added through the earlier builder would land in the old backing array and vanish. */
 func TestTableBuilder_RowsSurviveALaterAddBlock(t *testing.T) {
     builder := NewTableBuilder()
 

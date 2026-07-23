@@ -146,7 +146,7 @@ func TestNewRequest_PatchFormParsing(t *testing.T) {
 }
 
 func TestNewRequest_GetDoesNotParseForm(t *testing.T) {
-    httpRequest := httptest.NewRequest("GET", "/test?key=val", nil)
+    httpRequest := httptest.NewRequest("GET", "/test?key=value", nil)
 
     request := NewRequest(httpRequest, nil, nil, nil)
 
@@ -312,9 +312,9 @@ func TestRequest_ParseFormBody(t *testing.T) {
         t.Fatalf("expected post param 'key' to exist after ParseFormBody")
     }
 
-    val := request.FormValue("key")
-    if "value" != val {
-        t.Fatalf("expected 'value', got: %s", val)
+    value := request.FormValue("key")
+    if "value" != value {
+        t.Fatalf("expected 'value', got: %s", value)
     }
 }
 
@@ -325,9 +325,9 @@ func TestRequest_FormValue(t *testing.T) {
 
     request := NewRequest(httpRequest, nil, nil, nil)
 
-    val := request.FormValue("field")
-    if "formval" != val {
-        t.Fatalf("expected 'formval', got: %s", val)
+    value := request.FormValue("field")
+    if "formval" != value {
+        t.Fatalf("expected 'formval', got: %s", value)
     }
 }
 

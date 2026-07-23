@@ -118,3 +118,38 @@ type ParameterEcho struct {
 func NewMigrationRunner() error {
     return nil
 }
+
+const ServiceCollisionProbe = "domain.collisionProbe"
+
+/* the argument names collide with the generated body's own identifiers on purpose: the package aliases (domain, contract), the configuration helper and the closure parameter must all survive a constructor written in idiomatic Go */
+//melody:service ServiceCollisionProbe
+func NewCollisionProbe(
+    domain *UserRepository,
+    contract contract.Logger,
+    configuration *UserRepository,
+    resolver *UserRepository,
+    retryCount int,
+    refreshBudget uint32,
+) (*CollisionProbe, error) {
+    return &CollisionProbe{
+        domain:        domain,
+        contract:      contract,
+        configuration: configuration,
+        resolver:      resolver,
+        retryCount:    retryCount,
+        refreshBudget: refreshBudget,
+    }, nil
+}
+
+type CollisionProbe struct {
+    domain        *UserRepository
+    contract      contract.Logger
+    configuration *UserRepository
+    resolver      *UserRepository
+    retryCount    int
+    refreshBudget uint32
+}
+
+func NewToken() string {
+    return "token"
+}

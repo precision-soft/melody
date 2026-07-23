@@ -25,6 +25,7 @@ func newFixtureBindSet() *BindSet {
         Name("apiUrl", "fixture.api_url").
         Name("retryCount", "fixture.retry_count").
         Name("maxAttempts", "fixture.max_attempts").
+        Name("refreshBudget", "fixture.refresh_budget").
         Exclude("*Fixture")
 
     return bindSet
@@ -86,7 +87,7 @@ func TestGenerate_ReportsSkippedConstructorsWithAReason(t *testing.T) {
         reasonByName[skipped.Name] = skipped.Reason
     }
 
-    for _, name := range []string{"NewGenericHolder", "NewVariadicService", "NewMigrationRunner"} {
+    for _, name := range []string{"NewGenericHolder", "NewVariadicService", "NewMigrationRunner", "NewToken"} {
         reason, exists := reasonByName[name]
         if false == exists {
             t.Fatalf("expected %s to be reported as skipped", name)

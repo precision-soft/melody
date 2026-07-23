@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- `validation.go` — `ForbiddenCharacter`, `CrontabForbiddenCharacters` and `ValidateNoForbiddenCharacters` spell the names out; the abbreviated forms remain as deprecated aliases, so nothing breaks at compile time.
+
 ## [v3.5.0] - 2026-07-17 - In-Process Cron Runner
 
 ### Added

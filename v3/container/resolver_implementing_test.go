@@ -2,6 +2,7 @@ package container
 
 import (
     "errors"
+    "reflect"
     "testing"
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
@@ -296,7 +297,7 @@ func TestAllImplementing_ScopeOverrideTakesPart(t *testing.T) {
         _ = requestScope.Close()
     }()
 
-    overrideErr := requestScope.OverrideProtectedInstance("*container.invoiceHandler", &auditHandler{})
+    overrideErr := requestScope.OverrideProtectedInstance(defaultServiceNameForType(reflect.TypeOf(&invoiceHandler{})), &auditHandler{})
     if nil != overrideErr {
         t.Fatalf("expected the override to install, got %v", overrideErr)
     }
@@ -312,5 +313,88 @@ func TestAllImplementing_ScopeOverrideTakesPart(t *testing.T) {
 
     if "audit" != handlers[0].Handle() || "audit" != handlers[1].Handle() {
         t.Fatalf("expected the scope override to take the registration's place, got %q and %q", handlers[0].Handle(), handlers[1].Handle())
+    }
+}
+
+/* @info excluding anything but the collector itself would freeze a collection whose content depends on boot order; a deeper service on the same path must fail as the cycle it is */
+func TestAllImplementing_AncestorOnTheResolutionPathFailsLoudly(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*auditHandler, error) {
+        _, dispatcherErr := FromResolverByType[*handlerDispatcher](resolver)
+        if nil != dispatcherErr {
+            return nil, dispatcherErr
+        }
+
+        return &auditHandler{}, nil
+    })
+
+    MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*handlerDispatcher, error) {
+        handlers, allImplementingErr := AllImplementing[collectableHandler](resolver)
+        if nil != allImplementingErr {
+            return nil, allImplementingErr
+        }
+
+        return &handlerDispatcher{handlers: handlers}, nil
+    })
+
+    _, getErr := FromResolverByType[*auditHandler](serviceContainer)
+    if nil == getErr {
+        t.Fatalf("expected the handler-resolves-dispatcher-collects-handler cycle to fail loudly")
+    }
+}
+
+/* @info a closed scope's Get refuses for the request-outliving goroutine, and the collection must refuse the same way instead of handing that goroutine an empty set to dispatch to */
+func TestAllImplementing_RefusesAClosedScope(t *testing.T) {
+    serviceContainer := newCollectionContainer(t)
+
+    requestScope := serviceContainer.NewScope()
+
+    closeErr := requestScope.Close()
+    if nil != closeErr {
+        t.Fatalf("expected the scope to close, got %v", closeErr)
+    }
+
+    _, allImplementingErr := AllImplementing[collectableHandler](requestScope)
+    if nil == allImplementingErr {
+        t.Fatalf("expected the collection on a closed scope to be refused")
+    }
+}
+
+/* @info equal priorities keep the stable type-and-name order, and a negative one sorts after every service that declared nothing */
+func TestAllImplementing_EqualAndNegativePrioritiesKeepAStableOrder(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    MustRegister(serviceContainer, "handler.low", func(resolver containercontract.Resolver) (*namedHandler, error) {
+        return &namedHandler{name: "low"}, nil
+    }, WithTypeRegistration(false), WithCollectionPriority(-5))
+
+    MustRegister(serviceContainer, "handler.b", func(resolver containercontract.Resolver) (*namedHandler, error) {
+        return &namedHandler{name: "b"}, nil
+    }, WithTypeRegistration(false))
+
+    MustRegister(serviceContainer, "handler.a", func(resolver containercontract.Resolver) (*namedHandler, error) {
+        return &namedHandler{name: "a"}, nil
+    }, WithTypeRegistration(false))
+
+    MustRegister(serviceContainer, "handler.first", func(resolver containercontract.Resolver) (*namedHandler, error) {
+        return &namedHandler{name: "first"}, nil
+    }, WithTypeRegistration(false), WithCollectionPriority(10))
+
+    handlers, allImplementingErr := AllImplementing[collectableHandler](serviceContainer)
+    if nil != allImplementingErr {
+        t.Fatalf("expected the collection to succeed, got %v", allImplementingErr)
+    }
+
+    collected := make([]string, 0, len(handlers))
+    for _, handler := range handlers {
+        collected = append(collected, handler.Handle())
+    }
+
+    expected := []string{"first", "a", "b", "low"}
+    for index, name := range expected {
+        if name != collected[index] {
+            t.Fatalf("unexpected order: got %v, want %v", collected, expected)
+        }
     }
 }

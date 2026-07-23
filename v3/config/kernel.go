@@ -206,15 +206,7 @@ func (instance *kernelConfiguration) validateLogPath() error {
         return nil
     }
 
-    if true == envPlaceholderPattern.MatchString(logPath) || true == parameterPlaceholderPattern.MatchString(logPath) {
-        return exception.NewError(
-            "log path contains unresolved placeholders",
-            exceptioncontract.Context{
-                "logPath": logPath,
-            },
-            nil,
-        )
-    }
+    /* resolution fails on any placeholder it cannot expand, so a resolved path can only carry a percent as data — the doubled-percent escape produces one — and a placeholder-shaped check here would reject exactly those legitimate values */
 
     return nil
 }

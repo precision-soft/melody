@@ -96,29 +96,32 @@ func TestRenderType_LeavesABuiltinTypeAlone(t *testing.T) {
 /* @info an accessor returns the widest type of its family, so only a narrower argument needs a conversion in the generated provider */
 func TestScalarAccessorAndConversion_PairUpPerType(t *testing.T) {
     cases := []struct {
-        typeExpression  string
+        typeReference   *TypeReference
         accessor        string
         isFallible      bool
         needsConversion bool
     }{
-        {"string", "MustString()", false, false},
-        {"bool", "Bool()", true, false},
-        {"int", "Int()", true, false},
-        {"int64", "Int()", true, true},
-        {"float64", "Float()", true, false},
-        {"float32", "Float()", true, true},
-        {"time.Duration", "Duration()", true, false},
+        {&TypeReference{Expression: "string"}, "MustString()", false, false},
+        {&TypeReference{Expression: "bool"}, "Bool()", true, false},
+        {&TypeReference{Expression: "int"}, "Int()", true, false},
+        {&TypeReference{Expression: "int64"}, "Int()", true, true},
+        {&TypeReference{Expression: "float64"}, "Float()", true, false},
+        {&TypeReference{Expression: "float32"}, "Float()", true, true},
+        {&TypeReference{Expression: "time.Duration", Qualifier: "time", ImportPath: "time"}, "Duration()", true, false},
+        /* the classification follows the resolved import path: an aliased stdlib duration keeps its accessor, a foreign package named time does not borrow it */
+        {&TypeReference{Expression: "stdtime.Duration", Qualifier: "stdtime", ImportPath: "time"}, "Duration()", true, false},
+        {&TypeReference{Expression: "time.Duration", Qualifier: "time", ImportPath: "example.com/faketime"}, "Int()", true, true},
     }
 
     for _, testCase := range cases {
-        accessor, isFallible := scalarAccessor(testCase.typeExpression)
+        accessor, isFallible := scalarAccessor(testCase.typeReference)
 
         if testCase.accessor != accessor || testCase.isFallible != isFallible {
-            t.Fatalf("unexpected accessor for %s: %q fallible=%t", testCase.typeExpression, accessor, isFallible)
+            t.Fatalf("unexpected accessor for %s: %q fallible=%t", testCase.typeReference.Expression, accessor, isFallible)
         }
 
-        if testCase.needsConversion != scalarNeedsConversion(testCase.typeExpression) {
-            t.Fatalf("unexpected conversion decision for %s", testCase.typeExpression)
+        if testCase.needsConversion != scalarNeedsConversion(testCase.typeReference) {
+            t.Fatalf("unexpected conversion decision for %s", testCase.typeReference.Expression)
         }
     }
 }

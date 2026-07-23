@@ -244,7 +244,7 @@ func TestMysqlLock_AcquireVerifyErrorReleasesHeldLock(t *testing.T) {
     }
 }
 
-/** @info Mirrors TestMysqlLock_RefreshCanceledRuntimeContextKeepsHeldLock: a canceled request context is a transient caller-side condition, not a lost lock. Re-acquiring under one must not be mistaken for a verify error and must not RELEASE_LOCK a lock this process still holds. */
+/* @info Mirrors TestMysqlLock_RefreshCanceledRuntimeContextKeepsHeldLock: a canceled request context is a transient caller-side condition, not a lost lock. Re-acquiring under one must not be mistaken for a verify error and must not RELEASE_LOCK a lock this process still holds. */
 func TestMysqlLock_AcquireCanceledRuntimeContextKeepsHeldLock(t *testing.T) {
     dsn := os.Getenv("MYSQL_DSN")
     if "" == dsn {
@@ -481,7 +481,7 @@ func TestBoundedLockName_ShortNamePassesThrough(t *testing.T) {
     }
 }
 
-/** @info A lock name longer than MySQL's 64-character user-level-lock limit would make GET_LOCK error on every Acquire, so RunExclusive fails closed forever and the wrapped job never runs. boundedLockName must fold such a name onto a form MySQL accepts. */
+/* @info A lock name longer than MySQL's 64-character user-level-lock limit would make GET_LOCK error on every Acquire, so RunExclusive fails closed forever and the wrapped job never runs. boundedLockName must fold such a name onto a form MySQL accepts. */
 func TestBoundedLockName_LongNameFitsMysqlLimit(t *testing.T) {
     name := "melody:command:" + strings.Repeat("a", 80)
 
