@@ -22,7 +22,7 @@ Import path: `github.com/precision-soft/melody/integrations/bunorm/v3`
 
 ## Connection parameters
 
-A provider opens a database from an explicit [`bunorm.ConnectionParams`](./connection_params.go) value (`Host`, `Port`, `Database`, `User`, `Password`) — the caller reads these from config/environment and passes them in. `SafeContext()` returns the parameters with the password omitted, suitable for logging.
+A provider opens a database from an explicit [`bunorm.ConnectionParams`](./connection_parameters.go) value (`Host`, `Port`, `Database`, `User`, `Password`) — the caller reads these from config/environment and passes them in. `SafeContext()` returns the parameters with the password omitted, suitable for logging.
 
 The [`bunorm.Provider`](./provider.go) contract is a single method:
 

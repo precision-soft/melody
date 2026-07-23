@@ -17,13 +17,13 @@ const k8sDefaultRestartPolicy = "OnFailure"
 const k8sNameMaxLength = 52
 
 /* @info line terminators are rejected outright with an actionable error; every other value is emitted as a double-quoted YAML scalar (with any remaining control character escaped by yamlQuote), so colons, spaces, and wildcards survive without breaking the document */
-var k8sForbiddenChars = []ForbiddenChar{
+var k8sForbiddenCharacters = []ForbiddenCharacter{
     {Char: '\n', Reason: "a literal newline terminates the YAML scalar and corrupts the manifest; remove it at the source"},
     {Char: '\r', Reason: "a carriage return terminates the YAML scalar on parsers that treat CR as a line break; remove it before rendering"},
 }
 
 /* @info schedule fields carry the same line-terminator restriction as every other k8s value, plus a % rejection: % is not a valid character in a cron schedule field, so reject it here with a k8s-appropriate reason rather than emitting a manifest the apiserver refuses */
-var k8sScheduleForbiddenChars = []ForbiddenChar{
+var k8sScheduleForbiddenCharacters = []ForbiddenCharacter{
     {Char: '%', Reason: "not a valid character in a kubernetes CronJob schedule field; remove it at the source"},
     {Char: '\n', Reason: "a literal newline terminates the YAML scalar and corrupts the manifest; remove it at the source"},
     {Char: '\r', Reason: "a carriage return terminates the YAML scalar on parsers that treat CR as a line break; remove it before rendering"},
@@ -50,12 +50,12 @@ func (instance *K8sTemplate) Render(entries []Entry, options RenderOptions) (str
         )
     }
 
-    if validationErr := ValidateNoForbiddenChars([]string{options.Image}, k8sForbiddenChars, "k8s image"); nil != validationErr {
+    if validationErr := ValidateNoForbiddenCharacters([]string{options.Image}, k8sForbiddenCharacters, "k8s image"); nil != validationErr {
         return "", validationErr
     }
 
     if "" != options.Namespace {
-        if validationErr := ValidateNoForbiddenChars([]string{options.Namespace}, k8sForbiddenChars, "k8s namespace"); nil != validationErr {
+        if validationErr := ValidateNoForbiddenCharacters([]string{options.Namespace}, k8sForbiddenCharacters, "k8s namespace"); nil != validationErr {
             return "", validationErr
         }
     }
@@ -65,7 +65,7 @@ func (instance *K8sTemplate) Render(entries []Entry, options RenderOptions) (str
         restartPolicy = k8sDefaultRestartPolicy
     }
 
-    if validationErr := ValidateNoForbiddenChars([]string{restartPolicy}, k8sForbiddenChars, "k8s restart policy"); nil != validationErr {
+    if validationErr := ValidateNoForbiddenCharacters([]string{restartPolicy}, k8sForbiddenCharacters, "k8s restart policy"); nil != validationErr {
         return "", validationErr
     }
 
@@ -152,12 +152,12 @@ func buildCronJobManifest(entry Entry, image string, namespace string, restartPo
     }
 
     /* @info the same per-field schedule validation the crontab template applies; embedded whitespace, %, CR or LF are all invalid in a k8s cron schedule too, so reject them with a clear error rather than emitting a broken manifest */
-    if scheduleValidationErr := validateScheduleFields(entry, k8sScheduleForbiddenChars); nil != scheduleValidationErr {
+    if scheduleValidationErr := validateScheduleFields(entry, k8sScheduleForbiddenCharacters); nil != scheduleValidationErr {
         return "", "", scheduleValidationErr
     }
 
     schedule := entry.Schedule.Expression()
-    if validationErr := ValidateNoForbiddenChars([]string{schedule}, k8sForbiddenChars, fmt.Sprintf("entry %q schedule", entry.Name)); nil != validationErr {
+    if validationErr := ValidateNoForbiddenCharacters([]string{schedule}, k8sForbiddenCharacters, fmt.Sprintf("entry %q schedule", entry.Name)); nil != validationErr {
         return "", "", validationErr
     }
 
@@ -166,7 +166,7 @@ func buildCronJobManifest(entry Entry, image string, namespace string, restartPo
         return "", "", invocationErr
     }
 
-    if validationErr := ValidateNoForbiddenChars(invocationTokens, k8sForbiddenChars, fmt.Sprintf("entry %q command", entry.Name)); nil != validationErr {
+    if validationErr := ValidateNoForbiddenCharacters(invocationTokens, k8sForbiddenCharacters, fmt.Sprintf("entry %q command", entry.Name)); nil != validationErr {
         return "", "", validationErr
     }
 

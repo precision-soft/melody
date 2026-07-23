@@ -124,7 +124,7 @@ func (instance *Configuration) scanTemplate(
                 continue
             }
 
-            /* no closing ")%" ahead: the fragment is not a placeholder and the percent is data */
+            /* no closer right there — the run ended at a percent or ran out: the fragment is not a placeholder and the percent is data */
             builder.WriteByte('%')
             index = index + 1
 
@@ -163,9 +163,9 @@ func (instance *Configuration) resolveEnvironmentPlaceholder(
     resolvingParameters map[string]bool,
     resolvingEnvironmentKeys map[string]bool,
 ) (string, int, error) {
-    /* the candidate ends where the placeholder grammar ends: scanning ahead to an arbitrary ")%" would let a distant closer — the end of a different, well-formed placeholder — turn a literal "%env(" into a malformed-placeholder boot failure, and would carry raw template text into the error context */
+    /* the candidate ends at the first ")%" that no percent interrupts: a percent before the closer means a different placeholder's closer is being looked at, and reaching for it would turn a literal "%env(" into a malformed-placeholder boot failure carrying raw template text — while a closer inside the run keeps a misspelled-but-closed placeholder (%env(FOO-BAR)%) reported instead of silently surviving as text */
     innerEnd := len("%env(")
-    for innerEnd < len(fragment) && true == isEnvPlaceholderInnerCharacter(fragment[innerEnd]) {
+    for innerEnd < len(fragment) && '%' != fragment[innerEnd] && ')' != fragment[innerEnd] {
         innerEnd = innerEnd + 1
     }
 
@@ -177,12 +177,17 @@ func (instance *Configuration) resolveEnvironmentPlaceholder(
 
     submatches := envPlaceholderPattern.FindStringSubmatch(candidate)
     if nil == submatches || candidate != submatches[0] {
-        /* @important the placeholder text names an environment key, never its value, so it is safe to carry into the error context */
+        /* @important only a candidate spelled in key-grammar characters is carried into the error context: the bounded span may hold arbitrary pasted text — a credential typed where the key belongs — and that must not reach the logs */
+        reportedPlaceholder := "%env(<redacted>)%"
+        if true == isKeyGrammarText(candidate[len("%env(") : len(candidate)-len(")%")]) {
+            reportedPlaceholder = candidate
+        }
+
         return "", 0, exception.NewError(
             "malformed environment placeholder in template; the only supported form besides %env(KEY)% is %env(default:<fallback parameter>:KEY)%, and a type cast belongs on the typed accessor (Bool, Int, Float, Duration) rather than in the placeholder",
             map[string]any{
                 "parameter":   currentKey,
-                "placeholder": candidate,
+                "placeholder": reportedPlaceholder,
             },
             nil,
         )
@@ -350,6 +355,12 @@ func isParameterNameCharacter(character byte) bool {
     return true == isParameterNameStartCharacter(character) || ('0' <= character && '9' >= character) || '.' == character
 }
 
-func isEnvPlaceholderInnerCharacter(character byte) bool {
-    return true == isParameterNameCharacter(character) || ':' == character
+func isKeyGrammarText(text string) bool {
+    for index := 0; index < len(text); index = index + 1 {
+        if false == isParameterNameCharacter(text[index]) && ':' != text[index] {
+            return false
+        }
+    }
+
+    return true
 }

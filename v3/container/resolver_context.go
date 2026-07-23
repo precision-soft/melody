@@ -408,7 +408,7 @@ func (instance *resolverContext) ReferencesImplementing(interfaceType reflect.Ty
     return instance.containerInstance.ReferencesImplementing(interfaceType)
 }
 
-/* isResolvingReference reports whether the reference is the service this context is creating right now — the innermost node of the resolution stack. Only that service is excluded from a collection: it is the composite dispatcher collecting the handlers it belongs to. A reference deeper on the path is not excluded, so collecting it runs into the creation guard and fails loudly as the circular dependency it is — excluding it instead would freeze a collection whose content depends on which service happened to boot first. The type arm compares reflect.Type identity, never the type's String(), which two types from same-named packages share. */
+/* isResolvingReference reports whether the reference is the service this context is creating right now — the innermost node of the resolution stack. Only that service is excluded from a collection: it is the composite dispatcher collecting the handlers it belongs to. A reference deeper on the path is not excluded, so collecting it runs into the creation guard and fails loudly as the circular dependency it is — excluding it instead would freeze a collection whose content depends on which service happened to boot first. On a type node the exclusion is narrowed to the name this context actually holds in creation, so a sibling name of the same type — registered while the creation ran — stays collectable; the type comparison itself is reflect.Type identity, never the type's String(), which two types from same-named packages share. */
 func (instance *resolverContext) isResolvingReference(reference containercontract.ServiceReference) bool {
     if 0 == len(instance.stack) {
         return false
@@ -416,13 +416,25 @@ func (instance *resolverContext) isResolvingReference(reference containercontrac
 
     topIndex := len(instance.stack) - 1
 
-    if instance.stack[topIndex] == "service:"+reference.ServiceName {
+    if "service:"+reference.ServiceName == instance.stack[topIndex] {
         return true
     }
 
     topType := instance.stackTypes[topIndex]
+    if nil == topType || topType != reference.ServiceType {
+        return false
+    }
 
-    return nil != topType && topType == reference.ServiceType
+    instance.containerInstance.mutex.RLock()
+    state, isCreating := instance.containerInstance.creatingByName[reference.ServiceName]
+    instance.containerInstance.mutex.RUnlock()
+
+    if true == isCreating {
+        return state.ownerContextId == instance.contextId
+    }
+
+    /* no name-keyed creation to pin the exclusion on: the type-keyed path, so the type identity is all there is */
+    return true
 }
 
 func (instance *resolverContext) pushKey(creatingKey string, creatingType reflect.Type) error {

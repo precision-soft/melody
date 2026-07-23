@@ -20,7 +20,7 @@ func TestSanitizeLogFileNameReplacesSlashes(t *testing.T) {
     }
 }
 
-func TestSanitizeLogFileNameKeepsRegularChars(t *testing.T) {
+func TestSanitizeLogFileNameKeepsRegularCharacters(t *testing.T) {
     result := sanitizeLogFileName("regular_command-name")
 
     if "regular_command-name" != result {

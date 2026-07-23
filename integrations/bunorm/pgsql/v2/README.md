@@ -11,7 +11,7 @@ This module implements [`bunorm.Provider`](../provider.go) and produces a Bun da
 
 ## Provider
 
-[`pgsql.NewProvider`](./provider.go) builds a [`pgsql.Provider`](./provider.go) from optional [`ProviderOption`](./provider_option.go) values. Connection details (`Host`, `Port`, `Database`, `User`, `Password`) are supplied at open time through the [`bunorm.ConnectionParams`](../connection_params.go) passed to `Open` — the provider itself holds only dialect/driver tuning.
+[`pgsql.NewProvider`](./provider.go) builds a [`pgsql.Provider`](./provider.go) from optional [`ProviderOption`](./provider_option.go) values. Connection details (`Host`, `Port`, `Database`, `User`, `Password`) are supplied at open time through the [`bunorm.ConnectionParams`](../connection_parameters.go) passed to `Open` — the provider itself holds only dialect/driver tuning.
 
 Pool and timeout defaults can be overridden via the chainable [`WithPoolConfig`](./provider.go) and [`WithTimeoutConfig`](./provider.go) methods using [`PoolConfig`](./pool_config.go) and [`TimeoutConfig`](./timeout_config.go).
 

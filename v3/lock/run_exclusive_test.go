@@ -184,7 +184,7 @@ func TestRunExclusive_PropagatesFnError(t *testing.T) {
     }
 
     if expected != runErr {
-        t.Fatalf("expected the fn error to propagate, got: %v", runErr)
+        t.Fatalf("expected the callback error to propagate, got: %v", runErr)
     }
 }
 
@@ -305,7 +305,7 @@ func (instance *blockingRefreshLock) Refresh(runtimeInstance runtimecontract.Run
     return exception.NewError("refresh aborted", nil, runtimeInstance.Context().Err())
 }
 
-/* @info A lease-style backend rewrites the lease to now+ttl on Refresh. Handing it the probe interval itself would renew the lease exactly as it expires, so every probe races its own expiry: fn is cancelled spuriously and the lapsed lease lets a second instance run alongside it. The probe must renew for a multiple of its own cadence, and the derived interval must never reach time.NewTicker as zero. */
+/* @info A lease-style backend rewrites the lease to now+ttl on Refresh. Handing it the probe interval itself would renew the lease exactly as it expires, so every probe races its own expiry: callback is cancelled spuriously and the lapsed lease lets a second instance run alongside it. The probe must renew for a multiple of its own cadence, and the derived interval must never reach time.NewTicker as zero. */
 func TestResolveRefreshSchedule(t *testing.T) {
     for _, testCase := range []struct {
         name             string
@@ -362,12 +362,12 @@ func TestRunExclusive_TinyTtlDoesNotPanicTheRefreshGoroutine(t *testing.T) {
         t.Fatal("expected the lock to be acquired")
     }
     if false == ran {
-        t.Fatal("expected fn to run")
+        t.Fatal("expected callback to run")
     }
     _ = runErr
 }
 
-/* @info A Refresh already blocked on an unresponsive backend when fn returns must be interrupted: closing refreshDone alone cannot reach it, so RunExclusive would wait on the goroutine forever while holding the lock. Cancelling the child context before Wait unblocks it, and the resulting error must read as shutdown, not as a lost lease. */
+/* @info A Refresh already blocked on an unresponsive backend when callback returns must be interrupted: closing refreshDone alone cannot reach it, so RunExclusive would wait on the goroutine forever while holding the lock. Cancelling the child context before Wait unblocks it, and the resulting error must read as shutdown, not as a lost lease. */
 func TestRunExclusive_DoesNotHangWhenARefreshIsInFlightAtReturn(t *testing.T) {
     entered := make(chan struct{})
     locker := &blockingRefreshLocker{entered: entered}
@@ -396,7 +396,7 @@ func TestRunExclusive_DoesNotHangWhenARefreshIsInFlightAtReturn(t *testing.T) {
     select {
     case <-done:
     case <-time.After(5 * time.Second):
-        t.Fatal("RunExclusive hung with a refresh in flight at fn return")
+        t.Fatal("RunExclusive hung with a refresh in flight at callback return")
     }
 }
 
@@ -421,7 +421,7 @@ func TestRunExclusive_ContextCancellationIsShutdownNotLostLease(t *testing.T) {
 
             <-childRuntime.Context().Done()
 
-            /* let the refresh goroutine record its cancelled-call failure before fn returns and closes the done channel */
+            /* let the refresh goroutine record its cancelled-call failure before callback returns and closes the done channel */
             time.Sleep(50 * time.Millisecond)
 
             return nil

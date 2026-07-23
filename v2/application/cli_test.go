@@ -283,7 +283,7 @@ func TestStripRuntimeFlagsFromOsArgs_ConsumesARealFlagValue(t *testing.T) {
     }
 }
 
-/* @info a command's own --role after the subcommand name is left in os.Args for the command to parse: an --role after the subcommand name is left in os.Args for the command to parse. */
+/* @info a command may declare its own --role flag: after the subcommand name it belongs to the command, so stripping must leave it in os.Args for the command to parse. */
 func TestStripRuntimeFlagsFromOsArgs_PreservesCommandOwnRoleFlag(t *testing.T) {
     originalArguments := os.Args
     t.Cleanup(func() {
@@ -385,7 +385,7 @@ func TestParseRuntimeFlags_TerminatorStopsRoleParsing(t *testing.T) {
     }
 }
 
-/* @info Tokens after the bare "--" terminator are literal command arguments and must survive stripping intact.Args and the command never received it. */
+/* @info tokens after the bare "--" terminator are literal command arguments and must survive stripping intact. */
 func TestStripRuntimeFlagsFromOsArgs_TerminatorKeepsLiteralArguments(t *testing.T) {
     originalArguments := os.Args
     t.Cleanup(func() {

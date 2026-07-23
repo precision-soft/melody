@@ -343,7 +343,7 @@ func renderNarrowingGuard(
     builder.WriteString(body + indent + indent + strconv.Quote("a configuration parameter does not fit the constructor argument") + ",\n")
     builder.WriteString(body + indent + indent + "map[string]any{\n")
     builder.WriteString(body + indent + indent + indent + strconv.Quote("parameter") + ": " + strconv.Quote(resolved.parameterName) + ",\n")
-    builder.WriteString(body + indent + indent + indent + strconv.Quote("argument") + ": " + strconv.Quote(resolved.variableName) + ",\n")
+    builder.WriteString(body + indent + indent + indent + strconv.Quote("argument") + ": " + strconv.Quote(resolved.argument.Name) + ",\n")
     builder.WriteString(body + indent + indent + indent + strconv.Quote("argumentType") + ": " + strconv.Quote(resolved.argument.Type.Expression) + ",\n")
     builder.WriteString(body + indent + indent + "},\n")
     builder.WriteString(body + indent + indent + "nil,\n")

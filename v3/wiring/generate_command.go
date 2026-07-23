@@ -113,14 +113,13 @@ func (instance *GenerateCommand) Run(
         }
     }
 
-    out := commandContext.String("out")
-    if "" == out {
+    outputPath := commandContext.String("out")
+    if "" == outputPath {
         fmt.Fprint(commandContext.Writer, source)
 
         return nil
     }
 
-    outputPath := out
     if false == filepath.IsAbs(outputPath) {
         outputPath = filepath.Join(projectDirectory, outputPath)
     }

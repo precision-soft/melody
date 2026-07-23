@@ -6,7 +6,7 @@ Import path: `github.com/precision-soft/melody/integrations/bunorm/pgsql/v3`
 
 ## Provider
 
-[`pgsql.NewProvider`](./provider.go) builds a [`pgsql.Provider`](./provider.go) from optional [`ProviderOption`](./provider_option.go) values. Connection details (`Host`, `Port`, `Database`, `User`, `Password`) are supplied at open time through the [`bunorm.ConnectionParams`](../../v3/connection_params.go) the manager registry passes to `Open` — the provider itself holds only dialect/driver tuning.
+[`pgsql.NewProvider`](./provider.go) builds a [`pgsql.Provider`](./provider.go) from optional [`ProviderOption`](./provider_option.go) values. Connection details (`Host`, `Port`, `Database`, `User`, `Password`) are supplied at open time through the [`bunorm.ConnectionParams`](../../v3/connection_parameters.go) the manager registry passes to `Open` — the provider itself holds only dialect/driver tuning.
 
 ```go
 provider := pgsql.NewProvider()

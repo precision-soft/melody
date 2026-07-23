@@ -573,3 +573,25 @@ func TestResolveTemplate_ProjectDirectoryReferenceIsData(t *testing.T) {
         t.Fatalf("expected the project directory to stay untouched, got %q", projectDirectoryParameter.String())
     }
 }
+
+/* @info a misspelled placeholder that still closes (%env(FOO-BAR)%) is reported, while a literal "%env(" whose closer belongs to a different placeholder stays data — the candidate ends at the first ")%" no percent interrupts */
+func TestResolveTemplate_ClosedMisspelledPlaceholderIsStillReported(t *testing.T) {
+    configuration := &Configuration{
+        environment: &Environment{values: map[string]string{}},
+        parameters:  ParameterMap{},
+    }
+
+    _, resolveErr := configuration.resolveTemplate(
+        "%env(FOO-BAR)%",
+        "app.value",
+        make(map[string]bool),
+        make(map[string]bool),
+    )
+    if nil == resolveErr {
+        t.Fatalf("expected the closed misspelled placeholder to be reported")
+    }
+
+    if false == strings.Contains(resolveErr.Error(), "malformed environment placeholder") {
+        t.Fatalf("unexpected error: %v", resolveErr)
+    }
+}

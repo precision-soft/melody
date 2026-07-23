@@ -275,7 +275,7 @@ func startLeaderGate(
 func openRedis(address string) rueidis.Client {
     provider := melodyrueidis.NewProvider()
 
-    client, openErr := provider.Open(melodyrueidis.NewConnectionParams(address, "", ""))
+    client, openErr := provider.Open(melodyrueidis.NewConnectionParameters(address, "", ""))
     if nil != openErr {
         fail("lock: open redis: %v", openErr)
     }

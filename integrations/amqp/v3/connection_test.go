@@ -84,7 +84,7 @@ func TestProviderNewTransport_TransportOverridesGeneral(t *testing.T) {
     }
 }
 
-/* @info net/url parses "guest:guest@host" as scheme "guest" with no userinfo, so the old redaction returned it verbatim and the password reached the connection-failure log. Redaction must fail closed. */
+/* @info net/url parses "guest:guest@host" as scheme "guest" with no userinfo, so the redaction must fail closed rather than echo the input into the connection-failure log */
 func TestRedactDsn_FailsClosedOnDsnWithoutParsableUserinfo(t *testing.T) {
     for _, dsn := range []string{
         "guest:secret@rabbitmq:5672",

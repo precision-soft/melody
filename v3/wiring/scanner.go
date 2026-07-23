@@ -271,7 +271,7 @@ func parseDirectives(functionDeclaration *ast.FuncDecl) *constructorDirectives {
     for _, comment := range functionDeclaration.Doc.List {
         text := strings.TrimSpace(comment.Text)
 
-        if text == ignoreDirective {
+        if ignoreDirective == text {
             directives.isIgnored = true
 
             continue
@@ -384,6 +384,10 @@ func describeConstructor(
             argumentType := describeType(parameter.Type, importPath, packageName, fileImports)
             if nil == argumentType {
                 return nil, "a parameter has a type that cannot be rendered from another package"
+            }
+
+            if "error" == argumentType.Expression || "any" == argumentType.Expression {
+                return nil, "a parameter is typed " + argumentType.Expression + ", which the container cannot resolve"
             }
 
             for _, name := range parameter.Names {
@@ -504,18 +508,47 @@ func isStandardDuration(typeReference *TypeReference) bool {
 func collectImports(fileNode *ast.File) map[string]string {
     fileImports := make(map[string]string)
 
+    /* explicit aliases first: Go guarantees their uniqueness in a file, so they own their name outright */
     for _, importSpec := range fileNode.Imports {
+        if nil == importSpec.Name {
+            continue
+        }
+
         importPath, unquoteErr := strconv.Unquote(importSpec.Path.Value)
         if nil != unquoteErr {
             continue
         }
 
-        alias := path.Base(importPath)
+        fileImports[importSpec.Name.Name] = importPath
+    }
+
+    /* a path base never overrides an alias, and a base two unnamed imports share is ambiguous — the file compiles because the packages' real names differ, so the base identifies neither and is dropped for both */
+    basePathByName := make(map[string]string)
+    baseCountByName := make(map[string]int)
+
+    for _, importSpec := range fileNode.Imports {
         if nil != importSpec.Name {
-            alias = importSpec.Name.Name
+            continue
         }
 
-        fileImports[alias] = importPath
+        importPath, unquoteErr := strconv.Unquote(importSpec.Path.Value)
+        if nil != unquoteErr {
+            continue
+        }
+
+        base := path.Base(importPath)
+        basePathByName[base] = importPath
+        baseCountByName[base] = baseCountByName[base] + 1
+    }
+
+    for base, count := range baseCountByName {
+        if 1 != count {
+            continue
+        }
+
+        if _, exists := fileImports[base]; false == exists {
+            fileImports[base] = basePathByName[base]
+        }
     }
 
     /* the qualifier a file uses is the package name, which the last path segment does not always spell: a major-version directory (melody/v3), a gopkg.in versioned base (yaml.v3), a hyphenated repository (go-redis). The conventional names those shapes resolve to are added as fallbacks — an explicit alias or an exact base always wins over a guess, and a guess two imports both produce is ambiguous and added for neither. */

@@ -398,3 +398,35 @@ func TestAllImplementing_EqualAndNegativePrioritiesKeepAStableOrder(t *testing.T
         }
     }
 }
+
+/* @info the exclusion on a type node pins to the name this context holds in creation: a sibling name of the same type, registered while the collector's provider runs, stays collectable */
+func TestAllImplementing_SiblingNameOfTheCollectorTypeIsCollected(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    MustRegister(serviceContainer, "handler.collector", func(resolver containercontract.Resolver) (*namedHandler, error) {
+        MustRegister(serviceContainer, "handler.sibling", func(innerResolver containercontract.Resolver) (*namedHandler, error) {
+            return &namedHandler{name: "sibling"}, nil
+        }, WithTypeRegistration(false))
+
+        handlers, allImplementingErr := AllImplementing[collectableHandler](resolver)
+        if nil != allImplementingErr {
+            return nil, allImplementingErr
+        }
+
+        collected := ""
+        for _, handler := range handlers {
+            collected = collected + handler.Handle()
+        }
+
+        return &namedHandler{name: "collector(" + collected + ")"}, nil
+    }, WithTypeRegistration(false))
+
+    collector, getErr := FromResolver[*namedHandler](serviceContainer, "handler.collector")
+    if nil != getErr {
+        t.Fatalf("expected the collector to resolve, got %v", getErr)
+    }
+
+    if "collector(sibling)" != collector.name {
+        t.Fatalf("expected the sibling to be collected and the collector excluded, got %q", collector.name)
+    }
+}

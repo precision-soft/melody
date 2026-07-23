@@ -13,9 +13,9 @@ import (
 )
 
 func TestFileServer_Filesystem_ServesFile(t *testing.T) {
-    dir := t.TempDir()
+    directory := t.TempDir()
 
-    filePath := dir + "/index.html"
+    filePath := directory + "/index.html"
     err := osWriteFile(filePath, []byte("hello"))
     if nil != err {
         t.Fatalf("write file error: %v", err)
@@ -23,7 +23,7 @@ func TestFileServer_Filesystem_ServesFile(t *testing.T) {
 
     config := NewFileServerConfig(
         ModeFilesystem,
-        dir,
+        directory,
         "index.html",
         "",
         false,

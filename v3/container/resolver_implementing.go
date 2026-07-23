@@ -50,6 +50,9 @@ func AllImplementing[T any](resolver containercontract.Resolver) ([]T, error) {
         )
     }
 
+    references := typeLister.ReferencesImplementing(interfaceType)
+
+    /* the closed check runs after the gather: a scope closing in between would have enumerated nothing, and returning that as success would hand a request-outliving goroutine a silently empty set — the very thing the refusal exists for. References gathered while the scope was still open fail loudly in the Gets below if the close lands later. */
     if closedChecker, isClosedChecker := resolver.(closedScopeChecker); true == isClosedChecker && true == closedChecker.isScopeClosed() {
         return nil, exception.NewError(
             "scope is closed",
@@ -59,8 +62,6 @@ func AllImplementing[T any](resolver containercontract.Resolver) ([]T, error) {
             nil,
         )
     }
-
-    references := typeLister.ReferencesImplementing(interfaceType)
 
     resolutionChecker, hasResolutionChecker := resolver.(referenceResolutionChecker)
 

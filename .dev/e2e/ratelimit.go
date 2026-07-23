@@ -14,7 +14,7 @@ configured failure mode, denying by default and admitting only when the caller o
 func runRateLimitCheck(address string) {
     provider := melodyrueidis.NewProvider()
 
-    client, openErr := provider.Open(melodyrueidis.NewConnectionParams(address, "", ""))
+    client, openErr := provider.Open(melodyrueidis.NewConnectionParameters(address, "", ""))
     if nil != openErr {
         fail("rate limit: open redis: %v", openErr)
     }
@@ -76,7 +76,7 @@ func runRateLimitCheck(address string) {
     pass("rate limiter window lapsed and restored the budget")
 
     /* an unreachable store denies by default (fail-closed) and admits only under an explicit fail-open */
-    brokenClient, brokenOpenErr := provider.Open(melodyrueidis.NewConnectionParams(address, "", ""))
+    brokenClient, brokenOpenErr := provider.Open(melodyrueidis.NewConnectionParameters(address, "", ""))
     if nil != brokenOpenErr {
         fail("rate limit: open the redis client to break: %v", brokenOpenErr)
     }

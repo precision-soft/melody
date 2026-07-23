@@ -165,7 +165,7 @@ type visibleFieldCandidate struct {
     value reflect.Value
 }
 
-/* validateStruct validates the fields of one json object: the struct's own fields plus everything its embeds promote, resolved with encoding/json's dominance rules — the shallowest field wins a name, an explicit json tag beats an untagged field at equal depth, and an ambiguity drops the name entirely. Only the winners are validated, because only the winners are populated from a payload: validating a shadowed promoted field would run its tag against a permanent zero value and reject every request, so its tag ran against a permanent zero value. */
+/* validateStruct validates the fields of one json object: the struct's own fields plus everything its embeds promote, resolved with encoding/json's dominance rules — the shallowest field wins a name, an explicit json tag beats an untagged field at equal depth, and an ambiguity drops the name entirely. Only the winners are validated, because only the winners are populated from a payload: validating a shadowed promoted field would run its tag against a permanent zero value and reject every request. */
 func (instance *Validator) validateStruct(value reflect.Value, path string, depth int, visited map[cyclicReference]bool) ValidationErrors {
     var errors ValidationErrors
 
