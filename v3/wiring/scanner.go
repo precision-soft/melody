@@ -71,7 +71,6 @@ var scalarTypeNames = map[string]bool{
     "rune":    true,
 }
 
-
 /* ScanResult carries what a scan found together with what it deliberately left out, so the generator can report the skipped constructors instead of silently narrowing its coverage. */
 type ScanResult struct {
     Constructors []*Constructor

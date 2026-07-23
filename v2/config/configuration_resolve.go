@@ -181,7 +181,7 @@ func (instance *Configuration) resolveEnvironmentPlaceholder(
     if nil == submatches || candidate != submatches[0] {
         /* @important only a candidate spelled in key-grammar characters is carried into the error context: the bounded span may hold arbitrary pasted text — a credential typed where the key belongs — and that must not reach the logs */
         reportedPlaceholder := "%env(<redacted>)%"
-        if true == isKeyGrammarText(candidate[len("%env(") : len(candidate)-len(")%")]) {
+        if true == isKeyGrammarText(candidate[len("%env("):len(candidate)-len(")%")]) {
             reportedPlaceholder = candidate
         }
 

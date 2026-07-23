@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v2.5.0] - 2026-07-23 - Spelled-Out Forbidden-Character API
+
 ### Changed
 
 - `validation.go` — `ForbiddenCharacter`, `CrontabForbiddenCharacters` and `ValidateNoForbiddenCharacters` spell the names out; the abbreviated `ForbiddenChar`, `CrontabForbiddenChars` and `ValidateNoForbiddenChars` remain as deprecated aliases, so nothing breaks at compile time. The templates read `CrontabForbiddenCharacters`, so reassigning the deprecated `CrontabForbiddenChars` variable no longer influences rendering — mutate or replace `CrontabForbiddenCharacters` instead.
@@ -57,7 +59,9 @@ Identical to the corresponding v1 release except: module path is `github.com/pre
 
 Identical to the corresponding v1 release except: module path is `github.com/precision-soft/melody/integrations/cron/v2`; dependency pinned to `github.com/precision-soft/melody/v2`. See the [v1 changelog](../CHANGELOG.md#v100---2026-05-16---initial-release--cron-integration) for the full change list.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.4.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.5.0...HEAD
+
+[v2.5.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.4.0...integrations/cron/v2.5.0
 
 [v2.4.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.3.0...integrations/cron/v2.4.0
 

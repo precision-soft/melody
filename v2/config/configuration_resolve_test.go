@@ -521,7 +521,6 @@ func TestResolveTemplate_SingleCharacterParameterReferenceResolves(t *testing.T)
     }
 }
 
-
 /* @info the candidate ends where the placeholder grammar ends: a literal %env( must stay data even when a different, well-formed placeholder closes later in the same value */
 func TestResolveTemplate_LiteralEnvPrefixBesideARealPlaceholderIsData(t *testing.T) {
     configuration := &Configuration{
@@ -555,7 +554,7 @@ func TestResolveTemplate_ProjectDirectoryReferenceIsData(t *testing.T) {
     configuration := &Configuration{
         environment: &Environment{values: map[string]string{}},
         parameters: ParameterMap{
-            KernelProjectDir: projectDirectoryParameter,
+            KernelProjectDir:  projectDirectoryParameter,
             "kernel.logs_dir": NewParameter("", "%kernel.project_dir%/var/log", "", true),
         },
     }

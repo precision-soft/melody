@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.5.0] - 2026-07-23 - Spelled-Out Connection Parameters
+
 ### Changed
 
 - `connection_parameters.go` — `ConnectionParameters` and `NewConnectionParameters` spell the names out; the abbreviated forms remain as deprecated aliases, so nothing breaks at compile time.
@@ -100,7 +102,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `v3/connection_params.go` — `ConnectionConfig` renamed to `ConnectionParams` with value semantics
 - Dependencies pinned to `github.com/precision-soft/melody/v3 v3.0.0`
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.4.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.5.0...HEAD
+
+[v3.5.0]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.4.1...integrations/rueidis/v3.5.0
 
 [v3.4.1]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.4.0...integrations/rueidis/v3.4.1
 

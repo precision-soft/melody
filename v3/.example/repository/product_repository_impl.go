@@ -7,7 +7,6 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v3/.example/entity"
-
 )
 
 //melody:service ServiceProductRepository

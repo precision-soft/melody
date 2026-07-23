@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.5.0] - 2026-07-23 - Audit Transaction Scoping and Spelled-Out Connection Parameters
+
 ### Changed
 
 - `connection_parameters.go` — `ConnectionParameters` spells the name out; `ConnectionParams` remains as a deprecated alias, so nothing breaks at compile time.
@@ -127,7 +129,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Dependencies pinned to `github.com/precision-soft/melody/v3` and other v3 module paths
 - README relative path links updated to reflect v3 directory structure
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.4.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.5.0...HEAD
+
+[v3.5.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.4.0...integrations/bunorm/v3.5.0
 
 [v3.4.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.3.0...integrations/bunorm/v3.4.0
 

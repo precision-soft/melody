@@ -557,4 +557,3 @@ func TestValueContainsRedactTag_SharedBackingArraySliceNotFalseDeduped(t *testin
         t.Fatalf("expected the redact-tagged secretHolder at Full[1] to be detected; the longer slice shares a backing array with the shorter Head[:1] and was falsely deduped, skipping the secret")
     }
 }
-

@@ -6,7 +6,6 @@ import (
     "strings"
 
     "github.com/precision-soft/melody/v3/.example/entity"
-
 )
 
 //melody:service ServiceCategoryRepository
