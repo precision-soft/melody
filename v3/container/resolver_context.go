@@ -433,8 +433,8 @@ func (instance *resolverContext) isResolvingReference(reference containercontrac
         return state.ownerContextId == instance.contextId
     }
 
-    /* no name-keyed creation to pin the exclusion on: the type-keyed path, so the type identity is all there is */
-    return true
+    /* an idle sibling name of the collector's type: the collector's own reference is always pinned by the creation entry above, and a purely type-keyed creation never yields a listed reference, so nothing here is the collector */
+    return false
 }
 
 func (instance *resolverContext) pushKey(creatingKey string, creatingType reflect.Type) error {

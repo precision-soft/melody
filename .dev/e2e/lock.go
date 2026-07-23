@@ -18,7 +18,7 @@ import (
 )
 
 /* runRunExclusiveCheck exercises lock.RunExclusive over a live redis lease locker: a second caller is turned
-away while the first holds the lock, the lock is released as soon as fn returns so the next tick runs, and an
+away while the first holds the lock, the lock is released as soon as the callback returns so the next tick runs, and an
 unreachable store fails closed rather than double-running the work. This is the primitive that keeps a
 cron-launched command running exactly once per tick across N application instances. */
 func runRunExclusiveCheck(address string) {
@@ -28,7 +28,7 @@ func runRunExclusiveCheck(address string) {
     locker := melodyrueidis.NewLocker(client)
     name := fmt.Sprintf("melody:e2e:exclusive:%d", time.Now().UnixNano())
 
-    /* while the first caller holds the lock, a second caller must be turned away without running fn */
+    /* while the first caller holds the lock, a second caller must be turned away without running the callback */
     var contenderRan atomic.Bool
     holderInside := make(chan struct{})
     holderMayFinish := make(chan struct{})
@@ -57,7 +57,7 @@ func runRunExclusiveCheck(address string) {
 
     <-holderInside
 
-    contenderRan2, contenderErr := lock.RunExclusive(
+    contenderReported, contenderErr := lock.RunExclusive(
         newRuntime(),
         locker,
         name,
@@ -70,11 +70,11 @@ func runRunExclusiveCheck(address string) {
     if nil != contenderErr {
         fail("run exclusive: the contender errored while the lock was held: %v", contenderErr)
     }
-    if true == contenderRan2 {
+    if true == contenderReported {
         fail("run exclusive: the contender reported that it ran while the lock was held")
     }
     if true == contenderRan.Load() {
-        fail("run exclusive: the contender's fn ran while another holder owned the lock")
+        fail("run exclusive: the contender's the callback ran while another holder owned the lock")
     }
     pass("run exclusive turned the contender away while the lock was held")
 
@@ -87,9 +87,9 @@ func runRunExclusiveCheck(address string) {
     if false == holderRan {
         fail("run exclusive: the holder did not report that it ran")
     }
-    pass("run exclusive ran the holder's fn to completion")
+    pass("run exclusive ran the holder's the callback to completion")
 
-    /* the lock is released when fn returns, so the very next tick runs rather than waiting out the ttl */
+    /* the lock is released when the callback returns, so the very next tick runs rather than waiting out the ttl */
     nextTickRan, nextTickErr := lock.RunExclusive(
         newRuntime(),
         locker,
@@ -101,11 +101,11 @@ func runRunExclusiveCheck(address string) {
         fail("run exclusive: the next tick errored: %v", nextTickErr)
     }
     if false == nextTickRan {
-        fail("run exclusive: the lock outlived fn — the next tick was skipped")
+        fail("run exclusive: the lock outlived the callback — the next tick was skipped")
     }
-    pass("run exclusive released the lock when fn returned (next tick ran)")
+    pass("run exclusive released the lock when the callback returned (next tick ran)")
 
-    /* fn's error reaches the caller, and the lock is still released */
+    /* the callback's error reaches the caller, and the lock is still released */
     sentinel := fmt.Errorf("work failed")
     failedRan, failedErr := lock.RunExclusive(
         newRuntime(),
@@ -115,15 +115,15 @@ func runRunExclusiveCheck(address string) {
         func(runtimecontract.Runtime) error { return sentinel },
     )
     if false == failedRan {
-        fail("run exclusive: a failing fn was reported as not run")
+        fail("run exclusive: a failing the callback was reported as not run")
     }
     if nil == failedErr {
-        fail("run exclusive: fn's error was swallowed")
+        fail("run exclusive: the callback's error was swallowed")
     }
     if false == errors.Is(failedErr, sentinel) {
-        fail("run exclusive: fn's error reached the caller as %v, not as the error fn returned", failedErr)
+        fail("run exclusive: the callback's error reached the caller as %v, not as the error the callback returned", failedErr)
     }
-    pass("run exclusive surfaced fn's error")
+    pass("run exclusive surfaced the callback's error")
 
     /* the claim above is "and the lock is still released": prove it, or a release that regressed would go unnoticed */
     afterFailureRan, afterFailureErr := lock.RunExclusive(
@@ -134,12 +134,12 @@ func runRunExclusiveCheck(address string) {
         func(runtimecontract.Runtime) error { return nil },
     )
     if nil != afterFailureErr {
-        fail("run exclusive: the tick after a failing fn errored: %v", afterFailureErr)
+        fail("run exclusive: the tick after a failing the callback errored: %v", afterFailureErr)
     }
     if false == afterFailureRan {
-        fail("run exclusive: a failing fn left the lock held — the next tick was skipped")
+        fail("run exclusive: a failing the callback left the lock held — the next tick was skipped")
     }
-    pass("run exclusive released the lock even when fn failed")
+    pass("run exclusive released the lock even when the callback failed")
 
     /* an unreachable store must fail closed: no run, and the error reaches the caller */
     brokenClient := openRedis(address)

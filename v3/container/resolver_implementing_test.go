@@ -430,3 +430,30 @@ func TestAllImplementing_SiblingNameOfTheCollectorTypeIsCollected(t *testing.T) 
         t.Fatalf("expected the sibling to be collected and the collector excluded, got %q", collector.name)
     }
 }
+
+/* @info the same pinning holds when the collector is resolved by type: its own reference is caught through the name-keyed creation entry, and the idle sibling stays collectable */
+func TestAllImplementing_SiblingNameIsCollectedWhenTheCollectorResolvesByType(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*compositeDispatcher, error) {
+        MustRegister(serviceContainer, "handler.sibling.typed", func(innerResolver containercontract.Resolver) (*namedHandler, error) {
+            return &namedHandler{name: "sibling"}, nil
+        }, WithTypeRegistration(false))
+
+        handlers, allImplementingErr := AllImplementing[collectableHandler](resolver)
+        if nil != allImplementingErr {
+            return nil, allImplementingErr
+        }
+
+        return &compositeDispatcher{handlers: handlers}, nil
+    })
+
+    dispatcher, getErr := FromResolverByType[*compositeDispatcher](serviceContainer)
+    if nil != getErr {
+        t.Fatalf("expected the dispatcher to resolve, got %v", getErr)
+    }
+
+    if 1 != len(dispatcher.handlers) || "sibling" != dispatcher.handlers[0].Handle() {
+        t.Fatalf("expected the sibling to be collected and the collector excluded, got %v", dispatcher.handlers)
+    }
+}

@@ -566,6 +566,11 @@ func collectImports(fileNode *ast.File) map[string]string {
         }
 
         for _, candidate := range packageNameCandidates(importPath) {
+            /* a name two unnamed bases already contested identifies neither of them, and a guess must not claim it for a third import */
+            if 1 < baseCountByName[candidate] {
+                continue
+            }
+
             candidatePathByName[candidate] = importPath
             candidateCountByName[candidate] = candidateCountByName[candidate] + 1
         }
