@@ -11,7 +11,16 @@ import (
     "github.com/precision-soft/melody/v2/internal"
 )
 
+/* Close tears the container down exactly once. A concurrent or repeated call blocks until the first teardown finishes and returns the same error, so a second caller never reports a premature success while services are still being closed. */
 func (instance *container) Close() error {
+    instance.closeOnce.Do(func() {
+        instance.closeErr = instance.closeInternal()
+    })
+
+    return instance.closeErr
+}
+
+func (instance *container) closeInternal() error {
     type closer interface {
         Close() error
     }
@@ -23,13 +32,7 @@ func (instance *container) Close() error {
 
     instance.mutex.Lock()
 
-    if true == instance.isClosed {
-        existingErr := instance.closeErr
-        instance.mutex.Unlock()
-        return existingErr
-    }
-
-    /* @important mark closed while still holding the lock so a concurrent Close() returns at the guard above instead of snapshotting the same services and closing every one of them twice. */
+    /* @important mark closed while still holding the lock so the resolver's creation guard refuses new creations for the whole teardown; the sync.Once in Close serializes repeated callers. */
     instance.isClosed = true
 
     typeStringToType := make(map[string]reflect.Type, len(instance.typeInstances))
@@ -45,9 +48,9 @@ func (instance *container) Close() error {
     }
 
     for targetType := range instance.typeInstances {
-        typeString := targetType.String()
-        typeStringToType[typeString] = targetType
-        createdNodeKeys = append(createdNodeKeys, "type:"+typeString)
+        typeKey := typeIdentityKey(targetType)
+        typeStringToType[typeKey] = targetType
+        createdNodeKeys = append(createdNodeKeys, "type:"+typeKey)
     }
 
     sort.Slice(
@@ -65,8 +68,8 @@ func (instance *container) Close() error {
         }
 
         if true == strings.HasPrefix(nodeKey, "type:") {
-            typeString := strings.TrimPrefix(nodeKey, "type:")
-            targetType, typeExists := typeStringToType[typeString]
+            typeKey := strings.TrimPrefix(nodeKey, "type:")
+            targetType, typeExists := typeStringToType[typeKey]
             if false == typeExists {
                 return nil, false
             }
@@ -119,8 +122,8 @@ func (instance *container) Close() error {
     }
 
     typeAliasRepresentative := func(typeNodeKey string) (string, bool) {
-        typeString := strings.TrimPrefix(typeNodeKey, "type:")
-        targetType, typeExists := typeStringToType[typeString]
+        typeKey := strings.TrimPrefix(typeNodeKey, "type:")
+        targetType, typeExists := typeStringToType[typeKey]
         if false == typeExists {
             return "", false
         }
@@ -349,11 +352,6 @@ func (instance *container) Close() error {
             nil,
         )
     }
-
-    instance.mutex.Lock()
-    instance.isClosed = true
-    instance.closeErr = resultErr
-    instance.mutex.Unlock()
 
     return resultErr
 }

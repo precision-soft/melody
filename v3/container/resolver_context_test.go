@@ -3,6 +3,7 @@ package container
 import (
     "reflect"
     "strconv"
+    "strings"
     "sync"
     "sync/atomic"
     "testing"
@@ -147,4 +148,23 @@ func TestResolverContext_GetByTypeSnapshotsTypeProviderUnderTheLock(t *testing.T
 
     atomic.StoreInt32(&stop, 1)
     waitGroup.Wait()
+}
+
+/* @info the resolution key is unique per type identity, not the type's String() which two same-named types from different packages share, so the creation guard and cycle detection cannot alias two distinct types onto one key */
+func TestTypeIdentityKey_DistinguishesSameStringTypesFromDifferentPackages(t *testing.T) {
+    interfaceType := reflect.TypeOf((*collectableHandler)(nil)).Elem()
+    pointerType := reflect.TypeOf(&invoiceHandler{})
+
+    if typeIdentityKey(interfaceType) == typeIdentityKey(pointerType) {
+        t.Fatalf("expected distinct types to yield distinct keys")
+    }
+
+    if typeIdentityKey(pointerType) != typeIdentityKey(reflect.TypeOf(&invoiceHandler{})) {
+        t.Fatalf("expected the same type to yield a stable key")
+    }
+
+    /* the discriminator is the named type's import path, which differs even when String() would not: the key carries it ahead of the String() */
+    if false == strings.HasPrefix(typeIdentityKey(pointerType), pointerType.Elem().PkgPath()) {
+        t.Fatalf("expected the key to lead with the named type's package path, got %q", typeIdentityKey(pointerType))
+    }
 }

@@ -55,6 +55,10 @@ Melody itself gates nothing on the role: it is declared intent for the compositi
 
 Like `--mode`, the `--role` flag never implies CLI mode and is stripped from `os.Args` before the CLI framework parses the arguments.
 
+## Service registration
+
+`Application` is itself a container registrar: [`ServiceRegistrar`](../../application/contract/service_module.go) embeds [`container/contract.Registrar`](../../container/contract/registrar.go), so a `RegisterServices` hook reaches the container's own typed helpers — `container.MustRegisterType` and anything generated on top of it (see [WIRING](WIRING.md)) — through `registrar.Register` / `registrar.MustRegister`, not only the name-based `RegisterService`. A duplicate registration is absorbed into the aggregated boot-collision report whichever entry point produced it, naming the user's registration call site.
+
 ## Usage
 
 The example below demonstrates creating an application and registering a module that:

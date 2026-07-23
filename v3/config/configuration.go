@@ -86,6 +86,8 @@ type Configuration struct {
     kernel      *kernelConfiguration
     http        *httpConfiguration
 
+    /* set once the boot-time Resolve has run, so a parameter registered afterwards is resolved on registration instead of keeping its raw template */
+    resolved bool
 }
 
 func (instance *Configuration) Cli() configcontract.CliConfiguration {
@@ -199,6 +201,32 @@ func (instance *Configuration) registerRuntimeParameter(name string, value any, 
     parameter.isSecret.Store(isSecret)
 
     instance.parameters[name] = parameter
+
+    /* the boot resolution has already run, so this parameter would otherwise keep its raw template — a %env(...)% reaching the consuming service verbatim. Resolve it now against the parameters boot left in place; a pre-resolve registration is left raw for the boot pass to resolve in one batch. */
+    if true == instance.resolved {
+        stringValue, isString := value.(string)
+        if true == isString {
+            resolvedValue, resolveErr := instance.resolveTemplate(
+                stringValue,
+                name,
+                make(map[string]bool),
+                make(map[string]bool),
+            )
+            if nil != resolveErr {
+                exception.Panic(
+                    exception.NewError(
+                        "could not resolve a runtime parameter registered after boot",
+                        exceptioncontract.Context{
+                            "parameterName": name,
+                        },
+                        resolveErr,
+                    ),
+                )
+            }
+
+            parameter.value = resolvedValue
+        }
+    }
 }
 
 /* MarkSecret marks an already registered parameter as holding a credential. The parameters melody registers automatically from the .env artifacts are the ones most likely to hold one, and they exist before any module runs, so marking them is separate from declaring them.

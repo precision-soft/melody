@@ -62,7 +62,7 @@ func (instance *Application) panicOnBootCollisions() {
     )
 }
 
-/* callerOrigin names the first stack frame outside the framework's own registration plumbing. A fixed frame count would name whatever delegation layer sits between the user's call and the recording — a count that shifts with every refactor and differs between the name-based and the generated type-based path — while the report exists to say where the duplicate came from. */
+/* callerOrigin names the first stack frame outside the framework's own registration plumbing. A fixed frame count would name whatever delegation layer sits between the user's call and the recording — a count that shifts with every refactor and differs between the name-based and the typed registration path — while the report exists to say where the duplicate came from. */
 func callerOrigin() string {
     programCounters := make([]uintptr, 32)
     frameCount := goruntime.Callers(2, programCounters)

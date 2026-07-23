@@ -57,6 +57,18 @@ bus := container.MustFromResolverByType[messagebuscontract.Bus](resolver)
 
 For a service with a **single** implementation this removes the need to invent a string service-name constant and a per-type `MustGetX` accessor — register it and resolve it by type. Keep the **named** path (`RegisterService(ServiceX, ...)` + `XMustFromResolver`) when a contract has more than one implementation that must coexist: because type registration is strict, registering two services under the same contract type fails at registration (the string name is then the only disambiguator).
 
+### Collecting every implementation of an interface
+
+A component that must act on **all** services of a kind — a dispatcher over every message handler, a scheduler over every cron task — collects them with [`AllImplementing[T]`](../../container/resolver_implementing.go) instead of being handed a hand-maintained list that goes stale when a service is added:
+
+```go
+handlers, err := container.AllImplementing[MessageHandler](resolver)
+```
+
+`AllImplementing[T]` requires `T` to be an interface and resolves every registered service whose type satisfies it — one registered under the interface type itself included, and every instance of a type registered non-strictly under several names. `MustAllImplementing[T]` is the panicking variant. The order never changes between runs: descending [`WithCollectionPriority(n)`](../../container/register_option.go) (a higher priority is dispatched earlier), then type and name. A provider that fails aborts the whole collection rather than yielding a partial set.
+
+Collect with the **resolver a provider receives**, not the container itself, so the collection participates in the current scope's overrides and so a container blocking on its own in-flight creation is avoided. The service whose provider is doing the collecting is excluded from its own result — the composite dispatcher that is itself one of the handlers it dispatches to collects the others. The enumeration is exposed through [`contract.TypeLister`](../../container/contract/type_lister.go), kept apart from `Resolver` so a resolver written outside the framework keeps compiling; the container, a request scope and the provider resolver all implement it, and a closed scope refuses the collection the way its `Get` does.
+
 ## Usage
 
 The example below demonstrates:
@@ -176,6 +188,8 @@ func example() {
 - [`type Provider[T]`](../../container/contract/provider.go)
 - [`type RegisterOption`](../../container/contract/registrar.go)
 - [`type RegisterOptions`](../../container/contract/registrar.go)
+- [`type TypeLister`](../../container/contract/type_lister.go)
+- [`type ServiceReference`](../../container/contract/type_lister.go)
 
 ### Constructors and helpers (`container`)
 
@@ -188,6 +202,10 @@ func example() {
 - Registration options:
     - [`WithTypeRegistration(isStrict bool)`](../../container/register_option.go)
     - [`WithoutTypeRegistration()`](../../container/register_option.go)
+    - [`WithCollectionPriority(priority int)`](../../container/register_option.go)
+- Interface collection:
+    - [`AllImplementing[T]`](../../container/resolver_implementing.go)
+    - [`MustAllImplementing[T]`](../../container/resolver_implementing.go)
 - Typed resolution:
     - [`FromResolver[T]`](../../container/resolver.go)
     - [`MustFromResolver[T]`](../../container/resolver.go)

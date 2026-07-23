@@ -2,6 +2,7 @@ package application
 
 import (
     "context"
+    "errors"
     "io/fs"
     "os"
 
@@ -205,8 +206,9 @@ func (instance *Application) Run(ctx context.Context) {
 
         runCliErr := instance.runCli(ctx)
         if nil != runCliErr {
-            exitError, ok := runCliErr.(*exception.ExitError)
-            if true == ok {
+            /* the exit-coded error may arrive wrapped — the cli action folds a command's error together with shutdown-close failures — so walk the cause chain rather than assert the top type, or an intended exit code degrades into a panic with a different code */
+            var exitError *exception.ExitError
+            if true == errors.As(runCliErr, &exitError) {
                 exception.Exit(exitError)
             }
 

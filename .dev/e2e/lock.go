@@ -74,7 +74,7 @@ func runRunExclusiveCheck(address string) {
         fail("run exclusive: the contender reported that it ran while the lock was held")
     }
     if true == contenderRan.Load() {
-        fail("run exclusive: the contender's the callback ran while another holder owned the lock")
+        fail("run exclusive: the contender's callback ran while another holder owned the lock")
     }
     pass("run exclusive turned the contender away while the lock was held")
 
@@ -87,7 +87,7 @@ func runRunExclusiveCheck(address string) {
     if false == holderRan {
         fail("run exclusive: the holder did not report that it ran")
     }
-    pass("run exclusive ran the holder's the callback to completion")
+    pass("run exclusive ran the holder's callback to completion")
 
     /* the lock is released when the callback returns, so the very next tick runs rather than waiting out the ttl */
     nextTickRan, nextTickErr := lock.RunExclusive(
@@ -115,7 +115,7 @@ func runRunExclusiveCheck(address string) {
         func(runtimecontract.Runtime) error { return sentinel },
     )
     if false == failedRan {
-        fail("run exclusive: a failing the callback was reported as not run")
+        fail("run exclusive: a failing callback was reported as not run")
     }
     if nil == failedErr {
         fail("run exclusive: the callback's error was swallowed")
@@ -134,10 +134,10 @@ func runRunExclusiveCheck(address string) {
         func(runtimecontract.Runtime) error { return nil },
     )
     if nil != afterFailureErr {
-        fail("run exclusive: the tick after a failing the callback errored: %v", afterFailureErr)
+        fail("run exclusive: the tick after a failing callback errored: %v", afterFailureErr)
     }
     if false == afterFailureRan {
-        fail("run exclusive: a failing the callback left the lock held — the next tick was skipped")
+        fail("run exclusive: a failing callback left the lock held — the next tick was skipped")
     }
     pass("run exclusive released the lock even when the callback failed")
 

@@ -42,6 +42,7 @@ type container struct {
     dependencyGraph             map[string]map[string]struct{}
     isClosed                    bool
     closeErr                    error
+    closeOnce                   sync.Once
 }
 
 func (instance *container) Get(serviceName string) (any, error) {

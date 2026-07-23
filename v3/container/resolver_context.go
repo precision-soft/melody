@@ -184,11 +184,11 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
     }
 
     if "" == instance.rootRequestedKey {
-        instance.rootRequestedKey = "type:" + canonicalTargetType.String()
+        instance.rootRequestedKey = "type:" + typeIdentityKey(canonicalTargetType)
     }
 
     requestedKey := instance.rootRequestedKey
-    typeKey := canonicalTargetType.String()
+    typeKey := typeIdentityKey(canonicalTargetType)
     nodeKey := "type:" + typeKey
 
     parentKey := ""

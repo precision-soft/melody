@@ -20,6 +20,20 @@ func canonicalServiceType(targetType reflect.Type) reflect.Type {
     return targetType
 }
 
+/* typeIdentityKey is a stable map/stack key that is unique per type identity, unlike String(), which two same-named types from different packages share. A package cannot declare two types of the same name, so the named type's import path — reached through any pointer wrapping — plus the full String() distinguishes them without a registry or a lock. */
+func typeIdentityKey(targetType reflect.Type) string {
+    if nil == targetType {
+        return ""
+    }
+
+    named := targetType
+    for reflect.Ptr == named.Kind() {
+        named = named.Elem()
+    }
+
+    return named.PkgPath() + "\x00" + targetType.String()
+}
+
 func defaultServiceNameForType(targetType reflect.Type) string {
     canonicalType := canonicalServiceType(targetType)
 
@@ -27,7 +41,23 @@ func defaultServiceNameForType(targetType reflect.Type) string {
         return ""
     }
 
-    return canonicalType.String()
+    return uniqueTypeName(canonicalType)
+}
+
+/* uniqueTypeName is the service name a type registration derives from the type. It qualifies the type with its import path, so two same-named types from different packages — which share a String() built from the short package name — get distinct names and can both be type-registered. An unnamed or builtin type, never a real service type, keeps its String(). */
+func uniqueTypeName(targetType reflect.Type) string {
+    pointerPrefix := ""
+    named := targetType
+    for reflect.Ptr == named.Kind() {
+        pointerPrefix = pointerPrefix + "*"
+        named = named.Elem()
+    }
+
+    if "" == named.PkgPath() {
+        return targetType.String()
+    }
+
+    return pointerPrefix + named.PkgPath() + "." + named.Name()
 }
 
 func isAnyType(targetType reflect.Type) bool {

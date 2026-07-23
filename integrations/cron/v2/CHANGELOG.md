@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
-- `validation.go` — `ForbiddenCharacter`, `CrontabForbiddenCharacters` and `ValidateNoForbiddenCharacters` spell the names out; the abbreviated forms remain as deprecated aliases, so nothing breaks at compile time. The templates read `CrontabForbiddenCharacters`, so reassigning the deprecated `CrontabForbiddenChars` variable no longer influences rendering — mutate or replace `CrontabForbiddenCharacters` instead.
+- `validation.go` — `ForbiddenCharacter`, `CrontabForbiddenCharacters` and `ValidateNoForbiddenCharacters` spell the names out; the abbreviated `ForbiddenChar`, `CrontabForbiddenChars` and `ValidateNoForbiddenChars` remain as deprecated aliases, so nothing breaks at compile time. The templates read `CrontabForbiddenCharacters`, so reassigning the deprecated `CrontabForbiddenChars` variable no longer influences rendering — mutate or replace `CrontabForbiddenCharacters` instead.
 
 ## [v2.4.0] - 2026-07-17 - In-Process Cron Runner
 

@@ -7,6 +7,10 @@ import (
 )
 
 func (instance *Configuration) Resolve() error {
+    /* Resolve iterates and mutates the shared parameter map, so it holds the write lock the runtime accessors read under; the body reaches parameters only through the lock-free getInternalParameter, never a locking accessor, so the lock is not re-entered. */
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
     for name, parameter := range instance.parameters {
         if KernelProjectDir == name {
             continue
@@ -22,13 +26,9 @@ func (instance *Configuration) Resolve() error {
         }
 
         if "" == stringValue {
-            if true == parameter.IsDefault() {
-                stringValue = parameter.environmentValue.(string)
-            } else {
-                parameter.value = stringValue
+            parameter.value = stringValue
 
-                continue
-            }
+            continue
         }
 
         value, resolveTemplateErr := instance.resolveTemplate(
@@ -49,6 +49,8 @@ func (instance *Configuration) Resolve() error {
 
         parameter.value = value
     }
+
+    instance.resolved = true
 
     return nil
 }
