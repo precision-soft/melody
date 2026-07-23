@@ -6,25 +6,25 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
 )
 
-func NewConnectionParams(
+func NewConnectionParameters(
     address string,
     user string,
     password string,
-) ConnectionParams {
-    return ConnectionParams{
+) ConnectionParameters {
+    return ConnectionParameters{
         Address:  address,
         User:     user,
         Password: password,
     }
 }
 
-type ConnectionParams struct {
+type ConnectionParameters struct {
     Address  string
     User     string
     Password string
 }
 
-func (instance *ConnectionParams) SafeContext() exceptioncontract.Context {
+func (instance *ConnectionParameters) SafeContext() exceptioncontract.Context {
     return exceptioncontract.Context{
         "address": instance.Address,
         "user":    instance.User,
@@ -49,4 +49,16 @@ func parseAddressList(value string) []string {
     }
 
     return addresses
+}
+
+/* Deprecated: use ConnectionParameters. */
+type ConnectionParams = ConnectionParameters
+
+/* Deprecated: use NewConnectionParameters. */
+func NewConnectionParams(
+    address string,
+    user string,
+    password string,
+) ConnectionParameters {
+    return NewConnectionParameters(address, user, password)
 }

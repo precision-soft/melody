@@ -1,5 +1,7 @@
 package contract
 
+import "time"
+
 type Parameter interface {
     EnvironmentKey() string
 
@@ -9,6 +11,8 @@ type Parameter interface {
 
     IsDefault() bool
 
+    IsSecret() bool
+
     String() string
 
     MustString() string
@@ -16,4 +20,8 @@ type Parameter interface {
     Bool() (bool, error)
 
     Int() (int, error)
+
+    Float() (float64, error)
+
+    Duration() (time.Duration, error)
 }

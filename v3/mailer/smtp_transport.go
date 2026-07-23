@@ -185,8 +185,8 @@ func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, 
                 return deadlineErr
             }
 
-            auth := smtp.PlainAuth("", instance.username, instance.password, instance.host)
-            if authErr := client.Auth(auth); nil != authErr {
+            authentication := smtp.PlainAuth("", instance.username, instance.password, instance.host)
+            if authErr := client.Auth(authentication); nil != authErr {
                 return exception.NewError("smtp auth failed", map[string]any{"address": instance.address}, authErr)
             }
         }

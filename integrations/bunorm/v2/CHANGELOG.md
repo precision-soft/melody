@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v2.1.0] - 2026-07-23 - Spelled-Out Connection Parameters
+
+### Changed
+
+- `connection_parameters.go` — `ConnectionParameters` spells the name out; `ConnectionParams` remains as a deprecated alias, so nothing breaks at compile time.
+
 ## [v2.0.1] - 2026-07-11 - Manager Registry Open Concurrency and Panic Safety
 
 ### Fixed
@@ -31,7 +37,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `connection_params.go` — `bunorm.ConnectionParams` struct (`Host`, `Port`, `Database`, `User`, `Password`) with `SafeContext()` method that elides the password for logging
 - `provider_definition.go` — `ProviderDefinition.Params` field holds connection parameters separately from the definition name
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v2.0.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v2.1.0...HEAD
+
+[v2.1.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v2.0.1...integrations/bunorm/v2.1.0
 
 [v2.0.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v2.0.0...integrations/bunorm/v2.0.1
 

@@ -19,7 +19,7 @@ func (instance *Module) buildRedis() {
         melodyrueidis.WithRetryConfig(melodyrueidis.NewRetryConfig(10, time.Second, 5*time.Second, 2.0)),
     )
 
-    client, openErr := provider.Open(melodyrueidis.NewConnectionParams(address, "", ""))
+    client, openErr := provider.Open(melodyrueidis.NewConnectionParameters(address, "", ""))
     if nil != openErr {
         exception.Panic(exception.FromError(openErr))
     }

@@ -14,27 +14,27 @@ import (
 )
 
 func NewHttpTestRequest(method string, urlString string) httpcontract.Request {
-    req := httptest.NewRequest(method, urlString, nil)
+    request := httptest.NewRequest(method, urlString, nil)
 
-    return NewHttpTestRequestFromHttpRequest(req)
+    return NewHttpTestRequestFromHttpRequest(request)
 }
 
 func NewHttpTestRequestWithAccept(method string, urlString string, accept string) httpcontract.Request {
-    req := httptest.NewRequest(method, urlString, nil)
-    req.Header.Set("Accept", accept)
+    request := httptest.NewRequest(method, urlString, nil)
+    request.Header.Set("Accept", accept)
 
-    return NewHttpTestRequestFromHttpRequest(req)
+    return NewHttpTestRequestFromHttpRequest(request)
 }
 
-func NewHttpTestRequestFromHttpRequest(req *http.Request) httpcontract.Request {
-    if nil == req {
+func NewHttpTestRequestFromHttpRequest(request *http.Request) httpcontract.Request {
+    if nil == request {
         exception.Panic(
             exception.NewError("http request may not be nil", nil, nil),
         )
     }
 
     return &HttpTestRequest{
-        httpRequestValue:   req,
+        httpRequestValue:   request,
         paramsValue:        map[string]string{},
         queryBagValue:      bag.NewParameterBag(),
         postBagValue:       bag.NewParameterBag(),

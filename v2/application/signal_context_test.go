@@ -9,7 +9,7 @@ import (
     "time"
 )
 
-/** @info signal.NotifyContext keeps SIGINT/SIGTERM registered after the first signal cancels the context, so a second Ctrl+C during a hung shutdown does nothing and the operator's only escape is SIGKILL. The watcher must cancel on the first signal and force the process to exit on the second, with the conventional 128+signal exit code. */
+/* @info signal.NotifyContext keeps SIGINT/SIGTERM registered after the first signal cancels the context, so a second Ctrl+C during a hung shutdown does nothing and the operator's only escape is SIGKILL. The watcher must cancel on the first signal and force the process to exit on the second, with the conventional 128+signal exit code. */
 func TestWatchSignals_FirstSignalCancels_SecondForcesExit(t *testing.T) {
     cases := []struct {
         name             string
@@ -78,7 +78,7 @@ func TestWatchSignals_FirstSignalCancels_SecondForcesExit(t *testing.T) {
     }
 }
 
-/** @info The stop function keeps the signal.NotifyContext contract: it unregisters the notifications, cancels the context, releases the watcher goroutine, and stays safe to call more than once and from concurrent goroutines. */
+/* @info The stop function keeps the signal.NotifyContext contract: it unregisters the notifications, cancels the context, releases the watcher goroutine, and stays safe to call more than once and from concurrent goroutines. */
 func TestNewSignalContext_StopCancelsAndReleasesWatcher(t *testing.T) {
     signalContext, stop := NewSignalContext()
 
@@ -115,7 +115,7 @@ func TestNewSignalContext_StopCancelsAndReleasesWatcher(t *testing.T) {
     }
 }
 
-/** @info a second signal landing inside the debounce window is a duplicate delivery of the same logical shutdown request — a supervisor and a terminal both forwarding one interrupt — and must be absorbed so the graceful shutdown continues; a signal past the window is the operator's escalation and still forces the exit. */
+/* @info a second signal landing inside the debounce window is a duplicate delivery of the same logical shutdown request — a supervisor and a terminal both forwarding one interrupt — and must be absorbed so the graceful shutdown continues; a signal past the window is the operator's escalation and still forces the exit. */
 func TestWatchSignals_NearSimultaneousDuplicateIsAbsorbed(t *testing.T) {
     exitCalls := make(chan int, 1)
     originalExit := signalContextExit
@@ -173,7 +173,7 @@ func TestWatchSignals_NearSimultaneousDuplicateIsAbsorbed(t *testing.T) {
     }
 }
 
-/** @info A stop that races a buffered second signal must side with stop: once the caller has unregistered, the watcher may not force the process down. */
+/* @info A stop that races a buffered second signal must side with stop: once the caller has unregistered, the watcher may not force the process down. */
 func TestWatchSignals_StopWinsOverBufferedSecondSignal(t *testing.T) {
     exitCalls := make(chan int, 1)
     originalExit := signalContextExit

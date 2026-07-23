@@ -25,10 +25,10 @@ func TestMiddleware_PreflightOptions(t *testing.T) {
 
     handler := middleware(next)
 
-    req := httptest.NewRequest(nethttp.MethodOptions, "/x", nil)
-    req.Header.Set("Origin", "https://example.com")
+    request := httptest.NewRequest(nethttp.MethodOptions, "/x", nil)
+    request.Header.Set("Origin", "https://example.com")
 
-    response, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(req))
+    response, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
     if nil != err {
         t.Fatalf("unexpected error")
     }
@@ -66,10 +66,10 @@ func TestMiddleware_NonPreflightAddsHeaders(t *testing.T) {
 
     handler := middleware(next)
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
-    req.Header.Set("Origin", "https://example.com")
+    request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
+    request.Header.Set("Origin", "https://example.com")
 
-    response, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(req))
+    response, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
     if nil != err {
         t.Fatalf("unexpected error")
     }
@@ -98,10 +98,10 @@ func TestMiddleware_DisallowedOriginPassesThrough(t *testing.T) {
 
     handler := middleware(next)
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
-    req.Header.Set("Origin", "https://blocked.example.com")
+    request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
+    request.Header.Set("Origin", "https://blocked.example.com")
 
-    response, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(req))
+    response, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
     if nil != err {
         t.Fatalf("unexpected error")
     }
@@ -126,9 +126,9 @@ func TestMiddleware_NoOriginHeaderPassesThrough(t *testing.T) {
 
     handler := middleware(next)
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
+    request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
 
-    response, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(req))
+    response, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
     if nil != err {
         t.Fatalf("unexpected error")
     }
@@ -150,10 +150,10 @@ func TestMiddleware_AppliesHeadersEvenWhenHandlerErrored(t *testing.T) {
 
     handler := middleware(next)
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
-    req.Header.Set("Origin", "https://example.com")
+    request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
+    request.Header.Set("Origin", "https://example.com")
 
-    response, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(req))
+    response, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
     if nil == err {
         t.Fatalf("expected error to propagate")
     }

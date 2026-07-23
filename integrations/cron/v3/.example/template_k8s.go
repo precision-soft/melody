@@ -17,14 +17,14 @@ func (instance *KubernetesCronjobTemplate) Name() string {
 }
 
 func (instance *KubernetesCronjobTemplate) Render(entries []melodycron.Entry, options melodycron.RenderOptions) (string, error) {
-    forbidden := []melodycron.ForbiddenChar{
+    forbidden := []melodycron.ForbiddenCharacter{
         {Char: '\t', Reason: "tabs break YAML indentation in CronJob specs"},
     }
 
     var builder strings.Builder
     builder.WriteString("apiVersion: batch/v1\nkind: List\nitems:\n")
     for _, entry := range entries {
-        if validationErr := melodycron.ValidateNoForbiddenChars(entry.Command, forbidden, "k8s entry "+entry.Name); nil != validationErr {
+        if validationErr := melodycron.ValidateNoForbiddenCharacters(entry.Command, forbidden, "k8s entry "+entry.Name); nil != validationErr {
             return "", validationErr
         }
 

@@ -18,6 +18,8 @@ The commands are intended for diagnostics and local debugging (container service
     - parameters (`debug:parameters`)
     - version metadata (`debug:version`)
 
+`debug:parameters` reports a `secret` column: a parameter declared as holding a credential (see [CONFIG](CONFIG.md#secret-parameters)) renders its value as `********` — or `(empty)` when it carries none — with the length withheld, while an ordinary parameter prints in the clear.
+
 ## Exported API
 
 ### Commands

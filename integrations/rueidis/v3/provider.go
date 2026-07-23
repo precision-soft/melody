@@ -52,7 +52,7 @@ type Provider struct {
     retryConfig   *RetryConfig
 }
 
-func (instance *Provider) Open(params ConnectionParams) (rueidis.Client, error) {
+func (instance *Provider) Open(params ConnectionParameters) (rueidis.Client, error) {
     if nil == instance.retryConfig {
         return instance.open(params)
     }
@@ -60,7 +60,7 @@ func (instance *Provider) Open(params ConnectionParams) (rueidis.Client, error) 
     return instance.openWithRetry(params)
 }
 
-func (instance *Provider) openWithRetry(params ConnectionParams) (rueidis.Client, error) {
+func (instance *Provider) openWithRetry(params ConnectionParameters) (rueidis.Client, error) {
     logger := logging.EnsureLogger(nil)
 
     attempt := uint32(0)
@@ -212,7 +212,7 @@ func (instance *Provider) computeBackoffDelay(attempt uint32) time.Duration {
     return time.Duration(delay)
 }
 
-func (instance *Provider) open(params ConnectionParams) (rueidis.Client, error) {
+func (instance *Provider) open(params ConnectionParameters) (rueidis.Client, error) {
     clientConfig := instance.clientConfig
     if nil == clientConfig {
         clientConfig = DefaultClientConfig()

@@ -292,6 +292,30 @@ func (instance *scope) Close() error {
     return nil
 }
 
+/* TypesImplementing delegates to the root container, so a component holding a request scope can collect its collaborators through AllImplementing. A closed scope enumerates nothing, mirroring Has. */
+func (instance *scope) TypesImplementing(interfaceType reflect.Type) []reflect.Type {
+    containerInstance := instance.container.Load()
+    if nil == containerInstance {
+        return []reflect.Type{}
+    }
+
+    return containerInstance.TypesImplementing(interfaceType)
+}
+
+/* ReferencesImplementing delegates to the root container. The references are resolved by name, and a name resolved through this scope yields the scope's override when one was installed — which is how a per-request substitute takes part in a collection gathered on the scope. */
+func (instance *scope) ReferencesImplementing(interfaceType reflect.Type) []containercontract.ServiceReference {
+    containerInstance := instance.container.Load()
+    if nil == containerInstance {
+        return []containercontract.ServiceReference{}
+    }
+
+    return containerInstance.ReferencesImplementing(interfaceType)
+}
+
+func (instance *scope) isScopeClosed() bool {
+    return nil == instance.container.Load()
+}
+
 func (instance *scope) lookupInstanceByName(serviceName string) (any, bool, error) {
     if "" == serviceName {
         return nil, false, exception.NewError(
@@ -343,3 +367,4 @@ func (instance *scope) lookupInstanceByType(canonicalType reflect.Type) (any, bo
 }
 
 var _ containercontract.Scope = (*scope)(nil)
+var _ containercontract.TypeLister = (*scope)(nil)

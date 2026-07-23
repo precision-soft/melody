@@ -242,3 +242,19 @@ func TestBootCollision_NoCollisionsMeansNoPanic(t *testing.T) {
 
     application.panicOnBootCollisions()
 }
+
+/* @info the report exists to say where the duplicate came from; a fixed frame count named whichever delegation layer sat between the user's call and the recording, so the origin must be asserted to land in the caller's file whatever the registration path */
+func TestBootCollision_OriginNamesTheCallerNotTheFrameworkPlumbing(t *testing.T) {
+    application := newCollisionTestApplication(t)
+
+    application.RegisterService("service.test.value", stringProvider("first"))
+    application.RegisterService("service.test.value", stringProvider("second"))
+
+    if 1 != len(application.bootCollisions) {
+        t.Fatalf("expected one recorded collision, got %d", len(application.bootCollisions))
+    }
+
+    if false == strings.Contains(application.bootCollisions[0].origin, "boot_collision_test.go") {
+        t.Fatalf("expected the origin to name the registration call site, got %q", application.bootCollisions[0].origin)
+    }
+}

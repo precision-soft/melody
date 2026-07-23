@@ -25,7 +25,7 @@ func newTokenStoreClient(t *testing.T) redisclient.Client {
     }
 
     provider := NewProvider()
-    client, openErr := provider.Open(NewConnectionParams(address, "", ""))
+    client, openErr := provider.Open(NewConnectionParameters(address, "", ""))
     if nil != openErr {
         t.Fatalf("open: %v", openErr)
     }

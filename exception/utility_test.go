@@ -43,7 +43,7 @@ func TestFromError_WrapsNonExceptionError(t *testing.T) {
     }
 }
 
-/* @info regression: unclamped huge maxDepth must not drive the up-front allocation */
+/* @info unclamped huge maxDepth must not drive the up-front allocation */
 
 func TestBuildCauseChain_HugeMaxDepthDoesNotPanic(t *testing.T) {
     causeErr := errors.New("cause")

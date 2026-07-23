@@ -16,17 +16,17 @@ func TestNewApiKeyHeaderAuthenticator_EmptyExpectedValuePanics(t *testing.T) {
 }
 
 func TestApiKeyHeaderAuthenticator_SupportsReturnsFalseWhenHeaderMissing(t *testing.T) {
-    auth := NewApiKeyHeaderAuthenticator("X-Api-Key", "expected", "u1", []string{"ROLE_API"})
+    authenticator := NewApiKeyHeaderAuthenticator("X-Api-Key", "expected", "u1", []string{"ROLE_API"})
 
     request := newSecurityTestRequest(nethttp.MethodGet, "/x", map[string]string{}, nil)
 
-    if true == auth.Supports(request) {
+    if true == authenticator.Supports(request) {
         t.Fatalf("expected supports to be false")
     }
 }
 
 func TestApiKeyHeaderAuthenticator_SupportsReturnsTrueWhenHeaderPresent(t *testing.T) {
-    auth := NewApiKeyHeaderAuthenticator("X-Api-Key", "expected", "u1", []string{"ROLE_API"})
+    authenticator := NewApiKeyHeaderAuthenticator("X-Api-Key", "expected", "u1", []string{"ROLE_API"})
 
     request := newSecurityTestRequest(
         nethttp.MethodGet,
@@ -35,13 +35,13 @@ func TestApiKeyHeaderAuthenticator_SupportsReturnsTrueWhenHeaderPresent(t *testi
         nil,
     )
 
-    if false == auth.Supports(request) {
+    if false == authenticator.Supports(request) {
         t.Fatalf("expected supports to be true")
     }
 }
 
 func TestApiKeyHeaderAuthenticator_AuthenticateReturnsAnonymousOnMismatch(t *testing.T) {
-    auth := NewApiKeyHeaderAuthenticator("X-Api-Key", "expected", "u1", []string{"ROLE_API"})
+    authenticator := NewApiKeyHeaderAuthenticator("X-Api-Key", "expected", "u1", []string{"ROLE_API"})
 
     request := newSecurityTestRequest(
         nethttp.MethodGet,
@@ -50,7 +50,7 @@ func TestApiKeyHeaderAuthenticator_AuthenticateReturnsAnonymousOnMismatch(t *tes
         nil,
     )
 
-    token, err := auth.Authenticate(request)
+    token, err := authenticator.Authenticate(request)
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -60,7 +60,7 @@ func TestApiKeyHeaderAuthenticator_AuthenticateReturnsAnonymousOnMismatch(t *tes
 }
 
 func TestApiKeyHeaderAuthenticator_AuthenticateReturnsAuthenticatedOnMatch(t *testing.T) {
-    auth := NewApiKeyHeaderAuthenticator("X-Api-Key", "expected", "u1", []string{"ROLE_API"})
+    authenticator := NewApiKeyHeaderAuthenticator("X-Api-Key", "expected", "u1", []string{"ROLE_API"})
 
     request := newSecurityTestRequest(
         nethttp.MethodGet,
@@ -69,7 +69,7 @@ func TestApiKeyHeaderAuthenticator_AuthenticateReturnsAuthenticatedOnMatch(t *te
         nil,
     )
 
-    token, err := auth.Authenticate(request)
+    token, err := authenticator.Authenticate(request)
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }

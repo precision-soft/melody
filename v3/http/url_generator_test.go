@@ -206,7 +206,7 @@ func TestGeneratePath_EscapesParamSpecialCharacters(t *testing.T) {
     }
 }
 
-/** @info A ":param" spans one path segment; a slash in its value would be emitted as %2F, which the net/http server decodes back to "/" before the kernel matches on request.URL.Path, so the link would resolve to a different route or 404. The generator must reject the slash rather than mint such a url. */
+/* @info A ":param" spans one path segment; a slash in its value would be emitted as %2F, which the net/http server decodes back to "/" before the kernel matches on request.URL.Path, so the link would resolve to a different route or 404. The generator must reject the slash rather than mint such a url. */
 func TestGeneratePath_RejectsSlashInParam(t *testing.T) {
     routeRegistry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(routeRegistry)
@@ -256,7 +256,7 @@ func TestGenerateUrl_AddsQueryParamsAndIgnoresEmptyKey(t *testing.T) {
     }
 }
 
-/** @info A requirement on a catch-all is enforced when matching, so honouring it while generating is what keeps the generator from minting urls its own router answers with a 404. */
+/* @info A requirement on a catch-all is enforced when matching, so honouring it while generating is what keeps the generator from minting urls its own router answers with a 404. */
 func TestGeneratePath_CatchAllRequirementFailure(t *testing.T) {
     routeRegistry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(routeRegistry)
@@ -290,7 +290,7 @@ func TestGeneratePath_CatchAllRequirementFailure(t *testing.T) {
     }
 }
 
-/** @info matchPath receives the catch-all remainder as the non-empty segments joined by "/", so the requirement must be tested against that collapsed remainder — an interior double slash the emission drops (here "a//b" -> "a/b") must not fail generation, or a value the router serves cannot be generated. */
+/* @info matchPath receives the catch-all remainder as the non-empty segments joined by "/", so the requirement must be tested against that collapsed remainder — an interior double slash the emission drops (here "a//b" -> "a/b") must not fail generation, or a value the router serves cannot be generated. */
 func TestGeneratePath_CatchAllRequirementMatchesEmittedRemainder(t *testing.T) {
     routeRegistry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(routeRegistry)
@@ -324,7 +324,7 @@ func TestGeneratePath_CatchAllRequirementMatchesEmittedRemainder(t *testing.T) {
     }
 }
 
-/** @info registerRouteInTree and matchPath treat "*name..." as terminal wherever it appears, dropping any pattern segments that follow it; the generator must stop there too, or it appends trailing literals onto a url its own router answers with a 404. */
+/* @info registerRouteInTree and matchPath treat "*name..." as terminal wherever it appears, dropping any pattern segments that follow it; the generator must stop there too, or it appends trailing literals onto a url its own router answers with a 404. */
 func TestGeneratePath_NonTerminalCatchAllDropsTrailingLiterals(t *testing.T) {
     routeRegistry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(routeRegistry)

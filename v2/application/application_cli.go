@@ -65,7 +65,7 @@ func (instance *Application) RegisterCliCommand(command clicontract.Command) {
     for _, existingCommand := range instance.cliCommands {
         if commandName == existingCommand.Name() {
             /* recorded for the aggregated boot report instead of panicking one at a time; the first registration wins until the guaranteed panic ends the boot */
-            instance.recordBootCollision(bootCollisionKindCliCommand, commandName, 1)
+            instance.recordBootCollision(bootCollisionKindCliCommand, commandName)
             return
         }
     }

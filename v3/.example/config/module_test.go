@@ -14,7 +14,7 @@ func (instance *stubEnvironmentSource) Load() (map[string]string, error) {
     return instance.values, nil
 }
 
-/** @info environmentValue returns a .env-registered parameter fully resolved — NewConfiguration expands
+/* @info environmentValue returns a .env-registered parameter fully resolved — NewConfiguration expands
 %env(X)%/%name% indirection and unescapes %% at construction (before this composition root runs), so a
 "pa%%ss" value reads back as "pa%ss" without environmentValue doing anything itself; a missing key returns ""
 so an unset integration variable keeps its "skip this integration" behaviour. */
@@ -41,10 +41,10 @@ func TestModuleEnvironmentValue(t *testing.T) {
         key      string
         expected string
     }{
-        {key: "APP_PLAIN", expected: "redis:6379"}, // literal passes through unchanged
-        {key: "APP_PERCENT", expected: "pa%ss"},    // %% collapses to a single %
-        {key: "APP_MULTI", expected: "a%b%c"},      // every %% pair collapses
-        {key: "APP_MISSING", expected: ""},         // absent key -> empty (skip-integration)
+        {key: "APP_PLAIN", expected: "redis:6379"}, /* literal passes through unchanged */
+        {key: "APP_PERCENT", expected: "pa%ss"},    /* %% collapses to a single % */
+        {key: "APP_MULTI", expected: "a%b%c"},      /* every %% pair collapses */
+        {key: "APP_MISSING", expected: ""},         /* absent key -> empty (skip-integration) */
     }
 
     for _, testCase := range cases {

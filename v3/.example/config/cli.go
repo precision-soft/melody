@@ -10,6 +10,7 @@ import (
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodykernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     melodylock "github.com/precision-soft/melody/v3/lock"
+    melodywiring "github.com/precision-soft/melody/v3/wiring"
 )
 
 /* RegisterCliCommands contributes only the application's own commands. The core commands (melody:routes:manifest, melody:openapi:generate, melody:messagebus:consume) are auto-registered by the framework once their services are configured, and the melody:outbox:relay command comes from the outbox module (see configure.go), so they are not listed here. */
@@ -30,6 +31,8 @@ func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.
         cli.NewGrantDemoCommand(
             melodycontainer.Lazy[*service.UserService](kernelInstance.ServiceContainer(), service.ServiceUserService),
         ),
+        /* @info regenerates generated/wiring_gen.go from the packages declared in the bind set; it runs inside the application, so every bind is checked against the parameters this configuration actually declares. */
+        melodywiring.NewGenerateCommand(NewWiringBindSet()),
     }
 
     /* @info per-tick dedup demo: the demo command is wrapped as an exclusive command over lock.NewLazyLocker, which resolves the registered service.lock.locker (redis when configured, otherwise mysql, otherwise in-memory — see registerLockerService) at the first CreateLock instead of here — run it from two shells at once against a shared locker and exactly one executes, the other exits zero with a "skipped" log line. The ttl is crash-safety only; the lock is refreshed while the command runs and released the moment it returns. */

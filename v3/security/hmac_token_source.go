@@ -4,6 +4,7 @@ import (
     "bytes"
     "io"
     nethttp "net/http"
+    "strconv"
     "time"
 
     "github.com/precision-soft/melody/v3/exception"
@@ -270,9 +271,9 @@ func (instance *HmacTokenSource) guardNonce(runtimeInstance runtimecontract.Runt
     return nil
 }
 
-/* hmacNonceGuardKey namespaces the caller-chosen envelope nonce before it reaches the shared NonceGuard. The nonce field is fully controlled by whoever signs the envelope, so recording it verbatim would let a holder of a valid key write into any other component's key space of the same guard — for example the TOTP replay guard, which keys "2fa:<user>:<code>". Prefixing with "hmac:<keyId>:" keeps HMAC nonces in their own space, so a caller-controlled nonce can never collide with the "2fa:" namespace or with another key id's nonces when one shared guard backs several components. */
+/* hmacNonceGuardKey namespaces the caller-chosen envelope nonce before it reaches the shared NonceGuard. The nonce field is fully controlled by whoever signs the envelope, so recording it verbatim would let a holder of a valid key write into any other component's key space of the same guard — for example the TOTP replay guard, which keys "2fa:<user>:<code>". The key id's length is encoded in front of it because key ids have no charset restriction: with a plain "hmac:<keyId>:<nonce>" join, key ids "a" and "a:b" would let a holder of key "a" sign nonce "b:<n>" and pre-burn key "a:b"'s nonce "<n>", forcing rejection of that key's legitimate requests. */
 func hmacNonceGuardKey(keyId string, nonce string) string {
-    return "hmac:" + keyId + ":" + nonce
+    return "hmac:" + strconv.Itoa(len(keyId)) + ":" + keyId + ":" + nonce
 }
 
 /* guardNonceAndBody runs the replay and body-hash checks in the order selected for this request. Nonce-first (the default) lets a captured-but-valid envelope force at most one body buffering, since a replay is rejected before readAndRestoreBody runs; body-first rejects a mismatched body without consuming the nonce, so an on-path party cannot burn a legitimate request's nonce by replaying its header with a mutated body. The signature has already been verified, so only a legitimate envelope ever reaches either check. */

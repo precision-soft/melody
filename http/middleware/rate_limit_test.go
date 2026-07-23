@@ -15,10 +15,10 @@ import (
 )
 
 func TestDefaultClientIp_UsesRemoteAddr(t *testing.T) {
-    req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
-    req.RemoteAddr = "192.168.1.100:12345"
+    request := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    request.RemoteAddr = "192.168.1.100:12345"
 
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     ip := DefaultClientIp(melodyRequest)
     if "192.168.1.100" != ip {
@@ -27,11 +27,11 @@ func TestDefaultClientIp_UsesRemoteAddr(t *testing.T) {
 }
 
 func TestDefaultClientIp_IgnoresXForwardedFor(t *testing.T) {
-    req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
-    req.RemoteAddr = "10.0.0.1:5555"
-    req.Header.Set("X-Forwarded-For", "1.2.3.4")
+    request := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    request.RemoteAddr = "10.0.0.1:5555"
+    request.Header.Set("X-Forwarded-For", "1.2.3.4")
 
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     ip := DefaultClientIp(melodyRequest)
     if "10.0.0.1" != ip {
@@ -40,11 +40,11 @@ func TestDefaultClientIp_IgnoresXForwardedFor(t *testing.T) {
 }
 
 func TestDefaultClientIp_IgnoresXRealIp(t *testing.T) {
-    req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
-    req.RemoteAddr = "10.0.0.2:6666"
-    req.Header.Set("X-Real-IP", "5.6.7.8")
+    request := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    request.RemoteAddr = "10.0.0.2:6666"
+    request.Header.Set("X-Real-IP", "5.6.7.8")
 
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     ip := DefaultClientIp(melodyRequest)
     if "10.0.0.2" != ip {
@@ -53,12 +53,12 @@ func TestDefaultClientIp_IgnoresXRealIp(t *testing.T) {
 }
 
 func TestDefaultClientIp_IgnoresBothHeaders(t *testing.T) {
-    req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
-    req.RemoteAddr = "172.16.0.1:9999"
-    req.Header.Set("X-Forwarded-For", "1.1.1.1, 2.2.2.2")
-    req.Header.Set("X-Real-IP", "3.3.3.3")
+    request := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    request.RemoteAddr = "172.16.0.1:9999"
+    request.Header.Set("X-Forwarded-For", "1.1.1.1, 2.2.2.2")
+    request.Header.Set("X-Real-IP", "3.3.3.3")
 
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     ip := DefaultClientIp(melodyRequest)
     if "172.16.0.1" != ip {
@@ -200,11 +200,11 @@ func TestRateLimitMiddleware_AllowsRequest(t *testing.T) {
 
     handler := middleware(next)
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
-    rec := httptest.NewRecorder()
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    request := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    recorder := httptest.NewRecorder()
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    response, err := handler(nil, rec, melodyRequest)
+    response, err := handler(nil, recorder, melodyRequest)
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -229,24 +229,24 @@ func TestRateLimitMiddleware_RejectsWhenLimitExceeded(t *testing.T) {
 
     handler := middleware(next)
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
-    rec := httptest.NewRecorder()
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    request := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    recorder := httptest.NewRecorder()
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    _, _ = handler(nil, rec, melodyRequest)
+    _, _ = handler(nil, recorder, melodyRequest)
 
-    _, err := handler(nil, rec, melodyRequest)
+    _, err := handler(nil, recorder, melodyRequest)
     if nil == err {
         t.Fatalf("expected error from rate limit exceeded")
     }
 }
 
 func TestDefaultKeyExtractor_UsesRemoteAddrByDefault(t *testing.T) {
-    req := httptest.NewRequest(nethttp.MethodGet, "/api/data", nil)
-    req.RemoteAddr = "10.20.30.40:1234"
-    req.Header.Set("X-Forwarded-For", "spoofed-ip")
+    request := httptest.NewRequest(nethttp.MethodGet, "/api/data", nil)
+    request.RemoteAddr = "10.20.30.40:1234"
+    request.Header.Set("X-Forwarded-For", "spoofed-ip")
 
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     limiter := NewTokenBucketLimiterWithClock(clock.NewFrozenClock(time.Now()), 10, time.Minute)
     config := NewRateLimitConfig(limiter, nil, nil)
@@ -260,11 +260,11 @@ func TestDefaultKeyExtractor_UsesRemoteAddrByDefault(t *testing.T) {
 }
 
 func TestRateLimitConfig_ClientIpResolver_OverridesDefault(t *testing.T) {
-    req := httptest.NewRequest(nethttp.MethodGet, "/api/data", nil)
-    req.RemoteAddr = "10.20.30.40:1234"
-    req.Header.Set("X-Forwarded-For", "1.1.1.1")
+    request := httptest.NewRequest(nethttp.MethodGet, "/api/data", nil)
+    request.RemoteAddr = "10.20.30.40:1234"
+    request.Header.Set("X-Forwarded-For", "1.1.1.1")
 
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     limiter := NewTokenBucketLimiterWithClock(clock.NewFrozenClock(time.Now()), 10, time.Minute)
     config := NewRateLimitConfig(limiter, nil, nil)
@@ -283,12 +283,12 @@ func TestRateLimitConfig_ClientIpResolver_OverridesDefault(t *testing.T) {
 }
 
 func TestIpRateLimit_UsesRemoteAddrByDefault(t *testing.T) {
-    req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
-    req.RemoteAddr = "192.168.0.50:8080"
-    req.Header.Set("X-Forwarded-For", "evil-ip")
-    req.Header.Set("X-Real-IP", "also-evil")
+    request := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    request.RemoteAddr = "192.168.0.50:8080"
+    request.Header.Set("X-Forwarded-For", "evil-ip")
+    request.Header.Set("X-Real-IP", "also-evil")
 
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     ip := DefaultClientIp(melodyRequest)
 
@@ -451,10 +451,10 @@ func TestDefaultKeyExtractor_NormalizesTrailingSlashPaths(t *testing.T) {
     _ = RateLimitMiddleware(config)
 
     keyFor := func(path string) string {
-        req := httptest.NewRequest(nethttp.MethodGet, path, nil)
-        req.RemoteAddr = "1.2.3.4:5555"
+        request := httptest.NewRequest(nethttp.MethodGet, path, nil)
+        request.RemoteAddr = "1.2.3.4:5555"
 
-        return config.KeyExtractor()(testhelper.NewHttpTestRequestFromHttpRequest(req))
+        return config.KeyExtractor()(testhelper.NewHttpTestRequestFromHttpRequest(request))
     }
 
     canonical := keyFor("/login")
@@ -499,8 +499,8 @@ func TestRateLimitMiddleware_PrefersRuntimeRateLimiter(t *testing.T) {
         return http.TextResponse(200, "ok"), nil
     })
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    request := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     if _, err := handler(nil, httptest.NewRecorder(), melodyRequest); nil != err {
         t.Fatalf("unexpected error: %v", err)
@@ -524,8 +524,8 @@ func TestRateLimitMiddleware_HonorsFailurePolicyDenialOnStoreError(t *testing.T)
         return http.TextResponse(200, "ok"), nil
     })
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    request := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     _, err := handler(nil, httptest.NewRecorder(), melodyRequest)
     if nil == err {
@@ -545,8 +545,8 @@ func TestRateLimitMiddleware_HonorsFailurePolicyAllowanceOnStoreError(t *testing
         return http.TextResponse(200, "ok"), nil
     })
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    request := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     if _, err := handler(nil, httptest.NewRecorder(), melodyRequest); nil != err {
         t.Fatalf("unexpected error: %v", err)

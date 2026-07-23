@@ -4,6 +4,7 @@ import (
     "reflect"
     "sync"
     "testing"
+    "time"
 
     containercontract "github.com/precision-soft/melody/v2/container/contract"
 )
@@ -572,4 +573,60 @@ func TestContainer_Close_OverrideProtectedInstanceWithoutTypeRegistrationClosesO
     if 1 != count {
         t.Fatalf("expected overridden non-type-registered value-type service Close to be called once, got %d", count)
     }
+}
+
+/* @info a concurrent second Close must not report success while the first is still tearing services down: both callers get the first teardown's result once it finishes */
+func TestClose_ConcurrentCallersShareTheResult(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    releaseClose := make(chan struct{})
+    closeObserved := make(chan struct{}, 1)
+
+    MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*blockingCloser, error) {
+        return &blockingCloser{release: releaseClose, observed: closeObserved}, nil
+    })
+
+    _, getErr := FromResolverByType[*blockingCloser](serviceContainer)
+    if nil != getErr {
+        t.Fatalf("expected the service to resolve, got %v", getErr)
+    }
+
+    firstDone := make(chan error, 1)
+    go func() {
+        firstDone <- serviceContainer.Close()
+    }()
+
+    <-closeObserved
+
+    secondDone := make(chan error, 1)
+    go func() {
+        secondDone <- serviceContainer.Close()
+    }()
+
+    select {
+    case <-secondDone:
+        t.Fatalf("the second Close returned before the first finished tearing down")
+    case <-time.After(50 * time.Millisecond):
+    }
+
+    close(releaseClose)
+
+    firstErr := <-firstDone
+    secondErr := <-secondDone
+
+    if firstErr != secondErr {
+        t.Fatalf("expected both callers to share the teardown result, got %v and %v", firstErr, secondErr)
+    }
+}
+
+type blockingCloser struct {
+    release  chan struct{}
+    observed chan struct{}
+}
+
+func (instance *blockingCloser) Close() error {
+    instance.observed <- struct{}{}
+    <-instance.release
+
+    return nil
 }

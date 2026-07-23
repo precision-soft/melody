@@ -17,7 +17,7 @@ func runCacheCheck(address string) {
 
     provider := melodyrueidis.NewProvider()
 
-    client, openErr := provider.Open(melodyrueidis.NewConnectionParams(address, "", ""))
+    client, openErr := provider.Open(melodyrueidis.NewConnectionParameters(address, "", ""))
     if nil != openErr {
         fail("cache: open redis: %v", openErr)
     }

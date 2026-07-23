@@ -15,12 +15,10 @@ import (
 )
 
 var (
-    envPlaceholderPattern       = regexp.MustCompile(`%env\(([A-Za-z_][A-Za-z0-9_]*)\)%`)
-    parameterPlaceholderPattern = regexp.MustCompile(`%([A-Za-z_][A-Za-z0-9_.]+)%`)
-)
-
-const (
-    escapedPercentPlaceholder = "\x00PERCENT\x00"
+    /* the optional "default:<fallback>:" prefix marks an environment key whose absence is tolerated: "%env(default::KEY)%" falls back to the empty string and "%env(default:some.parameter:KEY)%" falls back to another parameter. Without the prefix an undefined key stays a hard error, so a plain "%env(KEY)%" never silently degrades to empty. */
+    envPlaceholderPattern = regexp.MustCompile(`%env\((default:([A-Za-z_][A-Za-z0-9_.]*)?:)?([A-Za-z_][A-Za-z0-9_]*)\)%`)
+    /* a single-character name is a valid reference: the default processor's fallback group accepts one, so a reference pattern has to match it too or %a% silently survives as literal text */
+    parameterPlaceholderPattern = regexp.MustCompile(`%([A-Za-z_][A-Za-z0-9_.]*)%`)
 )
 
 func NewConfiguration(
@@ -88,8 +86,8 @@ type Configuration struct {
     kernel      *kernelConfiguration
     http        *httpConfiguration
 
-    /* parameters whose raw value escaped a literal percent with %%; after resolution their value legitimately contains %...%, which the unresolved-placeholder check must not mistake for a placeholder it failed to expand */
-    parametersWithEscapedPercents map[string]bool
+    /* set once the boot-time Resolve has run, so a parameter registered afterwards is resolved on registration instead of keeping its raw template */
+    resolved bool
 }
 
 func (instance *Configuration) Cli() configcontract.CliConfiguration {
@@ -155,6 +153,15 @@ func (instance *Configuration) MustGet(name string) configcontract.Parameter {
 }
 
 func (instance *Configuration) RegisterRuntime(name string, value any) {
+    instance.registerRuntimeParameter(name, value, false)
+}
+
+/* RegisterRuntimeSecret registers a parameter that holds a credential, so that the commands which render the configuration redact it. The value is stored and resolved like any other: the marking governs display, not storage, and it travels to every parameter whose template reads this one. It does not travel backwards: the parameter melody auto-registered from the environment key this template reads holds the same credential and needs its own MarkSecret. */
+func (instance *Configuration) RegisterRuntimeSecret(name string, value any) {
+    instance.registerRuntimeParameter(name, value, true)
+}
+
+func (instance *Configuration) registerRuntimeParameter(name string, value any, isSecret bool) {
     if "" == name {
         exception.Panic(
             exception.NewError("cannot register parameters with empty names", nil, nil),
@@ -190,7 +197,53 @@ func (instance *Configuration) RegisterRuntime(name string, value any) {
         )
     }
 
-    instance.parameters[name] = NewParameter("", value, value, false)
+    parameter := NewParameter("", value, value, false)
+    parameter.isSecret.Store(isSecret)
+
+    instance.parameters[name] = parameter
+
+    /* the boot resolution has already run, so this parameter would otherwise keep its raw template — a %env(...)% reaching the consuming service verbatim. Resolve it now against the parameters boot left in place; a pre-resolve registration is left raw for the boot pass to resolve in one batch. */
+    if true == instance.resolved {
+        stringValue, isString := value.(string)
+        if true == isString {
+            resolvedValue, resolveErr := instance.resolveTemplate(
+                stringValue,
+                name,
+                make(map[string]bool),
+                make(map[string]bool),
+            )
+            if nil != resolveErr {
+                exception.Panic(
+                    exception.NewError(
+                        "could not resolve a runtime parameter registered after boot",
+                        exceptioncontract.Context{
+                            "parameterName": name,
+                        },
+                        resolveErr,
+                    ),
+                )
+            }
+
+            parameter.value = resolvedValue
+        }
+    }
+}
+
+/* MarkSecret marks an already registered parameter as holding a credential. The parameters melody registers automatically from the .env artifacts are the ones most likely to hold one, and they exist before any module runs, so marking them is separate from declaring them.
+
+An absent parameter is left alone rather than reported: an environment key is legitimately undefined in some environments, and refusing to boot over one would make the marking unusable exactly where it matters. The secret column of debug:parameters is what confirms a marking took effect. */
+func (instance *Configuration) MarkSecret(name string) bool {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    parameter := instance.getInternalParameter(name)
+    if nil == parameter {
+        return false
+    }
+
+    parameter.isSecret.Store(true)
+
+    return true
 }
 
 func (instance *Configuration) Names() []string {
@@ -390,22 +443,6 @@ func (instance *Configuration) registerEnvironmentParameters() error {
 
 func (instance *Configuration) isReserved(name string) bool {
     return strings.HasPrefix(name, "kernel.")
-}
-
-func (instance *Configuration) escapePercents(value string) string {
-    if "" == value {
-        return value
-    }
-
-    return strings.ReplaceAll(value, "%%", escapedPercentPlaceholder)
-}
-
-func (instance *Configuration) unescapePercents(value string) string {
-    if "" == value {
-        return value
-    }
-
-    return strings.ReplaceAll(value, escapedPercentPlaceholder, "%")
 }
 
 /* @important getInternalParameter is the lock-free map lookup primitive; it must NOT take the lock because it is called both at single-threaded construction (placeholder resolution) and while the write lock is already held (RegisterRuntime). Concurrent readers go through Get/Parameters/Names, which take the read lock around it. */

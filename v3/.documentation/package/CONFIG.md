@@ -43,6 +43,26 @@ The environment name is resolved from `MELODY_ENV` inside the loaded `.env` valu
 
 A present key with an empty string value is considered **present** (it is a valid value for string parameters). Typed conversions for non-string getters treat empty strings as invalid, by design.
 
+### Template resolution
+
+A parameter value is a template resolved left to right, positionally. Each percent opens exactly one of:
+
+- `%%` — one literal percent;
+- `%env(KEY)%` — an environment key; an undefined key fails the boot, so a credential parameter refuses to start rather than degrade to empty;
+- `%env(default:<fallback>:KEY)%` — an optional environment key: `%env(default::KEY)%` falls back to the empty string, `%env(default:some.parameter:KEY)%` to another parameter. A defined key always wins over the fallback;
+- `%parameter%` — another parameter, whose fully resolved value is spliced in as data (a percent inside it survives literally, it is never rescanned);
+- anything else — a lone percent is data.
+
+A self-reference — direct or through any chain of parameters and environment keys — is a circular-reference error at resolution. A value that must hold a literal percent doubles it: `pa%%ss%%word` resolves to `pa%ss%word`.
+
+### Secret parameters
+
+A parameter may be declared as holding a credential so that the commands rendering the configuration redact it — the value reaching the services is untouched, this governs display only. Declare one through the module registrar with [`RegisterSecretParameter`](../../application/contract/parameter_module.go), or mark one melody auto-registered from the `.env` artifacts with [`MarkParameterSecret`](../../application/contract/parameter_module.go). The marking travels with the value: a parameter whose template reads a secret (a dsn assembling a password, through `%parameter%` or `%env(KEY)%`) becomes secret itself. [`Parameter.IsSecret`](../../config/parameter.go) reports the marking; `debug:parameters` renders a marked parameter as `********`.
+
+### Typed accessors
+
+[`Parameter`](../../config/parameter.go) reads its value through `MustString`, `Bool`, `Int`, `Float` and `Duration`, converting from the native type or from the string an environment value always arrives as. Each fallible accessor reports an unset or non-convertible value as an error identified by environment key alone, keeping an inline credential out of the exception context.
+
 ## Container integration
 
 The package defines the service name:

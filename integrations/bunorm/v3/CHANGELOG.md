@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.5.0] - 2026-07-23 - Audit Transaction Scoping and Spelled-Out Connection Parameters
+
+### Changed
+
+- `connection_parameters.go` — `ConnectionParameters` spells the name out; `ConnectionParams` remains as a deprecated alias, so nothing breaks at compile time.
+
+### Fixed
+
+- `audit/storage.go`, `audit/track.go` — the transaction a `Tracker` binds onto the context is scoped to the database it belongs to. `BunStorage.Save` preferred the bound handle unconditionally, so a recorder built over a separate audit database wrote its entries through the tracked business transaction: the rows landed in the business database — or the insert failed there and rolled the business write back with it. The tracker's binding now carries its database, and a storage over a different one keeps writing through its own handle; the caller's explicit `WithDatabase` stays honoured unconditionally, since it is the caller's statement that the handle can carry the audit rows. The comparison is by handle identity: tracker-side atomicity requires building the storage over the same `*bun.DB` instance the Tracker holds — a second handle onto the same physical database is treated as a separate database and its audit rows commit outside the tracked transaction.
+
 ## [v3.4.0] - 2026-07-20 - Audit Entity Id Derivation and Transaction Binding
 
 ### Added
@@ -119,7 +129,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Dependencies pinned to `github.com/precision-soft/melody/v3` and other v3 module paths
 - README relative path links updated to reflect v3 directory structure
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.4.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.5.0...HEAD
+
+[v3.5.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.4.0...integrations/bunorm/v3.5.0
 
 [v3.4.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.3.0...integrations/bunorm/v3.4.0
 

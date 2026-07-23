@@ -25,10 +25,10 @@ func TestExceptionListener_HtmlResponse_EscapesXss(t *testing.T) {
     xssPayload := "<script>alert(1)</script>"
     httpErr := exception.NewHttpException(500, xssPayload)
 
-    req := httptest.NewRequest("GET", "/test", nil)
-    req.Header.Set("Accept", "text/html")
+    request := httptest.NewRequest("GET", "/test", nil)
+    request.Header.Set("Accept", "text/html")
 
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, httpErr)
 
@@ -61,10 +61,10 @@ func TestExceptionListener_JsonResponse_ContainsMessage(t *testing.T) {
 
     httpErr := exception.NewHttpException(400, "bad request input")
 
-    req := httptest.NewRequest("GET", "/api/test", nil)
-    req.Header.Set("Accept", "application/json")
+    request := httptest.NewRequest("GET", "/api/test", nil)
+    request.Header.Set("Accept", "application/json")
 
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, httpErr)
 
@@ -97,10 +97,10 @@ func TestExceptionListener_DebugModeOff_GenericMessage(t *testing.T) {
 
     genericErr := errors.New("sensitive internal details")
 
-    req := httptest.NewRequest("GET", "/api/test", nil)
-    req.Header.Set("Accept", "application/json")
+    request := httptest.NewRequest("GET", "/api/test", nil)
+    request.Header.Set("Accept", "application/json")
 
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, genericErr)
 
@@ -136,10 +136,10 @@ func TestExceptionListener_DebugModeOn_ShowsErrorMessage(t *testing.T) {
 
     genericErr := errors.New("detailed debug info here")
 
-    req := httptest.NewRequest("GET", "/api/test", nil)
-    req.Header.Set("Accept", "application/json")
+    request := httptest.NewRequest("GET", "/api/test", nil)
+    request.Header.Set("Accept", "application/json")
 
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, genericErr)
 
@@ -168,10 +168,10 @@ func TestExceptionListener_DebugModeOn_HtmlEscapesMessage(t *testing.T) {
 
     genericErr := errors.New("<img src=x onerror=alert(1)>")
 
-    req := httptest.NewRequest("GET", "/test", nil)
-    req.Header.Set("Accept", "text/html")
+    request := httptest.NewRequest("GET", "/test", nil)
+    request.Header.Set("Accept", "text/html")
 
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, genericErr)
 
@@ -201,8 +201,8 @@ func TestExceptionListener_NilErr_NoResponse(t *testing.T) {
 
     RegisterKernelExceptionListener(dispatcher, false)
 
-    req := httptest.NewRequest("GET", "/test", nil)
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    request := httptest.NewRequest("GET", "/test", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, nil)
 
@@ -224,8 +224,8 @@ func TestExceptionListener_ResponseAlreadySet_Skips(t *testing.T) {
 
     RegisterKernelExceptionListener(dispatcher, false)
 
-    req := httptest.NewRequest("GET", "/test", nil)
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    request := httptest.NewRequest("GET", "/test", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     existingResponse := TextResponse(200, "already handled")
     exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, errors.New("some error"))
@@ -251,10 +251,10 @@ func TestExceptionListener_SetsRequestIdHeader(t *testing.T) {
 
     httpErr := exception.NewHttpException(404, "not found")
 
-    req := httptest.NewRequest("GET", "/api/test", nil)
-    req.Header.Set("Accept", "application/json")
+    request := httptest.NewRequest("GET", "/api/test", nil)
+    request.Header.Set("Accept", "application/json")
 
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, httpErr)
 
@@ -283,10 +283,10 @@ func TestExceptionListener_HttpExceptionStatusCode(t *testing.T) {
 
     httpErr := exception.NewHttpException(403, "forbidden")
 
-    req := httptest.NewRequest("GET", "/api/resource", nil)
-    req.Header.Set("Accept", "application/json")
+    request := httptest.NewRequest("GET", "/api/resource", nil)
+    request.Header.Set("Accept", "application/json")
 
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, httpErr)
 

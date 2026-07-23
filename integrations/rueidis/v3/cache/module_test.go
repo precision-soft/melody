@@ -21,6 +21,16 @@ func (instance *spyServiceRegistrar) RegisterService(serviceName string, provide
     instance.names = append(instance.names, serviceName)
 }
 
+func (instance *spyServiceRegistrar) Register(serviceName string, provider any, options ...containercontract.RegisterOption) error {
+    instance.RegisterService(serviceName, provider, options...)
+
+    return nil
+}
+
+func (instance *spyServiceRegistrar) MustRegister(serviceName string, provider any, options ...containercontract.RegisterOption) {
+    instance.RegisterService(serviceName, provider, options...)
+}
+
 func TestModule_NameAndDescription(t *testing.T) {
     module := NewModule(ModuleConfig{})
 

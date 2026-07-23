@@ -277,7 +277,7 @@ func TestRegisterRuntimeAddsValue(t *testing.T) {
     }
 }
 
-/** @info A value that escapes a literal percent with %% resolves to text of the shape %NAME%, which the post-resolution scan then rejected as an "unresolved placeholder" — failing the whole boot for a correctly escaped literal. */
+/* @info A value that escapes a literal percent with %% resolves to text of the shape %NAME%, which the post-resolution scan then rejected as an "unresolved placeholder" — failing the whole boot for a correctly escaped literal. */
 func TestConfiguration_EscapedPercentLiteralDoesNotFailValidation(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{
         CliDescriptionKey: "%%APP_NAME%% stays literal",
@@ -296,5 +296,26 @@ func TestConfiguration_EscapedPercentLiteralDoesNotFailValidation(t *testing.T) 
     resolved := configuration.MustGet(KernelCliDescription).String()
     if "%APP_NAME% stays literal" != resolved {
         t.Fatalf("expected the escaped percents to unescape, got %q", resolved)
+    }
+}
+
+/* @info a parameter registered after the boot resolution keeps no raw template: it is resolved on registration against the parameters boot left in place, so a %env(...)% does not reach the consuming service verbatim */
+func TestRegisterRuntime_AfterResolveResolvesTheTemplate(t *testing.T) {
+    source := &testEnvironmentSource{values: map[string]string{"MAIL_HOST": "smtp.example.com"}}
+
+    environment, environmentErr := NewEnvironment(source)
+    if nil != environmentErr {
+        t.Fatalf("unexpected environment error: %v", environmentErr)
+    }
+
+    configuration, configurationErr := NewConfiguration(environment, t.TempDir())
+    if nil != configurationErr {
+        t.Fatalf("unexpected configuration error: %v", configurationErr)
+    }
+
+    configuration.RegisterRuntime("mail.host", "%env(MAIL_HOST)%")
+
+    if "smtp.example.com" != configuration.MustGet("mail.host").MustString() {
+        t.Fatalf("expected the post-boot template to resolve, got %q", configuration.MustGet("mail.host").MustString())
     }
 }

@@ -19,19 +19,19 @@ const defaultSessionProbeInterval = 15 * time.Second
 /* minimumRefreshInterval floors the derived refresh cadence: a caller that passes a ttl of a few nanoseconds would otherwise compute ttl/2 == 0, and time.NewTicker(0) panics on the background refresh goroutine — a panic no recover can reach, taking the process down while the lock is held. */
 const minimumRefreshInterval = 1 * time.Millisecond
 
-/* sessionProbeTtlFactor gives the probe a lease margin. A session locker ignores the ttl handed to Refresh (its Refresh is a pure liveness probe), but a lease locker rewrites the lease to now+ttl: passing the probe interval itself would renew a lease at exactly the moment it expires, so every probe would race its own expiry and lose about half the time — cancelling fn spuriously and, worse, letting the lease lapse so a second instance can acquire and run alongside it. Renewing for twice the probe interval keeps the same one-interval margin the positive-ttl path gets from refreshing at ttl/2. */
+/* sessionProbeTtlFactor gives the probe a lease margin. A session locker ignores the ttl handed to Refresh (its Refresh is a pure liveness probe), but a lease locker rewrites the lease to now+ttl: passing the probe interval itself would renew a lease at exactly the moment it expires, so every probe would race its own expiry and lose about half the time — cancelling callback spuriously and, worse, letting the lease lapse so a second instance can acquire and run alongside it. Renewing for twice the probe interval keeps the same one-interval margin the positive-ttl path gets from refreshing at ttl/2. */
 const sessionProbeTtlFactor = 2
 
-/* defaultReleaseTimeout bounds the detached release call that runs after fn: the caller's context may already be cancelled by then (a SIGTERM between a cron tick and its release), and a release skipped because of that cancellation would leave the lock held until the ttl lapses — losing the very next tick. */
+/* defaultReleaseTimeout bounds the detached release call that runs after callback: the caller's context may already be cancelled by then (a SIGTERM between a cron tick and its release), and a release skipped because of that cancellation would leave the lock held until the ttl lapses — losing the very next tick. */
 const defaultReleaseTimeout = 5 * time.Second
 
-/* RunExclusive acquires the named lock, runs fn while holding it, and always releases afterwards, so the ttl acts only as crash-safety, never as the run cadence. It returns (false, nil) without running fn when another holder owns the lock, so N cron-launched instances run the command exactly once per tick. While fn runs, the lock is refreshed at half the ttl on a background goroutine; a failed refresh cancels the child runtime handed to fn, because the lease may now be held by another instance. A non-positive ttl selects the session-lock behavior: no lease to extend, only a liveness probe at defaultSessionProbeInterval. */
+/* RunExclusive acquires the named lock, runs callback while holding it, and always releases afterwards, so the ttl acts only as crash-safety, never as the run cadence. It returns (false, nil) without running callback when another holder owns the lock, so N cron-launched instances run the command exactly once per tick. While callback runs, the lock is refreshed at half the ttl on a background goroutine; a failed refresh cancels the child runtime handed to callback, because the lease may now be held by another instance. A non-positive ttl selects the session-lock behavior: no lease to extend, only a liveness probe at defaultSessionProbeInterval. */
 func RunExclusive(
     runtimeInstance runtimecontract.Runtime,
     locker lockcontract.Locker,
     name string,
     ttl time.Duration,
-    fn func(runtimecontract.Runtime) error,
+    callback func(runtimecontract.Runtime) error,
 ) (bool, error) {
     if true == internal.IsNilInterface(runtimeInstance) {
         exception.Panic(exception.NewError("run exclusive runtime is nil", nil, nil))
@@ -45,8 +45,8 @@ func RunExclusive(
         exception.Panic(exception.NewError("run exclusive lock name is empty", nil, nil))
     }
 
-    if nil == fn {
-        exception.Panic(exception.NewError("run exclusive fn is nil", nil, nil))
+    if nil == callback {
+        exception.Panic(exception.NewError("run exclusive callback is nil", nil, nil))
     }
 
     lock := locker.CreateLock(name, ttl)
@@ -83,12 +83,12 @@ func RunExclusive(
 
         refreshFailure = refreshWhileHeld(childRuntime, lock, ttl, refreshDone)
         if nil != refreshFailure {
-            /* the lease could not be extended (lost to another holder or a backend error); stop fn rather than let it keep working alongside whoever may hold the lock now */
+            /* the lease could not be extended (lost to another holder or a backend error); stop callback rather than let it keep working alongside whoever may hold the lock now */
             cancel()
         }
     }()
 
-    runErr := fn(childRuntime)
+    runErr := callback(childRuntime)
 
     /* close before cancel so a refresh that fails *because* of the cancel is read as shutdown, not as a lost lease; cancel before Wait so a refresh already blocked on an unresponsive backend is interrupted rather than wedging this call until the connection times out — with the lock still held. */
     close(refreshDone)
@@ -129,7 +129,7 @@ func refreshWhileHeld(
             return nil
         case <-ticker.C:
             if refreshErr := lock.Refresh(runtimeInstance, refreshTtl); nil != refreshErr {
-                /* fn finished, or the caller cancelled — a SIGTERM cancels the very context the backend was called with, so the refresh in flight fails with the cancellation. Either way the failure is the shutdown itself, not a lost lease, and reporting it would turn a clean stop into an error. */
+                /* callback finished, or the caller cancelled — a SIGTERM cancels the very context the backend was called with, so the refresh in flight fails with the cancellation. Either way the failure is the shutdown itself, not a lost lease, and reporting it would turn a clean stop into an error. */
                 select {
                 case <-done:
                     return nil

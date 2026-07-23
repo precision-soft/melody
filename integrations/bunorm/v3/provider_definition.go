@@ -3,6 +3,6 @@ package bunorm
 type ProviderDefinition struct {
     Name      string
     Provider  Provider
-    Params    ConnectionParams
+    Params    ConnectionParameters
     IsDefault bool
 }

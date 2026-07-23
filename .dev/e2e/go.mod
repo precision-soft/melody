@@ -7,9 +7,9 @@ require (
 	github.com/precision-soft/melody/integrations/amqp/v3 v3.2.0
 	github.com/precision-soft/melody/integrations/bunorm/migrate/v3 v3.0.0
 	github.com/precision-soft/melody/integrations/bunorm/pgsql/v3 v3.2.0
-	github.com/precision-soft/melody/integrations/bunorm/v3 v3.1.2
+	github.com/precision-soft/melody/integrations/bunorm/v3 v3.2.0
 	github.com/precision-soft/melody/integrations/outbox/v3 v3.0.0
-	github.com/precision-soft/melody/integrations/rueidis/v3 v3.3.0
+	github.com/precision-soft/melody/integrations/rueidis/v3 v3.4.0
 	github.com/precision-soft/melody/integrations/websocket/v3 v3.0.0
 	github.com/precision-soft/melody/v3 v3.11.0
 	github.com/redis/rueidis v1.0.71

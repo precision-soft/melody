@@ -91,7 +91,7 @@ func TestApplicationRegisterHttpMiddlewareFactories_PanicsAfterBoot(t *testing.T
     })
 }
 
-/** @info http.Server.Shutdown neither cancels an in-flight request's context nor tracks a hijacked connection, so a Server-Sent Events stream or a websocket blocks the entire shutdown timeout and is then cut mid-flight. The hook is what lets the application release those handlers, and net/http runs it the moment Shutdown begins. */
+/* @info http.Server.Shutdown neither cancels an in-flight request's context nor tracks a hijacked connection, so a Server-Sent Events stream or a websocket blocks the entire shutdown timeout and is then cut mid-flight. The hook is what lets the application release those handlers, and net/http runs it the moment Shutdown begins. */
 func TestOnHttpShutdown_HooksRunWhenTheServerShutsDown(t *testing.T) {
     released := make(chan struct{})
 
@@ -112,7 +112,7 @@ func TestOnHttpShutdown_HooksRunWhenTheServerShutsDown(t *testing.T) {
     }
 }
 
-/** @info The hook list reaches the server: a nil hook is rejected outright, and a registered one is kept. */
+/* @info The hook list reaches the server: a nil hook is rejected outright, and a registered one is kept. */
 func TestOnHttpShutdown_RejectsNilAndKeepsTheHook(t *testing.T) {
     applicationInstance := &Application{}
 
@@ -130,7 +130,7 @@ func TestOnHttpShutdown_RejectsNilAndKeepsTheHook(t *testing.T) {
     applicationInstance.OnHttpShutdown(nil)
 }
 
-/** @info OnHttpShutdown copies its hooks into the net/http server once, on the main goroutine, before ListenAndServe; a hook registered after boot never reaches the server (silently dropped) and the append races, so — like every sibling registrar — it must panic once the application has booted. */
+/* @info OnHttpShutdown copies its hooks into the net/http server once, on the main goroutine, before ListenAndServe; a hook registered after boot never reaches the server (silently dropped) and the append races, so — like every sibling registrar — it must panic once the application has booted. */
 func TestOnHttpShutdown_PanicsAfterBoot(t *testing.T) {
     applicationInstance := NewApplication(
         context.Background(),
@@ -145,7 +145,7 @@ func TestOnHttpShutdown_PanicsAfterBoot(t *testing.T) {
     })
 }
 
-/** @info net/http runs each shutdown hook on a bare `go f()`, where a panic cannot be recovered by Run's logOnRecoverAndExit and would hard-crash the process mid-drain, skipping Application.Close(). The wrapper recovers the panic through the framework logger and still marks the hook done, so a panicking hook is contained like every other extension point. */
+/* @info net/http runs each shutdown hook on a bare `go f()`, where a panic cannot be recovered by Run's logOnRecoverAndExit and would hard-crash the process mid-drain, skipping Application.Close(). The wrapper recovers the panic through the framework logger and still marks the hook done, so a panicking hook is contained like every other extension point. */
 func TestWrapHttpShutdownHook_ContainsAPanicAndStillCompletes(t *testing.T) {
     var hooksDone sync.WaitGroup
 
@@ -174,7 +174,7 @@ func TestWrapHttpShutdownHook_ContainsAPanicAndStillCompletes(t *testing.T) {
     hooksDone.Wait()
 }
 
-/** @info Shutdown starts the hooks on detached goroutines and returns immediately when the only open connections are hijacked, so runHttp must join the hooks before returning. waitForHttpShutdownHooks must not report done until the registered hook has actually finished. */
+/* @info Shutdown starts the hooks on detached goroutines and returns immediately when the only open connections are hijacked, so runHttp must join the hooks before returning. waitForHttpShutdownHooks must not report done until the registered hook has actually finished. */
 func TestWaitForHttpShutdownHooks_BlocksUntilTheHookCompletes(t *testing.T) {
     var hooksDone sync.WaitGroup
 
@@ -212,7 +212,7 @@ func TestWaitForHttpShutdownHooks_BlocksUntilTheHookCompletes(t *testing.T) {
     }
 }
 
-/** @info The join is bounded by the shutdown budget: a hook that never finishes must not pin the process forever, so a spent context releases the wait. */
+/* @info The join is bounded by the shutdown budget: a hook that never finishes must not pin the process forever, so a spent context releases the wait. */
 func TestWaitForHttpShutdownHooks_ReturnsWhenTheBudgetIsSpent(t *testing.T) {
     var hooksDone sync.WaitGroup
 

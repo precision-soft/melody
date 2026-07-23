@@ -19,6 +19,7 @@ const (
     ServiceCategoryService = "service-example-category-service"
 )
 
+//melody:service ServiceCategoryService
 func NewCategoryService(
     categoryRepository repository.CategoryRepository,
     cacheInstance melodycachecontract.Cache,

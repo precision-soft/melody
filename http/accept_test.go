@@ -55,7 +55,7 @@ func TestPrefersHtml_ReturnsFalseForNilRequest(t *testing.T) {
     }
 }
 
-/** @info A wildcard range must never override the exact type's weight (RFC 7231 5.3.2 gives the weight to the most specific matching range). A trailing type wildcard or catch-all range with a higher q must not mask an explicit "text/html;q=0" refusal or a low exact q, which would serve html against the client's stated preference. */
+/* @info A wildcard range must never override the exact type's weight (RFC 7231 5.3.2 gives the weight to the most specific matching range). A trailing type wildcard or catch-all range with a higher q must not mask an explicit "text/html;q=0" refusal or a low exact q, which would serve html against the client's stated preference. */
 func TestPrefersHtml_ExactTypeQualityBeatsWildcard(t *testing.T) {
     cases := []struct {
         acceptHeader string
@@ -80,7 +80,7 @@ func TestPrefersHtml_ExactTypeQualityBeatsWildcard(t *testing.T) {
     }
 }
 
-/** @info The q parameter is how a client ranks alternatives: "text/html;q=0.1, application/json" asks for json, and q=0 refuses a type outright. Reading the header by substring position alone served the representation the client down-weighted, or one it had explicitly rejected. */
+/* @info The q parameter is how a client ranks alternatives: "text/html;q=0.1, application/json" asks for json, and q=0 refuses a type outright. Reading the header by substring position alone served the representation the client down-weighted, or one it had explicitly rejected. */
 func TestPrefersHtml_HonoursQualityValues(t *testing.T) {
     cases := []struct {
         acceptHeader string

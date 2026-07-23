@@ -367,3 +367,29 @@ func TestScope_MustGetByTypeNilTypePanicsDescriptively(t *testing.T) {
 
     _ = scope.MustGetByType(nil)
 }
+
+/* @info a closed scope enumerates nothing, mirroring Has: the request is over and its collaborators are gone, so a late collection gets an empty set instead of reaching into a container the scope no longer holds */
+func TestScope_TypesImplementingReturnsEmptyWhenClosed(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*scopeTestService, error) {
+        return &scopeTestService{}, nil
+    })
+
+    scopeInstance := serviceContainer.NewScope()
+
+    closeErr := scopeInstance.Close()
+    if nil != closeErr {
+        t.Fatalf("expected the scope to close, got %v", closeErr)
+    }
+
+    typeLister, isTypeLister := scopeInstance.(containercontract.TypeLister)
+    if false == isTypeLister {
+        t.Fatalf("expected the scope to enumerate types")
+    }
+
+    matches := typeLister.TypesImplementing(reflect.TypeOf((*any)(nil)).Elem())
+    if 0 != len(matches) {
+        t.Fatalf("expected a closed scope to enumerate nothing, got %d", len(matches))
+    }
+}

@@ -201,7 +201,7 @@ func TestIsTransientErrorTraversesWrappedErrors(t *testing.T) {
     }
 }
 
-/** @info NaN fails every comparison, so a NaN multiplier would slip through a `1 > x` clamp, poison the float-space growth and convert to a negative duration — an immediate re-dial storm; the not-at-least-1 clamp resolves it to the default. */
+/* @info NaN fails every comparison, so a NaN multiplier would slip through a `1 > x` clamp, poison the float-space growth and convert to a negative duration — an immediate re-dial storm; the not-at-least-1 clamp resolves it to the default. */
 func TestComputeBackoffDelayNaNMultiplierFallsBackToDefault(t *testing.T) {
     provider := newTestProvider().
         WithRetryConfig(NewRetryConfig(3, -time.Second, -time.Second, math.NaN()))

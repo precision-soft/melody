@@ -6,10 +6,9 @@ import (
     "strings"
 
     "github.com/precision-soft/melody/v3/.example/entity"
-
-    melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
 )
 
+//melody:service ServiceCategoryRepository
 func NewInMemoryCategoryRepository() CategoryRepository {
     return &inMemoryCategoryRepository{
         categories: []*entity.Category{
@@ -145,9 +144,3 @@ func (instance *inMemoryCategoryRepository) nextId() string {
 }
 
 var _ CategoryRepository = (*inMemoryCategoryRepository)(nil)
-
-func CategoryRepositoryProvider() melodycontainercontract.Provider[CategoryRepository] {
-    return func(resolver melodycontainercontract.Resolver) (CategoryRepository, error) {
-        return NewInMemoryCategoryRepository(), nil
-    }
-}

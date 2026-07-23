@@ -25,14 +25,14 @@ func newStaticTestRuntime() runtimecontract.Runtime {
 }
 
 func TestStaticMiddleware_DoesNotDuplicateContentType(t *testing.T) {
-    dir := t.TempDir()
+    directory := t.TempDir()
 
-    if writeErr := os.WriteFile(dir+"/style.css", []byte("body{color:red}"), 0o640); nil != writeErr {
+    if writeErr := os.WriteFile(directory+"/style.css", []byte("body{color:red}"), 0o640); nil != writeErr {
         t.Fatalf("write file error: %v", writeErr)
     }
 
     options := static.NewOptions(
-        static.NewFileServerConfig(static.ModeFilesystem, dir, "index.html", "", false, 0, false),
+        static.NewFileServerConfig(static.ModeFilesystem, directory, "index.html", "", false, 0, false),
         "",
         nil,
     )

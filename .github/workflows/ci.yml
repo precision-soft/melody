@@ -30,6 +30,19 @@ jobs:
                         echo "=== ${module_directory} (tags: '${{ matrix.tags }}') ==="
                         (cd "${module_directory}" && go vet ./... && go test ./...)
                     done
+            # the e2e harness module sits outside go.work on purpose (it builds
+            # GOWORK=off against the local replaces), so the workspace loop above
+            # never compiles it; without this a break in the harness — or a stale
+            # framework pin in its go.mod — surfaces only when someone runs
+            # run.sh/stack.sh by hand. Mirrors run_e2e_harness_checks in
+            # `.dev/validate/all.sh`.
+            -   name: vet the e2e harness module (outside the workspace)
+                if: matrix.tags == ''
+                env:
+                    GOWORK: "off"
+                run: |
+                    set -euo pipefail
+                    (cd .dev/e2e && go vet ./...)
 
     # the race detector over the concurrency-carrying packages of the core majors
     # and the cron runner. The matrix job runs them without it, so a lost mutex or

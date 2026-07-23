@@ -170,7 +170,7 @@ func (instance emptyNameCipherRef) CipherName() string {
     return ""
 }
 
-/** @info A marker with an empty CipherName() would resolve the DEFAULT cipher, silently giving a compartment-bound column the default key — the cross-compartment read the marker exists to prevent. */
+/* @info A marker with an empty CipherName() would resolve the DEFAULT cipher, silently giving a compartment-bound column the default key — the cross-compartment read the marker exists to prevent. */
 func TestEncryptedStringFor_EmptyCipherNameIsRejected(t *testing.T) {
     UseCipher(NewFakeCipher())
     defer UseCipher(nil)
@@ -187,7 +187,7 @@ func TestEncryptedStringFor_EmptyCipherNameIsRejected(t *testing.T) {
     }
 }
 
-/** @info fmt reaches for GoStringer under %#v; without it the underlying string literal — the plaintext — is printed straight into logs and test failures. */
+/* @info fmt reaches for GoStringer under %#v; without it the underlying string literal — the plaintext — is printed straight into logs and test failures. */
 func TestEncryptedTypes_RedactUnderTheGoStringVerb(t *testing.T) {
     const plaintext = "RO49-SECRET-IBAN"
 

@@ -83,7 +83,7 @@ func TestIsRequestFromTrustedProxy_MatchesIpAndCidr(t *testing.T) {
     }
 }
 
-/** @info A peer whose RemoteAddr arrives in IPv4-mapped IPv6 form (::ffff:172.18.0.2 from a PROXY-protocol listener or a custom net.Conn) is the IPv4 address it names, so an IPv4 CIDR or an unmapped literal in the trusted proxy list must still match it. isRequestFromTrustedProxy mirrors the per-address check in http/middleware/client_ip.go, which unmaps both sides before comparing. */
+/* @info A peer whose RemoteAddr arrives in IPv4-mapped IPv6 form (::ffff:172.18.0.2 from a PROXY-protocol listener or a custom net.Conn) is the IPv4 address it names, so an IPv4 CIDR or an unmapped literal in the trusted proxy list must still match it. isRequestFromTrustedProxy mirrors the per-address check in http/middleware/client_ip.go, which unmaps both sides before comparing. */
 func TestIsRequestFromTrustedProxy_UnmapsIpv4MappedIpv6Peer(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "[::ffff:172.18.0.2]:5555"
@@ -100,7 +100,7 @@ func TestIsRequestFromTrustedProxy_UnmapsIpv4MappedIpv6Peer(t *testing.T) {
     }
 }
 
-/** @info detectSchemeWithForwardedHeadersPolicy must trust a mapped IPv4-in-IPv6 proxy peer so it honours X-Forwarded-Proto: without the Unmap the trusted-proxy check fails, the scheme collapses to http, and the session cookie is set with Secure=false behind a TLS-terminating proxy. */
+/* @info detectSchemeWithForwardedHeadersPolicy must trust a mapped IPv4-in-IPv6 proxy peer so it honours X-Forwarded-Proto: without the Unmap the trusted-proxy check fails, the scheme collapses to http, and the session cookie is set with Secure=false behind a TLS-terminating proxy. */
 func TestDetectSchemeWithForwardedHeadersPolicy_TrustsIpv4MappedIpv6Peer(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "[::ffff:172.18.0.2]:5555"
@@ -119,7 +119,7 @@ func TestDetectSchemeWithForwardedHeadersPolicy_TrustsIpv4MappedIpv6Peer(t *test
     }
 }
 
-/** @info A trusted proxy entry written in IPv4-mapped IPv6 CIDR form (::ffff:10.0.0.0/104) names the IPv4 range it embeds, so an unmapped IPv4 peer inside that range must still be trusted. Without rewriting the mapped prefix to its 10.0.0.0/8 equivalent, netip.Prefix.Contains rejects the IPv4 peer across address families, the proxy reads as untrusted, X-Forwarded-Proto is discarded and the scheme collapses to http — which sets the session cookie with Secure=false behind a TLS-terminating proxy. */
+/* @info A trusted proxy entry written in IPv4-mapped IPv6 CIDR form (::ffff:10.0.0.0/104) names the IPv4 range it embeds, so an unmapped IPv4 peer inside that range must still be trusted. Without rewriting the mapped prefix to its 10.0.0.0/8 equivalent, netip.Prefix.Contains rejects the IPv4 peer across address families, the proxy reads as untrusted, X-Forwarded-Proto is discarded and the scheme collapses to http — which sets the session cookie with Secure=false behind a TLS-terminating proxy. */
 func TestDetectSchemeWithForwardedHeadersPolicy_TrustsMappedFormCidr(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "10.0.0.5:5555"
@@ -436,7 +436,7 @@ func (instance *testRuntime) Container() containercontract.Container { return ni
 
 var _ runtimecontract.Runtime = (*testRuntime)(nil)
 
-func assertPanicWithExceptionMessage(t *testing.T, fn func(), expectedMessage string) {
+func assertPanicWithExceptionMessage(t *testing.T, callback func(), expectedMessage string) {
     t.Helper()
 
     defer func() {
@@ -455,7 +455,7 @@ func assertPanicWithExceptionMessage(t *testing.T, fn func(), expectedMessage st
         }
     }()
 
-    fn()
+    callback()
 }
 
 func TestWrapControllerWithContainer_AutowiresDependenciesByType(t *testing.T) {
@@ -827,7 +827,7 @@ func TestMatchPath_ParamLocale_SetsLocaleParam(t *testing.T) {
     }
 }
 
-/** @info A chain of proxies appends to X-Forwarded-Proto rather than replacing it, so the header arrives as "https, http". The client-facing hop is the leftmost entry; returning the whole list yields a scheme equal to neither "http" nor "https", which quietly drops the Secure attribute from every cookie the response sets. */
+/* @info A chain of proxies appends to X-Forwarded-Proto rather than replacing it, so the header arrives as "https, http". The client-facing hop is the leftmost entry; returning the whole list yields a scheme equal to neither "http" nor "https", which quietly drops the Secure attribute from every cookie the response sets. */
 func TestDetectSchemeWithForwardedHeadersPolicy_UsesTheClientFacingProtoOfAChain(t *testing.T) {
     for _, headerValue := range []string{"https, http", "https,http", " https , http "} {
         netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)

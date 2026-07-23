@@ -102,7 +102,7 @@ func (instance *CrontabTemplate) Render(entries []Entry, options RenderOptions) 
             return "", userColumnErr
         }
 
-        if validationErr := ValidateNoForbiddenChars(options.HeartbeatCommand, CrontabForbiddenChars, "heartbeat command"); nil != validationErr {
+        if validationErr := ValidateNoForbiddenCharacters(options.HeartbeatCommand, CrontabForbiddenCharacters, "heartbeat command"); nil != validationErr {
             return "", validationErr
         }
 
@@ -127,7 +127,7 @@ func (instance *CrontabTemplate) Render(entries []Entry, options RenderOptions) 
             return "", userColumnErr
         }
 
-        if validationErr := ValidateNoForbiddenChars([]string{options.HeartbeatPath}, CrontabForbiddenChars, "heartbeat path"); nil != validationErr {
+        if validationErr := ValidateNoForbiddenCharacters([]string{options.HeartbeatPath}, CrontabForbiddenCharacters, "heartbeat path"); nil != validationErr {
             return "", validationErr
         }
 
@@ -185,7 +185,7 @@ func buildCrontabLine(entry Entry, includeUserColumn bool) (string, error) {
         }
     }
 
-    if scheduleValidationErr := validateScheduleFields(entry, CrontabForbiddenChars); nil != scheduleValidationErr {
+    if scheduleValidationErr := validateScheduleFields(entry, CrontabForbiddenCharacters); nil != scheduleValidationErr {
         return "", scheduleValidationErr
     }
 
@@ -199,7 +199,7 @@ func buildCrontabLine(entry Entry, includeUserColumn bool) (string, error) {
             )
         }
 
-        if validationErr := ValidateNoForbiddenChars(entry.Command, CrontabForbiddenChars, fmt.Sprintf("entry %q", entry.Name)); nil != validationErr {
+        if validationErr := ValidateNoForbiddenCharacters(entry.Command, CrontabForbiddenCharacters, fmt.Sprintf("entry %q", entry.Name)); nil != validationErr {
             return "", validationErr
         }
 
@@ -214,7 +214,7 @@ func buildCrontabLine(entry Entry, includeUserColumn bool) (string, error) {
         }
 
         tokens := append([]string{entry.Binary}, entry.Args...)
-        if validationErr := ValidateNoForbiddenChars(tokens, CrontabForbiddenChars, fmt.Sprintf("entry %q", entry.Name)); nil != validationErr {
+        if validationErr := ValidateNoForbiddenCharacters(tokens, CrontabForbiddenCharacters, fmt.Sprintf("entry %q", entry.Name)); nil != validationErr {
             return "", validationErr
         }
 
@@ -223,7 +223,7 @@ func buildCrontabLine(entry Entry, includeUserColumn bool) (string, error) {
 
     logRedirect := ""
     if "" != entry.LogPath {
-        if validationErr := ValidateNoForbiddenChars([]string{entry.LogPath}, CrontabForbiddenChars, fmt.Sprintf("entry %q log path", entry.Name)); nil != validationErr {
+        if validationErr := ValidateNoForbiddenCharacters([]string{entry.LogPath}, CrontabForbiddenCharacters, fmt.Sprintf("entry %q log path", entry.Name)); nil != validationErr {
             return "", validationErr
         }
 

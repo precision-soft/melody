@@ -7,7 +7,7 @@ import (
     "unicode/utf8"
 )
 
-/** @info Hard-wrapping sliced cells on byte boundaries (splitLine[:width]) split multibyte UTF-8 runes in half, emitting invalid UTF-8 for any cell wider than the column. */
+/* @info Hard-wrapping sliced cells on byte boundaries (splitLine[:width]) split multibyte UTF-8 runes in half, emitting invalid UTF-8 for any cell wider than the column. */
 func TestTablePrinter_WrapsMultibyteRunesWithoutSplitting(t *testing.T) {
     printer := NewDefaultTablePrinter()
 
@@ -33,7 +33,7 @@ func TestTablePrinter_WrapsMultibyteRunesWithoutSplitting(t *testing.T) {
     }
 }
 
-/** @info Column widths and cell padding were measured with len() (bytes); multibyte rows therefore misaligned the rendered border relative to the ASCII header/separator. */
+/* @info Column widths and cell padding were measured with len() (bytes); multibyte rows therefore misaligned the rendered border relative to the ASCII header/separator. */
 func TestTablePrinter_PadsMultibyteCellsByRune(t *testing.T) {
     printer := NewDefaultTablePrinter()
 

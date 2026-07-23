@@ -341,7 +341,7 @@ func encodeWordChunks(value string) string {
     for _, runeValue := range value {
         token := encodeRune(runeValue)
 
-        if 0 < word.Len() && (word.Len()+len(token)) > maxEncodedWordPayload {
+        if 0 < word.Len() && maxEncodedWordPayload < (word.Len()+len(token)) {
             flushWord()
         }
 
@@ -624,7 +624,7 @@ func encodeBase64Lines(content []byte) string {
     encoded := base64.StdEncoding.EncodeToString(content)
 
     var wrapped strings.Builder
-    for len(encoded) > 76 {
+    for 76 < len(encoded) {
         wrapped.WriteString(encoded[:76])
         wrapped.WriteString(lineBreak)
         encoded = encoded[76:]

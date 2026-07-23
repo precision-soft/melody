@@ -10,9 +10,9 @@ import (
 )
 
 func TestDirFileSystem_OpenRootReturnsDirectory(t *testing.T) {
-    dir := t.TempDir()
+    directory := t.TempDir()
 
-    fileSystem := osDirFileSystem(dir)
+    fileSystem := osDirFileSystem(directory)
 
     file, err := fileSystem.Open("")
     if nil != err {
@@ -31,15 +31,15 @@ func TestDirFileSystem_OpenRootReturnsDirectory(t *testing.T) {
 }
 
 func TestDirFileSystem_OpenPathWithinRootSucceeds(t *testing.T) {
-    dir := t.TempDir()
+    directory := t.TempDir()
 
-    filePath := filepath.Join(dir, "file.txt")
+    filePath := filepath.Join(directory, "file.txt")
     writeErr := os.WriteFile(filePath, []byte("hello"), 0o644)
     if nil != writeErr {
         t.Fatalf("write error: %v", writeErr)
     }
 
-    fileSystem := osDirFileSystem(dir)
+    fileSystem := osDirFileSystem(directory)
 
     file, err := fileSystem.Open("file.txt")
     if nil != err {
@@ -49,9 +49,9 @@ func TestDirFileSystem_OpenPathWithinRootSucceeds(t *testing.T) {
 }
 
 func TestDirFileSystem_OpenAbsolutePathRejected(t *testing.T) {
-    dir := t.TempDir()
+    directory := t.TempDir()
 
-    fileSystem := osDirFileSystem(dir)
+    fileSystem := osDirFileSystem(directory)
 
     _, err := fileSystem.Open("/etc/passwd")
     if false == errors.Is(err, fs.ErrInvalid) {
@@ -60,9 +60,9 @@ func TestDirFileSystem_OpenAbsolutePathRejected(t *testing.T) {
 }
 
 func TestDirFileSystem_OpenParentTraversalRejected(t *testing.T) {
-    dir := t.TempDir()
+    directory := t.TempDir()
 
-    fileSystem := osDirFileSystem(dir)
+    fileSystem := osDirFileSystem(directory)
 
     _, err := fileSystem.Open("..")
     if false == errors.Is(err, fs.ErrPermission) {
@@ -128,9 +128,9 @@ func TestDirFileSystem_OpenSymlinkWithinRootAllowed(t *testing.T) {
 }
 
 func TestDirFileSystem_OpenNonExistentPathReturnsError(t *testing.T) {
-    dir := t.TempDir()
+    directory := t.TempDir()
 
-    fileSystem := osDirFileSystem(dir)
+    fileSystem := osDirFileSystem(directory)
 
     _, err := fileSystem.Open("does-not-exist.txt")
     if nil == err {

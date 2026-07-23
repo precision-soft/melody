@@ -29,9 +29,9 @@ func TestRegisterResponseListener_AppliesHeadersToErrorResponse(t *testing.T) {
 
     RegisterResponseListener(dispatcher, DefaultService())
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
-    req.Header.Set("Origin", "https://example.com")
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
+    request.Header.Set("Origin", "https://example.com")
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     errorResponse := http.EmptyResponse(nethttp.StatusInternalServerError)
     payload := http.NewKernelResponseEvent(melodyRequest, errorResponse)
@@ -51,8 +51,8 @@ func TestRegisterResponseListener_SkipsWhenOriginMissing(t *testing.T) {
 
     RegisterResponseListener(dispatcher, DefaultService())
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     response := http.EmptyResponse(200)
     payload := http.NewKernelResponseEvent(melodyRequest, response)
@@ -73,9 +73,9 @@ func TestRegisterResponseListener_SkipsDisallowedOrigin(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
     RegisterResponseListener(dispatcher, service)
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
-    req.Header.Set("Origin", "https://blocked.example.com")
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
+    request.Header.Set("Origin", "https://blocked.example.com")
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     response := http.EmptyResponse(200)
     payload := http.NewKernelResponseEvent(melodyRequest, response)

@@ -8,9 +8,9 @@ import (
     "github.com/precision-soft/melody/v3/.example/entity"
 
     "github.com/precision-soft/melody/v3/.example/security"
-    melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
 )
 
+//melody:service ServiceUserRepository
 func NewInMemoryUserRepository() UserRepository {
     return &inMemoryUserRepository{
         users: []*entity.User{
@@ -204,9 +204,3 @@ func (instance *inMemoryUserRepository) usernameTakenByAnother(username string, 
 }
 
 var _ UserRepository = (*inMemoryUserRepository)(nil)
-
-func UserRepositoryProvider() melodycontainercontract.Provider[UserRepository] {
-    return func(resolver melodycontainercontract.Resolver) (UserRepository, error) {
-        return NewInMemoryUserRepository(), nil
-    }
-}

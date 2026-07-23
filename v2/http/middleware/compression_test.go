@@ -75,7 +75,7 @@ func (instance *closeSignalReader) Close() error {
     return nil
 }
 
-/** @info When a middleware outer to compression panics after next() returned, the kernel dropped the pipe-backed response without closing it, so the gzip goroutine blocked forever in pipe.Write and its deferred close of the original body reader (and its descriptor) never ran; tying the pipe reader to request-context cancellation must release it. */
+/* @info When a middleware outer to compression panics after next() returned, the kernel dropped the pipe-backed response without closing it, so the gzip goroutine blocked forever in pipe.Write and its deferred close of the original body reader (and its descriptor) never ran; tying the pipe reader to request-context cancellation must release it. */
 func TestCompressionMiddleware_ReleasesGzipGoroutineWhenRequestUnwinds(t *testing.T) {
     config := NewCompressionConfig(6, 16, nil, nil)
     middleware := CompressionMiddleware(config)
@@ -102,10 +102,10 @@ func TestCompressionMiddleware_ReleasesGzipGoroutineWhenRequestUnwinds(t *testin
     requestContext, cancel := context.WithCancel(context.Background())
     defer cancel()
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/test", nil).WithContext(requestContext)
-    req.Header.Set("Accept-Encoding", "gzip")
+    request := httptest.NewRequest(nethttp.MethodGet, "/test", nil).WithContext(requestContext)
+    request.Header.Set("Accept-Encoding", "gzip")
 
-    resultResponse, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(req))
+    resultResponse, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
     if nil != err {
         t.Fatalf("expected nil error, got: %v", err)
     }
@@ -153,10 +153,10 @@ func TestCompressionMiddleware_ReadAllError_ReturnsError(t *testing.T) {
         },
     )
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
-    req.Header.Set("Accept-Encoding", "gzip")
+    request := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    request.Header.Set("Accept-Encoding", "gzip")
 
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     _, err := handler(nil, httptest.NewRecorder(), melodyRequest)
 
@@ -194,10 +194,10 @@ func TestCompressionMiddleware_SuccessfulCompression(t *testing.T) {
         },
     )
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
-    req.Header.Set("Accept-Encoding", "gzip")
+    request := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    request.Header.Set("Accept-Encoding", "gzip")
 
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     resultResponse, err := handler(nil, httptest.NewRecorder(), melodyRequest)
 
@@ -241,10 +241,10 @@ func TestCompressionMiddleware_SkipsWhenBelowMinSize(t *testing.T) {
         },
     )
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
-    req.Header.Set("Accept-Encoding", "gzip")
+    request := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    request.Header.Set("Accept-Encoding", "gzip")
 
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     resultResponse, err := handler(nil, httptest.NewRecorder(), melodyRequest)
 
@@ -339,9 +339,9 @@ func TestCompressionMiddleware_AddsVaryAcceptEncodingWhenCompressing(t *testing.
         },
     )
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/", nil)
-    req.Header.Set("Accept-Encoding", "gzip")
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    request := httptest.NewRequest(nethttp.MethodGet, "/", nil)
+    request.Header.Set("Accept-Encoding", "gzip")
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     resultResponse, err := handler(nil, httptest.NewRecorder(), melodyRequest)
     if nil != err {
@@ -375,9 +375,9 @@ func TestCompressionMiddleware_AddsVaryEvenWhenClientRefusesGzip(t *testing.T) {
         },
     )
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/", nil)
-    req.Header.Set("Accept-Encoding", "gzip;q=0, deflate")
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    request := httptest.NewRequest(nethttp.MethodGet, "/", nil)
+    request.Header.Set("Accept-Encoding", "gzip;q=0, deflate")
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     resultResponse, err := handler(nil, httptest.NewRecorder(), melodyRequest)
     if nil != err {
@@ -416,9 +416,9 @@ func TestCompressionMiddleware_DoesNotDuplicateVary(t *testing.T) {
         },
     )
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/", nil)
-    req.Header.Set("Accept-Encoding", "gzip")
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    request := httptest.NewRequest(nethttp.MethodGet, "/", nil)
+    request.Header.Set("Accept-Encoding", "gzip")
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     resultResponse, err := handler(nil, httptest.NewRecorder(), melodyRequest)
     if nil != err {
@@ -454,9 +454,9 @@ func TestCompressionMiddleware_StreamingGzipProducesValidOutput(t *testing.T) {
         },
     )
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/", nil)
-    req.Header.Set("Accept-Encoding", "gzip")
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(req)
+    request := httptest.NewRequest(nethttp.MethodGet, "/", nil)
+    request.Header.Set("Accept-Encoding", "gzip")
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     resultResponse, err := handler(nil, httptest.NewRecorder(), melodyRequest)
     if nil != err {
@@ -504,7 +504,7 @@ func TestAcceptsGzip_Cases(t *testing.T) {
     }
 }
 
-/** @info Only a zero minimum size was normalized, so a negative one reached make([]byte, peekSize) and panicked on every request through the middleware. */
+/* @info Only a zero minimum size was normalized, so a negative one reached make([]byte, peekSize) and panicked on every request through the middleware. */
 func TestCompressionMiddleware_NegativeMinSizeIsNormalized(t *testing.T) {
     config := NewCompressionConfig(
         6,
@@ -536,10 +536,10 @@ func TestCompressionMiddleware_NegativeMinSizeIsNormalized(t *testing.T) {
         },
     )
 
-    req := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
-    req.Header.Set("Accept-Encoding", "gzip")
+    request := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    request.Header.Set("Accept-Encoding", "gzip")
 
-    resultResponse, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(req))
+    resultResponse, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
     if nil != err {
         t.Fatalf("expected nil error, got: %v", err)
     }

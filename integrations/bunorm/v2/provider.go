@@ -7,5 +7,5 @@ import (
 )
 
 type Provider interface {
-    Open(params ConnectionParams, logger loggingcontract.Logger) (*bun.DB, error)
+    Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error)
 }

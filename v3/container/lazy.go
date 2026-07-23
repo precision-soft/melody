@@ -16,7 +16,9 @@ type LazyService[T any] struct {
     value    T
 }
 
-/* Lazy returns a handle that resolves serviceName from the resolver on first use, the deferred form of FromResolver / MustFromResolver. */
+/* Lazy returns a handle that resolves serviceName from the resolver on first use, the deferred form of FromResolver / MustFromResolver.
+
+Build the handle over the container (or a resolver not shared across goroutines): every container resolution mints a fresh resolver context, so concurrent first uses are safe. A handle that captures the resolver context a provider was handed and then escapes that provider must not have Get/Resolve called from several goroutines at once — that context is a single resolution chain and is not safe for concurrent use. */
 func Lazy[T any](resolver containercontract.Resolver, serviceName string) *LazyService[T] {
     return &LazyService[T]{
         resolve: func() (T, error) {

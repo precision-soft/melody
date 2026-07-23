@@ -20,7 +20,7 @@ func TestProvider_Open_ZeroConnectTimeoutPingsWithoutDeadline(t *testing.T) {
         ),
     )
 
-    client, openErr := provider.Open(NewConnectionParams(address, "", ""))
+    client, openErr := provider.Open(NewConnectionParameters(address, "", ""))
     if nil != openErr {
         t.Fatalf("open with zero connect timeout against healthy redis: %v", openErr)
     }

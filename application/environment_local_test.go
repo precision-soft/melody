@@ -50,7 +50,7 @@ func TestMissingEnvironmentFileHint_EmptyWhenNoDirectory(t *testing.T) {
     }
 }
 
-/** @info a project configured solely through the development-environment file boots and loads it without any .env, so a resolution failure there is a plain unresolved key — a hint claiming the environment files are missing would misattribute it. */
+/* @info a project configured solely through the development-environment file boots and loads it without any .env, so a resolution failure there is a plain unresolved key — a hint claiming the environment files are missing would misattribute it. */
 func TestMissingEnvironmentFileHint_EmptyWhenDevelopmentEnvPresent(t *testing.T) {
     cases := []string{
         ".env." + config.EnvDevelopment,

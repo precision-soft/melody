@@ -8,7 +8,7 @@ import (
     "github.com/precision-soft/melody/v3/.example/handler"
     handlercategory "github.com/precision-soft/melody/v3/.example/handler/category"
     handlercurrency "github.com/precision-soft/melody/v3/.example/handler/currency"
-    handlerevents "github.com/precision-soft/melody/v3/.example/handler/events"
+    handlerevent "github.com/precision-soft/melody/v3/.example/handler/event"
     handleri18n "github.com/precision-soft/melody/v3/.example/handler/i18n"
     handlerinternalauth "github.com/precision-soft/melody/v3/.example/handler/internalauth"
     handleroutbox "github.com/precision-soft/melody/v3/.example/handler/outbox"
@@ -139,8 +139,8 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     router.HandleNamed(route.I18nGreetingName, "GET", route.I18nGreetingPattern, handleri18n.GreetingHandler())
 
-    router.HandleNamed(route.EventsStreamName, "GET", route.EventsStreamPattern, handlerevents.StreamHandler(instance.serverSentEventHub))
-    router.HandleNamed(route.EventsPublishName, "GET", route.EventsPublishPattern, handlerevents.PublishHandler(instance.messageBusDispatch))
+    router.HandleNamed(route.EventsStreamName, "GET", route.EventsStreamPattern, handlerevent.StreamHandler(instance.serverSentEventHub))
+    router.HandleNamed(route.EventsPublishName, "GET", route.EventsPublishPattern, handlerevent.PublishHandler(instance.messageBusDispatch))
 
     /* @info every catalog/user route below is exposed in the frontend zone: the admin SPA generates all of
        their URLs by name from the route manifest (data-route / route(...)), so an unexposed route would make

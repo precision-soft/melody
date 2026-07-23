@@ -12,6 +12,11 @@ import (
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
+const (
+    redactedValuePlaceholder = "********"
+    redactedEmptyPlaceholder = "(empty)"
+)
+
 type ParameterCommand struct {
 }
 
@@ -135,14 +140,17 @@ func (instance *ParameterCommand) Run(
             }
         }
 
+        isSecret := parameter.IsSecret()
+
         items = append(
             items,
             parameterListItem{
                 Name:             key,
                 EnvironmentKey:   parameter.EnvironmentKey(),
-                EnvironmentValue: fmt.Sprintf("%v", parameter.EnvironmentValue()),
-                ValueString:      fmt.Sprintf("%v", parameter.Value()),
+                EnvironmentValue: redactedParameterValue(parameter.EnvironmentValue(), isSecret),
+                ValueString:      redactedParameterValue(parameter.Value(), isSecret),
                 IsDefault:        parameter.IsDefault(),
+                IsSecret:         isSecret,
                 Aliases:          aliases,
             },
         )
@@ -160,7 +168,7 @@ func (instance *ParameterCommand) Run(
 
         block := builder.AddBlock(
             "PARAMETERS",
-            []string{"parameter", "environmentKey", "environmentValue", "value", "default", "aliases"},
+            []string{"parameter", "environmentKey", "environmentValue", "value", "default", "secret", "aliases"},
         )
 
         for _, item := range items {
@@ -170,6 +178,7 @@ func (instance *ParameterCommand) Run(
                 item.EnvironmentValue,
                 item.ValueString,
                 fmt.Sprintf("%t", item.IsDefault),
+                fmt.Sprintf("%t", item.IsSecret),
                 item.Aliases,
             )
         }
@@ -189,12 +198,28 @@ func (instance *ParameterCommand) Run(
     return output.Render(commandContext.Writer, envelope, option)
 }
 
+/* redactedParameterValue keeps a parameter declared as a secret out of the rendered output while still reporting whether it carries a value at all, which is what an operator runs this command to find out. The length is withheld along with the value: on a short credential it narrows the search meaningfully. */
+func redactedParameterValue(value any, isSecret bool) string {
+    formattedValue := fmt.Sprintf("%v", value)
+
+    if false == isSecret {
+        return formattedValue
+    }
+
+    if "" == formattedValue {
+        return redactedEmptyPlaceholder
+    }
+
+    return redactedValuePlaceholder
+}
+
 type parameterListItem struct {
     Name             string `json:"name"`
     EnvironmentKey   string `json:"environmentKey"`
     EnvironmentValue string `json:"environmentValue"`
     ValueString      string `json:"value"`
     IsDefault        bool   `json:"isDefault"`
+    IsSecret         bool   `json:"isSecret"`
     Aliases          string `json:"aliases"`
 }
 

@@ -17,6 +17,14 @@ func (instance *spyParameterRegistrar) RegisterParameter(name string, value any)
     instance.names = append(instance.names, name)
 }
 
+func (instance *spyParameterRegistrar) RegisterSecretParameter(name string, value any) {
+    instance.names = append(instance.names, name)
+}
+
+/* marking an existing parameter registers nothing, so the recorded names stay the set the module contributed */
+func (instance *spyParameterRegistrar) MarkParameterSecret(name string) {
+}
+
 func TestModule_NameAndDescription(t *testing.T) {
     module := NewModule(ModuleConfig{})
 
@@ -56,7 +64,7 @@ func TestModule_RegisterCliCommandsFromConfiguration(t *testing.T) {
     }
 }
 
-/** @info the schedule steps the day of month across the odd days and pins Monday; 2026-07-20 is an even-numbered Monday, matched only by the kubernetes dialect's or rule, so the assertions prove ModuleConfig.RunnerDialect reaches the runner's matchers and that the zero value keeps the crontab default. */
+/* @info the schedule steps the day of month across the odd days and pins Monday; 2026-07-20 is an even-numbered Monday, matched only by the kubernetes dialect's or rule, so the assertions prove ModuleConfig.RunnerDialect reaches the runner's matchers and that the zero value keeps the crontab default. */
 func TestModule_RegisterCliCommandsThreadsTheRunnerDialect(t *testing.T) {
     evenMonday := time.Date(2026, time.July, 20, 0, 0, 0, 0, time.UTC)
     if time.Monday != evenMonday.Weekday() {

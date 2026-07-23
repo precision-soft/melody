@@ -233,7 +233,7 @@ func TestLeaderGate_ReleasesOnShutdown(t *testing.T) {
     }
 }
 
-/** @info A gate that can never acquire — a redis locker built with a non-positive ttl fails closed on every Acquire — is otherwise indistinguishable from a healthy follower: it campaigns, backs off and elects nobody, silently, forever. */
+/* @info A gate that can never acquire — a redis locker built with a non-positive ttl fails closed on every Acquire — is otherwise indistinguishable from a healthy follower: it campaigns, backs off and elects nobody, silently, forever. */
 func TestLeaderGate_CampaignErrorsReachTheHook(t *testing.T) {
     runContext, cancel := context.WithCancel(context.Background())
     defer cancel()
@@ -277,7 +277,7 @@ func TestLeaderGate_CampaignErrorsReachTheHook(t *testing.T) {
     }
 }
 
-/** @info A shutdown cancels the context the backend is called with, so the campaign in flight fails with that cancellation. Reporting it would hand every graceful stop an error indistinguishable from a store outage. */
+/* @info A shutdown cancels the context the backend is called with, so the campaign in flight fails with that cancellation. Reporting it would hand every graceful stop an error indistinguishable from a store outage. */
 func TestLeaderGate_ShutdownDoesNotReportACampaignError(t *testing.T) {
     runContext, cancel := context.WithCancel(context.Background())
     runtimeInstance := testRuntimeWithContext(runContext)
@@ -331,7 +331,7 @@ func TestLeaderGate_ShutdownDoesNotReportACampaignError(t *testing.T) {
     }
 }
 
-/** @info A RetryInterval slower than the one-minute outage cap must not invert into faster-than-healthy retries: doubling the campaign backoff caps at the configured RetryInterval, never below it, so an outage never hammers the store more often than the healthy campaign cadence. */
+/* @info A RetryInterval slower than the one-minute outage cap must not invert into faster-than-healthy retries: doubling the campaign backoff caps at the configured RetryInterval, never below it, so an outage never hammers the store more often than the healthy campaign cadence. */
 func TestLeaderGate_CampaignBackoffNeverFasterThanRetryInterval(t *testing.T) {
     retryInterval := 5 * time.Minute
 
@@ -351,7 +351,7 @@ func TestLeaderGate_CampaignBackoffNeverFasterThanRetryInterval(t *testing.T) {
     }
 }
 
-/** @info An override RefreshInterval slower than half the lease ttl would let the lease lapse before the first renewal, so a second instance could acquire and both report leadership. NewLeaderGateWithOptions must clamp such an override down to the safe derived cadence (ttl/2). */
+/* @info An override RefreshInterval slower than half the lease ttl would let the lease lapse before the first renewal, so a second instance could acquire and both report leadership. NewLeaderGateWithOptions must clamp such an override down to the safe derived cadence (ttl/2). */
 func TestLeaderGate_RefreshIntervalClampedToHalfTtl(t *testing.T) {
     locker := NewInMemoryLocker(clock.NewSystemClock())
 

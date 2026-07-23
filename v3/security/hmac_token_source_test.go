@@ -653,3 +653,22 @@ func TestHmacTokenSource_EndToEndResolvesServiceWithActorThroughFirewall(t *test
         t.Fatal("expected the replayed envelope to resolve to an anonymous token")
     }
 }
+
+/* @info key ids carry no charset restriction, so the guard key must be injective: with a plain colon join, key "a" signing nonce "b:<n>" would pre-burn key "a:b"'s nonce "<n>" and force rejection of that key's legitimate requests */
+func TestHmacNonceGuardKey_ColonExtensionKeyIdsCannotCollide(t *testing.T) {
+    if hmacNonceGuardKey("a", "b:nonce") == hmacNonceGuardKey("a:b", "nonce") {
+        t.Fatalf("expected the guard keys of colon-extension key ids to differ")
+    }
+
+    guard := NewMemoryNonceGuard()
+
+    firstSeen, firstErr := guard.Remember(testRuntime(), hmacNonceGuardKey("a", "b:nonce"), time.Minute)
+    if nil != firstErr || true == firstSeen {
+        t.Fatalf("expected the first nonce to store, got seen=%t err=%v", firstSeen, firstErr)
+    }
+
+    secondSeen, secondErr := guard.Remember(testRuntime(), hmacNonceGuardKey("a:b", "nonce"), time.Minute)
+    if nil != secondErr || true == secondSeen {
+        t.Fatalf("expected key a:b's nonce to stay unburned, got seen=%t err=%v", secondSeen, secondErr)
+    }
+}

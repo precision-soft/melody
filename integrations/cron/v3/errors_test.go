@@ -162,7 +162,7 @@ func TestErrorsIsErrEntryEmptyCommandFromEmptyTokens(t *testing.T) {
 }
 
 func TestErrorsIsErrForbiddenCharacter(t *testing.T) {
-    err := ValidateNoForbiddenChars([]string{"safe", "bad\nnewline"}, CrontabForbiddenChars, "test")
+    err := ValidateNoForbiddenCharacters([]string{"safe", "bad\nnewline"}, CrontabForbiddenCharacters, "test")
     if nil == err {
         t.Fatalf("expected error when token contains forbidden character, got nil")
     }
@@ -189,7 +189,7 @@ func TestErrorsIsErrFieldContainsWhitespaceFromSchedule(t *testing.T) {
         Schedule: &Schedule{Minute: "0 5"},
     }
 
-    err := validateScheduleFields(entry, CrontabForbiddenChars)
+    err := validateScheduleFields(entry, CrontabForbiddenCharacters)
     if nil == err {
         t.Fatalf("expected error when schedule field contains whitespace, got nil")
     }

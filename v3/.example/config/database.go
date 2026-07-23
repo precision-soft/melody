@@ -36,7 +36,7 @@ func (instance *Module) buildDatabase() {
     )
 
     database, openErr := provider.Open(
-        melodybunorm.ConnectionParams{
+        melodybunorm.ConnectionParameters{
             Host:     host,
             Port:     port,
             Database: instance.environmentValue(environmentKeyMysqlDatabase),

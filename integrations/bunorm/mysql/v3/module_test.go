@@ -15,17 +15,17 @@ import (
 
 type fakeConnector struct{}
 
-func (fakeConnector) Connect(context.Context) (driver.Conn, error) {
+func (instance fakeConnector) Connect(context.Context) (driver.Conn, error) {
     return nil, errors.New("fake connector never connects")
 }
 
-func (fakeConnector) Driver() driver.Driver {
+func (instance fakeConnector) Driver() driver.Driver {
     return fakeDriver{}
 }
 
 type fakeDriver struct{}
 
-func (fakeDriver) Open(string) (driver.Conn, error) {
+func (instance fakeDriver) Open(string) (driver.Conn, error) {
     return nil, errors.New("fake driver never opens")
 }
 
@@ -39,6 +39,16 @@ type spyServiceRegistrar struct {
 
 func (instance *spyServiceRegistrar) RegisterService(serviceName string, provider any, options ...containercontract.RegisterOption) {
     instance.names = append(instance.names, serviceName)
+}
+
+func (instance *spyServiceRegistrar) Register(serviceName string, provider any, options ...containercontract.RegisterOption) error {
+    instance.RegisterService(serviceName, provider, options...)
+
+    return nil
+}
+
+func (instance *spyServiceRegistrar) MustRegister(serviceName string, provider any, options ...containercontract.RegisterOption) {
+    instance.RegisterService(serviceName, provider, options...)
 }
 
 func TestModule_NameAndDescription(t *testing.T) {

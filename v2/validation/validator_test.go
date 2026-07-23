@@ -533,7 +533,7 @@ func findValidationErrorByField(validationErrors ValidationErrors, field string)
     return nil
 }
 
-/** @info validate tags declared on nested struct fields and on slice-of-struct elements are enforced (the flat validator returned nil for these), with a path identifying the offending nested field. */
+/* @info validate tags declared on nested struct fields and on slice-of-struct elements are enforced, with a path identifying the offending nested field. */
 func TestValidator_EnforcesNestedConstraints(t *testing.T) {
     validatorInstance := NewValidator()
 
@@ -554,7 +554,7 @@ func TestValidator_EnforcesNestedConstraints(t *testing.T) {
     }
 }
 
-/** @info a fully valid nested payload still passes so the cascade adds no false rejections. */
+/* @info a fully valid nested payload still passes so the cascade adds no false rejections. */
 func TestValidator_AcceptsValidNestedPayload(t *testing.T) {
     validatorInstance := NewValidator()
 
@@ -567,7 +567,7 @@ func TestValidator_AcceptsValidNestedPayload(t *testing.T) {
     requireNoValidationErrors(t, err)
 }
 
-/** @info a self-referential value must not hang or overflow the stack during the recursive cascade. */
+/* @info a self-referential value must not hang or overflow the stack during the recursive cascade. */
 func TestValidator_CyclicPayloadTerminates(t *testing.T) {
     validatorInstance := NewValidator()
 
@@ -576,4 +576,138 @@ func TestValidator_CyclicPayloadTerminates(t *testing.T) {
 
     err := validatorInstance.Validate(node)
     requireNoValidationErrors(t, err)
+}
+
+/* @info a field encoding/json never populates must not be validated: its permanent zero value would fail the tag on every request, while the openapi mirror rightly omits the field from the schema — the whole endpoint would advertise one contract and reject another */
+func TestValidateStruct_SkipsAFieldJsonNeverPopulates(t *testing.T) {
+    type payload struct {
+        Internal string `json:"-" validate:"notBlank"`
+        Name     string `json:"name"`
+    }
+
+    validator := NewValidator()
+
+    validateErr := validator.Validate(&payload{Name: "ok"})
+    if nil != validateErr {
+        t.Fatalf("expected the json:\"-\" field to be skipped, got %v", validateErr)
+    }
+}
+
+type shadowedStamp struct {
+    UpdatedBy string `json:"updatedBy" validate:"notBlank"`
+}
+
+type shadowingPayload struct {
+    shadowedStamp
+    UpdatedBy string `json:"updatedBy"`
+}
+
+/* @info the outer field shadows the promoted one under encoding/json's dominance, so the payload can never populate the embed's field; validating its permanent zero value rejected every request while the schema mirror documented only the winner */
+func TestValidateStruct_SkipsAPromotedFieldShadowedByTheOuterOne(t *testing.T) {
+    validator := NewValidator()
+
+    validateErr := validator.Validate(&shadowingPayload{UpdatedBy: ""})
+    if nil != validateErr {
+        t.Fatalf("expected the shadowed promoted field to be skipped, got %v", validateErr)
+    }
+}
+
+type ambiguousLeft struct {
+    Origin string `validate:"notBlank"`
+}
+
+type ambiguousRight struct {
+    Origin string `validate:"notBlank"`
+}
+
+type ambiguousPayload struct {
+    ambiguousLeft
+    ambiguousRight
+}
+
+/* @info two promoted fields claiming one name at equal depth are the ambiguity encoding/json drops — no field is populated, so none is validated */
+func TestValidateStruct_DropsAnAmbiguousPromotedName(t *testing.T) {
+    validator := NewValidator()
+
+    validateErr := validator.Validate(&ambiguousPayload{})
+    if nil != validateErr {
+        t.Fatalf("expected the ambiguous name to be dropped, got %v", validateErr)
+    }
+}
+
+type taggedTwin struct {
+    Source string `json:"Origin" validate:"notBlank"`
+}
+
+type untaggedTwin struct {
+    Origin string `validate:"notBlank"`
+}
+
+type taggedWinsPayload struct {
+    taggedTwin
+    untaggedTwin
+}
+
+/* @info at equal depth a single explicitly json-named field beats the untagged one, so only the tagged twin's tag runs — against the value the payload actually lands in */
+func TestValidateStruct_TaggedPromotedFieldBeatsTheUntaggedTwin(t *testing.T) {
+    validator := NewValidator()
+
+    validateErr := validator.Validate(&taggedWinsPayload{
+        taggedTwin: taggedTwin{Source: "set"},
+    })
+    if nil != validateErr {
+        t.Fatalf("expected only the tagged twin to be validated, got %v", validateErr)
+    }
+
+    failingErr := validator.Validate(&taggedWinsPayload{})
+    if nil == failingErr {
+        t.Fatalf("expected the tagged twin's tag to still run")
+    }
+}
+
+/* @info encoding/json populates the exported fields promoted through an unexported embed, so their tags run — the walk must include what a payload reaches */
+func TestValidateStruct_ValidatesFieldsPromotedThroughAnUnexportedEmbed(t *testing.T) {
+    validator := NewValidator()
+
+    validateErr := validator.Validate(&struct {
+        shadowedStamp
+        Name string `json:"name"`
+    }{})
+    if nil == validateErr {
+        t.Fatalf("expected the promoted notBlank to run against the empty field")
+    }
+}
+
+type nilEmbedPayload struct {
+    *shadowedStamp
+    Name string `json:"name"`
+}
+
+/* @info a nil pointer embed leaves nothing to validate, but its promoted names keep their place in the dominance so shadowing stays what it would be were the embed present */
+func TestValidateStruct_ToleratesANilPointerEmbed(t *testing.T) {
+    validator := NewValidator()
+
+    validateErr := validator.Validate(&nilEmbedPayload{Name: "ok"})
+    if nil != validateErr {
+        t.Fatalf("expected the nil embed to be tolerated, got %v", validateErr)
+    }
+}
+
+type TaggedEmbed struct {
+    Name string `json:"embedName"`
+}
+
+type taggedEmbedPayload struct {
+    TaggedEmbed `validate:"notEmpty"`
+    Title       string `json:"title"`
+}
+
+/* @info a constraint declared on the embed itself runs against the embed value: the promoted fields are payload-populated, so the tag is satisfiable and must not vanish with the flattening */
+func TestValidateStruct_AppliesTheTagDeclaredOnAPromotedEmbed(t *testing.T) {
+    validator := NewValidator()
+
+    validateErr := validator.Validate(&taggedEmbedPayload{})
+    if nil == validateErr {
+        t.Fatalf("expected the embed's own tag to run")
+    }
 }

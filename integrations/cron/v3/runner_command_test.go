@@ -455,7 +455,7 @@ func TestRunnerCommand_CommandContextArgsIsUsable(t *testing.T) {
     }
 }
 
-/** @info the fake clock returns an instant just before the targeted minute while the loop anchors the chain and arms the timer, then a stepped-back instant for every later read; only an evaluation pinned to the armed minute still fires the schedule, and the stepped-back reads may only influence the arming of later wakes. */
+/* @info the fake clock returns an instant just before the targeted minute while the loop anchors the chain and arms the timer, then a stepped-back instant for every later read; only an evaluation pinned to the armed minute still fires the schedule, and the stepped-back reads may only influence the arming of later wakes. */
 func TestRunnerCommand_LoopEvaluatesTheTimerTargetedMinute(t *testing.T) {
     ran := make(chan struct{}, 1)
     job := &signalingCommand{commandName: "job:targeted", ran: ran}
@@ -499,7 +499,7 @@ func TestRunnerCommand_LoopEvaluatesTheTimerTargetedMinute(t *testing.T) {
     }
 }
 
-/** @info each command releases only when its peer has also started, so the tick passes solely when the due entries run concurrently, like crontab starting an independent process per entry. */
+/* @info each command releases only when its peer has also started, so the tick passes solely when the due entries run concurrently, like crontab starting an independent process per entry. */
 func TestRunnerCommand_RunDueRunsDueEntriesConcurrently(t *testing.T) {
     firstArrived := make(chan struct{})
     secondArrived := make(chan struct{})
@@ -519,7 +519,7 @@ func TestRunnerCommand_RunDueRunsDueEntriesConcurrently(t *testing.T) {
     }
 }
 
-/** @info the job blocks until the runtime context is cancelled, so a second start signal while no run has completed proves the loop armed and fired the next minute without waiting on the running job — and that an entry may overlap itself. */
+/* @info the job blocks until the runtime context is cancelled, so a second start signal while no run has completed proves the loop armed and fired the next minute without waiting on the running job — and that an entry may overlap itself. */
 func TestRunnerCommand_LoopTicksWhileAJobIsStillRunning(t *testing.T) {
     started := make(chan struct{}, 16)
     job := &blockingCommand{commandName: "job:blocking", started: started}
@@ -581,7 +581,7 @@ func TestRunnerCommand_LoopTicksWhileAJobIsStillRunning(t *testing.T) {
     }
 }
 
-/** @info the job holds itself inside Run for completionDelay AFTER the cancellation reaches its child context, so the two events are ordered rather than raced: a loop that abandons its in-flight jobs returns while the job is still sleeping, and the assertion below sees completedCount==0 every time. Without that delay both goroutines wake on the same cancel() and the job wins by luck, so the test passed even with inFlight.Wait() removed. */
+/* @info the job holds itself inside Run for completionDelay AFTER the cancellation reaches its child context, so the two events are ordered rather than raced: a loop that abandons its in-flight jobs returns while the job is still sleeping, and the assertion below sees completedCount==0 every time. Without that delay both goroutines wake on the same cancel() and the job wins by luck, so the test passed even with inFlight.Wait() removed. */
 func TestRunnerCommand_LoopWaitsForInFlightJobsOnCancellation(t *testing.T) {
     started := make(chan struct{}, 1)
     job := &blockingCommand{commandName: "job:blocking", started: started, completionDelay: 250 * time.Millisecond}
@@ -748,7 +748,7 @@ func TestRunnerCommand_UnknownDialectPanicsAtConstruction(t *testing.T) {
     NewRunnerCommand(configuration, RunnerDialect("solaris"), job)
 }
 
-/** @info the schedule steps the day of month across the odd days and pins Monday; 2026-07-20 is an even-numbered Monday, so it is due only under the kubernetes dialect's or rule, proving the configured dialect reaches every entry's matcher on the runDue path the --once flag uses. The zero-value dialect is asserted against the named crontab constant through the same entries. */
+/* @info the schedule steps the day of month across the odd days and pins Monday; 2026-07-20 is an even-numbered Monday, so it is due only under the kubernetes dialect's or rule, proving the configured dialect reaches every entry's matcher on the runDue path the --once flag uses. The zero-value dialect is asserted against the named crontab constant through the same entries. */
 func TestRunnerCommand_DialectReachesTheEntryMatchers(t *testing.T) {
     at := time.Date(2026, time.July, 20, 0, 0, 0, 0, time.UTC)
     if time.Monday != at.Weekday() {
@@ -787,7 +787,7 @@ func TestRunnerCommand_DialectReachesTheEntryMatchers(t *testing.T) {
     }
 }
 
-/** @info drives reconcileWallClock through every absolute minute of one local span, the way the loop wakes, and counts how often each entry class fires; the fixed-time matcher pins 03:30 so daylight-saving days prove the once-and-only-once property. */
+/* @info drives reconcileWallClock through every absolute minute of one local span, the way the loop wakes, and counts how often each entry class fires; the fixed-time matcher pins 03:30 so daylight-saving days prove the once-and-only-once property. */
 func driveReconciledSpan(
     t *testing.T,
     spanStart time.Time,
@@ -972,7 +972,7 @@ func TestReconcileWallClock_LargeJumpReanchorsWithoutCatchUp(t *testing.T) {
     }
 }
 
-/** @info Europe/Bucharest 2026-03-29: 03:00 EET jumps to 04:00 EEST, so the 03:00-03:59 wall minutes never exist; the catch-up must still evaluate them once for fixed-time entries while wildcard entries fire once per absolute minute (a 23-hour day). */
+/* @info Europe/Bucharest 2026-03-29: 03:00 EET jumps to 04:00 EEST, so the 03:00-03:59 wall minutes never exist; the catch-up must still evaluate them once for fixed-time entries while wildcard entries fire once per absolute minute (a 23-hour day). */
 func TestReconcileWallClock_SpringForwardRunsAFixedTimeEntryExactlyOnce(t *testing.T) {
     bucharest, locationErr := time.LoadLocation("Europe/Bucharest")
     if nil != locationErr {
@@ -1000,7 +1000,7 @@ func TestReconcileWallClock_SpringForwardRunsAFixedTimeEntryExactlyOnce(t *testi
     }
 }
 
-/** @info Europe/Bucharest 2026-10-25: 04:00 EEST falls back to 03:00 EET, so the 03:00-03:59 wall minutes repeat; fixed-time entries must stay suppressed on the repeat while wildcard entries fire once per absolute minute (a 25-hour day, so 60 wall doubles). */
+/* @info Europe/Bucharest 2026-10-25: 04:00 EEST falls back to 03:00 EET, so the 03:00-03:59 wall minutes repeat; fixed-time entries must stay suppressed on the repeat while wildcard entries fire once per absolute minute (a 25-hour day, so 60 wall doubles). */
 func TestReconcileWallClock_FallBackRunsAFixedTimeEntryExactlyOnce(t *testing.T) {
     bucharest, locationErr := time.LoadLocation("Europe/Bucharest")
     if nil != locationErr {
@@ -1028,7 +1028,7 @@ func TestReconcileWallClock_FallBackRunsAFixedTimeEntryExactlyOnce(t *testing.T)
     }
 }
 
-/** @info a plain day is the control: every class fires its natural count, proving the chain neither skips nor doubles when the clock behaves. */
+/* @info a plain day is the control: every class fires its natural count, proving the chain neither skips nor doubles when the clock behaves. */
 func TestReconcileWallClock_PlainDayRunsEveryMinuteExactlyOnce(t *testing.T) {
     bucharest, locationErr := time.LoadLocation("Europe/Bucharest")
     if nil != locationErr {
@@ -1071,7 +1071,7 @@ func (instance *exitCoderCommand) Run(runtimeInstance runtimecontract.Runtime, c
     return exception.NewExitError(3, exception.NewError("the job failed with an exit code", nil, nil))
 }
 
-/** @info the returned error carries an exit code, which the cli library's default handler turns into os.Exit; the runner must return it as a plain failure instead — a red run here does not merely fail, it kills the whole test process. */
+/* @info the returned error carries an exit code, which the cli library's default handler turns into os.Exit; the runner must return it as a plain failure instead — a red run here does not merely fail, it kills the whole test process. */
 func TestRunnerCommand_ExitCoderErrorIsReturnedInsteadOfExitingTheScheduler(t *testing.T) {
     exiting := &exitCoderCommand{commandName: "job:exiting"}
     healthy := newRecordingCommand("job:healthy")
@@ -1155,7 +1155,7 @@ func (instance *memoizedFlagsCommand) Run(runtimeInstance runtimecontract.Runtim
     return nil
 }
 
-/** @info the cli library writes parse state into the flag instances, so a command handing the runner the same instances on every Flags() call would make overlapping invocations race on them; the wiring error surfaces at construction. */
+/* @info the cli library writes parse state into the flag instances, so a command handing the runner the same instances on every Flags() call would make overlapping invocations race on them; the wiring error surfaces at construction. */
 func TestRunnerCommand_SharedFlagInstancesPanicAtConstruction(t *testing.T) {
     defer func() {
         recovered := recover()
@@ -1179,7 +1179,7 @@ func TestRunnerCommand_SharedFlagInstancesPanicAtConstruction(t *testing.T) {
     NewRunnerCommand(configuration, RunnerDialectCrontab, newMemoizedFlagsCommand("job:memoized"))
 }
 
-/** @info an entry naming a system user stays runnable in-process — the one Configuration keeps driving both the generated manifests and the runner — and the runner records the affected command for the warning Run logs. */
+/* @info an entry naming a system user stays runnable in-process — the one Configuration keeps driving both the generated manifests and the runner — and the runner records the affected command for the warning Run logs. */
 func TestRunnerCommand_UserEntryIsAcceptedAndRecordedForTheWarning(t *testing.T) {
     job := newRecordingCommand("job:user")
 
@@ -1202,7 +1202,7 @@ func TestRunnerCommand_UserEntryIsAcceptedAndRecordedForTheWarning(t *testing.T)
     }
 }
 
-/** @info the fake clock returns an instant just before a minute boundary once, for both the chain anchor and the first arming; a second read after the boundary would manufacture a two-minute jump on which a wildcard entry pinned to the boundary minute never fires. */
+/* @info the fake clock returns an instant just before a minute boundary once, for both the chain anchor and the first arming; a second read after the boundary would manufacture a two-minute jump on which a wildcard entry pinned to the boundary minute never fires. */
 func TestRunnerCommand_LoopAnchorsAndArmsFromOneClockRead(t *testing.T) {
     ran := make(chan struct{}, 1)
     job := &signalingCommand{commandName: "job:boundary", ran: ran}
@@ -1275,7 +1275,7 @@ func (instance *countingCommand) Run(runtimeInstance runtimecontract.Runtime, co
     return nil
 }
 
-/** @info a backward wall step inside the armed window makes the loop arm a second time for the minute it just dispatched (the evaluation is pinned to the armed minute, so the step does not move it): the fake clock wakes for 10:00 from 09:59:59.900, steps back to 09:59:59.890, and the re-arm renders 10:00 again. The wildcard entry must run once for that minute, not twice seconds apart — the repeated wall minute of a fall-back is the other case, and a whole hour of other minutes runs in between there. */
+/* @info a backward wall step inside the armed window makes the loop arm a second time for the minute it just dispatched (the evaluation is pinned to the armed minute, so the step does not move it): the fake clock wakes for 10:00 from 09:59:59.900, steps back to 09:59:59.890, and the re-arm renders 10:00 again. The wildcard entry must run once for that minute, not twice seconds apart — the repeated wall minute of a fall-back is the other case, and a whole hour of other minutes runs in between there. */
 func TestRunnerCommand_LoopDoesNotRedispatchTheMinuteItJustDispatched(t *testing.T) {
     ran := make(chan struct{}, 8)
     job := &countingCommand{commandName: "job:every-minute", ran: ran}
@@ -1333,7 +1333,7 @@ func TestRunnerCommand_LoopDoesNotRedispatchTheMinuteItJustDispatched(t *testing
     }
 }
 
-/** @info drives the real runner loop across the Europe/Bucharest 2026-10-25 fall-back: the first wake fires the 03:30 fixed-time entry on the first pass of the repeated hour, the second wake lands on the repeat (04:00 EEST renders as 03:00 EET, a backward jump), and the third wake re-reaches the pinned 03:30 on the repeat — the dispatch class filter must keep the fixed-time entry suppressed there while the wildcard entry follows every wake. */
+/* @info drives the real runner loop across the Europe/Bucharest 2026-10-25 fall-back: the first wake fires the 03:30 fixed-time entry on the first pass of the repeated hour, the second wake lands on the repeat (04:00 EEST renders as 03:00 EET, a backward jump), and the third wake re-reaches the pinned 03:30 on the repeat — the dispatch class filter must keep the fixed-time entry suppressed there while the wildcard entry follows every wake. */
 func TestRunnerCommand_LoopSuppressesAFixedTimeEntryAcrossTheFallBackRepeat(t *testing.T) {
     bucharest, locationErr := time.LoadLocation("Europe/Bucharest")
     if nil != locationErr {

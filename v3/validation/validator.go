@@ -5,6 +5,7 @@ import (
     "reflect"
     "strings"
     "sync"
+    "time"
 
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
@@ -158,72 +159,292 @@ func (instance *Validator) validateReflected(value reflect.Value, path string, d
     }
 }
 
+/* visibleFieldCandidate pairs a field with the value it was reached through. An invalid value — the field of a nil pointer embed — still takes part in dominance, so a shallower field keeps shadowing what it would shadow were the embed present; it just yields nothing to validate. */
+type visibleFieldCandidate struct {
+    field reflect.StructField
+    value reflect.Value
+}
+
+/* validateStruct validates the fields of one json object: the struct's own fields plus everything its embeds promote, resolved with encoding/json's dominance rules — the shallowest field wins a name, an explicit json tag beats an untagged field at equal depth, and an ambiguity drops the name entirely. Only the winners are validated, because only the winners are populated from a payload: validating a shadowed promoted field would run its tag against a permanent zero value and reject every request, while the openapi mirror (openapi/schema.go collectStructFields, kept in lockstep with this walk) rightly documents the winner alone. */
 func (instance *Validator) validateStruct(value reflect.Value, path string, depth int, visited map[cyclicReference]bool) ValidationErrors {
     var errors ValidationErrors
 
-    valueType := value.Type()
+    type embeddedLevelItem struct {
+        itemType reflect.Type
+        value    reflect.Value
+        count    int
+    }
 
-    for i := 0; i < value.NumField(); i++ {
-        field := valueType.Field(i)
-        fieldValue := value.Field(i)
+    resolved := make(map[string]bool)
 
-        if false == field.IsExported() {
-            continue
-        }
+    embeddedSeen := make(map[reflect.Type]bool)
+    embeddedSeen[value.Type()] = true
 
-        fieldName := field.Name
-        jsonTag := field.Tag.Get("json")
-        if "" != jsonTag && "-" != jsonTag {
-            parts := strings.Split(jsonTag, ",")
-            if "" != parts[0] {
-                fieldName = parts[0]
-            }
-        }
+    level := []*embeddedLevelItem{
+        {itemType: value.Type(), value: value, count: 1},
+    }
 
-        fieldPath := fieldName
-        if "" != path {
-            fieldPath = path + "." + fieldName
-        }
+    for 0 < len(level) {
+        candidatesByName := make(map[string][]visibleFieldCandidate)
+        var order []string
 
-        validateTag := field.Tag.Get("validate")
-        if "" != validateTag && "-" != validateTag {
-            rules, err := parseValidationTag(validateTag)
-            if nil != err {
-                errors = append(
-                    errors,
-                    NewValidationError(
-                        fieldPath,
-                        "invalid validation tag syntax",
-                        ErrorInvalidRuleSyntax,
-                        map[string]any{
-                            "tag": validateTag,
-                        },
-                    ),
-                )
-            } else {
-                for _, rule := range rules {
-                    validationError := instance.validateRule(
-                        fieldValue.Interface(),
-                        fieldPath,
-                        rule,
-                    )
-                    if nil != validationError {
-                        errors = append(errors, validationError)
+        nextByType := make(map[reflect.Type]*embeddedLevelItem)
+        var nextLevel []*embeddedLevelItem
+
+        for _, item := range level {
+            for index := 0; index < item.itemType.NumField(); index++ {
+                field := item.itemType.Field(index)
+
+                fieldValue := reflect.Value{}
+                if true == item.value.IsValid() {
+                    fieldValue = item.value.Field(index)
+                }
+
+                if true == isPromotedValidationEmbed(field) {
+                    /* the embed's own tag runs against the embed value: its promoted fields are payload-populated, so a constraint declared on the embed is satisfiable and must not vanish with the flattening. An unexported embed's value cannot pass through Interface — only its promoted exported fields can — so its tag stays out of reach. */
+                    if true == field.IsExported() {
+                        errors = append(errors, instance.applyFieldRules(field, fieldValue, embeddedFieldPath(field, path))...)
                     }
+
+                    embeddedType := dereferencedValidationStructType(field.Type)
+                    if true == embeddedSeen[embeddedType] {
+                        continue
+                    }
+
+                    /* a type reached by several equal-depth paths has its fields duplicated per path so a diamond annihilates in the dominance pick, as in encoding/json; two copies decide every tie, so the count is capped there instead of doubling through stacked diamonds */
+                    nextItem, exists := nextByType[embeddedType]
+                    if false == exists {
+                        nextItem = &embeddedLevelItem{
+                            itemType: embeddedType,
+                            value:    dereferencedValidationStructValue(fieldValue),
+                        }
+                        nextByType[embeddedType] = nextItem
+                        nextLevel = append(nextLevel, nextItem)
+                    }
+
+                    nextItem.count = nextItem.count + item.count
+                    if 2 < nextItem.count {
+                        nextItem.count = 2
+                    }
+
+                    continue
+                }
+
+                if false == field.IsExported() {
+                    continue
+                }
+
+                jsonName, omit := validationJsonFieldName(field)
+                if true == omit {
+                    continue
+                }
+
+                if true == resolved[jsonName] {
+                    continue
+                }
+
+                if _, seen := candidatesByName[jsonName]; false == seen {
+                    order = append(order, jsonName)
+                }
+
+                duplicateCount := item.count
+                if 2 < duplicateCount {
+                    duplicateCount = 2
+                }
+
+                for copyIndex := 0; copyIndex < duplicateCount; copyIndex++ {
+                    candidatesByName[jsonName] = append(candidatesByName[jsonName], visibleFieldCandidate{
+                        field: field,
+                        value: fieldValue,
+                    })
                 }
             }
         }
 
-        /* @important an embedded (anonymous) struct is promoted onto its parent, mirroring how the openapi schema mirror flattens embeds, so its nested fields keep the parent's path prefix instead of gaining the embed type name as a segment. */
-        recursionPath := fieldPath
-        if true == field.Anonymous {
-            recursionPath = path
+        for _, jsonName := range order {
+            resolved[jsonName] = true
+
+            winner, ok := dominantVisibleField(candidatesByName[jsonName])
+            if false == ok {
+                continue
+            }
+
+            errors = append(errors, instance.validateVisibleField(winner, jsonName, path, depth, visited)...)
         }
 
-        errors = append(errors, instance.validateReflected(fieldValue, recursionPath, depth+1, visited)...)
+        for _, nextItem := range nextLevel {
+            embeddedSeen[nextItem.itemType] = true
+        }
+
+        level = nextLevel
     }
 
     return errors
+}
+
+/* validateVisibleField applies the field's own tag and recurses into its value, under the json name of the field — the promoted fields of an embed keep the parent's path prefix, exactly as the payload spells them. */
+func (instance *Validator) validateVisibleField(
+    candidate visibleFieldCandidate,
+    jsonName string,
+    path string,
+    depth int,
+    visited map[cyclicReference]bool,
+) ValidationErrors {
+    var errors ValidationErrors
+
+    if false == candidate.value.IsValid() {
+        return errors
+    }
+
+    fieldPath := jsonName
+    if "" != path {
+        fieldPath = path + "." + jsonName
+    }
+
+    errors = append(errors, instance.applyFieldRules(candidate.field, candidate.value, fieldPath)...)
+
+    return append(errors, instance.validateReflected(candidate.value, fieldPath, depth+1, visited)...)
+}
+
+func (instance *Validator) applyFieldRules(field reflect.StructField, value reflect.Value, fieldPath string) ValidationErrors {
+    var errors ValidationErrors
+
+    if false == value.IsValid() {
+        return errors
+    }
+
+    validateTag := field.Tag.Get("validate")
+    if "" == validateTag || "-" == validateTag {
+        return errors
+    }
+
+    rules, err := parseValidationTag(validateTag)
+    if nil != err {
+        return append(errors, NewValidationError(
+            fieldPath,
+            "invalid validation tag syntax",
+            ErrorInvalidRuleSyntax,
+            map[string]any{
+                "tag": validateTag,
+            },
+        ))
+    }
+
+    for _, rule := range rules {
+        validationError := instance.validateRule(value.Interface(), fieldPath, rule)
+        if nil != validationError {
+            errors = append(errors, validationError)
+        }
+    }
+
+    return errors
+}
+
+/* embeddedFieldPath names the embed the way an error can point at it: by its field name under the parent's path, since the embed itself has no json name of its own. */
+func embeddedFieldPath(field reflect.StructField, path string) string {
+    if "" == path {
+        return field.Name
+    }
+
+    return path + "." + field.Name
+}
+
+/* dominantVisibleField mirrors the openapi mirror's dominantEmbeddedField (openapi/schema.go): a single candidate wins outright, exactly one explicitly json-named candidate beats the untagged ones, and anything else is the ambiguity encoding/json drops — no field is populated, so none is validated. */
+func dominantVisibleField(group []visibleFieldCandidate) (visibleFieldCandidate, bool) {
+    if 1 == len(group) {
+        return group[0], true
+    }
+
+    taggedIndex := -1
+    taggedCount := 0
+    for index, candidate := range group {
+        if true == hasExplicitValidationJsonName(candidate.field) {
+            taggedCount++
+            taggedIndex = index
+        }
+    }
+
+    if 1 == taggedCount {
+        return group[taggedIndex], true
+    }
+
+    return visibleFieldCandidate{}, false
+}
+
+/* validationJsonFieldName mirrors the openapi mirror's jsonFieldName: the name a payload spells the field with, and whether the field is omitted outright — a field encoding/json never populates cannot be satisfied by any payload, so validating its permanent zero value would reject every request (a field literally named "-" is spelled "-," and stays validated). */
+func validationJsonFieldName(field reflect.StructField) (string, bool) {
+    tag := field.Tag.Get("json")
+    if "-" == tag {
+        return "", true
+    }
+
+    if "" == tag {
+        return field.Name, false
+    }
+
+    parts := strings.Split(tag, ",")
+    if "" == parts[0] {
+        return field.Name, false
+    }
+
+    return parts[0], false
+}
+
+func hasExplicitValidationJsonName(field reflect.StructField) bool {
+    tag := field.Tag.Get("json")
+    if "" == tag {
+        return false
+    }
+
+    parts := strings.Split(tag, ",")
+
+    return "" != parts[0] && "-" != parts[0]
+}
+
+/* isPromotedValidationEmbed mirrors the openapi mirror's isPromotedEmbed: an anonymous struct (or pointer to one) without an explicit json name flattens onto its parent object; a json-named embed is an ordinary field holding a nested object, and an embedded time.Time is a scalar. */
+func isPromotedValidationEmbed(field reflect.StructField) bool {
+    if false == field.Anonymous {
+        return false
+    }
+
+    tag := field.Tag.Get("json")
+    if "-" == tag {
+        return false
+    }
+
+    if "" != tag && "" != strings.Split(tag, ",")[0] {
+        return false
+    }
+
+    embedded := field.Type
+    for reflect.Ptr == embedded.Kind() {
+        embedded = embedded.Elem()
+    }
+
+    return reflect.Struct == embedded.Kind() && validationTimeType != embedded
+}
+
+var validationTimeType = reflect.TypeOf(time.Time{})
+
+func dereferencedValidationStructType(targetType reflect.Type) reflect.Type {
+    for reflect.Ptr == targetType.Kind() {
+        targetType = targetType.Elem()
+    }
+
+    return targetType
+}
+
+/* dereferencedValidationStructValue unwraps a (possibly pointer) embed value; a nil pointer yields an invalid value, which keeps its promoted names in the dominance while leaving nothing to validate. */
+func dereferencedValidationStructValue(value reflect.Value) reflect.Value {
+    for true == value.IsValid() && reflect.Ptr == value.Kind() {
+        if true == value.IsNil() {
+            return reflect.Value{}
+        }
+
+        value = value.Elem()
+    }
+
+    return value
 }
 
 func (instance *Validator) validateSequence(value reflect.Value, path string, depth int, visited map[cyclicReference]bool) ValidationErrors {

@@ -16,7 +16,7 @@ rueidis NonceGuard, propagates the originating actor, then proves the same envel
 on audience mismatch, and on a tampered body. */
 func runHmacCheck(address string) {
     provider := rueidisintegration.NewProvider()
-    client, openErr := provider.Open(rueidisintegration.NewConnectionParams(address, "", ""))
+    client, openErr := provider.Open(rueidisintegration.NewConnectionParameters(address, "", ""))
     if nil != openErr {
         fail("open redis client: %v", openErr)
     }

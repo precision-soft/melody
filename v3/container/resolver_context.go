@@ -23,6 +23,7 @@ func newResolverContext(containerInstance *container) *resolverContext {
         contextId:         containerInstance.resolverContextIdCounter.Add(1),
         rootRequestedKey:  "",
         stack:             make([]string, 0, 8),
+        stackTypes:        make([]reflect.Type, 0, 8),
     }
 }
 
@@ -33,6 +34,7 @@ func newScopeResolverContext(containerInstance *container, scopeInstance *scope)
         contextId:         containerInstance.resolverContextIdCounter.Add(1),
         rootRequestedKey:  "",
         stack:             make([]string, 0, 8),
+        stackTypes:        make([]reflect.Type, 0, 8),
     }
 }
 
@@ -42,6 +44,8 @@ type resolverContext struct {
     contextId         uint64
     rootRequestedKey  string
     stack             []string
+    /* stackTypes runs parallel to stack: the canonical type of a type node, nil for a name node. The collection exclusion compares type identity through it, because two distinct types from same-named packages share a String() and a string comparison would exclude a service that is not on the path at all. */
+    stackTypes []reflect.Type
 }
 
 func (instance *resolverContext) Get(serviceName string) (any, error) {
@@ -61,7 +65,7 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
         parentKey = instance.stack[len(instance.stack)-1]
     }
 
-    pushKeyErr := instance.pushKey(nodeKey)
+    pushKeyErr := instance.pushKey(nodeKey, nil)
     if nil != pushKeyErr {
         return nil, pushKeyErr
     }
@@ -180,11 +184,11 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
     }
 
     if "" == instance.rootRequestedKey {
-        instance.rootRequestedKey = "type:" + canonicalTargetType.String()
+        instance.rootRequestedKey = "type:" + typeIdentityKey(canonicalTargetType)
     }
 
     requestedKey := instance.rootRequestedKey
-    typeKey := canonicalTargetType.String()
+    typeKey := typeIdentityKey(canonicalTargetType)
     nodeKey := "type:" + typeKey
 
     parentKey := ""
@@ -192,7 +196,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
         parentKey = instance.stack[len(instance.stack)-1]
     }
 
-    pushKeyErr := instance.pushKey(nodeKey)
+    pushKeyErr := instance.pushKey(nodeKey, canonicalTargetType)
     if nil != pushKeyErr {
         return nil, pushKeyErr
     }
@@ -395,7 +399,45 @@ func (instance *resolverContext) HasType(targetType reflect.Type) bool {
     return instance.containerInstance.HasType(targetType)
 }
 
-func (instance *resolverContext) pushKey(creatingKey string) error {
+/* TypesImplementing delegates to the root container, so a provider that collects its collaborators through AllImplementing can do it with the resolver it was handed instead of needing the container itself. */
+func (instance *resolverContext) TypesImplementing(interfaceType reflect.Type) []reflect.Type {
+    return instance.containerInstance.TypesImplementing(interfaceType)
+}
+
+func (instance *resolverContext) ReferencesImplementing(interfaceType reflect.Type) []containercontract.ServiceReference {
+    return instance.containerInstance.ReferencesImplementing(interfaceType)
+}
+
+/* isResolvingReference reports whether the reference is the service this context is creating right now — the innermost node of the resolution stack. Only that service is excluded from a collection: it is the composite dispatcher collecting the handlers it belongs to. A reference deeper on the path is not excluded, so collecting it runs into the creation guard and fails loudly as the circular dependency it is — excluding it instead would freeze a collection whose content depends on which service happened to boot first. On a type node the exclusion is narrowed to the name this context actually holds in creation, so a sibling name of the same type — registered while the creation ran — stays collectable; the type comparison itself is reflect.Type identity, never the type's String(), which two types from same-named packages share. */
+func (instance *resolverContext) isResolvingReference(reference containercontract.ServiceReference) bool {
+    if 0 == len(instance.stack) {
+        return false
+    }
+
+    topIndex := len(instance.stack) - 1
+
+    if "service:"+reference.ServiceName == instance.stack[topIndex] {
+        return true
+    }
+
+    topType := instance.stackTypes[topIndex]
+    if nil == topType || topType != reference.ServiceType {
+        return false
+    }
+
+    instance.containerInstance.mutex.RLock()
+    state, isCreating := instance.containerInstance.creatingByName[reference.ServiceName]
+    instance.containerInstance.mutex.RUnlock()
+
+    if true == isCreating {
+        return state.ownerContextId == instance.contextId
+    }
+
+    /* an idle sibling name of the collector's type: the collector's own reference is always pinned by the creation entry above, and a purely type-keyed creation never yields a listed reference, so nothing here is the collector */
+    return false
+}
+
+func (instance *resolverContext) pushKey(creatingKey string, creatingType reflect.Type) error {
     if "" == creatingKey {
         return exception.NewError(
             "creating key is empty",
@@ -418,6 +460,7 @@ func (instance *resolverContext) pushKey(creatingKey string) error {
     }
 
     instance.stack = append(instance.stack, creatingKey)
+    instance.stackTypes = append(instance.stackTypes, creatingType)
 
     return nil
 }
@@ -428,6 +471,7 @@ func (instance *resolverContext) popKey() {
     }
 
     instance.stack = instance.stack[:len(instance.stack)-1]
+    instance.stackTypes = instance.stackTypes[:len(instance.stackTypes)-1]
 }
 
 func (instance *resolverContext) stackStringWithRepeat(repeatedKey string) string {
@@ -439,3 +483,4 @@ func (instance *resolverContext) stackStringWithRepeat(repeatedKey string) strin
 }
 
 var _ containercontract.Resolver = (*resolverContext)(nil)
+var _ containercontract.TypeLister = (*resolverContext)(nil)

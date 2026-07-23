@@ -158,7 +158,9 @@ func collectStructFields(
             if 0 == embedCount[embeddedType] {
                 embedQueue = append(embedQueue, embeddedType)
             }
-            embedCount[embeddedType]++
+            if 2 > embedCount[embeddedType] {
+                embedCount[embeddedType]++
+            }
             continue
         }
 
@@ -216,7 +218,11 @@ func collectStructFields(
                     if 0 == nextCount[childType] {
                         nextLevel = append(nextLevel, childType)
                     }
+                    /* two copies decide every dominance tie, so the count is capped there instead of doubling through stacked diamonds */
                     nextCount[childType] += multiplicity
+                    if 2 < nextCount[childType] {
+                        nextCount[childType] = 2
+                    }
                     continue
                 }
 
@@ -285,7 +291,8 @@ func zeroValueRejectsAbsentProperty(field reflect.StructField, schema *Schema) b
 
         switch name {
         case "min":
-            if "string" != schema.Type || "" != schema.Format {
+            /* a pointer field has no zero value the validator would measure: an omitted property leaves it nil and the length constraint dereferences nothing, so the absence is accepted and the field must stay optional */
+            if true == isPointer || "string" != schema.Type || "" != schema.Format {
                 continue
             }
             bound := 1

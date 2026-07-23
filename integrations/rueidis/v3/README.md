@@ -13,7 +13,7 @@ Import path: `github.com/precision-soft/melody/integrations/rueidis/v3`
 
 ## Provider
 
-[`NewProvider`](./provider.go) builds a [`Provider`](./provider.go) from optional options ([`WithClientConfig`](./provider.go), [`WithTimeoutConfig`](./provider.go)). `Open` takes a [`ConnectionParams`](./connection_params.go) (address, user, password) and returns a `rueidis.Client`; a comma-separated address list is used as multiple init addresses.
+[`NewProvider`](./provider.go) builds a [`Provider`](./provider.go) from optional options ([`WithClientConfig`](./provider.go), [`WithTimeoutConfig`](./provider.go)). `Open` takes a [`ConnectionParams`](./connection_parameters.go) (address, user, password) and returns a `rueidis.Client`; a comma-separated address list is used as multiple init addresses.
 
 ```go
 provider := rueidis.NewProvider()

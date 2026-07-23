@@ -223,6 +223,13 @@ func (instance *stubConfiguration) MustGet(name string) configcontract.Parameter
 
 func (instance *stubConfiguration) RegisterRuntime(name string, value any) {}
 
+func (instance *stubConfiguration) RegisterRuntimeSecret(name string, value any) {
+}
+
+func (instance *stubConfiguration) MarkSecret(name string) bool {
+    return false
+}
+
 func (instance *stubConfiguration) Resolve() error {
     return nil
 }

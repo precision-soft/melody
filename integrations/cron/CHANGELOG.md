@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v1.5.0] - 2026-07-23 - Spelled-Out Forbidden-Character API
+
+### Changed
+
+- `validation.go` — `ForbiddenCharacter`, `CrontabForbiddenCharacters` and `ValidateNoForbiddenCharacters` spell the names out; the abbreviated `ForbiddenChar`, `CrontabForbiddenChars` and `ValidateNoForbiddenChars` remain as deprecated aliases, so nothing breaks at compile time. The templates read `CrontabForbiddenCharacters`, so reassigning the deprecated `CrontabForbiddenChars` variable no longer influences rendering — mutate or replace `CrontabForbiddenCharacters` instead.
+
 ## [v1.4.0] - 2026-07-17 - In-Process Cron Runner
 
 ### Added
@@ -114,7 +120,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `cli/contract/type.go` (root + v2/ + v3/) gains `type StringSliceFlag = urfavecli.StringSliceFlag` so the cron command (which uses repeatable string-slice flags for `--heartbeat-command` and `--heartbeat-destination`) consumes `clicontract.StringSliceFlag` like every other flag in the integration, without an extra `urfavecli` import in `generate_command.go`
 - `README.md` — added a "Cron expression validation" section that documents which checks the generator runs at generation time and which it deliberately leaves to the cron daemon at install time, with `crontab -T` recommended as the post-generation gate. Clarified the `EntryConfig.DestinationFile`-absolute-path semantics, documented the hardcoded `0644`/`0755` file modes, and added a new "Package surface" section listing every exported identifier. `v2/README.md` and `v3/README.md` now reference that section uniformly so they no longer cross-reference each other asymmetrically.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.4.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.5.0...HEAD
+
+[v1.5.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.4.0...integrations/cron/v1.5.0
 
 [v1.4.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.3.0...integrations/cron/v1.4.0
 
