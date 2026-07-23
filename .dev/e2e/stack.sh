@@ -27,6 +27,13 @@
 #                        the explicit value when it is
 #   - SIGNAL SHUTDOWN    a built example serving http exits zero on a single SIGINT (the graceful path
 #                        through NewSignalContext)
+#   - WIRING GENERATE    melody:wiring:generate --strict runs inside the real application (the project
+#                        directory the running configuration reports) and reproduces the committed
+#                        generated/wiring_gen.go byte for byte
+#   - PARAMETER SECRETS  debug:parameters redacts the marked credentials and the dsn assembled from one,
+#                        while an ordinary parameter still prints in clear
+#   - OPTIONAL ENV KEY   the default processor falls back when the key is unset, an .env.local override
+#                        wins over the fallback, and the empty-string fallback resolves to ""
 #
 # Everything runs inside the dev container against the compose stack, through the helpers in common.sh.
 # The example's .env.local is written and restored by the process-role check; it is git-ignored.
@@ -545,6 +552,143 @@ else
 fi
 
 section_end "GRACEFUL SIGNAL SHUTDOWN" "success" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
+# WIRING GENERATE — the generator runs in the real application and reproduces the committed file
+# ---------------------------------------------------------------------------------------------------
+
+section_start "WIRING GENERATE" "${TAG_VALIDATE}" "e2e"
+
+# the unit test compares against the same project directory the application runs with, but only this
+# invocation proves the command works from inside the app: a drift between the bind-set directories and
+# the runtime project directory is exactly what the test alone once missed
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "rm -f /tmp/wiring_gen_check.go
+    go run . melody:wiring:generate --package generated --function RegisterGeneratedServices --strict --out /tmp/wiring_gen_check.go >/tmp/wiring-generate.log 2>&1
+    echo \"wiring_exit_status=\$?\"
+    if diff -q /tmp/wiring_gen_check.go generated/wiring_gen.go >/dev/null 2>&1; then
+        echo 'wiring_identical=1'
+    else
+        echo 'wiring_identical=0'
+        diff /tmp/wiring_gen_check.go generated/wiring_gen.go 2>&1 | head -20
+    fi
+    tail -3 /tmp/wiring-generate.log"
+WIRING_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+
+WIRING_EXIT_STATUS_STRING="$(printf '%s' "${WIRING_OUTPUT_STRING}" | grep -o 'wiring_exit_status=[0-9]*' | head -1 | cut -d= -f2 || true)"
+
+if [[ "${WIRING_EXIT_STATUS_STRING:-1}" -eq 0 ]]; then
+    check_pass "melody:wiring:generate --strict exits zero from inside the application"
+else
+    check_fail "melody:wiring:generate --strict exited ${WIRING_EXIT_STATUS_STRING:-<none>} (${WIRING_OUTPUT_STRING})"
+fi
+
+if printf '%s' "${WIRING_OUTPUT_STRING}" | grep -q 'wiring_identical=1'; then
+    check_pass "the regenerated wiring is identical to the committed generated/wiring_gen.go"
+else
+    check_fail "the regenerated wiring drifted from the committed file (${WIRING_OUTPUT_STRING})"
+fi
+
+section_end "WIRING GENERATE" "success" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
+# PARAMETER SECRETS — the marked credentials and the dsn assembled from one are redacted
+# ---------------------------------------------------------------------------------------------------
+
+section_start "PARAMETER SECRETS" "${TAG_VALIDATE}" "e2e"
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:parameters --format json 2>/dev/null"
+# whitespace is stripped so each json object greps as one line whatever the printer's indentation
+SECRETS_JSON_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | tr -d ' \n\t')"
+
+MYSQL_PASSWORD_ENTRY_STRING="$(printf '%s' "${SECRETS_JSON_STRING}" | grep -o '"name":"MYSQL_PASSWORD"[^}]*' | head -1 || true)"
+if printf '%s' "${MYSQL_PASSWORD_ENTRY_STRING}" | grep -q '"value":"\*\*\*\*\*\*\*\*"' && printf '%s' "${MYSQL_PASSWORD_ENTRY_STRING}" | grep -q '"isSecret":true'; then
+    check_pass "MYSQL_PASSWORD is marked secret and its value is redacted"
+else
+    check_fail "MYSQL_PASSWORD is not redacted: ${MYSQL_PASSWORD_ENTRY_STRING:-<entry missing>}"
+fi
+
+if printf '%s' "${MYSQL_PASSWORD_ENTRY_STRING}" | grep -q 'melody'; then
+    check_fail "the MYSQL_PASSWORD entry leaks the raw credential: ${MYSQL_PASSWORD_ENTRY_STRING}"
+else
+    check_pass "the MYSQL_PASSWORD entry carries no raw credential"
+fi
+
+S3_SECRET_ENTRY_STRING="$(printf '%s' "${SECRETS_JSON_STRING}" | grep -o '"name":"S3_SECRET_KEY"[^}]*' | head -1 || true)"
+if printf '%s' "${S3_SECRET_ENTRY_STRING}" | grep -q '"value":"\*\*\*\*\*\*\*\*"' && printf '%s' "${S3_SECRET_ENTRY_STRING}" | grep -q '"isSecret":true'; then
+    check_pass "S3_SECRET_KEY is marked secret and its value is redacted"
+else
+    check_fail "S3_SECRET_KEY is not redacted: ${S3_SECRET_ENTRY_STRING:-<entry missing>}"
+fi
+
+# the dsn only reads the password, so its redaction is the propagation promise: the marking travelled
+# through the template instead of covering the password alone
+DSN_ENTRY_STRING="$(printf '%s' "${SECRETS_JSON_STRING}" | grep -o '"name":"app.database.dsn"[^}]*' | head -1 || true)"
+if printf '%s' "${DSN_ENTRY_STRING}" | grep -q '"value":"\*\*\*\*\*\*\*\*"' && printf '%s' "${DSN_ENTRY_STRING}" | grep -q '"isSecret":true'; then
+    check_pass "the dsn assembled from the marked password is redacted along with it"
+else
+    check_fail "the assembled dsn is not redacted: ${DSN_ENTRY_STRING:-<entry missing>}"
+fi
+
+if printf '%s' "${DSN_ENTRY_STRING}" | grep -q 'tcp('; then
+    check_fail "the dsn entry leaks the assembled value: ${DSN_ENTRY_STRING}"
+else
+    check_pass "the dsn entry carries no assembled value"
+fi
+
+TITLE_ENTRY_STRING="$(printf '%s' "${SECRETS_JSON_STRING}" | grep -o '"name":"app.catalog_title"[^}]*' | head -1 || true)"
+if printf '%s' "${TITLE_ENTRY_STRING}" | grep -q 'MelodyExampleCatalog' && printf '%s' "${TITLE_ENTRY_STRING}" | grep -q '"isSecret":false'; then
+    check_pass "an ordinary parameter still prints in clear"
+else
+    check_fail "the ordinary parameter is not printed in clear: ${TITLE_ENTRY_STRING:-<entry missing>}"
+fi
+
+section_end "PARAMETER SECRETS" "success" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
+# OPTIONAL ENV KEY — the default processor's fallback, an .env.local override, the empty fallback
+# ---------------------------------------------------------------------------------------------------
+
+section_start "OPTIONAL ENV KEY" "${TAG_VALIDATE}" "e2e"
+
+trap restore_example_env_local EXIT
+restore_example_env_local
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:parameters --format json 2>/dev/null"
+OPTIONAL_DEFAULT_JSON_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | tr -d ' \n\t')"
+
+REFRESH_DEFAULT_ENTRY_STRING="$(printf '%s' "${OPTIONAL_DEFAULT_JSON_STRING}" | grep -o '"name":"app.reporting.refresh_interval"[^}]*' | head -1 || true)"
+if printf '%s' "${REFRESH_DEFAULT_ENTRY_STRING}" | grep -q '"value":"5m"'; then
+    check_pass "the unset APP_REPORTING_REFRESH_INTERVAL falls back to the default parameter (5m)"
+else
+    check_fail "the fallback did not resolve to 5m: ${REFRESH_DEFAULT_ENTRY_STRING:-<entry missing>}"
+fi
+
+EXPORT_ENDPOINT_ENTRY_STRING="$(printf '%s' "${OPTIONAL_DEFAULT_JSON_STRING}" | grep -o '"name":"app.reporting.export_endpoint"[^}]*' | head -1 || true)"
+if printf '%s' "${EXPORT_ENDPOINT_ENTRY_STRING}" | grep -q '"value":""'; then
+    check_pass "the empty-string fallback resolves to an empty value"
+else
+    check_fail "the empty fallback did not resolve to an empty value: ${EXPORT_ENDPOINT_ENTRY_STRING:-<entry missing>}"
+fi
+
+# melody resolves config from .env files, never the process environment, so the override lands in
+# .env.local (git-ignored, restored by the trap)
+docker_compose_no_log exec -T "${E2E_SERVICE_NAME_STRING}" \
+    bash -c "printf 'APP_REPORTING_REFRESH_INTERVAL=90s\n' > ${EXAMPLE_ENV_LOCAL_PATH_STRING}" </dev/null
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:parameters --format json 2>/dev/null"
+OPTIONAL_OVERRIDE_JSON_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | tr -d ' \n\t')"
+
+REFRESH_OVERRIDE_ENTRY_STRING="$(printf '%s' "${OPTIONAL_OVERRIDE_JSON_STRING}" | grep -o '"name":"app.reporting.refresh_interval"[^}]*' | head -1 || true)"
+if printf '%s' "${REFRESH_OVERRIDE_ENTRY_STRING}" | grep -q '"value":"90s"'; then
+    check_pass "a defined APP_REPORTING_REFRESH_INTERVAL wins over the fallback (90s)"
+else
+    check_fail "the defined key did not win over the fallback: ${REFRESH_OVERRIDE_ENTRY_STRING:-<entry missing>}"
+fi
+
+restore_example_env_local
+trap - EXIT
+
+section_end "OPTIONAL ENV KEY" "success" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
 

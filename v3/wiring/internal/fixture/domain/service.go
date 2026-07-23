@@ -3,6 +3,7 @@ package domain
 import (
     "time"
 
+    "github.com/precision-soft/melody/v3/config"
     "github.com/precision-soft/melody/v3/wiring/internal/fixture/domain/contract"
 )
 
@@ -88,4 +89,32 @@ func NewVariadicService(parts ...string) *VariadicService {
 
 type VariadicService struct {
     parts []string
+}
+
+func NewAuditTrail(repository *UserRepository) (AuditTrail, error) {
+    return AuditTrail{repository: repository}, nil
+}
+
+type AuditTrail struct {
+    repository *UserRepository
+}
+
+func NewRetryPolicy(maxAttempts uint8) *RetryPolicy {
+    return &RetryPolicy{maxAttempts: maxAttempts}
+}
+
+type RetryPolicy struct {
+    maxAttempts uint8
+}
+
+func NewParameterEcho(parameter *config.Parameter) *ParameterEcho {
+    return &ParameterEcho{parameter: parameter}
+}
+
+type ParameterEcho struct {
+    parameter *config.Parameter
+}
+
+func NewMigrationRunner() error {
+    return nil
 }

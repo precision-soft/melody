@@ -11,7 +11,7 @@ import (
 )
 
 /* @info a self-referential env value expands to itself plus extra characters on every pass; the env-substitution branch is not covered by the parameter-recursion cycle guard, so without the pass bound the fixed-point loop never terminates */
-func TestResolveWithTemplates_SelfReferentialEnvValueReportsCircularReference(t *testing.T) {
+func TestResolveTemplate_SelfReferentialEnvValueReportsCircularReference(t *testing.T) {
     configuration := &Configuration{
         environment: &Environment{
             values: map[string]string{
@@ -29,9 +29,10 @@ func TestResolveWithTemplates_SelfReferentialEnvValueReportsCircularReference(t 
     done := make(chan resolveOutcome, 1)
 
     go func() {
-        value, err := configuration.resolveWithTemplates(
+        value, err := configuration.resolveTemplate(
             "x%env(APP_A)%",
             "app.a",
+            make(map[string]bool),
             make(map[string]bool),
         )
 
@@ -48,12 +49,12 @@ func TestResolveWithTemplates_SelfReferentialEnvValueReportsCircularReference(t 
             t.Fatalf("expected a circular reference error, got %v", outcome.err)
         }
     case <-time.After(2 * time.Second):
-        t.Fatalf("resolveWithTemplates never returned: the self-referential env value looped forever")
+        t.Fatalf("resolveTemplate never returned: the self-referential env value looped forever")
     }
 }
 
 /* @info an undefined env placeholder must be reported by key only; the raw parameter value routinely carries inline credentials that would otherwise reach logs through the exception cause-context chain */
-func TestResolveWithTemplates_UndefinedEnvironmentKeyErrorOmitsRawValue(t *testing.T) {
+func TestResolveTemplate_UndefinedEnvironmentKeyErrorOmitsRawValue(t *testing.T) {
     configuration := &Configuration{
         environment: &Environment{values: map[string]string{}},
         parameters:  ParameterMap{},
@@ -61,7 +62,7 @@ func TestResolveWithTemplates_UndefinedEnvironmentKeyErrorOmitsRawValue(t *testi
 
     secretValue := "mysql://root:S3cretPassword@tcp(db:3306)/app?tls=%env(DB_TLS)%"
 
-    _, err := configuration.resolveWithTemplates(secretValue, "database.url", make(map[string]bool))
+    _, err := configuration.resolveTemplate(secretValue, "database.url", make(map[string]bool), make(map[string]bool))
     if nil == err {
         t.Fatalf("expected an undefined environment key error")
     }
@@ -76,7 +77,7 @@ func TestResolveWithTemplates_UndefinedEnvironmentKeyErrorOmitsRawValue(t *testi
 }
 
 /* @info an undefined parameter placeholder must be reported by key only, never with the raw value that may embed credentials */
-func TestResolveWithTemplates_UndefinedParameterKeyErrorOmitsRawValue(t *testing.T) {
+func TestResolveTemplate_UndefinedParameterKeyErrorOmitsRawValue(t *testing.T) {
     configuration := &Configuration{
         environment: &Environment{values: map[string]string{}},
         parameters:  ParameterMap{},
@@ -84,7 +85,7 @@ func TestResolveWithTemplates_UndefinedParameterKeyErrorOmitsRawValue(t *testing
 
     secretValue := "postgres://user:P4ssPhrase@host:5432/db?opt=%missing_parameter%"
 
-    _, err := configuration.resolveWithTemplates(secretValue, "database.dsn", make(map[string]bool))
+    _, err := configuration.resolveTemplate(secretValue, "database.dsn", make(map[string]bool), make(map[string]bool))
     if nil == err {
         t.Fatalf("expected an undefined parameter key error")
     }
@@ -132,7 +133,7 @@ func TestEnvPlaceholderPattern_AcceptsDefaultProcessorForms(t *testing.T) {
 }
 
 /* @info a single colon is the most likely misspelling of the default processor; the strict pattern cannot match it, so without the shape guard it would survive resolution as literal text and reach the service as the string "%env(default:KEY)%" */
-func TestResolveSinglePass_MalformedEnvPlaceholderIsReported(t *testing.T) {
+func TestResolveTemplate_MalformedEnvPlaceholderIsReported(t *testing.T) {
     configuration := &Configuration{
         environment: &Environment{
             values: map[string]string{},
@@ -140,9 +141,10 @@ func TestResolveSinglePass_MalformedEnvPlaceholderIsReported(t *testing.T) {
         parameters: ParameterMap{},
     }
 
-    _, err := configuration.resolveWithTemplates(
+    _, err := configuration.resolveTemplate(
         "%env(default:AWS_ENDPOINT_URL)%",
         "aws.endpoint_url",
+        make(map[string]bool),
         make(map[string]bool),
     )
     if nil == err {
@@ -156,7 +158,7 @@ func TestResolveSinglePass_MalformedEnvPlaceholderIsReported(t *testing.T) {
     }
 }
 
-func TestResolveWithTemplates_DefaultProcessorYieldsEmptyStringForUndefinedKey(t *testing.T) {
+func TestResolveTemplate_DefaultProcessorYieldsEmptyStringForUndefinedKey(t *testing.T) {
     configuration := &Configuration{
         environment: &Environment{
             values: map[string]string{},
@@ -164,9 +166,10 @@ func TestResolveWithTemplates_DefaultProcessorYieldsEmptyStringForUndefinedKey(t
         parameters: ParameterMap{},
     }
 
-    value, err := configuration.resolveWithTemplates(
+    value, err := configuration.resolveTemplate(
         "%env(default::AWS_ENDPOINT_URL)%",
         "aws.endpoint_url",
+        make(map[string]bool),
         make(map[string]bool),
     )
     if nil != err {
@@ -178,7 +181,7 @@ func TestResolveWithTemplates_DefaultProcessorYieldsEmptyStringForUndefinedKey(t
     }
 }
 
-func TestResolveWithTemplates_DefaultProcessorFallsBackToParameter(t *testing.T) {
+func TestResolveTemplate_DefaultProcessorFallsBackToParameter(t *testing.T) {
     configuration := &Configuration{
         environment: &Environment{
             values: map[string]string{},
@@ -188,9 +191,10 @@ func TestResolveWithTemplates_DefaultProcessorFallsBackToParameter(t *testing.T)
         },
     }
 
-    value, err := configuration.resolveWithTemplates(
+    value, err := configuration.resolveTemplate(
         "%env(default:aws.default_endpoint:AWS_ENDPOINT_URL)%",
         "aws.endpoint_url",
+        make(map[string]bool),
         make(map[string]bool),
     )
     if nil != err {
@@ -202,7 +206,7 @@ func TestResolveWithTemplates_DefaultProcessorFallsBackToParameter(t *testing.T)
     }
 }
 
-func TestResolveWithTemplates_DefaultProcessorPrefersDefinedEnvironmentValue(t *testing.T) {
+func TestResolveTemplate_DefaultProcessorPrefersDefinedEnvironmentValue(t *testing.T) {
     configuration := &Configuration{
         environment: &Environment{
             values: map[string]string{
@@ -214,9 +218,10 @@ func TestResolveWithTemplates_DefaultProcessorPrefersDefinedEnvironmentValue(t *
         },
     }
 
-    value, err := configuration.resolveWithTemplates(
+    value, err := configuration.resolveTemplate(
         "%env(default:aws.default_endpoint:AWS_ENDPOINT_URL)%",
         "aws.endpoint_url",
+        make(map[string]bool),
         make(map[string]bool),
     )
     if nil != err {
@@ -229,7 +234,7 @@ func TestResolveWithTemplates_DefaultProcessorPrefersDefinedEnvironmentValue(t *
 }
 
 /* @info the default processor must stay opt-in: a plain placeholder that silently degraded to an empty string would boot the application with an unset credential instead of refusing to start */
-func TestResolveWithTemplates_PlainPlaceholderStillFailsForUndefinedKey(t *testing.T) {
+func TestResolveTemplate_PlainPlaceholderStillFailsForUndefinedKey(t *testing.T) {
     configuration := &Configuration{
         environment: &Environment{
             values: map[string]string{},
@@ -237,9 +242,10 @@ func TestResolveWithTemplates_PlainPlaceholderStillFailsForUndefinedKey(t *testi
         parameters: ParameterMap{},
     }
 
-    _, err := configuration.resolveWithTemplates(
+    _, err := configuration.resolveTemplate(
         "%env(AWS_ENDPOINT_URL)%",
         "aws.endpoint_url",
+        make(map[string]bool),
         make(map[string]bool),
     )
     if nil == err {
@@ -254,7 +260,7 @@ func TestResolveWithTemplates_PlainPlaceholderStillFailsForUndefinedKey(t *testi
 }
 
 /* @info the fallback is handed back as a parameter placeholder, so an undefined fallback must surface the parameter branch error rather than resolve to the literal text */
-func TestResolveWithTemplates_DefaultProcessorReportsUndefinedFallbackParameter(t *testing.T) {
+func TestResolveTemplate_DefaultProcessorReportsUndefinedFallbackParameter(t *testing.T) {
     configuration := &Configuration{
         environment: &Environment{
             values: map[string]string{},
@@ -262,9 +268,10 @@ func TestResolveWithTemplates_DefaultProcessorReportsUndefinedFallbackParameter(
         parameters: ParameterMap{},
     }
 
-    _, err := configuration.resolveWithTemplates(
+    _, err := configuration.resolveTemplate(
         "%env(default:aws.missing_fallback:AWS_ENDPOINT_URL)%",
         "aws.endpoint_url",
+        make(map[string]bool),
         make(map[string]bool),
     )
     if nil == err {
@@ -320,3 +327,197 @@ func TestConfiguration_UnescapedLiteralPercentFailsWithAnActionableMessage(t *te
         t.Fatalf("expected the cause chain to point at the escape, got %s", messages)
     }
 }
+
+/* @info an environment value is a template of its own: its doubled percents are its literals and must survive the splice as data instead of being rescanned as the parameter reference %ss% */
+func TestResolveTemplate_EnvValueDoubledPercentsResolveToLiterals(t *testing.T) {
+    configuration := &Configuration{
+        environment: &Environment{
+            values: map[string]string{
+                "APP_PASSWORD": "pa%%ss%%word",
+            },
+        },
+        parameters: ParameterMap{},
+    }
+
+    value, resolveErr := configuration.resolveTemplate(
+        "%env(APP_PASSWORD)%",
+        "app.password",
+        make(map[string]bool),
+        make(map[string]bool),
+    )
+    if nil != resolveErr {
+        t.Fatalf("expected the env value to resolve, got %v", resolveErr)
+    }
+
+    if "pa%ss%word" != value {
+        t.Fatalf("expected the doubled percents to resolve to literals, got %q", value)
+    }
+}
+
+/* @info a referenced parameter's resolved value is data: a password holding a literal percent must splice into the dsn that reads it without being rescanned as a reference */
+func TestResolveTemplate_ReferencedValueWithLiteralPercentSplicesAsData(t *testing.T) {
+    configuration := &Configuration{
+        environment: &Environment{values: map[string]string{}},
+        parameters: ParameterMap{
+            "app.password": NewParameter("APP_PASSWORD", "pa%%ss%%word", "pa%%ss%%word", false),
+        },
+    }
+
+    escapedValue, resolveErr := configuration.resolveTemplate(
+        "mysql://root:%app.password%@db/app",
+        "database.url",
+        make(map[string]bool),
+        make(map[string]bool),
+    )
+    if nil != resolveErr {
+        t.Fatalf("expected the reference to resolve, got %v", resolveErr)
+    }
+
+    if "mysql://root:pa%ss%word@db/app" != escapedValue {
+        t.Fatalf("expected the referenced percents to survive as data, got %q", escapedValue)
+    }
+}
+
+/* @info marking the env-registered parameter is how a credential read through %env(KEY)% is declared, and the marking must travel to the reader exactly as it does on the parameter branch */
+func TestResolveTemplate_SecretTravelsThroughAnEnvPlaceholder(t *testing.T) {
+    passwordParameter := NewParameter("MYSQL_PASSWORD", "s3cret", "s3cret", false)
+    passwordParameter.isSecret.Store(true)
+
+    databaseUrlParameter := NewParameter("", "root:%env(MYSQL_PASSWORD)%@db", "", false)
+
+    configuration := &Configuration{
+        environment: &Environment{
+            values: map[string]string{
+                "MYSQL_PASSWORD": "s3cret",
+            },
+        },
+        parameters: ParameterMap{
+            "MYSQL_PASSWORD": passwordParameter,
+            "database.url":   databaseUrlParameter,
+        },
+    }
+
+    escapedValue, resolveErr := configuration.resolveTemplate(
+        "root:%env(MYSQL_PASSWORD)%@db",
+        "database.url",
+        make(map[string]bool),
+        make(map[string]bool),
+    )
+    if nil != resolveErr {
+        t.Fatalf("expected the env reference to resolve, got %v", resolveErr)
+    }
+
+    if "root:s3cret@db" != escapedValue {
+        t.Fatalf("unexpected resolved value %q", escapedValue)
+    }
+
+    if false == databaseUrlParameter.IsSecret() {
+        t.Fatalf("expected the secret marking to travel through the env placeholder")
+    }
+}
+
+/* @info an env value carrying a single-percent malformed shape still fails: values are templates by design, and the doubled-percent escape is the supported way to write a literal percent */
+func TestResolveTemplate_InjectedMalformedShapeStillFails(t *testing.T) {
+    configuration := &Configuration{
+        environment: &Environment{
+            values: map[string]string{
+                "APP_RAW": "x%env(a:b)%y",
+            },
+        },
+        parameters: ParameterMap{},
+    }
+
+    _, resolveErr := configuration.resolveTemplate(
+        "%env(APP_RAW)%",
+        "app.raw",
+        make(map[string]bool),
+        make(map[string]bool),
+    )
+    if nil == resolveErr {
+        t.Fatalf("expected the malformed injected placeholder to be reported")
+    }
+
+    if false == strings.Contains(resolveErr.Error(), "malformed environment placeholder") {
+        t.Fatalf("unexpected error: %v", resolveErr)
+    }
+}
+
+/* @info a self-reference is a cycle like any other: the scanner reports it at resolve time instead of leaving the placeholder behind as literal text for an after-the-fact check to catch */
+func TestResolveTemplate_SelfReferenceIsACircularReference(t *testing.T) {
+    configuration := &Configuration{
+        environment: &Environment{values: map[string]string{}},
+        parameters: ParameterMap{
+            "app.a": NewParameter("", "%app.b%_%app.a%", "", false),
+            "app.b": NewParameter("", "pa%%ss", "", false),
+        },
+    }
+
+    resolveErr := configuration.Resolve()
+    if nil == resolveErr {
+        t.Fatalf("expected the self-reference to be reported at resolve time")
+    }
+
+    if false == strings.Contains(resolveErr.Error()+causeChain(resolveErr), "circular parameter reference") {
+        t.Fatalf("unexpected error: %v", resolveErr)
+    }
+}
+
+func causeChain(err error) string {
+    messages := ""
+    for cause := err; nil != cause; cause = errors.Unwrap(cause) {
+        messages = messages + cause.Error() + "\n"
+    }
+
+    return messages
+}
+
+/* @info a literal percent written with the doubled escape survives a splice as data, and adjacent references resolve instead of swallowing each other */
+func TestResolveTemplate_SplicedLiteralsAndAdjacentReferencesResolve(t *testing.T) {
+    configuration := &Configuration{
+        environment: &Environment{values: map[string]string{}},
+        parameters: ParameterMap{
+            "app.a": NewParameter("", "x_%app.b%", "", false),
+            "app.b": NewParameter("", "pa%%ss%%word", "", false),
+            "app.c": NewParameter("", "%app.a%%app.b%", "", false),
+        },
+    }
+
+    resolveErr := configuration.Resolve()
+    if nil != resolveErr {
+        t.Fatalf("expected the resolution to succeed, got %v", resolveErr)
+    }
+
+    if "x_pa%ss%word" != configuration.getInternalParameter("app.a").String() {
+        t.Fatalf("unexpected resolved value %q", configuration.getInternalParameter("app.a").String())
+    }
+
+    /* the adjacency %app.a%%app.b% resolves both references, where an escape-first reading would have swallowed the touching percents */
+    if "x_pa%ss%wordpa%ss%word" != configuration.getInternalParameter("app.c").String() {
+        t.Fatalf("unexpected adjacent resolution %q", configuration.getInternalParameter("app.c").String())
+    }
+}
+
+/* @info the default processor accepts a single-character fallback name, so the parameter pattern has to resolve it too instead of leaving %a% as literal text */
+func TestResolveTemplate_SingleCharacterParameterReferenceResolves(t *testing.T) {
+    configuration := &Configuration{
+        environment: &Environment{values: map[string]string{}},
+        parameters: ParameterMap{
+            "a": NewParameter("", "short", "", false),
+        },
+    }
+
+    escapedValue, resolveErr := configuration.resolveTemplate(
+        "%env(default:a:MISSING_KEY)%",
+        "app.value",
+        make(map[string]bool),
+        make(map[string]bool),
+    )
+    if nil != resolveErr {
+        t.Fatalf("expected the single-character fallback to resolve, got %v", resolveErr)
+    }
+
+    if "short" != escapedValue {
+        t.Fatalf("expected the fallback parameter to resolve, got %q", escapedValue)
+    }
+}
+

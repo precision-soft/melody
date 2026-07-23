@@ -163,6 +163,18 @@ run_race_go_suites() {
         run_batch_in_service_shell "${SERVICE_NAME_STRING}" "${BATCH_COMMAND_LIST[@]}"
 }
 
+# the e2e harness module is deliberately outside go.work (it builds GOWORK=off against the local replaces),
+# so no other lane compiles it: a break in the harness — or a stale framework pin in its go.mod — would
+# otherwise surface only when someone runs run.sh or stack.sh by hand
+run_e2e_harness_checks() {
+    if [[ ! -f "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/e2e/go.mod" ]]; then
+        return 0
+    fi
+
+    run_section "melody e2e harness module (.dev/e2e, GOWORK=off)" "${TAG_VALIDATE}" "go" -- \
+        run_batch_in_service_shell "${SERVICE_NAME_STRING}" "cd ${CONTAINER_ROOT_PATH}/.dev/e2e && GOWORK=off go vet ./..."
+}
+
 get_versioned_module_directory_list() {
     local CANDIDATE_DIR_STRING
     for CANDIDATE_DIR_STRING in "${REPOSITORY_ROOT_DIRECTORY_STRING}"/v[0-9]*/; do
@@ -312,6 +324,8 @@ main() {
             run_go_checks "${INTEGRATION_MODULE_DIRECTORY_STRING}" "melody integration module: ${INTEGRATION_MODULE_DIRECTORY_STRING#${ROOT_DIRECTORY_STRING}/}"
         done < <(get_integration_module_directory_list)
 
+        run_e2e_harness_checks
+
         run_race_go_suites
 
         run_live_go_suites
@@ -349,6 +363,12 @@ main() {
             info "skip integration module: ${INTEGRATION_MODULE_DIRECTORY_STRING#${ROOT_DIRECTORY_STRING}/}"
         fi
     done < <(get_integration_module_directory_list)
+
+    if has_staged_change_in_component "${ROOT_DIRECTORY_STRING}/.dev/e2e"; then
+        run_e2e_harness_checks
+    else
+        info "skip .dev/e2e harness (no staged changes)"
+    fi
 
     section_end "staged validation" "success" "${TAG_VALIDATE}" "staged"
     success "validation completed"

@@ -2,6 +2,7 @@ package wiring
 
 import (
     "go/ast"
+    "go/build"
     "go/parser"
     "go/token"
     "io/fs"
@@ -155,6 +156,23 @@ func scanFile(
     packageBinding *PackageBinding,
     result *ScanResult,
 ) error {
+    /* a file the default build excludes — a //go:build ignore script, the unsatisfied half of a tag pair, a foreign GOOS suffix — contributes no constructors to the binary the wiring is generated for, and scanning it anyway would register phantom services or the same service twice */
+    buildContext := build.Default
+    isIncluded, matchErr := buildContext.MatchFile(filepath.Dir(currentPath), filepath.Base(currentPath))
+    if nil != matchErr {
+        return exception.NewError(
+            "could not evaluate the build constraints of a source file",
+            map[string]any{
+                "file": currentPath,
+            },
+            matchErr,
+        )
+    }
+
+    if false == isIncluded {
+        return nil
+    }
+
     fileNode, parseErr := parser.ParseFile(fileSet, currentPath, nil, parser.ParseComments)
     if nil != parseErr {
         return exception.NewError(
@@ -262,8 +280,8 @@ func parseDirectives(functionDeclaration *ast.FuncDecl) *constructorDirectives {
             continue
         }
 
-        if true == strings.HasPrefix(text, serviceDirective) {
-            fields := strings.Fields(strings.TrimPrefix(text, serviceDirective))
+        if remainder, isService := directiveRemainder(text, serviceDirective); true == isService {
+            fields := strings.Fields(remainder)
             if 0 < len(fields) {
                 directives.serviceNameIdentifier = fields[0]
             }
@@ -271,11 +289,12 @@ func parseDirectives(functionDeclaration *ast.FuncDecl) *constructorDirectives {
             continue
         }
 
-        if false == strings.HasPrefix(text, bindDirective) {
+        remainder, isBind := directiveRemainder(text, bindDirective)
+        if false == isBind {
             continue
         }
 
-        for _, assignment := range strings.Fields(strings.TrimPrefix(text, bindDirective)) {
+        for _, assignment := range strings.Fields(remainder) {
             separatorIndex := strings.Index(assignment, "=")
             if 0 >= separatorIndex {
                 continue
@@ -286,6 +305,19 @@ func parseDirectives(functionDeclaration *ast.FuncDecl) *constructorDirectives {
     }
 
     return directives
+}
+
+/* directiveRemainder matches a directive exactly or followed by whitespace. A plain prefix match would also claim a longer word — //melody:serviceFoo — and read a name out of what is not the directive at all. */
+func directiveRemainder(text string, directive string) (string, bool) {
+    if text == directive {
+        return "", true
+    }
+
+    if true == strings.HasPrefix(text, directive+" ") || true == strings.HasPrefix(text, directive+"\t") {
+        return text[len(directive)+1:], true
+    }
+
+    return "", false
 }
 
 func describeConstructor(
@@ -316,6 +348,14 @@ func describeConstructor(
     returnType := describeType(results.List[0].Type, importPath, packageName, fileImports)
     if nil == returnType {
         return nil, "the returned type is not a named type"
+    }
+
+    if "error" == returnType.Expression {
+        return nil, "the returned value is an error rather than a service"
+    }
+
+    if "any" == returnType.Expression {
+        return nil, "the returned type is any, which cannot identify a service"
     }
 
     returnsError := false
@@ -461,7 +501,62 @@ func collectImports(fileNode *ast.File) map[string]string {
         fileImports[alias] = importPath
     }
 
+    /* the qualifier a file uses is the package name, which the last path segment does not always spell: a major-version directory (melody/v3), a gopkg.in versioned base (yaml.v3), a hyphenated repository (go-redis). The conventional names those shapes resolve to are added as fallbacks, an explicit alias or an exact base always winning over a guess. */
+    for _, importSpec := range fileNode.Imports {
+        if nil != importSpec.Name {
+            continue
+        }
+
+        importPath, unquoteErr := strconv.Unquote(importSpec.Path.Value)
+        if nil != unquoteErr {
+            continue
+        }
+
+        for _, candidate := range packageNameCandidates(importPath) {
+            if _, exists := fileImports[candidate]; false == exists {
+                fileImports[candidate] = importPath
+            }
+        }
+    }
+
     return fileImports
+}
+
+func packageNameCandidates(importPath string) []string {
+    base := path.Base(importPath)
+
+    candidates := make([]string, 0, 2)
+
+    if true == isMajorVersionSegment(base) {
+        parent := path.Base(path.Dir(importPath))
+        if "" != parent && "." != parent && "/" != parent {
+            candidates = append(candidates, parent)
+        }
+    }
+
+    if dotIndex := strings.Index(base, "."); 0 < dotIndex {
+        candidates = append(candidates, base[:dotIndex])
+    }
+
+    if hyphenIndex := strings.LastIndex(base, "-"); 0 <= hyphenIndex && hyphenIndex+1 < len(base) {
+        candidates = append(candidates, base[hyphenIndex+1:])
+    }
+
+    return candidates
+}
+
+func isMajorVersionSegment(value string) bool {
+    if 2 > len(value) || 'v' != value[0] {
+        return false
+    }
+
+    for _, character := range value[1:] {
+        if '0' > character || '9' < character {
+            return false
+        }
+    }
+
+    return true
 }
 
 func derivedImportPath(rootImportPath string, rootDirectory string, filePath string) (string, error) {

@@ -50,7 +50,7 @@ func (instance *GenerateCommand) Flags() []clicontract.Flag {
         },
         &clicontract.BoolFlag{
             Name:  "strict",
-            Usage: "fail when a declared bind matched no constructor argument",
+            Usage: "fail when a declared bind matched no constructor argument or a constructor was skipped",
         },
     }
 }
@@ -85,14 +85,32 @@ func (instance *GenerateCommand) Run(
 
     instance.writeReport(commandContext, report)
 
-    if true == commandContext.Bool("strict") && 0 < len(report.UnusedBinds) {
-        return exception.NewError(
-            "declared binds matched no constructor argument",
-            map[string]any{
-                "binds": strings.Join(report.UnusedBinds, ", "),
-            },
-            nil,
-        )
+    if true == commandContext.Bool("strict") {
+        if 0 < len(report.UnusedBinds) {
+            return exception.NewError(
+                "declared binds matched no constructor argument",
+                map[string]any{
+                    "binds": strings.Join(report.UnusedBinds, ", "),
+                },
+                nil,
+            )
+        }
+
+        /* a skipped constructor is coverage the wiring silently lost; strict exists so a loss has to be acknowledged, which is what //melody:ignore is for */
+        if 0 < len(report.Skipped) {
+            skippedNames := make([]string, 0, len(report.Skipped))
+            for _, skipped := range report.Skipped {
+                skippedNames = append(skippedNames, skipped.Name)
+            }
+
+            return exception.NewError(
+                "constructors were skipped",
+                map[string]any{
+                    "constructors": strings.Join(skippedNames, ", "),
+                },
+                nil,
+            )
+        }
     }
 
     out := commandContext.String("out")
@@ -105,6 +123,17 @@ func (instance *GenerateCommand) Run(
     outputPath := out
     if false == filepath.IsAbs(outputPath) {
         outputPath = filepath.Join(projectDirectory, outputPath)
+    }
+
+    makeDirectoryErr := os.MkdirAll(filepath.Dir(outputPath), 0o755)
+    if nil != makeDirectoryErr {
+        return exception.NewError(
+            "could not create the output directory of the generated wiring",
+            map[string]any{
+                "out": outputPath,
+            },
+            makeDirectoryErr,
+        )
     }
 
     writeErr := os.WriteFile(outputPath, []byte(source), 0o644)

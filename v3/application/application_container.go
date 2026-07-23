@@ -55,12 +55,12 @@ func (instance *Application) Register(
 
     /* duplicates are recorded for the aggregated boot report instead of panicking one at a time (the first registration wins until the guaranteed panic ends the boot); any other registration failure stays fail-fast */
     if true == errors.Is(registerErr, container.ErrServiceIdAlreadyRegistered) {
-        instance.recordBootCollision(bootCollisionKindService, serviceName, 1)
+        instance.recordBootCollision(bootCollisionKindService, serviceName)
         return nil
     }
 
     if true == errors.Is(registerErr, container.ErrServiceTypeAlreadyRegistered) {
-        instance.recordBootCollision(bootCollisionKindServiceType, serviceName, 1)
+        instance.recordBootCollision(bootCollisionKindServiceType, serviceName)
         return nil
     }
 

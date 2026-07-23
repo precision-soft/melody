@@ -1,48 +1,28 @@
 package config
 
 import (
-    "fmt"
-    "strings"
     "testing"
-
-    "github.com/precision-soft/melody/exception"
 )
 
-/* @info the unresolved-placeholder validation must report only the parameter name and the offending placeholder identifier; the resolved value routinely carries inline credentials that would otherwise reach logs through the exception cause-context chain */
-func TestValidateNoUnresolvedPlaceholders_ErrorOmitsResolvedValue(t *testing.T) {
-    resolvedValue := "mysql://root:S3cretPassword@tcp(db:3306)/app?tls=%env(DB_TLS)%"
-
+/* @info the resolver fails on anything placeholder-shaped it cannot resolve, so the post-resolution hook has nothing left to check and must never fail a boot on a value whose percents are data */
+func TestValidate_PassesAfterResolution(t *testing.T) {
     configuration := &Configuration{
+        environment: &Environment{values: map[string]string{}},
         parameters: ParameterMap{
-            "database.url": NewParameter("DATABASE_URL", resolvedValue, resolvedValue, false),
+            "app.progress": NewParameter("", "50%% done", "", false),
         },
     }
 
-    err := configuration.validateNoUnresolvedPlaceholders()
-    if nil == err {
-        t.Fatalf("expected an unresolved placeholder error")
+    resolveErr := configuration.Resolve()
+    if nil != resolveErr {
+        t.Fatalf("expected the resolution to succeed, got %v", resolveErr)
     }
 
-    exceptionError, ok := err.(*exception.Error)
-    if false == ok {
-        t.Fatalf("expected an *exception.Error, got %T", err)
+    if "50% done" != configuration.getInternalParameter("app.progress").String() {
+        t.Fatalf("unexpected resolved value %q", configuration.getInternalParameter("app.progress").String())
     }
 
-    context := exceptionError.Context()
-
-    if _, present := context["value"]; true == present {
-        t.Fatalf("error context must not embed the resolved parameter value")
-    }
-
-    if true == strings.Contains(fmt.Sprintf("%v", context), "S3cretPassword") {
-        t.Fatalf("error context leaked the inline credential: %v", context)
-    }
-
-    if "database.url" != context["parameterName"] {
-        t.Fatalf("expected the parameter name in the context, got %v", context["parameterName"])
-    }
-
-    if "%env(DB_TLS)%" != context["placeholder"] {
-        t.Fatalf("expected the offending placeholder in the context, got %v", context["placeholder"])
+    if validateErr := configuration.validate(); nil != validateErr {
+        t.Fatalf("expected the validation to pass, got %v", validateErr)
     }
 }

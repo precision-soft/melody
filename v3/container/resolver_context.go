@@ -395,6 +395,37 @@ func (instance *resolverContext) HasType(targetType reflect.Type) bool {
     return instance.containerInstance.HasType(targetType)
 }
 
+/* TypesImplementing delegates to the root container, so a provider that collects its collaborators through AllImplementing can do it with the resolver it was handed instead of needing the container itself. */
+func (instance *resolverContext) TypesImplementing(interfaceType reflect.Type) []reflect.Type {
+    return instance.containerInstance.TypesImplementing(interfaceType)
+}
+
+func (instance *resolverContext) ReferencesImplementing(interfaceType reflect.Type) []containercontract.ServiceReference {
+    return instance.containerInstance.ReferencesImplementing(interfaceType)
+}
+
+/* isResolvingReference reports whether the referenced service sits anywhere on this context's resolution stack — under its name or under its type. It is what lets a collection exclude the very service whose provider is collecting: the composite dispatcher that is itself one of the handlers it dispatches to. */
+func (instance *resolverContext) isResolvingReference(reference containercontract.ServiceReference) bool {
+    nameKey := "service:" + reference.ServiceName
+
+    typeKey := ""
+    if nil != reference.ServiceType {
+        typeKey = "type:" + reference.ServiceType.String()
+    }
+
+    for _, key := range instance.stack {
+        if key == nameKey {
+            return true
+        }
+
+        if "" != typeKey && key == typeKey {
+            return true
+        }
+    }
+
+    return false
+}
+
 func (instance *resolverContext) pushKey(creatingKey string) error {
     if "" == creatingKey {
         return exception.NewError(
@@ -439,3 +470,4 @@ func (instance *resolverContext) stackStringWithRepeat(repeatedKey string) strin
 }
 
 var _ containercontract.Resolver = (*resolverContext)(nil)
+var _ containercontract.TypeLister = (*resolverContext)(nil)

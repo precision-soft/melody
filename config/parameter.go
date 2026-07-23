@@ -4,6 +4,7 @@ import (
     "fmt"
     "strconv"
     "strings"
+    "sync/atomic"
     "time"
 
     configcontract "github.com/precision-soft/melody/config/contract"
@@ -27,7 +28,8 @@ type Parameter struct {
     environmentValue any
     value            any
     isDefault        bool
-    isSecret         bool
+    /* @important atomic because MarkSecret may mark a parameter under the configuration lock while a consumer that already holds the pointer asks IsSecret without it */
+    isSecret atomic.Bool
 }
 
 func (instance *Parameter) EnvironmentKey() string {
@@ -48,7 +50,7 @@ func (instance *Parameter) IsDefault() bool {
 
 /* IsSecret reports whether the parameter was declared as holding a credential, either directly or by resolving a template that reads one. Commands that render the configuration redact such a parameter; the value itself is untouched. */
 func (instance *Parameter) IsSecret() bool {
-    return instance.isSecret
+    return instance.isSecret.Load()
 }
 
 func (instance *Parameter) String() string {

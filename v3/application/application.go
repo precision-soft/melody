@@ -14,6 +14,7 @@ import (
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     "github.com/precision-soft/melody/v3/logging"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     "github.com/precision-soft/melody/v3/security"
 )
 
@@ -36,6 +37,7 @@ type Application struct {
     routeRegistry         httpcontract.RouteRegistry
     moduleConfigurations  map[string]any
     bootCollisions        []bootCollision
+    unappliedSecretMarks  []string
 }
 
 func (instance *Application) Boot() kernelcontract.Kernel {
@@ -48,6 +50,9 @@ func (instance *Application) Boot() kernelcontract.Kernel {
     configuration := instance.configuration
 
     instance.bootModulesPreConfigurationResolve()
+
+    /* the retry runs before the resolve on purpose: the marking must be on the parameter when the templates that read it resolve, or it would never travel into the derived values */
+    instance.applyUnappliedSecretMarks()
 
     resolveErr := configuration.Resolve()
     if nil != resolveErr {
@@ -102,7 +107,7 @@ func (instance *Application) RegisterSecretParameter(
     instance.registerParameter(name, value, true)
 }
 
-/* MarkParameterSecret marks a parameter that already exists — typically one melody registered automatically from the .env artifacts — as holding a credential. A name that matches nothing is left alone, since an environment key is legitimately undefined in some environments. */
+/* MarkParameterSecret marks a parameter that already exists — typically one melody registered automatically from the .env artifacts — as holding a credential. A name that matches nothing does not fail the boot, since an environment key is legitimately undefined in some environments; it is retried once every registration has run and warned about if it still matched nothing, so a misspelled name is visible instead of silently redacting nothing. */
 func (instance *Application) MarkParameterSecret(name string) {
     if true == instance.booted {
         exception.Panic(
@@ -116,7 +121,27 @@ func (instance *Application) MarkParameterSecret(name string) {
         )
     }
 
-    instance.configuration.MarkSecret(name)
+    if false == instance.configuration.MarkSecret(name) {
+        instance.unappliedSecretMarks = append(instance.unappliedSecretMarks, name)
+    }
+}
+
+/* applyUnappliedSecretMarks retries the markings that matched nothing when they were declared — the parameter may have been registered after the marking ran — and warns about each one that still matches nothing, which is what turns a misspelled name into a visible signal instead of an unredacted credential. It runs after every module registered its parameters and before the configuration resolves, so a retried marking still propagates into the parameters whose templates read the secret. */
+func (instance *Application) applyUnappliedSecretMarks() {
+    for _, name := range instance.unappliedSecretMarks {
+        if true == instance.configuration.MarkSecret(name) {
+            continue
+        }
+
+        instance.bootLogger().Warning(
+            "a secret marking matched no parameter; the name may be misspelled, or the environment key is undefined in this environment",
+            loggingcontract.Context{
+                "parameterName": name,
+            },
+        )
+    }
+
+    instance.unappliedSecretMarks = nil
 }
 
 func (instance *Application) registerParameter(
@@ -138,7 +163,7 @@ func (instance *Application) registerParameter(
 
     /* a duplicate is recorded for the aggregated boot report instead of panicking one at a time; the first registration wins until the guaranteed panic ends the boot */
     if "" != name && nil != instance.configuration.Get(name) {
-        instance.recordBootCollision(bootCollisionKindParameter, name, 1)
+        instance.recordBootCollision(bootCollisionKindParameter, name)
         return
     }
 
@@ -219,7 +244,7 @@ func (instance *Application) RegisterConfiguration(name string, configuration an
     _, exists := instance.moduleConfigurations[name]
     if true == exists {
         /* recorded for the aggregated boot report instead of panicking one at a time; the first registration wins until the guaranteed panic ends the boot */
-        instance.recordBootCollision(bootCollisionKindConfiguration, name, 1)
+        instance.recordBootCollision(bootCollisionKindConfiguration, name)
         return
     }
 

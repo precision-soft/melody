@@ -285,7 +285,8 @@ func zeroValueRejectsAbsentProperty(field reflect.StructField, schema *Schema) b
 
         switch name {
         case "min":
-            if "string" != schema.Type || "" != schema.Format {
+            /* a pointer field has no zero value the validator would measure: an omitted property leaves it nil and the length constraint dereferences nothing, so the absence is accepted and the field must stay optional */
+            if true == isPointer || "string" != schema.Type || "" != schema.Format {
                 continue
             }
             bound := 1

@@ -7,6 +7,8 @@ import (
     "path/filepath"
     "strings"
     "testing"
+
+    "github.com/uptrace/bun"
 )
 
 func TestWithDatabase_BindsHandleForRecorder(t *testing.T) {
@@ -51,5 +53,27 @@ func TestFileStorage_AppendsJsonLines(t *testing.T) {
 
     if "account_audit" != decoded["table"] {
         t.Fatalf("expected the table name in the record, got %v", decoded["table"])
+    }
+}
+
+/* @info a tracker-made binding is atomicity within one database, not a routing decision: a storage over a separate audit database must keep its own handle, or a split-database deployment finds its audit rows in the business database — while the caller's explicit WithDatabase stays honoured unconditionally */
+func TestDatabaseFromContext_TrackerBindingIsIgnoredByAnotherDatabase(t *testing.T) {
+    businessDatabase := newTestDatabase()
+    auditDatabase := newTestDatabase()
+
+    trackerContext := withTransactionForDatabase(context.Background(), businessDatabase, businessDatabase)
+
+    if bun.IDB(auditDatabase) != databaseFromContext(trackerContext, auditDatabase) {
+        t.Fatalf("expected the storage over another database to keep its own handle")
+    }
+
+    if bun.IDB(businessDatabase) != databaseFromContext(trackerContext, businessDatabase) {
+        t.Fatalf("expected the storage over the transaction's own database to use the bound handle")
+    }
+
+    explicitContext := WithDatabase(context.Background(), businessDatabase)
+
+    if bun.IDB(businessDatabase) != databaseFromContext(explicitContext, auditDatabase) {
+        t.Fatalf("expected the caller's explicit binding to be honoured unconditionally")
     }
 }

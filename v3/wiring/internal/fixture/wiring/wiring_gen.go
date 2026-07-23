@@ -6,12 +6,30 @@ import (
     melodyconfig "github.com/precision-soft/melody/v3/config"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
+    melodyexception "github.com/precision-soft/melody/v3/exception"
     domain "github.com/precision-soft/melody/v3/wiring/internal/fixture/domain"
     contract "github.com/precision-soft/melody/v3/wiring/internal/fixture/domain/contract"
+    math "math"
 )
 
 /* RegisterFixtureServices registers every service discovered under the scanned packages. */
 func RegisterFixtureServices(registrar containercontract.Registrar) {
+    melodycontainer.MustRegisterType(
+        registrar,
+        func(resolver containercontract.Resolver) (domain.AuditTrail, error) {
+            var zeroValue domain.AuditTrail
+
+            repository, repositoryErr := melodycontainer.FromResolverByType[*domain.UserRepository](resolver)
+            if nil != repositoryErr {
+                return zeroValue, repositoryErr
+            }
+
+            return domain.NewAuditTrail(
+                repository,
+            )
+        },
+    )
+
     melodycontainer.MustRegisterType(
         registrar,
         func(resolver containercontract.Resolver) (*domain.InvoiceService, error) {
@@ -39,6 +57,20 @@ func RegisterFixtureServices(registrar containercontract.Registrar) {
 
     melodycontainer.MustRegisterType(
         registrar,
+        func(resolver containercontract.Resolver) (*domain.ParameterEcho, error) {
+            parameter, parameterErr := melodycontainer.FromResolverByType[*melodyconfig.Parameter](resolver)
+            if nil != parameterErr {
+                return nil, parameterErr
+            }
+
+            return domain.NewParameterEcho(
+                parameter,
+            ), nil
+        },
+    )
+
+    melodycontainer.MustRegisterType(
+        registrar,
         func(resolver containercontract.Resolver) (*domain.ReportingService, error) {
             configuration := melodyconfig.ConfigMustFromResolver(resolver)
 
@@ -46,6 +78,36 @@ func RegisterFixtureServices(registrar containercontract.Registrar) {
 
             return domain.NewReportingService(
                 reportingUrl,
+            ), nil
+        },
+    )
+
+    melodycontainer.MustRegisterType(
+        registrar,
+        func(resolver containercontract.Resolver) (*domain.RetryPolicy, error) {
+            configuration := melodyconfig.ConfigMustFromResolver(resolver)
+
+            maxAttemptsValue, maxAttemptsErr := configuration.MustGet("fixture.max_attempts").Int()
+            if nil != maxAttemptsErr {
+                return nil, maxAttemptsErr
+            }
+
+            if maxAttemptsValue < 0 || math.MaxUint8 < maxAttemptsValue {
+                return nil, melodyexception.NewError(
+                    "a configuration parameter does not fit the constructor argument",
+                    map[string]any{
+                        "parameter": "fixture.max_attempts",
+                        "argument": "maxAttempts",
+                        "argumentType": "uint8",
+                    },
+                    nil,
+                )
+            }
+
+            maxAttempts := uint8(maxAttemptsValue)
+
+            return domain.NewRetryPolicy(
+                maxAttempts,
             ), nil
         },
     )

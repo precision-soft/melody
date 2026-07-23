@@ -13,9 +13,13 @@ const (
     configImportPath             = "github.com/precision-soft/melody/v3/config"
     containerImportPath          = "github.com/precision-soft/melody/v3/container"
     containerContractImportPath  = "github.com/precision-soft/melody/v3/container/contract"
+    exceptionImportPath          = "github.com/precision-soft/melody/v3/exception"
+    mathImportPath               = "math"
     containerContractImportAlias = "containercontract"
     configImportAlias            = "melodyconfig"
     containerImportAlias         = "melodycontainer"
+    exceptionImportAlias         = "melodyexception"
+    mathImportAlias              = "math"
 )
 
 type GenerateRequest struct {
@@ -53,12 +57,16 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
 
     usedBinds := make(map[string]bool)
 
+    /* every fixed alias is reserved before any scanned type can claim its name: a scanned argument living in one of these packages then renders through the same alias the emitted bodies use, instead of racing them for it */
     importAliases := newImportAliasTable()
     importAliases.reserve(containerContractImportPath, containerContractImportAlias)
     importAliases.reserve(containerImportPath, containerImportAlias)
+    importAliases.reserve(configImportPath, configImportAlias)
+    importAliases.reserve(exceptionImportPath, exceptionImportAlias)
+    importAliases.reserve(mathImportPath, mathImportAlias)
 
     providerBlocks := make([]string, 0)
-    requiresConfiguration := false
+    unusedDirectiveBinds := make([]string, 0)
 
     for _, packageBinding := range request.BindSet.Packages() {
         scanResult, scanErr := Scan(request.ProjectDirectory, packageBinding)
@@ -69,7 +77,7 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
         report.Skipped = append(report.Skipped, scanResult.Skipped...)
 
         for _, constructor := range scanResult.Constructors {
-            resolvedArguments, resolveErr := resolveArguments(
+            resolvedArguments, constructorUnusedDirectiveBinds, resolveErr := resolveArguments(
                 constructor,
                 packageBinding,
                 request,
@@ -80,11 +88,7 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
                 return "", nil, resolveErr
             }
 
-            for _, resolvedArgument := range resolvedArguments {
-                if true == resolvedArgument.argument.IsScalar {
-                    requiresConfiguration = true
-                }
-            }
+            unusedDirectiveBinds = append(unusedDirectiveBinds, constructorUnusedDirectiveBinds...)
 
             providerBlocks = append(
                 providerBlocks,
@@ -95,18 +99,13 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
         }
     }
 
-    if true == requiresConfiguration {
-        importAliases.reserve(configImportPath, configImportAlias)
-    }
-
-    report.UnusedBinds = collectUnusedBinds(request.BindSet, usedBinds)
+    report.UnusedBinds = collectUnusedBinds(request.BindSet, usedBinds, unusedDirectiveBinds)
 
     source := renderFile(
         request.PackageName,
         functionName,
         importAliases,
         providerBlocks,
-        requiresConfiguration,
     )
 
     return source, report, nil
@@ -124,8 +123,9 @@ func resolveArguments(
     request *GenerateRequest,
     usedBinds map[string]bool,
     report *GenerateReport,
-) ([]*resolvedArgument, error) {
+) ([]*resolvedArgument, []string, error) {
     resolvedArguments := make([]*resolvedArgument, 0, len(constructor.Arguments))
+    matchedDirectiveBinds := make(map[string]bool)
 
     for _, argument := range constructor.Arguments {
         resolved := &resolvedArgument{
@@ -141,7 +141,7 @@ func resolveArguments(
 
         parameterName, bindScope, found := lookupBind(constructor, packageBinding, request.BindSet, argument.Name)
         if false == found {
-            return nil, exception.NewError(
+            return nil, nil, exception.NewError(
                 "no bind covers a scalar constructor argument",
                 map[string]any{
                     "constructor": constructor.Name,
@@ -155,7 +155,7 @@ func resolveArguments(
         }
 
         if 0 < len(request.DeclaredParameters) && false == request.DeclaredParameters[parameterName] {
-            return nil, exception.NewError(
+            return nil, nil, exception.NewError(
                 "a bind points at a parameter the application does not declare",
                 map[string]any{
                     "constructor": constructor.Name,
@@ -166,6 +166,10 @@ func resolveArguments(
                 },
                 nil,
             )
+        }
+
+        if bindScopeDirective == bindScope {
+            matchedDirectiveBinds[argument.Name] = true
         }
 
         if bindScopeGlobal == bindScope {
@@ -186,7 +190,15 @@ func resolveArguments(
         resolvedArguments = append(resolvedArguments, resolved)
     }
 
-    return resolvedArguments, nil
+    /* a directive bind naming an argument the constructor does not have — or one that is a service rather than a scalar — otherwise vanishes without a trace, and it sits right next to the constructor it fails to affect */
+    unusedDirectiveBinds := make([]string, 0)
+    for bindName := range constructor.DirectiveBinds {
+        if false == matchedDirectiveBinds[bindName] {
+            unusedDirectiveBinds = append(unusedDirectiveBinds, constructor.Name+"."+bindName)
+        }
+    }
+
+    return resolvedArguments, unusedDirectiveBinds, nil
 }
 
 type bindScopeKind int
@@ -226,8 +238,10 @@ func packageBindKey(importPath string, argumentName string) string {
     return "package:" + importPath + ":" + argumentName
 }
 
-func collectUnusedBinds(bindSet *BindSet, usedBinds map[string]bool) []string {
+func collectUnusedBinds(bindSet *BindSet, usedBinds map[string]bool, unusedDirectiveBinds []string) []string {
     unused := make([]string, 0)
+
+    unused = append(unused, unusedDirectiveBinds...)
 
     for _, argumentName := range bindSet.GlobalBindNames() {
         if false == usedBinds[globalBindKey(argumentName)] {

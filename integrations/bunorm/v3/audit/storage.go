@@ -16,24 +16,43 @@ type Storage interface {
 
 type databaseContextKey struct{}
 
+/* boundDatabase is a handle bound onto the context, together with the database it was opened on when the binding was made by a Tracker rather than by the caller. The origin is what lets a storage over a separate audit database ignore the tracker's business transaction instead of redirecting its rows into the business database. */
+type boundDatabase struct {
+    handle bun.IDB
+    origin *bun.DB
+}
+
 /* WithDatabase binds a database/transaction handle onto the context so a Recorder's Record{Insert,
    Update,Delete} writes its entry through it — typically the caller's already-open transaction — keeping
    the audit entry atomic with the data change without forcing the write through the Tracker. A caller
-   that runs its own write inside a unit-of-work transaction records with WithDatabase(ctx, tx). */
+   that runs its own write inside a unit-of-work transaction records with WithDatabase(ctx, tx); the
+   binding is honoured unconditionally, so it is the caller's statement that the handle can carry the
+   audit rows. */
 func WithDatabase(ctx context.Context, database bun.IDB) context.Context {
-    return withDatabase(ctx, database)
+    return context.WithValue(ctx, databaseContextKey{}, &boundDatabase{handle: database})
 }
 
-func withDatabase(ctx context.Context, database bun.IDB) context.Context {
-    return context.WithValue(ctx, databaseContextKey{}, database)
+/* withTransactionForDatabase is the tracker-side binding: it remembers which database the transaction
+   belongs to, so a storage writing elsewhere keeps its own handle. */
+func withTransactionForDatabase(ctx context.Context, handle bun.IDB, origin *bun.DB) context.Context {
+    return context.WithValue(ctx, databaseContextKey{}, &boundDatabase{handle: handle, origin: origin})
 }
 
 func databaseFromContext(ctx context.Context, fallback bun.IDB) bun.IDB {
-    if database, bound := ctx.Value(databaseContextKey{}).(bun.IDB); true == bound && nil != database {
-        return database
+    bound, isBound := ctx.Value(databaseContextKey{}).(*boundDatabase)
+    if false == isBound || nil == bound || nil == bound.handle {
+        return fallback
     }
 
-    return fallback
+    /* a tracker-made binding is atomicity within one database, not a routing decision: a storage whose own database differs from the transaction's must keep writing to its own, or a split-database deployment would find its audit rows in the business database — or lose the business write when the insert fails there */
+    if nil != bound.origin {
+        fallbackDatabase, isDatabase := fallback.(*bun.DB)
+        if true == isDatabase && fallbackDatabase != bound.origin {
+            return fallback
+        }
+    }
+
+    return bound.handle
 }
 
 func NewBunStorage(database *bun.DB) *BunStorage {

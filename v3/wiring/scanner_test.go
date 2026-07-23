@@ -1,6 +1,8 @@
 package wiring
 
 import (
+    "go/parser"
+    "go/token"
     "strings"
     "testing"
 )
@@ -196,5 +198,94 @@ func TestScan_ReportsAMissingDirectory(t *testing.T) {
 
     if false == strings.Contains(scanErr.Error(), "could not scan the package directory") {
         t.Fatalf("unexpected error: %v", scanErr)
+    }
+}
+
+/* @info a plain prefix match would also claim a longer word — //melody:serviceFoo — and read a name out of what is not the directive at all */
+func TestDirectiveRemainder_MatchesTheDirectiveExactly(t *testing.T) {
+    cases := []struct {
+        text      string
+        directive string
+        remainder string
+        matches   bool
+    }{
+        {"//melody:service ServiceName", serviceDirective, "ServiceName", true},
+        {"//melody:service", serviceDirective, "", true},
+        {"//melody:serviceFoo", serviceDirective, "", false},
+        {"//melody:bind url=app.url", bindDirective, "url=app.url", true},
+        {"//melody:bindx=y", bindDirective, "", false},
+    }
+
+    for _, currentCase := range cases {
+        remainder, matches := directiveRemainder(currentCase.text, currentCase.directive)
+
+        if currentCase.matches != matches || currentCase.remainder != remainder {
+            t.Fatalf(
+                "unexpected directive match for %q: got (%q, %v), want (%q, %v)",
+                currentCase.text,
+                remainder,
+                matches,
+                currentCase.remainder,
+                currentCase.matches,
+            )
+        }
+    }
+}
+
+func TestPackageNameCandidates_CoverTheConventionalShapes(t *testing.T) {
+    cases := []struct {
+        importPath string
+        candidates []string
+    }{
+        {"github.com/precision-soft/melody/v3", []string{"melody"}},
+        {"gopkg.in/yaml.v3", []string{"yaml"}},
+        {"github.com/redis/go-redis", []string{"redis"}},
+        {"example.com/plain", []string{}},
+    }
+
+    for _, currentCase := range cases {
+        candidates := packageNameCandidates(currentCase.importPath)
+
+        if len(currentCase.candidates) != len(candidates) {
+            t.Fatalf("unexpected candidates for %q: got %v, want %v", currentCase.importPath, candidates, currentCase.candidates)
+        }
+
+        for index, candidate := range candidates {
+            if currentCase.candidates[index] != candidate {
+                t.Fatalf("unexpected candidates for %q: got %v, want %v", currentCase.importPath, candidates, currentCase.candidates)
+            }
+        }
+    }
+}
+
+/* @info the qualifier a file uses is the package name, which the last path segment does not always spell; without the fallbacks a constructor depending on such a package is skipped */
+func TestCollectImports_ResolvesAQualifierThePathBaseDoesNotSpell(t *testing.T) {
+    source := `package sample
+
+import (
+    "gopkg.in/yaml.v3"
+    "github.com/precision-soft/melody/v3"
+    redis "github.com/other/custom-alias"
+)
+`
+
+    fileNode, parseErr := parser.ParseFile(token.NewFileSet(), "sample.go", source, parser.ParseComments)
+    if nil != parseErr {
+        t.Fatalf("could not parse the sample source: %v", parseErr)
+    }
+
+    fileImports := collectImports(fileNode)
+
+    if "gopkg.in/yaml.v3" != fileImports["yaml"] {
+        t.Fatalf("expected the yaml qualifier to resolve, got %q", fileImports["yaml"])
+    }
+
+    if "github.com/precision-soft/melody/v3" != fileImports["melody"] {
+        t.Fatalf("expected the melody qualifier to resolve, got %q", fileImports["melody"])
+    }
+
+    /* an explicit alias always wins over a guessed fallback of another import */
+    if "github.com/other/custom-alias" != fileImports["redis"] {
+        t.Fatalf("expected the explicit alias to win, got %q", fileImports["redis"])
     }
 }

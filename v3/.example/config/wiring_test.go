@@ -11,7 +11,8 @@ const (
     generatedWiringFile = "../generated/wiring_gen.go"
     generatedPackage    = "generated"
     generatedFunction   = "RegisterGeneratedServices"
-    wiringProjectDir    = "../.."
+    /* the tests run from the config package, one level below the application root, so this is the same project directory the running application reports through KernelProjectDir */
+    wiringProjectDir = ".."
 )
 
 func generateWiring(t *testing.T) (string, *melodywiring.GenerateReport) {

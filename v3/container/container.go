@@ -22,6 +22,7 @@ func NewContainer() containercontract.Container {
         creatingByType:              make(map[string]*creationState),
         resolverWaitGraph:           make(map[uint64]map[uint64]struct{}),
         typeRegistrationNamesByType: make(map[reflect.Type][]string),
+        collectionPriorityByName:    make(map[string]int),
         dependencyGraph:             make(map[string]map[string]struct{}),
     }
 }
@@ -37,6 +38,7 @@ type container struct {
     resolverContextIdCounter    atomic.Uint64
     resolverWaitGraph           map[uint64]map[uint64]struct{}
     typeRegistrationNamesByType map[reflect.Type][]string
+    collectionPriorityByName    map[string]int
     dependencyGraph             map[string]map[string]struct{}
     isClosed                    bool
     closeErr                    error
@@ -320,6 +322,10 @@ func (instance *container) register(
 
     instance.providers[serviceName] = provider
 
+    if 0 != registerOption.CollectionPriority {
+        instance.collectionPriorityByName[serviceName] = registerOption.CollectionPriority
+    }
+
     if true == registerOption.AlsoRegisterType {
         registerTypeErr := instance.registerType(
             serviceName,
@@ -329,6 +335,7 @@ func (instance *container) register(
         )
         if nil != registerTypeErr {
             delete(instance.providers, serviceName)
+            delete(instance.collectionPriorityByName, serviceName)
             return registerTypeErr
         }
     }

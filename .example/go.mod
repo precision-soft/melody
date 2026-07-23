@@ -5,8 +5,8 @@ go 1.24.0
 toolchain go1.24.9
 
 require (
-	github.com/precision-soft/melody v1.13.0
-	github.com/precision-soft/melody/integrations/cron v1.0.0
+	github.com/precision-soft/melody v1.17.0
+	github.com/precision-soft/melody/integrations/cron v1.1.0
 )
 
 require (

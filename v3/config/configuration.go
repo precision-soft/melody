@@ -16,14 +16,9 @@ import (
 
 var (
     /* the optional "default:<fallback>:" prefix marks an environment key whose absence is tolerated: "%env(default::KEY)%" falls back to the empty string and "%env(default:some.parameter:KEY)%" falls back to another parameter. Without the prefix an undefined key stays a hard error, so a plain "%env(KEY)%" never silently degrades to empty. */
-    envPlaceholderPattern       = regexp.MustCompile(`%env\((default:([A-Za-z_][A-Za-z0-9_.]*)?:)?([A-Za-z_][A-Za-z0-9_]*)\)%`)
-    parameterPlaceholderPattern = regexp.MustCompile(`%([A-Za-z_][A-Za-z0-9_.]+)%`)
-    /* matches anything shaped like an environment placeholder so that a spelling the strict pattern rejects (a "default:" prefix with a single colon, an invalid key) is reported instead of surviving as literal text */
-    envPlaceholderShapePattern = regexp.MustCompile(`%env\([^)]*\)%`)
-)
-
-const (
-    escapedPercentPlaceholder = "\x00PERCENT\x00"
+    envPlaceholderPattern = regexp.MustCompile(`%env\((default:([A-Za-z_][A-Za-z0-9_.]*)?:)?([A-Za-z_][A-Za-z0-9_]*)\)%`)
+    /* a single-character name is a valid reference: the default processor's fallback group accepts one, so a reference pattern has to match it too or %a% silently survives as literal text */
+    parameterPlaceholderPattern = regexp.MustCompile(`%([A-Za-z_][A-Za-z0-9_.]*)%`)
 )
 
 func NewConfiguration(
@@ -91,8 +86,6 @@ type Configuration struct {
     kernel      *kernelConfiguration
     http        *httpConfiguration
 
-    /* parameters whose raw value escaped a literal percent with %%; after resolution their value legitimately contains %...%, which the unresolved-placeholder check must not mistake for a placeholder it failed to expand */
-    parametersWithEscapedPercents map[string]bool
 }
 
 func (instance *Configuration) Cli() configcontract.CliConfiguration {
@@ -203,14 +196,14 @@ func (instance *Configuration) registerRuntimeParameter(name string, value any, 
     }
 
     parameter := NewParameter("", value, value, false)
-    parameter.isSecret = isSecret
+    parameter.isSecret.Store(isSecret)
 
     instance.parameters[name] = parameter
 }
 
 /* MarkSecret marks an already registered parameter as holding a credential. The parameters melody registers automatically from the .env artifacts are the ones most likely to hold one, and they exist before any module runs, so marking them is separate from declaring them.
 
-An absent parameter is left alone rather than reported: an environment key is legitimately undefined in some environments, and refusing to boot over one would make the marking unusable exactly where it matters. The secret column of melody:debug:parameters is what confirms a marking took effect. */
+An absent parameter is left alone rather than reported: an environment key is legitimately undefined in some environments, and refusing to boot over one would make the marking unusable exactly where it matters. The secret column of debug:parameters is what confirms a marking took effect. */
 func (instance *Configuration) MarkSecret(name string) bool {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -220,7 +213,7 @@ func (instance *Configuration) MarkSecret(name string) bool {
         return false
     }
 
-    parameter.isSecret = true
+    parameter.isSecret.Store(true)
 
     return true
 }
@@ -422,22 +415,6 @@ func (instance *Configuration) registerEnvironmentParameters() error {
 
 func (instance *Configuration) isReserved(name string) bool {
     return strings.HasPrefix(name, "kernel.")
-}
-
-func (instance *Configuration) escapePercents(value string) string {
-    if "" == value {
-        return value
-    }
-
-    return strings.ReplaceAll(value, "%%", escapedPercentPlaceholder)
-}
-
-func (instance *Configuration) unescapePercents(value string) string {
-    if "" == value {
-        return value
-    }
-
-    return strings.ReplaceAll(value, escapedPercentPlaceholder, "%")
 }
 
 /* @important getInternalParameter is the lock-free map lookup primitive; it must NOT take the lock because it is called both at single-threaded construction (placeholder resolution) and while the write lock is already held (RegisterRuntime). Concurrent readers go through Get/Parameters/Names, which take the read lock around it. */

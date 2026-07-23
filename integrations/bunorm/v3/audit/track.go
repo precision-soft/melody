@@ -36,7 +36,7 @@ func (instance *Tracker) Insert(ctx context.Context, entity string, entityId str
         /* An autoincrement primary key is only known after the insert, so a caller cannot pass it in
            advance. Derive it from the now-populated model so the INSERT entry carries the real
            entity_id (and an entity's history stays queryable by id) instead of an empty string. */
-        return instance.recorder.RecordInsert(withDatabase(ctx, tx), entity, instance.resolveEntityId(entityId, model), model)
+        return instance.recorder.RecordInsert(withTransactionForDatabase(ctx, tx, instance.database), entity, instance.resolveEntityId(entityId, model), model)
     })
 }
 
@@ -55,7 +55,7 @@ func (instance *Tracker) Update(ctx context.Context, entity string, entityId str
             return exception.NewError("audited update failed", map[string]any{"entity": entity}, updateErr)
         }
 
-        return instance.recorder.RecordUpdate(withDatabase(ctx, tx), entity, instance.resolveEntityId(entityId, model), before, model)
+        return instance.recorder.RecordUpdate(withTransactionForDatabase(ctx, tx, instance.database), entity, instance.resolveEntityId(entityId, model), before, model)
     })
 }
 
@@ -65,7 +65,7 @@ func (instance *Tracker) Delete(ctx context.Context, entity string, entityId str
             return exception.NewError("audited delete failed", map[string]any{"entity": entity}, deleteErr)
         }
 
-        return instance.recorder.RecordDelete(withDatabase(ctx, tx), entity, instance.resolveEntityId(entityId, model), model)
+        return instance.recorder.RecordDelete(withTransactionForDatabase(ctx, tx, instance.database), entity, instance.resolveEntityId(entityId, model), model)
     })
 }
 

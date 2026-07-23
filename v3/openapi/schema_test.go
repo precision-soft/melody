@@ -1492,6 +1492,23 @@ func TestBuildSchema_ZeroValueRejectingConstraintsAreRequired(t *testing.T) {
     }
 }
 
+/** @info a pointer string field has no zero value the length constraint would measure: an omitted property leaves it nil, the validator's dereference reports absence and accepts the payload, so advertising the field required would force clients to send what the server does not demand. */
+func TestBuildSchema_PointerMinFieldStaysOptional(t *testing.T) {
+    pointerStringType := reflect.TypeOf((*string)(nil))
+    structType := reflect.StructOf([]reflect.StructField{
+        {Name: "Nick", Type: pointerStringType, Tag: `json:"nick" validate:"min=1"`},
+        {Name: "Alias", Type: pointerStringType, Tag: `json:"alias" validate:"min"`},
+    })
+
+    schema := buildSchema(structType, map[string]*Schema{}, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    for _, name := range []string{"nick", "alias"} {
+        if true == containsString(schema.Required, name) {
+            t.Fatalf("expected the pointer field %q to stay optional (the validator accepts its absence), required=%v", name, schema.Required)
+        }
+    }
+}
+
 /** @info a POSIX named class ([:alpha:]) nested in a bracket expression has its own closing ']' that the character-class scanner must not read as the end of the whole class; otherwise regex=[[:alpha:],] is split at the in-class comma into an uncompilable pattern plus a stray ']' rule. The validator rejects such a tag for every value including "", so the mirror must keep the class intact and advertise the compilable pattern rather than a maxLength-0 (empty-string-satisfiable) field. This keeps the local scanner in lockstep with validation/validation_rule.go. */
 func TestApplyValidation_PosixClassKeepsTheClassIntact(t *testing.T) {
     schema := &Schema{Type: "string"}

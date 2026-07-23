@@ -24,6 +24,7 @@ func newFixtureBindSet() *BindSet {
         Name("sessionTtl", "fixture.session_ttl").
         Name("apiUrl", "fixture.api_url").
         Name("retryCount", "fixture.retry_count").
+        Name("maxAttempts", "fixture.max_attempts").
         Exclude("*Fixture")
 
     return bindSet
@@ -85,7 +86,7 @@ func TestGenerate_ReportsSkippedConstructorsWithAReason(t *testing.T) {
         reasonByName[skipped.Name] = skipped.Reason
     }
 
-    for _, name := range []string{"NewGenericHolder", "NewVariadicService"} {
+    for _, name := range []string{"NewGenericHolder", "NewVariadicService", "NewMigrationRunner"} {
         reason, exists := reasonByName[name]
         if false == exists {
             t.Fatalf("expected %s to be reported as skipped", name)
@@ -196,5 +197,144 @@ func TestGenerate_RequiresABindSet(t *testing.T) {
     _, _, generateErr := Generate(&GenerateRequest{ProjectDirectory: fixtureProjectDir})
     if nil == generateErr {
         t.Fatalf("expected generation to require a bind set")
+    }
+}
+
+/* @info nil is not a value of a struct type, so the error paths of a non-pointer provider have to return a declared zero value or the generated file does not compile */
+func TestGenerate_ReturnsADeclaredZeroValueForANonPointerConstructor(t *testing.T) {
+    source, _ := generateFixture(t, newFixtureBindSet())
+
+    if false == strings.Contains(source, "var zeroValue domain.AuditTrail") {
+        t.Fatalf("expected the non-pointer provider to declare a zero value")
+    }
+
+    if false == strings.Contains(source, "return zeroValue, repositoryErr") {
+        t.Fatalf("expected the error path to return the declared zero value")
+    }
+}
+
+/* @info a Go conversion wraps silently, so a parameter of -1 handed to a uint8 argument would otherwise become 255 instead of an error naming the parameter */
+func TestGenerate_GuardsANarrowingScalarConversion(t *testing.T) {
+    source, _ := generateFixture(t, newFixtureBindSet())
+
+    if false == strings.Contains(source, "if maxAttemptsValue < 0 || math.MaxUint8 < maxAttemptsValue {") {
+        t.Fatalf("expected the narrowing conversion to be range-guarded")
+    }
+
+    if false == strings.Contains(source, "a configuration parameter does not fit the constructor argument") {
+        t.Fatalf("expected the guard to fail with a named error")
+    }
+}
+
+/* @info the framework config package is imported under a fixed alias by every provider body, so a scanned dependency living in that same package must render through that alias instead of claiming "config" for itself */
+func TestGenerate_RendersAFrameworkConfigDependencyThroughTheReservedAlias(t *testing.T) {
+    source, _ := generateFixture(t, newFixtureBindSet())
+
+    if false == strings.Contains(source, "FromResolverByType[*melodyconfig.Parameter]") {
+        t.Fatalf("expected the framework config dependency to use the reserved alias")
+    }
+}
+
+func TestGenerate_ExcludesAFileTheBuildExcludes(t *testing.T) {
+    source, report := generateFixture(t, newFixtureBindSet())
+
+    if true == strings.Contains(source, "NewBuildExcluded") {
+        t.Fatalf("expected the build-excluded constructor to be absent from the wiring")
+    }
+
+    for _, skipped := range report.Skipped {
+        if "NewBuildExcluded" == skipped.Name {
+            t.Fatalf("expected the build-excluded file to be excluded rather than reported as unwireable")
+        }
+    }
+}
+
+/* @info a function with no providers still has to compile: an import block naming the container package that no body uses would fail the build of an application whose scan found nothing yet */
+func TestGenerate_EmptyScanEmitsACompilableFile(t *testing.T) {
+    bindSet := NewBindSet()
+    bindSet.Package(
+        "github.com/precision-soft/melody/v3/wiring/internal/fixture/wiring",
+        "wiring/internal/fixture/wiring",
+    )
+
+    source, report, generateErr := Generate(&GenerateRequest{
+        ProjectDirectory: fixtureProjectDir,
+        PackageName:      "wiring",
+        FunctionName:     "RegisterNothing",
+        BindSet:          bindSet,
+    })
+    if nil != generateErr {
+        t.Fatalf("expected the empty scan to generate, got %v", generateErr)
+    }
+
+    if 0 != report.ConstructorCount {
+        t.Fatalf("expected no constructors, got %d", report.ConstructorCount)
+    }
+
+    if true == strings.Contains(source, containerImportPath+"\"") {
+        t.Fatalf("expected the unused container import to be absent")
+    }
+
+    if _, parseErr := parser.ParseFile(token.NewFileSet(), "wiring_gen.go", source, parser.AllErrors); nil != parseErr {
+        t.Fatalf("the empty generated source does not parse: %v", parseErr)
+    }
+}
+
+func TestResolveArguments_ReportsADirectiveBindThatMatchedNoArgument(t *testing.T) {
+    bindSet := NewBindSet()
+    packageBinding := bindSet.Package("example.com/domain", "domain")
+
+    constructor := &Constructor{
+        Name:           "NewOrphanDirective",
+        DirectiveBinds: map[string]string{"missing": "fixture.missing"},
+        Arguments:      make([]*Argument, 0),
+    }
+
+    _, unusedDirectiveBinds, resolveErr := resolveArguments(
+        constructor,
+        packageBinding,
+        &GenerateRequest{BindSet: bindSet},
+        make(map[string]bool),
+        &GenerateReport{GlobalBindReach: make(map[string][]string)},
+    )
+    if nil != resolveErr {
+        t.Fatalf("expected the resolution to succeed, got %v", resolveErr)
+    }
+
+    if 1 != len(unusedDirectiveBinds) || "NewOrphanDirective.missing" != unusedDirectiveBinds[0] {
+        t.Fatalf("expected the orphan directive bind to be reported, got %v", unusedDirectiveBinds)
+    }
+}
+
+/* @info a directive bind on a service argument is the same silent loss: the bind is dead because only a scalar is filled from a parameter */
+func TestResolveArguments_ReportsADirectiveBindOnAServiceArgument(t *testing.T) {
+    bindSet := NewBindSet()
+    packageBinding := bindSet.Package("example.com/domain", "domain")
+
+    constructor := &Constructor{
+        Name:           "NewServiceBound",
+        DirectiveBinds: map[string]string{"repository": "fixture.repository"},
+        Arguments: []*Argument{
+            {
+                Name:     "repository",
+                Type:     &TypeReference{Expression: "*domain.UserRepository", Qualifier: "domain", IsPointer: true},
+                IsScalar: false,
+            },
+        },
+    }
+
+    _, unusedDirectiveBinds, resolveErr := resolveArguments(
+        constructor,
+        packageBinding,
+        &GenerateRequest{BindSet: bindSet},
+        make(map[string]bool),
+        &GenerateReport{GlobalBindReach: make(map[string][]string)},
+    )
+    if nil != resolveErr {
+        t.Fatalf("expected the resolution to succeed, got %v", resolveErr)
+    }
+
+    if 1 != len(unusedDirectiveBinds) || "NewServiceBound.repository" != unusedDirectiveBinds[0] {
+        t.Fatalf("expected the service-argument directive bind to be reported, got %v", unusedDirectiveBinds)
     }
 }
