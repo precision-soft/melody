@@ -268,7 +268,7 @@ func (instance *Configuration) resolveEnvironmentPlaceholder(
     return resolvedFallback, len(candidate), nil
 }
 
-/* resolveParameterReference resolves one referenced parameter and splices its fully resolved value in as data. The referenced parameter's own value is stored along the way, and a secret marking on it travels to the reader — a dsn assembled from a declared password is the common case — so redaction covers the assembled value beside the credential itself. */
+/* resolveParameterReference resolves one referenced parameter and splices its fully resolved value in as data. During boot the referenced parameter's own value is stored along the way — post-boot the store is skipped, since a consumer holding the pointer reads value without a lock and the re-resolution is deterministic anyway. A secret marking on it travels to the reader — a dsn assembled from a declared password is the common case — so redaction covers the assembled value beside the credential itself. */
 func (instance *Configuration) resolveParameterReference(
     parameterKey string,
     currentKey string,
@@ -315,7 +315,9 @@ func (instance *Configuration) resolveParameterReference(
         return "", resolveErr
     }
 
-    referencedParameter.value = resolvedReferencedValue
+    if false == instance.resolved {
+        referencedParameter.value = resolvedReferencedValue
+    }
 
     if true == referencedParameter.isSecret.Load() {
         currentParameter := instance.getInternalParameter(currentKey)

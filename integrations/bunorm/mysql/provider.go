@@ -340,6 +340,9 @@ func (instance *Provider) isTransientError(inputErr error) bool {
         "server closed the connection",
         "connection closed",
         "use of closed network connection",
+        /* the same aborted-connection error under the two spellings its platforms give it */
+        "software caused connection abort",
+        "established connection was aborted",
         "bad connection",
         "too many connections",
         "network is unreachable",

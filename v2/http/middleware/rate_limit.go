@@ -4,7 +4,6 @@ import (
     "fmt"
     "net"
     nethttp "net/http"
-    "strings"
     "sync"
     "time"
 
@@ -17,6 +16,8 @@ import (
     "github.com/precision-soft/melody/v2/logging"
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
 )
+
+const defaultMaxRateLimitKeys = 1_000_000
 
 func NewTokenBucketLimiter(rate int, window time.Duration) *TokenBucketLimiter {
     return NewTokenBucketLimiterWithClock(clock.NewSystemClock(), rate, window)
@@ -44,20 +45,35 @@ func NewTokenBucketLimiterWithClock(clockInstance clockcontract.Clock, rate int,
         capacity:        rate,
         clockInstance:   clockInstance,
         cleanupInterval: 5 * time.Minute,
+        maxKeys:         defaultMaxRateLimitKeys,
     }
 
     return limiter
 }
 
 type TokenBucketLimiter struct {
-    mutex           sync.RWMutex
-    buckets         map[string]*tokenBucket
-    rate            int
-    window          time.Duration
-    capacity        int
-    clockInstance   clockcontract.Clock
-    cleanupInterval time.Duration
-    lastCleanupAt   time.Time
+    mutex              sync.RWMutex
+    buckets            map[string]*tokenBucket
+    rate               int
+    window             time.Duration
+    capacity           int
+    clockInstance      clockcontract.Clock
+    cleanupInterval    time.Duration
+    lastCleanupAt      time.Time
+    maxKeys            int
+    lastCeilingPruneAt time.Time
+}
+
+/* SetMaxKeys bounds how many distinct keys the limiter tracks. When the map is full and an idle-entry prune frees nothing, a request under an unseen key is denied rather than minting a bucket, so an attacker varying the key cannot grow the map without bound. A non-positive value is ignored. */
+func (instance *TokenBucketLimiter) SetMaxKeys(maxKeys int) {
+    if 0 >= maxKeys {
+        return
+    }
+
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.maxKeys = maxKeys
 }
 
 type tokenBucket struct {
@@ -69,18 +85,27 @@ func (instance *TokenBucketLimiter) Allow(key string) bool {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    instance.cleanupIfNeededLocked()
+    now := instance.clockInstance.Now()
+
+    instance.cleanupIfNeededLocked(now)
 
     bucket, exists := instance.buckets[key]
     if false == exists {
+        if instance.maxKeys <= len(instance.buckets) {
+            instance.pruneAtCeilingLocked(now)
+        }
+
+        if instance.maxKeys <= len(instance.buckets) {
+            return false
+        }
+
         bucket = &tokenBucket{
             tokens:     instance.capacity,
-            lastRefill: instance.clockInstance.Now(),
+            lastRefill: now,
         }
         instance.buckets[key] = bucket
     }
 
-    now := instance.clockInstance.Now()
     elapsed := now.Sub(bucket.lastRefill)
 
     if instance.window <= elapsed {
@@ -108,9 +133,7 @@ func (instance *TokenBucketLimiter) Close() error {
     return nil
 }
 
-func (instance *TokenBucketLimiter) cleanupIfNeededLocked() {
-    now := instance.clockInstance.Now()
-
+func (instance *TokenBucketLimiter) cleanupIfNeededLocked(now time.Time) {
     if true == instance.lastCleanupAt.IsZero() {
         instance.lastCleanupAt = now
         return
@@ -120,13 +143,28 @@ func (instance *TokenBucketLimiter) cleanupIfNeededLocked() {
         return
     }
 
+    instance.pruneIdleLocked(now)
+
+    instance.lastCleanupAt = now
+}
+
+/* pruneAtCeilingLocked reclaims idle entries when the map is full, at most once per window. The prune walks the whole map, and at the ceiling every request under an unseen key would pay that walk while holding the lock all traffic shares — the bound meant to protect memory would become a processing amplifier for the very traffic it exists to survive. An entry only falls idle after twice the window, so a finer cadence cannot free meaningfully more; between prunes an unseen key is denied without a walk. */
+func (instance *TokenBucketLimiter) pruneAtCeilingLocked(now time.Time) {
+    if false == instance.lastCeilingPruneAt.IsZero() && instance.window > now.Sub(instance.lastCeilingPruneAt) {
+        return
+    }
+
+    instance.lastCeilingPruneAt = now
+
+    instance.pruneIdleLocked(now)
+}
+
+func (instance *TokenBucketLimiter) pruneIdleLocked(now time.Time) {
     for key, bucket := range instance.buckets {
         if instance.window*2 < now.Sub(bucket.lastRefill) {
             delete(instance.buckets, key)
         }
     }
-
-    instance.lastCleanupAt = now
 }
 
 var _ httpcontract.RateLimiter = (*TokenBucketLimiter)(nil)
@@ -156,19 +194,34 @@ func NewSlidingWindowLimiterWithClock(clockInstance clockcontract.Clock, limit i
         window:          window,
         clockInstance:   clockInstance,
         cleanupInterval: 5 * time.Minute,
+        maxKeys:         defaultMaxRateLimitKeys,
     }
 
     return limiter
 }
 
 type SlidingWindowLimiter struct {
-    mutex           sync.RWMutex
-    windows         map[string]*slidingWindow
-    limit           int
-    window          time.Duration
-    clockInstance   clockcontract.Clock
-    cleanupInterval time.Duration
-    lastCleanupAt   time.Time
+    mutex              sync.RWMutex
+    windows            map[string]*slidingWindow
+    limit              int
+    window             time.Duration
+    clockInstance      clockcontract.Clock
+    cleanupInterval    time.Duration
+    lastCleanupAt      time.Time
+    maxKeys            int
+    lastCeilingPruneAt time.Time
+}
+
+/* SetMaxKeys bounds how many distinct keys the limiter tracks. When the map is full and an idle-entry prune frees nothing, a request under an unseen key is denied rather than minting a window, so an attacker varying the key cannot grow the map without bound. A non-positive value is ignored. */
+func (instance *SlidingWindowLimiter) SetMaxKeys(maxKeys int) {
+    if 0 >= maxKeys {
+        return
+    }
+
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.maxKeys = maxKeys
 }
 
 type slidingWindow struct {
@@ -179,13 +232,22 @@ func (instance *SlidingWindowLimiter) Allow(key string) bool {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    instance.cleanupIfNeededLocked()
-
     now := instance.clockInstance.Now()
+
+    instance.cleanupIfNeededLocked(now)
+
     windowStart := now.Add(-instance.window)
 
     window, exists := instance.windows[key]
     if false == exists {
+        if instance.maxKeys <= len(instance.windows) {
+            instance.pruneAtCeilingLocked(now)
+        }
+
+        if instance.maxKeys <= len(instance.windows) {
+            return false
+        }
+
         window = &slidingWindow{
             requests: make([]time.Time, 0),
         }
@@ -222,9 +284,7 @@ func (instance *SlidingWindowLimiter) Close() error {
     return nil
 }
 
-func (instance *SlidingWindowLimiter) cleanupIfNeededLocked() {
-    now := instance.clockInstance.Now()
-
+func (instance *SlidingWindowLimiter) cleanupIfNeededLocked(now time.Time) {
     if true == instance.lastCleanupAt.IsZero() {
         instance.lastCleanupAt = now
         return
@@ -234,6 +294,23 @@ func (instance *SlidingWindowLimiter) cleanupIfNeededLocked() {
         return
     }
 
+    instance.pruneIdleLocked(now)
+
+    instance.lastCleanupAt = now
+}
+
+/* pruneAtCeilingLocked reclaims idle entries when the map is full, at most once per window. The prune walks the whole map, and at the ceiling every request under an unseen key would pay that walk while holding the lock all traffic shares — the bound meant to protect memory would become a processing amplifier for the very traffic it exists to survive. An entry only falls idle after twice the window, so a finer cadence cannot free meaningfully more; between prunes an unseen key is denied without a walk. */
+func (instance *SlidingWindowLimiter) pruneAtCeilingLocked(now time.Time) {
+    if false == instance.lastCeilingPruneAt.IsZero() && instance.window > now.Sub(instance.lastCeilingPruneAt) {
+        return
+    }
+
+    instance.lastCeilingPruneAt = now
+
+    instance.pruneIdleLocked(now)
+}
+
+func (instance *SlidingWindowLimiter) pruneIdleLocked(now time.Time) {
     for key, window := range instance.windows {
         if 0 == len(window.requests) {
             delete(instance.windows, key)
@@ -245,8 +322,6 @@ func (instance *SlidingWindowLimiter) cleanupIfNeededLocked() {
             delete(instance.windows, key)
         }
     }
-
-    instance.lastCleanupAt = now
 }
 
 var _ httpcontract.RateLimiter = (*SlidingWindowLimiter)(nil)
@@ -264,20 +339,6 @@ func DefaultClientIp(request httpcontract.Request) string {
     }
 
     return host
-}
-
-/* normalizeBucketPath mirrors the router's splitPath trailing-slash normalization (router_utility.go) so /login, /login/ and /login// (which all execute the same handler) share one rate-limit bucket instead of minting a fresh full allowance per trailing-slash variant. */
-func normalizeBucketPath(path string) string {
-    if 1 < len(path) {
-        trimmedPath := strings.TrimRight(path, "/")
-        if "" == trimmedPath {
-            return "/"
-        }
-
-        return trimmedPath
-    }
-
-    return path
 }
 
 type RateLimitConfig struct {
@@ -338,9 +399,7 @@ func RateLimitMiddleware(config *RateLimitConfig) httpcontract.Middleware {
 
     if nil == config.KeyExtractor() {
         config.SetKeyExtractor(func(request httpcontract.Request) string {
-            ip := config.clientIp(request)
-
-            return fmt.Sprintf("%s:%s", ip, normalizeBucketPath(request.HttpRequest().URL.Path))
+            return config.clientIp(request)
         })
     }
 

@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- rate limit: the default key extractor now keys on the client IP alone instead of `ip:path`. `SimpleRateLimit(n)` is therefore a true per-IP budget of `n` requests per minute rather than `n` per IP per path — a client that varied the path could previously never trip the limit. **Behavioural change**: an application relying on the old per-path budgets must set a path-aware `KeyExtractor` explicitly. Both limiters also bound how many distinct keys they track (`SetMaxKeys`, default 1,000,000): once the map is full and an idle-entry prune frees nothing, a request under an unseen key is denied rather than growing the map without bound. The reclaim walk runs at most once per window, so a full limiter cannot be made to pay a whole-map scan for every request under an unseen key
+
+### Fixed
+
+- config: registering a runtime parameter after boot no longer writes back onto a referenced parameter's resolved value, so a consumer holding the parameter pointer and reading it without a lock no longer races the write — the referenced value is stored only during boot, and the post-boot re-resolution is deterministic anyway
+- container: two distinct zero-size services (`struct{}` pointers, which share one address), or a service pointer that aliases another service's first field, are each closed on teardown instead of being collapsed onto one representative by address alone and one of them silently skipped — the teardown identity now pairs the address with the concrete pointer type
+- cli: a command that returns an exit-coded error now exits through the application's own shutdown and logging path (structured error log, container close) instead of the cli library calling `os.Exit` from inside its run and bypassing them
+
 ## [v1.18.1] - 2026-07-24 - Contained Container Teardown Panics and Padded Skip Marker
 
 ### Fixed

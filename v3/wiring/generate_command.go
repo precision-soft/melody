@@ -6,6 +6,7 @@ import (
     "path/filepath"
     "sort"
     "strings"
+    "unicode"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/config"
@@ -56,6 +57,14 @@ func (instance *GenerateCommand) Flags() []clicontract.Flag {
             Name:  "report-vendor",
             Usage: "name the vendor directories the scan stepped over",
         },
+        &clicontract.StringFlag{
+            Name:  "tags",
+            Usage: "comma-separated build tags the target binary carries, so a constructor gated on one of them is scanned; the generated file is then specific to those tags and must be built with them, since it names constructors the untagged build does not have",
+        },
+        &clicontract.BoolFlag{
+            Name:  "report-excluded",
+            Usage: "name the build-excluded files that hold a constructor candidate",
+        },
     }
 }
 
@@ -76,12 +85,18 @@ func (instance *GenerateCommand) Run(
         declaredParameters[name] = true
     }
 
+    buildTags, buildTagsErr := splitBuildTags(commandContext.String("tags"))
+    if nil != buildTagsErr {
+        return buildTagsErr
+    }
+
     source, report, generateErr := Generate(&GenerateRequest{
         ProjectDirectory:   projectDirectory,
         PackageName:        commandContext.String("package"),
         FunctionName:       commandContext.String("function"),
         BindSet:            instance.bindSet,
         DeclaredParameters: declaredParameters,
+        BuildTags:          buildTags,
     })
     if nil != generateErr {
         return generateErr
@@ -180,6 +195,13 @@ func (instance *GenerateCommand) writeReport(
         }
     }
 
+    /* a build-excluded file holding a candidate is opt-in for the same reason: a foreign-GOOS variant is legitimate noise, but a user missing a service built under a tag can ask which files the scan left out and pass the tag through --tags */
+    if true == commandContext.Bool("report-excluded") {
+        for _, excludedFile := range report.ExcludedFiles {
+            fmt.Fprintf(commandContext.Writer, "excluded by build constraints (holds a constructor candidate): %s\n", excludedFile)
+        }
+    }
+
     for _, unused := range report.UnusedBinds {
         fmt.Fprintf(commandContext.Writer, "bind %s matched no constructor argument\n", unused)
     }
@@ -202,6 +224,53 @@ func (instance *GenerateCommand) writeReport(
             strings.Join(constructors, ", "),
         )
     }
+}
+
+/* splitBuildTags parses the comma-separated tag list. A build context carries plain tag identifiers, not constraint expressions: a negation or a space-separated pair reaches it as a tag no file can ever declare, so the scan would silently behave as if nothing had been passed — the tagged files stay excluded, their services stay missing from the generated wiring, and strict still reports success. Reject the malformed entry here instead, where the mistake is still traceable to what was typed. */
+func splitBuildTags(tags string) ([]string, error) {
+    if "" == tags {
+        return nil, nil
+    }
+
+    buildTags := make([]string, 0)
+    for _, tag := range strings.Split(tags, ",") {
+        trimmedTag := strings.TrimSpace(tag)
+        if "" == trimmedTag {
+            continue
+        }
+
+        if false == isBuildTagIdentifier(trimmedTag) {
+            return nil, exception.NewError(
+                "a build tag must be a plain tag identifier, not a constraint expression",
+                map[string]any{
+                    "tag":  trimmedTag,
+                    "tags": tags,
+                },
+                nil,
+            )
+        }
+
+        buildTags = append(buildTags, trimmedTag)
+    }
+
+    return buildTags, nil
+}
+
+/* isBuildTagIdentifier mirrors go/build's own isValidTag so a tag the go tool would accept is never rejected here: any unicode letter or digit, plus underscore and dot. */
+func isBuildTagIdentifier(tag string) bool {
+    for _, character := range tag {
+        if true == unicode.IsLetter(character) || true == unicode.IsDigit(character) {
+            continue
+        }
+
+        if '_' == character || '.' == character {
+            continue
+        }
+
+        return false
+    }
+
+    return true
 }
 
 var _ clicontract.Command = (*GenerateCommand)(nil)

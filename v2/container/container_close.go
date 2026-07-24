@@ -85,7 +85,7 @@ func (instance *container) closeInternal() error {
     /* @important the same instance can be created under several node keys (a named service that also registers its type lives under both "service:<name>" and "type:<T>"); collapse those aliases onto one representative so a dependency edge recorded against any alias constrains the close order of the shared instance and it is closed exactly once in dependent-before-dependency order. The "type:<T>" node is collapsed onto its backing "service:<name>" structurally (via typeRegistrationNamesByType), which is correct even for a value-type service whose dynamic contents are not hashable; pointer/value identity then groups any remaining same-instance aliases */
     valueOfNodeKey := make(map[string]any, len(createdNodeKeys))
     representativeOf := make(map[string]string, len(createdNodeKeys))
-    pointerRepresentative := make(map[uintptr]string, len(createdNodeKeys))
+    pointerRepresentative := make(map[pointerIdentity]string, len(createdNodeKeys))
     valueRepresentative := make(map[any]string, len(createdNodeKeys))
     canonicalNodeKeys := make([]string, 0, len(createdNodeKeys))
 
@@ -287,7 +287,7 @@ func (instance *container) closeInternal() error {
 
     instance.mutex.Unlock()
 
-    closedPointers := make(map[uintptr]struct{})
+    closedPointers := make(map[pointerIdentity]struct{})
     closedValues := make(map[any]struct{})
     failures := make(map[string]string)
 
@@ -427,9 +427,14 @@ func isComparableValue(value any) bool {
     return reflect.ValueOf(value).Comparable()
 }
 
-func pointerKeyOf(value any) (uintptr, bool) {
+type pointerIdentity struct {
+    pointer   uintptr
+    valueType reflect.Type
+}
+
+func pointerKeyOf(value any) (pointerIdentity, bool) {
     if true == internal.IsNilInterface(value) {
-        return 0, false
+        return pointerIdentity{}, false
     }
 
     reflected := reflect.ValueOf(value)
@@ -439,8 +444,8 @@ func pointerKeyOf(value any) (uintptr, bool) {
     }
 
     if reflect.Pointer == reflected.Kind() && false == reflected.IsNil() {
-        return reflected.Pointer(), true
+        return pointerIdentity{pointer: reflected.Pointer(), valueType: reflected.Type()}, true
     }
 
-    return 0, false
+    return pointerIdentity{}, false
 }

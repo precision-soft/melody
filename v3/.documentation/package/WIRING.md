@@ -37,7 +37,9 @@ Generation **fails** when a scalar argument no bind covers, and — when run thr
 cli.RegisterCommand(wiring.NewGenerateCommand(config.NewWiringBindSet()))
 ```
 
-Flags: `--out <path>` (write to a file relative to the project directory; prints to stdout when empty), `--package <name>` (default `config`), `--function <name>` (default `RegisterGeneratedServices`), `--strict`. The committed generated file is what the application registers, so it is regenerated whenever a scanned constructor changes and kept under version control.
+Flags: `--out <path>` (write to a file relative to the project directory; prints to stdout when empty), `--package <name>` (default `config`), `--function <name>` (default `RegisterGeneratedServices`), `--strict`, `--tags <a,b>` (build tags the target binary carries), `--report-vendor` (name the vendor directories the scan stepped over), `--report-excluded` (name the build-excluded files that hold a constructor candidate). The committed generated file is what the application registers, so it is regenerated whenever a scanned constructor changes and kept under version control.
+
+A file the build excludes contributes nothing to the binary the wiring is generated for, so the scan skips it — the unsatisfied half of a tag pair, a foreign `GOOS` suffix, a `//go:build ignore` script. `--tags` tells the scan which tags the binary carries, so a constructor gated on one of them is scanned instead of dropped with its service silently missing; the value is a comma-separated list of plain tag identifiers, not a constraint expression, and anything else is rejected rather than quietly matching no file. The generated source is then specific to that tag set and must be built with the same tags, since it names constructors an untagged build does not have. `--report-excluded` names the excluded files that do hold a constructor candidate, so a service missing from the output traces back to the tag it needs; `--strict` does not fail on them, because the scan cannot know which target the file was written for.
 
 ## Usage
 

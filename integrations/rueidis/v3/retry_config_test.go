@@ -38,6 +38,8 @@ func TestIsTransientError(t *testing.T) {
         "EOF",
         "read tcp: use of closed network connection",
         "read: connection reset by peer",
+        "write tcp: software caused connection abort",
+        "write tcp: An established connection was aborted by the software in your host machine.",
         "LOADING Redis is loading the dataset in memory",
     }
     for _, message := range transient {

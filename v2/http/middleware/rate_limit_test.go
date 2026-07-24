@@ -254,7 +254,7 @@ func TestDefaultKeyExtractor_UsesRemoteAddrByDefault(t *testing.T) {
 
     key := config.KeyExtractor()(melodyRequest)
 
-    if "10.20.30.40:/api/data" != key {
+    if "10.20.30.40" != key {
         t.Fatalf("unexpected key: %s", key)
     }
 }
@@ -277,7 +277,7 @@ func TestRateLimitConfig_ClientIpResolver_OverridesDefault(t *testing.T) {
 
     key := config.KeyExtractor()(melodyRequest)
 
-    if "1.1.1.1:/api/data" != key {
+    if "1.1.1.1" != key {
         t.Fatalf("expected resolver-provided IP, got: %s", key)
     }
 }
@@ -445,7 +445,7 @@ func TestTokenBucketLimiter_NonPositiveRateDoesNotDenyAll(t *testing.T) {
     }
 }
 
-func TestDefaultKeyExtractor_NormalizesTrailingSlashPaths(t *testing.T) {
+func TestDefaultKeyExtractor_KeysOnClientIpAcrossPaths(t *testing.T) {
     limiter := NewTokenBucketLimiterWithClock(clock.NewFrozenClock(time.Now()), 10, time.Minute)
     config := NewRateLimitConfig(limiter, nil, nil)
     _ = RateLimitMiddleware(config)
@@ -458,14 +458,142 @@ func TestDefaultKeyExtractor_NormalizesTrailingSlashPaths(t *testing.T) {
     }
 
     canonical := keyFor("/login")
-    if "1.2.3.4:/login" != canonical {
-        t.Fatalf("unexpected canonical key: %s", canonical)
+    if "1.2.3.4" != canonical {
+        t.Fatalf("unexpected key: %s", canonical)
     }
 
-    for _, path := range []string{"/login/", "/login//", "/login///"} {
+    for _, path := range []string{"/dashboard", "/api/data", "/a/b/c"} {
         if canonical != keyFor(path) {
-            t.Fatalf("expected %q to share the /login bucket, got %q", path, keyFor(path))
+            t.Fatalf("expected %q from the same ip to share one bucket, got %q", path, keyFor(path))
         }
+    }
+}
+
+func TestTokenBucketLimiter_MaxKeysDeniesUnseenKeyWhenFull(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewTokenBucketLimiterWithClock(frozenClock, 5, time.Minute)
+    limiter.SetMaxKeys(2)
+
+    if false == limiter.Allow("a") {
+        t.Fatalf("expected the first key to be admitted")
+    }
+    if false == limiter.Allow("b") {
+        t.Fatalf("expected the second key to be admitted")
+    }
+
+    if true == limiter.Allow("c") {
+        t.Fatalf("expected an unseen key to be denied once the map is full of active entries")
+    }
+
+    if false == limiter.Allow("a") {
+        t.Fatalf("expected an already-tracked key to keep being served")
+    }
+
+    limiter.mutex.RLock()
+    trackedKeys := len(limiter.buckets)
+    limiter.mutex.RUnlock()
+
+    if 2 != trackedKeys {
+        t.Fatalf("expected the map to stay bounded at 2 keys, got %d", trackedKeys)
+    }
+}
+
+func TestTokenBucketLimiter_MaxKeysReclaimsIdleBeforeDenying(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewTokenBucketLimiterWithClock(frozenClock, 5, time.Minute)
+    limiter.SetMaxKeys(2)
+
+    limiter.Allow("a")
+    limiter.Allow("b")
+
+    frozenClock.Advance(3 * time.Minute)
+
+    if false == limiter.Allow("c") {
+        t.Fatalf("expected an unseen key to be admitted after idle entries are reclaimed")
+    }
+}
+
+func TestSlidingWindowLimiter_MaxKeysDeniesUnseenKeyWhenFull(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewSlidingWindowLimiterWithClock(frozenClock, 5, time.Minute)
+    limiter.SetMaxKeys(2)
+
+    if false == limiter.Allow("a") {
+        t.Fatalf("expected the first key to be admitted")
+    }
+    if false == limiter.Allow("b") {
+        t.Fatalf("expected the second key to be admitted")
+    }
+
+    if true == limiter.Allow("c") {
+        t.Fatalf("expected an unseen key to be denied once the map is full of active entries")
+    }
+
+    limiter.mutex.RLock()
+    trackedKeys := len(limiter.windows)
+    limiter.mutex.RUnlock()
+
+    if 2 != trackedKeys {
+        t.Fatalf("expected the map to stay bounded at 2 keys, got %d", trackedKeys)
+    }
+}
+
+/* @info the ceiling prune walks the whole map, so running it for every unseen key would make a full limiter cost O(tracked keys) per request under the lock all traffic shares; it runs at most once per window, and the reclaim it defers lands on the next walk */
+func TestTokenBucketLimiter_CeilingPruneRunsAtMostOncePerWindow(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewTokenBucketLimiterWithClock(frozenClock, 5, time.Minute)
+    limiter.SetMaxKeys(2)
+
+    limiter.Allow("a")
+    limiter.Allow("b")
+
+    frozenClock.Advance(110 * time.Second)
+
+    /* the first unseen key walks the map; nothing is idle yet (an entry falls idle after twice the window), so it is denied */
+    if true == limiter.Allow("c") {
+        t.Fatalf("expected an unseen key to be denied while every entry is still active")
+    }
+
+    frozenClock.Advance(20 * time.Second)
+
+    /* both entries are idle now, but the previous walk ran 20 seconds ago — inside the window — so this request is denied without paying for another walk */
+    if true == limiter.Allow("d") {
+        t.Fatalf("expected an unseen key to be denied without a second map walk inside the same window")
+    }
+
+    frozenClock.Advance(40 * time.Second)
+
+    /* a full window has passed since the last walk, so the idle entries are reclaimed and the unseen key is admitted */
+    if false == limiter.Allow("e") {
+        t.Fatalf("expected the idle entries to be reclaimed once a window has passed since the last walk")
+    }
+}
+
+/* @info the sliding window limiter carries the same ceiling walk and the same once-per-window gate */
+func TestSlidingWindowLimiter_CeilingPruneRunsAtMostOncePerWindow(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewSlidingWindowLimiterWithClock(frozenClock, 5, time.Minute)
+    limiter.SetMaxKeys(2)
+
+    limiter.Allow("a")
+    limiter.Allow("b")
+
+    frozenClock.Advance(110 * time.Second)
+
+    if true == limiter.Allow("c") {
+        t.Fatalf("expected an unseen key to be denied while every entry is still active")
+    }
+
+    frozenClock.Advance(20 * time.Second)
+
+    if true == limiter.Allow("d") {
+        t.Fatalf("expected an unseen key to be denied without a second map walk inside the same window")
+    }
+
+    frozenClock.Advance(40 * time.Second)
+
+    if false == limiter.Allow("e") {
+        t.Fatalf("expected the idle entries to be reclaimed once a window has passed since the last walk")
     }
 }
 

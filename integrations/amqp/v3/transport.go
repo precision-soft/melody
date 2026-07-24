@@ -530,13 +530,14 @@ func (instance *Transport) consumeLoop(
             return
         }
 
-        /* @important a lost consume channel on a live static connection (no dialer) is recoverable: connect() still hands back the live connection and a fresh channel can be opened on it, mirroring server_sent_event_backplane.go liveConnection. Only give up when the connection itself is gone and no dialer can redial — there a re-subscribe can never recover. */
-        if nil == instance.dialer && false == instance.connectionAlive() {
-            instance.logError(
-                runtimeInstance,
-                "amqp deliveries channel closed and the connection is gone with no dialer, consumer is stopping",
-                exception.NewError("amqp deliveries channel closed", map[string]any{"queue": instance.queue}, nil),
-            )
+        if false == instance.subscribeRetryable() {
+            if nil == runtimeInstance.Context().Err() && false == instance.isClosing() {
+                instance.logError(
+                    runtimeInstance,
+                    "amqp deliveries channel closed and the connection is gone with no dialer, consumer is stopping",
+                    exception.NewError("amqp deliveries channel closed", map[string]any{"queue": instance.queue}, nil),
+                )
+            }
 
             return
         }
@@ -561,6 +562,10 @@ func (instance *Transport) consumeLoop(
 
         reopenedChannel, reopenedDeliveries, reopenErr := instance.reopenConsume(runtimeInstance, &backoff)
         if nil != reopenErr {
+            if nil == runtimeInstance.Context().Err() && false == instance.isClosing() {
+                instance.logError(runtimeInstance, "amqp consumer failed to reopen its channel and is stopping", reopenErr)
+            }
+
             return
         }
 
@@ -681,7 +686,7 @@ func (instance *Transport) retrySubscribe(
             return nil, nil, subscribeErr
         }
 
-        if nil == instance.dialer {
+        if false == instance.subscribeRetryable() {
             return nil, nil, subscribeErr
         }
 
@@ -777,6 +782,19 @@ func (instance *Transport) connectionAlive() bool {
 
 /* publishRetryable reports whether a failed publish is worth one retry on a fresh channel: a closing transport never retries; otherwise a dialer can reconnect, or a live static connection (no dialer) can open a new channel on the same live connection. Only a no-dialer transport whose connection is gone gives up without retrying, since a fresh channel can never be opened there. */
 func (instance *Transport) publishRetryable() bool {
+    if true == instance.isClosing() {
+        return false
+    }
+
+    if nil != instance.dialer {
+        return true
+    }
+
+    return instance.connectionAlive()
+}
+
+/* @important a lost consume channel on a live static connection (no dialer) is recoverable: connect() still hands back the live connection and a fresh channel can be opened on it, mirroring server_sent_event_backplane.go liveConnection. Only give up when the connection itself is gone and no dialer can redial — there a re-subscribe can never recover. */
+func (instance *Transport) subscribeRetryable() bool {
     if true == instance.isClosing() {
         return false
     }

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- a consumer on a live static connection (no dialer) recovers from a transient subscribe failure by retrying on a fresh channel instead of stopping permanently on the first failure — the live connection can still carry the subscription, so the transport gives up only when the connection itself is gone; a consumer that does stop because its channel cannot be reopened now logs the reason instead of ending silently after a "reconnecting" message, while a stop caused by the transport closing stays silent
+
 ## [v3.2.1] - 2026-07-11 - Prefetch Clamp, DSN Redaction, and Channel Recovery
 
 ### Fixed

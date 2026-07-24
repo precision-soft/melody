@@ -45,14 +45,23 @@ func buildSchema(targetType reflect.Type, components map[string]*Schema, names m
             return withNullable(&Schema{Type: "string", Format: "byte"}, nullable)
         }
 
-        return withNullable(&Schema{Type: "array", Items: buildSchema(targetType.Elem(), components, names, visited)}, nullable)
+        return withNullable(&Schema{Type: "array", Items: elementSchema(targetType.Elem(), components, names, visited)}, nullable)
     case reflect.Map:
-        return withNullable(&Schema{Type: "object", AdditionalProperties: buildSchema(targetType.Elem(), components, names, visited)}, nullable)
+        return withNullable(&Schema{Type: "object", AdditionalProperties: elementSchema(targetType.Elem(), components, names, visited)}, nullable)
     case reflect.Struct:
         return structSchemaReference(targetType, components, names, visited, nullable)
     default:
         return withNullable(&Schema{}, nullable)
     }
+}
+
+/* @important a collection element carries no validate tag of its own — a tag on the field constrains the collection, not each entry — so the unsigned floor is stamped here rather than left to addFieldProperty, which only ever sees the field. Without it the items schema of a []uint advertises the whole negative range the decoder rejects. The absence of a tag is also what makes the floor safe here: there is no validator-placed exclusive bound for it to weaken. */
+func elementSchema(elementType reflect.Type, components map[string]*Schema, names map[reflect.Type]string, visited map[reflect.Type]bool) *Schema {
+    schema := buildSchema(elementType, components, names, visited)
+
+    applyUnsignedLowerBound(schema, elementType)
+
+    return schema
 }
 
 func structSchemaReference(structType reflect.Type, components map[string]*Schema, names map[reflect.Type]string, visited map[reflect.Type]bool, nullable bool) *Schema {
@@ -129,7 +138,7 @@ func buildStructSchema(structType reflect.Type, components map[string]*Schema, n
     return schema
 }
 
-/* @important the validator runs a promoted embed's own validate tag against the embed value itself (validation/validator.go), so a tag no value satisfies — malformed syntax, unconsumable parameters, notEmpty/greaterThan/lessThan (a struct value falls into their reject branch and a nil embed pointer is rejected as null), a malformed numeric bound, a parseable max below the value embed's stringification floor — rejects every payload of the enclosing object; the promoted properties alone cannot express that, so the parent schema is contradicted instead. notBlank on a pointer embed (rejects only the all-promoted-properties-absent payload) has no cheap object-level advertisement and is left unmirrored. */
+/* @important the validator runs a promoted embed's own validate tag against the embed value itself (validation/validator.go), so a tag no value satisfies — malformed syntax, unconsumable parameters, notEmpty/greaterThan/lessThan (a struct value falls into their reject branch and a nil embed pointer is rejected as null), a malformed numeric bound, a parseable max below the value embed's stringification floor — rejects every payload of the enclosing object; the promoted properties alone cannot express that, so the parent schema is contradicted instead. notBlank on a pointer embed (rejects only the all-promoted-properties-absent payload) has no cheap object-level advertisement and is left unmirrored. A reject-all tag on an embed reached only through a pointer embed at a deeper level is a related over-approximation: the object is advertised unsatisfiable, while the validator skips the tag for a payload that never materialises the intervening pointer, so the spec is stricter than the server (fail-closed). Suppressing it would advertise the promoted properties as satisfiable when a payload that reaches them is always rejected, so the safe over-approximation stands rather than a faithless one. */
 func embedTagRejectsAll(field reflect.StructField) bool {
     validateTag := field.Tag.Get("validate")
 
@@ -338,18 +347,47 @@ func addFieldProperty(
     propertySchema := buildSchema(field.Type, components, names, visited)
     applyValidation(propertySchema, field.Tag.Get("validate"))
 
+    /* a fixed-length array carries the length its type fixes, so notEmpty's minItems floor is vacuous for it — the validator measures a length that can never fall below it; drop the floor the notEmpty branch stamped so the spec accepts what the server accepts. A schema another rule already contradicted keeps its floor: the maxItems 0 beside it is the other half of that contradiction, and dropping the floor alone would leave the empty array advertised as valid while the validator rejects every payload. */
+    if true == fixedArrayNotEmptyIsVacuous(field) && nil == propertySchema.MaxItems {
+        propertySchema.MinItems = nil
+    }
+
     /* @important the required and validation decisions run against the bare scalar schema first: the validator sees the DECODED value, so its rules and the absence semantics belong to the scalar, while the quoted advertisement below only changes how the payload spells it */
     fieldRequired := true == isRequired(field, propertySchema) || true == pointerBoundRequiresPresence(field) || true == zeroValueRejectsAbsentProperty(field, propertySchema)
 
     if quotedKind, isQuoted := jsonStringOptionKind(field); true == isQuoted {
         quotedFieldIsPointer := "" == field.Type.Name() && reflect.Ptr == field.Type.Kind()
         propertySchema = quotedScalarSchema(propertySchema, quotedKind, quotedFieldIsPointer)
+    } else {
+        applyUnsignedLowerBound(propertySchema, field.Type)
     }
 
     properties[jsonName] = propertySchema
 
     if true == fieldRequired {
         *required = append(*required, jsonName)
+    }
+}
+
+/* @important an unsigned field cannot decode a negative number, so the validator never sees one, yet a kind-blind integer schema advertises the whole negative range as valid; stamp a zero floor so the spec rejects what the decoder rejects. The floor is raise-only and never weakens a bound the validator already placed at or above zero — a value-less greaterThan leaves its exclusive zero minimum intact. */
+func applyUnsignedLowerBound(schema *Schema, fieldType reflect.Type) {
+    for reflect.Ptr == fieldType.Kind() {
+        fieldType = fieldType.Elem()
+    }
+
+    switch fieldType.Kind() {
+    case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+        if "integer" != schema.Type {
+            return
+        }
+
+        if nil != schema.Minimum && 0 <= *schema.Minimum {
+            return
+        }
+
+        floor := float64(0)
+        schema.Minimum = &floor
+        schema.ExclusiveMinimum = nil
     }
 }
 
@@ -686,6 +724,11 @@ func isRequired(field reflect.StructField, schema *Schema) bool {
         name, _ := splitRule(rule)
 
         if "notEmpty" == name {
+            /* notEmpty on a fixed-length array is vacuous: the validator measures len(), which for [N]T (N >= 1) is always N, so it never rejects the field, present or absent — a non-pointer fixed array is therefore not required. A *[N]T stays required, since the validator rejects the nil pointer. */
+            if reflect.Array == field.Type.Kind() && 1 <= field.Type.Len() {
+                return false
+            }
+
             return true
         }
 
@@ -693,6 +736,22 @@ func isRequired(field reflect.StructField, schema *Schema) bool {
             if true == absenceIsNil || ("string" == schema.Type && false == isStructuralStringFormat(schema.Format)) {
                 return true
             }
+        }
+    }
+
+    return false
+}
+
+/* fixedArrayNotEmptyIsVacuous reports whether a field is a non-pointer fixed-length array carrying notEmpty, for which the validator's length check can never fail — the property is neither required nor floored, so the spec matches the server that accepts any array length (a longer payload truncates, a shorter one zero-fills). */
+func fixedArrayNotEmptyIsVacuous(field reflect.StructField) bool {
+    if reflect.Array != field.Type.Kind() || 1 > field.Type.Len() {
+        return false
+    }
+
+    for _, rule := range splitRules(field.Tag.Get("validate")) {
+        name, _ := splitRule(rule)
+        if "notEmpty" == name {
+            return true
         }
     }
 

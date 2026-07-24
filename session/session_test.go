@@ -20,8 +20,8 @@ func TestIsValidSessionId(t *testing.T) {
     }
 
     for value, expected := range cases {
-        if expected != isValidSessionId(value) {
-            t.Fatalf("isValidSessionId(%q) = %v, want %v", value, !expected, expected)
+        if result := isValidSessionId(value); expected != result {
+            t.Fatalf("isValidSessionId(%q) = %v, want %v", value, result, expected)
         }
     }
 }

@@ -133,8 +133,18 @@ func TestIsTransientErrorClassification(t *testing.T) {
             transient: true,
         },
         {
-            name:      "net temporary error is transient",
+            name:      "net error with only the deprecated temporary flag is not transient",
             inputErr:  &stubTemporaryError{message: "resource momentarily busy"},
+            transient: false,
+        },
+        {
+            name:      "connection abort marker is transient",
+            inputErr:  errors.New("write tcp 10.0.0.1:5432: software caused connection abort"),
+            transient: true,
+        },
+        {
+            name:      "windows connection abort marker is transient",
+            inputErr:  errors.New("write tcp 10.0.0.1:5432: An established connection was aborted by the software in your host machine."),
             transient: true,
         },
         {

@@ -1,6 +1,7 @@
 package application
 
 import (
+    "context"
     "fmt"
     "io"
     "os"
@@ -154,6 +155,8 @@ func (instance *Application) runCli() error {
     rootCli := cli.NewCommandContext(configuration.Cli().Name(), configuration.Cli().Description())
     rootCli.Writer = os.Stdout
     rootCli.ErrWriter = os.Stderr
+    rootCli.ExitErrHandler = func(handlerContext context.Context, handlerCommandContext *clicontract.CommandContext, handlerErr error) {
+    }
 
     availableCommands := make([]commandSuggestion, 0, len(instance.cliCommands))
 

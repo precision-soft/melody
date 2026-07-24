@@ -30,6 +30,8 @@ type GenerateRequest struct {
     BindSet          *BindSet
     /* DeclaredParameters is the set of parameter names the application declares. When it is empty the generator cannot check a bind target and says so instead of assuming the target exists. */
     DeclaredParameters map[string]bool
+    /* BuildTags are the build tags the target binary carries, so a constructor gated on one of them is scanned rather than dropped. */
+    BuildTags []string
 }
 
 type GenerateReport struct {
@@ -37,8 +39,10 @@ type GenerateReport struct {
     Skipped          []*SkippedConstructor
     /* SkippedVendorDirectories names the vendor trees the scan stepped over; strict does not fail on them — they cannot contribute services — but the command can name them on request. */
     SkippedVendorDirectories []string
-    UnusedBinds              []string
-    GlobalBindReach          map[string][]string
+    /* ExcludedFiles names the build-excluded files that hold a constructor candidate; strict does not fail on them, but the command can name them on request so a missing service traces back to the tag it needs. */
+    ExcludedFiles   []string
+    UnusedBinds     []string
+    GlobalBindReach map[string][]string
 }
 
 /* Generate scans every declared package and renders the registration source. It fails on the first constructor whose scalar argument no bind covers: an unfilled scalar has no safe default, and letting it through would move the failure to a runtime far from its cause. */
@@ -55,6 +59,7 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
     report := &GenerateReport{
         Skipped:                  make([]*SkippedConstructor, 0),
         SkippedVendorDirectories: make([]string, 0),
+        ExcludedFiles:            make([]string, 0),
         UnusedBinds:              make([]string, 0),
         GlobalBindReach:          make(map[string][]string),
     }
@@ -112,13 +117,14 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
     unusedDirectiveBinds := make([]string, 0)
 
     for _, packageBinding := range request.BindSet.Packages() {
-        scanResult, scanErr := Scan(request.ProjectDirectory, packageBinding)
+        scanResult, scanErr := Scan(request.ProjectDirectory, packageBinding, request.BuildTags)
         if nil != scanErr {
             return "", nil, scanErr
         }
 
         report.Skipped = append(report.Skipped, scanResult.Skipped...)
         report.SkippedVendorDirectories = append(report.SkippedVendorDirectories, scanResult.SkippedVendorDirectories...)
+        report.ExcludedFiles = append(report.ExcludedFiles, scanResult.ExcludedFiles...)
 
         for _, constructor := range scanResult.Constructors {
             resolvedArguments, constructorUnusedDirectiveBinds, resolveErr := resolveArguments(

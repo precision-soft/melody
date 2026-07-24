@@ -570,6 +570,132 @@ func TestContainer_Close_OverrideProtectedInstanceWithoutTypeRegistrationClosesO
     }
 }
 
+type zeroSizeCloserOne struct{}
+
+func (instance *zeroSizeCloserOne) Close() error {
+    zeroSizeCloserOneClosed = true
+    return nil
+}
+
+type zeroSizeCloserTwo struct{}
+
+func (instance *zeroSizeCloserTwo) Close() error {
+    zeroSizeCloserTwoClosed = true
+    return nil
+}
+
+var (
+    zeroSizeCloserOneClosed bool
+    zeroSizeCloserTwoClosed bool
+)
+
+func TestContainer_Close_DistinctZeroSizeServicesEachClose(t *testing.T) {
+    zeroSizeCloserOneClosed = false
+    zeroSizeCloserTwoClosed = false
+
+    serviceContainer := NewContainer()
+
+    MustRegister[*zeroSizeCloserOne](
+        serviceContainer,
+        "zero.size.one",
+        func(resolver containercontract.Resolver) (*zeroSizeCloserOne, error) {
+            return &zeroSizeCloserOne{}, nil
+        },
+    )
+
+    MustRegister[*zeroSizeCloserTwo](
+        serviceContainer,
+        "zero.size.two",
+        func(resolver containercontract.Resolver) (*zeroSizeCloserTwo, error) {
+            return &zeroSizeCloserTwo{}, nil
+        },
+    )
+
+    _ = MustFromResolver[*zeroSizeCloserOne](serviceContainer, "zero.size.one")
+    _ = MustFromResolver[*zeroSizeCloserTwo](serviceContainer, "zero.size.two")
+
+    if err := serviceContainer.Close(); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    if false == zeroSizeCloserOneClosed {
+        t.Fatalf("expected the first zero-size service to be closed")
+    }
+
+    if false == zeroSizeCloserTwoClosed {
+        t.Fatalf("expected the second zero-size service to be closed")
+    }
+}
+
+type firstFieldOuterCloser struct {
+    inner   firstFieldInnerCloser
+    counter *int
+    lock    *sync.Mutex
+}
+
+func (instance *firstFieldOuterCloser) Close() error {
+    instance.lock.Lock()
+    defer instance.lock.Unlock()
+
+    *instance.counter++
+
+    return nil
+}
+
+type firstFieldInnerCloser struct {
+    counter *int
+    lock    *sync.Mutex
+}
+
+func (instance *firstFieldInnerCloser) Close() error {
+    instance.lock.Lock()
+    defer instance.lock.Unlock()
+
+    *instance.counter += 10
+
+    return nil
+}
+
+func TestContainer_Close_FirstFieldPointerAliasEachClose(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var lock sync.Mutex
+    count := 0
+
+    outer := &firstFieldOuterCloser{counter: &count, lock: &lock}
+    outer.inner = firstFieldInnerCloser{counter: &count, lock: &lock}
+
+    MustRegister[*firstFieldOuterCloser](
+        serviceContainer,
+        "first.field.outer",
+        func(resolver containercontract.Resolver) (*firstFieldOuterCloser, error) {
+            return outer, nil
+        },
+    )
+
+    MustRegister[*firstFieldInnerCloser](
+        serviceContainer,
+        "first.field.inner",
+        func(resolver containercontract.Resolver) (*firstFieldInnerCloser, error) {
+            return &outer.inner, nil
+        },
+    )
+
+    _ = MustFromResolver[*firstFieldOuterCloser](serviceContainer, "first.field.outer")
+    _ = MustFromResolver[*firstFieldInnerCloser](serviceContainer, "first.field.inner")
+
+    if err := serviceContainer.Close(); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    lock.Lock()
+    defer lock.Unlock()
+
+    if 11 != count {
+        t.Fatalf("expected both the outer and the first-field-aliased inner service to close, got counter %d", count)
+    }
+}
+
 /* @info a concurrent second Close must not report success while the first is still tearing services down: both callers get the first teardown's result once it finishes */
 func TestClose_ConcurrentCallersShareTheResult(t *testing.T) {
     serviceContainer := NewContainer()

@@ -4,6 +4,7 @@ import (
     "errors"
     "fmt"
     "strings"
+    "sync"
     "testing"
     "time"
 
@@ -621,4 +622,39 @@ func TestResolveTemplate_ClosedMisspelledPlaceholderIsStillReported(t *testing.T
     if false == strings.Contains(resolveErr.Error(), "malformed environment placeholder") {
         t.Fatalf("unexpected error: %v", resolveErr)
     }
+}
+
+func TestRegisterRuntime_ConcurrentWithReadsOfAReferencedParameter(t *testing.T) {
+    configuration := newResolvedConfiguration(
+        t,
+        map[string]string{"ACME_HOST": "acme.example"},
+        func(configuration *Configuration) {
+            configuration.RegisterRuntime("app.host", "%env(ACME_HOST)%")
+        },
+    )
+
+    var waitGroup sync.WaitGroup
+    waitGroup.Add(2)
+
+    go func() {
+        defer waitGroup.Done()
+
+        for iteration := 0; iteration < 1000; iteration++ {
+            configuration.RegisterRuntime(fmt.Sprintf("app.derived.%d", iteration), "%app.host%:8080")
+        }
+    }()
+
+    go func() {
+        defer waitGroup.Done()
+
+        for iteration := 0; iteration < 1000; iteration++ {
+            if "acme.example" != configuration.Get("app.host").String() {
+                t.Errorf("expected the referenced parameter to keep its resolved value")
+
+                return
+            }
+        }
+    }()
+
+    waitGroup.Wait()
 }

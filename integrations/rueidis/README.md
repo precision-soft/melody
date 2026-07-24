@@ -246,3 +246,5 @@ defer backplane.Close()
 ```
 
 `NewServerSentEventBackplane` calls `hub.SetBackplane` itself, so after construction `hub.Broadcast(...)` replicates automatically. The Redis client is caller-owned; `Close` stops the subscription but does not close the client. Delivery is best-effort like Server-Sent Events itself; `hub.BackplaneFailures()` counts broadcasts that could not be published.
+
+`WithServerSentEventBackplaneCallTimeout(d)` bounds one publish round trip (default 1s). The caller is typically an http handler broadcasting an event, and its context carries no deadline, so without a bound an unresponsive store holds the request instead of failing it. A publish that runs out of time is counted in `hub.BackplaneFailures()` like any other failed replication — the event reaches the local subscribers but not the other instances — so surface that counter as a metric if cross-instance delivery matters, and raise the timeout for a store whose round trip legitimately exceeds it. A non-positive value falls back to the default. The timeout derives from the backplane's own context, so `Close` also cancels a publish still in flight.

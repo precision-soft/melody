@@ -635,6 +635,29 @@ func TestPublishRetryable_LiveStaticConnectionRetriesWithoutDialer(t *testing.T)
     }
 }
 
+/* @info a transient subscribe failure on a live static connection (no dialer) must be retried on a fresh channel — the live connection can still carry the subscription — while a no-dialer transport whose connection is gone, or a closing transport, must give up. */
+func TestSubscribeRetryable_LiveStaticConnectionRetriesWithoutDialer(t *testing.T) {
+    liveStatic := &Transport{queue: "orders", connection: &amqp091.Connection{}}
+    if false == liveStatic.subscribeRetryable() {
+        t.Fatalf("expected a subscribe on a live static connection to be retryable without a dialer")
+    }
+
+    gone := &Transport{queue: "orders"}
+    if true == gone.subscribeRetryable() {
+        t.Fatalf("expected no retry when there is no dialer and no live connection")
+    }
+
+    dialerBacked := &Transport{queue: "orders", dialer: func() (*amqp091.Connection, error) { return nil, nil }}
+    if false == dialerBacked.subscribeRetryable() {
+        t.Fatalf("expected a dialer-backed transport to stay retryable")
+    }
+
+    closing := &Transport{queue: "orders", connection: &amqp091.Connection{}, closing: true}
+    if true == closing.subscribeRetryable() {
+        t.Fatalf("expected a closing transport never to retry a subscribe")
+    }
+}
+
 /* @info a consumer built on a live static connection with no dialer must recover from a channel-only loss (queue deleted, broker basic.cancel, a PRECONDITION_FAILED that closes only the channel): the live connection can still open a fresh channel, so the loop must re-subscribe instead of closing out and stopping. */
 func TestConsumeLoop_StaticLiveConnectionRecoversFromChannelOnlyLoss(t *testing.T) {
     ctx, cancel := context.WithCancel(context.Background())

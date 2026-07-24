@@ -16,7 +16,7 @@ func scanFixture(t *testing.T) *ScanResult {
 
     packageBinding := bindSet.Package(fixtureImportPath, fixtureDirectory)
 
-    scanResult, scanErr := Scan(fixtureProjectDir, packageBinding)
+    scanResult, scanErr := Scan(fixtureProjectDir, packageBinding, nil)
     if nil != scanErr {
         t.Fatalf("expected the fixture to scan, got %v", scanErr)
     }
@@ -193,7 +193,7 @@ func TestIsExcluded_MatchesTheReturnedTypeName(t *testing.T) {
 func TestScan_ReportsAMissingDirectory(t *testing.T) {
     bindSet := NewBindSet()
 
-    _, scanErr := Scan(fixtureProjectDir, bindSet.Package("github.com/acme/missing", "wiring/internal/fixture/missing"))
+    _, scanErr := Scan(fixtureProjectDir, bindSet.Package("github.com/acme/missing", "wiring/internal/fixture/missing"), nil)
     if nil == scanErr {
         t.Fatalf("expected a missing directory to be reported")
     }
@@ -316,7 +316,7 @@ func TestScan_SkipsVendorDirectoriesAndMainPackages(t *testing.T) {
     bindSet := NewBindSet()
     binding := bindSet.Package("example.com/proj/app", "app")
 
-    scanResult, scanErr := Scan(projectDirectory, binding)
+    scanResult, scanErr := Scan(projectDirectory, binding, nil)
     if nil != scanErr {
         t.Fatalf("scan: %v", scanErr)
     }
@@ -352,5 +352,55 @@ func TestScan_SkipsVendorDirectoriesAndMainPackages(t *testing.T) {
     /* the vendor tree is recorded separately: it cannot contribute services, so strict does not fail on it, but the report can name it on request */
     if 1 != len(scanResult.SkippedVendorDirectories) || false == strings.HasSuffix(scanResult.SkippedVendorDirectories[0], filepath.Join("app", "vendor")) {
         t.Fatalf("expected the vendor directory recorded, got %v", scanResult.SkippedVendorDirectories)
+    }
+}
+
+/* @info a constructor gated on a build tag the binary carries is dropped by the default build; the scan must be told the tag through --tags to include it, and name it as excluded otherwise so a missing service is traceable */
+func TestScan_BuildTaggedConstructorIsExcludedUntilTagIsPassed(t *testing.T) {
+    projectDirectory := t.TempDir()
+
+    writeScanFile := func(relativePath string, content string) {
+        t.Helper()
+
+        fullPath := filepath.Join(projectDirectory, relativePath)
+        if mkdirErr := os.MkdirAll(filepath.Dir(fullPath), 0o755); nil != mkdirErr {
+            t.Fatalf("mkdir: %v", mkdirErr)
+        }
+
+        if writeErr := os.WriteFile(fullPath, []byte(content), 0o644); nil != writeErr {
+            t.Fatalf("write: %v", writeErr)
+        }
+    }
+
+    writeScanFile("app/service.go", "package app\n\ntype Thing struct{}\n\nfunc NewThing() *Thing {\n    return &Thing{}\n}\n")
+    writeScanFile("app/postgres.go", "//go:build with_postgres\n\npackage app\n\ntype Postgres struct{}\n\nfunc NewPostgres() *Postgres {\n    return &Postgres{}\n}\n")
+
+    bindSet := NewBindSet()
+    binding := bindSet.Package("example.com/proj/app", "app")
+
+    withoutTag, scanErr := Scan(projectDirectory, binding, nil)
+    if nil != scanErr {
+        t.Fatalf("scan without tag: %v", scanErr)
+    }
+
+    if nil != constructorByName(withoutTag, "NewPostgres") {
+        t.Fatalf("expected the tagged constructor to be excluded without the build tag")
+    }
+
+    if 1 != len(withoutTag.ExcludedFiles) || false == strings.HasSuffix(withoutTag.ExcludedFiles[0], filepath.Join("app", "postgres.go")) {
+        t.Fatalf("expected the tagged file named as excluded, got %v", withoutTag.ExcludedFiles)
+    }
+
+    withTag, scanErr := Scan(projectDirectory, binding, []string{"with_postgres"})
+    if nil != scanErr {
+        t.Fatalf("scan with tag: %v", scanErr)
+    }
+
+    if nil == constructorByName(withTag, "NewPostgres") {
+        t.Fatalf("expected the tagged constructor to be scanned once its build tag is passed")
+    }
+
+    if 0 != len(withTag.ExcludedFiles) {
+        t.Fatalf("expected no excluded files once the tag is passed, got %v", withTag.ExcludedFiles)
     }
 }

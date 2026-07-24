@@ -236,6 +236,66 @@ func TestBuildSchema_NotEmptyEmitsCollectionFloors(t *testing.T) {
     }
 }
 
+func TestBuildSchema_NotEmptyOnFixedArrayIsVacuous(t *testing.T) {
+    components := map[string]*Schema{}
+    names := map[reflect.Type]string{}
+    visited := map[reflect.Type]bool{}
+
+    arrayType := reflect.TypeOf([2]int{})
+    pointerArrayType := reflect.TypeOf(&[2]int{})
+    requestType := reflect.StructOf([]reflect.StructField{
+        {Name: "Pair", Type: arrayType, Tag: `json:"pair" validate:"notEmpty"`},
+        {Name: "MaybePair", Type: pointerArrayType, Tag: `json:"maybe_pair" validate:"notEmpty"`},
+    })
+
+    schema := buildSchema(requestType, components, names, visited)
+
+    /* the validator's length check on a fixed array can never fail, so the server accepts any array length; the spec must neither require the field nor floor its length */
+    if pair := schema.Properties["pair"]; nil != pair.MinItems {
+        t.Fatalf("expected notEmpty on a fixed-length array to advertise no minItems, got %v", pair.MinItems)
+    }
+
+    for _, name := range schema.Required {
+        if "pair" == name {
+            t.Fatalf("expected a non-pointer fixed-length array not to be required under notEmpty")
+        }
+    }
+
+    /* a *[N]T stays required: the validator rejects the nil pointer */
+    maybeRequired := false
+    for _, name := range schema.Required {
+        if "maybe_pair" == name {
+            maybeRequired = true
+        }
+    }
+    if false == maybeRequired {
+        t.Fatalf("expected a pointer-to-fixed-array under notEmpty to stay required")
+    }
+}
+
+/* @info the vacuity of notEmpty on a fixed-length array must not dismantle the unsatisfiable marking another rule placed: dropping minItems 1 beside a maxItems 0 would leave the empty array advertised as valid while the validator rejects every payload */
+func TestBuildSchema_FixedArrayNotEmptyKeepsUnsatisfiableMarking(t *testing.T) {
+    components := map[string]*Schema{}
+    names := map[reflect.Type]string{}
+    visited := map[reflect.Type]bool{}
+
+    requestType := reflect.StructOf([]reflect.StructField{
+        {Name: "Codes", Type: reflect.TypeOf([3]int{}), Tag: `json:"codes" validate:"notEmpty,min=abc"`},
+    })
+
+    schema := buildSchema(requestType, components, names, visited)
+    codes := schema.Properties["codes"]
+
+    /* a malformed bound fails the field closed for every value, so the empty window must survive intact */
+    if nil == codes.MinItems || 1 != *codes.MinItems {
+        t.Fatalf("expected the unsatisfiable marking to keep minItems 1, got %v", codes.MinItems)
+    }
+
+    if nil == codes.MaxItems || 0 != *codes.MaxItems {
+        t.Fatalf("expected the unsatisfiable marking to keep maxItems 0, got %v", codes.MaxItems)
+    }
+}
+
 func TestBuildSchema_NotEmptyOnScalarIsUnsatisfiable(t *testing.T) {
     components := map[string]*Schema{}
     names := map[reflect.Type]string{}
@@ -403,6 +463,111 @@ func TestApplyValidation_NegativeMaxOnNullableStringKeepsNullValid(t *testing.T)
     }
     if nil == nonNullable.MinLength || 1 != *nonNullable.MinLength || nil == nonNullable.MaxLength || 0 != *nonNullable.MaxLength {
         t.Fatalf("expected a non-nullable field advertised fully unsatisfiable (minLength 1, maxLength 0), got: %+v", nonNullable)
+    }
+}
+
+func TestBuildSchema_UnsignedFieldCarriesZeroFloor(t *testing.T) {
+    components := map[string]*Schema{}
+    names := map[reflect.Type]string{}
+    visited := map[reflect.Type]bool{}
+
+    uintType := reflect.TypeOf(uint(0))
+    intType := reflect.TypeOf(0)
+    requestType := reflect.StructOf([]reflect.StructField{
+        {Name: "Plain", Type: uintType, Tag: `json:"plain"`},
+        {Name: "Ceiling", Type: uintType, Tag: `json:"ceiling" validate:"lessThan=0"`},
+        {Name: "NegativeCeiling", Type: uintType, Tag: `json:"negative_ceiling" validate:"lessThan=-3"`},
+        {Name: "PositiveFloor", Type: uintType, Tag: `json:"positive_floor" validate:"greaterThan=0"`},
+        {Name: "RaisedFloor", Type: uintType, Tag: `json:"raised_floor" validate:"greaterThan=5"`},
+        {Name: "Signed", Type: intType, Tag: `json:"signed"`},
+    })
+
+    schema := buildSchema(requestType, components, names, visited)
+
+    plain := schema.Properties["plain"]
+    if nil == plain.Minimum || 0 != *plain.Minimum || nil != plain.ExclusiveMinimum {
+        t.Fatalf("expected a bare unsigned field to advertise an inclusive minimum 0, got %+v", plain)
+    }
+
+    ceiling := schema.Properties["ceiling"]
+    if nil == ceiling.Minimum || 0 != *ceiling.Minimum || nil == ceiling.Maximum || 0 != *ceiling.Maximum ||
+        nil == ceiling.ExclusiveMaximum || false == *ceiling.ExclusiveMaximum {
+        t.Fatalf("expected lessThan=0 on an unsigned field to advertise an empty window (minimum 0, maximum 0 exclusive), got %+v", ceiling)
+    }
+
+    negativeCeiling := schema.Properties["negative_ceiling"]
+    if nil == negativeCeiling.Minimum || 0 != *negativeCeiling.Minimum || nil == negativeCeiling.Maximum || -3 != *negativeCeiling.Maximum {
+        t.Fatalf("expected lessThan=-3 on an unsigned field to advertise an empty window (minimum 0 above maximum -3), got %+v", negativeCeiling)
+    }
+
+    positiveFloor := schema.Properties["positive_floor"]
+    if nil == positiveFloor.Minimum || 0 != *positiveFloor.Minimum || nil == positiveFloor.ExclusiveMinimum || false == *positiveFloor.ExclusiveMinimum {
+        t.Fatalf("expected greaterThan=0 on an unsigned field to keep its exclusive zero minimum, got %+v", positiveFloor)
+    }
+
+    raisedFloor := schema.Properties["raised_floor"]
+    if nil == raisedFloor.Minimum || 5 != *raisedFloor.Minimum || nil == raisedFloor.ExclusiveMinimum || false == *raisedFloor.ExclusiveMinimum {
+        t.Fatalf("expected greaterThan=5 on an unsigned field to keep its exclusive minimum 5, got %+v", raisedFloor)
+    }
+
+    signed := schema.Properties["signed"]
+    if nil != signed.Minimum {
+        t.Fatalf("expected a bare signed field to advertise no minimum, got %+v", signed)
+    }
+}
+
+/* @info a collection element carries no validate tag, so the unsigned floor belongs to the element schema; without it the items of a []uint advertise the negatives the decoder rejects */
+func TestBuildSchema_UnsignedCollectionElementCarriesZeroFloor(t *testing.T) {
+    components := map[string]*Schema{}
+    names := map[reflect.Type]string{}
+    visited := map[reflect.Type]bool{}
+
+    requestType := reflect.StructOf([]reflect.StructField{
+        {Name: "List", Type: reflect.TypeOf([]uint{}), Tag: `json:"list"`},
+        {Name: "Lookup", Type: reflect.TypeOf(map[string]uint32{}), Tag: `json:"lookup"`},
+        {Name: "Fixed", Type: reflect.TypeOf([2]uint16{}), Tag: `json:"fixed"`},
+        {Name: "Nested", Type: reflect.TypeOf([][]uint64{}), Tag: `json:"nested"`},
+        {Name: "Optional", Type: reflect.TypeOf([]*uint8{}), Tag: `json:"optional"`},
+        {Name: "Signed", Type: reflect.TypeOf([]int{}), Tag: `json:"signed"`},
+        {Name: "Raw", Type: reflect.TypeOf([]byte{}), Tag: `json:"raw"`},
+    })
+
+    schema := buildSchema(requestType, components, names, visited)
+
+    carriesZeroFloor := func(elementSchema *Schema) bool {
+        return nil != elementSchema && nil != elementSchema.Minimum && 0 == *elementSchema.Minimum && nil == elementSchema.ExclusiveMinimum
+    }
+
+    if false == carriesZeroFloor(schema.Properties["list"].Items) {
+        t.Fatalf("expected the items of a []uint to advertise an inclusive minimum 0, got %+v", schema.Properties["list"].Items)
+    }
+
+    if false == carriesZeroFloor(schema.Properties["lookup"].AdditionalProperties) {
+        t.Fatalf("expected the values of a map[string]uint32 to advertise an inclusive minimum 0, got %+v", schema.Properties["lookup"].AdditionalProperties)
+    }
+
+    if false == carriesZeroFloor(schema.Properties["fixed"].Items) {
+        t.Fatalf("expected the items of a [2]uint16 to advertise an inclusive minimum 0, got %+v", schema.Properties["fixed"].Items)
+    }
+
+    /* the floor reaches the innermost element: the outer element is itself a collection, whose own items are built the same way */
+    if false == carriesZeroFloor(schema.Properties["nested"].Items.Items) {
+        t.Fatalf("expected the innermost items of a [][]uint64 to advertise an inclusive minimum 0, got %+v", schema.Properties["nested"].Items.Items)
+    }
+
+    /* a nullable element still cannot decode a negative number */
+    if false == carriesZeroFloor(schema.Properties["optional"].Items) {
+        t.Fatalf("expected the items of a []*uint8 to advertise an inclusive minimum 0, got %+v", schema.Properties["optional"].Items)
+    }
+
+    if nil != schema.Properties["signed"].Items.Minimum {
+        t.Fatalf("expected the items of a []int to advertise no minimum, got %+v", schema.Properties["signed"].Items)
+    }
+
+    /* a []byte renders as a base64 string, not an array of integers, so no numeric floor applies to it */
+    raw := schema.Properties["raw"]
+    if "string" != raw.Type || "byte" != raw.Format || nil != raw.Minimum {
+        t.Fatalf("expected a []byte to stay a byte-format string with no minimum, got %+v", raw)
     }
 }
 

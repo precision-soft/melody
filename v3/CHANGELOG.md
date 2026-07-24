@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- rate limit: the default key extractor now keys on the client IP alone instead of `ip:path`. `SimpleRateLimit(n)` is therefore a true per-IP budget of `n` requests per minute rather than `n` per IP per path — a client that varied the path could previously never trip the limit. **Behavioural change**: an application relying on the old per-path budgets must set a path-aware `KeyExtractor` explicitly. Both limiters also bound how many distinct keys they track (`SetMaxKeys`, default 1,000,000): once the map is full and an idle-entry prune frees nothing, a request under an unseen key is denied rather than growing the map without bound. The reclaim walk runs at most once per window, so a full limiter cannot be made to pay a whole-map scan for every request under an unseen key
+
+### Fixed
+
+- config: registering a runtime parameter after boot no longer writes back onto a referenced parameter's resolved value, so a consumer holding the parameter pointer and reading it without a lock no longer races the write — the referenced value is stored only during boot, and the post-boot re-resolution is deterministic anyway
+- container: two distinct zero-size services (`struct{}` pointers, which share one address), or a service pointer that aliases another service's first field, are each closed on teardown instead of being collapsed onto one representative by address alone and one of them silently skipped — the teardown identity now pairs the address with the concrete pointer type
+- openapi: a bare unsigned integer field carries a zero floor so the spec rejects the negative numbers the decoder rejects, instead of advertising the whole negative range as valid; the floor is raise-only and never weakens an exclusive bound the validator already placed at or above zero, so a value-less `greaterThan` keeps its exclusive zero minimum and a `lessThan` at or below zero advertises an empty window. An unsigned collection element carries the same floor, so the items of a `[]uint` and the values of a `map[string]uint` no longer advertise the negatives the decoder rejects either
+- cli: a command that returns an exit-coded error now exits through the application's own shutdown and logging path (structured error log, container close) instead of the cli library calling `os.Exit` from inside its run and bypassing them
+- wiring: `melody:wiring:generate` accepts `--tags` (comma-separated build tags the target binary carries) so a constructor gated on `//go:build <tag>` is scanned instead of dropped, its service silently missing from the generated wiring; a build-excluded file that holds a constructor candidate is named on request through `--report-excluded`, so a missing service traces back to the tag it needs without failing `--strict` on a file legitimately excluded for another target. A build context carries plain tag identifiers, so a constraint expression such as `--tags '!postgres'` is rejected instead of silently matching nothing and leaving `--strict` green with the service still missing; the generated source is specific to the tag set it was generated with and must be built with the same tags
+- openapi: `notEmpty` on a non-pointer fixed-length array (`[N]T`) no longer advertises the field as `required` with `minItems 1` — the validator measures a length that can never fall below the array's fixed size, so it never rejects the field and the spec now accepts any array length as the server does; a `*[N]T` stays required, since the validator rejects the nil pointer
+
 ## [v3.13.0] - 2026-07-24 - Faithful OpenAPI Mirror, Wiring Codegen Guards and Contained Teardown Panics
 
 ### Fixed

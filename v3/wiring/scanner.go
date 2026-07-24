@@ -77,6 +77,8 @@ type ScanResult struct {
     Skipped      []*SkippedConstructor
     /* SkippedVendorDirectories names the vendor trees the walk stepped over; they cannot contribute services, so they are reported separately from the skipped constructors strict fails on. */
     SkippedVendorDirectories []string
+    /* ExcludedFiles names the source files a build constraint kept out of the scan even though they hold constructor candidates — a service the running binary carries under a build tag the scan was not told about. They are reported on request rather than skipped, since strict cannot know which tags the binary was built with; passing them through --tags brings the file back in. */
+    ExcludedFiles []string
 }
 
 type SkippedConstructor struct {
@@ -87,7 +89,7 @@ type SkippedConstructor struct {
 }
 
 /* Scan walks the directory of a package binding and returns every constructor it can wire. A directory below the one declared is scanned as its own package, its import path derived from the relative path, so a package declared as the root of a domain covers the packages beneath it. */
-func Scan(projectDirectory string, packageBinding *PackageBinding) (*ScanResult, error) {
+func Scan(projectDirectory string, packageBinding *PackageBinding, buildTags []string) (*ScanResult, error) {
     rootDirectory := packageBinding.Directory()
     if false == filepath.IsAbs(rootDirectory) {
         rootDirectory = filepath.Join(projectDirectory, rootDirectory)
@@ -129,7 +131,7 @@ func Scan(projectDirectory string, packageBinding *PackageBinding) (*ScanResult,
             return nil
         }
 
-        return scanFile(fileSet, rootDirectory, currentPath, packageBinding, result)
+        return scanFile(fileSet, rootDirectory, currentPath, packageBinding, buildTags, result)
     })
     if nil != walkErr {
         return nil, exception.NewError(
@@ -158,10 +160,12 @@ func scanFile(
     rootDirectory string,
     currentPath string,
     packageBinding *PackageBinding,
+    buildTags []string,
     result *ScanResult,
 ) error {
-    /* a file the default build excludes — a //go:build ignore script, the unsatisfied half of a tag pair, a foreign GOOS suffix — contributes no constructors to the binary the wiring is generated for, and scanning it anyway would register phantom services or the same service twice */
+    /* a file the build excludes — a //go:build ignore script, the unsatisfied half of a tag pair, a foreign GOOS suffix — contributes no constructors to the binary the wiring is generated for, and scanning it anyway would register phantom services or the same service twice. The scan is told which tags the binary carries so a file gated on one of them is included rather than dropped; the generated source is then specific to that tag set, naming constructors a build without those tags does not have. */
     buildContext := build.Default
+    buildContext.BuildTags = buildTags
     isIncluded, matchErr := buildContext.MatchFile(filepath.Dir(currentPath), filepath.Base(currentPath))
     if nil != matchErr {
         return exception.NewError(
@@ -174,6 +178,11 @@ func scanFile(
     }
 
     if false == isIncluded {
+        /* an excluded file that holds a constructor candidate is coverage a build tag kept out; it is named on request so a missing service is traceable to the tag it needs, without failing strict on a file legitimately excluded for another target */
+        if true == fileHasConstructorCandidate(fileSet, currentPath) {
+            result.ExcludedFiles = append(result.ExcludedFiles, currentPath)
+        }
+
         return nil
     }
 
@@ -267,6 +276,31 @@ func scanFile(
     }
 
     return nil
+}
+
+/* fileHasConstructorCandidate reports whether a build-excluded file holds a function the scan would have taken as a provider; a parse failure or a main package answers false, since neither yields a constructor the report should point at. */
+func fileHasConstructorCandidate(fileSet *token.FileSet, currentPath string) bool {
+    fileNode, parseErr := parser.ParseFile(fileSet, currentPath, nil, parser.ParseComments)
+    if nil != parseErr {
+        return false
+    }
+
+    if "main" == fileNode.Name.Name {
+        return false
+    }
+
+    for _, declaration := range fileNode.Decls {
+        functionDeclaration, isFunction := declaration.(*ast.FuncDecl)
+        if false == isFunction {
+            continue
+        }
+
+        if true == isConstructorCandidate(functionDeclaration) {
+            return true
+        }
+    }
+
+    return false
 }
 
 func isConstructorCandidate(functionDeclaration *ast.FuncDecl) bool {

@@ -1,6 +1,7 @@
 package rueidis
 
 import (
+    "context"
     "math"
     "testing"
     "time"
@@ -95,6 +96,53 @@ func TestNextServerSentEventBackplaneBackoff_ExtremeFactorCollapsesOntoTheCap(t 
 
     if 30*time.Second != instance.nextServerSentEventBackplaneBackoff(time.Second) {
         t.Fatalf("expected the overflowing backoff to collapse onto the cap")
+    }
+}
+
+func TestWithServerSentEventBackplaneCallTimeout_NonPositiveFallsBackToTheDefault(t *testing.T) {
+    /* a non-positive call timeout must not survive verbatim: context.WithTimeout(ctx, 0) is born cancelled, forcing every publish onto the failure path forever */
+    cases := map[string]time.Duration{
+        "zero":     0,
+        "negative": -1 * time.Second,
+    }
+
+    for name, timeout := range cases {
+        t.Run(name, func(t *testing.T) {
+            instance := &ServerSentEventBackplane{callTimeout: defaultServerSentEventBackplaneCallTimeout}
+
+            WithServerSentEventBackplaneCallTimeout(timeout)(instance)
+
+            if defaultServerSentEventBackplaneCallTimeout != instance.callTimeout {
+                t.Fatalf("expected a %v call timeout to fall back to the default, got %v", timeout, instance.callTimeout)
+            }
+        })
+    }
+}
+
+func TestWithServerSentEventBackplaneCallTimeout_PositiveIsKept(t *testing.T) {
+    instance := &ServerSentEventBackplane{callTimeout: defaultServerSentEventBackplaneCallTimeout}
+
+    WithServerSentEventBackplaneCallTimeout(750 * time.Millisecond)(instance)
+
+    if 750*time.Millisecond != instance.callTimeout {
+        t.Fatalf("expected a positive call timeout to be kept, got %v", instance.callTimeout)
+    }
+}
+
+func TestServerSentEventBackplane_PublishAppliesCallTimeout(t *testing.T) {
+    client := newTokenStoreClient(t)
+
+    backplane := &ServerSentEventBackplane{
+        client:      client,
+        channel:     "melody:sse:test:timeout",
+        origin:      "test-origin",
+        ctx:         context.Background(),
+        callTimeout: time.Nanosecond,
+    }
+
+    publishErr := backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "x"})
+    if nil == publishErr {
+        t.Fatalf("expected the 1ns call timeout to bound Publish and surface a deadline error")
     }
 }
 

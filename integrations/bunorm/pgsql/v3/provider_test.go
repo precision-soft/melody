@@ -115,3 +115,17 @@ func TestIsTransientErrorRecognizesColdStartFatals(t *testing.T) {
         t.Fatalf("expected an authentication failure to stay non-transient")
     }
 }
+
+/* @info a connection abort is the one retryable condition the deprecated net.Error.Temporary() uniquely covered; it is recognised through an explicit marker instead */
+func TestIsTransientErrorRecognizesConnectionAbort(t *testing.T) {
+    provider := NewProvider()
+
+    if false == provider.isTransientError(errors.New("write tcp 10.0.0.1:5432: software caused connection abort")) {
+        t.Fatalf("expected a connection abort to be transient")
+    }
+
+    /* the same errno carries a different text on windows, where the deprecated call used to cover it too */
+    if false == provider.isTransientError(errors.New("write tcp 10.0.0.1:5432: An established connection was aborted by the software in your host machine.")) {
+        t.Fatalf("expected the windows spelling of a connection abort to be transient")
+    }
+}

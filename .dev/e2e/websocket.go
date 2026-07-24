@@ -41,18 +41,18 @@ func runWebsocketCheck() {
     server := httptest.NewServer(adapter)
     defer server.Close()
 
-    wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+    websocketUrl := "ws" + strings.TrimPrefix(server.URL, "http")
 
     dialCtx, dialCancel := context.WithTimeout(context.Background(), 10*time.Second)
     defer dialCancel()
 
-    first, _, firstDialErr := coderwebsocket.Dial(dialCtx, wsURL, nil)
+    first, _, firstDialErr := coderwebsocket.Dial(dialCtx, websocketUrl, nil)
     if nil != firstDialErr {
         fail("websocket: dial first client: %v", firstDialErr)
     }
     defer first.Close(coderwebsocket.StatusNormalClosure, "")
 
-    second, _, secondDialErr := coderwebsocket.Dial(dialCtx, wsURL, nil)
+    second, _, secondDialErr := coderwebsocket.Dial(dialCtx, websocketUrl, nil)
     if nil != secondDialErr {
         fail("websocket: dial second client: %v", secondDialErr)
     }

@@ -266,6 +266,8 @@ const ordersPath = routes.path("user_show", { id: 42, tab: "orders" }); // /user
 * [`ServerSentEventHub.Broadcast`](../../http/server_sent_event_hub.go) is non-blocking and drops events for subscribers whose buffer is full; delivery is **at-most-once**. Size the subscribe buffer for the expected burst, or treat the stream as best-effort. [`ServerSentEventHub.DroppedEventCount`](../../http/server_sent_event_hub.go) returns the cumulative number of dropped events so the loss can be surfaced as a metric.
 * Route names must be unique. URL generation relies on a [`RouteRegistry`](../../http/contract/route_registry.go) entry for the route name.
 * [`UrlGeneratorMustFromContainer`](../../http/service_resolver.go) is a fail-fast helper and will panic if `ServiceUrlGenerator` is missing or has an invalid type.
+* [`RateLimitMiddleware`](../../http/middleware/rate_limit.go) keys on the client IP alone when no [`SetKeyExtractor`](../../http/middleware/rate_limit.go) is given, so `SimpleRateLimit(n)` is a budget of `n` requests per minute per IP **across the whole service**, not per route. Set an explicit key extractor for a per-route or per-user budget. The IP comes from the direct peer, so behind a reverse proxy every client collapses onto the proxy's address: pass [`NewForwardedClientIpResolver`](../../http/middleware/client_ip.go) to [`SetClientIpResolver`](../../http/middleware/rate_limit.go) — it walks `X-Forwarded-For` against the trusted-proxy policy and falls back to the direct peer whenever the chain cannot be trusted.
+* Both in-memory limiters bound how many distinct keys they track ([`SetMaxKeys`](../../http/middleware/rate_limit.go), default 1,000,000), because the key is attacker-influenced and the map would otherwise grow without bound. Once the map is full and reclaiming idle entries frees nothing, a request under an unseen key is **denied** rather than tracked — a deliberate fail-closed choice, so size the ceiling above the distinct-client count you expect. Reclamation walks the map at most once per window, so the bound cannot be turned into a per-request cost.
 
 ## Userland API
 
@@ -333,7 +335,7 @@ const ordersPath = routes.path("user_show", { id: 42, tab: "orders" }); // /user
 
 * Rate limiting:
     * [`RateLimitMiddleware`](../../http/middleware/rate_limit.go)
-    * `TokenBucketLimiter` / `SlidingWindowLimiter` in [`rate_limit.go`](../../http/middleware/rate_limit.go)
+    * `TokenBucketLimiter` / `SlidingWindowLimiter` in [`rate_limit.go`](../../http/middleware/rate_limit.go), each with `SetMaxKeys(int)`
 
 * Static:
     * [`StaticMiddleware`](../../http/middleware/static.go)
