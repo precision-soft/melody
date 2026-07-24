@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v1.6.0] - 2026-07-24 - Name Folding and Bounds-Checked Schedule Validation
+
 ### Fixed
 
 - the in-process runner's matcher folds the three-letter month and day-of-week names (`jan`-`dec`, `sun`-`sat`) onto their numbers, so a schedule the generator renders with names also runs in-process
@@ -125,7 +127,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `cli/contract/type.go` (root + v2/ + v3/) gains `type StringSliceFlag = urfavecli.StringSliceFlag` so the cron command (which uses repeatable string-slice flags for `--heartbeat-command` and `--heartbeat-destination`) consumes `clicontract.StringSliceFlag` like every other flag in the integration, without an extra `urfavecli` import in `generate_command.go`
 - `README.md` — added a "Cron expression validation" section that documents which checks the generator runs at generation time and which it deliberately leaves to the cron daemon at install time, with `crontab -T` recommended as the post-generation gate. Clarified the `EntryConfig.DestinationFile`-absolute-path semantics, documented the hardcoded `0644`/`0755` file modes, and added a new "Package surface" section listing every exported identifier. `v2/README.md` and `v3/README.md` now reference that section uniformly so they no longer cross-reference each other asymmetrically.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.5.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.6.0...HEAD
+
+[v1.6.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.5.0...integrations/cron/v1.6.0
 
 [v1.5.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.4.0...integrations/cron/v1.5.0
 

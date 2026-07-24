@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v2.0.5] - 2026-07-24 - Server Shutdown Transient Marker
+
 ### Fixed
 
 - the connection retry treats `Server shutdown in progress` as transient, so a restarting server is retried instead of failing the open on the first attempt
@@ -49,7 +51,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Code moved to `integrations/bunorm/mysql/v2/` with matching module path
 - Dependencies: `github.com/precision-soft/melody/integrations/bunorm/v2 v2.0.0`, `github.com/precision-soft/melody/v2 v2.0.0`
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v2.0.4...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v2.0.5...HEAD
+
+[v2.0.5]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v2.0.4...integrations/bunorm/mysql/v2.0.5
 
 [v2.0.4]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v2.0.3...integrations/bunorm/mysql/v2.0.4
 

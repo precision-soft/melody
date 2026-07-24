@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v1.18.1] - 2026-07-24 - Contained Container Teardown Panics and Padded Skip Marker
+
 ### Fixed
 
 - validation: a padded skip marker (`validate:" - "`) is trimmed and skips validation instead of being read as an unknown rule that rejects every value
@@ -595,7 +597,9 @@ Lock-step release — no `v1/` changes this cycle. Tag published to keep the cor
 - `session/` — session management with file-based and in-memory storage backends
 - `validation/` — validation framework with `greaterThan`, `notEmpty`, `notBlank`, `alpha`, `alphanumeric`, `email`, `numeric`, `regex`, `minLength`, `maxLength` constraints
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v1.18.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/v1.18.1...HEAD
+
+[v1.18.1]: https://github.com/precision-soft/melody/compare/v1.18.0...v1.18.1
 
 [v1.18.0]: https://github.com/precision-soft/melody/compare/v1.17.0...v1.18.0
 

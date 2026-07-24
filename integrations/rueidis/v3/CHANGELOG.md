@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.5.1] - 2026-07-24 - Reconnect Backoff Clamps
+
 ### Fixed
 
 - a `ReconnectConfig.BackoffFactor` below 1 (or NaN) falls back to the default instead of decaying the server-sent-event backplane's resubscribe backoff toward zero and busy-spinning through a redis outage
@@ -108,7 +110,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `v3/connection_params.go` — `ConnectionConfig` renamed to `ConnectionParams` with value semantics
 - Dependencies pinned to `github.com/precision-soft/melody/v3 v3.0.0`
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.5.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.5.1...HEAD
+
+[v3.5.1]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.5.0...integrations/rueidis/v3.5.1
 
 [v3.5.0]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.4.1...integrations/rueidis/v3.5.0
 

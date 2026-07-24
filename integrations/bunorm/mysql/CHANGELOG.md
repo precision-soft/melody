@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v1.1.5] - 2026-07-24 - Server Shutdown Transient Marker
+
 ### Fixed
 
 - the connection retry treats `Server shutdown in progress` as transient, so a restarting server is retried instead of failing the open on the first attempt
@@ -76,7 +78,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Builder methods: `Provider.WithPoolConfig()`, `WithTimeoutConfig()`
 - `mysql_error.go` — MySQL-specific error detection utilities
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v1.1.4...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v1.1.5...HEAD
+
+[v1.1.5]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v1.1.4...integrations/bunorm/mysql/v1.1.5
 
 [v1.1.4]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v1.1.3...integrations/bunorm/mysql/v1.1.4
 

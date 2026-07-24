@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v2.6.0] - 2026-07-24 - Name Folding and Bounds-Checked Schedule Validation
+
 ### Fixed
 
 - the in-process runner's matcher folds the three-letter month and day-of-week names (`jan`-`dec`, `sun`-`sat`) onto their numbers, so a schedule the generator renders with names also runs in-process
@@ -64,7 +66,9 @@ Identical to the corresponding v1 release except: module path is `github.com/pre
 
 Identical to the corresponding v1 release except: module path is `github.com/precision-soft/melody/integrations/cron/v2`; dependency pinned to `github.com/precision-soft/melody/v2`. See the [v1 changelog](../CHANGELOG.md#v100---2026-05-16---initial-release--cron-integration) for the full change list.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.5.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.6.0...HEAD
+
+[v2.6.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.5.0...integrations/cron/v2.6.0
 
 [v2.5.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.4.0...integrations/cron/v2.5.0
 

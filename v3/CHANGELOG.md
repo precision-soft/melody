@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.13.0] - 2026-07-24 - Faithful OpenAPI Mirror, Wiring Codegen Guards and Contained Teardown Panics
+
 ### Fixed
 
 - validation: a padded skip marker (`validate:" - "`) is trimmed and skips validation instead of being read as an unknown rule that rejects every value
@@ -704,7 +706,9 @@ Lock-step release — no `v3/` changes this cycle. Tag SHA differs from `v3.0.0`
 - `application/application.go`, `application/application_new.go` — application context in constructor; `New(ctx context.Context, ...)` takes a caller-supplied context used for the full application lifecycle
 - `application/contract/service_module.go` — `ServiceModule` simplification; single `Register(container)` method replacing split register/configure lifecycle
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v3.12.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/v3.13.0...HEAD
+
+[v3.13.0]: https://github.com/precision-soft/melody/compare/v3.12.0...v3.13.0
 
 [v3.12.0]: https://github.com/precision-soft/melody/compare/v3.11.0...v3.12.0
 

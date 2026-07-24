@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v1.1.6] - 2026-07-24 - Cold-Start Transient Markers
+
 ### Fixed
 
 - the connection retry treats any `the database system is ...` cold-start FATAL (starting up, in recovery mode, shutting down) as transient, so a server still replaying WAL is retried instead of failing the open on the first attempt
@@ -89,7 +91,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `connection_config.go` — `pgsql.ConnectionConfig` holding connection details; `SafeContext()` excludes password from logs
 - Builder methods: `Provider.WithPoolConfig()`, `WithTimeoutConfig()`
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v1.1.5...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v1.1.6...HEAD
+
+[v1.1.6]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v1.1.5...integrations/bunorm/pgsql/v1.1.6
 
 [v1.1.5]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v1.1.4...integrations/bunorm/pgsql/v1.1.5
 

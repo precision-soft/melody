@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v2.12.1] - 2026-07-24 - Contained Container Teardown Panics and Padded Skip Marker
+
 ### Fixed
 
 - validation: a padded skip marker (`validate:" - "`) is trimmed and skips validation instead of being read as an unknown rule that rejects every value
@@ -482,7 +484,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - `go.mod` — introduce Melody v2 module (`github.com/precision-soft/melody/v2`)
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v2.12.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/v2.12.1...HEAD
+
+[v2.12.1]: https://github.com/precision-soft/melody/compare/v2.12.0...v2.12.1
 
 [v2.12.0]: https://github.com/precision-soft/melody/compare/v2.11.0...v2.12.0
 
