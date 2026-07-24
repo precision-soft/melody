@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.1.1] - 2026-07-25 - Hijacked Connections Out of the Request Histogram
+
+### Fixed
+
+- a hijacked connection is recorded as `101 Switching Protocols` instead of the default `200`, so a websocket upgrade that lives for hours no longer lands in the same request-duration series as an ordinary request and skews the latency distribution
+
 ## [v3.1.0] - 2026-07-06 - Lifecycle Handler Decorator and OTLP Trace Export
 
 ### Added
@@ -36,6 +42,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 [v3.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations/opentelemetry/v3.0.0
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/opentelemetry/v3.1.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/opentelemetry/v3.1.1...HEAD
+
+[v3.1.1]: https://github.com/precision-soft/melody/compare/integrations/opentelemetry/v3.1.0...integrations/opentelemetry/v3.1.1
 
 [v3.1.0]: https://github.com/precision-soft/melody/compare/integrations/opentelemetry/v3.0.0...integrations/opentelemetry/v3.1.0

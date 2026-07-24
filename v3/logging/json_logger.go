@@ -47,6 +47,7 @@ type jsonLogger struct {
     output      io.Writer
     minLevel    loggingcontract.Level
     levelLabels loggingcontract.LevelLabels
+    closed      bool
 }
 
 func (instance *jsonLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
@@ -81,6 +82,10 @@ func (instance *jsonLogger) Log(level loggingcontract.Level, message string, con
     instance.writeMutex.Lock()
     defer instance.writeMutex.Unlock()
 
+    if true == instance.closed {
+        return
+    }
+
     _, _ = instance.output.Write(append(encoded, '\n'))
 }
 
@@ -104,7 +109,15 @@ func (instance *jsonLogger) Emergency(message string, context loggingcontract.Co
     instance.Log(loggingcontract.LevelEmergency, message, context)
 }
 
+/* @important the close takes the same lock the writes take: it hands the writer to a Close that may mutate it, and a goroutine that outlives the container teardown can still be inside Write. The console is left open on purpose, so the flag is set only where the writer was really closed. */
 func (instance *jsonLogger) Close() error {
+    instance.writeMutex.Lock()
+    defer instance.writeMutex.Unlock()
+
+    if true == instance.closed {
+        return nil
+    }
+
     file, isFile := instance.output.(*os.File)
     if true == isFile && nil != file {
         fileName := file.Name()
@@ -117,6 +130,8 @@ func (instance *jsonLogger) Close() error {
     if false == isCloser || true == internal.IsNilInterface(closer) {
         return nil
     }
+
+    instance.closed = true
 
     return closer.Close()
 }

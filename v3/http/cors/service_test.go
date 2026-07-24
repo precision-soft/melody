@@ -1,7 +1,11 @@
 package cors
 
 import (
+    nethttp "net/http"
+    "net/http/httptest"
     "testing"
+
+    "github.com/precision-soft/melody/v3/internal/testhelper"
 )
 
 func TestService_OriginAllowed_CaseInsensitiveExactMatch(t *testing.T) {
@@ -126,4 +130,68 @@ func TestNewService_DoesNotPanicWhenCredentialsWithSpecificOrigin(t *testing.T) 
         AllowOrigins:     []string{"http://example.com"},
         AllowCredentials: true,
     })
+}
+
+func TestNewService_DoesNotPanicWhenCredentialsWithAllowOriginFunc(t *testing.T) {
+    defer func() {
+        if nil != recover() {
+            t.Fatalf("did not expect panic when AllowCredentials is true with an allow origin func")
+        }
+    }()
+
+    service := NewService(Config{
+        AllowCredentials: true,
+        AllowOriginFunc: func(origin string) bool {
+            return "https://example.com" == origin
+        },
+    })
+
+    if false == service.OriginAllowed("https://example.com") {
+        t.Fatalf("expected the allow origin func to decide the origin")
+    }
+
+    if true == service.OriginAllowed("https://other.com") {
+        t.Fatalf("expected the allow origin func to deny the origin")
+    }
+}
+
+func TestNewService_PanicsWhenCredentialsWithoutOriginsOrAllowOriginFunc(t *testing.T) {
+    defer func() {
+        if nil == recover() {
+            t.Fatalf("expected panic when AllowCredentials is true without origins and without an allow origin func")
+        }
+    }()
+
+    NewService(Config{
+        AllowCredentials: true,
+    })
+}
+
+func TestService_IsPreflight_RequiresRequestMethodHeader(t *testing.T) {
+    service := DefaultService()
+
+    request := httptest.NewRequest(nethttp.MethodOptions, "/x", nil)
+    request.Header.Set("Origin", "https://example.com")
+
+    if true == service.IsPreflight(testhelper.NewHttpTestRequestFromHttpRequest(request)) {
+        t.Fatalf("expected an options request without Access-Control-Request-Method not to be a preflight")
+    }
+
+    request.Header.Set("Access-Control-Request-Method", nethttp.MethodPost)
+
+    if false == service.IsPreflight(testhelper.NewHttpTestRequestFromHttpRequest(request)) {
+        t.Fatalf("expected an options request with Access-Control-Request-Method to be a preflight")
+    }
+}
+
+func TestService_IsPreflight_RequiresOptionsMethod(t *testing.T) {
+    service := DefaultService()
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
+    request.Header.Set("Origin", "https://example.com")
+    request.Header.Set("Access-Control-Request-Method", nethttp.MethodPost)
+
+    if true == service.IsPreflight(testhelper.NewHttpTestRequestFromHttpRequest(request)) {
+        t.Fatalf("expected a non-options request not to be a preflight")
+    }
 }

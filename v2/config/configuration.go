@@ -306,11 +306,14 @@ func (instance *Configuration) applyEnvironmentOverrides() error {
     return nil
 }
 
+/* @important the constructor's own pass does not mark the configuration resolved: the composition root registers its parameters after it and before boot, and a parameter registered while the configuration counts as resolved is resolved eagerly against whatever exists at that moment — which makes registration order significant and reports a forward reference as a failure "after boot" that boot has not yet reached. The boot pass resolves them all in one order-independent batch. */
 func (instance *Configuration) resolvePlaceholders() error {
     resolveErr := instance.Resolve()
     if nil != resolveErr {
         return exception.NewError("could not resolve the config parameters", nil, resolveErr)
     }
+
+    instance.resolved = false
 
     instance.logger.Info("configuration parameters resolved", nil)
 

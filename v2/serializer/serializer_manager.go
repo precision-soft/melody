@@ -1,6 +1,7 @@
 package serializer
 
 import (
+    "errors"
     "sort"
     "strings"
 
@@ -8,6 +9,11 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
     serializercontract "github.com/precision-soft/melody/v2/serializer/contract"
 )
+
+/* ErrNotAcceptable reports that the accept header refused every media type the manager can produce, so no representation can be served. */
+var ErrNotAcceptable = errors.New("no acceptable media type for the accept header")
+
+const notAcceptableMessage = "the accept header refuses every available media type"
 
 func NewSerializerManager(serializersByMime map[string]serializercontract.Serializer) (*SerializerManager, error) {
     if nil == serializersByMime {
@@ -83,35 +89,55 @@ func (instance *SerializerManager) ResolveByAcceptHeader(acceptHeader string) (s
         )
     }
 
-    for _, acceptedMimeValue := range acceptedMimes {
-        if "*/*" == acceptedMimeValue.mime {
-            serializerInstance, exists := instance.serializersByMime[MimeApplicationJson]
-            if true == exists {
-                return serializerInstance, nil
-            }
+    candidateMimes := make([]string, 0, len(instance.serializersByMime))
+    for candidateMime := range instance.serializersByMime {
+        candidateMimes = append(candidateMimes, candidateMime)
+    }
+
+    sort.Strings(candidateMimes)
+
+    /* @important each available type takes the quality of the MOST SPECIFIC range that covers it, so an exact range overrides a wildcard regardless of header order; a covered type whose range carries q=0 is refused rather than ignored, and a header that refuses every available type is answered as not acceptable instead of being served the very type it rejected */
+    selectedMime := ""
+    selectedQuality := 0.0
+    selectedSpecificity := 0
+    refusedEveryMatch := false
+
+    for _, candidateMime := range candidateMimes {
+        quality, specificity, matched := acceptQualityFor(acceptedMimes, candidateMime)
+        if false == matched {
             continue
         }
 
-        serializerInstance, exists := instance.serializersByMime[acceptedMimeValue.mime]
-        if true == exists {
-            return serializerInstance, nil
+        if 0 == quality {
+            refusedEveryMatch = true
+
+            continue
         }
 
-        if true == isWildcardSubtype(acceptedMimeValue.mime) {
-            candidateMimes := make([]string, 0, len(instance.serializersByMime))
-            for candidateMime := range instance.serializersByMime {
-                candidateMimes = append(candidateMimes, candidateMime)
-            }
+        if quality > selectedQuality {
+            selectedMime = candidateMime
+            selectedQuality = quality
+            selectedSpecificity = specificity
 
-            sort.Strings(candidateMimes)
-
-            for _, candidateMime := range candidateMimes {
-                candidateSerializer := instance.serializersByMime[candidateMime]
-                if true == matchWildcardSubtype(acceptedMimeValue.mime, candidateMime) {
-                    return candidateSerializer, nil
-                }
-            }
+            continue
         }
+
+        if quality == selectedQuality && specificity > selectedSpecificity {
+            selectedMime = candidateMime
+            selectedSpecificity = specificity
+        }
+    }
+
+    if "" != selectedMime {
+        return instance.serializersByMime[selectedMime], nil
+    }
+
+    if true == refusedEveryMatch {
+        return nil, exception.NewError(
+            notAcceptableMessage,
+            exceptioncontract.Context{"accept": acceptHeader},
+            ErrNotAcceptable,
+        )
     }
 
     serializerInstance, exists := instance.serializersByMime[MimeApplicationJson]

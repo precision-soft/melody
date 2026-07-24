@@ -269,6 +269,14 @@ const ordersPath = routes.path("user_show", { id: 42, tab: "orders" }); // /user
 * [`RateLimitMiddleware`](../../http/middleware/rate_limit.go) keys on the client IP alone when no [`SetKeyExtractor`](../../http/middleware/rate_limit.go) is given, so `SimpleRateLimit(n)` is a budget of `n` requests per minute per IP **across the whole service**, not per route. Set an explicit key extractor for a per-route or per-user budget. The IP comes from the direct peer, so behind a reverse proxy every client collapses onto the proxy's address: pass [`NewForwardedClientIpResolver`](../../http/middleware/client_ip.go) to [`SetClientIpResolver`](../../http/middleware/rate_limit.go) — it walks `X-Forwarded-For` against the trusted-proxy policy and falls back to the direct peer whenever the chain cannot be trusted.
 * Both in-memory limiters bound how many distinct keys they track ([`SetMaxKeys`](../../http/middleware/rate_limit.go), default 1,000,000), because the key is attacker-influenced and the map would otherwise grow without bound. Once the map is full and reclaiming idle entries frees nothing, a request under an unseen key is **denied** rather than tracked — a deliberate fail-closed choice, so size the ceiling above the distinct-client count you expect. Reclamation walks the map at most once per window, so the bound cannot be turned into a per-request cost.
 
+* An `OPTIONS` request carrying an `Origin` but no `Access-Control-Request-Method` is **not** a preflight: it reaches the router, so a route registered for `OPTIONS` is served and every middleware inner to cors sees it. A browser sends that header on every real preflight, so no genuine one is lost. See [`Service.IsPreflight`](../../http/cors/service.go).
+* `Vary: Origin` is emitted on **every** response the cors middleware and listener touch, including one produced for a rejected origin or for a request carrying no `Origin` at all, so a shared cache keyed on the url alone cannot hand an origin-less body to an allowed cross-origin requester. The header is added at most once. See [`addVaryOrigin`](../../http/cors/service.go).
+* A credentialed configuration that decides origins through `AllowOriginFunc` is accepted; one with neither an origin list nor a function still panics on the defaulted wildcard, which is the combination the guard exists to prevent. See [`NewService`](../../http/cors/service.go).
+* A conditional request for a static file is answered `304 Not Modified` when `If-None-Match` carries the entity tag anywhere in its comma-separated list, or carries it in the weak `W/` form a proxy may have rewritten it into. The wildcard `*` is deliberately **not** honoured — it would turn an attacker-supplied header into an unconditional 304. See [`EtagMatchesIfNoneMatch`](../../http/static/etag.go).
+* The kernel publishes the scheme it resolved through the configured forwarded-headers policy on the request as [`RequestAttributeScheme`](../../http/request.go). A listener has no access to that policy, so re-detecting the scheme without it reports `http` for every request a trusted proxy terminated as `https`.
+* The request attributes the kernel owns are reserved under the framework's underscore prefix (`_session`, `_scheme`) and are set **after** the route attributes, so a route attribute cannot replace the session object or the resolved scheme. Read them through [`RequestAttributeSession`](../../http/request.go) and [`RequestAttributeScheme`](../../http/request.go), never through the literal key.
+* A handler that panics with `net/http`'s `ErrAbortHandler` aborts the connection silently, as that sentinel documents, instead of being turned into a `500` plus an error log line. The check is on identity, so an application error merely wrapping the sentinel is unaffected.
+
 ## Userland API
 
 ### Contracts (`http/contract`)
@@ -320,6 +328,23 @@ const ordersPath = routes.path("user_show", { id: 42, tab: "orders" }); // /user
     * [`RouteRegistryMustFromContainer(containercontract.Container)`](../../http/service_resolver.go)
     * [`UrlGeneratorMustFromContainer(containercontract.Container)`](../../http/service_resolver.go)
     * [`RouterMustFromContainer(containercontract.Container)`](../../http/service_resolver.go)
+
+### CORS (`http/cors`)
+
+* Policy:
+    * [`type Service`](../../http/cors/service.go)
+    * [`type Config`](../../http/cors/service.go)
+    * [`NewService`](../../http/cors/service.go)
+    * [`DefaultService`](../../http/cors/service.go)
+    * [`RestrictiveService`](../../http/cors/service.go)
+
+* Middleware:
+    * [`Middleware`](../../http/cors/middleware.go)
+    * [`DefaultMiddleware`](../../http/cors/middleware.go)
+    * [`Restrictive`](../../http/cors/middleware.go)
+
+* Listener:
+    * [`RegisterResponseListener`](../../http/cors/listener.go)
 
 ### Middleware (`http/middleware`)
 

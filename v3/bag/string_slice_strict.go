@@ -12,7 +12,7 @@ func StringSliceStrict(parameterBag bagcontract.ParameterBag, name string) ([]st
     }
 
     if nil == value {
-        return nil, true, nil
+        return nil, false, nil
     }
 
     switch typedValue := value.(type) {

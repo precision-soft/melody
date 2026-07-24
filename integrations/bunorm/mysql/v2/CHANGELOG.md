@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-## [v2.0.6] - 2026-07-24 - Connection-Abort Retry Markers
+## [v2.0.6] - 2026-07-25 - Connection-Abort Retry Markers
 
 ### Fixed
 

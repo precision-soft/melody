@@ -17,7 +17,7 @@ func TestProviderOpenWithRetryAndNilLoggerDoesNotPanic(t *testing.T) {
         WithRetryConfig(NewRetryConfig(2, time.Millisecond, 5*time.Millisecond, 2.0)),
     )
 
-    params := bunorm.ConnectionParams{
+    params := bunorm.ConnectionParameters{
         Host:     "127.0.0.1",
         Port:     "1",
         Database: "melody_unreachable",
@@ -60,7 +60,7 @@ func TestProviderOpenWithZeroConnectTimeoutConnects(t *testing.T) {
         t.Skip("PGSQL_HOST not set; skipping pgsql provider integration test")
     }
 
-    params := bunorm.ConnectionParams{
+    params := bunorm.ConnectionParameters{
         Host:     host,
         Port:     os.Getenv("PGSQL_PORT"),
         Database: os.Getenv("PGSQL_DATABASE"),

@@ -179,27 +179,35 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
     }()
     database, openErr := providerDefinition.Provider.Open(instance.resolver)
 
-    instance.lock.Lock()
+    /* @important the publish runs in a closure with a deferred unlock: it calls into the freshly opened database, and a panic there would otherwise unwind with the lock held, whereupon the recovery defer above re-acquires the same non-reentrant mutex and wedges the whole registry with no waiter ever released */
+    func() {
+        instance.lock.Lock()
+        defer instance.lock.Unlock()
 
-    delete(instance.pendingOpenByName, name)
+        delete(instance.pendingOpenByName, name)
 
-    if nil != openErr {
-        pendingOpen.openError = openErr
-    } else if true == instance.closed {
-        /*
-           Close ran while this open was in flight: it already iterated the manager
-           map without this entry, so memoizing the manager now would leak its
-           connection pool. Close the freshly opened database and refuse.
-        */
-        _ = database.Close()
-        pendingOpen.openError = ErrManagerRegistryClosed
-    } else {
+        if nil != openErr {
+            pendingOpen.openError = openErr
+
+            return
+        }
+
+        if true == instance.closed {
+            /*
+               Close ran while this open was in flight: it already iterated the manager
+               map without this entry, so memoizing the manager now would leak its
+               connection pool. Close the freshly opened database and refuse.
+            */
+            _ = database.Close()
+            pendingOpen.openError = ErrManagerRegistryClosed
+
+            return
+        }
+
         manager := NewManager(name, database)
         instance.managers[name] = manager
         pendingOpen.manager = manager
-    }
-
-    instance.lock.Unlock()
+    }()
 
     settled = true
 

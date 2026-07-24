@@ -53,7 +53,7 @@ func NewService(config Config) *Service {
         allowHeaders = []string{"Origin", "Content-Type", "Accept"}
     }
 
-    if true == config.AllowCredentials {
+    if true == config.AllowCredentials && nil == config.AllowOriginFunc {
         for _, origin := range allowOrigins {
             if "*" == strings.TrimSpace(origin) {
                 exception.Panic(
@@ -226,7 +226,11 @@ func (instance *Service) IsPreflight(request httpcontract.Request) bool {
         return false
     }
 
-    return nethttp.MethodOptions == request.HttpRequest().Method
+    if nethttp.MethodOptions != request.HttpRequest().Method {
+        return false
+    }
+
+    return "" != request.HttpRequest().Header.Get("Access-Control-Request-Method")
 }
 
 func (instance *Service) RequestOrigin(request httpcontract.Request) string {

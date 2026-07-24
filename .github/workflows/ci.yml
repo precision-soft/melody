@@ -48,8 +48,11 @@ jobs:
     # and the cron runner. The matrix job runs them without it, so a lost mutex or
     # an unsynchronized memo stays green there: these packages hold goroutines that
     # outlive a call (the lazy service memo, the signal watcher, the smtp
-    # cancellation watcher, the cron runner's parallel dispatch), and only the
-    # detector can see them race. Needs no service containers.
+    # cancellation watcher, the http client's redirect policy reading the header
+    # map, the logger's shared writer, the message bus dispatch, the cron runner's
+    # parallel dispatch), and only the detector can see them race — several of
+    # those tests assert nothing at all, so without this lane they can only ever
+    # pass. Needs no service containers.
     race:
         runs-on: ubuntu-latest
         steps:
@@ -62,9 +65,9 @@ jobs:
                 run: |
                     set -euo pipefail
                     for major_directory in . v2 v3; do
-                        (cd "${major_directory}" && go test -race -count=1 ./container/... ./application/... ./config/... ./event/...)
+                        (cd "${major_directory}" && go test -race -count=1 ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/...)
                     done
-                    (cd v3 && go test -race -count=1 ./mailer/... ./lock/...)
+                    (cd v3 && go test -race -count=1 ./mailer/... ./lock/... ./messagebus/...)
                     for cron_directory in integrations/cron integrations/cron/v2 integrations/cron/v3; do
                         (cd "${cron_directory}" && go test -race -count=1 ./...)
                     done
@@ -133,7 +136,7 @@ jobs:
                     (cd integrations/rueidis/v3 && go test -race -count=1 ./...)
                     (cd integrations/rueidis/v2 && go test -count=1 ./...)
                     (cd integrations/rueidis && go test -count=1 ./...)
-                    (cd integrations/bunorm/mysql/v3 && go test -count=1 ./...)
+                    (cd integrations/bunorm/mysql/v3 && go test -race -count=1 ./...)
                     (cd integrations/bunorm/mysql/v2 && go test -count=1 ./...)
                     (cd integrations/bunorm/mysql && go test -count=1 ./...)
                     (cd integrations/bunorm/pgsql/v3 && go test -race -count=1 ./...)

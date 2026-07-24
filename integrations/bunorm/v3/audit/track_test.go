@@ -5,6 +5,8 @@ import (
     "database/sql"
     "database/sql/driver"
     "errors"
+    "io"
+    "strings"
     "testing"
 
     "github.com/uptrace/bun"
@@ -120,6 +122,268 @@ func TestEntityIdFromModel_DerivesPrimaryKey(t *testing.T) {
 
     if got := entityIdFromModel(database, "not a struct pointer"); "" != got {
         t.Fatalf("non-struct: got %q, want empty", got)
+    }
+}
+
+type auditedAccount struct {
+    bun.BaseModel `bun:"table:audited_account"`
+
+    Id      int64  `bun:"id,pk"`
+    Name    string `bun:"name"`
+    Email   string `bun:"email"`
+    Balance int64  `bun:"balance"`
+}
+
+var auditedAccountColumnList = []string{"id", "name", "email", "balance"}
+
+/* scriptedDatabase answers the statements an audited write issues over a single stored row and records
+   them in order, so a test can assert both what was executed and what the database held. */
+type scriptedDatabase struct {
+    row        *auditedAccount
+    statements []string
+}
+
+type scriptedConnector struct {
+    database *scriptedDatabase
+}
+
+func (instance *scriptedConnector) Connect(context.Context) (driver.Conn, error) {
+    return &scriptedConnection{database: instance.database}, nil
+}
+
+func (instance *scriptedConnector) Driver() driver.Driver {
+    return scriptedDriver{}
+}
+
+type scriptedDriver struct{}
+
+func (instance scriptedDriver) Open(string) (driver.Conn, error) {
+    return nil, errors.New("scripted driver opens only through its connector")
+}
+
+type scriptedConnection struct {
+    database *scriptedDatabase
+}
+
+func (instance *scriptedConnection) Prepare(string) (driver.Stmt, error) {
+    return nil, errors.New("scripted connection prepares no statements")
+}
+
+func (instance *scriptedConnection) Close() error {
+    return nil
+}
+
+func (instance *scriptedConnection) Begin() (driver.Tx, error) {
+    return scriptedTransaction{}, nil
+}
+
+func (instance *scriptedConnection) BeginTx(context.Context, driver.TxOptions) (driver.Tx, error) {
+    return scriptedTransaction{}, nil
+}
+
+func (instance *scriptedConnection) QueryContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Rows, error) {
+    /* the dialect probes the server version while bun.NewDB builds; that probe is not part of the audited work */
+    if true == strings.Contains(query, "version()") {
+        return &scriptedRows{columns: []string{"version"}, values: [][]driver.Value{{"8.0.0"}}}, nil
+    }
+
+    instance.database.statements = append(instance.database.statements, query)
+
+    if nil == instance.database.row {
+        return &scriptedRows{columns: auditedAccountColumnList}, nil
+    }
+
+    row := instance.database.row
+
+    return &scriptedRows{
+        columns: auditedAccountColumnList,
+        values:  [][]driver.Value{{row.Id, row.Name, row.Email, row.Balance}},
+    }, nil
+}
+
+func (instance *scriptedConnection) ExecContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Result, error) {
+    instance.database.statements = append(instance.database.statements, query)
+
+    if true == strings.HasPrefix(strings.ToUpper(strings.TrimSpace(query)), "DELETE") {
+        affected := int64(0)
+        if nil != instance.database.row {
+            affected = 1
+        }
+
+        instance.database.row = nil
+
+        return scriptedResult{affected: affected}, nil
+    }
+
+    return scriptedResult{affected: 1}, nil
+}
+
+type scriptedTransaction struct{}
+
+func (instance scriptedTransaction) Commit() error {
+    return nil
+}
+
+func (instance scriptedTransaction) Rollback() error {
+    return nil
+}
+
+type scriptedResult struct {
+    affected int64
+}
+
+func (instance scriptedResult) LastInsertId() (int64, error) {
+    return 0, nil
+}
+
+func (instance scriptedResult) RowsAffected() (int64, error) {
+    return instance.affected, nil
+}
+
+type scriptedRows struct {
+    columns []string
+    values  [][]driver.Value
+    index   int
+}
+
+func (instance *scriptedRows) Columns() []string {
+    return instance.columns
+}
+
+func (instance *scriptedRows) Close() error {
+    return nil
+}
+
+func (instance *scriptedRows) Next(destination []driver.Value) error {
+    if instance.index >= len(instance.values) {
+        return io.EOF
+    }
+
+    copy(destination, instance.values[instance.index])
+    instance.index++
+
+    return nil
+}
+
+func newScriptedTracker(storedRow *auditedAccount, options ...EntityOptions) (*Tracker, *scriptedDatabase, *fakeStorage) {
+    scripted := &scriptedDatabase{row: storedRow}
+    database := bun.NewDB(sql.OpenDB(&scriptedConnector{database: scripted}), mysqldialect.New())
+    storage := &fakeStorage{}
+    registry := NewRegistry("melody_audit")
+
+    for _, entityOptions := range options {
+        registry.Register("user", entityOptions)
+    }
+
+    return NewTracker(database, NewRecorderWithStorage(storage, registry)), scripted, storage
+}
+
+/* @info the default: the caller holds the primary key and nothing else, so the delete claims nothing about the fields it never read — and charges the working database no read to write an audit row */
+func TestTracker_DeleteClaimsNothingItDidNotRead(t *testing.T) {
+    tracker, scripted, storage := newScriptedTracker(&auditedAccount{
+        Id:      42,
+        Name:    "real name",
+        Email:   "real@example.com",
+        Balance: 9999,
+    })
+
+    model := &auditedAccount{Id: 42, Name: "FABRICATED", Email: "fake@example.com", Balance: 1}
+
+    if deleteErr := tracker.Delete(context.Background(), "user", "", model); nil != deleteErr {
+        t.Fatalf("delete: %v", deleteErr)
+    }
+
+    for _, statement := range scripted.statements {
+        if true == strings.Contains(statement, "SELECT") {
+            t.Fatalf("the default delete must not read the row, got %q", statement)
+        }
+    }
+
+    if 1 != len(storage.saves) {
+        t.Fatalf("expected one audit entry, got %d", len(storage.saves))
+    }
+
+    entry := storage.saves[0].entries[0]
+    if "42" != entry.EntityId {
+        t.Fatalf("expected the entity id derived from the pk, got %q", entry.EntityId)
+    }
+
+    for _, forbidden := range []string{"FABRICATED", "fake@example.com", `"old":""`, `"old":0`} {
+        if true == strings.Contains(entry.Changes, forbidden) {
+            t.Fatalf("the trail must assert nothing about unread fields, found %s in %s", forbidden, entry.Changes)
+        }
+    }
+
+    if "[]" != entry.Changes {
+        t.Fatalf("expected an empty change set rather than the json literal null, got %q", entry.Changes)
+    }
+}
+
+/* @info a delete that matched no row removed nothing, so the trail must not carry a deletion that never happened */
+func TestTracker_DeleteRecordsNothingWhenNoRowMatched(t *testing.T) {
+    tracker, _, storage := newScriptedTracker(nil)
+
+    if deleteErr := tracker.Delete(context.Background(), "user", "", &auditedAccount{Id: 42}); nil != deleteErr {
+        t.Fatalf("a delete that matched no row must not fail: %v", deleteErr)
+    }
+
+    if 0 != len(storage.saves) {
+        t.Fatalf("expected no audit entry for a delete that removed nothing, got %d", len(storage.saves))
+    }
+}
+
+/* @info the opt-in: an entity whose deleted contents must be recoverable pays a select and a row lock for them */
+func TestTracker_DeleteCapturesTheStoredRowWhenTheEntityOptsIn(t *testing.T) {
+    tracker, scripted, storage := newScriptedTracker(
+        &auditedAccount{Id: 42, Name: "real name", Email: "real@example.com", Balance: 9999},
+        EntityOptions{CaptureDeleteBeforeImage: true},
+    )
+
+    model := &auditedAccount{Id: 42, Name: "FABRICATED", Email: "fake@example.com", Balance: 1}
+
+    if deleteErr := tracker.Delete(context.Background(), "user", "", model); nil != deleteErr {
+        t.Fatalf("delete: %v", deleteErr)
+    }
+
+    if 2 != len(scripted.statements) {
+        t.Fatalf("expected a select followed by a delete, got %d statements: %v", len(scripted.statements), scripted.statements)
+    }
+    if false == strings.Contains(scripted.statements[0], "SELECT") || false == strings.Contains(scripted.statements[0], "FOR UPDATE") {
+        t.Fatalf("expected the row to be loaded and locked before the delete, got %q", scripted.statements[0])
+    }
+
+    entry := storage.saves[0].entries[0]
+    for _, expected := range []string{`"old":"real name"`, `"old":"real@example.com"`, `"old":9999`} {
+        if false == strings.Contains(entry.Changes, expected) {
+            t.Fatalf("the before-image must carry the stored row, expected %s in %s", expected, entry.Changes)
+        }
+    }
+    if true == strings.Contains(entry.Changes, "FABRICATED") {
+        t.Fatalf("a caller-written before-image must not reach the trail: %s", entry.Changes)
+    }
+
+    /* the load runs on a clone, so the caller's own model is left as it was passed in */
+    if "FABRICATED" != model.Name {
+        t.Fatalf("the caller model must not be overwritten by the load, got %q", model.Name)
+    }
+}
+
+func TestTracker_DeleteFailsWhenAnOptedInRowIsAlreadyAbsent(t *testing.T) {
+    tracker, scripted, storage := newScriptedTracker(nil, EntityOptions{CaptureDeleteBeforeImage: true})
+
+    deleteErr := tracker.Delete(context.Background(), "user", "", &auditedAccount{Id: 42})
+    if nil == deleteErr {
+        t.Fatalf("an opted-in delete must fail when the row it must capture is gone")
+    }
+
+    for _, statement := range scripted.statements {
+        if true == strings.Contains(statement, "DELETE") {
+            t.Fatalf("no delete may run once the row could not be loaded, got %q", statement)
+        }
+    }
+
+    if 0 != len(storage.saves) {
+        t.Fatalf("expected no audit entry, got %d", len(storage.saves))
     }
 }
 

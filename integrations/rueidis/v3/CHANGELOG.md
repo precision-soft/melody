@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-## [v3.6.0] - 2026-07-24 - Bounded Backplane Publish and Connection-Abort Retries
+## [v3.6.0] - 2026-07-25 - Bounded Backplane Publish and Connection-Abort Retries
 
 ### Added
 

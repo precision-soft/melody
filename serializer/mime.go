@@ -84,10 +84,6 @@ func parseAcceptHeader(acceptHeader string) []acceptedMime {
             continue
         }
 
-        if 0 == qualityValue {
-            continue
-        }
-
         if "*/*" == mimePart {
             result = append(result, acceptedMime{
                 mime:         "*/*",
@@ -123,4 +119,43 @@ func matchWildcardSubtype(wildcardMime string, candidateMime string) bool {
 
     prefix := strings.TrimSuffix(wildcardMime, "*")
     return true == strings.HasPrefix(candidateMime, prefix)
+}
+
+/* @important a q of 0 is a refusal, not an absence: it is kept in the parsed list so a candidate it covers can be excluded rather than falling through to the default */
+func acceptMatchSpecificity(acceptedMimeValue string, candidateMime string) int {
+    acceptedMimeValue = normalizeMime(acceptedMimeValue)
+    candidateMime = normalizeMime(candidateMime)
+
+    if acceptedMimeValue == candidateMime {
+        return 3
+    }
+
+    if true == matchWildcardSubtype(acceptedMimeValue, candidateMime) {
+        return 2
+    }
+
+    if "*/*" == acceptedMimeValue {
+        return 1
+    }
+
+    return 0
+}
+
+func acceptQualityFor(acceptedMimes []acceptedMime, candidateMime string) (float64, int, bool) {
+    bestSpecificity := 0
+    bestQuality := 0.0
+
+    for _, acceptedMimeValue := range acceptedMimes {
+        specificity := acceptMatchSpecificity(acceptedMimeValue.mime, candidateMime)
+        if specificity > bestSpecificity {
+            bestSpecificity = specificity
+            bestQuality = acceptedMimeValue.qualityValue
+        }
+    }
+
+    if 0 == bestSpecificity {
+        return 0, 0, false
+    }
+
+    return bestQuality, bestSpecificity, true
 }

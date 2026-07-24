@@ -4,6 +4,7 @@ import (
     "fmt"
     "strconv"
     "strings"
+    "sync"
 
     "github.com/precision-soft/melody/v2/.example/entity"
 
@@ -22,14 +23,23 @@ func NewInMemoryUserRepository() UserRepository {
 }
 
 type inMemoryUserRepository struct {
+    mutex sync.RWMutex
     users []*entity.User
 }
 
+/* @info the returned slice is a copy, but a shallow one: the entity pointers stay shared with the
+repository, so a caller that mutates an entity in place bypasses the lock */
 func (instance *inMemoryUserRepository) All() ([]*entity.User, error) {
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
+
     return append([]*entity.User{}, instance.users...), nil
 }
 
 func (instance *inMemoryUserRepository) Create(user *entity.User) error {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
     if nil == user {
         return fmt.Errorf("user is required")
     }
@@ -42,13 +52,13 @@ func (instance *inMemoryUserRepository) Create(user *entity.User) error {
         return fmt.Errorf("password hash is required")
     }
 
-    _, usernameExists := instance.FindByUsername(user.Username)
+    _, usernameExists := instance.findByUsernameLocked(user.Username)
     if true == usernameExists {
         return fmt.Errorf("username already exists")
     }
 
     if "" == strings.TrimSpace(user.Id) {
-        user.Id = instance.nextId()
+        user.Id = instance.nextIdLocked()
     }
 
     instance.users = append(instance.users, user)
@@ -57,6 +67,9 @@ func (instance *inMemoryUserRepository) Create(user *entity.User) error {
 }
 
 func (instance *inMemoryUserRepository) Update(user *entity.User) (bool, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
     if nil == user {
         return false, fmt.Errorf("user is required")
     }
@@ -83,7 +96,7 @@ func (instance *inMemoryUserRepository) Update(user *entity.User) (bool, error) 
             continue
         }
 
-        if true == instance.usernameTakenByAnother(user.Username, id) {
+        if true == instance.usernameTakenByAnotherLocked(user.Username, id) {
             return false, fmt.Errorf("username already exists")
         }
 
@@ -95,6 +108,9 @@ func (instance *inMemoryUserRepository) Update(user *entity.User) (bool, error) 
 }
 
 func (instance *inMemoryUserRepository) DeleteById(id string) (bool, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
     normalizedId := strings.TrimSpace(id)
     if "" == normalizedId {
         return false, fmt.Errorf("id is required")
@@ -117,6 +133,13 @@ func (instance *inMemoryUserRepository) DeleteById(id string) (bool, error) {
 }
 
 func (instance *inMemoryUserRepository) FindById(id string) (*entity.User, bool) {
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
+
+    return instance.findByIdLocked(id)
+}
+
+func (instance *inMemoryUserRepository) findByIdLocked(id string) (*entity.User, bool) {
     for _, user := range instance.users {
         if nil == user {
             continue
@@ -131,6 +154,13 @@ func (instance *inMemoryUserRepository) FindById(id string) (*entity.User, bool)
 }
 
 func (instance *inMemoryUserRepository) FindByUsername(username string) (*entity.User, bool) {
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
+
+    return instance.findByUsernameLocked(username)
+}
+
+func (instance *inMemoryUserRepository) findByUsernameLocked(username string) (*entity.User, bool) {
     normalizedUsername := strings.TrimSpace(username)
     normalizedUsername = strings.ToLower(normalizedUsername)
 
@@ -151,7 +181,7 @@ func (instance *inMemoryUserRepository) FindByUsername(username string) (*entity
     return nil, false
 }
 
-func (instance *inMemoryUserRepository) nextId() string {
+func (instance *inMemoryUserRepository) nextIdLocked() string {
     maxSuffix := int64(0)
 
     for _, user := range instance.users {
@@ -178,7 +208,7 @@ func (instance *inMemoryUserRepository) nextId() string {
     return fmt.Sprintf("user-%d", maxSuffix+1)
 }
 
-func (instance *inMemoryUserRepository) usernameTakenByAnother(username string, excludedId string) bool {
+func (instance *inMemoryUserRepository) usernameTakenByAnotherLocked(username string, excludedId string) bool {
     normalizedUsername := strings.TrimSpace(username)
     if "" == normalizedUsername {
         return false

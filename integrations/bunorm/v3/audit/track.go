@@ -59,13 +59,39 @@ func (instance *Tracker) Update(ctx context.Context, entity string, entityId str
     })
 }
 
+/* @important the caller usually passes only the primary key, so the passed-in model's remaining fields
+   are zero values it never read: recording them would assert them as the deleted row's contents. By
+   default nothing is claimed about them — the trail carries the identifier, the actor and the time,
+   which is what the delete actually knows — and the working database is not charged a read to write an
+   audit row. An entity whose deleted contents must be recoverable opts into CaptureDeleteBeforeImage. */
 func (instance *Tracker) Delete(ctx context.Context, entity string, entityId string, model any) error {
     return instance.database.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-        if _, deleteErr := tx.NewDelete().Model(model).WherePK().Exec(ctx); nil != deleteErr {
+        var before any
+
+        if true == instance.recorder.registry.capturesDeleteBeforeImageFor(entity) {
+            captured, cloneErr := cloneModel(model)
+            if nil != cloneErr {
+                return cloneErr
+            }
+
+            if selectErr := tx.NewSelect().Model(captured).WherePK().For("UPDATE").Scan(ctx); nil != selectErr {
+                return exception.NewError("audited delete could not load the row it is about to delete", map[string]any{"entity": entity}, selectErr)
+            }
+
+            before = captured
+        }
+
+        result, deleteErr := tx.NewDelete().Model(model).WherePK().Exec(ctx)
+        if nil != deleteErr {
             return exception.NewError("audited delete failed", map[string]any{"entity": entity}, deleteErr)
         }
 
-        return instance.recorder.RecordDelete(withTransactionForDatabase(ctx, tx, instance.database), entity, instance.resolveEntityId(entityId, model), model)
+        /* a delete that matched no row removed nothing, so recording it would put a deletion that never happened in the trail; a driver that cannot report the count is trusted rather than second-guessed */
+        if affected, affectedErr := result.RowsAffected(); nil == affectedErr && 0 == affected {
+            return nil
+        }
+
+        return instance.recorder.RecordDelete(withTransactionForDatabase(ctx, tx, instance.database), entity, instance.resolveEntityId(entityId, model), before)
     })
 }
 

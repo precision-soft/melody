@@ -6,11 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-## [v3.2.2] - 2026-07-24 - Consumer Recovery on a Static Connection
+## [v3.2.2] - 2026-07-25 - Consumer Recovery on a Static Connection and a Joined Shutdown
 
 ### Fixed
 
+- `Receive` refuses to start a consume loop once `Close` has begun, so a subscribe racing a teardown cannot leave a goroutine the close never joins, nor add to the wait group a join already in flight
 - a consumer on a live static connection (no dialer) recovers from a transient subscribe failure by retrying on a fresh channel instead of stopping permanently on the first failure — the live connection can still carry the subscription, so the transport gives up only when the connection itself is gone; a consumer that does stop because its channel cannot be reopened now logs the reason instead of ending silently after a "reconnecting" message, while a stop caused by the transport closing stays silent
+- `transport.go` — `Close` now joins the consume goroutine instead of only signalling it. It closed the consume and publish channels and returned while `consumeLoop` was still running, so an envelope decoded inside that window still reached the application after `Close` had returned — an envelope that can never be acknowledged, because `Ack`/`Nack` report the torn-down consume channel as gone, leaving the broker to redeliver it; a decode failure racing the same window nacked on the channel `Close` had just closed. `Close` now marks the transport closing and fires the close signal under the mutex, releases the mutex, waits for the goroutine, and only then closes the channels and the owned connection — the wait must happen with the mutex released, since the loop's own helpers take it. The wait is bounded by a short join timeout so a loop parked inside a caller-supplied `Dialer`, the one place the close signal cannot reach it, can never make teardown block.
 
 ## [v3.2.1] - 2026-07-11 - Prefetch Clamp, DSN Redaction, and Channel Recovery
 

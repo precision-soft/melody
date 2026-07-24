@@ -59,7 +59,7 @@ func (instance Config) withDefaults() Config {
     return resolved
 }
 
-/* GenerateSecret returns a new base32 (RFC 4648, unpadded) TOTP secret suitable for an authenticator app and for OtpauthURI. */
+/* GenerateSecret returns a new base32 (RFC 4648, unpadded) TOTP secret suitable for an authenticator app and for OtpauthUri. */
 func GenerateSecret() (string, error) {
     raw := make([]byte, defaultSecretBytes)
     if _, readErr := rand.Read(raw); nil != readErr {
@@ -128,8 +128,8 @@ func GenerateCodeAt(secret string, at time.Time, config Config) (string, error) 
     return hotpCode(key, uint64(counter), resolved.Digits), nil
 }
 
-/* OtpauthURI builds the otpauth:// URI an authenticator app consumes (typically rendered as a QR code) during enrollment. */
-func OtpauthURI(issuer string, accountName string, secret string, config Config) string {
+/* OtpauthUri builds the otpauth:// URI an authenticator app consumes (typically rendered as a QR code) during enrollment. */
+func OtpauthUri(issuer string, accountName string, secret string, config Config) string {
     resolved := config.withDefaults()
 
     label := url.PathEscape(issuer + ":" + accountName)
@@ -142,6 +142,11 @@ func OtpauthURI(issuer string, accountName string, secret string, config Config)
     query.Set("period", fmt.Sprintf("%d", resolved.Period))
 
     return "otpauth://totp/" + label + "?" + query.Encode()
+}
+
+/* Deprecated: use OtpauthUri. */
+func OtpauthURI(issuer string, accountName string, secret string, config Config) string {
+    return OtpauthUri(issuer, accountName, secret, config)
 }
 
 /* GenerateRecoveryCodes returns count single-use recovery codes (formatted xxxxx-xxxxx). The caller stores them (encrypted) and removes each on use; a count of zero yields the default set size. */

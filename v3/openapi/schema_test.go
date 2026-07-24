@@ -2172,3 +2172,59 @@ func TestBuildSchema_JsonStringOptionKeepsTheEmptyUnsignedWindowUnsatisfiable(t 
         }
     }
 }
+
+/* @info the validator measures a length fixed at zero, so notEmpty rejects every payload; advertising minItems 1 alone told a client a non-empty array would be accepted */
+func TestBuildSchema_NotEmptyOnZeroLengthArrayIsUnsatisfiable(t *testing.T) {
+    components := map[string]*Schema{}
+    names := map[reflect.Type]string{}
+    visited := map[reflect.Type]bool{}
+
+    requestType := reflect.StructOf([]reflect.StructField{
+        {Name: "Tags", Type: reflect.TypeOf([0]string{}), Tag: `json:"tags" validate:"notEmpty"`},
+    })
+
+    schema := buildSchema(requestType, components, names, visited)
+
+    property, exists := schema.Properties["tags"]
+    if false == exists {
+        t.Fatalf("expected the property to be emitted")
+    }
+
+    if nil == property.MinItems || 1 != *property.MinItems {
+        t.Fatalf("expected the floor to be kept, got %v", property.MinItems)
+    }
+
+    if nil == property.MaxItems || 0 != *property.MaxItems {
+        t.Fatalf("expected the empty value space to be advertised, got %v", property.MaxItems)
+    }
+}
+
+func TestSchemaFromType_TopLevelUnsignedCarriesZeroFloor(t *testing.T) {
+    components := map[string]*Schema{}
+    names := map[reflect.Type]string{}
+
+    schema := schemaFromType(reflect.TypeOf(uint64(0)), components, names)
+
+    if "integer" != schema.Type {
+        t.Fatalf("unexpected schema type: %s", schema.Type)
+    }
+
+    if nil == schema.Minimum || 0 != *schema.Minimum {
+        t.Fatalf("expected a zero floor on a bare unsigned type, got %v", schema.Minimum)
+    }
+}
+
+func TestSchemaFromType_NilTypeYieldsEmptySchema(t *testing.T) {
+    components := map[string]*Schema{}
+    names := map[reflect.Type]string{}
+
+    schema := schemaFromType(nil, components, names)
+
+    if nil == schema {
+        t.Fatalf("expected a schema for a nil type")
+    }
+
+    if "" != schema.Type {
+        t.Fatalf("unexpected schema type: %s", schema.Type)
+    }
+}

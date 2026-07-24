@@ -15,7 +15,7 @@ import (
 
 func ApiCreateHandler() melodyhttpcontract.Handler {
     createProduct := melodyhttp.JsonHandler(
-        func(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, dto createRequest) (melodyhttpcontract.Response, error) {
+        func(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, dto CreateRequest) (melodyhttpcontract.Response, error) {
             productService := service.MustGetProductService(runtimeInstance.Container())
 
             product, createErr := productService.Create(
@@ -55,7 +55,8 @@ func apiJsonErrorResponder(
     return presenter.ApiError(runtimeInstance, request, status, message), nil
 }
 
-type createRequest struct {
+/* @important bound by the openapi descriptor in config; keep it exported */
+type CreateRequest struct {
     Id          string  `json:"id" validate:"max=60"`
     Name        string  `json:"name" validate:"notBlank,min=2,max=120"`
     Description string  `json:"description" validate:"notBlank,min=1,max=40"`

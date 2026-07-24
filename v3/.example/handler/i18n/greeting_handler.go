@@ -10,7 +10,8 @@ import (
     melodytranslation "github.com/precision-soft/melody/v3/translation"
 )
 
-type greetingPayload struct {
+/* @important bound by the openapi descriptor in config; keep it exported */
+type GreetingResponse struct {
     Locale   string `json:"locale"`
     Greeting string `json:"greeting"`
     Cart     string `json:"cart"`
@@ -30,7 +31,7 @@ func GreetingHandler() melodyhttpcontract.Handler {
             name = "world"
         }
 
-        payload := greetingPayload{
+        payload := GreetingResponse{
             Locale:   locale,
             Greeting: translator.Trans("greeting", map[string]any{"name": name}, "messages", locale),
             Cart:     translator.Trans("cart.items", map[string]any{"count": queryInt(request, "count")}, "messages", locale),

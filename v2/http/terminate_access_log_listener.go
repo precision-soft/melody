@@ -79,8 +79,16 @@ func RegisterKernelTerminateAccessLogListener(eventDispatcher eventcontract.Even
             userAgent := ""
             referer := ""
 
+            if schemeValue, exists := terminateEvent.Request().Attributes().Get(RequestAttributeScheme); true == exists {
+                if schemeString, isString := schemeValue.(string); true == isString {
+                    scheme = schemeString
+                }
+            }
+
             if nil != terminateEvent.Request().HttpRequest() {
-                scheme = detectScheme(terminateEvent.Request().HttpRequest())
+                if "" == scheme {
+                    scheme = detectScheme(terminateEvent.Request().HttpRequest())
+                }
                 host = terminateEvent.Request().HttpRequest().Host
 
                 if nil != terminateEvent.Request().HttpRequest().URL {

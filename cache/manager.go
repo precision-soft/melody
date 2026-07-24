@@ -1,10 +1,13 @@
 package cache
 
 import (
+    "strconv"
+    "strings"
     "time"
 
     cachecontract "github.com/precision-soft/melody/cache/contract"
     "github.com/precision-soft/melody/exception"
+    exceptioncontract "github.com/precision-soft/melody/exception/contract"
     "github.com/precision-soft/melody/internal"
 )
 
@@ -107,8 +110,32 @@ func (instance *Manager) DeleteMultiple(keys []string) error {
     return instance.backend.DeleteMultiple(keys)
 }
 
+/* @important the counter operations are backend-native so a distributed backend keeps them atomic, which means they bypass the serializer and store the count as decimal text; a counter key must therefore be read with GetCounter rather than Get, and must not be mixed with Set on the same key */
 func (instance *Manager) Increment(key string, delta int64) (int64, error) {
     return instance.backend.Increment(key, delta)
+}
+
+/* GetCounter reads a key written by Increment or Decrement. Those operations are backend-native and store the count as decimal text rather than through the serializer, so Get would hand the raw payload to a deserializer that does not expect it. */
+func (instance *Manager) GetCounter(key string) (int64, bool, error) {
+    payload, exists, getErr := instance.backend.Get(key)
+    if nil != getErr {
+        return 0, false, getErr
+    }
+
+    if false == exists {
+        return 0, false, nil
+    }
+
+    parsedValue, parseErr := strconv.ParseInt(strings.TrimSpace(string(payload)), 10, 64)
+    if nil != parseErr {
+        return 0, false, exception.NewError(
+            "cache value is not a valid int64",
+            exceptioncontract.Context{"key": key},
+            parseErr,
+        )
+    }
+
+    return parsedValue, true, nil
 }
 
 func (instance *Manager) Decrement(key string, delta int64) (int64, error) {

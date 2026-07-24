@@ -371,7 +371,7 @@ func (instance *FileServer) resolveAndOpen(
         }
 
         ifNoneMatch := request.Header("If-None-Match")
-        if "" != ifNoneMatch && ifNoneMatch == etag {
+        if true == EtagMatchesIfNoneMatch(ifNoneMatch, etag) {
             if nil != logger {
                 logger.Info(
                     "static serve 304 by etag",

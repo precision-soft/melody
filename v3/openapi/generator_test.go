@@ -602,3 +602,41 @@ func TestGenerate_PointerNumericWithBoundIsNotNullable(t *testing.T) {
         t.Fatalf("expected a bound-less pointer field to remain nullable, got: %+v", optional)
     }
 }
+
+func TestGenerate_ResponseWithoutBodyTypeIsDescribed(t *testing.T) {
+    registry := NewRegistry()
+    registry.Describe("products.delete", Descriptor{
+        Responses: map[int]reflect.Type{
+            204: nil,
+        },
+    })
+
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "products.delete", pattern: "/products/:id/", methods: []string{"DELETE"}},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, registry)
+
+    pathItem, exists := document.Paths["/products/{id}/"]
+    if false == exists {
+        t.Fatalf("expected the delete path")
+    }
+
+    response, hasResponse := pathItem.Delete.Responses["204"]
+    if false == hasResponse {
+        t.Fatalf("expected the 204 response")
+    }
+
+    mediaType, hasMediaType := response.Content["application/json"]
+    if false == hasMediaType {
+        t.Fatalf("expected the json media type")
+    }
+
+    if nil == mediaType.Schema {
+        t.Fatalf("expected a schema for the bodyless response")
+    }
+
+    if "" != mediaType.Schema.Type {
+        t.Fatalf("unexpected schema type: %s", mediaType.Schema.Type)
+    }
+}

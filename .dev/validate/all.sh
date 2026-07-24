@@ -103,7 +103,7 @@ LIVE_SUITE_SPECIFICATION_STRING_LIST=(
     "integrations/rueidis/v3 -race"
     "integrations/rueidis/v2"
     "integrations/rueidis"
-    "integrations/bunorm/mysql/v3"
+    "integrations/bunorm/mysql/v3 -race"
     "integrations/bunorm/mysql/v2"
     "integrations/bunorm/mysql"
     "integrations/bunorm/pgsql/v3 -race"
@@ -137,12 +137,14 @@ run_live_go_suites() {
 # the race detector over the concurrency-carrying packages of the core majors and the cron runner, mirroring
 # the ci race job. The build-tag matrix above runs these without it, so a lost mutex or an unsynchronized memo
 # stays green there: these packages hold goroutines that outlive a call (the lazy service memo, the signal
-# watcher, the smtp cancellation watcher, the cron runner's parallel dispatch), and only the detector sees
-# them race. No service containers needed.
+# watcher, the smtp cancellation watcher, the http client's redirect policy reading the header map, the
+# logger's shared writer, the message bus dispatch, the cron runner's parallel dispatch), and only the
+# detector sees them race — several of those tests assert nothing at all, so without this lane they can only
+# ever pass. No service containers needed.
 RACE_SUITE_SPECIFICATION_STRING_LIST=(
-    ". ./container/... ./application/... ./config/... ./event/..."
-    "v2 ./container/... ./application/... ./config/... ./event/..."
-    "v3 ./container/... ./application/... ./config/... ./event/... ./mailer/... ./lock/..."
+    ". ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/..."
+    "v2 ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/..."
+    "v3 ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/... ./mailer/... ./lock/... ./messagebus/..."
     "integrations/cron ./..."
     "integrations/cron/v2 ./..."
     "integrations/cron/v3 ./..."

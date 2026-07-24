@@ -30,6 +30,10 @@ func changeSetWithIgnore(before any, after any, ignore map[string]struct{}) []Ch
     var changes []Change
     collectChanges(&changes, structValue(before), structValue(after), ignore, false)
 
+    if nil == before && nil == after {
+        return []Change{}
+    }
+
     return changes
 }
 

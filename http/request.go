@@ -15,7 +15,8 @@ import (
 )
 
 const (
-    RequestAttributeSession = "session"
+    RequestAttributeSession = "_session"
+    RequestAttributeScheme  = "_scheme"
 )
 
 func ErrorUnsupportedContentType() error {

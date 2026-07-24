@@ -202,11 +202,13 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
         melodyRequest := NewRequest(request, params, runtimeInstance, requestContext)
 
-        melodyRequest.Attributes().Set(RequestAttributeSession, sessionInstance)
-
         for key, value := range routeAttributes {
             melodyRequest.Attributes().Set(key, value)
         }
+
+        /* @important published after the route attributes so a route cannot replace what the kernel owns; the scheme is the one resolved through the configured forwarded-headers policy, which a listener has no access to — re-detecting without it reports http for every request a trusted proxy terminated as https */
+        melodyRequest.Attributes().Set(RequestAttributeSession, sessionInstance)
+        melodyRequest.Attributes().Set(RequestAttributeScheme, scheme)
 
         routeName := melodyRequest.RouteName()
 
@@ -278,6 +280,11 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             recoveredValue := recover()
             if nil == recoveredValue {
                 return
+            }
+
+            /* @important net/http documents this sentinel as "abort the connection and suppress the log", and only a panic reaching its own serve loop closes the connection without a response; converting it into an error would answer an aborted upload with a 500 and an error line. The identity check matches net/http's own, so an application error merely wrapping the sentinel is unaffected. */
+            if nethttp.ErrAbortHandler == recoveredValue {
+                panic(recoveredValue)
             }
 
             recoveredErr := RecoverToError(recoveredValue)

@@ -4,6 +4,7 @@ import (
     "fmt"
     "strconv"
     "strings"
+    "sync"
 
     "github.com/precision-soft/melody/.example/entity"
 
@@ -22,14 +23,27 @@ func NewInMemoryCategoryRepository() CategoryRepository {
 }
 
 type inMemoryCategoryRepository struct {
+    mutex      sync.RWMutex
     categories []*entity.Category
 }
 
+/* @info the returned slice is a copy, but a shallow one: the entity pointers stay shared with the
+repository, so a caller that mutates an entity in place bypasses the lock */
 func (instance *inMemoryCategoryRepository) All() []*entity.Category {
-    return instance.categories
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
+
+    return append([]*entity.Category{}, instance.categories...)
 }
 
 func (instance *inMemoryCategoryRepository) FindById(id string) (*entity.Category, bool) {
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
+
+    return instance.findByIdLocked(id)
+}
+
+func (instance *inMemoryCategoryRepository) findByIdLocked(id string) (*entity.Category, bool) {
     for _, category := range instance.categories {
         if nil == category {
             continue
@@ -44,6 +58,9 @@ func (instance *inMemoryCategoryRepository) FindById(id string) (*entity.Categor
 }
 
 func (instance *inMemoryCategoryRepository) Create(category *entity.Category) error {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
     if nil == category {
         return fmt.Errorf("category is required")
     }
@@ -53,10 +70,10 @@ func (instance *inMemoryCategoryRepository) Create(category *entity.Category) er
     }
 
     if "" == strings.TrimSpace(category.Id) {
-        category.Id = instance.nextId()
+        category.Id = instance.nextIdLocked()
     }
 
-    _, exists := instance.FindById(category.Id)
+    _, exists := instance.findByIdLocked(category.Id)
     if true == exists {
         return fmt.Errorf("id already exists")
     }
@@ -66,6 +83,9 @@ func (instance *inMemoryCategoryRepository) Create(category *entity.Category) er
 }
 
 func (instance *inMemoryCategoryRepository) Update(category *entity.Category) (bool, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
     if nil == category {
         return false, fmt.Errorf("category is required")
     }
@@ -96,6 +116,9 @@ func (instance *inMemoryCategoryRepository) Update(category *entity.Category) (b
 }
 
 func (instance *inMemoryCategoryRepository) DeleteById(id string) (bool, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
     normalizedId := strings.TrimSpace(id)
     if "" == normalizedId {
         return false, fmt.Errorf("id is required")
@@ -117,7 +140,7 @@ func (instance *inMemoryCategoryRepository) DeleteById(id string) (bool, error) 
     return false, nil
 }
 
-func (instance *inMemoryCategoryRepository) nextId() string {
+func (instance *inMemoryCategoryRepository) nextIdLocked() string {
     maxSuffix := int64(0)
 
     for _, category := range instance.categories {

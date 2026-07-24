@@ -154,3 +154,24 @@ func TestModule_RegisterCliCommandsSkipsWithoutRelay(t *testing.T) {
         t.Fatalf("expected no commands without a relay, got %d", len(commands))
     }
 }
+
+func TestModule_RegisterServicesRegistersFactoryProviders(t *testing.T) {
+    registrar := &spyServiceRegistrar{}
+
+    NewModule(ModuleConfig{
+        StoreFactory: func(resolver containercontract.Resolver) (*Store, error) {
+            return &Store{}, nil
+        },
+        RelayFactory: func(resolver containercontract.Resolver) (*Relay, error) {
+            return newModuleTestRelay(), nil
+        },
+    }).RegisterServices(registrar)
+
+    if false == containsName(registrar.names, ServiceStore) {
+        t.Fatalf("expected the store factory registered under %q, got %v", ServiceStore, registrar.names)
+    }
+
+    if false == containsName(registrar.names, ServiceRelay) {
+        t.Fatalf("expected the relay factory registered under %q, got %v", ServiceRelay, registrar.names)
+    }
+}

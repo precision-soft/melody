@@ -19,6 +19,9 @@ func validateAuditTableName(table string) {
 type EntityOptions struct {
     Table         string
     IgnoredFields []string
+
+    /* @important CaptureDeleteBeforeImage makes an audited delete load and lock the row first so the trail carries its field values. It costs a select and a row lock on every delete of this entity and turns deleting an absent row into an error, so it is off unless the entity is one whose deleted contents must be recoverable from the trail. */
+    CaptureDeleteBeforeImage bool
 }
 
 type Registry struct {
@@ -71,6 +74,15 @@ func (instance *Registry) tableFor(entity string) string {
     }
 
     return instance.defaultTable
+}
+
+func (instance *Registry) capturesDeleteBeforeImageFor(entity string) bool {
+    options, exists := instance.optionsByEntity[entity]
+    if false == exists {
+        return false
+    }
+
+    return options.CaptureDeleteBeforeImage
 }
 
 func (instance *Registry) ignoredFieldsFor(entity string) map[string]struct{} {

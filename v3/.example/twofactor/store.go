@@ -80,7 +80,7 @@ func (instance *Store) Enroll(
         return "", "", nil, insertErr
     }
 
-    uri := totp.OtpauthURI(issuer, userIdentifier, secret, totp.Config{})
+    uri := totp.OtpauthUri(issuer, userIdentifier, secret, totp.Config{})
 
     return secret, uri, recoveryCodes, nil
 }

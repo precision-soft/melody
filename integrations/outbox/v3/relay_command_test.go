@@ -213,3 +213,28 @@ func TestRelayCommand_RejectsMalformedInterval(t *testing.T) {
         t.Fatalf("expected a malformed interval to be rejected")
     }
 }
+
+func TestNewRelayCommandFromResolver_DefersResolution(t *testing.T) {
+    serviceContainer := container.NewContainer()
+
+    resolved := false
+    container.MustRegister[*Relay](
+        serviceContainer,
+        ServiceRelay,
+        func(resolver containercontract.Resolver) (*Relay, error) {
+            resolved = true
+
+            return newModuleTestRelay(), nil
+        },
+    )
+
+    command := NewRelayCommandFromResolver(serviceContainer)
+
+    if true == resolved {
+        t.Fatalf("expected no relay resolution before the first batch")
+    }
+
+    if "melody:outbox:relay" != command.Name() {
+        t.Fatalf("unexpected command name %q", command.Name())
+    }
+}

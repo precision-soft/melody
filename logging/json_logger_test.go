@@ -369,3 +369,76 @@ func TestJsonLogger_FallbackOnMarshalError(t *testing.T) {
         t.Fatalf("fallback time is not valid RFC3339: %v", parseErr)
     }
 }
+
+type statefulProbeWriter struct {
+    lines  []string
+    closed bool
+}
+
+func (instance *statefulProbeWriter) Write(payload []byte) (int, error) {
+    instance.lines = append(instance.lines, string(payload))
+
+    return len(payload), nil
+}
+
+func (instance *statefulProbeWriter) Close() error {
+    instance.closed = true
+
+    return nil
+}
+
+/* @info Close hands the writer to a Close that may mutate it while a goroutine outliving the container teardown is still inside Write; run with -race */
+func TestJsonLogger_CloseIsSynchronizedWithConcurrentWrites(t *testing.T) {
+    writer := &statefulProbeWriter{}
+    logger := NewJsonLogger(writer, loggingcontract.LevelDebug)
+
+    var waitGroup sync.WaitGroup
+    waitGroup.Add(2)
+
+    go func() {
+        defer waitGroup.Done()
+
+        for iteration := 0; iteration < 500; iteration++ {
+            logger.Info("message", nil)
+        }
+    }()
+
+    go func() {
+        defer waitGroup.Done()
+
+        closeable, isCloseable := logger.(interface{ Close() error })
+        if false == isCloseable {
+            return
+        }
+
+        _ = closeable.Close()
+    }()
+
+    waitGroup.Wait()
+}
+
+func TestJsonLogger_WritesAreDroppedAfterClose(t *testing.T) {
+    writer := &statefulProbeWriter{}
+    logger := NewJsonLogger(writer, loggingcontract.LevelDebug)
+
+    logger.Info("before", nil)
+
+    closeable, isCloseable := logger.(interface{ Close() error })
+    if false == isCloseable {
+        t.Fatalf("expected the logger to be closeable")
+    }
+
+    if closeErr := closeable.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    logger.Info("after", nil)
+
+    if 1 != len(writer.lines) {
+        t.Fatalf("expected only the pre-close line to be written, got %d", len(writer.lines))
+    }
+
+    if false == strings.Contains(writer.lines[0], "before") {
+        t.Fatalf("unexpected written line: %s", writer.lines[0])
+    }
+}

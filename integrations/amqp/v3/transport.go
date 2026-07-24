@@ -137,6 +137,8 @@ type Transport struct {
     closeSignal       chan struct{}
     closeOnce         sync.Once
 
+    wait sync.WaitGroup
+
     publishMutex sync.Mutex
     consumeMutex sync.Mutex
 }
@@ -165,7 +167,11 @@ func (instance *Transport) Receive(
 
     out := make(chan messagebuscontract.Envelope)
 
-    go instance.consumeLoop(runtimeInstance, channel, deliveries, out)
+    if false == instance.startConsumeLoop(runtimeInstance, channel, deliveries, out) {
+        channel.Close()
+
+        return nil, exception.NewError("amqp transport is closing", nil, nil)
+    }
 
     return out, nil
 }
@@ -225,14 +231,21 @@ func (instance *Transport) Nack(
     return instance.republish(runtimeInstance, channel, stamp, envelopeInstance)
 }
 
+/* @important closeJoinTimeout bounds how long Close waits for the consume goroutine. The loop observes closeSignal at every blocking point, so a healthy join costs microseconds; the one stretch it cannot observe it is inside the caller-supplied dialer, and connect rechecks closing the moment that dial returns — so the wait is one dial attempt, not an open-ended one. The window is sized to a full amqp handshake so the join completes for every dialer that carries a timeout; a dialer with none would otherwise hang teardown for good, which is why the wait is bounded at all rather than open. */
+const closeJoinTimeout = 30 * time.Second
+
 func (instance *Transport) Close(runtimeInstance runtimecontract.Runtime) error {
     instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
     instance.closing = true
     instance.closeOnce.Do(func() {
         close(instance.closeSignal)
     })
+    instance.mutex.Unlock()
+
+    instance.awaitConsumeLoop()
+
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
 
     if nil != instance.consumeChannel {
         instance.consumeChannel.Close()
@@ -251,6 +264,26 @@ func (instance *Transport) Close(runtimeInstance runtimecontract.Runtime) error 
     }
 
     return nil
+}
+
+/* @important the consume goroutine's own helpers (isClosing, currentGeneration, resetConsumeChannel) take instance.mutex, so the join must run with that mutex released or Close deadlocks against the goroutine it is waiting for. */
+func (instance *Transport) awaitConsumeLoop() {
+    joined := make(chan struct{})
+
+    go func() {
+        instance.wait.Wait()
+
+        close(joined)
+    }()
+
+    timer := time.NewTimer(closeJoinTimeout)
+    defer timer.Stop()
+
+    select {
+    case <-joined:
+    case <-timer.C:
+        /* the waiter is left to finish on its own: no further Add can happen, since startConsumeLoop refuses once closing is set, so it ends as soon as the loop does */
+    }
 }
 
 func (instance *Transport) connect() (*amqp091.Connection, error) {
@@ -508,6 +541,34 @@ func (instance *Transport) subscribe() (*amqp091.Channel, <-chan amqp091.Deliver
     }
 
     return channel, deliveries, nil
+}
+
+/* @important the Add and the Done live together here so consumeLoop carries no precondition a caller must remember, and Close joins whatever this started. The Add is taken under the mutex Close sets closing under, so a loop can never be started after Close observed the count — which would both escape the join and race the Wait already in flight. */
+func (instance *Transport) startConsumeLoop(
+    runtimeInstance runtimecontract.Runtime,
+    channel *amqp091.Channel,
+    deliveries <-chan amqp091.Delivery,
+    out chan messagebuscontract.Envelope,
+) bool {
+    instance.mutex.Lock()
+
+    if true == instance.closing {
+        instance.mutex.Unlock()
+
+        return false
+    }
+
+    instance.wait.Add(1)
+
+    instance.mutex.Unlock()
+
+    go func() {
+        defer instance.wait.Done()
+
+        instance.consumeLoop(runtimeInstance, channel, deliveries, out)
+    }()
+
+    return true
 }
 
 func (instance *Transport) consumeLoop(

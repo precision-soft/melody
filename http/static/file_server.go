@@ -280,7 +280,7 @@ func (instance *FileServer) Serve(
         }
 
         ifNoneMatch := request.Header("If-None-Match")
-        if "" != ifNoneMatch && ifNoneMatch == etag {
+        if true == EtagMatchesIfNoneMatch(ifNoneMatch, etag) {
             logger.Info(
                 "static serve 304 by etag",
                 loggingcontract.Context{
@@ -438,7 +438,7 @@ func (instance *FileServer) serveForStreaming(
         }
 
         ifNoneMatch := request.Header("If-None-Match")
-        if "" != ifNoneMatch && ifNoneMatch == etag {
+        if true == EtagMatchesIfNoneMatch(ifNoneMatch, etag) {
             _ = file.Close()
             return nethttp.StatusNotModified, headers, nil, nil, true
         }

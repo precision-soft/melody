@@ -18,8 +18,8 @@ func TestBagStringStrict(t *testing.T) {
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
-    if false == exists {
-        t.Fatalf("expected exists to be true")
+    if true == exists {
+        t.Fatalf("expected a nil value to report as unset")
     }
     if "" != value {
         t.Fatalf("expected empty string for nil value, got %q", value)

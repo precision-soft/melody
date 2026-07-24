@@ -146,3 +146,24 @@ func TestAppendString_AndAppendStringSlice(t *testing.T) {
         t.Fatalf("expected value to remain unchanged on error")
     }
 }
+
+func TestStringSlice_PresentNilReportsUnset(t *testing.T) {
+    parameterBag := NewParameterBag()
+    parameterBag.Set("tags", nil)
+
+    if false == parameterBag.Has("tags") {
+        t.Fatalf("expected the key to be present")
+    }
+
+    values, exists := StringSlice(parameterBag, "tags")
+    if true == exists {
+        t.Fatalf("expected StringSlice to report a nil value as unset")
+    }
+    if nil != values {
+        t.Fatalf("expected no values, got %v", values)
+    }
+
+    if _, exists, _ := StringAt(parameterBag, "tags", 0); true == exists {
+        t.Fatalf("expected StringAt to report a nil value as unset")
+    }
+}

@@ -29,3 +29,28 @@ func (instance *testEnvironmentSource) Load() (map[string]string, error) {
 
     return copied, nil
 }
+
+func newResolvedConfiguration(
+    t *testing.T,
+    environmentValues map[string]string,
+    declare func(configuration *Configuration),
+) *Configuration {
+    t.Helper()
+
+    configuration, newConfigurationErr := NewConfiguration(
+        &Environment{values: environmentValues},
+        "/srv/app",
+    )
+    if nil != newConfigurationErr {
+        t.Fatalf("expected the configuration to build, got %v", newConfigurationErr)
+    }
+
+    declare(configuration)
+
+    resolveErr := configuration.Resolve()
+    if nil != resolveErr {
+        t.Fatalf("expected the parameters to resolve, got %v", resolveErr)
+    }
+
+    return configuration
+}

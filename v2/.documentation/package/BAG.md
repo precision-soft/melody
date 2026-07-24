@@ -115,6 +115,7 @@ func readRequestParameters(
 
 - `String` returns `""` for non-string stored types; use `StringStrict` to detect type mismatches.
 - `StringSlice` and `StringSliceStrict` accept both `[]string` and `string` (single value), returning a slice in both cases.
+- A key present with a `nil` value reports as **unset** from `String`, `StringSlice`, `Int`, `Bool`, `Float64` and `Duration`, so `Has` and those accessors disagree for that state: `Has` reports the key, the accessor reports absence. The strict variants (`StringStrict`, `StringSliceStrict`) still report it as present with a zero value.
 - `ParameterBag.All()` returns a copy of the internal map.
 
 ## Userland API

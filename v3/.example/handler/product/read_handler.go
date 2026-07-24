@@ -81,7 +81,8 @@ func ApiReadHandler() melodyhttpcontract.Handler {
     }
 }
 
-type productResponse struct {
+/* @important bound by the openapi descriptor in config; keep it exported */
+type ProductResponse struct {
     Id          string  `json:"id"`
     Name        string  `json:"name"`
     Description string  `json:"description"`
@@ -93,18 +94,18 @@ type productResponse struct {
     UpdatedAt   string  `json:"updatedAt"`
 }
 
-type readAllResponse []productResponse
+type readAllResponse []ProductResponse
 
 type readResponse struct {
-    Product    productResponse             `json:"product"`
+    Product    ProductResponse             `json:"product"`
     Categories []category.CategoryResponse `json:"categories"`
     Currencies []currency.CurrencyResponse `json:"currencies"`
 }
 
-func mapProduct(product *entity.Product) productResponse {
+func mapProduct(product *entity.Product) ProductResponse {
     priceRounded := math.Round(product.Price*100.0) / 100.0
 
-    return productResponse{
+    return ProductResponse{
         Id:          product.Id,
         Name:        product.Name,
         Description: product.Description,

@@ -44,6 +44,10 @@ func TestRegisterResponseListener_AppliesHeadersToErrorResponse(t *testing.T) {
     if "" == errorResponse.Headers().Get("Access-Control-Allow-Origin") {
         t.Fatalf("expected CORS headers applied to error response by listener")
     }
+
+    if 1 != len(errorResponse.Headers().Values("Vary")) {
+        t.Fatalf("expected a single Vary header, got: %v", errorResponse.Headers().Values("Vary"))
+    }
 }
 
 func TestRegisterResponseListener_SkipsWhenOriginMissing(t *testing.T) {
@@ -64,6 +68,10 @@ func TestRegisterResponseListener_SkipsWhenOriginMissing(t *testing.T) {
 
     if "" != response.Headers().Get("Access-Control-Allow-Origin") {
         t.Fatalf("expected no CORS headers when Origin absent")
+    }
+
+    if "Origin" != response.Headers().Get("Vary") {
+        t.Fatalf("expected Vary: Origin when Origin absent, got: %q", response.Headers().Get("Vary"))
     }
 }
 
@@ -87,5 +95,9 @@ func TestRegisterResponseListener_SkipsDisallowedOrigin(t *testing.T) {
 
     if "" != response.Headers().Get("Access-Control-Allow-Origin") {
         t.Fatalf("expected no CORS headers for disallowed origin")
+    }
+
+    if "Origin" != response.Headers().Get("Vary") {
+        t.Fatalf("expected Vary: Origin for disallowed origin, got: %q", response.Headers().Get("Vary"))
     }
 }

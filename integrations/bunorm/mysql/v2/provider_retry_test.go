@@ -116,6 +116,16 @@ func TestIsTransientErrorClassification(t *testing.T) {
             transient: true,
         },
         {
+            name:      "connection abort marker is transient",
+            inputErr:  errors.New("write tcp 10.0.0.1:3306: software caused connection abort"),
+            transient: true,
+        },
+        {
+            name:      "windows connection abort marker is transient",
+            inputErr:  errors.New("write tcp 10.0.0.1:3306: An established connection was aborted by the software in your host machine."),
+            transient: true,
+        },
+        {
             name:      "connection refused marker is transient",
             inputErr:  errors.New("dial tcp 127.0.0.1:3306: connect: connection refused"),
             transient: true,

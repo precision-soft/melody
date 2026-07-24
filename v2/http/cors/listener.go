@@ -26,16 +26,6 @@ func RegisterResponseListener(eventDispatcher eventcontract.EventDispatcher, ser
                 return nil
             }
 
-            request := responseEvent.Request()
-            origin := service.RequestOrigin(request)
-            if "" == origin {
-                return nil
-            }
-
-            if false == service.OriginAllowed(origin) {
-                return nil
-            }
-
             response := responseEvent.Response()
             if nil == response {
                 return nil
@@ -43,6 +33,18 @@ func RegisterResponseListener(eventDispatcher eventcontract.EventDispatcher, ser
 
             if nil == response.Headers() {
                 response.SetHeaders(make(nethttp.Header))
+            }
+
+            /* @important emitted on every path so a shared cache cannot serve an origin-less body to an allowed origin */
+            addVaryOrigin(response.Headers())
+
+            origin := service.RequestOrigin(responseEvent.Request())
+            if "" == origin {
+                return nil
+            }
+
+            if false == service.OriginAllowed(origin) {
+                return nil
             }
 
             service.ApplyResponseHeaders(origin, response.Headers())

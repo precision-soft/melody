@@ -18,7 +18,7 @@ func TestProviderOpenWithRetryAndNilLoggerDoesNotPanic(t *testing.T) {
         WithRetryConfig(NewRetryConfig(2, time.Millisecond, 5*time.Millisecond, 2.0)),
     )
 
-    params := bunorm.ConnectionParams{
+    params := bunorm.ConnectionParameters{
         Host:     "127.0.0.1",
         Port:     "1",
         Database: "melody_unreachable",
@@ -71,7 +71,7 @@ func TestProviderOpenWithZeroConnectTimeoutConnects(t *testing.T) {
         t.Skipf("MYSQL_DSN address %q is not host:port; skipping", config.Addr)
     }
 
-    params := bunorm.ConnectionParams{
+    params := bunorm.ConnectionParameters{
         Host:     host,
         Port:     port,
         Database: config.DBName,

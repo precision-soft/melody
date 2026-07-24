@@ -1,7 +1,16 @@
 package encrypt
 
 import (
+    "context"
+    "database/sql"
+    "database/sql/driver"
+    "errors"
+    "io"
+    "strings"
     "testing"
+
+    "github.com/uptrace/bun"
+    "github.com/uptrace/bun/dialect/mysqldialect"
 )
 
 func TestEncryptTransform_DeterministicProducesSearchableCiphertext(t *testing.T) {
@@ -78,5 +87,153 @@ func TestReencryptTransform_RandomizedSameKeyRewritesDeterministicValue(t *testi
     }
     if plaintext, _ := cipher.Decrypt(rewritten); "alice@example.com" != plaintext {
         t.Fatalf("expected the rewritten value to still decrypt to the original plaintext")
+    }
+}
+
+type stubMigrateDriver struct {
+    rowsAffected int64
+    served       bool
+}
+
+func (instance *stubMigrateDriver) Open(name string) (driver.Conn, error) {
+    return &stubMigrateConnection{shared: instance}, nil
+}
+
+type stubMigrateConnection struct {
+    shared *stubMigrateDriver
+}
+
+func (instance *stubMigrateConnection) Prepare(query string) (driver.Stmt, error) {
+    return &stubMigrateStatement{shared: instance.shared, query: query}, nil
+}
+
+func (instance *stubMigrateConnection) Close() error {
+    return nil
+}
+
+func (instance *stubMigrateConnection) Begin() (driver.Tx, error) {
+    return nil, errors.New("transactions are not supported by the stub")
+}
+
+type stubMigrateStatement struct {
+    shared *stubMigrateDriver
+    query  string
+}
+
+func (instance *stubMigrateStatement) Close() error {
+    return nil
+}
+
+func (instance *stubMigrateStatement) NumInput() int {
+    return -1
+}
+
+func (instance *stubMigrateStatement) Exec(arguments []driver.Value) (driver.Result, error) {
+    return &stubMigrateResult{rowsAffected: instance.shared.rowsAffected}, nil
+}
+
+func (instance *stubMigrateStatement) Query(arguments []driver.Value) (driver.Rows, error) {
+    if false == strings.Contains(instance.query, "ORDER BY") || true == instance.shared.served {
+        return &stubMigrateRows{}, nil
+    }
+
+    instance.shared.served = true
+
+    return &stubMigrateRows{remaining: [][]driver.Value{{"row-1", "plaintext"}}}, nil
+}
+
+type stubMigrateResult struct {
+    rowsAffected int64
+}
+
+func (instance *stubMigrateResult) LastInsertId() (int64, error) {
+    return 0, nil
+}
+
+func (instance *stubMigrateResult) RowsAffected() (int64, error) {
+    return instance.rowsAffected, nil
+}
+
+type stubMigrateRows struct {
+    remaining [][]driver.Value
+}
+
+func (instance *stubMigrateRows) Columns() []string {
+    return []string{"id", "secret"}
+}
+
+func (instance *stubMigrateRows) Close() error {
+    return nil
+}
+
+func (instance *stubMigrateRows) Next(destination []driver.Value) error {
+    if 0 == len(instance.remaining) {
+        return io.EOF
+    }
+
+    row := instance.remaining[0]
+    instance.remaining = instance.remaining[1:]
+
+    copy(destination, row)
+
+    return nil
+}
+
+func newStubMigrator(t *testing.T, driverName string, rowsAffected int64) *Migrator {
+    t.Helper()
+
+    sql.Register(driverName, &stubMigrateDriver{rowsAffected: rowsAffected})
+
+    sqlDatabase, openErr := sql.Open(driverName, "stub")
+    if nil != openErr {
+        t.Fatalf("open stub database: %v", openErr)
+    }
+
+    t.Cleanup(func() { _ = sqlDatabase.Close() })
+
+    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+
+    return &Migrator{
+        db:     bun.NewDB(sqlDatabase, mysqldialect.New()),
+        cipher: NewCipher(provider),
+    }
+}
+
+/* @info the update is guarded on the value read for the row, so a row that changed under the run matches zero rows and keeps its plaintext; counting it as processed and exiting zero let a deployment gated on the exit code proceed over values that were never migrated */
+func TestMigrate_ReportsRowsTheGuardedUpdateDidNotTouch(t *testing.T) {
+    migrator := newStubMigrator(t, "zzMigrateSkipStub", 0)
+
+    processed, runErr := migrator.MigrateEncrypt(
+        context.Background(),
+        TableSpec{Table: "user", PrimaryKey: "id", Columns: []string{"secret"}},
+    )
+
+    if nil == runErr {
+        t.Fatalf("expected a skipped row to be reported, got processed=%d and no error", processed)
+    }
+
+    if false == strings.Contains(runErr.Error(), "untouched") {
+        t.Fatalf("unexpected error: %v", runErr)
+    }
+
+    if 0 != processed {
+        t.Fatalf("expected the skipped row not to be counted as processed, got %d", processed)
+    }
+}
+
+func TestMigrate_CountsRowsTheUpdateApplied(t *testing.T) {
+    migrator := newStubMigrator(t, "zzMigrateAppliedStub", 1)
+
+    processed, runErr := migrator.MigrateEncrypt(
+        context.Background(),
+        TableSpec{Table: "user", PrimaryKey: "id", Columns: []string{"secret"}},
+    )
+
+    if nil != runErr {
+        t.Fatalf("unexpected error: %v", runErr)
+    }
+
+    if 1 != processed {
+        t.Fatalf("expected the applied row to be counted, got %d", processed)
     }
 }

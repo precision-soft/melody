@@ -27,6 +27,7 @@ func TestMiddleware_PreflightOptions(t *testing.T) {
 
     request := httptest.NewRequest(nethttp.MethodOptions, "/x", nil)
     request.Header.Set("Origin", "https://example.com")
+    request.Header.Set("Access-Control-Request-Method", nethttp.MethodPost)
 
     response, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
     if nil != err {
@@ -50,6 +51,100 @@ func TestMiddleware_PreflightOptions(t *testing.T) {
 
     if "Origin" != response.Headers().Get("Vary") {
         t.Fatalf("expected Vary: Origin, got: %q", response.Headers().Get("Vary"))
+    }
+}
+
+func TestMiddleware_OptionsWithoutRequestMethodReachesNext(t *testing.T) {
+    middleware := DefaultMiddleware()
+
+    calledNext := false
+    next := func(
+        runtimeInstance runtimecontract.Runtime,
+        writer nethttp.ResponseWriter,
+        request httpcontract.Request,
+    ) (httpcontract.Response, error) {
+        calledNext = true
+        return http.EmptyResponse(nethttp.StatusOK), nil
+    }
+
+    handler := middleware(next)
+
+    request := httptest.NewRequest(nethttp.MethodOptions, "/x", nil)
+    request.Header.Set("Origin", "https://example.com")
+
+    response, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
+    if nil != err {
+        t.Fatalf("unexpected error")
+    }
+    if false == calledNext {
+        t.Fatalf("expected next to be invoked for an options request without Access-Control-Request-Method")
+    }
+    if nil == response {
+        t.Fatalf("expected response")
+    }
+
+    if nethttp.StatusOK != response.StatusCode() {
+        t.Fatalf("unexpected status")
+    }
+
+    if "" == response.Headers().Get("Access-Control-Allow-Origin") {
+        t.Fatalf("expected Access-Control-Allow-Origin header")
+    }
+
+    if "" != response.Headers().Get("Access-Control-Allow-Methods") {
+        t.Fatalf("expected no preflight headers for a non-preflight options request")
+    }
+}
+
+func TestMiddleware_AddsVaryOriginForDisallowedOrigin(t *testing.T) {
+    service := NewService(Config{AllowOrigins: []string{"https://allowed.example.com"}})
+    middleware := Middleware(service)
+
+    next := func(
+        runtimeInstance runtimecontract.Runtime,
+        writer nethttp.ResponseWriter,
+        request httpcontract.Request,
+    ) (httpcontract.Response, error) {
+        return http.EmptyResponse(nethttp.StatusOK), nil
+    }
+
+    handler := middleware(next)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
+    request.Header.Set("Origin", "https://blocked.example.com")
+
+    response, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
+    if nil != err {
+        t.Fatalf("unexpected error")
+    }
+
+    if "Origin" != response.Headers().Get("Vary") {
+        t.Fatalf("expected Vary: Origin for disallowed origin, got: %q", response.Headers().Get("Vary"))
+    }
+}
+
+func TestMiddleware_AddsVaryOriginWhenOriginAbsent(t *testing.T) {
+    middleware := DefaultMiddleware()
+
+    next := func(
+        runtimeInstance runtimecontract.Runtime,
+        writer nethttp.ResponseWriter,
+        request httpcontract.Request,
+    ) (httpcontract.Response, error) {
+        return http.EmptyResponse(nethttp.StatusOK), nil
+    }
+
+    handler := middleware(next)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
+
+    response, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
+    if nil != err {
+        t.Fatalf("unexpected error")
+    }
+
+    if "Origin" != response.Headers().Get("Vary") {
+        t.Fatalf("expected Vary: Origin when Origin absent, got: %q", response.Headers().Get("Vary"))
     }
 }
 
@@ -79,6 +174,10 @@ func TestMiddleware_NonPreflightAddsHeaders(t *testing.T) {
 
     if "" == response.Headers().Get("Access-Control-Allow-Origin") {
         t.Fatalf("expected Access-Control-Allow-Origin header")
+    }
+
+    if 1 != len(response.Headers().Values("Vary")) {
+        t.Fatalf("expected a single Vary header, got: %v", response.Headers().Values("Vary"))
     }
 }
 

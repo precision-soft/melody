@@ -16,17 +16,9 @@ func Middleware(service *Service) httpcontract.Middleware {
     return func(next httpcontract.Handler) httpcontract.Handler {
         return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             origin := service.RequestOrigin(request)
+            allowOrigin := "" != origin && true == service.OriginAllowed(origin)
 
-            if "" == origin {
-                return next(runtimeInstance, writer, request)
-            }
-
-            allowOrigin := service.OriginAllowed(origin)
-            if false == allowOrigin {
-                return next(runtimeInstance, writer, request)
-            }
-
-            if true == service.IsPreflight(request) {
+            if true == allowOrigin && true == service.IsPreflight(request) {
                 response := http.EmptyResponse(nethttp.StatusNoContent)
                 service.ApplyPreflightHeaders(origin, response.Headers())
 
@@ -42,7 +34,12 @@ func Middleware(service *Service) httpcontract.Middleware {
                 response.SetHeaders(make(nethttp.Header))
             }
 
-            service.ApplyResponseHeaders(origin, response.Headers())
+            /* @important emitted on every path so a shared cache cannot serve an origin-less body to an allowed origin */
+            addVaryOrigin(response.Headers())
+
+            if true == allowOrigin {
+                service.ApplyResponseHeaders(origin, response.Headers())
+            }
 
             return response, nextMiddlewareErr
         }

@@ -1,6 +1,7 @@
 package http
 
 import (
+    "errors"
     nethttp "net/http"
 
     "github.com/precision-soft/melody/exception"
@@ -68,6 +69,12 @@ func NormalizeResultToResponse(
             }
 
             serializerInstance, err := serializerManager.ResolveByAcceptHeader(acceptHeader)
+
+            /* @important a header that refuses every available media type is answered as not acceptable rather than served the very type it rejected; a header that simply matches nothing still falls through to the default representation */
+            if true == errors.Is(err, serializer.ErrNotAcceptable) {
+                return EmptyResponse(nethttp.StatusNotAcceptable), nil
+            }
+
             if nil == err && nil != serializerInstance {
                 serializedBytes, err := serializerInstance.Serialize(value)
                 if nil != err {

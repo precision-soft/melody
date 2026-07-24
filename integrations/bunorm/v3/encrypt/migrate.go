@@ -100,6 +100,8 @@ func (instance *Migrator) reencryptTransform(spec TableSpec, targetKeyId string)
     }
 }
 
+const skippedSampleSize = 10
+
 func (instance *Migrator) run(ctx context.Context, spec TableSpec, transform func(string) (string, error)) (int, error) {
     if "" == spec.Table || "" == spec.PrimaryKey || 0 == len(spec.Columns) {
         return 0, exception.NewError("migrate spec needs a table, primary key and at least one column", nil, nil)
@@ -129,6 +131,8 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, transform fun
     var cursor string
     hasCursor := false
     processed := 0
+    skippedCount := 0
+    skippedSample := make([]string, 0, skippedSampleSize)
 
     for {
         var rows *sql.Rows
@@ -158,8 +162,18 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, transform fun
             cursor = row.primaryKey
             hasCursor = true
 
-            if updateErr := instance.applyRow(ctx, spec, row, transform); nil != updateErr {
+            applied, updateErr := instance.applyRow(ctx, spec, row, transform)
+            if nil != updateErr {
                 return processed, updateErr
+            }
+
+            if false == applied {
+                skippedCount++
+                if skippedSampleSize > len(skippedSample) {
+                    skippedSample = append(skippedSample, row.primaryKey)
+                }
+
+                continue
             }
 
             processed++
@@ -170,10 +184,23 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, transform fun
         }
     }
 
+    /* @important a guarded update that matched no row left the column in its original state, so reporting success would let a deployment gated on the exit code proceed over values that were never migrated; the run is reported as incomplete and a re-run picks the rows up under their new values */
+    if 0 < skippedCount {
+        return processed, exception.NewError(
+            "migrate left rows untouched because they changed under the run; re-run to pick them up",
+            map[string]any{
+                "table":             spec.Table,
+                "skippedCount":      skippedCount,
+                "skippedPrimaryKey": skippedSample,
+            },
+            nil,
+        )
+    }
+
     return processed, nil
 }
 
-func (instance *Migrator) applyRow(ctx context.Context, spec TableSpec, row migrateRow, transform func(string) (string, error)) error {
+func (instance *Migrator) applyRow(ctx context.Context, spec TableSpec, row migrateRow, transform func(string) (string, error)) (bool, error) {
     assignments := make([]string, 0, len(spec.Columns))
     setArguments := make([]any, 0, len(spec.Columns))
     valuePredicates := make([]string, 0, len(spec.Columns))
@@ -187,7 +214,7 @@ func (instance *Migrator) applyRow(ctx context.Context, spec TableSpec, row migr
 
         transformed, transformErr := transform(value.String)
         if nil != transformErr {
-            return exception.NewError("migrate transform failed", map[string]any{"table": spec.Table, "column": column}, transformErr)
+            return false, exception.NewError("migrate transform failed", map[string]any{"table": spec.Table, "column": column}, transformErr)
         }
 
         if transformed == value.String {
@@ -201,7 +228,7 @@ func (instance *Migrator) applyRow(ctx context.Context, spec TableSpec, row migr
     }
 
     if 0 == len(assignments) {
-        return nil
+        return true, nil
     }
 
     arguments := make([]any, 0, len(setArguments)+1+len(valueArguments))
@@ -222,11 +249,18 @@ func (instance *Migrator) applyRow(ctx context.Context, spec TableSpec, row migr
         whereClause,
     )
 
-    if _, execErr := instance.db.DB.ExecContext(ctx, updateSql, arguments...); nil != execErr {
-        return exception.NewError("migrate update failed", map[string]any{"table": spec.Table, "id": row.primaryKey}, execErr)
+    result, execErr := instance.db.DB.ExecContext(ctx, updateSql, arguments...)
+    if nil != execErr {
+        return false, exception.NewError("migrate update failed", map[string]any{"table": spec.Table, "id": row.primaryKey}, execErr)
     }
 
-    return nil
+    /* @important a driver that cannot report the affected count is treated as having applied the update: reporting a false skip would fail a run that in fact completed */
+    affected, affectedErr := result.RowsAffected()
+    if nil != affectedErr {
+        return true, nil
+    }
+
+    return 0 < affected, nil
 }
 
 type migrateRow struct {

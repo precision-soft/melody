@@ -823,3 +823,132 @@ func TestKernel_PanicRecoveryClosesTheDiscardedFileBackedResponse(t *testing.T) 
         t.Fatal("the discarded file-backed response body was never closed: one file descriptor leaks per request")
     }
 }
+
+/* @info net/http documents this sentinel as "abort the connection and suppress the log"; converting it into an error answered an aborted upload with a 500 and an error line, and a reverse proxy panics with it on every client disconnect mid-stream */
+func TestKernel_AbortHandlerPanicClosesTheConnectionWithoutAResponse(t *testing.T) {
+    router := NewRouter()
+
+    router.Handle(
+        nethttp.MethodGet,
+        "/abort",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            panic(nethttp.ErrAbortHandler)
+        },
+    )
+
+    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+
+    server := httptest.NewServer(handler)
+    defer server.Close()
+
+    response, requestErr := server.Client().Get(server.URL + "/abort")
+    if nil == requestErr {
+        defer response.Body.Close()
+
+        t.Fatalf("expected the connection to be closed without a response, got status %d", response.StatusCode)
+    }
+}
+
+/* @info the kernel resolves the scheme through the configured forwarded-headers policy and publishes it on the request; a listener has no access to that policy, so without the attribute the access log reported http for every request a trusted proxy terminated as https */
+func TestKernel_PublishesThePolicyResolvedSchemeOnTheRequest(t *testing.T) {
+    router := NewRouter()
+
+    observedScheme := ""
+
+    router.Handle(
+        nethttp.MethodGet,
+        "/scheme",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            if schemeValue, exists := request.Attributes().Get(RequestAttributeScheme); true == exists {
+                if schemeString, isString := schemeValue.(string); true == isString {
+                    observedScheme = schemeString
+                }
+            }
+
+            return TextResponse(200, "ok"), nil
+        },
+    )
+
+    kernelInstance := NewKernel(router)
+    kernelInstance.SetForwardedHeadersPolicy(httpcontract.ForwardedHeadersPolicy{
+        TrustForwardedHeaders: true,
+        TrustedProxyList:      []string{"10.0.0.0/8"},
+    })
+
+    handler := kernelInstance.ServeHttp(newHttpTestContainer())
+
+    trustedRequest := httptest.NewRequest(nethttp.MethodGet, "/scheme", nil)
+    trustedRequest.RemoteAddr = "10.0.0.7:44321"
+    trustedRequest.Header.Set("X-Forwarded-Proto", "https")
+
+    handler.ServeHTTP(httptest.NewRecorder(), trustedRequest)
+
+    if "https" != observedScheme {
+        t.Fatalf("expected the trusted proxy scheme to be published, got %q", observedScheme)
+    }
+
+    observedScheme = ""
+
+    untrustedRequest := httptest.NewRequest(nethttp.MethodGet, "/scheme", nil)
+    untrustedRequest.RemoteAddr = "203.0.113.9:44321"
+    untrustedRequest.Header.Set("X-Forwarded-Proto", "https")
+
+    handler.ServeHTTP(httptest.NewRecorder(), untrustedRequest)
+
+    if "http" != observedScheme {
+        t.Fatalf("expected an untrusted peer's forwarded scheme to be discarded, got %q", observedScheme)
+    }
+}
+
+func TestKernel_RouteAttributesCannotReplaceTheKernelOwnedAttributes(t *testing.T) {
+    router := NewRouter()
+
+    observedScheme := ""
+    observedSessionIsSession := false
+
+    router.HandleWithOptions(
+        "/owned",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            if schemeValue, exists := request.Attributes().Get(RequestAttributeScheme); true == exists {
+                if schemeString, isString := schemeValue.(string); true == isString {
+                    observedScheme = schemeString
+                }
+            }
+
+            sessionValue, exists := request.Attributes().Get(RequestAttributeSession)
+            if true == exists {
+                _, observedSessionIsSession = sessionValue.(sessioncontract.Session)
+            }
+
+            return TextResponse(200, "ok"), nil
+        },
+        NewRouteOptions(
+            "owned",
+            []string{nethttp.MethodGet},
+            "",
+            nil,
+            nil,
+            nil,
+            nil,
+            0,
+            map[string]any{
+                "scheme":                "spoofed",
+                "session":               "spoofed",
+                RequestAttributeScheme:  "spoofed",
+                RequestAttributeSession: "spoofed",
+            },
+        ),
+    )
+
+    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+
+    handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/owned", nil))
+
+    if "http" != observedScheme {
+        t.Fatalf("expected the kernel-resolved scheme to survive a route attribute, got %q", observedScheme)
+    }
+
+    if false == observedSessionIsSession {
+        t.Fatalf("expected the kernel-published session to survive a route attribute")
+    }
+}

@@ -12,7 +12,7 @@ func StringStrict(parameterBag bagcontract.ParameterBag, name string) (string, b
     }
 
     if nil == value {
-        return "", true, nil
+        return "", false, nil
     }
 
     stringValue, isString := value.(string)

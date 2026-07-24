@@ -16,15 +16,25 @@ Additional fields can be dropped globally or per entity via the `Registry` (see 
 
 ### Automatic capture (recommended)
 
-`Tracker` runs the bun write and records the matching entry in one call. Updates load the current row by primary key first, so the diff has true before-values:
+`Tracker` runs the bun write and records the matching entry in one call. Updates **and deletes** load the
+current row by primary key first (`SELECT ... FOR UPDATE`), so the recorded before-image is the row as the
+database held it, never the model the caller happened to pass:
 
 ```go
 recorder := audit.NewRecorder(auditDb, audit.DefaultTable)
 tracker := audit.NewTracker(appDb, recorder)
 
 ctx := audit.WithActor(ctx, "user-42")
-tracker.Update(ctx, "user", "42", &user) // SELECT old, UPDATE, record diff — all in one transaction
+tracker.Update(ctx, "user", "42", &user)              // SELECT old, UPDATE, record diff — all in one transaction
+tracker.Delete(ctx, "user", "42", &User{Id: 42})      // SELECT old, DELETE, record the loaded row — same transaction
 ```
+
+`Delete` therefore needs no hydrated model: pass the primary key and the trail still carries every column's
+old value. Two consequences follow from that load:
+
+- deleting a row that is already absent is an **error**, not a silently recorded no-op — nothing is deleted
+  and nothing is audited (the same contract `Update` imposes).
+- each audited delete costs one extra `SELECT` round trip.
 
 Pass `""` as the id to let the `Tracker` derive it from the model's bun primary key after the write — the common case for an autoincrement key, unknown until the INSERT populates the model. A caller-supplied id still wins, and a composite key is joined with `:`.
 
@@ -76,3 +86,15 @@ Group one unit of work's entries under a shared `melody_audit_transaction` row:
 ctx, txId, _ := audit.BeginTransaction(ctx, auditDb, "user-42", map[string]any{"request": reqId})
 // every entry recorded with ctx now carries transaction_id = txId
 ```
+
+### Deletes
+
+A delete records the identifier, the actor and the time — not the fields of the model you passed. The caller usually holds only the primary key, so those fields are zero values the delete never read, and recording them would assert them as the deleted row's contents for a row that is gone.
+
+When an entity's deleted contents must be recoverable from the trail, opt in for that entity:
+
+```go
+registry.Register("user", audit.EntityOptions{CaptureDeleteBeforeImage: true})
+```
+
+The delete then loads and locks the row before removing it, so the trail carries its real values. That costs one select and a row lock on every delete of that entity, and deleting a row that is already absent becomes an error. A delete that matched no row is never recorded.

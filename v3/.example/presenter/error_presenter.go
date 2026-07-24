@@ -7,6 +7,9 @@ import (
     "strings"
     "time"
 
+    melodyconfig "github.com/precision-soft/melody/v3/config"
+    melodyconfigcontract "github.com/precision-soft/melody/v3/config/contract"
+    melodycontainer "github.com/precision-soft/melody/v3/container"
     melodyexception "github.com/precision-soft/melody/v3/exception"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
@@ -56,7 +59,7 @@ func ApiError(
             Success: false,
             Payload: nil,
             Errors:  normalizedErrors,
-            Context: buildErrorContext(runtimeInstance, request, statusCode, nil),
+            Context: buildErrorContext(request, statusCode, nil, debugMode(runtimeInstance)),
         },
     )
 }
@@ -69,6 +72,7 @@ func ApiErrorWithErr(
     causeErr error,
 ) melodyhttpcontract.Response {
     normalizedErrors := normalizeErrors([]string{publicMessage})
+    debugEnabled := debugMode(runtimeInstance)
 
     return buildApiResponse(
         runtimeInstance,
@@ -78,8 +82,8 @@ func ApiErrorWithErr(
             Success: false,
             Payload: nil,
             Errors:  normalizedErrors,
-            Context: buildErrorContext(runtimeInstance, request, statusCode, causeErr),
-            Trace:   buildErrorTrace(causeErr),
+            Context: buildErrorContext(request, statusCode, causeErr, debugEnabled),
+            Trace:   buildErrorTrace(causeErr, debugEnabled),
         },
     )
 }
@@ -188,11 +192,34 @@ func fallbackJsonResponse(statusCode int, payload any) melodyhttpcontract.Respon
     return response
 }
 
+/* @important the debug decision is the kernel environment, exactly as the framework exception listener
+reads it; when it cannot be determined the presenter stays closed and emits no cause material */
+func debugMode(runtimeInstance melodyruntimecontract.Runtime) bool {
+    if nil == runtimeInstance {
+        return false
+    }
+
+    serviceContainer := runtimeInstance.Container()
+    if nil == serviceContainer {
+        return false
+    }
+
+    configuration, configurationErr := melodycontainer.FromResolver[melodyconfigcontract.Configuration](
+        serviceContainer,
+        melodyconfig.ServiceConfig,
+    )
+    if nil != configurationErr || nil == configuration {
+        return false
+    }
+
+    return melodyconfig.EnvDevelopment == configuration.Kernel().Env()
+}
+
 func buildErrorContext(
-    runtimeInstance melodyruntimecontract.Runtime,
     request melodyhttpcontract.Request,
     statusCode int,
     causeErr error,
+    debugEnabled bool,
 ) map[string]any {
     context := map[string]any{
         "time":       time.Now().UTC().Format(time.RFC3339Nano),
@@ -208,7 +235,7 @@ func buildErrorContext(
         context["params"] = request.Params()
     }
 
-    if nil != causeErr {
+    if nil != causeErr && true == debugEnabled {
         context["error"] = map[string]any{
             "message": causeErr.Error(),
             "type":    fmt.Sprintf("%T", causeErr),
@@ -218,8 +245,8 @@ func buildErrorContext(
     return context
 }
 
-func buildErrorTrace(err error) []map[string]any {
-    if nil == err {
+func buildErrorTrace(err error, debugEnabled bool) []map[string]any {
+    if nil == err || false == debugEnabled {
         return nil
     }
 

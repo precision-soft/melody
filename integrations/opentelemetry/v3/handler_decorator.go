@@ -86,6 +86,12 @@ func NewHandlerDecorator(config HandlerDecoratorConfig) (applicationcontract.Htt
                 recoveredValue := recover()
 
                 statusCode := recorder.statusCode
+
+                /* @important a hijacked connection left the request/response model at the upgrade, so recording it as the constructor's default 200 puts a connection that lives for hours in the same duration series as an ordinary request and destroys the latency distribution */
+                if true == recorder.hijacked {
+                    statusCode = nethttp.StatusSwitchingProtocols
+                }
+
                 if nil != recoveredValue {
                     statusCode = nethttp.StatusInternalServerError
                     span.SetStatus(codes.Error, "handler panicked")
@@ -121,6 +127,7 @@ type statusRecordingResponseWriter struct {
     nethttp.ResponseWriter
     statusCode  int
     wroteHeader bool
+    hijacked    bool
 }
 
 func (instance *statusRecordingResponseWriter) WriteHeader(statusCode int) {
@@ -155,6 +162,7 @@ func (instance *statusRecordingResponseWriter) Hijack() (net.Conn, *bufio.ReadWr
 
     connection, readWriter, hijackErr := hijacker.Hijack()
     if nil == hijackErr {
+        instance.hijacked = true
         instance.wroteHeader = true
     }
 

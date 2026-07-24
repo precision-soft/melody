@@ -6,16 +6,22 @@ import (
     "errors"
     "math"
     "os"
+    "strings"
+    "sync"
     "testing"
     "time"
 
     "github.com/precision-soft/melody/v3/container"
+    containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/logging"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     melodymessagebus "github.com/precision-soft/melody/v3/messagebus"
     messagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     melodyserializer "github.com/precision-soft/melody/v3/serializer"
+    serializercontract "github.com/precision-soft/melody/v3/serializer/contract"
     amqp091 "github.com/rabbitmq/amqp091-go"
 )
 
@@ -32,9 +38,133 @@ type closeUnblockMessage struct {
     Id int
 }
 
+type closeJoinMessage struct {
+    Id int
+}
+
+/* blockingDeserializer parks the consume goroutine inside decode until the test releases it, holding open the window in which Close used to return while the loop was still running. */
+type blockingDeserializer struct {
+    inner   serializercontract.Serializer
+    once    sync.Once
+    entered chan struct{}
+    release chan struct{}
+}
+
+func newBlockingDeserializer() *blockingDeserializer {
+    return &blockingDeserializer{
+        inner:   melodyserializer.NewJsonSerializer(),
+        entered: make(chan struct{}),
+        release: make(chan struct{}),
+    }
+}
+
+func (instance *blockingDeserializer) Serialize(value any) ([]byte, error) {
+    return instance.inner.Serialize(value)
+}
+
+func (instance *blockingDeserializer) Deserialize(payload []byte, target any) error {
+    instance.once.Do(func() {
+        close(instance.entered)
+    })
+
+    <-instance.release
+
+    return instance.inner.Deserialize(payload, target)
+}
+
+func (instance *blockingDeserializer) ContentType() string {
+    return instance.inner.ContentType()
+}
+
+var _ serializercontract.Serializer = (*blockingDeserializer)(nil)
+
 func newReconnectRuntime(ctx context.Context) runtimecontract.Runtime {
     serviceContainer := container.NewContainer()
     return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+}
+
+type logRecord struct {
+    level   loggingcontract.Level
+    message string
+}
+
+type recordingLogger struct {
+    mutex   sync.Mutex
+    records []logRecord
+}
+
+func (instance *recordingLogger) Log(level loggingcontract.Level, message string, logContext loggingcontract.Context) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.records = append(instance.records, logRecord{level: level, message: message})
+}
+
+func (instance *recordingLogger) Debug(message string, logContext loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelDebug, message, logContext)
+}
+
+func (instance *recordingLogger) Info(message string, logContext loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelInfo, message, logContext)
+}
+
+func (instance *recordingLogger) Warning(message string, logContext loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelWarning, message, logContext)
+}
+
+func (instance *recordingLogger) Error(message string, logContext loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelError, message, logContext)
+}
+
+func (instance *recordingLogger) Emergency(message string, logContext loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelEmergency, message, logContext)
+}
+
+func (instance *recordingLogger) errorMessages() []string {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    messages := make([]string, 0, len(instance.records))
+    for _, record := range instance.records {
+        if loggingcontract.LevelError != record.level {
+            continue
+        }
+
+        messages = append(messages, record.message)
+    }
+
+    return messages
+}
+
+var _ loggingcontract.Logger = (*recordingLogger)(nil)
+
+/* newRecordingLoggerRuntime carries a logger the transport can actually reach: newReconnectRuntime builds an empty container, so LoggerFromRuntime hands back nil there and no log is produced or observed either way. */
+func newRecordingLoggerRuntime(ctx context.Context) (runtimecontract.Runtime, *recordingLogger) {
+    logger := &recordingLogger{}
+
+    serviceContainer := container.NewContainer()
+    container.MustRegister[loggingcontract.Logger](
+        serviceContainer,
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return logger, nil
+        },
+    )
+
+    return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer), logger
+}
+
+func awaitClosedOutput(t *testing.T, out <-chan messagebuscontract.Envelope) {
+    t.Helper()
+
+    select {
+    case _, open := <-out:
+        if true == open {
+            t.Fatalf("expected out to be closed without delivering a message")
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatalf("expected consumeLoop to close out")
+    }
 }
 
 func receiveWithin(t *testing.T, queue <-chan messagebuscontract.Envelope, timeout time.Duration) messagebuscontract.Envelope {
@@ -600,6 +730,70 @@ func TestConsumeLoop_NoDialerClosesOut(t *testing.T) {
     }
 }
 
+/* @important a consumer that can never re-subscribe must say why it is stopping: the loop returns and closes out either way, so without the log a consumer dies silently in production and the queue simply stops being drained. */
+func TestConsumeLoop_NoDialerLogsWhyTheConsumerStops(t *testing.T) {
+    runtimeInstance, logger := newRecordingLoggerRuntime(context.Background())
+
+    deliveries := make(chan amqp091.Delivery)
+    close(deliveries)
+
+    instance := &Transport{queue: "orders"}
+    out := make(chan messagebuscontract.Envelope)
+
+    go instance.consumeLoop(runtimeInstance, nil, deliveries, out)
+
+    awaitClosedOutput(t, out)
+
+    errorMessages := logger.errorMessages()
+    if 1 != len(errorMessages) {
+        t.Fatalf("expected exactly one error record naming the stop, got %v", errorMessages)
+    }
+
+    if false == strings.Contains(errorMessages[0], "consumer is stopping") {
+        t.Fatalf("expected the record to name the stop, got %q", errorMessages[0])
+    }
+}
+
+/* @important the mirror of the record above: a stop the transport itself asked for is expected, so it must stay silent — otherwise every deploy floods the error dashboards from each consumer that shuts down. */
+func TestConsumeLoop_ClosingTransportStopsWithoutLogging(t *testing.T) {
+    runtimeInstance, logger := newRecordingLoggerRuntime(context.Background())
+
+    deliveries := make(chan amqp091.Delivery)
+    close(deliveries)
+
+    instance := &Transport{queue: "orders", closing: true, closeSignal: make(chan struct{})}
+    out := make(chan messagebuscontract.Envelope)
+
+    go instance.consumeLoop(runtimeInstance, nil, deliveries, out)
+
+    awaitClosedOutput(t, out)
+
+    if errorMessages := logger.errorMessages(); 0 != len(errorMessages) {
+        t.Fatalf("expected a closing transport to stop silently, got %v", errorMessages)
+    }
+}
+
+func TestConsumeLoop_CancelledContextStopsWithoutLogging(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    runtimeInstance, logger := newRecordingLoggerRuntime(ctx)
+
+    deliveries := make(chan amqp091.Delivery)
+    close(deliveries)
+
+    instance := &Transport{queue: "orders", closeSignal: make(chan struct{})}
+    out := make(chan messagebuscontract.Envelope)
+
+    go instance.consumeLoop(runtimeInstance, nil, deliveries, out)
+
+    awaitClosedOutput(t, out)
+
+    if errorMessages := logger.errorMessages(); 0 != len(errorMessages) {
+        t.Fatalf("expected a cancelled context to stop the consumer silently, got %v", errorMessages)
+    }
+}
+
 func TestConnectionAlive_ReportsLiveAndGone(t *testing.T) {
     gone := &Transport{queue: "orders"}
     if true == gone.connectionAlive() {
@@ -977,6 +1171,225 @@ func TestReopenConsume_CloseUnblocksGoroutineParkedOnBackoff(t *testing.T) {
     }
 }
 
+/* @important Close must join the consume goroutine, not merely signal it. While it returned early the loop was still inside decode and went on to hand an envelope to the application AFTER Close returned — an envelope that can never be acked, because consumeChannelForAck reports the torn-down channel as gone, so the broker redelivers it; a decode failure racing the same window nacks on the channel Close has already closed. */
+func TestClose_WaitsForTheConsumeGoroutine(t *testing.T) {
+    registry := NewMessageRegistry()
+    RegisterMessage[closeJoinMessage](registry, "amqp.test.close-join")
+
+    serializer := newBlockingDeserializer()
+
+    instance := &Transport{
+        queue:       "orders",
+        registry:    registry,
+        serializer:  serializer,
+        closeSignal: make(chan struct{}),
+        reconnect:   resolveReconnectConfig(nil, nil),
+    }
+
+    body, marshalErr := json.Marshal(closeJoinMessage{Id: 1})
+    if nil != marshalErr {
+        t.Fatalf("marshal: %v", marshalErr)
+    }
+
+    deliveries := make(chan amqp091.Delivery, 1)
+    deliveries <- amqp091.Delivery{
+        Headers:     amqp091.Table{headerMessageType: "amqp.test.close-join"},
+        Body:        body,
+        DeliveryTag: 1,
+    }
+
+    runtimeInstance := newReconnectRuntime(context.Background())
+    out := make(chan messagebuscontract.Envelope)
+
+    instance.startConsumeLoop(runtimeInstance, nil, deliveries, out)
+
+    select {
+    case <-serializer.entered:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("the consume goroutine never reached the deserializer")
+    }
+
+    closed := make(chan struct{})
+    go func() {
+        instance.Close(runtimeInstance)
+
+        close(closed)
+    }()
+
+    /* shorter than closeJoinTimeout on purpose: past the bound Close is entitled to give up, and the assertion would stop proving anything */
+    select {
+    case <-closed:
+        t.Fatalf("Close returned while the consume goroutine was still inside the deserializer")
+    case <-time.After(100 * time.Millisecond):
+    }
+
+    close(serializer.release)
+
+    select {
+    case <-closed:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("Close did not return after the consume goroutine finished")
+    }
+
+    select {
+    case envelopeInstance, open := <-out:
+        if true == open {
+            t.Fatalf("an envelope reached the application after Close returned: %+v", envelopeInstance.Message())
+        }
+    default:
+        t.Fatalf("expected the consume goroutine to have closed out before Close returned")
+    }
+}
+
+/* @important the join is bounded: closeSignal is out of the loop's sight only while it is parked inside the caller-supplied dialer, and Close must not inherit that dialer's timeout — teardown that never blocked before has to keep not blocking. */
+/* @info the one stretch the loop cannot observe closeSignal is inside the caller-supplied dialer, and Close waits through it rather than tearing the channels down under a running loop */
+func TestClose_WaitsForALoopStuckInTheDialer(t *testing.T) {
+    dialing := make(chan struct{})
+    release := make(chan struct{})
+
+    var once sync.Once
+
+    instance := &Transport{
+        queue:       "orders",
+        closeSignal: make(chan struct{}),
+        reconnect:   ReconnectConfig{InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond, BackoffFactor: 2},
+        dialer: func() (*amqp091.Connection, error) {
+            once.Do(func() {
+                close(dialing)
+            })
+
+            <-release
+
+            return nil, exception.NewError("dial refused", nil, nil)
+        },
+    }
+
+    deliveries := make(chan amqp091.Delivery)
+    close(deliveries)
+
+    runtimeInstance := newReconnectRuntime(context.Background())
+    out := make(chan messagebuscontract.Envelope)
+
+    instance.startConsumeLoop(runtimeInstance, nil, deliveries, out)
+
+    select {
+    case <-dialing:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("the consume goroutine never reached the dialer")
+    }
+
+    dialDuration := 200 * time.Millisecond
+
+    go func() {
+        time.Sleep(dialDuration)
+
+        close(release)
+    }()
+
+    start := time.Now()
+    instance.Close(runtimeInstance)
+    elapsed := time.Since(start)
+
+    if elapsed < dialDuration {
+        t.Fatalf("Close returned after %s without waiting for the dial to finish", elapsed)
+    }
+
+    if closeJoinTimeout < elapsed {
+        t.Fatalf("Close blocked for %s, past the %s bound", elapsed, closeJoinTimeout)
+    }
+}
+
+/* @important the same join through the public path: Receive is what registers the goroutine, so a consumer started there must be joined too. */
+func TestTransport_CloseJoinsTheConsumerStartedByReceive(t *testing.T) {
+    dsn := os.Getenv("AMQP_DSN")
+    if "" == dsn {
+        t.Skip("AMQP_DSN not set; skipping amqp integration test")
+    }
+
+    provider := NewProvider()
+    connection, openErr := provider.Open(dsn)
+    if nil != openErr {
+        t.Fatalf("open connection: %v", openErr)
+    }
+    defer provider.Close(connection)
+
+    registry := NewMessageRegistry()
+    RegisterMessage[closeJoinMessage](registry, "amqp.test.close-join.live")
+
+    queueName := "melody.amqp.close-join"
+    serializer := newBlockingDeserializer()
+
+    transport := NewTransport(TransportConfig{
+        Connection: connection,
+        Queue:      queueName,
+        Prefetch:   1,
+        Registry:   registry,
+        Serializer: serializer,
+    })
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(closeJoinMessage{Id: 1})); nil != sendErr {
+        t.Fatalf("send: %v", sendErr)
+    }
+
+    out, receiveErr := transport.Receive(runtimeInstance)
+    if nil != receiveErr {
+        t.Fatalf("receive: %v", receiveErr)
+    }
+
+    select {
+    case <-serializer.entered:
+    case <-time.After(10 * time.Second):
+        t.Fatalf("the consumer never reached the deserializer")
+    }
+
+    closed := make(chan struct{})
+    go func() {
+        transport.Close(runtimeInstance)
+
+        close(closed)
+    }()
+
+    select {
+    case <-closed:
+        t.Fatalf("Close returned while the consumer was still inside the deserializer")
+    case <-time.After(100 * time.Millisecond):
+    }
+
+    close(serializer.release)
+
+    select {
+    case <-closed:
+    case <-time.After(5 * time.Second):
+        t.Fatalf("Close did not return after the consumer finished")
+    }
+
+    select {
+    case envelopeInstance, open := <-out:
+        if true == open {
+            t.Fatalf("an envelope reached the application after Close returned: %+v", envelopeInstance.Message())
+        }
+    default:
+        t.Fatalf("expected the consumer to have closed its output before Close returned")
+    }
+
+    /* the blocked message was never acked, so the broker returns it to the durable queue when the consume channel closes — drain it rather than leaving one behind per run */
+    admin, adminErr := connection.Channel()
+    if nil != adminErr {
+        t.Fatalf("open admin channel: %v", adminErr)
+    }
+    defer admin.Close()
+
+    if _, purgeErr := admin.QueuePurge(queueName, false); nil != purgeErr {
+        t.Fatalf("purge queue: %v", purgeErr)
+    }
+}
+
 func TestTransport_SendSurfacesUnroutablePublishAfterQueueDelete(t *testing.T) {
     dsn := os.Getenv("AMQP_DSN")
     if "" == dsn {
@@ -1233,5 +1646,221 @@ func TestMessageTypeName_ReportsConcreteType(t *testing.T) {
 
     if "amqp.sample" != messageTypeName(sample{}) {
         t.Fatalf("unexpected type name: %q", messageTypeName(sample{}))
+    }
+}
+
+/* @info delay buckets */
+
+func TestResolveDelayBuckets_DefaultsWhenEmpty(t *testing.T) {
+    buckets := resolveDelayBuckets(nil)
+
+    if 4 != len(buckets) || 5*time.Second != buckets[0] || 1*time.Hour != buckets[3] {
+        t.Fatalf("unexpected default buckets: %v", buckets)
+    }
+}
+
+func TestResolveDelayBuckets_RejectsNonAscending(t *testing.T) {
+    defer func() {
+        if nil == recover() {
+            t.Fatalf("expected non-ascending buckets to be rejected")
+        }
+    }()
+
+    _ = resolveDelayBuckets([]time.Duration{time.Minute, time.Second})
+}
+
+func TestResolveDelayBuckets_RejectsNonPositive(t *testing.T) {
+    defer func() {
+        if nil == recover() {
+            t.Fatalf("expected a non-positive bucket to be rejected")
+        }
+    }()
+
+    _ = resolveDelayBuckets([]time.Duration{0, time.Second})
+}
+
+func TestResolveDelayBuckets_RejectsTooMany(t *testing.T) {
+    tooMany := make([]time.Duration, maxDelayBuckets+1)
+    for index := range tooMany {
+        tooMany[index] = time.Duration(index+1) * time.Second
+    }
+
+    defer func() {
+        if nil == recover() {
+            t.Fatalf("expected more than %d buckets to be rejected", maxDelayBuckets)
+        }
+    }()
+
+    _ = resolveDelayBuckets(tooMany)
+}
+
+func TestDelayBucketFor_SelectsLargestNotExceeding(t *testing.T) {
+    buckets := []time.Duration{5 * time.Second, time.Minute, 10 * time.Minute, time.Hour}
+
+    cases := []struct {
+        name  string
+        delay time.Duration
+        want  time.Duration
+        found bool
+    }{
+        {name: "below smallest keeps legacy queue", delay: time.Second, want: 0, found: false},
+        {name: "exact smallest", delay: 5 * time.Second, want: 5 * time.Second, found: true},
+        {name: "between buckets quantizes down", delay: 90 * time.Second, want: time.Minute, found: true},
+        {name: "exact middle", delay: 10 * time.Minute, want: 10 * time.Minute, found: true},
+        {name: "above largest clamps to largest", delay: 3 * time.Hour, want: time.Hour, found: true},
+        {name: "just below smallest", delay: 5*time.Second - time.Millisecond, want: 0, found: false},
+    }
+
+    for _, current := range cases {
+        got, found := delayBucketFor(buckets, current.delay)
+        if current.found != found || current.want != got {
+            t.Fatalf("%s: delayBucketFor(%v) = (%v, %v), want (%v, %v)", current.name, current.delay, got, found, current.want, current.found)
+        }
+    }
+}
+
+func TestDelayBucketQueueName_IsDeterministic(t *testing.T) {
+    if "orders.delay.60000ms" != delayBucketQueueName("orders", time.Minute) {
+        t.Fatalf("unexpected bucket queue name: %s", delayBucketQueueName("orders", time.Minute))
+    }
+}
+
+func TestTransport_BucketedDelaysAvoidHeadOfLineBlocking(t *testing.T) {
+    dsn := os.Getenv("AMQP_DSN")
+    if "" == dsn {
+        t.Skip("AMQP_DSN not set; skipping amqp integration test")
+    }
+
+    provider := NewProvider()
+    connection, openErr := provider.Open(dsn)
+    if nil != openErr {
+        t.Fatalf("open connection: %v", openErr)
+    }
+    defer provider.Close(connection)
+
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, "amqp.test.delay.bucket")
+
+    transport := NewTransport(TransportConfig{
+        Connection:   connection,
+        Queue:        "melody.amqp.delay.bucket",
+        Prefetch:     2,
+        Registry:     registry,
+        DelayBuckets: []time.Duration{2 * time.Second, 8 * time.Second},
+    })
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+    defer transport.Close(runtimeInstance)
+
+    queue, receiveErr := transport.Receive(runtimeInstance)
+    if nil != receiveErr {
+        t.Fatalf("receive: %v", receiveErr)
+    }
+
+    /* @important the queues are durable, so a message parked in a bucket queue by a crashed or older run dead-letters back into the main queue and would corrupt the identity assertions below — drain any leftovers before producing this run's messages */
+    for draining := true; true == draining; {
+        select {
+        case leftover := <-queue:
+            if ackErr := transport.Ack(runtimeInstance, leftover); nil != ackErr {
+                t.Fatalf("ack leftover: %v", ackErr)
+            }
+        case <-time.After(1500 * time.Millisecond):
+            draining = false
+        }
+    }
+
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "long"})); nil != sendErr {
+        t.Fatalf("send long: %v", sendErr)
+    }
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "short"})); nil != sendErr {
+        t.Fatalf("send short: %v", sendErr)
+    }
+
+    first := receiveWithin(t, queue, 10*time.Second)
+    second := receiveWithin(t, queue, 10*time.Second)
+
+    longDelayed := first.
+        WithStamp(melodymessagebus.RedeliveryStamp{Count: 1}).
+        WithStamp(melodymessagebus.DelayStamp{Delay: 8 * time.Second})
+    shortDelayed := second.
+        WithStamp(melodymessagebus.RedeliveryStamp{Count: 1}).
+        WithStamp(melodymessagebus.DelayStamp{Delay: 2 * time.Second})
+
+    /* @important requeue the LONG delay first: on the single-delay-queue topology it parks at the head with the longer per-message ttl and RabbitMQ's head-of-queue-only expiry stalls the 2s message behind it for the full 8s — the bucketed topology parks them in separate uniform-ttl queues, so the short one must come back well before the long one */
+    start := time.Now()
+    if nackErr := transport.Nack(runtimeInstance, longDelayed, true); nil != nackErr {
+        t.Fatalf("nack long: %v", nackErr)
+    }
+    if nackErr := transport.Nack(runtimeInstance, shortDelayed, true); nil != nackErr {
+        t.Fatalf("nack short: %v", nackErr)
+    }
+
+    redelivered := receiveWithin(t, queue, 6*time.Second)
+
+    elapsed := time.Since(start)
+    if 6*time.Second <= elapsed {
+        t.Fatalf("short delay stalled behind the long one for %s", elapsed)
+    }
+
+    /* @important assert the IDENTITY of the redelivered message, not just its timing: a bucket-misrouting regression (short delay parked in the long bucket and vice versa) would otherwise still deliver A message within the window */
+    shortMessage, isShort := redelivered.Message().(testMessage)
+    if false == isShort || "short" != shortMessage.Name {
+        t.Fatalf("expected the short-delayed message first, got %+v", redelivered.Message())
+    }
+
+    if ackErr := transport.Ack(runtimeInstance, redelivered); nil != ackErr {
+        t.Fatalf("ack: %v", ackErr)
+    }
+
+    /* @important drain the long-delayed message too, so the durable bucket queue is left empty for the next run instead of leaking one parked message per run */
+    longRedelivered := receiveWithin(t, queue, 12*time.Second)
+
+    longMessage, isLong := longRedelivered.Message().(testMessage)
+    if false == isLong || "long" != longMessage.Name {
+        t.Fatalf("expected the long-delayed message second, got %+v", longRedelivered.Message())
+    }
+
+    if ackErr := transport.Ack(runtimeInstance, longRedelivered); nil != ackErr {
+        t.Fatalf("ack long: %v", ackErr)
+    }
+}
+
+func TestStartConsumeLoop_RefusesOnceCloseHasBegun(t *testing.T) {
+    instance := &Transport{
+        queue:       "orders",
+        registry:    NewMessageRegistry(),
+        serializer:  melodyserializer.NewJsonSerializer(),
+        closeSignal: make(chan struct{}),
+        reconnect:   resolveReconnectConfig(nil, nil),
+    }
+
+    runtimeInstance := newReconnectRuntime(context.Background())
+
+    if closeErr := instance.Close(runtimeInstance); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    deliveries := make(chan amqp091.Delivery)
+    out := make(chan messagebuscontract.Envelope)
+
+    if true == instance.startConsumeLoop(runtimeInstance, nil, deliveries, out) {
+        t.Fatalf("expected a closing transport to refuse a new consume loop")
+    }
+
+    joined := make(chan struct{})
+    go func() {
+        instance.wait.Wait()
+
+        close(joined)
+    }()
+
+    select {
+    case <-joined:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("a refused start must leave the wait group at zero, so nothing outlives the join")
     }
 }

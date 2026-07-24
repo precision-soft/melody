@@ -60,7 +60,9 @@ func serializeByAcceptHeader(acceptHeader string, value any) ([]byte, error) {
 
 ## Footguns & caveats
 
-- `ResolveByAcceptHeader("")` and `ResolveByAcceptHeader("*/*")` fall back to the default serializer registered for [`MimeApplicationJson`](../../serializer/mime.go). See [`ResolveByAcceptHeader`](../../serializer/serializer_manager.go).
+- `ResolveByAcceptHeader("")` falls back to the default serializer registered for [`MimeApplicationJson`](../../serializer/mime.go). See [`ResolveByAcceptHeader`](../../serializer/serializer_manager.go).
+- Every available media type takes the quality of the **most specific** range that covers it, so an exact range wins over a wildcard whatever the header order. `*/*` therefore selects the default JSON serializer whenever one is registered. See [`acceptQualityFor`](../../serializer/mime.go).
+- A range carrying `q=0` **refuses** the types it covers rather than being ignored. A header that refuses every type the manager can produce yields an error wrapping [`ErrNotAcceptable`](../../serializer/serializer_manager.go), which [`NormalizeResultToResponse`](../../http/result_handler.go) answers `406 Not Acceptable`. A header that simply matches nothing available still receives the default representation.
 - Wildcard subtypes (for example `text/*`) are supported when resolving against the configured serializers. See [`matchWildcardSubtype`](../../serializer/mime.go).
 - MIME values are normalized by stripping parameters (for example `; charset=utf-8`) and lowercasing. See [`normalizeMime`](../../serializer/mime.go).
 

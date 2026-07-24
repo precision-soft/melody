@@ -14,7 +14,7 @@ func StringSlice(parameterBag bagcontract.ParameterBag, name string) ([]string, 
     }
 
     if nil == value {
-        return nil, true
+        return nil, false
     }
 
     switch typedValue := value.(type) {

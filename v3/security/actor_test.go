@@ -1,21 +1,20 @@
-package security_test
+package security
 
 import (
     "testing"
 
-    "github.com/precision-soft/melody/v3/security"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
 func TestAuthenticatedTokenWithActorExposesActor(t *testing.T) {
-    actor := security.NewActor(
+    actor := NewActor(
         "user-7",
         securitycontract.ActorTypeUser,
         []string{"ROLE_BUYER"},
         map[string]string{"tenant": "acme"},
     )
 
-    token := security.NewAuthenticatedTokenWithActor("wms-service", []string{"ROLE_SERVICE"}, actor)
+    token := NewAuthenticatedTokenWithActor("wms-service", []string{"ROLE_SERVICE"}, actor)
 
     if "wms-service" != token.UserIdentifier() {
         t.Fatalf("expected principal wms-service, got %q", token.UserIdentifier())
@@ -37,7 +36,7 @@ func TestAuthenticatedTokenWithActorExposesActor(t *testing.T) {
 
 /* negative control: a plain authenticated token reports no actor. */
 func TestAuthenticatedTokenWithoutActorReportsAbsent(t *testing.T) {
-    token := security.NewAuthenticatedToken("user-1", []string{"ROLE_USER"})
+    token := NewAuthenticatedToken("user-1", []string{"ROLE_USER"})
 
     resolved, present := token.OnBehalfOf()
     if false != present {
@@ -61,7 +60,7 @@ func TestNewAuthenticatedTokenFromClaimsRebuildsActor(t *testing.T) {
         },
     }
 
-    token := security.NewAuthenticatedTokenFromClaims(claims)
+    token := NewAuthenticatedTokenFromClaims(claims)
 
     actor, present := token.OnBehalfOf()
     if false == present {
@@ -80,7 +79,7 @@ func TestNewAuthenticatedTokenFromClaimsRebuildsActor(t *testing.T) {
 func TestNewAuthenticatedTokenFromClaimsWithoutActor(t *testing.T) {
     claims := securitycontract.Claims{UserIdentifier: "u", Roles: []string{"ROLE_USER"}}
 
-    token := security.NewAuthenticatedTokenFromClaims(claims)
+    token := NewAuthenticatedTokenFromClaims(claims)
 
     if _, present := token.OnBehalfOf(); false != present {
         t.Fatal("expected no actor when claims omit one")
@@ -88,10 +87,10 @@ func TestNewAuthenticatedTokenFromClaimsWithoutActor(t *testing.T) {
 }
 
 func TestActorFromTokenReadsActorAwareTokens(t *testing.T) {
-    actor := security.NewActor("user-9", securitycontract.ActorTypeUser, nil, nil)
-    token := security.NewAuthenticatedTokenWithActor("svc", nil, actor)
+    actor := NewActor("user-9", securitycontract.ActorTypeUser, nil, nil)
+    token := NewAuthenticatedTokenWithActor("svc", nil, actor)
 
-    resolved, present := security.ActorFromToken(security.NewToken(token))
+    resolved, present := ActorFromToken(NewToken(token))
     if false == present {
         t.Fatal("expected ActorFromToken to read through the token wrapper")
     }
@@ -103,11 +102,11 @@ func TestActorFromTokenReadsActorAwareTokens(t *testing.T) {
 
 /* negative control: ActorFromToken on a non-actor-aware / anonymous token. */
 func TestActorFromTokenOnAnonymousToken(t *testing.T) {
-    if _, present := security.ActorFromToken(security.NewAnonymousToken()); false != present {
+    if _, present := ActorFromToken(NewAnonymousToken()); false != present {
         t.Fatal("expected no actor on an anonymous token")
     }
 
-    if _, present := security.ActorFromToken(nil); false != present {
+    if _, present := ActorFromToken(nil); false != present {
         t.Fatal("expected no actor for a nil token")
     }
 }
@@ -120,7 +119,7 @@ func TestNewActorFromDataBoundsCyclicImpersonatorChain(t *testing.T) {
     }
     data.Impersonator = data
 
-    actor := security.NewActorFromData(data)
+    actor := NewActorFromData(data)
     if nil == actor {
         t.Fatal("expected a rebuilt actor")
     }
@@ -146,7 +145,7 @@ func (instance *selfImpersonatingActor) Impersonator() (securitycontract.Actor, 
 
 /* @info a cyclic Actor whose Impersonator() returns itself must not recurse until the stack overflows when serialized; the depth bound truncates the chain. */
 func TestActorToDataBoundsCyclicImpersonatorChain(t *testing.T) {
-    data := security.ActorToData(&selfImpersonatingActor{})
+    data := ActorToData(&selfImpersonatingActor{})
     if nil == data {
         t.Fatal("expected serialized actor data")
     }
@@ -160,7 +159,7 @@ func TestActorDefensiveCopies(t *testing.T) {
     roles := []string{"ROLE_A"}
     attributes := map[string]string{"k": "v"}
 
-    actor := security.NewActor("a", securitycontract.ActorTypeSystem, roles, attributes)
+    actor := NewActor("a", securitycontract.ActorTypeSystem, roles, attributes)
 
     roles[0] = "ROLE_MUTATED"
     attributes["k"] = "mutated"

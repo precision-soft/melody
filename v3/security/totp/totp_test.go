@@ -1,10 +1,8 @@
-package totp_test
+package totp
 
 import (
     "testing"
     "time"
-
-    "github.com/precision-soft/melody/v3/security/totp"
 )
 
 /* rfc6238Secret is the ASCII secret "12345678901234567890" encoded as base32, from the RFC 6238 test vectors. */
@@ -12,7 +10,7 @@ const rfc6238Secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
 
 func TestVerifyAt_Rfc6238KnownAnswer(t *testing.T) {
     /* the RFC's SHA-1 8-digit code at T=59 is 94287082; truncated to 6 digits it is 287082 */
-    ok, verifyErr := totp.VerifyAt(rfc6238Secret, "287082", time.Unix(59, 0), totp.Config{})
+    ok, verifyErr := VerifyAt(rfc6238Secret, "287082", time.Unix(59, 0), Config{})
     if nil != verifyErr {
         t.Fatalf("verify: %v", verifyErr)
     }
@@ -23,32 +21,32 @@ func TestVerifyAt_Rfc6238KnownAnswer(t *testing.T) {
 }
 
 func TestGenerateAndVerifyRoundTrip(t *testing.T) {
-    secret, secretErr := totp.GenerateSecret()
+    secret, secretErr := GenerateSecret()
     if nil != secretErr {
         t.Fatalf("generate secret: %v", secretErr)
     }
 
     now := time.Now()
 
-    code, codeErr := totp.GenerateCodeAt(secret, now, totp.Config{})
+    code, codeErr := GenerateCodeAt(secret, now, Config{})
     if nil != codeErr {
         t.Fatalf("generate code: %v", codeErr)
     }
 
-    ok, verifyErr := totp.VerifyAt(secret, code, now, totp.Config{})
+    ok, verifyErr := VerifyAt(secret, code, now, Config{})
     if nil != verifyErr || false == ok {
         t.Fatalf("expected a freshly generated code to verify, ok=%v err=%v", ok, verifyErr)
     }
 }
 
 func TestVerifyAt_AcceptsCodeWithinSkew(t *testing.T) {
-    secret, _ := totp.GenerateSecret()
+    secret, _ := GenerateSecret()
     now := time.Unix(1_700_000_000, 0)
 
     /* a code from the previous 30s step must still verify with the default ±1 skew */
-    previous, _ := totp.GenerateCodeAt(secret, now.Add(-30*time.Second), totp.Config{})
+    previous, _ := GenerateCodeAt(secret, now.Add(-30*time.Second), Config{})
 
-    ok, _ := totp.VerifyAt(secret, previous, now, totp.Config{})
+    ok, _ := VerifyAt(secret, previous, now, Config{})
     if false == ok {
         t.Fatal("expected a previous-step code to verify within skew")
     }
@@ -56,21 +54,21 @@ func TestVerifyAt_AcceptsCodeWithinSkew(t *testing.T) {
 
 /* negative control: a code two steps away is outside the default skew window. */
 func TestVerifyAt_RejectsCodeOutsideSkew(t *testing.T) {
-    secret, _ := totp.GenerateSecret()
+    secret, _ := GenerateSecret()
     now := time.Unix(1_700_000_000, 0)
 
-    stale, _ := totp.GenerateCodeAt(secret, now.Add(-90*time.Second), totp.Config{})
+    stale, _ := GenerateCodeAt(secret, now.Add(-90*time.Second), Config{})
 
-    ok, _ := totp.VerifyAt(secret, stale, now, totp.Config{})
+    ok, _ := VerifyAt(secret, stale, now, Config{})
     if true == ok {
         t.Fatal("expected a code three steps old to be rejected")
     }
 }
 
 func TestVerifyAt_RejectsWrongCode(t *testing.T) {
-    secret, _ := totp.GenerateSecret()
+    secret, _ := GenerateSecret()
 
-    ok, _ := totp.VerifyAt(secret, "000000", time.Unix(59, 0), totp.Config{})
+    ok, _ := VerifyAt(secret, "000000", time.Unix(59, 0), Config{})
     if true == ok {
         /* astronomically unlikely to be the real code; guards against an always-true bug */
         t.Fatal("expected an arbitrary code to be rejected")
@@ -78,7 +76,7 @@ func TestVerifyAt_RejectsWrongCode(t *testing.T) {
 }
 
 func TestOtpauthURI_ContainsSecretAndIssuer(t *testing.T) {
-    uri := totp.OtpauthURI("Melody", "alice@example.com", rfc6238Secret, totp.Config{})
+    uri := OtpauthURI("Melody", "alice@example.com", rfc6238Secret, Config{})
 
     if false == containsAll(uri, "otpauth://totp/", "secret="+rfc6238Secret, "issuer=Melody", "period=30", "digits=6") {
         t.Fatalf("unexpected otpauth uri: %s", uri)
@@ -86,7 +84,7 @@ func TestOtpauthURI_ContainsSecretAndIssuer(t *testing.T) {
 }
 
 func TestGenerateRecoveryCodes_UniqueAndFormatted(t *testing.T) {
-    codes, codesErr := totp.GenerateRecoveryCodes(8)
+    codes, codesErr := GenerateRecoveryCodes(8)
     if nil != codesErr {
         t.Fatalf("recovery codes: %v", codesErr)
     }
@@ -111,10 +109,10 @@ func TestGenerateRecoveryCodes_UniqueAndFormatted(t *testing.T) {
 
 /* an out-of-range digit count (which would otherwise overflow the uint32 modulo) is clamped to the default rather than producing a broken or panicking code. */
 func TestVerifyAt_ClampsOutOfRangeDigits(t *testing.T) {
-    secret, _ := totp.GenerateSecret()
+    secret, _ := GenerateSecret()
     now := time.Unix(1_700_000_000, 0)
 
-    code, codeErr := totp.GenerateCodeAt(secret, now, totp.Config{Digits: 10})
+    code, codeErr := GenerateCodeAt(secret, now, Config{Digits: 10})
     if nil != codeErr {
         t.Fatalf("generate code: %v", codeErr)
     }
@@ -123,7 +121,7 @@ func TestVerifyAt_ClampsOutOfRangeDigits(t *testing.T) {
         t.Fatalf("expected an out-of-range digit count to clamp to 6, got a %d-digit code", len(code))
     }
 
-    ok, _ := totp.VerifyAt(secret, code, now, totp.Config{Digits: 10})
+    ok, _ := VerifyAt(secret, code, now, Config{Digits: 10})
     if false == ok {
         t.Fatal("expected the clamped code to verify")
     }
@@ -131,12 +129,12 @@ func TestVerifyAt_ClampsOutOfRangeDigits(t *testing.T) {
 
 /* Resolve must expose exactly the values Verify runs with: zero-value defaults filled in and the skew clamped to the same ceiling Verify enforces, so a caller sizing a replay window from Resolve never diverges from what Verify accepts. */
 func TestResolveFillsDefaultsAndClampsSkew(t *testing.T) {
-    resolved := totp.Config{}.Resolve()
+    resolved := Config{}.Resolve()
     if 30 != resolved.Period || 6 != resolved.Digits || 1 != resolved.Skew {
         t.Fatalf("expected zero-value defaults (30/6/1), got %d/%d/%d", resolved.Period, resolved.Digits, resolved.Skew)
     }
 
-    clamped := totp.Config{Period: 60, Digits: 8, Skew: 1_000_000}.Resolve()
+    clamped := Config{Period: 60, Digits: 8, Skew: 1_000_000}.Resolve()
     if 10 != clamped.Skew {
         t.Fatalf("expected a huge skew to clamp to 10, got %d", clamped.Skew)
     }
@@ -167,7 +165,7 @@ func containsAll(haystack string, needles ...string) bool {
 func TestVerifyAt_ToleratesWhitespaceInTheSubmittedCode(t *testing.T) {
     at := time.Unix(1111111109, 0)
 
-    code, codeErr := totp.GenerateCodeAt(rfc6238Secret, at, totp.Config{})
+    code, codeErr := GenerateCodeAt(rfc6238Secret, at, Config{})
     if nil != codeErr {
         t.Fatalf("unexpected code error: %v", codeErr)
     }
@@ -181,7 +179,7 @@ func TestVerifyAt_ToleratesWhitespaceInTheSubmittedCode(t *testing.T) {
     }
 
     for _, variant := range variants {
-        valid, verifyErr := totp.VerifyAt(rfc6238Secret, variant, at, totp.Config{})
+        valid, verifyErr := VerifyAt(rfc6238Secret, variant, at, Config{})
         if nil != verifyErr {
             t.Fatalf("unexpected verify error for %q: %v", variant, verifyErr)
         }
@@ -195,7 +193,7 @@ func TestVerifyAt_ToleratesWhitespaceInTheSubmittedCode(t *testing.T) {
 func TestVerifyAt_StillRejectsWrongAndShortCodes(t *testing.T) {
     at := time.Unix(1111111109, 0)
 
-    code, codeErr := totp.GenerateCodeAt(rfc6238Secret, at, totp.Config{})
+    code, codeErr := GenerateCodeAt(rfc6238Secret, at, Config{})
     if nil != codeErr {
         t.Fatalf("unexpected code error: %v", codeErr)
     }
@@ -204,7 +202,7 @@ func TestVerifyAt_StillRejectsWrongAndShortCodes(t *testing.T) {
     flipped := code[:5] + string('0'+(code[5]-'0'+1)%10)
 
     for _, invalid := range []string{"12 34", "  ", flipped[:3] + " " + flipped[3:]} {
-        valid, verifyErr := totp.VerifyAt(rfc6238Secret, invalid, at, totp.Config{})
+        valid, verifyErr := VerifyAt(rfc6238Secret, invalid, at, Config{})
         if nil != verifyErr {
             t.Fatalf("unexpected verify error for %q: %v", invalid, verifyErr)
         }
@@ -219,7 +217,7 @@ func TestVerifyAt_StillRejectsWrongAndShortCodes(t *testing.T) {
 func TestNormalizeCode_StripsEveryWhitespaceForm(t *testing.T) {
     /* the last variant carries a real non-breaking space (U+00A0), the separator a mobile copy/paste of a displayed code keeps */
     for _, variant := range []string{"123456", "123 456", " 123456 ", "1 2 3 4 5 6", "123\t456", "123 456"} {
-        if normalized := totp.NormalizeCode(variant); "123456" != normalized {
+        if normalized := NormalizeCode(variant); "123456" != normalized {
             t.Fatalf("expected %q to normalize to \"123456\", got %q", variant, normalized)
         }
     }

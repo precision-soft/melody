@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.6.0] - 2026-07-25 - Truthful Delete Auditing, Reported Encryption Skips and Contained Registry Teardown
+
+### Fixed
+
+- `audit`: an audited delete that captures no before-image records an empty change set rather than the json literal `null`, so a reader of the trail parses one shape
+- `encrypt`: the bulk migration keeps a count and a bounded sample of the rows it skipped instead of every skipped primary key, so a large table under a concurrent writer no longer accumulates the whole set in memory on the way to reporting the error
+- the manager registry no longer wedges permanently when opening a database panics while the registry is being closed. The section that publishes the opened manager released its lock without a defer, so a panic from the database's own `Close` unwound with the lock held and the recovery path then blocked on that same lock — after which every later call to the registry blocked forever, silently. A provider returning a nil database was enough to trigger it
+- `audit/track.go`, `audit/config.go` — `Tracker.Delete` no longer records field values it never read. The caller typically holds only the primary key, so the remaining fields of the passed-in model are zero values, and recording them asserted them as the deleted row's contents — permanently, for a row that no longer exists; a caller could just as easily write a false before-image by hand. The trail now carries what the delete actually knows: the identifier, the actor and the time. An entity whose deleted contents must be recoverable opts in per entity with `EntityOptions.CaptureDeleteBeforeImage`, which loads and locks the row with `SELECT ... WHERE pk FOR UPDATE` before removing it; it is off by default, so auditing charges the working database no extra read on the normal path, and only an opted-in entity pays the select, the row lock and an error when the row it must capture is already gone. A delete that matched no row is not recorded at all, instead of writing a deletion that never happened
+- encrypt: the bulk column migration reports a run as incomplete instead of successful when a guarded update matched no row. Each update is guarded on the value read for that row, so a row the application changed between the select and the update matches nothing and keeps its plaintext; the affected count was discarded and the row was still counted as processed, so the command logged success and exited zero over values it had never migrated — and under `--mode reencrypt` that left a row on a key about to be retired. The run now names how many rows it left untouched and exits non-zero, and a re-run picks them up under their new values
+
 ## [v3.5.0] - 2026-07-23 - Audit Transaction Scoping and Spelled-Out Connection Parameters
 
 ### Changed
@@ -129,7 +139,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Dependencies pinned to `github.com/precision-soft/melody/v3` and other v3 module paths
 - README relative path links updated to reflect v3 directory structure
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.5.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.0...HEAD
+
+[v3.6.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.5.0...integrations/bunorm/v3.6.0
 
 [v3.5.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.4.0...integrations/bunorm/v3.5.0
 

@@ -4,6 +4,7 @@ import (
     "fmt"
     "strconv"
     "strings"
+    "sync"
     "time"
 
     "github.com/precision-soft/melody/v2/.example/entity"
@@ -76,14 +77,27 @@ func NewInMemoryProductRepository() ProductRepository {
 }
 
 type inMemoryProductRepository struct {
+    mutex    sync.RWMutex
     products []*entity.Product
 }
 
+/* @info the returned slice is a copy, but a shallow one: the entity pointers stay shared with the
+repository, so a caller that mutates an entity in place bypasses the lock */
 func (instance *inMemoryProductRepository) All() []*entity.Product {
-    return instance.products
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
+
+    return append([]*entity.Product{}, instance.products...)
 }
 
 func (instance *inMemoryProductRepository) FindById(id string) (*entity.Product, bool) {
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
+
+    return instance.findByIdLocked(id)
+}
+
+func (instance *inMemoryProductRepository) findByIdLocked(id string) (*entity.Product, bool) {
     for _, product := range instance.products {
         if nil == product {
             continue
@@ -98,6 +112,9 @@ func (instance *inMemoryProductRepository) FindById(id string) (*entity.Product,
 }
 
 func (instance *inMemoryProductRepository) Create(product *entity.Product) error {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
     if nil == product {
         return fmt.Errorf("product is required")
     }
@@ -127,10 +144,10 @@ func (instance *inMemoryProductRepository) Create(product *entity.Product) error
     }
 
     if "" == strings.TrimSpace(product.Id) {
-        product.Id = instance.nextId()
+        product.Id = instance.nextIdLocked()
     }
 
-    _, exists := instance.FindById(product.Id)
+    _, exists := instance.findByIdLocked(product.Id)
     if true == exists {
         return fmt.Errorf("id already exists")
     }
@@ -148,6 +165,9 @@ func (instance *inMemoryProductRepository) Create(product *entity.Product) error
 }
 
 func (instance *inMemoryProductRepository) Update(product *entity.Product) (bool, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
     if nil == product {
         return false, fmt.Errorf("product is required")
     }
@@ -206,6 +226,9 @@ func (instance *inMemoryProductRepository) Update(product *entity.Product) (bool
 }
 
 func (instance *inMemoryProductRepository) DeleteById(id string) (bool, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
     normalizedId := strings.TrimSpace(id)
     if "" == normalizedId {
         return false, fmt.Errorf("id is required")
@@ -227,7 +250,7 @@ func (instance *inMemoryProductRepository) DeleteById(id string) (bool, error) {
     return false, nil
 }
 
-func (instance *inMemoryProductRepository) nextId() string {
+func (instance *inMemoryProductRepository) nextIdLocked() string {
     maxSuffix := int64(0)
 
     for _, product := range instance.products {

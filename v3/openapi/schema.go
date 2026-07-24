@@ -11,8 +11,13 @@ import (
 
 var timeType = reflect.TypeOf(time.Time{})
 
+/* @important the unsigned floor is applied here as well as on fields and collection elements: a request or response type handed in bare goes straight to buildSchema, so without this a top-level unsigned scalar advertises the negative range its decoder refuses */
 func schemaFromType(targetType reflect.Type, components map[string]*Schema, names map[reflect.Type]string) *Schema {
-    return buildSchema(targetType, components, names, make(map[reflect.Type]bool))
+    schema := buildSchema(targetType, components, names, make(map[reflect.Type]bool))
+
+    applyUnsignedLowerBound(schema, targetType)
+
+    return schema
 }
 
 func buildSchema(targetType reflect.Type, components map[string]*Schema, names map[reflect.Type]string, visited map[reflect.Type]bool) *Schema {
@@ -352,6 +357,11 @@ func addFieldProperty(
         propertySchema.MinItems = nil
     }
 
+    /* @important the zero-length counterpart of the case above: the validator measures a length fixed at zero, so notEmpty rejects every payload and the minItems floor alone would advertise a non-empty array the server always refuses */
+    if true == fixedArrayNotEmptyIsUnsatisfiable(field) {
+        markFieldUnsatisfiable(propertySchema)
+    }
+
     /* @important the required and validation decisions run against the bare scalar schema first: the validator sees the DECODED value, so its rules and the absence semantics belong to the scalar, while the quoted advertisement below only changes how the payload spells it */
     fieldRequired := true == isRequired(field, propertySchema) || true == pointerBoundRequiresPresence(field) || true == zeroValueRejectsAbsentProperty(field, propertySchema)
 
@@ -371,6 +381,10 @@ func addFieldProperty(
 
 /* @important an unsigned field cannot decode a negative number, so the validator never sees one, yet a kind-blind integer schema advertises the whole negative range as valid; stamp a zero floor so the spec rejects what the decoder rejects. The floor is raise-only and never weakens a bound the validator already placed at or above zero — a value-less greaterThan leaves its exclusive zero minimum intact. */
 func applyUnsignedLowerBound(schema *Schema, fieldType reflect.Type) {
+    if nil == fieldType {
+        return
+    }
+
     for reflect.Ptr == fieldType.Kind() {
         fieldType = fieldType.Elem()
     }
@@ -736,6 +750,27 @@ func isRequired(field reflect.StructField, schema *Schema) bool {
             if true == absenceIsNil || ("string" == schema.Type && false == isStructuralStringFormat(schema.Format)) {
                 return true
             }
+        }
+    }
+
+    return false
+}
+
+/* fixedArrayNotEmptyIsUnsatisfiable reports whether a field is a zero-length fixed array carrying notEmpty, for which the validator's length check can never pass, so no payload the spec advertises is ever accepted. */
+func fixedArrayNotEmptyIsUnsatisfiable(field reflect.StructField) bool {
+    fieldType := field.Type
+    for reflect.Ptr == fieldType.Kind() {
+        fieldType = fieldType.Elem()
+    }
+
+    if reflect.Array != fieldType.Kind() || 0 != fieldType.Len() {
+        return false
+    }
+
+    for _, rule := range splitRules(field.Tag.Get("validate")) {
+        name, _ := splitRule(rule)
+        if "notEmpty" == name {
+            return true
         }
     }
 

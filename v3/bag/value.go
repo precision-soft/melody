@@ -13,8 +13,9 @@ func String(parameterBag bagcontract.ParameterBag, name string) (string, bool) {
         return "", false
     }
 
+    /* @important a present-but-nil value reports as unset, matching what the typed accessors report for the same state; otherwise Has and String would agree while String and Int contradicted each other */
     if nil == value {
-        return "", true
+        return "", false
     }
 
     stringValue, isString := value.(string)

@@ -3,26 +3,13 @@ package config
 import (
     "reflect"
 
+    handleri18n "github.com/precision-soft/melody/v3/.example/handler/i18n"
+    handlerproduct "github.com/precision-soft/melody/v3/.example/handler/product"
     "github.com/precision-soft/melody/v3/.example/route"
     melodyopenapi "github.com/precision-soft/melody/v3/openapi"
 )
 
-type productCreateRequest struct {
-    Name  string  `json:"name" validate:"notBlank,min=2"`
-    Price float64 `json:"price" validate:"greaterThan=0"`
-}
-
-type productView struct {
-    Id    string  `json:"id"`
-    Name  string  `json:"name"`
-    Price float64 `json:"price"`
-}
-
-type greetingView struct {
-    Locale   string `json:"locale"`
-    Greeting string `json:"greeting"`
-}
-
+/* @important the descriptors below bind the handler types themselves, never a hand-written copy of them: a copy drifts from the validation rules and the published document then documents a body the route rejects. */
 func (instance *Module) buildOpenApi() {
     instance.openApiInfo = melodyopenapi.Info{
         Title:   "Melody Example API",
@@ -31,7 +18,7 @@ func (instance *Module) buildOpenApi() {
 
     instance.openApiRegistry = melodyopenapi.NewRegistry()
 
-    melodyopenapi.DescribeTyped[productCreateRequest, productView](
+    melodyopenapi.DescribeTyped[handlerproduct.CreateRequest, handlerproduct.ProductResponse](
         instance.openApiRegistry,
         route.ProductsApiCreateName,
         201,
@@ -43,7 +30,7 @@ func (instance *Module) buildOpenApi() {
         Summary: "Translated greeting",
         Tags:    []string{"i18n"},
         Responses: map[int]reflect.Type{
-            200: melodyopenapi.TypeOf[greetingView](),
+            200: melodyopenapi.TypeOf[handleri18n.GreetingResponse](),
         },
     })
 }
