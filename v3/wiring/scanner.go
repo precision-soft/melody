@@ -75,6 +75,8 @@ var scalarTypeNames = map[string]bool{
 type ScanResult struct {
     Constructors []*Constructor
     Skipped      []*SkippedConstructor
+    /* SkippedVendorDirectories names the vendor trees the walk stepped over; they cannot contribute services, so they are reported separately from the skipped constructors strict fails on. */
+    SkippedVendorDirectories []string
 }
 
 type SkippedConstructor struct {
@@ -108,8 +110,14 @@ func Scan(projectDirectory string, packageBinding *PackageBinding) (*ScanResult,
                 return nil
             }
 
-            /* a directory the go tool never compiles as part of the module cannot contribute services */
+            /* a directory the go tool never compiles as part of the module cannot contribute services; a skipped vendor tree is recorded so the report can name it on request */
             baseName := entry.Name()
+            if "vendor" == baseName {
+                result.SkippedVendorDirectories = append(result.SkippedVendorDirectories, currentPath)
+
+                return filepath.SkipDir
+            }
+
             if true == strings.HasPrefix(baseName, ".") || true == strings.HasPrefix(baseName, "_") || "testdata" == baseName {
                 return filepath.SkipDir
             }
@@ -178,6 +186,31 @@ func scanFile(
             },
             parseErr,
         )
+    }
+
+    /* a main package is a program, not an importable package; a constructor under cmd/ would render an import the compiler refuses. Its candidates are reported as skipped instead of dropped without a trace, so --strict surfaces the lost coverage and //melody:ignore acknowledges it. */
+    if "main" == fileNode.Name.Name {
+        for _, declaration := range fileNode.Decls {
+            functionDeclaration, isFunction := declaration.(*ast.FuncDecl)
+            if false == isFunction || false == isConstructorCandidate(functionDeclaration) {
+                continue
+            }
+
+            if true == parseDirectives(functionDeclaration).isIgnored {
+                continue
+            }
+
+            position := fileSet.Position(functionDeclaration.Pos())
+
+            result.Skipped = append(result.Skipped, &SkippedConstructor{
+                Name:   functionDeclaration.Name.Name,
+                File:   currentPath,
+                Line:   position.Line,
+                Reason: "declared in a main package the generated file cannot import",
+            })
+        }
+
+        return nil
     }
 
     importPath, importPathErr := derivedImportPath(packageBinding.ImportPath(), rootDirectory, currentPath)

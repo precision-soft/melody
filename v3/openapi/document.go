@@ -101,4 +101,5 @@ type Schema struct {
     ExclusiveMaximum     *bool              `json:"exclusiveMaximum,omitempty"`
     Pattern              string             `json:"pattern,omitempty"`
     Enum                 *[]any             `json:"enum,omitempty"`
+    Not                  *Schema            `json:"not,omitempty"`
 }

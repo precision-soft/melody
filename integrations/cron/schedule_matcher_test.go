@@ -624,3 +624,33 @@ func TestScheduleMatcher_UnknownDialectIsRejected(t *testing.T) {
         t.Fatalf("expected ErrUnknownRunnerDialect, got %v", matcherErr)
     }
 }
+
+/* @info the matcher folds the three-letter names crond reads in the month and day-of-week fields, so a generate-ready schedule with names also runs in-process */
+func TestScheduleMatcher_AcceptsNameTokens(t *testing.T) {
+    matcher, matcherErr := newScheduleMatcher(&Schedule{Month: "JAN", DayOfWeek: "mon-fri"}, RunnerDialectCrontab)
+    if nil != matcherErr {
+        t.Fatalf("expected the named schedule to parse, got %v", matcherErr)
+    }
+
+    if false == matcher.Matches(time.Date(2026, time.January, 5, 10, 0, 0, 0, time.UTC)) {
+        t.Fatalf("expected a January Monday to match")
+    }
+
+    if true == matcher.Matches(time.Date(2026, time.January, 4, 10, 0, 0, 0, time.UTC)) {
+        t.Fatalf("expected a January Sunday not to match")
+    }
+
+    if true == matcher.Matches(time.Date(2026, time.February, 2, 10, 0, 0, 0, time.UTC)) {
+        t.Fatalf("expected a February Monday not to match")
+    }
+}
+
+func TestScheduleMatcher_RejectsANameGluedToDigits(t *testing.T) {
+    if _, matcherErr := newScheduleMatcher(&Schedule{Month: "1jan"}, RunnerDialectCrontab); nil == matcherErr {
+        t.Fatalf("expected a name glued to digits to fail the parse instead of folding")
+    }
+
+    if _, matcherErr := newScheduleMatcher(&Schedule{DayOfWeek: "*/mon"}, RunnerDialectCrontab); nil == matcherErr {
+        t.Fatalf("expected a name in step position to fail the parse instead of folding")
+    }
+}

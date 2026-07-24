@@ -1,6 +1,7 @@
 package rueidis
 
 import (
+    "math"
     "testing"
     "time"
 
@@ -71,6 +72,29 @@ func TestServerSentEventBackplane_DoesNotEchoToOriginInstanceTwice(t *testing.T)
     case event := <-subscriber.Events():
         t.Fatalf("expected no echoed re-delivery of the origin's own broadcast, got %q", event.Data)
     case <-time.After(500 * time.Millisecond):
+    }
+}
+
+func TestNextServerSentEventBackplaneBackoff_GrowsAndCaps(t *testing.T) {
+    instance := &ServerSentEventBackplane{reconnect: resolveReconnectConfig(&ReconnectConfig{InitialBackoff: time.Second, MaxBackoff: 4 * time.Second, BackoffFactor: 2.0})}
+
+    expected := []time.Duration{2 * time.Second, 4 * time.Second, 4 * time.Second}
+
+    current := instance.reconnect.InitialBackoff
+    for index, want := range expected {
+        current = instance.nextServerSentEventBackplaneBackoff(current)
+        if want != current {
+            t.Fatalf("step %d: expected %s, got %s", index, want, current)
+        }
+    }
+}
+
+/* @info an extreme factor overflows the product into a negative duration; the growth function collapses both ends onto the cap so the resubscribe loop never spins with a zero delay */
+func TestNextServerSentEventBackplaneBackoff_ExtremeFactorCollapsesOntoTheCap(t *testing.T) {
+    instance := &ServerSentEventBackplane{reconnect: resolveReconnectConfig(&ReconnectConfig{InitialBackoff: time.Second, MaxBackoff: 30 * time.Second, BackoffFactor: math.Inf(1)})}
+
+    if 30*time.Second != instance.nextServerSentEventBackplaneBackoff(time.Second) {
+        t.Fatalf("expected the overflowing backoff to collapse onto the cap")
     }
 }
 

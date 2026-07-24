@@ -1559,3 +1559,451 @@ func TestBuildSchema_CollatingEquivalenceOpenersStayLiteralInsideClass(t *testin
         }
     }
 }
+
+type emailFacetRequest struct {
+    Email  string `json:"email" validate:"email,max=64"`
+    Domain string `json:"domain" validate:"email,regex=@corp[.]com$"`
+    Name   string `json:"name" validate:"min=3,email"`
+}
+
+/* @info the email format is an annotation, not a structural format: the validator still enforces every later string facet on the same raw string, so the mirror must not let the annotation swallow a max/regex/min that follows it in tag order */
+func TestBuildSchema_EmailAnnotationKeepsLaterStringFacets(t *testing.T) {
+    components := map[string]*Schema{}
+    buildSchema(reflect.TypeOf(emailFacetRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    schema := components["emailFacetRequest"]
+    if nil == schema {
+        t.Fatalf("expected the request component to be built")
+    }
+
+    email := schema.Properties["email"]
+    if "email" != email.Format {
+        t.Fatalf("expected the email format annotation, got %q", email.Format)
+    }
+    if nil == email.MaxLength || 64 != *email.MaxLength {
+        t.Fatalf("expected the max after email to be mirrored as maxLength 64, got %v", email.MaxLength)
+    }
+
+    domain := schema.Properties["domain"]
+    if "@corp[.]com$" != domain.Pattern {
+        t.Fatalf("expected the regex after email to be mirrored, got %q", domain.Pattern)
+    }
+
+    name := schema.Properties["name"]
+    if nil == name.MinLength || 3 != *name.MinLength {
+        t.Fatalf("expected the min before email to be mirrored as minLength 3, got %v", name.MinLength)
+    }
+
+    nameRequired := false
+    for _, requiredName := range schema.Required {
+        if "name" == requiredName {
+            nameRequired = true
+        }
+    }
+    if false == nameRequired {
+        t.Fatalf("expected min=3 to keep the field required despite the email annotation (the absent zero value \"\" fails the floor), got required=%v", schema.Required)
+    }
+}
+
+type notBlankKindsRequest struct {
+    Name  string    `json:"name" validate:"notBlank"`
+    Score *int      `json:"score" validate:"notBlank"`
+    Data  any       `json:"data" validate:"notBlank"`
+    Age   int       `json:"age" validate:"notBlank"`
+    Tags  []string  `json:"tags" validate:"notBlank"`
+    Blob  []byte    `json:"blob" validate:"notBlank"`
+    When  time.Time `json:"when" validate:"notBlank"`
+}
+
+/* @info notBlank turns absence into a 400 only for a pointer or interface (nil dereferences to nothing) or a genuine string (the zero "" is blank); the other zero values stringify non-blank ("0", "[]", the zero time) and pass, so listing them required would forbid an omission the validator accepts */
+func TestBuildSchema_NotBlankRequiredOnlyWhereAbsenceIsRejected(t *testing.T) {
+    components := map[string]*Schema{}
+    buildSchema(reflect.TypeOf(notBlankKindsRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    schema := components["notBlankKindsRequest"]
+    if nil == schema {
+        t.Fatalf("expected the request component to be built")
+    }
+
+    expected := map[string]bool{"name": true, "score": true, "data": true}
+    if len(expected) != len(schema.Required) {
+        t.Fatalf("expected exactly the string, pointer and interface fields required, got %v", schema.Required)
+    }
+    for _, requiredName := range schema.Required {
+        if false == expected[requiredName] {
+            t.Fatalf("unexpected required field %q in %v", requiredName, schema.Required)
+        }
+    }
+
+    blob := schema.Properties["blob"]
+    if nil != blob.MinLength {
+        t.Fatalf("expected notBlank to stay off the byte-format string (the validator accepts an empty blob), got minLength %v", *blob.MinLength)
+    }
+
+    name := schema.Properties["name"]
+    if nil == name.MinLength || 1 != *name.MinLength {
+        t.Fatalf("expected the genuine string to carry the minLength 1 floor, got %v", name.MinLength)
+    }
+}
+
+type interfaceRejectAllRequest struct {
+    Data any `json:"data" validate:"min=abc"`
+}
+
+/* @info a malformed bound rejects every value of every kind, but an interface field builds an empty schema no facet can contradict; not against the empty schema is the one advertisement no value satisfies */
+func TestBuildSchema_MalformedBoundOnInterfaceFieldAdvertisedUnsatisfiable(t *testing.T) {
+    components := map[string]*Schema{}
+    buildSchema(reflect.TypeOf(interfaceRejectAllRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    schema := components["interfaceRejectAllRequest"]
+    if nil == schema {
+        t.Fatalf("expected the request component to be built")
+    }
+
+    data := schema.Properties["data"]
+    if nil == data.Not {
+        t.Fatalf("expected the interface field with a reject-all tag to be contradicted with not, got %+v", data)
+    }
+}
+
+type EmbedAudit struct {
+    By string `json:"by"`
+}
+
+type embedRejectAllRequest struct {
+    EmbedAudit `validate:"notEmpty"`
+    Title      string `json:"title"`
+}
+
+type embedNotBlankRequest struct {
+    *EmbedAudit `validate:"notBlank"`
+    Title       string `json:"title"`
+}
+
+/* @info the validator runs a promoted embed's own tag against the embed value, so notEmpty on an embed rejects every payload of the enclosing object; the parent schema must advertise that, while notBlank on a pointer embed stays satisfiable and must not be contradicted */
+func TestBuildSchema_EmbedRejectAllTagContradictsTheParentSchema(t *testing.T) {
+    components := map[string]*Schema{}
+    buildSchema(reflect.TypeOf(embedRejectAllRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    schema := components["embedRejectAllRequest"]
+    if nil == schema {
+        t.Fatalf("expected the request component to be built")
+    }
+
+    if nil == schema.MinProperties || 1 != *schema.MinProperties || nil == schema.MaxProperties || 0 != *schema.MaxProperties {
+        t.Fatalf("expected the parent object contradicted (minProperties 1, maxProperties 0), got %+v", schema)
+    }
+
+    if nil == schema.Properties["title"] || nil == schema.Properties["by"] {
+        t.Fatalf("expected the documented properties to be preserved alongside the contradiction, got %v", schema.Properties)
+    }
+
+    satisfiableComponents := map[string]*Schema{}
+    buildSchema(reflect.TypeOf(embedNotBlankRequest{}), satisfiableComponents, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    satisfiable := satisfiableComponents["embedNotBlankRequest"]
+    if nil != satisfiable.MinProperties || nil != satisfiable.MaxProperties {
+        t.Fatalf("expected notBlank on a pointer embed to leave the parent satisfiable, got %+v", satisfiable)
+    }
+}
+
+type quotedScalarRequest struct {
+    Count   int     `json:"count,string"`
+    Ratio   float64 `json:"ratio,string"`
+    Active  bool    `json:"active,string"`
+    Level   *int    `json:"level,string"`
+    Doubled **int   `json:"doubled,string"`
+    Name    string  `json:"name,string"`
+    Plain   int     `json:"plain"`
+    Window  int     `json:"window,string" validate:"greaterThan=5,lessThan=6"`
+}
+
+/* @info encoding/json's ",string" option makes the decoder demand the quoted textual form and refuse the bare scalar, so the spec must advertise the string the payload actually spells */
+func TestBuildSchema_JsonStringOptionAdvertisedAsQuotedString(t *testing.T) {
+    components := map[string]*Schema{}
+    buildSchema(reflect.TypeOf(quotedScalarRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    schema := components["quotedScalarRequest"]
+    if nil == schema {
+        t.Fatalf("expected the request component to be built")
+    }
+
+    count := schema.Properties["count"]
+    if "string" != count.Type || "^(-?[0-9]+|null)$" != count.Pattern {
+        t.Fatalf("expected the quoted integer advertisement (the literal \"null\" included), got %+v", count)
+    }
+
+    /* ParseFloat accepts more than the JSON number grammar (hex floats, a trailing dot), so the quoted float advertises no pattern */
+    ratio := schema.Properties["ratio"]
+    if "string" != ratio.Type || "" != ratio.Pattern {
+        t.Fatalf("expected the quoted number advertised without a pattern, got %+v", ratio)
+    }
+
+    active := schema.Properties["active"]
+    if "string" != active.Type || nil == active.Enum || 3 != len(*active.Enum) || "null" != (*active.Enum)[2] {
+        t.Fatalf("expected the quoted boolean advertised as the two literals plus \"null\", got %+v", active)
+    }
+
+    level := schema.Properties["level"]
+    if "string" != level.Type || false == level.Nullable {
+        t.Fatalf("expected the quoted pointer scalar to stay nullable, got %+v", level)
+    }
+
+    doubled := schema.Properties["doubled"]
+    if "integer" != doubled.Type {
+        t.Fatalf("expected the double pointer to keep the option ignored (encoding/json dereferences one unnamed pointer only), got %+v", doubled)
+    }
+
+    name := schema.Properties["name"]
+    if "string" != name.Type || "" != name.Pattern {
+        t.Fatalf("expected the string field left alone, got %+v", name)
+    }
+
+    plain := schema.Properties["plain"]
+    if "integer" != plain.Type {
+        t.Fatalf("expected the option-less integer untouched, got %+v", plain)
+    }
+
+    /* the open interval (5, 6) holds no whole number, so the quoted integer must stay unsatisfiable */
+    window := schema.Properties["window"]
+    if "string" != window.Type || nil == window.MinLength || 1 != *window.MinLength || nil == window.MaxLength || 0 != *window.MaxLength {
+        t.Fatalf("expected the unsatisfiable scalar to stay unsatisfiable in its quoted form, got %+v", window)
+    }
+}
+
+type dynamicValueRequest struct {
+    Amount any `json:"amount" validate:"greaterThan=0"`
+    Bag    any `json:"bag" validate:"notEmpty"`
+}
+
+/* @info the validator judges an interface field's DECODED dynamic value — a positive number passes greaterThan and a non-empty string passes notEmpty — so the kind-classified reject-all arms must not contradict it */
+func TestBuildSchema_DynamicRulesOnInterfaceFieldsStaySatisfiable(t *testing.T) {
+    components := map[string]*Schema{}
+    buildSchema(reflect.TypeOf(dynamicValueRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    schema := components["dynamicValueRequest"]
+    if nil == schema {
+        t.Fatalf("expected the request component to be built")
+    }
+
+    amount := schema.Properties["amount"]
+    if nil != amount.Not || nil != amount.Minimum || nil != amount.MinProperties {
+        t.Fatalf("expected greaterThan on an interface field to stay unconstrained, got %+v", amount)
+    }
+
+    bag := schema.Properties["bag"]
+    if nil != bag.Not || nil != bag.MinProperties {
+        t.Fatalf("expected notEmpty on an interface field to stay unconstrained, got %+v", bag)
+    }
+}
+
+type interfaceMalformedComparisonRequest struct {
+    Amount  any `json:"amount" validate:"greaterThan=abc"`
+    Ceiling any `json:"ceiling" validate:"lessThan=xyz"`
+    Valid   any `json:"valid" validate:"greaterThan=5"`
+}
+
+/* @info GreaterThan/LessThan.WithParams run the same parseIntStrict as min/max, so a malformed bound fails constraint creation and rejects every payload before any value is examined; on an interface field the kind-classified branches are exempt, leaving not as the only truthful advertisement — a VALID bound stays satisfiable, judged on the decoded dynamic value */
+func TestBuildSchema_MalformedComparisonBoundOnInterfaceFieldAdvertisedUnsatisfiable(t *testing.T) {
+    components := map[string]*Schema{}
+    buildSchema(reflect.TypeOf(interfaceMalformedComparisonRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    schema := components["interfaceMalformedComparisonRequest"]
+    if nil == schema {
+        t.Fatalf("expected the request component to be built")
+    }
+
+    if nil == schema.Properties["amount"].Not {
+        t.Fatalf("expected the malformed greaterThan bound to be contradicted with not, got %+v", schema.Properties["amount"])
+    }
+
+    if nil == schema.Properties["ceiling"].Not {
+        t.Fatalf("expected the malformed lessThan bound to be contradicted with not, got %+v", schema.Properties["ceiling"])
+    }
+
+    if nil != schema.Properties["valid"].Not {
+        t.Fatalf("expected the valid bound to stay satisfiable, got %+v", schema.Properties["valid"])
+    }
+}
+
+type embedValueMaxOneRequest struct {
+    EmbedAudit `validate:"max=1"`
+    Title      string `json:"title"`
+}
+
+type embedValueMaxNegativeRequest struct {
+    EmbedAudit `validate:"max=-1"`
+    Title      string `json:"title"`
+}
+
+type embedValueMaxTwoRequest struct {
+    EmbedAudit `validate:"max=2"`
+    Title      string `json:"title"`
+}
+
+type embedPointerMaxOneRequest struct {
+    *EmbedAudit `validate:"max=1"`
+    Title       string `json:"title"`
+}
+
+type EmbedStringable struct {
+    By string `json:"by"`
+}
+
+func (instance EmbedStringable) String() string {
+    return ""
+}
+
+type embedStringerMaxOneRequest struct {
+    EmbedStringable `validate:"max=1"`
+    Title           string `json:"title"`
+}
+
+type EmbedPointerStringable struct {
+    By string `json:"by"`
+}
+
+func (instance *EmbedPointerStringable) String() string {
+    return ""
+}
+
+type embedPointerReceiverStringerMaxOneRequest struct {
+    EmbedPointerStringable `validate:"max=1"`
+    Title                  string `json:"title"`
+}
+
+/* @info MaxLength stringifies a value embed with %v and the default struct rendering never drops its braces ("{}" is the floor), so a parseable max below 2 rejects every payload; a pointer embed passes through the nil escape, a value-method Stringer delegates %v and voids the floor, and a pointer-receiver String() stays out of the value's method set so the floor holds */
+func TestBuildSchema_ValueEmbedMaxBelowTheBraceFloorContradictsTheParentSchema(t *testing.T) {
+    for _, testCase := range []struct {
+        requestType   reflect.Type
+        componentName string
+    }{
+        {reflect.TypeOf(embedValueMaxOneRequest{}), "embedValueMaxOneRequest"},
+        {reflect.TypeOf(embedValueMaxNegativeRequest{}), "embedValueMaxNegativeRequest"},
+        {reflect.TypeOf(embedPointerReceiverStringerMaxOneRequest{}), "embedPointerReceiverStringerMaxOneRequest"},
+    } {
+        components := map[string]*Schema{}
+        buildSchema(testCase.requestType, components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+        schema := components[testCase.componentName]
+        if nil == schema.MinProperties || 1 != *schema.MinProperties || nil == schema.MaxProperties || 0 != *schema.MaxProperties {
+            t.Fatalf("expected %s contradicted (minProperties 1, maxProperties 0), got %+v", testCase.componentName, schema)
+        }
+    }
+
+    for _, testCase := range []struct {
+        requestType   reflect.Type
+        componentName string
+    }{
+        {reflect.TypeOf(embedValueMaxTwoRequest{}), "embedValueMaxTwoRequest"},
+        {reflect.TypeOf(embedPointerMaxOneRequest{}), "embedPointerMaxOneRequest"},
+        {reflect.TypeOf(embedStringerMaxOneRequest{}), "embedStringerMaxOneRequest"},
+    } {
+        components := map[string]*Schema{}
+        buildSchema(testCase.requestType, components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+        schema := components[testCase.componentName]
+        if nil != schema.MinProperties || nil != schema.MaxProperties {
+            t.Fatalf("expected %s to stay satisfiable, got %+v", testCase.componentName, schema)
+        }
+    }
+}
+
+type quotedUnsignedRequest struct {
+    Slots uint `json:"slots,string"`
+}
+
+/* @info literalStore consumes a quoted "null" on every ,string kind and leaves the zero value, so the advertised pattern must admit the spelling the decoder accepts — and nothing else beyond the digits */
+func TestBuildSchema_JsonStringOptionAdvertisesTheNullLiteral(t *testing.T) {
+    components := map[string]*Schema{}
+    buildSchema(reflect.TypeOf(quotedUnsignedRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    slots := components["quotedUnsignedRequest"].Properties["slots"]
+    if "string" != slots.Type || "^([0-9]+|null)$" != slots.Pattern {
+        t.Fatalf("expected the quoted unsigned advertisement (the literal \"null\" included, no minus), got %+v", slots)
+    }
+}
+
+type duplicateBoundsRequest struct {
+    Amount int `json:"amount" validate:"greaterThan=5,greaterThan=3,lessThan=10,lessThan=20"`
+}
+
+/* @info the validator enforces every duplicate rule, so the effective window is the intersection; the mirror must keep the tightest bound of each side instead of letting the last rule overwrite it */
+func TestBuildSchema_DuplicateComparisonBoundsKeepTheTightestWindow(t *testing.T) {
+    components := map[string]*Schema{}
+    buildSchema(reflect.TypeOf(duplicateBoundsRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    amount := components["duplicateBoundsRequest"].Properties["amount"]
+    if nil == amount.Minimum || 5 != *amount.Minimum {
+        t.Fatalf("expected the higher greaterThan bound to win, got %+v", amount.Minimum)
+    }
+
+    if nil == amount.Maximum || 10 != *amount.Maximum {
+        t.Fatalf("expected the lower lessThan bound to win, got %+v", amount.Maximum)
+    }
+}
+
+type quotedNullRejectingRequest struct {
+    Level  *int     `json:"level,string" validate:"greaterThan=0"`
+    Flag   *bool    `json:"flag,string" validate:"notBlank"`
+    Floor  int      `json:"floor,string" validate:"greaterThan=0"`
+    Loose  int      `json:"loose,string" validate:"greaterThan=-5"`
+    Silent *int     `json:"silent,string" validate:"max=0"`
+    Ratio  *float64 `json:"ratio,string" validate:"notBlank"`
+}
+
+/* @info the quoted "null" decodes to null on a pointer and to the zero value on a bare scalar, so the advertisement must follow the validator: a null-rejecting rule withdraws the spelling (pattern, enum, or not on the pattern-less float), a window admitting zero keeps it, and a nullable empty value space accepts exactly the null literal */
+func TestBuildSchema_JsonStringOptionWithdrawsTheRejectedNullSpelling(t *testing.T) {
+    components := map[string]*Schema{}
+    buildSchema(reflect.TypeOf(quotedNullRejectingRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    schema := components["quotedNullRejectingRequest"]
+
+    level := schema.Properties["level"]
+    if "^-?[0-9]+$" != level.Pattern || true == level.Nullable {
+        t.Fatalf("expected the null-rejecting quoted pointer integer advertised without the null literal, got %+v", level)
+    }
+
+    flag := schema.Properties["flag"]
+    if nil == flag.Enum || 2 != len(*flag.Enum) {
+        t.Fatalf("expected the null-rejecting quoted pointer boolean advertised as the two literals alone, got %+v", flag)
+    }
+
+    floor := schema.Properties["floor"]
+    if "^-?[0-9]+$" != floor.Pattern {
+        t.Fatalf("expected the zero-excluding window to withdraw the null spelling on the bare scalar, got %+v", floor)
+    }
+
+    loose := schema.Properties["loose"]
+    if "^(-?[0-9]+|null)$" != loose.Pattern {
+        t.Fatalf("expected the zero-admitting window to keep the null spelling on the bare scalar, got %+v", loose)
+    }
+
+    silent := schema.Properties["silent"]
+    if nil == silent.Enum || 1 != len(*silent.Enum) || "null" != (*silent.Enum)[0] || false == silent.Nullable {
+        t.Fatalf("expected the nullable empty value space to accept exactly the null spellings, got %+v", silent)
+    }
+
+    ratio := schema.Properties["ratio"]
+    if nil == ratio.Not || nil == ratio.Not.Enum || "null" != (*ratio.Not.Enum)[0] {
+        t.Fatalf("expected the pattern-less quoted float to exclude the withdrawn null through not, got %+v", ratio)
+    }
+}
+
+type quotedUnsignedEmptyWindowRequest struct {
+    Slots uint `json:"slots,string" validate:"lessThan=-1"`
+    Turns uint `json:"turns,string" validate:"lessThan"`
+}
+
+/* @info an unsigned target under a negative ceiling — or the exclusive zero ceiling of a value-less lessThan — accepts nothing, and the kind-blind window check cannot see it: the quoted form must stay unsatisfiable instead of advertising a digits pattern every payload of which the validator rejects */
+func TestBuildSchema_JsonStringOptionKeepsTheEmptyUnsignedWindowUnsatisfiable(t *testing.T) {
+    components := map[string]*Schema{}
+    buildSchema(reflect.TypeOf(quotedUnsignedEmptyWindowRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    for _, propertyName := range []string{"slots", "turns"} {
+        property := components["quotedUnsignedEmptyWindowRequest"].Properties[propertyName]
+        if "" != property.Pattern || nil == property.MinLength || 1 != *property.MinLength || nil == property.MaxLength || 0 != *property.MaxLength {
+            t.Fatalf("expected the empty unsigned window of %q to stay unsatisfiable in its quoted form, got %+v", propertyName, property)
+        }
+    }
+}

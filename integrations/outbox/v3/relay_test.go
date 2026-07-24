@@ -313,6 +313,25 @@ func TestRelay_UnreachedBatchMateIsNotChargedDeliveryAttempt(t *testing.T) {
     }
 }
 
+/* @info the count follows the broker: a message whose send succeeded but whose MarkSent failed was still published, so the run reports it even as it surfaces the bookkeeping error */
+func TestRelay_CountsMessagePublishedWhenMarkSentFails(t *testing.T) {
+    repository := &markSentFailingRepository{fakeRepository{due: []Pending{
+        {Id: 1, TypeName: "string", Payload: []byte("a"), Attempts: 0, DeliveryAttempts: 0},
+    }}}
+    transport := &fakeTransport{}
+
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: transport, Codec: &stringCodec{}})
+
+    published, runErr := relay.RunOnce(relayTestRuntime())
+    if nil == runErr {
+        t.Fatal("expected the failing MarkSent to surface")
+    }
+
+    if 1 != published || 1 != len(transport.sent) {
+        t.Fatalf("expected the sent message to be counted as published, got %d (sent %d)", published, len(transport.sent))
+    }
+}
+
 /* negative control: a misconfigured MaxDeliveryAttempts at or below MaxAttempts must be raised to safe head-room. Otherwise a row that only failed to send a couple of times (so its claim count sits just above the tiny cap) would be dead-lettered as poison, silently destroying a still-retriable message and defeating the MaxAttempts retry path. */
 func TestRelay_RaisesMisconfiguredMaxDeliveryAttempts(t *testing.T) {
     repository := &fakeRepository{due: []Pending{{Id: 8, TypeName: "string", Payload: []byte("ok"), Attempts: 1, DeliveryAttempts: 2}}}

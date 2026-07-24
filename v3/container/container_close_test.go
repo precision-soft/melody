@@ -7,6 +7,7 @@ import (
     "time"
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
+    "github.com/precision-soft/melody/v3/exception"
 )
 
 type closeOrderRecorder struct {
@@ -623,4 +624,133 @@ func (instance *blockingCloser) Close() error {
     <-instance.release
 
     return nil
+}
+
+type panickingCloseService struct{}
+
+func (instance *panickingCloseService) Close() error {
+    panic("teardown exploded")
+}
+
+/* @info a service whose Close panics must not abort the teardown: the remaining services still close, the panic is recorded as a close failure, and a repeated Close reports the same error instead of a silent success */
+func TestContainer_Close_PanickingServiceCloseIsRecordedAndSiblingsStillClose(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 1)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    err := serviceContainer.Register(
+        "service.z.panics",
+        func(resolver containercontract.Resolver) (*panickingCloseService, error) {
+            return &panickingCloseService{}, nil
+        },
+    )
+    if nil != err {
+        t.Fatalf("unexpected register error: %v", err)
+    }
+
+    err = serviceContainer.Register(
+        "service.a.sibling",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{recorder: recorder}, nil
+        },
+    )
+    if nil != err {
+        t.Fatalf("unexpected register error: %v", err)
+    }
+
+    if _, getErr := serviceContainer.Get("service.z.panics"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if _, getErr := serviceContainer.Get("service.a.sibling"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    closeErr := serviceContainer.Close()
+    if nil == closeErr {
+        t.Fatalf("expected the panicking Close to surface as a close failure")
+    }
+
+    typedError, isTyped := closeErr.(*exception.Error)
+    if false == isTyped {
+        t.Fatalf("expected an exception error, got %T", closeErr)
+    }
+
+    failures, hasFailures := typedError.Context()["failures"].(map[string]string)
+    if false == hasFailures {
+        t.Fatalf("expected a failures map in the close error context, got %+v", typedError.Context())
+    }
+
+    if "service close panicked" != failures["service:service.z.panics"] {
+        t.Fatalf("expected the panic recorded against the panicking service, got %+v", failures)
+    }
+
+    if 1 != len(closeSequence) || "a" != closeSequence[0] {
+        t.Fatalf("expected the sibling service to still close after the panic, got %v", closeSequence)
+    }
+
+    repeatedErr := serviceContainer.Close()
+    if closeErr != repeatedErr {
+        t.Fatalf("expected a repeated Close to report the same teardown error, got %v and %v", closeErr, repeatedErr)
+    }
+}
+
+type panickingErrorMessage struct{}
+
+func (instance panickingErrorMessage) Error() string {
+    panic("boom from Error()")
+}
+
+type panickingErrorMessageService struct{}
+
+func (instance *panickingErrorMessageService) Close() error {
+    return panickingErrorMessage{}
+}
+
+/* @info a user error whose Error() panics must not escape the teardown: the failure is recorded with a deterministic message and a repeated Close reports the same error instead of a silent success */
+func TestContainer_Close_PanickingErrorMessageIsContainedAndRecorded(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    err := serviceContainer.Register(
+        "service.panicking.message",
+        func(resolver containercontract.Resolver) (*panickingErrorMessageService, error) {
+            return &panickingErrorMessageService{}, nil
+        },
+    )
+    if nil != err {
+        t.Fatalf("unexpected register error: %v", err)
+    }
+
+    if _, getErr := serviceContainer.Get("service.panicking.message"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    closeErr := serviceContainer.Close()
+    if nil == closeErr {
+        t.Fatalf("expected the panicking error message to surface as a close failure")
+    }
+
+    typedError, isTyped := closeErr.(*exception.Error)
+    if false == isTyped {
+        t.Fatalf("expected an exception error, got %T", closeErr)
+    }
+
+    failures, hasFailures := typedError.Context()["failures"].(map[string]string)
+    if false == hasFailures {
+        t.Fatalf("expected a failures map in the close error context, got %+v", typedError.Context())
+    }
+
+    if "close error message panicked: boom from Error()" != failures["service:service.panicking.message"] {
+        t.Fatalf("expected the contained panic message, got %+v", failures)
+    }
+
+    repeatedErr := serviceContainer.Close()
+    if closeErr != repeatedErr {
+        t.Fatalf("expected a repeated Close to report the same teardown error, got %v and %v", closeErr, repeatedErr)
+    }
 }

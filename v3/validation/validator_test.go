@@ -789,3 +789,27 @@ func TestValidateStruct_AppliesTheTagDeclaredOnAPromotedEmbed(t *testing.T) {
         t.Fatalf("expected the embed's own tag to run")
     }
 }
+
+type payloadWithPaddedSkipTag struct {
+    Anything string `validate:" - "`
+}
+
+/* @info a padded " - " is the skip marker, not an unknown rule that would reject every value */
+func TestValidator_PaddedDashSkipsValidation(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithPaddedSkipTag{Anything: "x"}))
+    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithPaddedSkipTag{}))
+}
+
+type payloadWithValueLessGreaterThan struct {
+    Count int `json:"count" validate:"greaterThan"`
+}
+
+/* @info a value-less greaterThan runs with the constraint's registered default and enforces > 0 */
+func TestValidator_ValueLessGreaterThanEnforcesThePositiveDefault(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    requireValidationErrors(t, validatorInstance.Validate(payloadWithValueLessGreaterThan{Count: 0}))
+    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithValueLessGreaterThan{Count: 1}))
+}

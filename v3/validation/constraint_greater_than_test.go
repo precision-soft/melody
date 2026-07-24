@@ -169,3 +169,23 @@ func TestGreaterThan_RejectsNaN(t *testing.T) {
         t.Fatalf("expected NaN to be rejected by greaterThan, but it passed validation")
     }
 }
+
+func TestGreaterThan_UintFailsWhenBelowMin(t *testing.T) {
+    constraint := NewGreaterThan(5)
+
+    validationError := constraint.Validate(uint(3), "field")
+
+    if nil == validationError {
+        t.Fatalf("expected error when uint is below min")
+    }
+}
+
+func TestGreaterThan_StringValueNamesTheNumericRequirement(t *testing.T) {
+    constraint := NewGreaterThan(5)
+
+    validationError := constraint.Validate("not a number", "field")
+
+    if nil == validationError || "field: value must be numeric" != validationError.Error() {
+        t.Fatalf("expected the numeric requirement to be named, got: %v", validationError)
+    }
+}

@@ -529,7 +529,7 @@ func TestScheduleMatcher_AcceptedFieldsAreAlwaysGeneratable(t *testing.T) {
                 t.Skipf("the matcher rejects %q, so the generator is free to reject it too", field)
             }
 
-            generatorErr := validateScheduleFields(Entry{Name: "job", Schedule: schedule}, CrontabForbiddenCharacters)
+            generatorErr := validateScheduleFields(Entry{Name: "job", Schedule: schedule}, CrontabForbiddenCharacters, RunnerDialectCrontab)
             if nil != generatorErr {
                 t.Fatalf("the matcher accepts %q but the generator rejects it, so a schedule that runs in-process cannot be generated: %v", field, generatorErr)
             }
@@ -554,7 +554,7 @@ func TestScheduleMatcher_SteppedSingleValueIsRejectedByBothHalves(t *testing.T) 
                 t.Fatal("the matcher accepted a step on a single value")
             }
 
-            generatorErr := validateScheduleFields(Entry{Name: "job", Schedule: testCase.schedule}, CrontabForbiddenCharacters)
+            generatorErr := validateScheduleFields(Entry{Name: "job", Schedule: testCase.schedule}, CrontabForbiddenCharacters, RunnerDialectCrontab)
             if nil == generatorErr {
                 t.Fatal("the generator accepted a step on a single value, so it would emit a schedule the runner refuses to boot on")
             }
@@ -580,7 +580,7 @@ func TestScheduleMatcher_TheSuggestedExplicitRangeIsAccepted(t *testing.T) {
         t.Fatalf("expected the explicit range to be accepted by the matcher, got %v", matcherErr)
     }
 
-    if generatorErr := validateScheduleFields(Entry{Name: "job", Schedule: schedule}, CrontabForbiddenCharacters); nil != generatorErr {
+    if generatorErr := validateScheduleFields(Entry{Name: "job", Schedule: schedule}, CrontabForbiddenCharacters, RunnerDialectCrontab); nil != generatorErr {
         t.Fatalf("expected the explicit range to be accepted by the generator, got %v", generatorErr)
     }
 
@@ -607,7 +607,7 @@ func TestScheduleMatcher_WhitespaceIsRejectedByBothHalves(t *testing.T) {
                 t.Fatalf("the matcher accepted a field carrying whitespace: %q", field)
             }
 
-            if generatorErr := validateScheduleFields(Entry{Name: "job", Schedule: schedule}, CrontabForbiddenCharacters); nil == generatorErr {
+            if generatorErr := validateScheduleFields(Entry{Name: "job", Schedule: schedule}, CrontabForbiddenCharacters, RunnerDialectCrontab); nil == generatorErr {
                 t.Fatalf("the generator accepted a field carrying whitespace, so it would render a crontab crond refuses to parse: %q", field)
             }
         })
@@ -622,5 +622,139 @@ func TestScheduleMatcher_UnknownDialectIsRejected(t *testing.T) {
 
     if false == errors.Is(matcherErr, ErrUnknownRunnerDialect) {
         t.Fatalf("expected ErrUnknownRunnerDialect, got %v", matcherErr)
+    }
+}
+
+/* @info the matcher folds the three-letter names crond reads in the month and day-of-week fields, so a generate-ready schedule with names also runs in-process */
+func TestScheduleMatcher_AcceptsNameTokens(t *testing.T) {
+    matcher, matcherErr := newScheduleMatcher(&Schedule{Month: "JAN", DayOfWeek: "mon-fri"}, RunnerDialectCrontab)
+    if nil != matcherErr {
+        t.Fatalf("expected the named schedule to parse, got %v", matcherErr)
+    }
+
+    if false == matcher.Matches(time.Date(2026, time.January, 5, 10, 0, 0, 0, time.UTC)) {
+        t.Fatalf("expected a January Monday to match")
+    }
+
+    if true == matcher.Matches(time.Date(2026, time.January, 4, 10, 0, 0, 0, time.UTC)) {
+        t.Fatalf("expected a January Sunday not to match")
+    }
+
+    if true == matcher.Matches(time.Date(2026, time.February, 2, 10, 0, 0, 0, time.UTC)) {
+        t.Fatalf("expected a February Monday not to match")
+    }
+}
+
+func TestScheduleMatcher_RejectsANameGluedToDigits(t *testing.T) {
+    if _, matcherErr := newScheduleMatcher(&Schedule{Month: "1jan"}, RunnerDialectCrontab); nil == matcherErr {
+        t.Fatalf("expected a name glued to digits to fail the parse instead of folding")
+    }
+
+    if _, matcherErr := newScheduleMatcher(&Schedule{DayOfWeek: "*/mon"}, RunnerDialectCrontab); nil == matcherErr {
+        t.Fatalf("expected a name in step position to fail the parse instead of folding")
+    }
+}
+
+/* @info the kubernetes template renders a whole-field "?" the robfig scheduler reads as the wildcard with its star bit intact, so the runner's matcher must accept every schedule the generator emits: "?" parses under the kubernetes dialect alone and stays refused by the crontab and zero-value dialects, which crond would reject. */
+func TestScheduleMatcher_KubernetesDialectAcceptsWholeFieldQuestionMark(t *testing.T) {
+    for _, schedule := range []*Schedule{
+        {Minute: "0", Hour: "3", DayOfMonth: "?"},
+        {Minute: "0", Hour: "3", DayOfWeek: "?"},
+        {Minute: "0", Hour: "3", DayOfMonth: "?", DayOfWeek: "?"},
+    } {
+        if _, kubernetesErr := newScheduleMatcher(schedule, RunnerDialectKubernetes); nil != kubernetesErr {
+            t.Fatalf("expected the kubernetes dialect to accept the whole-field question mark in %+v, got %v", schedule, kubernetesErr)
+        }
+
+        if _, crontabErr := newScheduleMatcher(schedule, RunnerDialectCrontab); nil == crontabErr {
+            t.Fatalf("expected the crontab dialect to keep rejecting the question mark in %+v", schedule)
+        }
+
+        if _, defaultErr := newScheduleMatcher(schedule, ""); nil == defaultErr {
+            t.Fatalf("expected the zero-value dialect to keep rejecting the question mark in %+v", schedule)
+        }
+    }
+}
+
+/* @info the generator accepts "?" only whole-field and only in the day fields, so the matcher mirrors that exact set: inside a list, a step, a range, or a non-day field it dies in the numeric parse even under kubernetes. */
+func TestScheduleMatcher_QuestionMarkStaysWholeFieldAndDayOnly(t *testing.T) {
+    for _, schedule := range []*Schedule{
+        {Minute: "?"},
+        {Hour: "?"},
+        {Month: "?"},
+        {DayOfWeek: "?,5"},
+        {DayOfWeek: "?/2"},
+        {DayOfMonth: "?-5"},
+    } {
+        if _, kubernetesErr := newScheduleMatcher(schedule, RunnerDialectKubernetes); nil == kubernetesErr {
+            t.Fatalf("expected %+v to stay rejected under the kubernetes dialect", schedule)
+        }
+    }
+}
+
+/* @info robfig keeps the star bit on "?", so a day pair with one "?" combines with and: the named day restricts, the "?" side is unrestricted. */
+func TestScheduleMatcher_QuestionMarkDayFieldIsUnrestricted(t *testing.T) {
+    assertJuly2026Weekdays(t)
+
+    dayOfMonthFixed, dayOfMonthErr := newScheduleMatcher(&Schedule{Minute: "0", Hour: "3", DayOfMonth: "15", DayOfWeek: "?"}, RunnerDialectKubernetes)
+    if nil != dayOfMonthErr {
+        t.Fatalf("unexpected parse error: %v", dayOfMonthErr)
+    }
+
+    if false == dayOfMonthFixed.Matches(time.Date(2026, time.July, 15, 3, 0, 0, 0, time.UTC)) {
+        t.Fatal("expected the fixed day of month to match with an unrestricted day of week")
+    }
+
+    if true == dayOfMonthFixed.Matches(time.Date(2026, time.July, 20, 3, 0, 0, 0, time.UTC)) {
+        t.Fatal("expected a Monday outside the fixed day of month not to match: the question mark keeps its star bit, so the day fields combine with and")
+    }
+
+    dayOfWeekFixed, dayOfWeekErr := newScheduleMatcher(&Schedule{Minute: "0", Hour: "3", DayOfMonth: "?", DayOfWeek: "1"}, RunnerDialectKubernetes)
+    if nil != dayOfWeekErr {
+        t.Fatalf("unexpected parse error: %v", dayOfWeekErr)
+    }
+
+    if false == dayOfWeekFixed.Matches(time.Date(2026, time.July, 20, 3, 0, 0, 0, time.UTC)) {
+        t.Fatal("expected the Monday to match with an unrestricted day of month")
+    }
+
+    if true == dayOfWeekFixed.Matches(time.Date(2026, time.July, 15, 3, 0, 0, 0, time.UTC)) {
+        t.Fatal("expected a Wednesday not to match when only Monday is named")
+    }
+}
+
+/* @info the kubernetes mirror of TestScheduleMatcher_AcceptedFieldsAreAlwaysGeneratable, in the direction that broke: every day-field shape the generator validates for a CronJob manifest must also parse in the in-process matcher, or NewRunnerCommand panics at boot on a Configuration the cluster runs happily. */
+func TestScheduleMatcher_KubernetesGeneratableDayFieldsAlwaysParse(t *testing.T) {
+    for _, schedule := range []*Schedule{
+        {DayOfMonth: "?"},
+        {DayOfWeek: "?"},
+        {DayOfMonth: "?", DayOfWeek: "?"},
+        {DayOfMonth: "1,15", DayOfWeek: "?"},
+        {DayOfWeek: "mon-fri"},
+        {DayOfWeek: "0-6/2"},
+    } {
+        entry := Entry{Name: "job", Schedule: schedule}
+
+        if generatorErr := validateScheduleFields(entry, k8sScheduleForbiddenCharacters, RunnerDialectKubernetes); nil != generatorErr {
+            t.Fatalf("expected the generator to accept %+v under the kubernetes dialect, got %v", schedule, generatorErr)
+        }
+
+        if _, matcherErr := newScheduleMatcher(schedule, RunnerDialectKubernetes); nil != matcherErr {
+            t.Fatalf("the generator accepts %+v under the kubernetes dialect but the matcher rejects it, so the runner would panic at boot: %v", schedule, matcherErr)
+        }
+    }
+}
+
+/* @info the name fold runs before the dialect-specific parse, so a named schedule the kubernetes generator renders must also parse in the matcher under that dialect, bounds included: sun-sat folds onto 0-6, inside the kubernetes ceiling */
+func TestScheduleMatcher_AcceptsNameTokensUnderTheKubernetesDialect(t *testing.T) {
+    schedule := &Schedule{Minute: "0", Hour: "12", Month: "jan-dec", DayOfWeek: "mon-fri"}
+
+    if _, matcherErr := newScheduleMatcher(schedule, RunnerDialectKubernetes); nil != matcherErr {
+        t.Fatalf("expected the named schedule to parse under the kubernetes dialect, got %v", matcherErr)
+    }
+
+    saturday := &Schedule{Minute: "0", Hour: "12", DayOfWeek: "sun-sat"}
+    if _, matcherErr := newScheduleMatcher(saturday, RunnerDialectKubernetes); nil != matcherErr {
+        t.Fatalf("expected sun-sat to fold onto 0-6 inside the kubernetes ceiling, got %v", matcherErr)
     }
 }

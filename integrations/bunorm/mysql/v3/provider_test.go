@@ -1,6 +1,7 @@
 package mysql
 
 import (
+    "errors"
     "math"
     "net"
     "os"
@@ -103,5 +104,18 @@ func TestComputeBackoffDelayNaNMultiplierFallsBackToDefault(t *testing.T) {
 
     if 5*time.Second != provider.computeBackoffDelay(10) {
         t.Fatalf("expected the NaN fallback to keep the default 5s clamp, got %s", provider.computeBackoffDelay(10))
+    }
+}
+
+/* @info a restarting server answers with 1053 before closing; treating it as transient keeps the cold-start retry loop alive instead of failing the open on the first attempt */
+func TestIsTransientErrorRecognizesServerShutdownInProgress(t *testing.T) {
+    provider := NewProvider()
+
+    if false == provider.isTransientError(errors.New("Error 1053: Server shutdown in progress")) {
+        t.Fatalf("expected a shutdown-in-progress error to be transient")
+    }
+
+    if true == provider.isTransientError(errors.New("Error 1064: You have an error in your SQL syntax")) {
+        t.Fatalf("expected a syntax error to stay non-transient")
     }
 }

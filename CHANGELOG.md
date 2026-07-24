@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- validation: a padded skip marker (`validate:" - "`) is trimmed and skips validation instead of being read as an unknown rule that rejects every value
+- container: a service `Close()` that panics no longer aborts the process when the value is discarded because the container closed mid-resolution, and no longer aborts the teardown loop — the panic is contained, recorded as a close failure, the remaining services still close and a repeated `Close()` reports the same error
+- container: a close failure whose user error carries a panicking `Error()` method is contained as well — the failure text is produced under a recover, so the teardown loop finishes and a repeated `Close()` reports the same error instead of a silent success
+
 ## [v1.18.0] - 2026-07-23 - Secret Parameters, Positional Config Resolution and Dominance-Aware Validation
 
 ### Added

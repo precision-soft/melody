@@ -46,9 +46,15 @@ func resolveReconnectConfig(override *ReconnectConfig) ReconnectConfig {
             resolved.MaxBackoff = override.MaxBackoff
         }
 
-        if 0 < override.BackoffFactor {
+        /* @important a factor below 1 (or NaN) would decay the backoff toward zero and turn an outage into a reconnect storm; keep the default instead. */
+        if 1 <= override.BackoffFactor {
             resolved.BackoffFactor = override.BackoffFactor
         }
+    }
+
+    /* @important an initial backoff above the cap would make the first wait exceed the declared maximum; clamp it onto the cap. */
+    if resolved.MaxBackoff < resolved.InitialBackoff {
+        resolved.InitialBackoff = resolved.MaxBackoff
     }
 
     return resolved

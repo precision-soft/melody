@@ -140,6 +140,11 @@ func TestIsTransientErrorClassification(t *testing.T) {
             inputErr:  errors.New("Error 1045: Access denied for user"),
             transient: false,
         },
+        {
+            name:      "server shutdown in progress is transient",
+            inputErr:  errors.New("Error 1053: Server shutdown in progress"),
+            transient: true,
+        },
     }
 
     for _, testCase := range testCases {

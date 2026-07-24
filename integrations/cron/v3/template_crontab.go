@@ -185,7 +185,7 @@ func buildCrontabLine(entry Entry, includeUserColumn bool) (string, error) {
         }
     }
 
-    if scheduleValidationErr := validateScheduleFields(entry, CrontabForbiddenCharacters); nil != scheduleValidationErr {
+    if scheduleValidationErr := validateScheduleFields(entry, CrontabForbiddenCharacters, RunnerDialectCrontab); nil != scheduleValidationErr {
         return "", scheduleValidationErr
     }
 

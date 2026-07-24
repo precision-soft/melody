@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- the in-process runner's matcher folds the three-letter month and day-of-week names (`jan`-`dec`, `sun`-`sat`) onto their numbers, so a schedule the generator renders with names also runs in-process
+- the crontab and kubernetes generators validate schedule field values against the same numeric bounds the in-process matcher enforces (three-letter month and day-of-week names are folded onto their numbers, day of week bounded at 6 under the kubernetes dialect), so an out-of-range field fails generation instead of rendering a crontab crond refuses wholesale or a CronJob manifest the apiserver rejects
+- the in-process runner's matcher accepts a whole-field `?` in the day fields under the kubernetes dialect, matching it as the unrestricted wildcard the robfig scheduler reads (star bit intact, day fields combine with and) — a `Schedule` the kubernetes generator renders into a valid CronJob no longer panics `NewRunnerCommand` at boot; the crontab and zero-value dialects keep refusing `?`
+
 ## [v3.6.0] - 2026-07-23 - Spelled-Out Forbidden-Character API
 
 ### Changed

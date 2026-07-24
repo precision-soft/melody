@@ -339,3 +339,48 @@ func TestResolveArguments_ReportsADirectiveBindOnAServiceArgument(t *testing.T) 
         t.Fatalf("expected the service-argument directive bind to be reported, got %v", unusedDirectiveBinds)
     }
 }
+
+/* @info both names land verbatim in the generated source, so a non-identifier, a keyword, a name the generated file already spells, or an identifier the spec refuses in that position (the blank identifier, init) fails generation at its cause instead of emitting a file that cannot parse, compile, or be called */
+func TestGenerate_RejectsAFunctionNameTheGeneratedFileCannotCarry(t *testing.T) {
+    for _, functionName := range []string{"melodycontainer", "error", "func", "foo bar", "3services", "a.b", "Register(", "Register//", "_", "init"} {
+        _, _, generateErr := Generate(&GenerateRequest{
+            ProjectDirectory: fixtureProjectDir,
+            PackageName:      "wiring",
+            FunctionName:     functionName,
+            BindSet:          newFixtureBindSet(),
+        })
+        if nil == generateErr {
+            t.Fatalf("expected the function name %q to be rejected", functionName)
+        }
+    }
+}
+
+func TestGenerate_EmptyFunctionNameFallsBackToTheDefault(t *testing.T) {
+    source, _, generateErr := Generate(&GenerateRequest{
+        ProjectDirectory: fixtureProjectDir,
+        PackageName:      "wiring",
+        FunctionName:     "",
+        BindSet:          newFixtureBindSet(),
+    })
+    if nil != generateErr {
+        t.Fatalf("expected the empty function name to fall back to the default, got %v", generateErr)
+    }
+
+    if false == strings.Contains(source, "func RegisterGeneratedServices(") {
+        t.Fatalf("expected the default function name in the generated source")
+    }
+}
+
+func TestGenerate_RejectsAPackageNameTheGeneratedFileCannotCarry(t *testing.T) {
+    for _, packageName := range []string{"foo bar", "3pkg", "a.b", "func", "", "_"} {
+        _, _, generateErr := Generate(&GenerateRequest{
+            ProjectDirectory: fixtureProjectDir,
+            PackageName:      packageName,
+            FunctionName:     "RegisterFixtureServices",
+            BindSet:          newFixtureBindSet(),
+        })
+        if nil == generateErr {
+            t.Fatalf("expected the package name %q to be rejected", packageName)
+        }
+    }
+}

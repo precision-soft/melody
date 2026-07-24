@@ -1,6 +1,7 @@
 package rueidis
 
 import (
+    "math"
     "testing"
     "time"
 )
@@ -38,16 +39,30 @@ func TestResolveReconnectConfig_OverrideWinsPerField(t *testing.T) {
     }
 }
 
-func TestNextServerSentEventBackplaneBackoff_GrowsAndCaps(t *testing.T) {
-    instance := &ServerSentEventBackplane{reconnect: resolveReconnectConfig(&ReconnectConfig{InitialBackoff: time.Second, MaxBackoff: 4 * time.Second, BackoffFactor: 2.0})}
-
-    expected := []time.Duration{2 * time.Second, 4 * time.Second, 4 * time.Second}
-
-    current := instance.reconnect.InitialBackoff
-    for index, want := range expected {
-        current = instance.nextServerSentEventBackplaneBackoff(current)
-        if want != current {
-            t.Fatalf("step %d: expected %s, got %s", index, want, current)
+/* @info a factor below 1 (or NaN) would decay the resubscribe backoff toward zero and turn a redis outage into a reconnect storm, so the resolver keeps the default instead */
+func TestResolveReconnectConfig_SubUnitFactorKeepsTheDefault(t *testing.T) {
+    for _, factor := range []float64{0.5, 0, -1, math.NaN()} {
+        resolved := resolveReconnectConfig(&ReconnectConfig{BackoffFactor: factor})
+        if 2.0 != resolved.BackoffFactor {
+            t.Fatalf("expected factor %v to fall back to the default 2.0, got %v", factor, resolved.BackoffFactor)
         }
+    }
+
+    resolved := resolveReconnectConfig(&ReconnectConfig{BackoffFactor: 1})
+    if 1.0 != resolved.BackoffFactor {
+        t.Fatalf("expected the boundary factor 1 to be accepted, got %v", resolved.BackoffFactor)
+    }
+}
+
+/* @info an initial backoff above the cap would make the first resubscribe wait exceed the declared maximum, so the resolver clamps it onto the cap */
+func TestResolveReconnectConfig_InitialAboveTheCapClampsOntoTheCap(t *testing.T) {
+    resolved := resolveReconnectConfig(&ReconnectConfig{InitialBackoff: 5 * time.Minute, MaxBackoff: 30 * time.Second})
+
+    if 30*time.Second != resolved.InitialBackoff {
+        t.Fatalf("expected the initial backoff to clamp onto the 30s cap, got %s", resolved.InitialBackoff)
+    }
+
+    if 30*time.Second != resolved.MaxBackoff {
+        t.Fatalf("expected the max backoff to stay 30s, got %s", resolved.MaxBackoff)
     }
 }

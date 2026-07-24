@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- the in-process runner's matcher folds the three-letter month and day-of-week names (`jan`-`dec`, `sun`-`sat`) onto their numbers, so a schedule the generator renders with names also runs in-process
+- the crontab generator validates schedule field values against the same numeric bounds the in-process matcher enforces (three-letter month and day-of-week names are folded onto their numbers), so an out-of-range field fails generation instead of rendering a crontab crond refuses wholesale
+
 ## [v1.5.0] - 2026-07-23 - Spelled-Out Forbidden-Character API
 
 ### Changed

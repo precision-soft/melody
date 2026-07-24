@@ -1,6 +1,7 @@
 package wiring
 
 import (
+    "go/token"
     "path"
     "sort"
     "strconv"
@@ -8,13 +9,53 @@ import (
     "unicode"
 )
 
+/* @important the provider bodies spell these identifiers — the closure parameters, the fixed locals, the conversion type names, the scalar element types a pointer argument renders verbatim, the error of every signature, the string and any of every guard's error context, and the nil/true/false literals; an import alias or a generated local claiming one would shadow it inside every closure, so the alias suffix loop and the variable namer both step over them. */
+var emittedBodyIdentifiers = []string{
+    "resolver",
+    "registrar",
+    "configuration",
+    "zeroValue",
+    "bool",
+    "int",
+    "int8",
+    "int16",
+    "int32",
+    "int64",
+    "uint",
+    "uint8",
+    "uint16",
+    "uint32",
+    "uint64",
+    "byte",
+    "rune",
+    "float32",
+    "float64",
+    "string",
+    "any",
+    "error",
+    "nil",
+    "true",
+    "false",
+}
+
 /* importAliasTable assigns every import path a unique alias. Two scanned packages routinely share a base name — a "contract" package under each domain — so the alias written into the generated file cannot simply be the package name. A path is reserved so its alias is fixed before any other path can claim it, but only a path an emitted expression actually asked for (through alias) is written into the import block: an unused import does not compile. */
 func newImportAliasTable() *importAliasTable {
-    return &importAliasTable{
+    table := &importAliasTable{
         aliasByPath: make(map[string]string),
         takenAlias:  make(map[string]bool),
         usedPaths:   make(map[string]bool),
     }
+
+    for _, emittedIdentifier := range emittedBodyIdentifiers {
+        table.takenAlias[emittedIdentifier] = true
+    }
+
+    return table
+}
+
+/* reserveIdentifier withholds a bare identifier — the generated function's own name — from the alias suffix loop without binding it to an import path. */
+func (instance *importAliasTable) reserveIdentifier(identifier string) {
+    instance.takenAlias[identifier] = true
 }
 
 type importAliasTable struct {
@@ -43,8 +84,9 @@ func (instance *importAliasTable) alias(importPath string) string {
 
     candidate := sanitizeAlias(path.Base(importPath))
 
+    /* a directory may be named after a Go keyword (app/interface); the keyword check pushes the alias into the suffixed form the import clause can parse */
     alias := candidate
-    for suffix := 2; true == instance.takenAlias[alias]; suffix = suffix + 1 {
+    for suffix := 2; true == instance.takenAlias[alias] || true == token.IsKeyword(alias); suffix = suffix + 1 {
         alias = candidate + strconv.Itoa(suffix)
     }
 
@@ -117,15 +159,15 @@ func assignVariableNames(
     importAliases *importAliasTable,
 ) {
     forbidden := map[string]bool{
-        "resolver":                   true,
-        "registrar":                  true,
-        "configuration":              true,
-        "zeroValue":                  true,
         containerContractImportAlias: true,
         containerImportAlias:         true,
         configImportAlias:            true,
         exceptionImportAlias:         true,
         mathImportAlias:              true,
+    }
+
+    for _, emittedIdentifier := range emittedBodyIdentifiers {
+        forbidden[emittedIdentifier] = true
     }
 
     forbidden[importAliases.alias(constructor.ImportPath)] = true
@@ -315,21 +357,21 @@ func renderNarrowingGuard(
     body string,
     errorReturnExpression string,
 ) string {
-    integerRange, hasRange := scalarIntegerRange(resolved.argument.Type.Expression)
+    narrowingRange, hasRange := scalarNarrowingRange(resolved.argument.Type.Expression)
     if false == hasRange {
         return ""
     }
 
     valueVariable := resolved.variableName + "Value"
 
-    condition := valueVariable + " < " + integerRange.lowerBound
-    if "" != integerRange.upperBound {
+    condition := valueVariable + " < " + narrowingRange.lowerBound
+    if "" != narrowingRange.upperBound {
         comparedValue := valueVariable
-        if "" != integerRange.upperBoundValueConversion {
-            comparedValue = integerRange.upperBoundValueConversion + "(" + valueVariable + ")"
+        if "" != narrowingRange.upperBoundValueConversion {
+            comparedValue = narrowingRange.upperBoundValueConversion + "(" + valueVariable + ")"
         }
 
-        condition = condition + " || " + integerRange.upperBound + " < " + comparedValue
+        condition = condition + " || " + narrowingRange.upperBound + " < " + comparedValue
     }
 
     if true == strings.Contains(condition, mathImportAlias+".") {
@@ -353,32 +395,34 @@ func renderNarrowingGuard(
     return builder.String()
 }
 
-type scalarIntegerBounds struct {
+type scalarNarrowingBounds struct {
     lowerBound string
     upperBound string
     /* math.MaxUint32 overflows a 32-bit int, so that comparison runs through int64 */
     upperBoundValueConversion string
 }
 
-/* scalarIntegerRange yields the bounds of an integer type narrower than the int the accessor returns. An empty upper bound means the int cannot exceed it, so only the lower one is checked. */
-func scalarIntegerRange(typeExpression string) (*scalarIntegerBounds, bool) {
+/* scalarNarrowingRange yields the bounds of a scalar type narrower than the widest type its accessor returns. An empty upper bound means the accessor value cannot exceed it, so only the lower one is checked. The float32 bounds catch the magnitudes a conversion would silently turn into an infinity. */
+func scalarNarrowingRange(typeExpression string) (*scalarNarrowingBounds, bool) {
     mathQualifier := mathImportAlias + "."
 
     switch typeExpression {
     case "int8":
-        return &scalarIntegerBounds{lowerBound: mathQualifier + "MinInt8", upperBound: mathQualifier + "MaxInt8"}, true
+        return &scalarNarrowingBounds{lowerBound: mathQualifier + "MinInt8", upperBound: mathQualifier + "MaxInt8"}, true
     case "int16":
-        return &scalarIntegerBounds{lowerBound: mathQualifier + "MinInt16", upperBound: mathQualifier + "MaxInt16"}, true
+        return &scalarNarrowingBounds{lowerBound: mathQualifier + "MinInt16", upperBound: mathQualifier + "MaxInt16"}, true
     case "int32", "rune":
-        return &scalarIntegerBounds{lowerBound: mathQualifier + "MinInt32", upperBound: mathQualifier + "MaxInt32"}, true
+        return &scalarNarrowingBounds{lowerBound: mathQualifier + "MinInt32", upperBound: mathQualifier + "MaxInt32"}, true
     case "uint8", "byte":
-        return &scalarIntegerBounds{lowerBound: "0", upperBound: mathQualifier + "MaxUint8"}, true
+        return &scalarNarrowingBounds{lowerBound: "0", upperBound: mathQualifier + "MaxUint8"}, true
     case "uint16":
-        return &scalarIntegerBounds{lowerBound: "0", upperBound: mathQualifier + "MaxUint16"}, true
+        return &scalarNarrowingBounds{lowerBound: "0", upperBound: mathQualifier + "MaxUint16"}, true
     case "uint32":
-        return &scalarIntegerBounds{lowerBound: "0", upperBound: mathQualifier + "MaxUint32", upperBoundValueConversion: "int64"}, true
+        return &scalarNarrowingBounds{lowerBound: "0", upperBound: mathQualifier + "MaxUint32", upperBoundValueConversion: "int64"}, true
     case "uint", "uint64":
-        return &scalarIntegerBounds{lowerBound: "0", upperBound: ""}, true
+        return &scalarNarrowingBounds{lowerBound: "0", upperBound: ""}, true
+    case "float32":
+        return &scalarNarrowingBounds{lowerBound: "-" + mathQualifier + "MaxFloat32", upperBound: mathQualifier + "MaxFloat32"}, true
     default:
         return nil, false
     }

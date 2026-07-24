@@ -291,6 +291,7 @@ func (instance *Provider) isTransientError(inputErr error) bool {
         "broken pipe",
         "connection reset",
         "eof",
+        "server shutdown in progress",
     }
 
     currentErr := inputErr

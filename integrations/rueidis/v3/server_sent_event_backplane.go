@@ -186,8 +186,9 @@ func (instance *ServerSentEventBackplane) logError(message string, err error) {
 }
 
 func (instance *ServerSentEventBackplane) nextServerSentEventBackplaneBackoff(current time.Duration) time.Duration {
+    /* an extreme factor overflows the product and the duration conversion lands negative; both ends collapse onto the cap so the loop never resubscribes with a zero delay */
     next := time.Duration(float64(current) * instance.reconnect.BackoffFactor)
-    if next > instance.reconnect.MaxBackoff {
+    if next <= 0 || next > instance.reconnect.MaxBackoff {
         return instance.reconnect.MaxBackoff
     }
 

@@ -2,12 +2,69 @@ package cron
 
 import (
     "fmt"
+    "strconv"
     "strings"
     "unicode"
 
     "github.com/precision-soft/melody/v2/exception"
     exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
 )
+
+/* crond reads three-letter names in the month and day-of-week fields; the bounds validation folds them onto their numbers so it reads the same schedule crond does. An unknown alphabetic token stays in place and fails the numeric parse. */
+var cronMonthNameValues = map[string]int{
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
+}
+
+var cronDayOfWeekNameValues = map[string]int{
+    "sun": 0,
+    "mon": 1,
+    "tue": 2,
+    "wed": 3,
+    "thu": 4,
+    "fri": 5,
+    "sat": 6,
+}
+
+/* normalizeCronNameTokens folds a name only where the target schedulers read one — as a complete range endpoint. A name glued to digits ("1jan") or in step position (behind the slash) stays put and fails the numeric parse, exactly as crond and the robfig scheduler refuse it. */
+func normalizeCronNameTokens(value string, nameValues map[string]int) string {
+    if nil == nameValues {
+        return value
+    }
+
+    items := strings.Split(value, ",")
+    for itemIndex, item := range items {
+        rangePart := item
+        stepPart := ""
+
+        if slashIndex := strings.Index(item, "/"); -1 != slashIndex {
+            rangePart = item[:slashIndex]
+            stepPart = item[slashIndex:]
+        }
+
+        bounds := strings.SplitN(rangePart, "-", 2)
+        for boundIndex, bound := range bounds {
+            number, known := nameValues[strings.ToLower(bound)]
+            if true == known {
+                bounds[boundIndex] = strconv.Itoa(number)
+            }
+        }
+
+        items[itemIndex] = strings.Join(bounds, "-") + stepPart
+    }
+
+    return strings.Join(items, ",")
+}
 
 type ForbiddenCharacter struct {
     Char   rune
@@ -119,14 +176,17 @@ func validateScheduleFields(entry Entry, forbidden []ForbiddenCharacter) error {
     }
 
     fields := []struct {
-        name  string
-        value string
+        name    string
+        value   string
+        minimum int
+        maximum int
+        names   map[string]int
     }{
-        {"Minute", entry.Schedule.Minute},
-        {"Hour", entry.Schedule.Hour},
-        {"DayOfMonth", entry.Schedule.DayOfMonth},
-        {"Month", entry.Schedule.Month},
-        {"DayOfWeek", entry.Schedule.DayOfWeek},
+        {"Minute", entry.Schedule.Minute, minuteMinimum, minuteMaximum, nil},
+        {"Hour", entry.Schedule.Hour, hourMinimum, hourMaximum, nil},
+        {"DayOfMonth", entry.Schedule.DayOfMonth, dayOfMonthMinimum, dayOfMonthMaximum, nil},
+        {"Month", entry.Schedule.Month, monthMinimum, monthMaximum, cronMonthNameValues},
+        {"DayOfWeek", entry.Schedule.DayOfWeek, dayOfWeekMinimum, dayOfWeekMaximum, cronDayOfWeekNameValues},
     }
 
     for _, field := range fields {
@@ -171,6 +231,19 @@ func validateScheduleFields(entry Entry, forbidden []ForbiddenCharacter) error {
         )
         if nil != forbiddenErr {
             return forbiddenErr
+        }
+
+        /* @important the rendered field must parse under the bounds crond enforces: crond treats one bad field as a parse error and refuses the whole crontab file with it — so an out-of-range value fails generation instead. */
+        if _, parseErr := parseCronField(fieldOrWildcard(normalizeCronNameTokens(field.value, field.names)), field.minimum, field.maximum); nil != parseErr {
+            return exception.NewError(
+                fmt.Sprintf("cron: entry %q has an invalid Schedule.%s (%q)", entry.Name, field.name, field.value),
+                exceptioncontract.Context{
+                    "entry": entry.Name,
+                    "field": field.name,
+                    "value": field.value,
+                },
+                parseErr,
+            )
         }
     }
 

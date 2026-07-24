@@ -52,6 +52,10 @@ func (instance *GenerateCommand) Flags() []clicontract.Flag {
             Name:  "strict",
             Usage: "fail when a declared bind matched no constructor argument or a constructor was skipped",
         },
+        &clicontract.BoolFlag{
+            Name:  "report-vendor",
+            Usage: "name the vendor directories the scan stepped over",
+        },
     }
 }
 
@@ -167,6 +171,13 @@ func (instance *GenerateCommand) writeReport(
             skipped.Line,
             skipped.Reason,
         )
+    }
+
+    /* vendor trees cannot contribute services, so naming them is opt-in: on a large project the list is noise, but a user wondering where a constructor went can ask for it */
+    if true == commandContext.Bool("report-vendor") {
+        for _, vendorDirectory := range report.SkippedVendorDirectories {
+            fmt.Fprintf(commandContext.Writer, "skipped vendor directory: %s\n", vendorDirectory)
+        }
     }
 
     for _, unused := range report.UnusedBinds {

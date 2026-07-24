@@ -2,6 +2,7 @@ package container
 
 import (
     "container/heap"
+    "fmt"
     "reflect"
     "sort"
     "strings"
@@ -315,9 +316,9 @@ func (instance *container) closeInternal() error {
             continue
         }
 
-        closeErr := closeable.Close()
+        closeErr := closeServiceValue(closeable)
         if nil != closeErr {
-            failures[candidate.nodeKey] = closeErr.Error()
+            failures[candidate.nodeKey] = errorText(closeErr)
         }
 
         if true == hasPointer {
@@ -354,6 +355,41 @@ func (instance *container) closeInternal() error {
     }
 
     return resultErr
+}
+
+/* @important contain a panicking Close() as a recorded failure so the teardown loop still closes the remaining services and closeErr is assigned. */
+func closeServiceValue(closeable interface{ Close() error }) (closeErr error) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            return
+        }
+
+        closeErr = exception.NewError(
+            "service close panicked",
+            exceptioncontract.Context{
+                "recoveredType":  fmt.Sprintf("%T", recoveredValue),
+                "recoveredValue": fmt.Sprintf("%v", recoveredValue),
+            },
+            nil,
+        )
+    }()
+
+    return closeable.Close()
+}
+
+/* @important a user error whose Error() panics must not abort the teardown loop, so the recorded failure text is produced under a recover. */
+func errorText(err error) (text string) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            return
+        }
+
+        text = fmt.Sprintf("close error message panicked: %v", recoveredValue)
+    }()
+
+    return err.Error()
 }
 
 type nodeKeyHeap struct {

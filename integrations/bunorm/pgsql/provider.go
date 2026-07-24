@@ -378,6 +378,7 @@ func (instance *Provider) isTransientError(inputErr error) bool {
         "broken pipe",
         "connection reset",
         "eof",
+        "the database system is",
     }
 
     currentErr := inputErr

@@ -30,6 +30,8 @@
 #   - WIRING GENERATE    melody:wiring:generate --strict runs inside the real application (the project
 #                        directory the running configuration reports) and reproduces the committed
 #                        generated/wiring_gen.go byte for byte
+#   - OPENAPI GENERATE   melody:openapi:generate builds a document from the application's real routes and
+#                        request types, carrying their operations and component schemas
 #   - PARAMETER SECRETS  debug:parameters redacts the marked credentials and the dsn assembled from one,
 #                        while an ordinary parameter still prints in clear
 #   - OPTIONAL ENV KEY   the default processor falls back when the key is unset, an .env.local override
@@ -589,6 +591,39 @@ else
 fi
 
 section_end "WIRING GENERATE" "success" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
+# OPENAPI GENERATE — the generator runs in the real application and emits a well-formed document
+# ---------------------------------------------------------------------------------------------------
+
+section_start "OPENAPI GENERATE" "${TAG_VALIDATE}" "e2e"
+
+# the unit tests exercise the schema mirror on synthetic types; only this invocation proves the command
+# builds a document from the application's real routes and request types
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "rm -f /tmp/openapi_check.json
+    go run . melody:openapi:generate --out /tmp/openapi_check.json >/tmp/openapi-generate.log 2>&1
+    echo \"openapi_exit_status=\$?\"
+    echo \"openapi_operation_count=\$(grep -c '\"operationId\"' /tmp/openapi_check.json 2>/dev/null || echo 0)\"
+    echo \"openapi_schema_marker=\$(grep -c '\"schemas\"' /tmp/openapi_check.json 2>/dev/null || echo 0)\"
+    tail -3 /tmp/openapi-generate.log"
+OPENAPI_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+
+OPENAPI_EXIT_STATUS_STRING="$(printf '%s' "${OPENAPI_OUTPUT_STRING}" | grep -o 'openapi_exit_status=[0-9]*' | head -1 | cut -d= -f2 || true)"
+OPENAPI_OPERATION_COUNT_STRING="$(printf '%s' "${OPENAPI_OUTPUT_STRING}" | grep -o 'openapi_operation_count=[0-9]*' | head -1 | cut -d= -f2 || true)"
+
+if [[ "${OPENAPI_EXIT_STATUS_STRING:-1}" -eq 0 ]]; then
+    check_pass "melody:openapi:generate exits zero from inside the application"
+else
+    check_fail "melody:openapi:generate exited ${OPENAPI_EXIT_STATUS_STRING:-<none>} (${OPENAPI_OUTPUT_STRING})"
+fi
+
+if [[ "${OPENAPI_OPERATION_COUNT_STRING:-0}" -gt 0 ]] && printf '%s' "${OPENAPI_OUTPUT_STRING}" | grep -q 'openapi_schema_marker=[1-9]'; then
+    check_pass "the generated document carries the application's operations and component schemas"
+else
+    check_fail "the generated document is missing operations or schemas (${OPENAPI_OUTPUT_STRING})"
+fi
+
+section_end "OPENAPI GENERATE" "success" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
 # PARAMETER SECRETS — the marked credentials and the dsn assembled from one are redacted

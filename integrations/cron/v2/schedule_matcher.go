@@ -90,8 +90,9 @@ func newScheduleMatcher(schedule *Schedule, dialect RunnerDialect) (*scheduleMat
         minuteExpression = fieldOrWildcard(schedule.Minute)
         hourExpression = fieldOrWildcard(schedule.Hour)
         dayOfMonthExpression = fieldOrWildcard(schedule.DayOfMonth)
-        monthExpression = fieldOrWildcard(schedule.Month)
-        dayOfWeekExpression = fieldOrWildcard(schedule.DayOfWeek)
+        /* the target schedulers read three-letter names in these two fields, so the matcher folds them onto their numbers and runs the same schedule the generated manifests do */
+        monthExpression = normalizeCronNameTokens(fieldOrWildcard(schedule.Month), cronMonthNameValues)
+        dayOfWeekExpression = normalizeCronNameTokens(fieldOrWildcard(schedule.DayOfWeek), cronDayOfWeekNameValues)
     }
 
     minute, minuteErr := parseCronField(minuteExpression, minuteMinimum, minuteMaximum)

@@ -259,6 +259,11 @@ func closeValueAfterContainerClose(value any) {
         return
     }
 
+    /* @important the caller runs this with the container mutex unlocked and unwinds through a deferred unlock; a panicking Close() would otherwise abort the process on an unlocked mutex. */
+    defer func() {
+        _ = recover()
+    }()
+
     _ = closeable.Close()
 }
 

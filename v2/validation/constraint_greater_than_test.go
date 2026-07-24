@@ -5,208 +5,187 @@ import (
     "testing"
 )
 
-func TestGreaterThan_IntAboveMin_ReturnsNil(t *testing.T) {
+func TestGreaterThan_IntegerPassesWhenAboveMin(t *testing.T) {
     constraint := NewGreaterThan(5)
 
-    validationError := constraint.Validate(10, "age")
+    validationError := constraint.Validate(10, "field")
+
     if nil != validationError {
-        t.Fatalf("expected nil error for int above min")
+        t.Fatalf("expected no error, got: %s", validationError.Error())
     }
 }
 
-func TestGreaterThan_IntEqualToMin_ReturnsError(t *testing.T) {
+func TestGreaterThan_IntegerFailsWhenEqualToMin(t *testing.T) {
     constraint := NewGreaterThan(5)
 
-    validationError := constraint.Validate(5, "age")
+    validationError := constraint.Validate(5, "field")
+
     if nil == validationError {
-        t.Fatalf("expected error when int equals min")
+        t.Fatalf("expected error when value equals min")
     }
 
     if ConstraintGreaterThanErrorSmallerThan != validationError.Code() {
-        t.Fatalf("unexpected error code: %s", validationError.Code())
+        t.Fatalf("expected code %s, got: %s", ConstraintGreaterThanErrorSmallerThan, validationError.Code())
     }
 }
 
-func TestGreaterThan_IntBelowMin_ReturnsError(t *testing.T) {
+func TestGreaterThan_IntegerFailsWhenBelowMin(t *testing.T) {
     constraint := NewGreaterThan(5)
 
-    validationError := constraint.Validate(3, "age")
+    validationError := constraint.Validate(3, "field")
+
     if nil == validationError {
-        t.Fatalf("expected error when int is below min")
+        t.Fatalf("expected error when value is below min")
     }
 }
 
-func TestGreaterThan_NilValue_ReturnsNil(t *testing.T) {
+func TestGreaterThan_Float64PassesWhenAboveMin(t *testing.T) {
+    constraint := NewGreaterThan(5)
+
+    validationError := constraint.Validate(5.5, "field")
+
+    if nil != validationError {
+        t.Fatalf("expected no error for float above min, got: %s", validationError.Error())
+    }
+}
+
+func TestGreaterThan_Float64FailsWhenEqualToMin(t *testing.T) {
+    constraint := NewGreaterThan(5)
+
+    validationError := constraint.Validate(5.0, "field")
+
+    if nil == validationError {
+        t.Fatalf("expected error when float equals min")
+    }
+}
+
+func TestGreaterThan_Float64FailsWhenBelowMin(t *testing.T) {
+    constraint := NewGreaterThan(5)
+
+    validationError := constraint.Validate(4.9, "field")
+
+    if nil == validationError {
+        t.Fatalf("expected error when float is below min")
+    }
+}
+
+func TestGreaterThan_Float32PassesWhenAboveMin(t *testing.T) {
     constraint := NewGreaterThan(0)
 
-    validationError := constraint.Validate(nil, "age")
+    validationError := constraint.Validate(float32(0.5), "field")
+
     if nil != validationError {
-        t.Fatalf("expected nil error for nil value")
+        t.Fatalf("expected no error for float32 above min, got: %s", validationError.Error())
     }
 }
 
-func TestGreaterThan_Float64AboveMin_ReturnsNil(t *testing.T) {
+func TestGreaterThan_UintPassesWhenAboveMin(t *testing.T) {
     constraint := NewGreaterThan(5)
 
-    validationError := constraint.Validate(5.5, "price")
+    validationError := constraint.Validate(uint(10), "field")
+
     if nil != validationError {
-        t.Fatalf("expected nil error for float64 above min")
+        t.Fatalf("expected no error for uint above min, got: %s", validationError.Error())
     }
 }
 
-func TestGreaterThan_Float64EqualToMin_ReturnsError(t *testing.T) {
+func TestGreaterThan_UintFailsWhenEqualToMin(t *testing.T) {
     constraint := NewGreaterThan(5)
 
-    validationError := constraint.Validate(5.0, "price")
-    if nil == validationError {
-        t.Fatalf("expected error when float64 equals min")
-    }
-}
+    validationError := constraint.Validate(uint(5), "field")
 
-func TestGreaterThan_Float64BelowMin_ReturnsError(t *testing.T) {
-    constraint := NewGreaterThan(5)
-
-    validationError := constraint.Validate(4.9, "price")
-    if nil == validationError {
-        t.Fatalf("expected error when float64 is below min")
-    }
-}
-
-func TestGreaterThan_Float32AboveMin_ReturnsNil(t *testing.T) {
-    constraint := NewGreaterThan(0)
-
-    validationError := constraint.Validate(float32(1.5), "amount")
-    if nil != validationError {
-        t.Fatalf("expected nil error for float32 above min")
-    }
-}
-
-func TestGreaterThan_UintAboveMin_ReturnsNil(t *testing.T) {
-    constraint := NewGreaterThan(5)
-
-    validationError := constraint.Validate(uint(10), "count")
-    if nil != validationError {
-        t.Fatalf("expected nil error for uint above min")
-    }
-}
-
-func TestGreaterThan_UintEqualToMin_ReturnsError(t *testing.T) {
-    constraint := NewGreaterThan(5)
-
-    validationError := constraint.Validate(uint(5), "count")
     if nil == validationError {
         t.Fatalf("expected error when uint equals min")
     }
 }
 
-func TestGreaterThan_UintBelowMin_ReturnsError(t *testing.T) {
-    constraint := NewGreaterThan(5)
-
-    validationError := constraint.Validate(uint(3), "count")
-    if nil == validationError {
-        t.Fatalf("expected error when uint is below min")
-    }
-}
-
-func TestGreaterThan_UintWithNegativeMin_AlwaysPasses(t *testing.T) {
+func TestGreaterThan_UintAlwaysPassesWhenMinIsNegative(t *testing.T) {
     constraint := NewGreaterThan(-1)
 
-    validationError := constraint.Validate(uint(0), "count")
+    validationError := constraint.Validate(uint(0), "field")
+
     if nil != validationError {
-        t.Fatalf("expected nil error for uint with negative min")
+        t.Fatalf("expected no error for uint when min is negative, got: %s", validationError.Error())
     }
 }
 
-func TestGreaterThan_IntPointer_UnwrapsPointer(t *testing.T) {
+func TestGreaterThan_NilValueReturnsNil(t *testing.T) {
     constraint := NewGreaterThan(5)
 
-    value := 10
-    validationError := constraint.Validate(&value, "age")
+    validationError := constraint.Validate(nil, "field")
+
     if nil != validationError {
-        t.Fatalf("expected nil error for pointer to int above min")
+        t.Fatalf("expected nil for nil value")
     }
 }
 
-func TestGreaterThan_NilPointer_ReturnsError(t *testing.T) {
+func TestGreaterThan_StringValueReturnsError(t *testing.T) {
     constraint := NewGreaterThan(5)
 
-    var value *int
-    validationError := constraint.Validate(value, "age")
+    validationError := constraint.Validate("not a number", "field")
+
+    if nil == validationError {
+        t.Fatalf("expected error for non-numeric value")
+    }
+}
+
+func TestGreaterThan_NilPointerReturnsError(t *testing.T) {
+    constraint := NewGreaterThan(5)
+
+    var nilPointer *int
+
+    validationError := constraint.Validate(nilPointer, "field")
+
     if nil == validationError {
         t.Fatalf("expected error for nil pointer")
     }
 }
 
-func TestGreaterThan_StringValue_ReturnsTypeError(t *testing.T) {
-    constraint := NewGreaterThan(0)
+func TestGreaterThan_PointerToIntPassesWhenAboveMin(t *testing.T) {
+    constraint := NewGreaterThan(5)
 
-    validationError := constraint.Validate("hello", "name")
-    if nil == validationError {
-        t.Fatalf("expected error for unsupported string type")
-    }
+    value := 10
+    validationError := constraint.Validate(&value, "field")
 
-    if "value must be numeric" != validationError.Message() {
-        t.Fatalf("unexpected message: %s", validationError.Message())
+    if nil != validationError {
+        t.Fatalf("expected no error for pointer to int above min, got: %s", validationError.Error())
     }
 }
 
-func TestGreaterThan_MinAccessor_ReturnsConfiguredMin(t *testing.T) {
+func TestGreaterThan_MinGetter(t *testing.T) {
     constraint := NewGreaterThan(42)
 
     if 42 != constraint.Min() {
-        t.Fatalf("expected min to be 42, got %d", constraint.Min())
+        t.Fatalf("expected Min() to return 42, got: %d", constraint.Min())
     }
-}
-
-type greaterThanPayload struct {
-    Age   int     `json:"age" validate:"greaterThan=18"`
-    Price float64 `json:"price" validate:"greaterThan=0"`
-}
-
-func TestValidator_GreaterThan_AcceptsValidIntField(t *testing.T) {
-    validatorInstance := NewValidator()
-
-    payload := greaterThanPayload{
-        Age:   25,
-        Price: 9.99,
-    }
-
-    err := validatorInstance.Validate(payload)
-    requireNoValidationErrors(t, err)
-}
-
-func TestValidator_GreaterThan_RejectsInvalidIntField(t *testing.T) {
-    validatorInstance := NewValidator()
-
-    payload := greaterThanPayload{
-        Age:   10,
-        Price: 9.99,
-    }
-
-    err := validatorInstance.Validate(payload)
-    _ = requireValidationErrors(t, err)
-}
-
-func TestValidator_GreaterThan_RejectsZeroFloat(t *testing.T) {
-    validatorInstance := NewValidator()
-
-    payload := greaterThanPayload{
-        Age:   25,
-        Price: 0.0,
-    }
-
-    err := validatorInstance.Validate(payload)
-    _ = requireValidationErrors(t, err)
 }
 
 func TestGreaterThan_RejectsNaN(t *testing.T) {
-    constraint := NewGreaterThan(0)
+    constraint := NewGreaterThan(10)
 
-    if nil == constraint.Validate(math.NaN(), "score") {
-        t.Fatalf("greaterThan must reject a NaN float (NaN compares false against every bound), got no error")
+    validationError := constraint.Validate(math.NaN(), "field")
+
+    if nil == validationError {
+        t.Fatalf("expected NaN to be rejected by greaterThan, but it passed validation")
     }
+}
 
-    if nil != constraint.Validate(5.0, "score") {
-        t.Fatalf("greaterThan(0) must still accept a finite value above the bound")
+func TestGreaterThan_UintFailsWhenBelowMin(t *testing.T) {
+    constraint := NewGreaterThan(5)
+
+    validationError := constraint.Validate(uint(3), "field")
+
+    if nil == validationError {
+        t.Fatalf("expected error when uint is below min")
+    }
+}
+
+func TestGreaterThan_StringValueNamesTheNumericRequirement(t *testing.T) {
+    constraint := NewGreaterThan(5)
+
+    validationError := constraint.Validate("not a number", "field")
+
+    if nil == validationError || "field: value must be numeric" != validationError.Error() {
+        t.Fatalf("expected the numeric requirement to be named, got: %v", validationError)
     }
 }

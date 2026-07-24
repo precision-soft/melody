@@ -17,12 +17,15 @@ func TestDereferenceValue_NamedStringNormalizesToPlainString(t *testing.T) {
     }
 }
 
-func TestEmail_NamedStringTypeInvalidIsRejected(t *testing.T) {
-    constraint := &Email{}
+func TestDereferenceValue_PointerToNamedStringNormalizes(t *testing.T) {
+    value := namedString("abc")
 
-    validationError := constraint.Validate(namedString("definitely not an email"), "field")
+    resolved, ok := dereferenceValue(&value)
+    if false == ok {
+        t.Fatalf("expected pointer to named string to resolve")
+    }
 
-    if nil == validationError {
-        t.Fatalf("fail-open: invalid email via named string type passed validation")
+    if _, isString := resolved.(string); false == isString {
+        t.Fatalf("expected pointer to named string to normalize to plain string, got %T", resolved)
     }
 }

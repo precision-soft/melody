@@ -91,3 +91,47 @@ func TestResolve_DuringCloseClosesTheCreatedValueInsteadOfLeakingIt(t *testing.T
         t.Fatalf("expected the value created while Close ran to be closed instead of leaked")
     }
 }
+
+type panickingCloser struct{}
+
+func (instance *panickingCloser) Close() error {
+    panic("close exploded")
+}
+
+/* @info the discarded value's Close runs while the container mutex is unlocked and the caller unwinds through a deferred unlock, so a panic escaping it would abort the whole process on an unlocked mutex instead of failing this one resolution */
+func TestResolve_DuringCloseContainsAPanickingCloseOfTheDiscardedValue(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    providerStarted := make(chan struct{})
+    providerRelease := make(chan struct{})
+
+    MustRegister[*panickingCloser](
+        serviceContainer,
+        "panicking.close.race",
+        func(resolver containercontract.Resolver) (*panickingCloser, error) {
+            close(providerStarted)
+            <-providerRelease
+
+            return &panickingCloser{}, nil
+        },
+    )
+
+    resultChannel := make(chan error, 1)
+    go func() {
+        _, getErr := serviceContainer.Get("panicking.close.race")
+        resultChannel <- getErr
+    }()
+
+    <-providerStarted
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    close(providerRelease)
+
+    getErr := <-resultChannel
+    if nil == getErr {
+        t.Fatalf("expected the resolution that finished after Close to fail")
+    }
+}

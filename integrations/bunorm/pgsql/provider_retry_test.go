@@ -162,6 +162,16 @@ func TestIsTransientErrorClassification(t *testing.T) {
             inputErr:  errors.New("FATAL: password authentication failed for user"),
             transient: false,
         },
+        {
+            name:      "database starting up is transient",
+            inputErr:  errors.New("FATAL: the database system is starting up (SQLSTATE=57P03)"),
+            transient: true,
+        },
+        {
+            name:      "database in recovery is transient",
+            inputErr:  errors.New("FATAL: the database system is in recovery mode (SQLSTATE=57P03)"),
+            transient: true,
+        },
     }
 
     for _, testCase := range testCases {

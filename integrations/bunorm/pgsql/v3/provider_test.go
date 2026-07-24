@@ -1,6 +1,7 @@
 package pgsql
 
 import (
+    "errors"
     "math"
     "os"
     "testing"
@@ -91,5 +92,26 @@ func TestComputeBackoffDelayNaNMultiplierFallsBackToDefault(t *testing.T) {
 
     if 5*time.Second != provider.computeBackoffDelay(10) {
         t.Fatalf("expected the NaN fallback to keep the default 5s clamp, got %s", provider.computeBackoffDelay(10))
+    }
+}
+
+/* @info a server replaying WAL accepts TCP but answers with the cold-start FATALs; treating them as transient keeps the retry loop alive instead of failing the open on the first attempt */
+func TestIsTransientErrorRecognizesColdStartFatals(t *testing.T) {
+    provider := NewProvider()
+
+    coldStartErrors := []string{
+        "FATAL: the database system is starting up (SQLSTATE=57P03)",
+        "FATAL: the database system is in recovery mode (SQLSTATE=57P03)",
+        "FATAL: the database system is shutting down (SQLSTATE=57P03)",
+    }
+
+    for _, message := range coldStartErrors {
+        if false == provider.isTransientError(errors.New(message)) {
+            t.Fatalf("expected %q to be transient", message)
+        }
+    }
+
+    if true == provider.isTransientError(errors.New("FATAL: password authentication failed for user")) {
+        t.Fatalf("expected an authentication failure to stay non-transient")
     }
 }

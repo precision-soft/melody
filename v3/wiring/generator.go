@@ -1,6 +1,7 @@
 package wiring
 
 import (
+    "go/token"
     "sort"
 
     "github.com/precision-soft/melody/v3/exception"
@@ -34,8 +35,10 @@ type GenerateRequest struct {
 type GenerateReport struct {
     ConstructorCount int
     Skipped          []*SkippedConstructor
-    UnusedBinds      []string
-    GlobalBindReach  map[string][]string
+    /* SkippedVendorDirectories names the vendor trees the scan stepped over; strict does not fail on them — they cannot contribute services — but the command can name them on request. */
+    SkippedVendorDirectories []string
+    UnusedBinds              []string
+    GlobalBindReach          map[string][]string
 }
 
 /* Generate scans every declared package and renders the registration source. It fails on the first constructor whose scalar argument no bind covers: an unfilled scalar has no safe default, and letting it through would move the failure to a runtime far from its cause. */
@@ -50,15 +53,55 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
     }
 
     report := &GenerateReport{
-        Skipped:         make([]*SkippedConstructor, 0),
-        UnusedBinds:     make([]string, 0),
-        GlobalBindReach: make(map[string][]string),
+        Skipped:                  make([]*SkippedConstructor, 0),
+        SkippedVendorDirectories: make([]string, 0),
+        UnusedBinds:              make([]string, 0),
+        GlobalBindReach:          make(map[string][]string),
     }
 
     usedBinds := make(map[string]bool)
 
     /* every fixed alias is reserved before any scanned type can claim its name: a scanned argument living in one of these packages then renders through the same alias the emitted bodies use, instead of racing them for it */
     importAliases := newImportAliasTable()
+
+    /* both names land verbatim in the generated source, so anything the file cannot carry fails here, at its cause: a non-identifier (keywords included) does not parse — or splices arbitrary tokens into the file — while the blank identifier and init are identifiers the spec still refuses in these positions (an unusable package name, an unreferenceable function, an init that must not have a signature) */
+    if false == token.IsIdentifier(functionName) || "_" == functionName || "init" == functionName {
+        return "", nil, exception.NewError(
+            "the generated function name cannot be declared and referenced in the generated file",
+            map[string]any{
+                "function": functionName,
+            },
+            nil,
+        )
+    }
+
+    if false == token.IsIdentifier(request.PackageName) || "_" == request.PackageName {
+        return "", nil, exception.NewError(
+            "the generated package name is not a usable Go package name",
+            map[string]any{
+                "package": request.PackageName,
+            },
+            nil,
+        )
+    }
+
+    /* the generated function shares its file with the fixed import aliases and the identifiers the provider bodies spell; a name claiming one of them cannot compile, so it fails here, at its cause */
+    if true == importAliases.takenAlias[functionName] ||
+        containerContractImportAlias == functionName ||
+        containerImportAlias == functionName ||
+        configImportAlias == functionName ||
+        exceptionImportAlias == functionName ||
+        mathImportAlias == functionName {
+        return "", nil, exception.NewError(
+            "the generated function name collides with an identifier the generated file spells",
+            map[string]any{
+                "function": functionName,
+            },
+            nil,
+        )
+    }
+
+    importAliases.reserveIdentifier(functionName)
     importAliases.reserve(containerContractImportPath, containerContractImportAlias)
     importAliases.reserve(containerImportPath, containerImportAlias)
     importAliases.reserve(configImportPath, configImportAlias)
@@ -75,6 +118,7 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
         }
 
         report.Skipped = append(report.Skipped, scanResult.Skipped...)
+        report.SkippedVendorDirectories = append(report.SkippedVendorDirectories, scanResult.SkippedVendorDirectories...)
 
         for _, constructor := range scanResult.Constructors {
             resolvedArguments, constructorUnusedDirectiveBinds, resolveErr := resolveArguments(

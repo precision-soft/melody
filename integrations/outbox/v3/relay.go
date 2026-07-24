@@ -147,13 +147,14 @@ func (instance *Relay) RunOnce(runtimeInstance runtimecontract.Runtime) (int, er
             lastRefresh = time.Now()
         }
 
+        /* the count follows the broker, not the bookkeeping: a message whose send succeeded but whose MarkSent failed was still published, so it is counted before the error is surfaced */
         delivered, deliverErr := instance.deliver(runtimeInstance, pending)
-        if nil != deliverErr {
-            return published, deliverErr
-        }
-
         if true == delivered {
             published++
+        }
+
+        if nil != deliverErr {
+            return published, deliverErr
         }
     }
 

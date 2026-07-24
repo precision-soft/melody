@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- a `ReconnectConfig.BackoffFactor` below 1 (or NaN) falls back to the default instead of decaying the server-sent-event backplane's resubscribe backoff toward zero and busy-spinning through a redis outage
+- a `ReconnectConfig.InitialBackoff` above `MaxBackoff` (a units typo, such as minutes against a seconds cap) is clamped onto the cap, so the first resubscribe wait can no longer exceed the declared maximum
+- an extreme `BackoffFactor` (huge or `+Inf`, which passes the at-least-1 guard) overflows the backoff product into a negative duration; the growth step collapses a non-positive result onto `MaxBackoff` instead of resubscribing with a zero delay
+
 ## [v3.5.0] - 2026-07-23 - Spelled-Out Connection Parameters
 
 ### Changed

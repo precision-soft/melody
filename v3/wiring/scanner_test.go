@@ -3,6 +3,8 @@ package wiring
 import (
     "go/parser"
     "go/token"
+    "os"
+    "path/filepath"
     "strings"
     "testing"
 )
@@ -287,5 +289,68 @@ import (
     /* an explicit alias always wins over a guessed fallback of another import */
     if "github.com/other/custom-alias" != fileImports["redis"] {
         t.Fatalf("expected the explicit alias to win, got %q", fileImports["redis"])
+    }
+}
+
+/* @info the go tool skips a vendor tree in its package walks and refuses to import a main package, so neither may contribute constructors to the generated wiring */
+func TestScan_SkipsVendorDirectoriesAndMainPackages(t *testing.T) {
+    projectDirectory := t.TempDir()
+
+    writeScanFile := func(relativePath string, content string) {
+        t.Helper()
+
+        fullPath := filepath.Join(projectDirectory, relativePath)
+        if mkdirErr := os.MkdirAll(filepath.Dir(fullPath), 0o755); nil != mkdirErr {
+            t.Fatalf("mkdir: %v", mkdirErr)
+        }
+
+        if writeErr := os.WriteFile(fullPath, []byte(content), 0o644); nil != writeErr {
+            t.Fatalf("write: %v", writeErr)
+        }
+    }
+
+    writeScanFile("app/service.go", "package app\n\ntype Thing struct{}\n\nfunc NewThing() *Thing {\n    return &Thing{}\n}\n")
+    writeScanFile("app/vendor/dep/dep.go", "package dep\n\ntype Vendored struct{}\n\nfunc NewVendored() *Vendored {\n    return &Vendored{}\n}\n")
+    writeScanFile("app/cmd/main.go", "package main\n\ntype Program struct{}\n\nfunc NewProgram() *Program {\n    return &Program{}\n}\n\n//melody:ignore\nfunc NewAcknowledged() *Program {\n    return &Program{}\n}\n\nfunc main() {}\n")
+
+    bindSet := NewBindSet()
+    binding := bindSet.Package("example.com/proj/app", "app")
+
+    scanResult, scanErr := Scan(projectDirectory, binding)
+    if nil != scanErr {
+        t.Fatalf("scan: %v", scanErr)
+    }
+
+    if nil == constructorByName(scanResult, "NewThing") {
+        t.Fatalf("expected the regular constructor to be found")
+    }
+
+    if nil != constructorByName(scanResult, "NewVendored") {
+        t.Fatalf("expected the vendored constructor to be skipped")
+    }
+
+    if nil != constructorByName(scanResult, "NewProgram") {
+        t.Fatalf("expected the main-package constructor to be skipped")
+    }
+
+    /* the main-package loss is visible: strict fails on the reported entry unless //melody:ignore acknowledges it */
+    var mainSkip *SkippedConstructor
+    for _, skipped := range scanResult.Skipped {
+        if "NewAcknowledged" == skipped.Name {
+            t.Fatalf("expected the ignore directive to acknowledge the main-package constructor, got %+v", skipped)
+        }
+
+        if "NewProgram" == skipped.Name {
+            mainSkip = skipped
+        }
+    }
+
+    if nil == mainSkip || false == strings.Contains(mainSkip.Reason, "main package") {
+        t.Fatalf("expected the main-package constructor reported as skipped with its reason, got %+v", scanResult.Skipped)
+    }
+
+    /* the vendor tree is recorded separately: it cannot contribute services, so strict does not fail on it, but the report can name it on request */
+    if 1 != len(scanResult.SkippedVendorDirectories) || false == strings.HasSuffix(scanResult.SkippedVendorDirectories[0], filepath.Join("app", "vendor")) {
+        t.Fatalf("expected the vendor directory recorded, got %v", scanResult.SkippedVendorDirectories)
     }
 }

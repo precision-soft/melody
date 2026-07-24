@@ -314,7 +314,8 @@ func (instance *Validator) applyFieldRules(field reflect.StructField, value refl
     }
 
     validateTag := field.Tag.Get("validate")
-    if "" == validateTag || "-" == validateTag {
+    /* the trimmed comparison keeps the skip marker in lockstep with the openapi mirror's splitRules, which trims the tag before reading it — a padded " - " must not turn into an unknown rule that rejects every value while the spec advertises no validation */
+    if trimmedTag := strings.TrimSpace(validateTag); "" == trimmedTag || "-" == trimmedTag {
         return errors
     }
 

@@ -2,12 +2,69 @@ package cron
 
 import (
     "fmt"
+    "strconv"
     "strings"
     "unicode"
 
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
 )
+
+/* crond and the robfig scheduler read three-letter names in the month and day-of-week fields; the bounds validation folds them onto their numbers so it reads the same schedule the target schedulers do. An unknown alphabetic token stays in place and fails the numeric parse. */
+var cronMonthNameValues = map[string]int{
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
+}
+
+var cronDayOfWeekNameValues = map[string]int{
+    "sun": 0,
+    "mon": 1,
+    "tue": 2,
+    "wed": 3,
+    "thu": 4,
+    "fri": 5,
+    "sat": 6,
+}
+
+/* normalizeCronNameTokens folds a name only where the target schedulers read one — as a complete range endpoint. A name glued to digits ("1jan") or in step position (behind the slash) stays put and fails the numeric parse, exactly as crond and the robfig scheduler refuse it. */
+func normalizeCronNameTokens(value string, nameValues map[string]int) string {
+    if nil == nameValues {
+        return value
+    }
+
+    items := strings.Split(value, ",")
+    for itemIndex, item := range items {
+        rangePart := item
+        stepPart := ""
+
+        if slashIndex := strings.Index(item, "/"); -1 != slashIndex {
+            rangePart = item[:slashIndex]
+            stepPart = item[slashIndex:]
+        }
+
+        bounds := strings.SplitN(rangePart, "-", 2)
+        for boundIndex, bound := range bounds {
+            number, known := nameValues[strings.ToLower(bound)]
+            if true == known {
+                bounds[boundIndex] = strconv.Itoa(number)
+            }
+        }
+
+        items[itemIndex] = strings.Join(bounds, "-") + stepPart
+    }
+
+    return strings.Join(items, ",")
+}
 
 type ForbiddenCharacter struct {
     Char   rune
@@ -113,20 +170,33 @@ func exampleSteppedRangeOf(item string, fieldName string) string {
     return item[:slashIndex] + "-" + maximum + item[slashIndex:]
 }
 
-func validateScheduleFields(entry Entry, forbidden []ForbiddenCharacter) error {
+func validateScheduleFields(entry Entry, forbidden []ForbiddenCharacter, dialect RunnerDialect) error {
     if nil == entry.Schedule {
         return nil
     }
 
+    /* the robfig scheduler behind the k8s template bounds day of week at 6; the crontab dialect keeps 7 as the Sunday alias. */
+    dayOfWeekFieldMaximum := dayOfWeekMaximum
+    if RunnerDialectKubernetes == dialect {
+        dayOfWeekFieldMaximum = dayOfWeekMaximumKubernetes
+    }
+
+    /* the robfig scheduler reads a whole-field "?" as the wildcard (the Quartz day-field convention), so the kubernetes dialect must keep rendering it; crond has no "?" and the crontab dialect rejects it through the numeric parse. */
+    questionMarkIsWildcard := RunnerDialectKubernetes == dialect
+
     fields := []struct {
-        name  string
-        value string
+        name               string
+        value              string
+        minimum            int
+        maximum            int
+        names              map[string]int
+        allowsQuestionMark bool
     }{
-        {"Minute", entry.Schedule.Minute},
-        {"Hour", entry.Schedule.Hour},
-        {"DayOfMonth", entry.Schedule.DayOfMonth},
-        {"Month", entry.Schedule.Month},
-        {"DayOfWeek", entry.Schedule.DayOfWeek},
+        {"Minute", entry.Schedule.Minute, minuteMinimum, minuteMaximum, nil, false},
+        {"Hour", entry.Schedule.Hour, hourMinimum, hourMaximum, nil, false},
+        {"DayOfMonth", entry.Schedule.DayOfMonth, dayOfMonthMinimum, dayOfMonthMaximum, nil, questionMarkIsWildcard},
+        {"Month", entry.Schedule.Month, monthMinimum, monthMaximum, cronMonthNameValues, false},
+        {"DayOfWeek", entry.Schedule.DayOfWeek, dayOfWeekMinimum, dayOfWeekFieldMaximum, cronDayOfWeekNameValues, questionMarkIsWildcard},
     }
 
     for _, field := range fields {
@@ -171,6 +241,23 @@ func validateScheduleFields(entry Entry, forbidden []ForbiddenCharacter) error {
         )
         if nil != forbiddenErr {
             return forbiddenErr
+        }
+
+        if true == field.allowsQuestionMark && "?" == field.value {
+            continue
+        }
+
+        /* @important the rendered field must parse under the bounds the target scheduler enforces: crond treats one bad field as a parse error and refuses the whole crontab file with it, and the apiserver rejects a CronJob manifest outside the robfig bounds — so an out-of-range value fails generation instead. */
+        if _, parseErr := parseCronField(fieldOrWildcard(normalizeCronNameTokens(field.value, field.names)), field.minimum, field.maximum); nil != parseErr {
+            return exception.NewError(
+                fmt.Sprintf("cron: entry %q has an invalid Schedule.%s (%q)", entry.Name, field.name, field.value),
+                exceptioncontract.Context{
+                    "entry": entry.Name,
+                    "field": field.name,
+                    "value": field.value,
+                },
+                parseErr,
+            )
         }
     }
 

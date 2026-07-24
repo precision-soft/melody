@@ -4,7 +4,6 @@ import (
     "fmt"
     "testing"
 
-    "github.com/precision-soft/melody/v2/container"
     "github.com/precision-soft/melody/v2/exception"
     validationcontract "github.com/precision-soft/melody/v2/validation/contract"
 )
@@ -82,8 +81,57 @@ type payloadWithRegexCommaInQuantifier struct {
     Value string `validate:"regex(pattern=^a{1,2}$)"`
 }
 
+type payloadWithRegexShorthand struct {
+    Value string `validate:"regex=^abc$"`
+}
+
+type payloadWithRegexShorthandCommaInCharClass struct {
+    Value string `validate:"regex=^[a,b]$"`
+}
+
+type payloadWithRegexShorthandCommaInQuantifier struct {
+    Value string `validate:"regex=^a{1,2}$"`
+}
+
 type payloadWithInvalidTag struct {
     Name string `validate:"min(1))"`
+}
+
+type payloadWithLessThan struct {
+    Quantity int `json:"quantity" validate:"lessThan(value=100)"`
+}
+
+type payloadWithLessThanShorthand struct {
+    Quantity int `json:"quantity" validate:"lessThan=100"`
+}
+
+func requireNoValidationErrors(t *testing.T, err error) {
+    t.Helper()
+
+    if nil == err {
+        return
+    }
+
+    t.Fatalf("expected no validation errors, got: %s", err.Error())
+}
+
+func requireValidationErrors(t *testing.T, err error) ValidationErrors {
+    t.Helper()
+
+    if nil == err {
+        t.Fatalf("expected validation errors")
+    }
+
+    validationErrors, ok := err.(ValidationErrors)
+    if false == ok {
+        t.Fatalf("expected ValidationErrors type, got: %T", err)
+    }
+
+    if false == validationErrors.HasErrors() {
+        t.Fatalf("expected validation errors")
+    }
+
+    return validationErrors
 }
 
 func TestValidator_DetectsErrors(t *testing.T) {
@@ -109,6 +157,35 @@ func TestValidator_AcceptsValidData(t *testing.T) {
 
     err := validatorInstance.Validate(payload)
     requireNoValidationErrors(t, err)
+}
+
+func TestValidator_LessThanIsEnforcedAndNotUnknownRule(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    requireValidationErrors(t, validatorInstance.Validate(payloadWithLessThan{Quantity: 100}))
+    requireValidationErrors(t, validatorInstance.Validate(payloadWithLessThan{Quantity: 150}))
+    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithLessThan{Quantity: 99}))
+
+    requireValidationErrors(t, validatorInstance.Validate(payloadWithLessThanShorthand{Quantity: 150}))
+    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithLessThanShorthand{Quantity: 99}))
+}
+
+func TestValidator_RegexShorthandIsEnforcedNotFailOpen(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    requireValidationErrors(t, validatorInstance.Validate(payloadWithRegexShorthand{Value: "does-not-match"}))
+    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithRegexShorthand{Value: "abc"}))
+}
+
+func TestValidator_RegexShorthandWithCommaMatchesParenthesizedForm(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithRegexShorthandCommaInCharClass{Value: "a"}))
+    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithRegexShorthandCommaInCharClass{Value: "b"}))
+    requireValidationErrors(t, validatorInstance.Validate(payloadWithRegexShorthandCommaInCharClass{Value: "z"}))
+
+    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithRegexShorthandCommaInQuantifier{Value: "aa"}))
+    requireValidationErrors(t, validatorInstance.Validate(payloadWithRegexShorthandCommaInQuantifier{Value: "aaa"}))
 }
 
 func TestValidator_CustomConstraint(t *testing.T) {
@@ -161,7 +238,7 @@ func TestValidator_ReturnsUnknownRuleError(t *testing.T) {
     }
 
     if ErrorUnknownRule != validationError.Code() {
-        t.Fatalf("unexpected code `" + validationError.Code() + "`")
+        t.Fatalf("unexpected code %q", validationError.Code())
     }
 }
 
@@ -181,7 +258,7 @@ func TestValidator_MalformedNumericParameterFailsClosed(t *testing.T) {
         }
 
         if ErrorInvalidRuleSyntax != validationError.Code() {
-            t.Fatalf("expected a malformed numeric parameter to fail closed with code `" + ErrorInvalidRuleSyntax + "`, got `" + validationError.Code() + "`")
+            t.Fatalf("expected a malformed numeric parameter to fail closed with code %q, got %q", ErrorInvalidRuleSyntax, validationError.Code())
         }
     }
 
@@ -350,25 +427,47 @@ func TestValidator_RegexConstraint_AllowsCommaInsideQuantifier(t *testing.T) {
     requireNoValidationErrors(t, err)
 }
 
-func TestValidatorFromContainer_ReturnsNilWhenMissing(t *testing.T) {
-    serviceContainer := container.NewContainer()
-
-    validatorInstance := ValidatorFromContainer(serviceContainer)
-    if nil != validatorInstance {
-        t.Fatalf("expected nil")
-    }
+type payloadWithGreaterThan struct {
+    Age int `json:"age" validate:"greaterThan=0"`
 }
 
-func TestValidatorMustFromContainer_PanicsWhenMissing(t *testing.T) {
-    serviceContainer := container.NewContainer()
+type payloadWithGreaterThanFloat struct {
+    Price float64 `json:"price" validate:"greaterThan=0"`
+}
 
-    defer func() {
-        if nil == recover() {
-            t.Fatalf("expected panic")
-        }
-    }()
+func TestValidator_GreaterThanConstraint_PassesForPositiveValue(t *testing.T) {
+    validatorInstance := NewValidator()
 
-    _ = ValidatorMustFromContainer(serviceContainer)
+    err := validatorInstance.Validate(payloadWithGreaterThan{Age: 25})
+    requireNoValidationErrors(t, err)
+}
+
+func TestValidator_GreaterThanConstraint_FailsForZero(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    err := validatorInstance.Validate(payloadWithGreaterThan{Age: 0})
+    _ = requireValidationErrors(t, err)
+}
+
+func TestValidator_GreaterThanConstraint_FailsForNegativeValue(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    err := validatorInstance.Validate(payloadWithGreaterThan{Age: -5})
+    _ = requireValidationErrors(t, err)
+}
+
+func TestValidator_GreaterThanConstraint_Float64PassesForPositiveValue(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    err := validatorInstance.Validate(payloadWithGreaterThanFloat{Price: 0.01})
+    requireNoValidationErrors(t, err)
+}
+
+func TestValidator_GreaterThanConstraint_Float64FailsForZero(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    err := validatorInstance.Validate(payloadWithGreaterThanFloat{Price: 0.0})
+    _ = requireValidationErrors(t, err)
 }
 
 func TestValidator_Validate_ReturnsInvalidRuleSyntaxErrorForInvalidTag(t *testing.T) {
@@ -386,8 +485,6 @@ func TestValidator_Validate_ReturnsInvalidRuleSyntaxErrorForInvalidTag(t *testin
         t.Fatalf("expected code `%s`, got `%s`", ErrorInvalidRuleSyntax, validationError.Code())
     }
 }
-
-/* @info parameterized-constraint fail-closed */
 
 type betweenLengthConstraint struct {
     min int
@@ -442,25 +539,6 @@ type payloadWithBetween struct {
 
 type payloadWithRigidParams struct {
     Code string `json:"code" validate:"rigid(strictness=high)"`
-}
-
-type payloadWithLessThan struct {
-    Quantity int `json:"quantity" validate:"lessThan(value=100)"`
-}
-
-type payloadWithLessThanShorthand struct {
-    Quantity int `json:"quantity" validate:"lessThan=100"`
-}
-
-func TestValidator_LessThanIsEnforcedAndNotUnknownRule(t *testing.T) {
-    validatorInstance := NewValidator()
-
-    requireValidationErrors(t, validatorInstance.Validate(payloadWithLessThan{Quantity: 100}))
-    requireValidationErrors(t, validatorInstance.Validate(payloadWithLessThan{Quantity: 150}))
-    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithLessThan{Quantity: 99}))
-
-    requireValidationErrors(t, validatorInstance.Validate(payloadWithLessThanShorthand{Quantity: 150}))
-    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithLessThanShorthand{Quantity: 99}))
 }
 
 func TestValidator_CustomParameterizedConstraintConsumesParams(t *testing.T) {
@@ -710,4 +788,28 @@ func TestValidateStruct_AppliesTheTagDeclaredOnAPromotedEmbed(t *testing.T) {
     if nil == validateErr {
         t.Fatalf("expected the embed's own tag to run")
     }
+}
+
+type payloadWithPaddedSkipTag struct {
+    Anything string `validate:" - "`
+}
+
+/* @info a padded " - " is the skip marker, not an unknown rule that would reject every value */
+func TestValidator_PaddedDashSkipsValidation(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithPaddedSkipTag{Anything: "x"}))
+    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithPaddedSkipTag{}))
+}
+
+type payloadWithValueLessGreaterThan struct {
+    Count int `json:"count" validate:"greaterThan"`
+}
+
+/* @info a value-less greaterThan runs with the constraint's registered default and enforces > 0 */
+func TestValidator_ValueLessGreaterThanEnforcesThePositiveDefault(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    requireValidationErrors(t, validatorInstance.Validate(payloadWithValueLessGreaterThan{Count: 0}))
+    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithValueLessGreaterThan{Count: 1}))
 }

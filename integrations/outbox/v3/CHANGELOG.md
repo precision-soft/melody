@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- `Relay.RunOnce` counts a message whose send succeeded but whose `MarkSent` failed as published, so the reported count follows what actually reached the broker
+
 ## [v3.1.0] - 2026-07-17 - Store and Relay Factories with Lazy Resolution
 
 ### Added
