@@ -93,7 +93,7 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
 - [`PackageBinding.Exclude(pattern string) *PackageBinding`](../../wiring/bind_set.go)
 - [`NewGenerateCommand(bindSet *BindSet) *GenerateCommand`](../../wiring/generate_command.go)
 - [`Generate(request *GenerateRequest) (string, *GenerateReport, error)`](../../wiring/generator.go)
-- [`Scan(projectDirectory string, packageBinding *PackageBinding) (*ScanResult, error)`](../../wiring/scanner.go)
+- [`Scan(projectDirectory string, packageBinding *PackageBinding, buildTags []string) (*ScanResult, error)`](../../wiring/scanner.go)
 
 ### Directives
 

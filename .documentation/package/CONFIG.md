@@ -198,6 +198,8 @@ func example() configcontract.Configuration {
     - `Get(name string) configcontract.Parameter`
     - `MustGet(name string) configcontract.Parameter`
     - `RegisterRuntime(name string, value any)`
+    - `RegisterRuntimeSecret(name string, value any)`
+    - `MarkSecret(name string) bool`
     - `Resolve() error`
     - `Names() []string`
     - `Kernel() configcontract.KernelConfiguration`

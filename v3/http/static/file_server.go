@@ -253,7 +253,7 @@ func (instance *FileServer) resolveAndOpen(
         }
     }
 
-    cleanedPath := path.Clean(requestPath)
+    cleanedPath := path.Clean("/" + requestPath)
     if "." == cleanedPath || "" == cleanedPath {
         cleanedPath = "/"
     }

@@ -33,7 +33,7 @@ func (instance *Router) AllowedMethods(path string, host string, scheme string) 
     routes := instance.routeRegistry.routesInternal()
     allowedMethodsSet := make(map[string]struct{})
 
-    pathSegments := splitPath(path)
+    pathSegments := splitRequestPath(path)
 
     for _, routeValue := range routes {
         if false == matchesHost(routeValue.host, host) {

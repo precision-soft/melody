@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.6.0] - 2026-07-24 - Bounded Backplane Publish and Connection-Abort Retries
+
 ### Added
 
 - server-sent event backplane: `WithServerSentEventBackplaneCallTimeout` bounds one `Publish` round trip (default 1s) so a request broadcasting an event fails fast instead of hanging on an unresponsive store — the caller is typically an http handler whose context carries no deadline. A non-positive value falls back to the default. The timeout derives from the backplane's own context, so `Close` cancels an in-flight publish too
@@ -118,7 +120,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `v3/connection_params.go` — `ConnectionConfig` renamed to `ConnectionParams` with value semantics
 - Dependencies pinned to `github.com/precision-soft/melody/v3 v3.0.0`
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.5.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.6.0...HEAD
+
+[v3.6.0]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.5.1...integrations/rueidis/v3.6.0
 
 [v3.5.1]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.5.0...integrations/rueidis/v3.5.1
 

@@ -335,7 +335,7 @@ const ordersPath = routes.path("user_show", { id: 42, tab: "orders" }); // /user
 
 * Rate limiting:
     * [`RateLimitMiddleware`](../../http/middleware/rate_limit.go)
-    * `TokenBucketLimiter` / `SlidingWindowLimiter` in [`rate_limit.go`](../../http/middleware/rate_limit.go), each with `SetMaxKeys(int)`
+    * `FixedWindowLimiter` / `SlidingWindowLimiter` in [`rate_limit.go`](../../http/middleware/rate_limit.go), each with `SetMaxKeys(int)`. `FixedWindowLimiter` restores the whole allowance at the window edge rather than proportionally to elapsed time, so an instant straddling that edge can admit up to twice the rate; `SlidingWindowLimiter` holds the rate over every trailing window. `TokenBucketLimiter` / `NewTokenBucketLimiter` / `NewTokenBucketLimiterWithClock` remain as deprecated aliases
 
 * Static:
     * [`StaticMiddleware`](../../http/middleware/static.go)

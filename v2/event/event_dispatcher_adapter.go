@@ -34,7 +34,7 @@ func NewEventDispatcherAdapter(
         eventDispatcher:         eventDispatcher,
         clock:                   clock,
         listenerRegistrations:   make(map[string][]adapterListenerRegistration),
-        subscriberRegistrations: make(map[uintptr][]eventcontract.ListenerRegistration),
+        subscriberRegistrations: make(map[subscriberIdentity][]eventcontract.ListenerRegistration),
     }
 }
 
@@ -43,7 +43,7 @@ type EventDispatcherAdapter struct {
     eventDispatcher         eventcontract.EventDispatcher
     clock                   clockcontract.Clock
     listenerRegistrations   map[string][]adapterListenerRegistration
-    subscriberRegistrations map[uintptr][]eventcontract.ListenerRegistration
+    subscriberRegistrations map[subscriberIdentity][]eventcontract.ListenerRegistration
     nextRegistrationIndex   uint64
 }
 
@@ -100,7 +100,7 @@ func (instance *EventDispatcherAdapter) RemoveListener(registration eventcontrac
         }
     }
 
-    for subscriberPointer, registrationList := range instance.subscriberRegistrations {
+    for subscriberIdentityValue, registrationList := range instance.subscriberRegistrations {
         filtered := make([]eventcontract.ListenerRegistration, 0, len(registrationList))
         for _, entry := range registrationList {
             if registration.EventName == entry.EventName && registration.ListenerId == entry.ListenerId {
@@ -111,11 +111,11 @@ func (instance *EventDispatcherAdapter) RemoveListener(registration eventcontrac
         }
 
         if 0 == len(filtered) {
-            delete(instance.subscriberRegistrations, subscriberPointer)
+            delete(instance.subscriberRegistrations, subscriberIdentityValue)
             continue
         }
 
-        instance.subscriberRegistrations[subscriberPointer] = filtered
+        instance.subscriberRegistrations[subscriberIdentityValue] = filtered
     }
     instance.mutex.Unlock()
 
@@ -136,8 +136,8 @@ func (instance *EventDispatcherAdapter) AddSubscriber(subscriber eventcontract.E
         )
     }
 
-    subscriberPointer := eventSubscriberPointer(subscriber)
-    if 0 == subscriberPointer {
+    subscriberIdentityValue := eventSubscriberIdentity(subscriber)
+    if 0 == subscriberIdentityValue.pointer {
         exception.Panic(
             exception.NewError(
                 "event subscriber pointer is required to add a subscriber",
@@ -213,8 +213,8 @@ func (instance *EventDispatcherAdapter) AddSubscriber(subscriber eventcontract.E
             )
 
             instance.mutex.Lock()
-            instance.subscriberRegistrations[subscriberPointer] = append(
-                instance.subscriberRegistrations[subscriberPointer],
+            instance.subscriberRegistrations[subscriberIdentityValue] = append(
+                instance.subscriberRegistrations[subscriberIdentityValue],
                 registration,
             )
             instance.mutex.Unlock()
@@ -229,8 +229,8 @@ func (instance *EventDispatcherAdapter) RemoveSubscriber(subscriber eventcontrac
         )
     }
 
-    subscriberPointer := eventSubscriberPointer(subscriber)
-    if 0 == subscriberPointer {
+    subscriberIdentityValue := eventSubscriberIdentity(subscriber)
+    if 0 == subscriberIdentityValue.pointer {
         exception.Panic(
             exception.NewError(
                 "event subscriber pointer is required to remove a subscriber",
@@ -243,8 +243,8 @@ func (instance *EventDispatcherAdapter) RemoveSubscriber(subscriber eventcontrac
     }
 
     instance.mutex.Lock()
-    registrationList := instance.subscriberRegistrations[subscriberPointer]
-    delete(instance.subscriberRegistrations, subscriberPointer)
+    registrationList := instance.subscriberRegistrations[subscriberIdentityValue]
+    delete(instance.subscriberRegistrations, subscriberIdentityValue)
     instance.mutex.Unlock()
 
     removedCount := 0

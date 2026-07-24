@@ -51,9 +51,7 @@ func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, co
         outputInstance.printError(lockErr)
         return lockErr
     }
-    defer func() {
-        _ = migrator.Unlock(runtimeInstance.Context())
-    }()
+    defer unlockMigrations(runtimeInstance.Context(), migrator, outputInstance)
 
     if option.Verbose {
         identity, identityErr := fetchDatabaseIdentity(runtimeInstance.Context(), db)

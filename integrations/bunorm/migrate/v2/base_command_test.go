@@ -1,6 +1,8 @@
 package migrate
 
 import (
+    "time"
+    "strings"
     "context"
     "errors"
     "testing"
@@ -160,5 +162,59 @@ func TestResolveDatabase_FlagWinsOverPinnedManager(t *testing.T) {
 func TestResolveDatabase_RegistryDefaultWithoutPinOrFlag(t *testing.T) {
     if resolved := resolveWithOptions(t, DefaultOptions(), ""); "<default>" != resolved {
         t.Fatalf("expected the registry default, got: %s", resolved)
+    }
+}
+
+type recordingMigrationUnlocker struct {
+    called              bool
+    errorAtCall         error
+    deadlineAtCall      time.Time
+    hasDeadlineAtCall   bool
+    unlockError         error
+}
+
+func (instance *recordingMigrationUnlocker) Unlock(ctx context.Context) error {
+    instance.called = true
+    instance.errorAtCall = ctx.Err()
+    instance.deadlineAtCall, instance.hasDeadlineAtCall = ctx.Deadline()
+
+    return instance.unlockError
+}
+
+/* @info an interrupted migration cancels the command context; if the unlock rides it the delete never reaches the database and the migration lock row survives, refusing every later migration until someone runs the unlock command by hand */
+func TestUnlockMigrations_RunsOnACancelledCommandContext(t *testing.T) {
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    unlocker := &recordingMigrationUnlocker{}
+    outputInstance, _ := newBufferedOutput(true)
+
+    unlockMigrations(cancelledContext, unlocker, outputInstance)
+
+    if false == unlocker.called {
+        t.Fatalf("expected the unlock to be attempted")
+    }
+
+    if nil != unlocker.errorAtCall {
+        t.Fatalf("expected the unlock to run on a live context, got %v", unlocker.errorAtCall)
+    }
+
+    if false == unlocker.hasDeadlineAtCall {
+        t.Fatalf("expected the unlock context to carry a deadline")
+    }
+
+    if false == unlocker.deadlineAtCall.After(time.Now()) {
+        t.Fatalf("expected the unlock deadline to be in the future")
+    }
+}
+
+func TestUnlockMigrations_ReportsAFailedUnlock(t *testing.T) {
+    unlocker := &recordingMigrationUnlocker{unlockError: errors.New("delete refused")}
+    outputInstance, buffer := newBufferedOutput(true)
+
+    unlockMigrations(context.Background(), unlocker, outputInstance)
+
+    if false == strings.Contains(buffer.String(), "delete refused") {
+        t.Fatalf("expected the unlock failure to be reported, got %q", buffer.String())
     }
 }

@@ -28,7 +28,7 @@ func NewEventDispatcher(clock clockcontract.Clock) *EventDispatcher {
 
     return &EventDispatcher{
         listeners:               make(map[string][]listenerWithPriority),
-        subscriberRegistrations: make(map[uintptr][]subscriberRegistration),
+        subscriberRegistrations: make(map[subscriberIdentity][]subscriberRegistration),
         clock:                   clock,
     }
 }
@@ -36,7 +36,7 @@ func NewEventDispatcher(clock clockcontract.Clock) *EventDispatcher {
 type EventDispatcher struct {
     mutex                   sync.RWMutex
     listeners               map[string][]listenerWithPriority
-    subscriberRegistrations map[uintptr][]subscriberRegistration
+    subscriberRegistrations map[subscriberIdentity][]subscriberRegistration
     clock                   clockcontract.Clock
     nextListenerId          uint64
 }
@@ -177,7 +177,7 @@ func (instance *EventDispatcher) RemoveListener(registration eventcontract.Liste
     }
 
     instance.mutex.Lock()
-    for subscriberPointer, registrationList := range instance.subscriberRegistrations {
+    for subscriberIdentityValue, registrationList := range instance.subscriberRegistrations {
         filtered := make([]subscriberRegistration, 0, len(registrationList))
         for _, registrationEntry := range registrationList {
             if eventName == registrationEntry.eventName && listenerId == registrationEntry.listenerId {
@@ -188,11 +188,11 @@ func (instance *EventDispatcher) RemoveListener(registration eventcontract.Liste
         }
 
         if 0 == len(filtered) {
-            delete(instance.subscriberRegistrations, subscriberPointer)
+            delete(instance.subscriberRegistrations, subscriberIdentityValue)
             continue
         }
 
-        instance.subscriberRegistrations[subscriberPointer] = filtered
+        instance.subscriberRegistrations[subscriberIdentityValue] = filtered
     }
     instance.mutex.Unlock()
 
@@ -213,8 +213,8 @@ func (instance *EventDispatcher) AddSubscriber(subscriber eventcontract.EventSub
         )
     }
 
-    subscriberPointer := eventSubscriberPointer(subscriber)
-    if 0 == subscriberPointer {
+    subscriberIdentityValue := eventSubscriberIdentity(subscriber)
+    if 0 == subscriberIdentityValue.pointer {
         exception.Panic(
             exception.NewError(
                 "event subscriber pointer is required to add a subscriber",
@@ -288,8 +288,8 @@ func (instance *EventDispatcher) AddSubscriber(subscriber eventcontract.EventSub
             subscriberType := reflect.TypeOf(subscriber).String()
 
             instance.mutex.Lock()
-            instance.subscriberRegistrations[subscriberPointer] = append(
-                instance.subscriberRegistrations[subscriberPointer],
+            instance.subscriberRegistrations[subscriberIdentityValue] = append(
+                instance.subscriberRegistrations[subscriberIdentityValue],
                 subscriberRegistration{
                     eventName:      eventName,
                     listenerId:     registration.ListenerId,
@@ -308,8 +308,8 @@ func (instance *EventDispatcher) RemoveSubscriber(subscriber eventcontract.Event
         )
     }
 
-    subscriberPointer := eventSubscriberPointer(subscriber)
-    if 0 == subscriberPointer {
+    subscriberIdentityValue := eventSubscriberIdentity(subscriber)
+    if 0 == subscriberIdentityValue.pointer {
         exception.Panic(
             exception.NewError(
                 "event subscriber pointer is required to remove a subscriber",
@@ -322,8 +322,8 @@ func (instance *EventDispatcher) RemoveSubscriber(subscriber eventcontract.Event
     }
 
     instance.mutex.Lock()
-    registrationList := instance.subscriberRegistrations[subscriberPointer]
-    delete(instance.subscriberRegistrations, subscriberPointer)
+    registrationList := instance.subscriberRegistrations[subscriberIdentityValue]
+    delete(instance.subscriberRegistrations, subscriberIdentityValue)
     instance.mutex.Unlock()
 
     removedCount := 0
@@ -712,19 +712,27 @@ type subscriberRegistration struct {
     subscriberType string
 }
 
+type subscriberIdentity struct {
+    pointer        uintptr
+    subscriberType reflect.Type
+}
+
 var _ eventcontract.EventDispatcher = (*EventDispatcher)(nil)
 var _ eventcontract.EventDispatcherInspector = (*EventDispatcher)(nil)
 var _ eventcontract.RequiredListenerRegistrar = (*EventDispatcher)(nil)
 
-func eventSubscriberPointer(subscriber eventcontract.EventSubscriber) uintptr {
+func eventSubscriberIdentity(subscriber eventcontract.EventSubscriber) subscriberIdentity {
     if nil == subscriber {
-        return 0
+        return subscriberIdentity{}
     }
 
     subscriberValue := reflect.ValueOf(subscriber)
     if reflect.Ptr != subscriberValue.Kind() {
-        return 0
+        return subscriberIdentity{}
     }
 
-    return subscriberValue.Pointer()
+    return subscriberIdentity{
+        pointer:        subscriberValue.Pointer(),
+        subscriberType: subscriberValue.Type(),
+    }
 }

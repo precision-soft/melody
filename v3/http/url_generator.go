@@ -75,6 +75,22 @@ func (instance *UrlGenerator) GeneratePath(routeName string, parameters map[stri
                 )
             }
 
+            if "" == value {
+                if true == isOptional {
+                    continue
+                }
+
+                /* @important matchPath refuses an empty segment for a named parameter, so emitting one here would mint a url this router answers with a 404 */
+                return "", exception.NewError(
+                    "route parameter may not be empty",
+                    exceptioncontract.Context{
+                        "routeName":     routeName,
+                        "parameterName": paramName,
+                    },
+                    nil,
+                )
+            }
+
             if true == strings.Contains(value, "/") {
                 /* a ":param" spans exactly one path segment, and matchPath binds it to a single segment (never a "/"-joined remainder); emitting url.PathEscape here would encode the slash as %2F, which the net/http server decodes back to "/" before the kernel matches on request.URL.Path, so the generated link would resolve to a different route or 404. Reject the slash instead of minting a url this router cannot answer, mirroring the single-segment wildcard branch below. */
                 return "", exception.NewError(

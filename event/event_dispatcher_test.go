@@ -692,3 +692,68 @@ func TestEventDispatcher_Dispatch_UsesListenerSnapshot(t *testing.T) {
         t.Fatalf("unexpected container close error: %v", containerCloseErr)
     }
 }
+
+type firstZeroSizeSubscriber struct{}
+
+func (instance *firstZeroSizeSubscriber) SubscribedEvents() map[string][]eventcontract.SubscribedEvent {
+    return map[string][]eventcontract.SubscribedEvent{
+        "zero.size.first": {
+            NewSubscribedEvent(
+                func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                    return nil
+                },
+                0,
+            ),
+        },
+    }
+}
+
+type secondZeroSizeSubscriber struct{}
+
+func (instance *secondZeroSizeSubscriber) SubscribedEvents() map[string][]eventcontract.SubscribedEvent {
+    return map[string][]eventcontract.SubscribedEvent{
+        "zero.size.second": {
+            NewSubscribedEvent(
+                func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                    return nil
+                },
+                0,
+            ),
+        },
+    }
+}
+
+func testHasRegisteredEventWithListeners(registeredEvents []eventcontract.RegisteredEvent, eventName string) bool {
+    for _, registeredEvent := range registeredEvents {
+        if eventName == registeredEvent.EventName && 0 < len(registeredEvent.Listeners) {
+            return true
+        }
+    }
+
+    return false
+}
+
+func TestEventDispatcher_RemoveSubscriber_DistinctZeroSizeSubscribersKeepTheirOwnListeners(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+
+    first := &firstZeroSizeSubscriber{}
+    second := &secondZeroSizeSubscriber{}
+
+    dispatcher.AddSubscriber(first)
+    dispatcher.AddSubscriber(second)
+
+    removedCount := dispatcher.RemoveSubscriber(first)
+    if 1 != removedCount {
+        t.Fatalf("expected 1 removed listener, got: %d", removedCount)
+    }
+
+    registeredEvents := dispatcher.RegisteredEvents()
+
+    if true == testHasRegisteredEventWithListeners(registeredEvents, "zero.size.first") {
+        t.Fatalf("expected the removed subscriber to lose its listener")
+    }
+
+    if false == testHasRegisteredEventWithListeners(registeredEvents, "zero.size.second") {
+        t.Fatalf("expected the other zero size subscriber to keep its listener")
+    }
+}

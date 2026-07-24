@@ -177,23 +177,32 @@ func wrapWithMiddlewares(handler httpcontract.Handler, middlewares []httpcontrac
 }
 
 func splitPath(value string) []string {
-    trimmedPath := strings.TrimSpace(value)
-    if "" == trimmedPath {
+    return splitNormalizedPath(strings.TrimSpace(value))
+}
+
+/* @important a request path is never trimmed: whitespace is significant to whatever sits in front of the application, so trimming it would let "/admin%20" reach the "/admin" handler through a proxy rule that never saw a match */
+func splitRequestPath(value string) []string {
+    return splitNormalizedPath(value)
+}
+
+func splitNormalizedPath(value string) []string {
+    if "" == value {
         return []string{""}
     }
 
-    if false == strings.HasPrefix(trimmedPath, "/") {
-        trimmedPath = "/" + trimmedPath
+    normalizedPath := value
+    if false == strings.HasPrefix(normalizedPath, "/") {
+        normalizedPath = "/" + normalizedPath
     }
 
-    if 1 < len(trimmedPath) {
-        trimmedPath = strings.TrimRight(trimmedPath, "/")
-        if "" == trimmedPath {
-            trimmedPath = "/"
+    if 1 < len(normalizedPath) {
+        normalizedPath = strings.TrimRight(normalizedPath, "/")
+        if "" == normalizedPath {
+            normalizedPath = "/"
         }
     }
 
-    return strings.Split(trimmedPath, "/")
+    return strings.Split(normalizedPath, "/")
 }
 
 func writeResponse(
@@ -577,6 +586,11 @@ func matchPath(
         pathPart := pathSegments[pathIndex]
 
         if true == strings.HasPrefix(routePart, ":") {
+            /* @important an empty segment does not satisfy a named parameter: "/users//profile" would otherwise bind an empty id that a handler cannot tell from a supplied one */
+            if "" == pathPart {
+                return nil, false
+            }
+
             paramName := strings.TrimPrefix(routePart, ":")
             if true == strings.HasSuffix(paramName, "?") {
                 paramName = strings.TrimSuffix(paramName, "?")

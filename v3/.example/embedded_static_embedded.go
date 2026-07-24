@@ -7,7 +7,7 @@ import (
     "io/fs"
 )
 
-//go:embed public public
+//go:embed all:public
 var embeddedStatic embed.FS
 
 var embeddedPublicFiles fs.FS = embeddedStatic

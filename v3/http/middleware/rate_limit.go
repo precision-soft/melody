@@ -19,14 +19,27 @@ import (
 
 const defaultMaxRateLimitKeys = 1_000_000
 
-func NewTokenBucketLimiter(rate int, window time.Duration) *TokenBucketLimiter {
-    return NewTokenBucketLimiterWithClock(clock.NewSystemClock(), rate, window)
+func NewFixedWindowLimiter(rate int, window time.Duration) *FixedWindowLimiter {
+    return NewFixedWindowLimiterWithClock(clock.NewSystemClock(), rate, window)
 }
 
-func NewTokenBucketLimiterWithClock(clockInstance clockcontract.Clock, rate int, window time.Duration) *TokenBucketLimiter {
+/* Deprecated: use FixedWindowLimiter. The limiter refills to full capacity at the window edge rather than proportionally to elapsed time, so it is a fixed-window counter and admits up to twice the rate across an instant straddling that edge; use SlidingWindowLimiter where the rate must hold over every trailing window. */
+type TokenBucketLimiter = FixedWindowLimiter
+
+/* Deprecated: use NewFixedWindowLimiter. */
+func NewTokenBucketLimiter(rate int, window time.Duration) *FixedWindowLimiter {
+    return NewFixedWindowLimiter(rate, window)
+}
+
+/* Deprecated: use NewFixedWindowLimiterWithClock. */
+func NewTokenBucketLimiterWithClock(clockInstance clockcontract.Clock, rate int, window time.Duration) *FixedWindowLimiter {
+    return NewFixedWindowLimiterWithClock(clockInstance, rate, window)
+}
+
+func NewFixedWindowLimiterWithClock(clockInstance clockcontract.Clock, rate int, window time.Duration) *FixedWindowLimiter {
     if true == internal.IsNilInterface(clockInstance) {
         exception.Panic(
-            exception.NewError("clock is required for token bucket limiter", nil, nil),
+            exception.NewError("clock is required for fixed window limiter", nil, nil),
         )
     }
 
@@ -38,8 +51,8 @@ func NewTokenBucketLimiterWithClock(clockInstance clockcontract.Clock, rate int,
         window = time.Minute
     }
 
-    limiter := &TokenBucketLimiter{
-        buckets:         make(map[string]*tokenBucket),
+    limiter := &FixedWindowLimiter{
+        buckets:         make(map[string]*fixedWindowBucket),
         rate:            rate,
         window:          window,
         capacity:        rate,
@@ -51,9 +64,9 @@ func NewTokenBucketLimiterWithClock(clockInstance clockcontract.Clock, rate int,
     return limiter
 }
 
-type TokenBucketLimiter struct {
+type FixedWindowLimiter struct {
     mutex              sync.RWMutex
-    buckets            map[string]*tokenBucket
+    buckets            map[string]*fixedWindowBucket
     rate               int
     window             time.Duration
     capacity           int
@@ -65,7 +78,7 @@ type TokenBucketLimiter struct {
 }
 
 /* SetMaxKeys bounds how many distinct keys the limiter tracks. When the map is full and an idle-entry prune frees nothing, a request under an unseen key is denied rather than minting a bucket, so an attacker varying the key cannot grow the map without bound. A non-positive value is ignored. */
-func (instance *TokenBucketLimiter) SetMaxKeys(maxKeys int) {
+func (instance *FixedWindowLimiter) SetMaxKeys(maxKeys int) {
     if 0 >= maxKeys {
         return
     }
@@ -76,12 +89,12 @@ func (instance *TokenBucketLimiter) SetMaxKeys(maxKeys int) {
     instance.maxKeys = maxKeys
 }
 
-type tokenBucket struct {
+type fixedWindowBucket struct {
     tokens     int
     lastRefill time.Time
 }
 
-func (instance *TokenBucketLimiter) Allow(key string) bool {
+func (instance *FixedWindowLimiter) Allow(key string) bool {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -99,13 +112,14 @@ func (instance *TokenBucketLimiter) Allow(key string) bool {
             return false
         }
 
-        bucket = &tokenBucket{
+        bucket = &fixedWindowBucket{
             tokens:     instance.capacity,
             lastRefill: now,
         }
         instance.buckets[key] = bucket
     }
 
+    /* @important the window is fixed, not a token bucket: the allowance is restored whole at the edge rather than proportionally to elapsed time, so up to twice the rate can pass across an instant straddling it. SlidingWindowLimiter holds the rate over every trailing window. */
     elapsed := now.Sub(bucket.lastRefill)
 
     if instance.window <= elapsed {
@@ -122,18 +136,18 @@ func (instance *TokenBucketLimiter) Allow(key string) bool {
     return false
 }
 
-func (instance *TokenBucketLimiter) Reset(key string) {
+func (instance *FixedWindowLimiter) Reset(key string) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
     delete(instance.buckets, key)
 }
 
-func (instance *TokenBucketLimiter) Close() error {
+func (instance *FixedWindowLimiter) Close() error {
     return nil
 }
 
-func (instance *TokenBucketLimiter) cleanupIfNeededLocked(now time.Time) {
+func (instance *FixedWindowLimiter) cleanupIfNeededLocked(now time.Time) {
     if true == instance.lastCleanupAt.IsZero() {
         instance.lastCleanupAt = now
         return
@@ -149,7 +163,7 @@ func (instance *TokenBucketLimiter) cleanupIfNeededLocked(now time.Time) {
 }
 
 /* pruneAtCeilingLocked reclaims idle entries when the map is full, at most once per window. The prune walks the whole map, and at the ceiling every request under an unseen key would pay that walk while holding the lock all traffic shares — the bound meant to protect memory would become a processing amplifier for the very traffic it exists to survive. An entry only falls idle after twice the window, so a finer cadence cannot free meaningfully more; between prunes an unseen key is denied without a walk. */
-func (instance *TokenBucketLimiter) pruneAtCeilingLocked(now time.Time) {
+func (instance *FixedWindowLimiter) pruneAtCeilingLocked(now time.Time) {
     if false == instance.lastCeilingPruneAt.IsZero() && instance.window > now.Sub(instance.lastCeilingPruneAt) {
         return
     }
@@ -159,7 +173,7 @@ func (instance *TokenBucketLimiter) pruneAtCeilingLocked(now time.Time) {
     instance.pruneIdleLocked(now)
 }
 
-func (instance *TokenBucketLimiter) pruneIdleLocked(now time.Time) {
+func (instance *FixedWindowLimiter) pruneIdleLocked(now time.Time) {
     for key, bucket := range instance.buckets {
         if instance.window*2 < now.Sub(bucket.lastRefill) {
             delete(instance.buckets, key)
@@ -167,7 +181,7 @@ func (instance *TokenBucketLimiter) pruneIdleLocked(now time.Time) {
     }
 }
 
-var _ httpcontract.RateLimiter = (*TokenBucketLimiter)(nil)
+var _ httpcontract.RateLimiter = (*FixedWindowLimiter)(nil)
 
 func NewSlidingWindowLimiter(limit int, window time.Duration) *SlidingWindowLimiter {
     return NewSlidingWindowLimiterWithClock(clock.NewSystemClock(), limit, window)
@@ -439,7 +453,7 @@ func RateLimitMiddleware(config *RateLimitConfig) httpcontract.Middleware {
 }
 
 func SimpleRateLimit(requestsPerMinute int) httpcontract.Middleware {
-    limiter := NewTokenBucketLimiter(requestsPerMinute, time.Minute)
+    limiter := NewFixedWindowLimiter(requestsPerMinute, time.Minute)
 
     return RateLimitMiddleware(
         NewRateLimitConfig(

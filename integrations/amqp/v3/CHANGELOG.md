@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.2.2] - 2026-07-24 - Consumer Recovery on a Static Connection
+
 ### Fixed
 
 - a consumer on a live static connection (no dialer) recovers from a transient subscribe failure by retrying on a fresh channel instead of stopping permanently on the first failure — the live connection can still carry the subscription, so the transport gives up only when the connection itself is gone; a consumer that does stop because its channel cannot be reopened now logs the reason instead of ending silently after a "reconnecting" message, while a stop caused by the transport closing stays silent
@@ -104,7 +106,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `transport.go`, `server_sent_event_backplane.go` — `resetPublishChannel` is now identity-aware: it closes the cached publish channel only when it is still the one the failing caller used. Two publishers that both failed on the same dead channel could otherwise have the second caller's reset close the healthy channel the first caller had just reopened, turning a recoverable single-retry into a spurious publish error on an otherwise-healthy broker. `publishOnce` now returns the channel it used and `resetPublishChannel` compares identity before closing.
 - `transport.go` — `consumeChannelForAck` now applies the same `IsClosed()` guard as `ensureConsumeChannel`/`ensurePublishChannel`. It returned the cached consume channel without checking whether the broker had closed it, so when a channel-level loss occurred between a delivery and its `Ack`/`Nack` — before the consume loop reset the channel — the acknowledgement was attempted on the already-closed channel. It now treats a non-nil but closed channel as absent and returns the clean `"amqp consume channel is not open"` error, letting the still-unacknowledged message redeliver on the next consume generation (at-least-once preserved).
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.2.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.2.2...HEAD
+
+[v3.2.2]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.2.1...integrations/amqp/v3.2.2
 
 [v3.2.1]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.2.0...integrations/amqp/v3.2.1
 

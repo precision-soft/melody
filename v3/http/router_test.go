@@ -285,3 +285,52 @@ func TestRouter_RequirementIsEnforcedOnCatchAllWildcard(t *testing.T) {
         t.Fatal("expected a catch-all value violating the requirement to be refused")
     }
 }
+
+/* @info a request path that differs from the route only by whitespace must not reach the handler: a proxy or firewall rule matching the exact path never sees a match, so an alias here is an authorization bypass in front of the application */
+func TestRouter_Match_WhitespacePaddedRequestPathDoesNotAliasTheRoute(t *testing.T) {
+    router := NewRouter()
+
+    router.Handle(
+        nethttp.MethodGet,
+        "/admin",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(200, "admin"), nil
+        },
+    )
+
+    for _, requestPath := range []string{"/admin ", "/admin\t", "/admin\n", "/admin\u00a0", " /admin"} {
+        if _, matched := router.Match(nethttp.MethodGet, requestPath, "", ""); true == matched {
+            t.Fatalf("expected the padded path %q not to match the route", requestPath)
+        }
+    }
+
+    if _, matched := router.Match(nethttp.MethodGet, "/admin", "", ""); false == matched {
+        t.Fatalf("expected the exact path to match the route")
+    }
+}
+
+/* @info an empty segment must not satisfy a named parameter: the handler cannot tell an empty bound value from a supplied one, so an empty identifier reaches whatever the handler does with it */
+func TestRouter_Match_EmptySegmentDoesNotSatisfyNamedParameter(t *testing.T) {
+    router := NewRouter()
+
+    router.Handle(
+        nethttp.MethodGet,
+        "/users/:id/profile",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(200, "profile"), nil
+        },
+    )
+
+    if _, matched := router.Match(nethttp.MethodGet, "/users//profile", "", ""); true == matched {
+        t.Fatalf("expected an empty identifier segment not to match")
+    }
+
+    routeMatch, matched := router.Match(nethttp.MethodGet, "/users/7/profile", "", "")
+    if false == matched {
+        t.Fatalf("expected a supplied identifier to match")
+    }
+
+    if "7" != routeMatch.Params["id"] {
+        t.Fatalf("expected the identifier to be bound, got %q", routeMatch.Params["id"])
+    }
+}

@@ -135,6 +135,10 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
                 return response, nil
             }
 
+            if nil == response.Headers() {
+                response.SetHeaders(make(nethttp.Header))
+            }
+
             if "" != response.Headers().Get("Content-Encoding") {
                 return response, nil
             }

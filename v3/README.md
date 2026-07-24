@@ -287,6 +287,9 @@ Each package below links to its source folder and its package documentation.
 * **VERSION** — [code](./version/) | [docs](.documentation/package/VERSION.md)  
   Version metadata and helpers.
 
+* **WIRING** — [code](./wiring/) | [docs](.documentation/package/WIRING.md)  
+  Container autowiring code generation: constructor scanning, bind sets, and the generate command.
+
 ## Example application
 
 The full userland showcase lives under `./.example/`. Start here:

@@ -31,6 +31,13 @@ func normalizeAccessControlAttributes(attributes []string) []string {
         )
     }
 
+    /* @important a rule whose attributes all normalize away still matches its path, and an empty attribute list grants every authenticated principal while shadowing any longer-prefixed rule that would have denied; the blank attribute is refused here rather than degrading the guard silently */
+    if 0 == len(normalizedAttributes) {
+        exception.Panic(
+            exception.NewError("access control rule requires at least one attribute", nil, nil),
+        )
+    }
+
     return normalizedAttributes
 }
 

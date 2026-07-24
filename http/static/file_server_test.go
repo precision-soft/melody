@@ -325,3 +325,60 @@ func TestContentTypeByExtension_ResolvesIcoAndIsCaseInsensitive(t *testing.T) {
 func osWriteFile(path string, data []byte) error {
     return os.WriteFile(path, data, 0o644)
 }
+
+/* @info the strip prefix leaves a relative remainder, so a leading ".." survives path.Clean and the join with the public directory absorbs it; the request must stay confined to the public directory instead of reaching a sibling of it in the embedded filesystem */
+func TestFileServer_Embedded_StripPrefixCannotEscapeThePublicDirectory(t *testing.T) {
+    fileSystem := fstest.MapFS{
+        "public/index.html": &fstest.MapFile{
+            Data: []byte("public-index"),
+        },
+        "secret.txt": &fstest.MapFile{
+            Data: []byte("top-secret"),
+        },
+        "templates/admin.html": &fstest.MapFile{
+            Data: []byte("admin-template"),
+        },
+    }
+
+    config := NewFileServerConfig(
+        ModeEmbedded,
+        "public",
+        "index.html",
+        "/static/",
+        false,
+        0,
+        false,
+    )
+
+    server := NewFileServer(
+        NewOptions(
+            config,
+            "",
+            fileSystem,
+        ),
+    )
+
+    for _, requestPath := range []string{
+        "http://example.com/static/../secret.txt",
+        "http://example.com/static/../templates/admin.html",
+        "http://example.com/static/./../secret.txt",
+    } {
+        _, _, body, served := server.Serve(
+            testhelper.NewHttpTestRequest(http.MethodGet, requestPath),
+            logging.NewNopLogger(),
+        )
+
+        if true == served {
+            t.Fatalf("expected %q not to be served, got body %q", requestPath, string(body))
+        }
+    }
+
+    statusCode, _, body, served := server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/static/index.html"),
+        logging.NewNopLogger(),
+    )
+
+    if false == served || 200 != statusCode || "public-index" != string(body) {
+        t.Fatalf("expected the public file to stay reachable, got served=%v status=%d body=%q", served, statusCode, string(body))
+    }
+}

@@ -165,7 +165,23 @@ transport := amqp.NewTransport(amqp.TransportConfig{
 })
 ```
 
-When the consume channel is lost, the delivery loop re-dials and re-subscribes with bounded exponential backoff (1s → 30s) and resumes on the **same** output channel, so the `melody:messagebus:consume` worker keeps running across a broker restart. The publish path drops a dead channel and retries once. `Close` stops the reconnect loop and closes only connections the transport itself dialed — never the one you passed in.
+When the consume channel is lost, the delivery loop re-dials and re-subscribes with bounded exponential backoff and resumes on the **same** output channel, so the `melody:messagebus:consume` worker keeps running across a broker restart. The publish path drops a dead channel and retries once. `Close` stops the reconnect loop and closes only connections the transport itself dialed — never the one you passed in.
+
+The backoff window is tunable through a [`ReconnectConfig`](./reconnect_config.go) (`InitialBackoff`, `MaxBackoff`, `BackoffFactor`), defaulting to 1s → 30s doubling per attempt as [`DefaultReconnectConfig`](./reconnect_config.go) declares. Set it once for every transport and backplane the provider builds with [`WithReconnectConfig`](./connection.go) — the provider-level value only reaches the ones built through `provider.NewTransport(...)` / `provider.NewServerSentEventBackplane(...)`, not the standalone `amqp.NewTransport(...)` constructor — and override it for a single transport through `TransportConfig.Reconnect`:
+
+```go
+provider := amqp.NewProvider(amqp.WithReconnectConfig(amqp.NewReconnectConfig(2*time.Second, time.Minute, 1.5)))
+
+transport := provider.NewTransport(amqp.TransportConfig{
+	Connection: connection,
+	Dialer:     provider.Dialer(dsn),
+	Queue:      "welcome_email",
+	Registry:   registry,
+	Reconnect:  amqp.NewReconnectConfig(500*time.Millisecond, 10*time.Second, 2.0),
+})
+```
+
+Unset fields keep their default, a `BackoffFactor` below 1 is refused (it would decay the wait toward zero and turn an outage into a reconnect storm), and the backoff only resets once a subscription has lived at least the initial backoff.
 
 The publish channel runs in **publisher-confirm mode**: `Send` (and the retry re-publish) reports success only after the broker acknowledged the message, and a mandatory publish that comes back as unroutable (for example the queue was deleted) or is nacked by the broker (for example a `max-length` policy with `reject-publish`) surfaces as an error instead of being silently discarded. This also protects the retry path — a re-published message is confirmed before the original delivery is acked, so a broker-side discard can never drop a message between requeues.
 

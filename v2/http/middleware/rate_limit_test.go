@@ -1,6 +1,7 @@
 package middleware
 
 import (
+    "fmt"
     nethttp "net/http"
     "net/http/httptest"
     "testing"
@@ -682,5 +683,145 @@ func TestRateLimitMiddleware_HonorsFailurePolicyAllowanceOnStoreError(t *testing
 
     if false == nextCalled {
         t.Fatalf("expected the fail-open allowance to reach the handler")
+    }
+}
+
+/* @info the non-positive guard is load-bearing: without it a configuration-sourced zero sets the ceiling to zero, the map-full check trips on the very first request and every request is denied for the process lifetime */
+func TestTokenBucketLimiter_NonPositiveMaxKeysIsIgnored(t *testing.T) {
+    limiter := NewTokenBucketLimiter(10, time.Minute)
+
+    limiter.SetMaxKeys(0)
+    if defaultMaxRateLimitKeys != limiter.maxKeys {
+        t.Fatalf("expected a zero ceiling to be ignored, got %d", limiter.maxKeys)
+    }
+
+    limiter.SetMaxKeys(-1)
+    if defaultMaxRateLimitKeys != limiter.maxKeys {
+        t.Fatalf("expected a negative ceiling to be ignored, got %d", limiter.maxKeys)
+    }
+
+    for index := 0; index < 100; index++ {
+        if false == limiter.Allow(fmt.Sprintf("client-%d", index)) {
+            t.Fatalf("expected the limiter to keep admitting unseen keys, denied at %d", index)
+        }
+    }
+}
+
+func TestSlidingWindowLimiter_NonPositiveMaxKeysIsIgnored(t *testing.T) {
+    limiter := NewSlidingWindowLimiter(10, time.Minute)
+
+    limiter.SetMaxKeys(0)
+    if defaultMaxRateLimitKeys != limiter.maxKeys {
+        t.Fatalf("expected a zero ceiling to be ignored, got %d", limiter.maxKeys)
+    }
+
+    limiter.SetMaxKeys(-1)
+    if defaultMaxRateLimitKeys != limiter.maxKeys {
+        t.Fatalf("expected a negative ceiling to be ignored, got %d", limiter.maxKeys)
+    }
+
+    for index := 0; index < 100; index++ {
+        if false == limiter.Allow(fmt.Sprintf("client-%d", index)) {
+            t.Fatalf("expected the limiter to keep admitting unseen keys, denied at %d", index)
+        }
+    }
+}
+
+/* @info the limiter is a fixed window, not a token bucket: the allowance is restored whole at the edge, so an instant straddling it admits up to twice the rate. Locked deliberately — SlidingWindowLimiter is the strict-invariant option. */
+func TestFixedWindowLimiter_RestoresTheWholeAllowanceAtTheWindowEdge(t *testing.T) {
+    clockInstance := clock.NewFrozenClock(time.Unix(0, 0).UTC())
+    limiter := NewFixedWindowLimiterWithClock(clockInstance, 100, time.Minute)
+
+    admittedBeforeEdge := 0
+    for index := 0; index < 100; index++ {
+        if true == limiter.Allow("client") {
+            admittedBeforeEdge++
+        }
+    }
+
+    if 100 != admittedBeforeEdge {
+        t.Fatalf("expected the whole allowance before the edge, got %d", admittedBeforeEdge)
+    }
+
+    if true == limiter.Allow("client") {
+        t.Fatalf("expected the allowance to be spent before the edge")
+    }
+
+    clockInstance.Advance(time.Minute)
+
+    admittedAfterEdge := 0
+    for index := 0; index < 100; index++ {
+        if true == limiter.Allow("client") {
+            admittedAfterEdge++
+        }
+    }
+
+    if 100 != admittedAfterEdge {
+        t.Fatalf("expected the whole allowance to be restored at the edge, got %d", admittedAfterEdge)
+    }
+}
+
+/* @info the strict alternative on the same traffic shape: half the allowance spent at the start and half just before the edge. The fixed window restores everything at the edge, so 150 requests land inside one trailing window; the sliding window only frees what actually aged out. */
+func TestSlidingWindowLimiter_HoldsTheRateWhereTheFixedWindowDoesNot(t *testing.T) {
+    spendHalfThenCountAtEdge := func(allow func(string) bool, advance func(time.Duration)) int {
+        for index := 0; index < 50; index++ {
+            if false == allow("client") {
+                t.Fatalf("expected the first half of the allowance to be admitted, denied at %d", index)
+            }
+        }
+
+        advance(59 * time.Second)
+
+        for index := 0; index < 50; index++ {
+            if false == allow("client") {
+                t.Fatalf("expected the second half of the allowance to be admitted, denied at %d", index)
+            }
+        }
+
+        advance(time.Second)
+
+        admittedAtEdge := 0
+        for index := 0; index < 100; index++ {
+            if true == allow("client") {
+                admittedAtEdge++
+            }
+        }
+
+        return admittedAtEdge
+    }
+
+    fixedClock := clock.NewFrozenClock(time.Unix(0, 0).UTC())
+    fixedLimiter := NewFixedWindowLimiterWithClock(fixedClock, 100, time.Minute)
+    fixedAdmitted := spendHalfThenCountAtEdge(fixedLimiter.Allow, fixedClock.Advance)
+
+    slidingClock := clock.NewFrozenClock(time.Unix(0, 0).UTC())
+    slidingLimiter := NewSlidingWindowLimiterWithClock(slidingClock, 100, time.Minute)
+    slidingAdmitted := spendHalfThenCountAtEdge(slidingLimiter.Allow, slidingClock.Advance)
+
+    if 100 != fixedAdmitted {
+        t.Fatalf("expected the fixed window to restore the whole allowance at the edge, got %d", fixedAdmitted)
+    }
+
+    if 50 != slidingAdmitted {
+        t.Fatalf("expected the sliding window to free only the aged-out half, got %d", slidingAdmitted)
+    }
+}
+
+/* @info the deprecated spelling must keep working: it is a type alias plus two forwarding constructors, so an application on the old name is unaffected */
+func TestTokenBucketLimiter_DeprecatedAliasStillConstructsTheFixedWindowLimiter(t *testing.T) {
+    var limiter *FixedWindowLimiter = NewTokenBucketLimiter(2, time.Minute)
+
+    if false == limiter.Allow("client") {
+        t.Fatalf("expected the first request to be admitted")
+    }
+
+    var aliased *TokenBucketLimiter = limiter
+
+    if false == aliased.Allow("client") {
+        t.Fatalf("expected the second request to be admitted through the alias")
+    }
+
+    if true == aliased.Allow("client") {
+        t.Fatalf("expected the allowance to be spent")
     }
 }

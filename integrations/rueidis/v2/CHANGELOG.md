@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v2.1.1] - 2026-07-24 - Rate Limiter Call Timeout on the Runtime Path
+
 ### Fixed
 
 - `rate_limit.go` — `RateLimiter.AllowWithRuntime` now applies the configured call timeout. It passed the runtime context straight through, and melody's http kernel attaches no deadline to a request context, so `WithRateLimiterCallTimeout` was dead on the exact path every http middleware uses: a Redis TCP black-hole (a partial partition, not a clean refusal) made every gated request hang under the recommended `FailureModeClosed` instead of failing fast. The runtime context is now capped with the call timeout (`context.WithTimeout` keeps the earlier deadline, so a request carrying a tighter one still wins), governing both entry points.
@@ -46,7 +48,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `v2/README.md` — documentation examples reformatted to be copy-paste runnable (wrapped in `main()` functions)
 - `Provider.Open()` signature unchanged in v2 (still accepts `containercontract.Resolver`) — contrast with v3 where it changes
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v2.1.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v2.1.1...HEAD
+
+[v2.1.1]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v2.1.0...integrations/rueidis/v2.1.1
 
 [v2.1.0]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v2.0.2...integrations/rueidis/v2.1.0
 

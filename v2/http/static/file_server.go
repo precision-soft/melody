@@ -174,7 +174,7 @@ func (instance *FileServer) Serve(
         )
     }
 
-    cleanedPath := path.Clean(requestPath)
+    cleanedPath := path.Clean("/" + requestPath)
 
     if "." == cleanedPath || "" == cleanedPath {
         cleanedPath = "/"
@@ -378,7 +378,7 @@ func (instance *FileServer) serveForStreaming(
         }
     }
 
-    cleanedPath := path.Clean(requestPath)
+    cleanedPath := path.Clean("/" + requestPath)
     if "." == cleanedPath || "" == cleanedPath {
         cleanedPath = "/"
     }

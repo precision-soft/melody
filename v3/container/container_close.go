@@ -86,18 +86,63 @@ func (instance *container) closeInternal() error {
     valueOfNodeKey := make(map[string]any, len(createdNodeKeys))
     representativeOf := make(map[string]string, len(createdNodeKeys))
     pointerRepresentative := make(map[pointerIdentity]string, len(createdNodeKeys))
+    pointerGroupMembers := make(map[pointerIdentity][]string, len(createdNodeKeys))
     valueRepresentative := make(map[any]string, len(createdNodeKeys))
     canonicalNodeKeys := make([]string, 0, len(createdNodeKeys))
+
+    nodesAreRelated := func(leftNodeKey string, rightNodeKey string) bool {
+        if dependencies, exists := instance.dependencyGraph[leftNodeKey]; true == exists {
+            if _, related := dependencies[rightNodeKey]; true == related {
+                return true
+            }
+        }
+
+        if dependencies, exists := instance.dependencyGraph[rightNodeKey]; true == exists {
+            if _, related := dependencies[leftNodeKey]; true == related {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    /* @important every zero-size allocation shares one address, so the address plus the type still cannot tell two distinct services of such a type apart; a genuine alias is one whose value came through the resolver from the other service, which is exactly the case the dependency graph records, so an unrelated node keeps its own representative and is closed on its own */
+    zeroSizeAliasRepresentative := func(nodeKey string, pointerKey pointerIdentity) (string, bool) {
+        for _, memberNodeKey := range pointerGroupMembers[pointerKey] {
+            if true == nodesAreRelated(nodeKey, memberNodeKey) {
+                return representativeOf[memberNodeKey], true
+            }
+        }
+
+        return "", false
+    }
 
     assignRepresentative := func(nodeKey string, value any) {
         if pointerKey, hasPointer := pointerKeyOf(value); true == hasPointer {
             if existingRepresentative, alreadyGrouped := pointerRepresentative[pointerKey]; true == alreadyGrouped {
-                representativeOf[nodeKey] = existingRepresentative
+                if false == isZeroSizePointerIdentity(pointerKey) {
+                    representativeOf[nodeKey] = existingRepresentative
+                    pointerGroupMembers[pointerKey] = append(pointerGroupMembers[pointerKey], nodeKey)
+
+                    return
+                }
+
+                if aliasRepresentative, aliased := zeroSizeAliasRepresentative(nodeKey, pointerKey); true == aliased {
+                    representativeOf[nodeKey] = aliasRepresentative
+                    pointerGroupMembers[pointerKey] = append(pointerGroupMembers[pointerKey], nodeKey)
+
+                    return
+                }
+
+                representativeOf[nodeKey] = nodeKey
+                pointerGroupMembers[pointerKey] = append(pointerGroupMembers[pointerKey], nodeKey)
+                canonicalNodeKeys = append(canonicalNodeKeys, nodeKey)
 
                 return
             }
 
             pointerRepresentative[pointerKey] = nodeKey
+            pointerGroupMembers[pointerKey] = append(pointerGroupMembers[pointerKey], nodeKey)
             representativeOf[nodeKey] = nodeKey
             canonicalNodeKeys = append(canonicalNodeKeys, nodeKey)
 
@@ -293,7 +338,11 @@ func (instance *container) closeInternal() error {
 
     for _, candidate := range candidates {
         pointerKey, hasPointer := pointerKeyOf(candidate.value)
-        comparableValue := false == hasPointer && true == isComparableValue(candidate.value)
+        if true == hasPointer && true == isZeroSizePointerIdentity(pointerKey) {
+            hasPointer = false
+        }
+
+        comparableValue := false == hasPointer && false == isZeroSizeValue(candidate.value) && true == isComparableValue(candidate.value)
 
         if true == hasPointer {
             if _, alreadyClosed := closedPointers[pointerKey]; true == alreadyClosed {
@@ -430,6 +479,32 @@ func isComparableValue(value any) bool {
 type pointerIdentity struct {
     pointer   uintptr
     valueType reflect.Type
+}
+
+func isZeroSizePointerIdentity(identity pointerIdentity) bool {
+    if nil == identity.valueType || reflect.Pointer != identity.valueType.Kind() {
+        return false
+    }
+
+    return 0 == identity.valueType.Elem().Size()
+}
+
+func isZeroSizeValue(value any) bool {
+    if true == internal.IsNilInterface(value) {
+        return false
+    }
+
+    reflected := reflect.ValueOf(value)
+
+    for reflect.Interface == reflected.Kind() {
+        reflected = reflected.Elem()
+    }
+
+    if reflect.Pointer != reflected.Kind() || true == reflected.IsNil() {
+        return false
+    }
+
+    return 0 == reflected.Type().Elem().Size()
 }
 
 func pointerKeyOf(value any) (pointerIdentity, bool) {

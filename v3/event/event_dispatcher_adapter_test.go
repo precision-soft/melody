@@ -235,3 +235,59 @@ func TestEventDispatcherAdapter_RegisteredEventsIsSafeForConcurrentReaders(t *te
     close(start)
     waitGroup.Wait()
 }
+
+type firstZeroSizeAdapterSubscriber struct{}
+
+func (instance *firstZeroSizeAdapterSubscriber) SubscribedEvents() map[string][]eventcontract.SubscribedEvent {
+    return map[string][]eventcontract.SubscribedEvent{
+        "zero.size.adapter.first": {
+            NewSubscribedEvent(
+                func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                    return nil
+                },
+                0,
+            ),
+        },
+    }
+}
+
+type secondZeroSizeAdapterSubscriber struct{}
+
+func (instance *secondZeroSizeAdapterSubscriber) SubscribedEvents() map[string][]eventcontract.SubscribedEvent {
+    return map[string][]eventcontract.SubscribedEvent{
+        "zero.size.adapter.second": {
+            NewSubscribedEvent(
+                func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                    return nil
+                },
+                0,
+            ),
+        },
+    }
+}
+
+func TestEventDispatcherAdapter_RemoveSubscriber_DistinctZeroSizeSubscribersKeepTheirOwnListeners(t *testing.T) {
+    dispatcher, clockInstance := testNewEventDispatcher()
+    adapter := NewEventDispatcherAdapter(dispatcher, clockInstance)
+
+    first := &firstZeroSizeAdapterSubscriber{}
+    second := &secondZeroSizeAdapterSubscriber{}
+
+    adapter.AddSubscriber(first)
+    adapter.AddSubscriber(second)
+
+    removedCount := adapter.RemoveSubscriber(first)
+    if 1 != removedCount {
+        t.Fatalf("expected 1 removed listener, got: %d", removedCount)
+    }
+
+    registeredEvents := adapter.RegisteredEvents()
+
+    if true == testHasRegisteredEventWithListeners(registeredEvents, "zero.size.adapter.first") {
+        t.Fatalf("expected the removed subscriber to lose its listener")
+    }
+
+    if false == testHasRegisteredEventWithListeners(registeredEvents, "zero.size.adapter.second") {
+        t.Fatalf("expected the other zero size subscriber to keep its listener")
+    }
+}

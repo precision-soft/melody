@@ -323,7 +323,7 @@ func (instance *Router) routeMayEndHere(remainingSegments []string) bool {
 }
 
 func (instance *Router) match(method string, path string, host string, scheme string) (httpcontract.Handler, map[string]string, map[string]any) {
-    pathParts := splitPath(path)
+    pathParts := splitRequestPath(path)
 
     pathSegments := pathParts
     if 1 <= len(pathSegments) {

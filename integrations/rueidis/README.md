@@ -3,6 +3,7 @@
 This integration provides:
 
 * A small `Provider` that opens a `rueidis.Client` from Melody config parameters.
+* A Redis-backed distributed rate limiter for the core `http/middleware` rate-limit middleware.
 * A Redis-backed Melody cache backend implemented on top of Rueidis.
 * A Redis-backed revocable token store for the core `security` package (v3 binding only).
 
@@ -16,6 +17,41 @@ Optional configuration:
 
 * [`ClientConfig`](./client_config.go) (client name, DB selection, TLS, disable client-side cache, ping on start)
 * [`TimeoutConfig`](./timeout_config.go) (connect / command timeouts)
+
+## Rate limiter
+
+Entry point: [`NewRateLimiter`](./rate_limit.go)
+
+A Redis-backed fixed-window limiter shared by every application instance — the distributed drop-in for the in-process limiters of the core `http/middleware` package. It implements both `http/contract.RateLimiter` and `http/contract.RuntimeRateLimiter`, so it goes straight into a `middleware.RateLimitConfig`. The counter is incremented atomically in a single Lua round trip, so N instances enforce one shared limit; because the window is fixed rather than sliding, up to twice the limit can pass across a window edge.
+
+```go
+package main
+
+func main() {
+	limiter := rueidisintegration.NewRateLimiter(client, 60, time.Minute)
+
+	rateLimit := middleware.RateLimitMiddleware(
+		middleware.NewRateLimitConfig(limiter, nil, nil),
+	)
+}
+```
+
+The limiter surface:
+
+* `Allow(key)` — the context-less entry point; it bounds its own round trip with the call timeout.
+* `AllowWithRuntime(runtimeInstance, key)` — the entry point the rate-limit middleware prefers; it caps the request context with the call timeout, so a request that already carries a tighter deadline keeps it while a request with no deadline still fails fast, and it reports the store failure alongside the decision.
+* `Reset(key)` — drops the counter for one key, best-effort; a store failure is only reported through the error observer.
+
+Keys live under the `melody:rate_limit:` prefix, so the limiter shares a Redis instance with the cache and the lock without colliding.
+
+Optional configuration:
+
+* [`WithRateLimiterKeyPrefix(prefix)`](./rate_limit.go) — the key prefix, default `melody:rate_limit:`.
+* [`WithRateLimiterFailureMode(mode)`](./rate_limit.go) — `FailureModeClosed` (the default) or `FailureModeOpen`.
+* [`WithRateLimiterOnError(handler)`](./rate_limit.go) — observes store failures, including the ones `Allow` and `Reset` cannot return.
+* [`WithRateLimiterCallTimeout(timeout)`](./rate_limit.go) — bounds one store round trip, default 250 milliseconds. A non-positive value falls back to the default.
+
+**The limiter is fail-closed by default.** When Redis cannot be reached, every limited route denies traffic — the right default for login and one-time-password endpoints, where an outage must not lift the limit, but it also means a Redis outage takes those routes down with it. Pick `FailureModeOpen` deliberately for plain traffic shaping, where a store outage must not become an outage of every limited route, and wire `WithRateLimiterOnError` so the failure is visible either way. Construction panics on a nil client, a non-positive limit, or a non-positive window.
 
 ## Cache backend
 
@@ -235,7 +271,9 @@ func registerTokenStore(builder containercontract.Builder, client redis.Client) 
 
 Wire the store into an `OpaqueTokenValidator` exactly as you would the in-memory one — the firewall configuration is identical because both satisfy `securitycontract.TokenStore`.
 
-## Server-Sent Events backplane
+## Server-Sent Events backplane (v3)
+
+Entry point: [`NewServerSentEventBackplane`](./v3/server_sent_event_backplane.go) — ships in the v3 binding only (`github.com/precision-soft/melody/integrations/rueidis/v3`).
 
 `NewServerSentEventBackplane(client, hub, ...options)` makes the core `http.ServerSentEventHub` fan its broadcasts out across every application instance behind a load balancer over a Redis pub/sub channel — without it, a `Broadcast` reaches only the clients connected to the instance that emitted it. Each broadcast is published to a shared channel (`WithServerSentEventBackplaneChannel`, default `melody:sse`) tagged with a per-instance random origin; a dedicated subscription forwards the events of other instances into the hub via `DeliverLocal` and skips the echo of its own origin, so nothing is delivered twice. The subscription re-subscribes with bounded backoff after a connection drop. The same hub backs the WebSocket integration, so both transports fan out cluster-wide.
 

@@ -45,6 +45,10 @@ func Html(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontr
         routesJson = "[]"
     }
 
+    /* @important the manifest is embedded inside a single-quoted JS string literal (window.melodyRoutes = JSON.parse('...')), so a backslash or single quote in the JSON must be escaped for that context or a crafted route name/pattern would break out of the string; json.Marshal already escapes < > & and the line separators, so escaping \ and ' is sufficient (backslash first so the quote escape is not re-escaped). */
+    routesJson = strings.ReplaceAll(routesJson, `\`, `\\`)
+    routesJson = strings.ReplaceAll(routesJson, `'`, `\'`)
+
     htmlString = strings.ReplaceAll(htmlString, "{{routes_json}}", routesJson)
 
     return melodyhttp.HtmlResponse(statusCode, htmlString)

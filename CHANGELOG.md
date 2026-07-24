@@ -8,6 +8,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- security: an access control rule whose attribute list normalizes to empty is refused at construction instead of being accepted. Such a rule still matched its path, so it granted every authenticated principal and shadowed any longer-prefixed rule that would have denied — a silent privilege downgrade from a variadic call with no attribute, or from a role that a configuration value resolved to empty. Blank attributes inside a non-empty list are still trimmed
+- http: `TokenBucketLimiter` is now `FixedWindowLimiter`, with the old type name and both constructors kept as deprecated aliases so existing code is unaffected. The limiter restores the whole allowance at the window edge rather than proportionally to elapsed time, so it is a fixed-window counter and an instant straddling that edge admits up to twice the rate; the name now says so. `SlidingWindowLimiter`, which `IpRateLimit` and `UserRateLimit` already use, holds the rate over every trailing window
+
+### Fixed
+
+- event: two distinct subscribers whose types carry no fields no longer collapse onto one registration, so removing either one leaves the other's listeners registered instead of silently unregistering both. Every zero-size allocation in Go shares one address, so the registration key now pairs that address with the subscriber's concrete type, the same identity the container teardown uses
+- http: a request path that differs from a route only by leading or trailing whitespace no longer reaches that route's handler. The path was trimmed before matching, so `/admin%20`, `/admin%09`, `/admin%0a` and `/admin%c2%a0` all resolved to `/admin` — aliases a reverse proxy, ingress or firewall rule matching the exact path never sees, so a rule denying `/admin` could be walked around. Route patterns are still trimmed at registration
+- http: an empty path segment no longer satisfies a named route parameter, so `/users//profile` no longer matches `/users/:id/profile` and binds an empty identifier a handler cannot distinguish from a supplied one. A trailing catch-all still matches its bare prefix, which is what the url generator emits for an absent remainder. The url generator refuses to mint such a path in the first place, so the two stay in agreement
+- http: a static file server configured with both a strip prefix and an embedded public directory can no longer serve a file outside that directory. Stripping the prefix left a relative path, so a leading `..` survived cleaning and the join with the public directory absorbed it, past the only traversal guard; the path is re-anchored before it is cleaned. The filesystem mode was never affected — it rejects the escape twice over
+- http: the compression middleware no longer panics on a response whose header map is nil, matching the guard the cors middleware already carries. The response normalizer repairs such a response only after the middleware chain has unwound, which is too late for a middleware that runs inside it
+- logging: `EnsureLogger` replaces a typed nil logger with the no-op logger instead of returning it unchanged and letting the first call panic — the case the function exists to guard
+- container: two distinct services of one type that carries no fields are each closed at teardown instead of one of them being silently skipped. Every zero-size allocation shares a single address, so pairing that address with the concrete type still could not tell them apart; a genuine alias is one whose value came through the resolver from the other service, and that relationship is what the dependency graph already records, so an unrelated node keeps its own representative while a resolver-mediated alias is still closed exactly once
+- cache: the in-memory backend no longer holds its exclusive lock across the whole map. The periodic expiry sweep takes the keys once and expires them in chunks, releasing the lock between them, and eviction from a full cache probes a bounded number of least-recently-used entries for an expired victim instead of walking the entire recency list on every insert. `Get` takes the same exclusive lock to touch that list, so both walks stalled every concurrent request in proportion to the number of entries
+- example: the route manifest is escaped for the javascript string literal it is spliced into, so a route name or pattern containing a backslash or an apostrophe no longer breaks every page's scripting (the escaping v3 already carried); the firewall session login handler stores the token roles alongside the user identifier, and the logout handler clears them, so a session written by that handler resolves back to an authenticated token rather than an anonymous one; the embedded static build embeds dot-prefixed and underscore-prefixed paths (`all:public`), so it serves the same file set as the filesystem build
+
+## [v1.19.0] - 2026-07-24 - Per-IP Rate Limiting and Bounded Limiter Keys
+
+### Changed
+
 - rate limit: the default key extractor now keys on the client IP alone instead of `ip:path`. `SimpleRateLimit(n)` is therefore a true per-IP budget of `n` requests per minute rather than `n` per IP per path — a client that varied the path could previously never trip the limit. **Behavioural change**: an application relying on the old per-path budgets must set a path-aware `KeyExtractor` explicitly. Both limiters also bound how many distinct keys they track (`SetMaxKeys`, default 1,000,000): once the map is full and an idle-entry prune frees nothing, a request under an unseen key is denied rather than growing the map without bound. The reclaim walk runs at most once per window, so a full limiter cannot be made to pay a whole-map scan for every request under an unseen key
 
 ### Fixed
@@ -607,7 +626,9 @@ Lock-step release — no `v1/` changes this cycle. Tag published to keep the cor
 - `session/` — session management with file-based and in-memory storage backends
 - `validation/` — validation framework with `greaterThan`, `notEmpty`, `notBlank`, `alpha`, `alphanumeric`, `email`, `numeric`, `regex`, `minLength`, `maxLength` constraints
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v1.18.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/v1.19.0...HEAD
+
+[v1.19.0]: https://github.com/precision-soft/melody/compare/v1.18.1...v1.19.0
 
 [v1.18.1]: https://github.com/precision-soft/melody/compare/v1.18.0...v1.18.1
 

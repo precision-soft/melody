@@ -1,6 +1,7 @@
 package security
 
 import (
+    "github.com/precision-soft/melody/internal/testhelper"
     "reflect"
     "strings"
     "testing"
@@ -319,5 +320,36 @@ func TestNewAccessControlRule_LonePublicAccessIsAllowed(t *testing.T) {
     rule := NewAccessControlRule("/health", "PUBLIC_ACCESS")
     if 1 != len(rule.attributes) {
         t.Fatalf("expected exactly one attribute, got %v", rule.attributes)
+    }
+}
+
+/* @info a rule whose attributes all normalize away still matches its path, so it granted every authenticated principal and shadowed any longer-prefixed rule that would have denied; the blank attribute is refused at construction instead */
+func TestAccessControlRule_RejectsAnAttributeListThatNormalizesToEmpty(t *testing.T) {
+    for _, attributes := range [][]string{
+        {},
+        {""},
+        {"   "},
+        {"", "  "},
+    } {
+        testhelper.AssertPanics(t, func() {
+            NewAccessControlRule("/admin", attributes...)
+        })
+
+        testhelper.AssertPanics(t, func() {
+            NewAccessControlExactRule("/admin", attributes...)
+        })
+
+        testhelper.AssertPanics(t, func() {
+            NewAccessControlRegexRule("^/admin", attributes...)
+        })
+
+        testhelper.AssertPanics(t, func() {
+            NewAccessControlRuleWithSegmentPrefix("/admin", attributes...)
+        })
+    }
+
+    rule := NewAccessControlRule("/admin", "", "ROLE_ADMIN", "   ")
+    if 1 != len(rule.attributes) || "ROLE_ADMIN" != rule.attributes[0] {
+        t.Fatalf("expected the blank attributes to be trimmed from a non-empty list, got %v", rule.attributes)
     }
 }

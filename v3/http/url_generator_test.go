@@ -366,3 +366,35 @@ func TestGeneratePath_NonTerminalCatchAllDropsTrailingLiterals(t *testing.T) {
         t.Fatalf("the generated catch-all url must be servable by its own router, %q did not match", pathValue)
     }
 }
+
+/* @info the generator and the matcher must agree: matchPath refuses an empty segment for a named parameter, so the generator must refuse to mint one rather than hand back a url that answers 404 */
+func TestGeneratePath_RejectsAnEmptyRequiredParameter(t *testing.T) {
+    routeRegistry := NewRouteRegistry()
+    router := NewRouterWithRouteRegistry(routeRegistry)
+    generator := NewUrlGenerator(routeRegistry)
+
+    router.HandleWithOptions(
+        "/users/:id/profile",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return EmptyResponse(200), nil
+        },
+        NewRouteOptions("users.profile", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
+    )
+
+    if _, err := generator.GeneratePath("users.profile", map[string]string{"id": ""}); nil == err {
+        t.Fatalf("expected an empty required parameter to be refused")
+    }
+
+    generatedPath, err := generator.GeneratePath("users.profile", map[string]string{"id": "7"})
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if "/users/7/profile" != generatedPath {
+        t.Fatalf("unexpected generated path: %s", generatedPath)
+    }
+
+    if _, matched := router.Match(nethttp.MethodGet, generatedPath, "", ""); false == matched {
+        t.Fatalf("expected the generated path to be routable")
+    }
+}

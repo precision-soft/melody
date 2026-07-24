@@ -754,3 +754,208 @@ func TestContainer_Close_PanickingErrorMessageIsContainedAndRecorded(t *testing.
         t.Fatalf("expected a repeated Close to report the same teardown error, got %v and %v", closeErr, repeatedErr)
     }
 }
+
+type zeroSizeCloserOne struct{}
+
+func (instance *zeroSizeCloserOne) Close() error {
+    zeroSizeCloserOneClosed = true
+    return nil
+}
+
+type zeroSizeCloserTwo struct{}
+
+func (instance *zeroSizeCloserTwo) Close() error {
+    zeroSizeCloserTwoClosed = true
+    return nil
+}
+
+var (
+    zeroSizeCloserOneClosed = false
+    zeroSizeCloserTwoClosed = false
+)
+
+func TestContainer_Close_DistinctZeroSizeServicesEachClose(t *testing.T) {
+    zeroSizeCloserOneClosed = false
+    zeroSizeCloserTwoClosed = false
+
+    serviceContainer := NewContainer()
+
+    MustRegister[*zeroSizeCloserOne](
+        serviceContainer,
+        "zero.size.one",
+        func(resolver containercontract.Resolver) (*zeroSizeCloserOne, error) {
+            return &zeroSizeCloserOne{}, nil
+        },
+    )
+
+    MustRegister[*zeroSizeCloserTwo](
+        serviceContainer,
+        "zero.size.two",
+        func(resolver containercontract.Resolver) (*zeroSizeCloserTwo, error) {
+            return &zeroSizeCloserTwo{}, nil
+        },
+    )
+
+    _ = MustFromResolver[*zeroSizeCloserOne](serviceContainer, "zero.size.one")
+    _ = MustFromResolver[*zeroSizeCloserTwo](serviceContainer, "zero.size.two")
+
+    if err := serviceContainer.Close(); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    if false == zeroSizeCloserOneClosed {
+        t.Fatalf("expected the first zero-size service to be closed")
+    }
+
+    if false == zeroSizeCloserTwoClosed {
+        t.Fatalf("expected the second zero-size service to be closed")
+    }
+}
+
+type firstFieldOuterCloser struct {
+    inner   firstFieldInnerCloser
+    counter *int
+    lock    *sync.Mutex
+}
+
+func (instance *firstFieldOuterCloser) Close() error {
+    instance.lock.Lock()
+    defer instance.lock.Unlock()
+
+    *instance.counter++
+
+    return nil
+}
+
+type firstFieldInnerCloser struct {
+    counter *int
+    lock    *sync.Mutex
+}
+
+func (instance *firstFieldInnerCloser) Close() error {
+    instance.lock.Lock()
+    defer instance.lock.Unlock()
+
+    *instance.counter += 10
+
+    return nil
+}
+
+func TestContainer_Close_FirstFieldPointerAliasEachClose(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var lock sync.Mutex
+    count := 0
+
+    outer := &firstFieldOuterCloser{counter: &count, lock: &lock}
+    outer.inner = firstFieldInnerCloser{counter: &count, lock: &lock}
+
+    MustRegister[*firstFieldOuterCloser](
+        serviceContainer,
+        "first.field.outer",
+        func(resolver containercontract.Resolver) (*firstFieldOuterCloser, error) {
+            return outer, nil
+        },
+    )
+
+    MustRegister[*firstFieldInnerCloser](
+        serviceContainer,
+        "first.field.inner",
+        func(resolver containercontract.Resolver) (*firstFieldInnerCloser, error) {
+            return &outer.inner, nil
+        },
+    )
+
+    _ = MustFromResolver[*firstFieldOuterCloser](serviceContainer, "first.field.outer")
+    _ = MustFromResolver[*firstFieldInnerCloser](serviceContainer, "first.field.inner")
+
+    if err := serviceContainer.Close(); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    lock.Lock()
+    defer lock.Unlock()
+
+    if 11 != count {
+        t.Fatalf("expected both the outer and the first-field-aliased inner service to close, got counter %d", count)
+    }
+}
+
+type sameTypeZeroSizeCloser struct{}
+
+var sameTypeZeroSizeCloseCount = 0
+
+func (instance *sameTypeZeroSizeCloser) Close() error {
+    sameTypeZeroSizeCloseCount = sameTypeZeroSizeCloseCount + 1
+
+    return nil
+}
+
+/* @info two distinct services of one zero-size type share an address, so pairing the address with the type is not enough to tell them apart; without the dependency-graph qualifier the second one was collapsed onto the first and never closed */
+func TestContainer_Close_DistinctServicesOfOneZeroSizeTypeEachClose(t *testing.T) {
+    sameTypeZeroSizeCloseCount = 0
+
+    serviceContainer := NewContainer()
+
+    MustRegister[*sameTypeZeroSizeCloser](
+        serviceContainer,
+        "same.type.zero.size.first",
+        func(resolver containercontract.Resolver) (*sameTypeZeroSizeCloser, error) {
+            return &sameTypeZeroSizeCloser{}, nil
+        },
+    )
+
+    MustRegister[*sameTypeZeroSizeCloser](
+        serviceContainer,
+        "same.type.zero.size.second",
+        func(resolver containercontract.Resolver) (*sameTypeZeroSizeCloser, error) {
+            return &sameTypeZeroSizeCloser{}, nil
+        },
+        WithoutTypeRegistration(),
+    )
+
+    _ = MustFromResolver[*sameTypeZeroSizeCloser](serviceContainer, "same.type.zero.size.first")
+    _ = MustFromResolver[*sameTypeZeroSizeCloser](serviceContainer, "same.type.zero.size.second")
+
+    if err := serviceContainer.Close(); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    if 2 != sameTypeZeroSizeCloseCount {
+        t.Fatalf("expected both distinct zero-size services to be closed, got %d", sameTypeZeroSizeCloseCount)
+    }
+}
+
+/* @info the mirror case: a service whose provider hands back what it resolved from another service holds the same instance, and the dependency edge proves it, so the shared instance is still closed exactly once */
+func TestContainer_Close_ResolverMediatedZeroSizeAliasClosesOnce(t *testing.T) {
+    sameTypeZeroSizeCloseCount = 0
+
+    serviceContainer := NewContainer()
+
+    MustRegister[*sameTypeZeroSizeCloser](
+        serviceContainer,
+        "zero.size.origin",
+        func(resolver containercontract.Resolver) (*sameTypeZeroSizeCloser, error) {
+            return &sameTypeZeroSizeCloser{}, nil
+        },
+    )
+
+    MustRegister[*sameTypeZeroSizeCloser](
+        serviceContainer,
+        "zero.size.alias",
+        func(resolver containercontract.Resolver) (*sameTypeZeroSizeCloser, error) {
+            return FromResolver[*sameTypeZeroSizeCloser](resolver, "zero.size.origin")
+        },
+        WithoutTypeRegistration(),
+    )
+
+    _ = MustFromResolver[*sameTypeZeroSizeCloser](serviceContainer, "zero.size.alias")
+
+    if err := serviceContainer.Close(); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    if 1 != sameTypeZeroSizeCloseCount {
+        t.Fatalf("expected the shared instance to be closed exactly once, got %d", sameTypeZeroSizeCloseCount)
+    }
+}

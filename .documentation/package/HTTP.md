@@ -207,6 +207,8 @@ var _ applicationcontract.HttpModule = (*ExampleHttpModule)(nil)
 
 * Route names must be unique. URL generation relies on a [`RouteRegistry`](../../http/contract/route_registry.go) entry for the route name.
 * [`UrlGeneratorMustFromContainer`](../../http/service_resolver.go) is a fail-fast helper and will panic if `ServiceUrlGenerator` is missing or has an invalid type.
+* [`RateLimitMiddleware`](../../http/middleware/rate_limit.go) keys on the client IP alone when no key extractor is given, so `SimpleRateLimit(n)` is a budget of `n` requests per minute per IP **across the whole service**, not per route. Set an explicit [`KeyExtractor`](../../http/middleware/rate_limit.go) for a per-route or per-user budget. The IP comes from the direct peer, so behind a reverse proxy every client collapses onto the proxy's address: pass [`NewForwardedClientIpResolver`](../../http/middleware/client_ip.go) to [`SetClientIpResolver`](../../http/middleware/rate_limit.go), which walks `X-Forwarded-For` against the trusted-proxy policy and falls back to the direct peer whenever the chain cannot be trusted.
+* Both in-memory limiters bound how many distinct keys they track ([`SetMaxKeys`](../../http/middleware/rate_limit.go), default 1,000,000), because the key is attacker-influenced and the map would otherwise grow without bound. Once the map is full and reclaiming idle entries frees nothing, a request under an unseen key is **denied** rather than tracked — a deliberate fail-closed choice, so size the ceiling above the distinct-client count you expect.
 
 ## Userland API
 
@@ -302,12 +304,17 @@ var _ applicationcontract.HttpModule = (*ExampleHttpModule)(nil)
     * [`type OnLimitExceeded`](../../http/middleware/rate_limit.go) (`func(httpcontract.Request) (httpcontract.Response, error)`)
     * [`type ClientIpResolver`](../../http/middleware/rate_limit.go) (`func(httpcontract.Request) string`) — optional for trusted-proxy deployments
     * [`DefaultClientIp`](../../http/middleware/rate_limit.go)
+    * [`NewForwardedClientIpResolver`](../../http/middleware/client_ip.go) — a `ClientIpResolver` that reads the client from `X-Forwarded-For` against the trusted-proxy policy; pass it to [`RateLimitConfig.SetClientIpResolver`](../../http/middleware/rate_limit.go)
     * [`SimpleRateLimit`](../../http/middleware/rate_limit.go) / [`IpRateLimit`](../../http/middleware/rate_limit.go) / [`UserRateLimit`](../../http/middleware/rate_limit.go)
     * Limiters:
-        * [`type TokenBucketLimiter`](../../http/middleware/rate_limit.go)
-        * [`NewTokenBucketLimiter`](../../http/middleware/rate_limit.go) / [`NewTokenBucketLimiterWithClock`](../../http/middleware/rate_limit.go)
+        * [`type FixedWindowLimiter`](../../http/middleware/rate_limit.go) — restores the whole allowance at the window edge rather than proportionally to elapsed time, so an instant straddling that edge can admit up to twice the rate; `SlidingWindowLimiter` holds the rate over every trailing window
+        * [`type TokenBucketLimiter`](../../http/middleware/rate_limit.go) — deprecated alias of `FixedWindowLimiter`
+        * [`NewFixedWindowLimiter`](../../http/middleware/rate_limit.go) / [`NewFixedWindowLimiterWithClock`](../../http/middleware/rate_limit.go)
+        * [`NewTokenBucketLimiter`](../../http/middleware/rate_limit.go) / [`NewTokenBucketLimiterWithClock`](../../http/middleware/rate_limit.go) — deprecated
+        * [`FixedWindowLimiter.SetMaxKeys(int)`](../../http/middleware/rate_limit.go)
         * [`type SlidingWindowLimiter`](../../http/middleware/rate_limit.go)
         * [`NewSlidingWindowLimiter`](../../http/middleware/rate_limit.go) / [`NewSlidingWindowLimiterWithClock`](../../http/middleware/rate_limit.go)
+        * [`SlidingWindowLimiter.SetMaxKeys(int)`](../../http/middleware/rate_limit.go)
 
 * Static:
     * [`StaticMiddleware`](../../http/middleware/static.go)

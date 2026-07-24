@@ -359,14 +359,32 @@ func (instance *InMemoryBackend) cleanupLoop() {
     }
 }
 
+const cleanupChunkSize = 1024
+
+const evictionProbeLimit = 8
+
+/* @important the sweep takes the keys once and then expires them in chunks, releasing the lock between chunks: Get takes the same exclusive lock to touch the recency list, so a single whole-map pass under one lock stalls every concurrent request for as long as the map is large. A key deleted meanwhile is simply not found. */
 func (instance *InMemoryBackend) cleanupExpired() {
     now := instance.clock.Now()
 
     instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
+    keys := make([]string, 0, len(instance.entries))
     for key := range instance.entries {
-        instance.deleteExpiredLocked(key, now)
+        keys = append(keys, key)
+    }
+    instance.mutex.Unlock()
+
+    for start := 0; start < len(keys); start = start + cleanupChunkSize {
+        end := start + cleanupChunkSize
+        if len(keys) < end {
+            end = len(keys)
+        }
+
+        instance.mutex.Lock()
+        for _, key := range keys[start:end] {
+            instance.deleteExpiredLocked(key, now)
+        }
+        instance.mutex.Unlock()
     }
 }
 
@@ -457,8 +475,12 @@ func (instance *InMemoryBackend) saveItemLocked(
     }
 }
 
+/* @important the walk toward the front is bounded: it looks for an expired victim before falling back to the least recently used one, and an unbounded search would make every insert into a full cache pay a whole-list scan under the exclusive lock. Expired entries are reclaimed anyway, lazily by the readers and periodically by the sweep. */
 func (instance *InMemoryBackend) evictOneLocked(now time.Time) {
-    for element := instance.lruList.Back(); nil != element; element = element.Prev() {
+    probed := 0
+    for element := instance.lruList.Back(); nil != element && evictionProbeLimit > probed; element = element.Prev() {
+        probed = probed + 1
+
         key, ok := element.Value.(string)
         if false == ok {
             instance.lruList.Remove(element)

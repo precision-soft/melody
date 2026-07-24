@@ -1,6 +1,7 @@
 package cache
 
 import (
+    "fmt"
     "math"
     "testing"
     "time"
@@ -368,5 +369,63 @@ func TestInMemoryBackend_IncrementOnFreshKeyHasNoExpiry(t *testing.T) {
 
     if "1" != string(value) {
         t.Fatalf("expected counter value 1, got %q", string(value))
+    }
+}
+
+/* @info the sweep walks a snapshot of the keys in chunks and releases the lock between them; a map larger than one chunk must still be swept whole, and the sweep must terminate */
+func TestInMemoryBackend_CleanupExpired_SweepsBeyondOneChunk(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    backend := NewInMemoryBackend(0, time.Hour, clockInstance)
+    defer backend.Close()
+
+    entryCount := cleanupChunkSize*2 + 7
+
+    for index := 0; index < entryCount; index++ {
+        _ = backend.Set(fmt.Sprintf("expiring-%d", index), []byte("value"), time.Minute)
+    }
+
+    _ = backend.Set("surviving", []byte("value"), time.Hour)
+
+    clockInstance.now = clockInstance.now.Add(2 * time.Minute)
+
+    backend.cleanupExpired()
+
+    backend.mutex.RLock()
+    remaining := len(backend.entries)
+    backend.mutex.RUnlock()
+
+    if 1 != remaining {
+        t.Fatalf("expected only the unexpired entry to survive the sweep, got %d of %d", remaining, entryCount+1)
+    }
+
+    if _, exists, _ := backend.Get("surviving"); false == exists {
+        t.Fatalf("expected the unexpired entry to survive")
+    }
+}
+
+/* @info eviction probes a bounded number of least-recently-used entries for an expired victim before falling back to the least recently used one; an unbounded search made every insert into a full cache pay a whole-list scan under the exclusive lock */
+func TestInMemoryBackend_Eviction_PrefersAnExpiredVictimWithinTheProbeWindow(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    backend := NewInMemoryBackend(3, time.Hour, clockInstance)
+    defer backend.Close()
+
+    _ = backend.Set("expiring", []byte("value"), time.Minute)
+    _ = backend.Set("keep-one", []byte("value"), time.Hour)
+    _ = backend.Set("keep-two", []byte("value"), time.Hour)
+
+    clockInstance.now = clockInstance.now.Add(2 * time.Minute)
+
+    _ = backend.Set("fresh", []byte("value"), time.Hour)
+
+    if _, exists, _ := backend.Get("expiring"); true == exists {
+        t.Fatalf("expected the expired entry to be the eviction victim")
+    }
+
+    for _, key := range []string{"keep-one", "keep-two", "fresh"} {
+        if _, exists, _ := backend.Get(key); false == exists {
+            t.Fatalf("expected %q to survive the eviction", key)
+        }
     }
 }

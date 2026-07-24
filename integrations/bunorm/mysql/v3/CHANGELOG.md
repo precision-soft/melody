@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.1.5] - 2026-07-24 - Connection-Abort Retry Markers
+
 ### Fixed
 
 - `provider.go` — transient-error detection recognises a connection abort through explicit markers for both spellings its platforms give it (`software caused connection abort` and `established connection was aborted`), aligning with the pgsql provider
@@ -86,7 +88,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Code duplicated into `integrations/bunorm/mysql/v3/`; v2 and v3 implementations maintained in parallel
 - Dependencies pinned to `bunorm/v3` and `melody/v3`
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.1.4...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.1.5...HEAD
+
+[v3.1.5]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.1.4...integrations/bunorm/mysql/v3.1.5
 
 [v3.1.4]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.1.3...integrations/bunorm/mysql/v3.1.4
 
