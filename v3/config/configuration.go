@@ -392,6 +392,17 @@ func (instance *Configuration) buildHttpConfiguration() error {
         )
     }
 
+    sessionTtl, sessionTtlErr := instance.MustGet(KernelHttpSessionTtl).Duration()
+    if nil != sessionTtlErr {
+        return exception.NewError(
+            "invalid environment value",
+            exceptioncontract.Context{
+                "environmentKey": HttpSessionTtlKey,
+            },
+            sessionTtlErr,
+        )
+    }
+
     httpConfigurationInstance, newHttpConfigurationErr := newHttpConfiguration(
         instance.MustGet(KernelHttpAddress).MustString(),
         instance.MustGet(KernelDefaultLocale).MustString(),
@@ -400,6 +411,7 @@ func (instance *Configuration) buildHttpConfiguration() error {
         httpMaxRequestBodyBytes,
         staticEnableCache,
         staticCacheMaxAge,
+        sessionTtl,
     )
     if nil != newHttpConfigurationErr {
         return exception.NewError("could not initialize the http configuration", nil, newHttpConfigurationErr)

@@ -35,7 +35,7 @@ var Migrations = migrate.NewMigrations()
 
 ### 2) Register commands from a CliModule
 
-Register the commands from a module that implements [`application/contract.CliModule`](../../../../v3/application/contract/module.go):
+Register the commands from a module that implements [`application/contract.CliModule`](../../../../v3/application/contract/cli_module.go):
 
 ```go
 package main

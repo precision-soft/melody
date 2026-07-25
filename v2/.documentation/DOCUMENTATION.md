@@ -73,6 +73,22 @@ Exclude:
 - Current API reference
 - Author guidelines / checklists
 
+### [`.documentation/UPGRADE.md`](./UPGRADE.md)
+
+Purpose: upgrade guide for an application already running Melody.
+
+Include:
+
+- One section per release, newest first, matching the release headings of `CHANGELOG.md`
+- For each change that can require an action: what changed, the symptom the upgrader sees, the remedy
+- The versioning policy a breaking change is released under
+
+Exclude:
+
+- The exhaustive list of changes (it belongs in `CHANGELOG.md`)
+- Current API reference
+- Author guidelines / checklists
+
 ### [`.documentation/package/`](./package/)
 
 Purpose: API-driven documentation for a package and its subpackages.

@@ -5,6 +5,7 @@ import (
     "regexp"
     "strconv"
     "strings"
+    "time"
 
     configcontract "github.com/precision-soft/melody/v3/config/contract"
     "github.com/precision-soft/melody/v3/exception"
@@ -23,6 +24,7 @@ func newHttpConfiguration(
     maxRequestBodyBytes int,
     staticEnableCache bool,
     staticCacheMaxAge int,
+    sessionTtl time.Duration,
 ) (*httpConfiguration, error) {
     if false == strings.Contains(address, ":") {
         address = ":" + address
@@ -36,6 +38,7 @@ func newHttpConfiguration(
         maxRequestBodyBytes: maxRequestBodyBytes,
         staticEnableCache:   staticEnableCache,
         staticCacheMaxAge:   staticCacheMaxAge,
+        sessionTtl:          sessionTtl,
     }
 
     validateErr := httpConfigurationInstance.validate()
@@ -54,6 +57,7 @@ type httpConfiguration struct {
     maxRequestBodyBytes int
     staticEnableCache   bool
     staticCacheMaxAge   int
+    sessionTtl          time.Duration
 }
 
 func (instance *httpConfiguration) Address() string {
@@ -82,6 +86,11 @@ func (instance *httpConfiguration) StaticEnableCache() bool {
 
 func (instance *httpConfiguration) StaticCacheMaxAge() int {
     return instance.staticCacheMaxAge
+}
+
+/* SessionTtl is how long a stored session stays valid. Zero, the default, stores it without an expiry. */
+func (instance *httpConfiguration) SessionTtl() time.Duration {
+    return instance.sessionTtl
 }
 
 func (instance *httpConfiguration) validate() error {
@@ -113,6 +122,11 @@ func (instance *httpConfiguration) validate() error {
     validateStaticCacheMaxAgeErr := instance.validateStaticCacheMaxAge()
     if nil != validateStaticCacheMaxAgeErr {
         return validateStaticCacheMaxAgeErr
+    }
+
+    validateSessionTtlErr := instance.validateSessionTtl()
+    if nil != validateSessionTtlErr {
+        return validateSessionTtlErr
     }
 
     return nil
@@ -238,6 +252,20 @@ func (instance *httpConfiguration) validateStaticCacheMaxAge() error {
             "static cache max age must be zero or positive",
             exceptioncontract.Context{
                 "staticCacheMaxAge": instance.staticCacheMaxAge,
+            },
+            nil,
+        )
+    }
+
+    return nil
+}
+
+func (instance *httpConfiguration) validateSessionTtl() error {
+    if 0 > instance.sessionTtl {
+        return exception.NewError(
+            "session ttl must be zero or positive",
+            exceptioncontract.Context{
+                "sessionTtl": instance.sessionTtl.String(),
             },
             nil,
         )

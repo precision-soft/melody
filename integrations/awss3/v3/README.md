@@ -60,7 +60,7 @@ app.RegisterModule(awss3.NewModule(awss3.ModuleConfig{Client: client, Bucket: "d
 
 ## Footguns & caveats
 
-- `Put` forwards the provided size to MinIO; pass `-1` when the size is unknown and the client will stream the object.
+- `Put` enforces the size you declare. A seekable body (`*bytes.Reader`, `*strings.Reader`, `multipart.File`, `*os.File`) is measured before the upload; a non-seekable one (an `http.Request.Body`) is checked as it streams and the upload is cut off before its last byte if the body turns out to be longer, so a wrong size never leaves a truncated object at the key. Memory does not scale with the body: a declared size at or below 16 MiB (MinIO's part size) is buffered so it can be rejected before any request, anything larger streams and is aborted mid-upload. Pass `-1` when the size is unknown and the client streams the object with no size check.
 - `Get` returns the object's reader after a `Stat`, so a missing object fails fast instead of erroring only on first read. Close the reader.
 - `PresignedUrl` issues a presigned GET URL valid for the given expiry.
 - The integration test (`storage_test.go`) is skipped unless `MINIO_ENDPOINT` (and `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY`) are set; it was verified against MinIO and LocalStack (the dev `docker-compose.yml` ships a LocalStack `s3` service).

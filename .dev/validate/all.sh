@@ -140,11 +140,12 @@ run_live_go_suites() {
 # watcher, the smtp cancellation watcher, the http client's redirect policy reading the header map, the
 # logger's shared writer, the message bus dispatch, the cron runner's parallel dispatch), and only the
 # detector sees them race — several of those tests assert nothing at all, so without this lane they can only
-# ever pass. No service containers needed.
+# ever pass. validation carries the process-lifetime parse and constraint memos that concurrent requests share,
+# and openapi the schema memo, so both belong here too. No service containers needed.
 RACE_SUITE_SPECIFICATION_STRING_LIST=(
-    ". ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/..."
-    "v2 ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/..."
-    "v3 ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/... ./mailer/... ./lock/... ./messagebus/..."
+    ". ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/... ./validation/..."
+    "v2 ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/... ./validation/..."
+    "v3 ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/... ./mailer/... ./lock/... ./messagebus/... ./validation/... ./openapi/..."
     "integrations/cron ./..."
     "integrations/cron/v2 ./..."
     "integrations/cron/v3 ./..."

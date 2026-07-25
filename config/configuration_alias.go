@@ -57,6 +57,10 @@ var environmentKeyAliasMap = map[string][]string{
         HttpMaxRequestBodyBytesKey,
         KernelHttpMaxRequestBodyBytes,
     },
+    HttpSessionTtlKey: {
+        HttpSessionTtlKey,
+        KernelHttpSessionTtl,
+    },
 }
 
 func (instance *Configuration) addAliasedParameterFromEnvironment(

@@ -1,0 +1,839 @@
+package main
+
+import (
+    "encoding/json"
+    "fmt"
+    "io"
+    "net"
+    "net/http"
+    "net/http/cookiejar"
+    "net/url"
+    "os"
+    "os/exec"
+    "path/filepath"
+    "regexp"
+    "strconv"
+    "strings"
+    "time"
+)
+
+/* exampleMajorListVariable names the environment variable that selects which majors the per-major example
+sections exercise. Unset means every major — the project's default run is the full run. */
+const exampleMajorListVariable = "MELODY_E2E_MAJORS"
+
+const exampleMajorListDefault = "1 2 3"
+
+/* the shared credentials the three example applications seed identically (repository/user_repository_impl.go):
+"user" holds ROLE_USER only, which is what makes the admin route below answer 403 rather than 200. */
+const (
+    exampleUsername       = "user"
+    examplePassword       = "user"
+    exampleWrongPassword  = "definitely-not-the-password"
+    exampleSessionCookie  = "MELODYSESSID"
+    exampleReadinessRoute = "/routes/"
+)
+
+/* exampleMajor names one major's .example application: where it lives in the tree and which port the harness
+serves its copy on. The ports are distinct so all three can run at once, and none of them is 8080 (the
+dev-supervised v3 example) or 18080 (stack.sh's signal-shutdown check). */
+type exampleMajor struct {
+    number            int
+    label             string
+    relativeDirectory string
+    port              int
+}
+
+var exampleMajorCatalog = []exampleMajor{
+    {number: 1, label: "v1", relativeDirectory: ".example", port: 18081},
+    {number: 2, label: "v2", relativeDirectory: "v2/.example", port: 18082},
+    {number: 3, label: "v3", relativeDirectory: "v3/.example", port: 18083},
+}
+
+/* exampleMajorList resolves the majors to exercise from MELODY_E2E_MAJORS, which accepts space or comma
+separated major numbers ("1 2 3", "1,3", "v2"). An UNSET variable means all three, so a default run drives every
+major; an empty value opts out of the per-major sections the same way clearing a backend variable opts out of
+the sections that backend gates. An unknown entry is a hard error rather than a silent narrowing of coverage. */
+func exampleMajorList() []exampleMajor {
+    raw, isSet := os.LookupEnv(exampleMajorListVariable)
+    if false == isSet {
+        raw = exampleMajorListDefault
+    }
+
+    entries := strings.FieldsFunc(raw, func(candidate rune) bool {
+        return ' ' == candidate || ',' == candidate || '\t' == candidate || '\n' == candidate
+    })
+
+    majors := make([]exampleMajor, 0, len(entries))
+
+    for _, entry := range entries {
+        number, convertErr := strconv.Atoi(strings.TrimPrefix(strings.TrimSpace(entry), "v"))
+        if nil != convertErr {
+            fail("%s: %q is not a melody major number", exampleMajorListVariable, entry)
+        }
+
+        major, exists := exampleMajorByNumber(number)
+        if false == exists {
+            fail("%s: melody has no major %d — expected one of 1, 2, 3", exampleMajorListVariable, number)
+        }
+
+        majors = append(majors, major)
+    }
+
+    return majors
+}
+
+func exampleMajorByNumber(number int) (exampleMajor, bool) {
+    for _, major := range exampleMajorCatalog {
+        if number == major.number {
+            return major, true
+        }
+    }
+
+    return exampleMajor{}, false
+}
+
+/* exampleRepositoryDirectory locates the repository root from the harness's own working directory (.dev/e2e),
+so the sections address the example applications by tree position instead of hardcoding the container path. */
+func exampleRepositoryDirectory() string {
+    workingDirectory, workingDirectoryErr := os.Getwd()
+    if nil != workingDirectoryErr {
+        fail("example application: resolve the working directory: %v", workingDirectoryErr)
+    }
+
+    return filepath.Clean(filepath.Join(workingDirectory, "..", ".."))
+}
+
+func (instance exampleMajor) directory() string {
+    return filepath.Join(exampleRepositoryDirectory(), instance.relativeDirectory)
+}
+
+func (instance exampleMajor) baseUrl() string {
+    return fmt.Sprintf("http://127.0.0.1:%d", instance.port)
+}
+
+/* runExampleApplicationCheck builds one major's .example application, boots it, drives it over real HTTP with a
+cookie jar, runs its command-line surface and shuts it down with a single SIGINT.
+
+The application is built into a workspace under the temporary directory rather than into the example itself,
+which is what keeps the coverage repeatable:
+
+  - melody derives the project directory from the location of the EXECUTABLE, so the binary sits beside the
+    .env it must read and the port override goes into a .env.local in that workspace. Nothing is written into
+    the example's own directory, so no built binary and no .env.local can be left behind there;
+  - the workspace sits outside the repository bind mount, so the file watcher that supervises the v3 example on
+    :8080 never sees a change and never restarts it mid-check.
+
+The binary is built UNTAGGED on purpose: under melody_env_embedded the env files are baked in at build time from
+the example directory, so a .env.local written into the workspace afterwards would be ignored and the
+application would fight the supervised one for :8080. */
+func runExampleApplicationCheck(major exampleMajor) {
+    workspace := filepath.Join(os.TempDir(), "melody-e2e-example-"+major.label)
+
+    prepareExampleWorkspace(major, workspace)
+    removeWorkspaceOnFailure := pushFailureCleanup(func() {
+        _ = os.RemoveAll(workspace)
+    })
+    defer func() {
+        removeWorkspaceOnFailure()
+        _ = os.RemoveAll(workspace)
+    }()
+
+    requireFreeExamplePort(major)
+
+    application := startExampleApplication(major, workspace)
+    stopApplicationOnFailure := pushFailureCleanup(application.kill)
+
+    waitForExampleReadiness(major, application)
+    pass("[%s] built from %s and answered %s on port %d", major.label, major.relativeDirectory, exampleReadinessRoute, major.port)
+
+    runExampleHttpAssertions(major)
+    runExampleCliAssertions(major, workspace)
+    assertExampleGracefulShutdown(major, application)
+
+    stopApplicationOnFailure()
+}
+
+/* prepareExampleWorkspace assembles the runnable copy: the built binary, the example's own .env, its public
+directory (the static surface the traversal probes need) and the .env.local that moves the http address off the
+port the dev container already serves. */
+func prepareExampleWorkspace(major exampleMajor, workspace string) {
+    if removeErr := os.RemoveAll(workspace); nil != removeErr {
+        fail("[%s] example application: clear the workspace %s: %v", major.label, workspace, removeErr)
+    }
+    if makeErr := os.MkdirAll(workspace, 0o755); nil != makeErr {
+        fail("[%s] example application: create the workspace %s: %v", major.label, workspace, makeErr)
+    }
+
+    directory := major.directory()
+    if _, statErr := os.Stat(filepath.Join(directory, "go.mod")); nil != statErr {
+        fail("[%s] example application: %s is not a go module: %v", major.label, directory, statErr)
+    }
+
+    build := exec.Command("go", "build", "-o", filepath.Join(workspace, "application"), ".")
+    build.Dir = directory
+    build.Env = exampleBuildEnvironment()
+
+    if buildOutput, buildErr := build.CombinedOutput(); nil != buildErr {
+        fail("[%s] example application: build %s: %v\n%s", major.label, directory, buildErr, buildOutput)
+    }
+
+    environmentFile, readErr := os.ReadFile(filepath.Join(directory, ".env"))
+    if nil != readErr {
+        fail("[%s] example application: read %s/.env: %v", major.label, directory, readErr)
+    }
+    if writeErr := os.WriteFile(filepath.Join(workspace, ".env"), environmentFile, 0o644); nil != writeErr {
+        fail("[%s] example application: write the workspace .env: %v", major.label, writeErr)
+    }
+
+    if copyErr := os.CopyFS(filepath.Join(workspace, "public"), os.DirFS(filepath.Join(directory, "public"))); nil != copyErr {
+        fail("[%s] example application: copy the public directory: %v", major.label, copyErr)
+    }
+
+    override := fmt.Sprintf("MELODY_HTTP_ADDRESS=:%d\n", major.port)
+    if writeErr := os.WriteFile(filepath.Join(workspace, ".env.local"), []byte(override), 0o644); nil != writeErr {
+        fail("[%s] example application: write the workspace .env.local: %v", major.label, writeErr)
+    }
+}
+
+/* exampleBuildEnvironment keeps the module resolution the harness itself runs under (GOWORK=off plus go on the
+path), since every example resolves the framework through its own replace directives. */
+func exampleBuildEnvironment() []string {
+    environment := []string{
+        "PATH=" + os.Getenv("PATH"),
+        "HOME=" + os.Getenv("HOME"),
+        "GOWORK=off",
+    }
+
+    if cache := os.Getenv("GOCACHE"); "" != cache {
+        environment = append(environment, "GOCACHE="+cache)
+    }
+    if modules := os.Getenv("GOMODCACHE"); "" != modules {
+        environment = append(environment, "GOMODCACHE="+modules)
+    }
+    if flags := os.Getenv("GOFLAGS"); "" != flags {
+        environment = append(environment, "GOFLAGS="+flags)
+    }
+
+    return environment
+}
+
+/* exampleRunEnvironment deliberately withholds the harness's backend variables from the application: melody
+resolves configuration from the .env files beside the executable, so the application under test runs configured
+exactly as it ships. Clearing REDIS_ADDRESS to skip the redis-backed sections therefore cannot reach in and
+reconfigure the example too. */
+func exampleRunEnvironment() []string {
+    return []string{
+        "PATH=" + os.Getenv("PATH"),
+        "HOME=" + os.Getenv("HOME"),
+    }
+}
+
+/* exampleApplication is a started example process together with the channel its exit status arrives on; Wait is
+called exactly once, in the goroutine, so both the readiness loop and the shutdown assertion can observe it. */
+type exampleApplication struct {
+    major    exampleMajor
+    command  *exec.Cmd
+    exitList chan error
+    logPath  string
+}
+
+func (instance *exampleApplication) kill() {
+    if nil == instance.command || nil == instance.command.Process {
+        return
+    }
+
+    _ = instance.command.Process.Kill()
+}
+
+/* logTail returns the last lines the application wrote, for the diagnostics that must say WHY the section could
+not run rather than blaming the property under test. */
+func (instance *exampleApplication) logTail(lines int) string {
+    content, readErr := os.ReadFile(instance.logPath)
+    if nil != readErr {
+        return fmt.Sprintf("(the application log at %s could not be read: %v)", instance.logPath, readErr)
+    }
+
+    all := strings.Split(strings.TrimRight(string(content), "\n"), "\n")
+    if len(all) > lines {
+        all = all[len(all)-lines:]
+    }
+
+    return strings.Join(all, "\n")
+}
+
+/* requireFreeExamplePort refuses to start on an occupied port: a leftover application from an interrupted run
+would answer every probe below and the section would pass without ever exercising the freshly built binary. */
+func requireFreeExamplePort(major exampleMajor) {
+    connection, dialErr := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", major.port), time.Second)
+    if nil != dialErr {
+        return
+    }
+
+    _ = connection.Close()
+
+    fail(
+        "[%s] example application: port %d is already served — a leftover process from an interrupted run would answer for the binary under test; kill it first",
+        major.label,
+        major.port,
+    )
+}
+
+func startExampleApplication(major exampleMajor, workspace string) *exampleApplication {
+    logPath := filepath.Join(workspace, "e2e-application.log")
+
+    logFile, createErr := os.Create(logPath)
+    if nil != createErr {
+        fail("[%s] example application: create the application log: %v", major.label, createErr)
+    }
+    defer func() {
+        _ = logFile.Close()
+    }()
+
+    command := exec.Command(filepath.Join(workspace, "application"))
+    command.Dir = workspace
+    command.Env = exampleRunEnvironment()
+    command.Stdout = logFile
+    command.Stderr = logFile
+
+    if startErr := command.Start(); nil != startErr {
+        fail("[%s] example application: start the built binary: %v", major.label, startErr)
+    }
+
+    application := &exampleApplication{
+        major:    major,
+        command:  command,
+        exitList: make(chan error, 1),
+        logPath:  logPath,
+    }
+
+    go func() {
+        application.exitList <- command.Wait()
+    }()
+
+    return application
+}
+
+/* waitForExampleReadiness polls the public route until it answers, and gives up the moment the process exits —
+an application that died at boot must produce a boot diagnostic, not a readiness timeout. */
+func waitForExampleReadiness(major exampleMajor, application *exampleApplication) {
+    client := &http.Client{Timeout: 2 * time.Second}
+    deadline := time.Now().Add(60 * time.Second)
+
+    for time.Now().Before(deadline) {
+        select {
+        case exitErr := <-application.exitList:
+            fail(
+                "[%s] example application: the process exited during boot (%v), so nothing below was exercised\n%s",
+                major.label,
+                exitErr,
+                application.logTail(20),
+            )
+        default:
+        }
+
+        response, responseErr := client.Get(major.baseUrl() + exampleReadinessRoute)
+        if nil == responseErr {
+            _, _ = io.Copy(io.Discard, response.Body)
+            _ = response.Body.Close()
+
+            if http.StatusOK == response.StatusCode {
+                return
+            }
+        }
+
+        time.Sleep(200 * time.Millisecond)
+    }
+
+    fail(
+        "[%s] example application: %s never answered 200 within the readiness budget, so nothing below was exercised\n%s",
+        major.label,
+        exampleReadinessRoute,
+        application.logTail(20),
+    )
+}
+
+/* exampleClient drives one running example over HTTP. Redirects are never followed (the entry point's 302 and
+the logout redirect are the assertions themselves) and the cookie jar is what makes the login flow real: the
+session id travels back on the following requests exactly as a browser would send it. */
+type exampleClient struct {
+    major  exampleMajor
+    client *http.Client
+    jar    *cookiejar.Jar
+}
+
+func newExampleClient(major exampleMajor) *exampleClient {
+    jar, jarErr := cookiejar.New(nil)
+    if nil != jarErr {
+        fail("[%s] example application: open a cookie jar: %v", major.label, jarErr)
+    }
+
+    return &exampleClient{
+        major: major,
+        jar:   jar,
+        client: &http.Client{
+            Timeout: 10 * time.Second,
+            Jar:     jar,
+            CheckRedirect: func(request *http.Request, previous []*http.Request) error {
+                return http.ErrUseLastResponse
+            },
+        },
+    }
+}
+
+type exampleResponse struct {
+    statusCode int
+    location   string
+    body       string
+    cookieList []*http.Cookie
+}
+
+/* call issues one request against the running example. The path is joined to the base url as a raw string so an
+encoded traversal attempt ("%2e%2e") reaches the application still encoded instead of being folded away by the
+client. */
+func (instance *exampleClient) call(method string, path string, accept string, contentType string, body string) exampleResponse {
+    var reader io.Reader
+    if "" != body {
+        reader = strings.NewReader(body)
+    }
+
+    request, requestErr := http.NewRequest(method, instance.major.baseUrl()+path, reader)
+    if nil != requestErr {
+        fail("[%s] example application: build a %s %s request: %v", instance.major.label, method, path, requestErr)
+    }
+
+    if "" != accept {
+        request.Header.Set("Accept", accept)
+    }
+    if "" != contentType {
+        request.Header.Set("Content-Type", contentType)
+    }
+
+    response, responseErr := instance.client.Do(request)
+    if nil != responseErr {
+        fail("[%s] example application: %s %s: %v", instance.major.label, method, path, responseErr)
+    }
+    defer func() {
+        _ = response.Body.Close()
+    }()
+
+    payload, readErr := io.ReadAll(response.Body)
+    if nil != readErr {
+        fail("[%s] example application: read the %s %s body: %v", instance.major.label, method, path, readErr)
+    }
+
+    return exampleResponse{
+        statusCode: response.StatusCode,
+        location:   response.Header.Get("Location"),
+        body:       string(payload),
+        cookieList: response.Cookies(),
+    }
+}
+
+func (instance *exampleClient) sessionCookie() *http.Cookie {
+    base, parseErr := url.Parse(instance.major.baseUrl())
+    if nil != parseErr {
+        fail("[%s] example application: parse the base url: %v", instance.major.label, parseErr)
+    }
+
+    for _, cookie := range instance.jar.Cookies(base) {
+        if exampleSessionCookie == cookie.Name {
+            return cookie
+        }
+    }
+
+    return nil
+}
+
+/* the routes below are the surface all three example applications share, read off their own route tables
+({,v2/,v3/}.example/route/route.go and config/http.go) rather than assumed:
+
+  - /routes/ is public in every major and lists the route table, which makes it the readiness probe;
+  - /health is public in v3 but falls under the ROLE_USER catch-all in v1 and v2, so it is NOT probed here;
+  - /categories/api/read/ is the ROLE_USER route, /users/api/read/ the ROLE_ADMIN one, and the seeded "user"
+    account holds ROLE_USER only — which is what separates the 401 of an anonymous request from the 403 of an
+    authenticated one without the role. */
+const (
+    exampleRoutesRoute        = "/routes/"
+    exampleRoutesRouteNoSlash = "/routes"
+    exampleMissingRoute       = "/routes/no-such-route/"
+    exampleLoginRoute         = "/login/"
+    exampleLogoutRoute        = "/logout/"
+    exampleUserRoute          = "/categories/api/read/"
+    exampleAdminRoute         = "/users/api/read/"
+    exampleStaticAsset        = "/assets/app.css"
+)
+
+func runExampleHttpAssertions(major exampleMajor) {
+    client := newExampleClient(major)
+
+    assertExamplePublicRoutes(major, client)
+    assertExampleAnonymousRejection(major, client)
+    assertExampleLoginFlow(major, client)
+    assertExampleStaticTraversal(major, client)
+    assertExampleLogout(major, client)
+}
+
+func assertExamplePublicRoutes(major exampleMajor, client *exampleClient) {
+    listing := client.call("GET", exampleRoutesRoute, "", "", "")
+    if http.StatusOK != listing.statusCode {
+        fail("[%s] %s answered %d, wanted 200 from the public route listing", major.label, exampleRoutesRoute, listing.statusCode)
+    }
+    /* a 200 alone would also come from an error page, so the assertion is that the route table itself is in the
+       body — the application booted its routes, it did not merely open a socket */
+    if false == strings.Contains(listing.body, "example.login.submit") {
+        fail("[%s] %s answered 200 without the route table in it: %s", major.label, exampleRoutesRoute, exampleTruncate(listing.body))
+    }
+    pass("[%s] the public route listing served the booted route table", major.label)
+
+    /* the url generator emits patterns WITHOUT the trailing slash, so the form it hands to a client has to
+       resolve as well as the declared one */
+    withoutSlash := client.call("GET", exampleRoutesRouteNoSlash, "", "", "")
+    if http.StatusOK != withoutSlash.statusCode {
+        fail(
+            "[%s] %s (the form the url generator emits) answered %d while %s answered 200",
+            major.label,
+            exampleRoutesRouteNoSlash,
+            withoutSlash.statusCode,
+            exampleRoutesRoute,
+        )
+    }
+    pass("[%s] both %s and the generator's %s resolve to the same route", major.label, exampleRoutesRoute, exampleRoutesRouteNoSlash)
+
+    /* the 404 is probed under a PUBLIC prefix on purpose: anywhere else the ROLE_USER catch-all answers first
+       and the not-found handler is never reached */
+    missing := client.call("GET", exampleMissingRoute, "", "", "")
+    if http.StatusNotFound != missing.statusCode {
+        fail("[%s] %s answered %d, wanted 404 from the not-found handler", major.label, exampleMissingRoute, missing.statusCode)
+    }
+    pass("[%s] an unrouted path under a public prefix answered 404", major.label)
+}
+
+func assertExampleAnonymousRejection(major exampleMajor, client *exampleClient) {
+    anonymous := client.call("GET", exampleUserRoute, "", "", "")
+    if http.StatusUnauthorized != anonymous.statusCode {
+        fail("[%s] %s answered %d to an anonymous request, wanted 401", major.label, exampleUserRoute, anonymous.statusCode)
+    }
+    pass("[%s] the protected route rejected the anonymous request with 401", major.label)
+
+    /* the same route asked for html goes through the entry point instead, which redirects to the login page */
+    browser := client.call("GET", exampleUserRoute, "text/html", "", "")
+    if http.StatusFound != browser.statusCode {
+        fail("[%s] %s answered %d to an html request, wanted 302 from the login entry point", major.label, exampleUserRoute, browser.statusCode)
+    }
+    if false == strings.HasPrefix(browser.location, exampleLoginRoute) {
+        fail("[%s] the login entry point redirected to %q, wanted %s", major.label, browser.location, exampleLoginRoute)
+    }
+    pass("[%s] an html request for the protected route redirected to %s", major.label, exampleLoginRoute)
+}
+
+func assertExampleLoginFlow(major exampleMajor, client *exampleClient) {
+    rejected := client.call("POST", exampleLoginRoute, "", "application/json", exampleCredentialBody(exampleUsername, exampleWrongPassword))
+    if http.StatusUnauthorized != rejected.statusCode {
+        fail("[%s] login with a wrong password answered %d, wanted 401: %s", major.label, rejected.statusCode, exampleTruncate(rejected.body))
+    }
+    if nil != client.sessionCookie() {
+        fail("[%s] login with a wrong password handed out a session cookie", major.label)
+    }
+    pass("[%s] login with a wrong password was refused and issued no session", major.label)
+
+    accepted := client.call("POST", exampleLoginRoute, "", "application/json", exampleCredentialBody(exampleUsername, examplePassword))
+    if http.StatusOK != accepted.statusCode {
+        fail("[%s] login answered %d, wanted 200: %s", major.label, accepted.statusCode, exampleTruncate(accepted.body))
+    }
+    pass("[%s] login with the seeded credentials was accepted", major.label)
+
+    issued := exampleSetCookie(accepted.cookieList)
+    if nil == issued {
+        fail("[%s] login answered 200 without setting the %s cookie, so no session was published", major.label, exampleSessionCookie)
+    }
+    if "" == issued.Value {
+        fail("[%s] login set an empty %s cookie", major.label, exampleSessionCookie)
+    }
+    if false == issued.HttpOnly {
+        fail("[%s] the session cookie was set without HttpOnly, so script can read the session id", major.label)
+    }
+    if http.SameSiteDefaultMode == issued.SameSite {
+        fail("[%s] the session cookie carries no SameSite attribute", major.label)
+    }
+    pass("[%s] the session cookie is HttpOnly and carries SameSite=%s", major.label, exampleSameSiteName(issued.SameSite))
+
+    if nil == client.sessionCookie() {
+        fail("[%s] the cookie jar did not keep the session cookie, so the flow below would not be a session flow", major.label)
+    }
+
+    granted := client.call("GET", exampleUserRoute, "", "", "")
+    if http.StatusOK != granted.statusCode {
+        fail("[%s] %s answered %d after login, wanted 200 — the session did not survive the round trip", major.label, exampleUserRoute, granted.statusCode)
+    }
+    if false == strings.Contains(granted.body, "cat-1") {
+        fail("[%s] %s answered 200 after login without its payload: %s", major.label, exampleUserRoute, exampleTruncate(granted.body))
+    }
+    pass("[%s] the session loaded from the cookie admitted the protected route", major.label)
+
+    /* the seeded account holds ROLE_USER only, so the admin route must answer 403 and not 401: a 401 here would
+       mean the session was not loaded at all and the run would be proving nothing about authorization */
+    forbidden := client.call("GET", exampleAdminRoute, "", "", "")
+    if http.StatusForbidden != forbidden.statusCode {
+        fail(
+            "[%s] %s answered %d to the ROLE_USER session, wanted 403 (401 would mean the session was not loaded)",
+            major.label,
+            exampleAdminRoute,
+            forbidden.statusCode,
+        )
+    }
+    pass("[%s] the admin route answered 403 to the authenticated non-admin session", major.label)
+}
+
+/* assertExampleStaticTraversal probes the static surface with percent-encoded dot segments, which a client will
+not fold away. The served asset is asserted FIRST: without it a disabled static surface would answer every
+traversal probe with a 404 and the section would report a containment it never tested. */
+func assertExampleStaticTraversal(major exampleMajor, client *exampleClient) {
+    asset := client.call("GET", exampleStaticAsset, "", "", "")
+    if http.StatusOK != asset.statusCode {
+        fail("[%s] %s answered %d, wanted 200 — the static surface the traversal probes target is not being served", major.label, exampleStaticAsset, asset.statusCode)
+    }
+    pass("[%s] the static surface serves %s (the traversal probes below have a live target)", major.label, exampleStaticAsset)
+
+    probeList := []struct {
+        path   string
+        leaked string
+        what   string
+    }{
+        {path: "/assets/%2e%2e/%2e%2e/go.mod", leaked: "module github.com/precision-soft/melody", what: "the example's own go.mod one level above the public directory"},
+        {path: "/assets/%2e%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/etc/passwd", leaked: "root:x:", what: "/etc/passwd through the assets prefix"},
+        {path: "/%2e%2e%2f%2e%2e%2fetc/passwd", leaked: "root:x:", what: "/etc/passwd from the root of the application"},
+    }
+
+    for _, probe := range probeList {
+        response := client.call("GET", probe.path, "", "", "")
+
+        if http.StatusOK == response.statusCode {
+            fail("[%s] %s answered 200 — an encoded traversal reached %s", major.label, probe.path, probe.what)
+        }
+        if true == strings.Contains(response.body, probe.leaked) {
+            fail("[%s] %s leaked %s in a %d response", major.label, probe.path, probe.what, response.statusCode)
+        }
+    }
+
+    pass("[%s] %d encoded ../ traversal attempts stayed inside the public directory", major.label, len(probeList))
+}
+
+func assertExampleLogout(major exampleMajor, client *exampleClient) {
+    loggedOut := client.call("GET", exampleLogoutRoute, "", "", "")
+    if http.StatusFound != loggedOut.statusCode {
+        fail("[%s] %s answered %d, wanted 302", major.label, exampleLogoutRoute, loggedOut.statusCode)
+    }
+    if "/" != loggedOut.location {
+        fail("[%s] %s redirected to %q, wanted /", major.label, exampleLogoutRoute, loggedOut.location)
+    }
+    pass("[%s] logout redirected to /", major.label)
+
+    /* the jar still holds the cookie, which is the point: the session it names must no longer authenticate
+       anything, so the protected route has to answer 401 again */
+    after := client.call("GET", exampleUserRoute, "", "", "")
+    if http.StatusUnauthorized != after.statusCode {
+        fail(
+            "[%s] %s answered %d after logout, wanted 401 — the session id the client still holds still authenticates",
+            major.label,
+            exampleUserRoute,
+            after.statusCode,
+        )
+    }
+    pass("[%s] the session the client still names no longer admits the protected route", major.label)
+}
+
+func exampleCredentialBody(username string, password string) string {
+    payload, marshalErr := json.Marshal(map[string]string{
+        "username": username,
+        "password": password,
+    })
+    if nil != marshalErr {
+        fail("example application: encode the login body: %v", marshalErr)
+    }
+
+    return string(payload)
+}
+
+func exampleSetCookie(cookieList []*http.Cookie) *http.Cookie {
+    for _, cookie := range cookieList {
+        if exampleSessionCookie == cookie.Name {
+            return cookie
+        }
+    }
+
+    return nil
+}
+
+func exampleSameSiteName(sameSite http.SameSite) string {
+    switch sameSite {
+    case http.SameSiteLaxMode:
+        return "Lax"
+    case http.SameSiteStrictMode:
+        return "Strict"
+    case http.SameSiteNoneMode:
+        return "None"
+    default:
+        return "Default"
+    }
+}
+
+func exampleTruncate(body string) string {
+    body = strings.ReplaceAll(body, "\n", " ")
+    if 200 < len(body) {
+        return body[:200] + "…"
+    }
+
+    return body
+}
+
+/* exampleAnsiPattern strips the cursor and colour sequences the command output frames its sections with, so the
+assertions match on the text a reader sees rather than on the escapes around it. */
+var exampleAnsiPattern = regexp.MustCompile("\x1b\\[[0-9;]*[a-zA-Z]")
+
+/* runExampleCliAssertions exercises the command-line half of the same application. product:list declares NO
+flags in the v1 and v2 examples, so --limit is legitimately an unknown flag there; the flag layer is exercised
+through the framework's own debug:router instead, which declares the standard --format/--limit set in every
+major. */
+func runExampleCliAssertions(major exampleMajor, workspace string) {
+    information := runExampleCommand(major, workspace, "app:info")
+
+    expectedAddress := fmt.Sprintf("http_address: :%d", major.port)
+    if false == strings.Contains(information, expectedAddress) {
+        fail(
+            "[%s] app:info reported no %q, so the workspace .env.local never reached the running configuration:\n%s",
+            major.label,
+            expectedAddress,
+            exampleTail(information, 20),
+        )
+    }
+    if false == exampleReportsPositiveCount(information, "routes:") {
+        fail("[%s] app:info reported no routes, so the command booted an empty application:\n%s", major.label, exampleTail(information, 20))
+    }
+    pass("[%s] app:info booted the same configuration over the command line (http_address :%d)", major.label, major.port)
+
+    products := runExampleCommand(major, workspace, "product:list")
+    for _, expected := range []string{"NAME", "CREATED_AT", "prod-1"} {
+        if false == strings.Contains(products, expected) {
+            fail("[%s] product:list printed no %q:\n%s", major.label, expected, exampleTail(products, 20))
+        }
+    }
+    pass("[%s] product:list resolved its services and printed the seeded catalogue", major.label)
+
+    routerOutput := runExampleCommand(major, workspace, "debug:router", "--format=json", "--limit=2")
+
+    var envelope struct {
+        Data struct {
+            Items []struct {
+                Name    string `json:"name"`
+                Pattern string `json:"pattern"`
+            } `json:"items"`
+            Total int `json:"total"`
+            Limit int `json:"limit"`
+        } `json:"data"`
+    }
+
+    document := exampleJsonDocument(routerOutput)
+    if decodeErr := json.NewDecoder(strings.NewReader(document)).Decode(&envelope); nil != decodeErr {
+        fail("[%s] debug:router --format=json emitted no decodable envelope (%v):\n%s", major.label, decodeErr, exampleTail(routerOutput, 20))
+    }
+
+    if 2 != envelope.Data.Limit {
+        fail("[%s] debug:router echoed limit=%d, wanted the 2 that was passed", major.label, envelope.Data.Limit)
+    }
+    if 2 != len(envelope.Data.Items) {
+        fail("[%s] debug:router --limit=2 emitted %d items, wanted 2", major.label, len(envelope.Data.Items))
+    }
+    /* a total that is not larger than the limit would make the truncation vacuous: the flag has to have cut
+       something away for this to prove it was honoured */
+    if 2 >= envelope.Data.Total {
+        fail("[%s] debug:router reported total=%d, so --limit=2 truncated nothing", major.label, envelope.Data.Total)
+    }
+    pass("[%s] debug:router --format=json --limit=2 truncated %d routes to 2 (the flag layer)", major.label, envelope.Data.Total)
+}
+
+func runExampleCommand(major exampleMajor, workspace string, arguments ...string) string {
+    command := exec.Command(filepath.Join(workspace, "application"), arguments...)
+    command.Dir = workspace
+    command.Env = exampleRunEnvironment()
+
+    output, runErr := command.CombinedOutput()
+    plain := exampleAnsiPattern.ReplaceAllString(string(output), "")
+
+    if nil != runErr {
+        fail("[%s] %s exited %v:\n%s", major.label, strings.Join(arguments, " "), runErr, exampleTail(plain, 20))
+    }
+
+    return plain
+}
+
+/* exampleJsonDocument isolates the command's json envelope from the boot log lines printed before it: the
+configuration is logged to stdout before the file logger exists, and those lines are json objects of their own.
+The envelope is pretty printed, so its opening brace is the only line that is exactly "{". */
+func exampleJsonDocument(output string) string {
+    lines := strings.Split(output, "\n")
+
+    for index, line := range lines {
+        if "{" == strings.TrimSpace(line) {
+            return strings.Join(lines[index:], "\n")
+        }
+    }
+
+    return output
+}
+
+func exampleReportsPositiveCount(output string, label string) bool {
+    for _, line := range strings.Split(output, "\n") {
+        trimmed := strings.TrimSpace(line)
+        if false == strings.HasPrefix(trimmed, label) {
+            continue
+        }
+
+        count, convertErr := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(trimmed, label)))
+        if nil == convertErr && 0 < count {
+            return true
+        }
+    }
+
+    return false
+}
+
+func exampleTail(output string, lines int) string {
+    all := strings.Split(strings.TrimRight(output, "\n"), "\n")
+    if len(all) > lines {
+        all = all[len(all)-lines:]
+    }
+
+    return strings.Join(all, "\n")
+}
+
+/* assertExampleGracefulShutdown proves the first signal is enough. The liveness probe is taken immediately
+before the signal because an exit-zero from an application that had already left on its own would satisfy the
+status assertion while proving nothing about the graceful path. */
+func assertExampleGracefulShutdown(major exampleMajor, application *exampleApplication) {
+    client := &http.Client{Timeout: 2 * time.Second}
+
+    response, responseErr := client.Get(major.baseUrl() + exampleReadinessRoute)
+    if nil != responseErr {
+        fail("[%s] example application: the application had already stopped serving before the SIGINT (%v), so the graceful path was not exercised", major.label, responseErr)
+    }
+    _, _ = io.Copy(io.Discard, response.Body)
+    _ = response.Body.Close()
+
+    if signalErr := application.command.Process.Signal(os.Interrupt); nil != signalErr {
+        fail("[%s] example application: send SIGINT: %v", major.label, signalErr)
+    }
+
+    select {
+    case exitErr := <-application.exitList:
+        if nil != exitErr {
+            fail("[%s] one SIGINT while serving http exited %v, wanted a zero exit\n%s", major.label, exitErr, application.logTail(20))
+        }
+
+        pass("[%s] one SIGINT while serving http exited 0 with no SIGKILL needed", major.label)
+    case <-time.After(30 * time.Second):
+        application.kill()
+        <-application.exitList
+
+        fail("[%s] the application was still running 30s after one SIGINT and had to be SIGKILLed\n%s", major.label, application.logTail(20))
+    }
+}

@@ -150,6 +150,8 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
         defaults[key] = value
     }
 
+    rejectNonTrailingOptionalParameter(parts, normalizedPattern, defaults)
+
     attributes := map[string]any{}
     for key, value := range options.Attributes() {
         if "" == key {
@@ -205,6 +207,41 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
     }
 
     instance.registerRouteInTree(instance.routeTreeRoot, patternSegments, routeIndex)
+}
+
+/* an omitted optional parameter is dropped wherever it sits in the pattern, while a match only ever ends early at the tail: a pattern like "/blog/:locale?/posts" therefore lets the url generator mint "/blog/posts", which this router answers with a 404. Only a trailing optional keeps the two sides in agreement, so anything else is refused at the definition site instead of shipping links nothing serves. */
+func rejectNonTrailingOptionalParameter(parts []string, normalizedPattern string, defaults map[string]string) {
+    for index, part := range parts {
+        if false == strings.HasPrefix(part, ":") {
+            continue
+        }
+
+        if false == strings.HasSuffix(part, "?") {
+            continue
+        }
+
+        if index == len(parts)-1 {
+            continue
+        }
+
+        parameterName := strings.TrimSuffix(strings.TrimPrefix(part, ":"), "?")
+
+        /* a non-empty default keeps the segment in every path the generator mints — GeneratePath substitutes it both for an absent parameter and for one supplied empty — so the pattern stays matchable. An empty default cannot: it leaves nothing to emit, and an empty segment satisfies no parameter. */
+        if "" != defaults[parameterName] {
+            continue
+        }
+
+        exception.Panic(
+            exception.NewError(
+                "optional route parameter must be the last pattern segment unless it has a default",
+                map[string]any{
+                    "pattern":       normalizedPattern,
+                    "parameterName": parameterName,
+                },
+                nil,
+            ),
+        )
+    }
 }
 
 func (instance *Router) registerRouteInTree(root *routeTreeNode, patternSegments []string, routeIndex int) {

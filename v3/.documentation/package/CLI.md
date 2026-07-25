@@ -60,8 +60,12 @@ This subpackage provides shared helpers that commands can use for consistent out
 
 - Printing and rendering:
     - [`output.Printer`](../../cli/output/printer.go)
-    - [`output.Render(...)`](../../cli/output/renderer.go)
+    - [`output.Render(...)`](../../cli/output/renderer.go) — prints the envelope and then returns an **exit-coded error** when the envelope carries an error, so a failing command leaves the process with a non-zero status and a shell gate such as `app debug:container app.missing || exit 1` holds. That error is pre-marked as logged, since the rendered envelope already carries the full report; a printing failure is still returned as a plain error.
     - [`output.SelectPrinter(option output.Option) output.Printer`](../../cli/output/printer_selector.go)
+
+- List payloads:
+    - [`output.NewListPayload(items []T, total int, limit int, offset int) output.ListPayload[T]`](../../cli/output/list_payload.go)
+    - [`output.WindowItems(items []T, limit int, offset int) []T`](../../cli/output/list_payload.go) — the shared `--limit`/`--offset` window over an already-ordered slice, so a command never bounds-checks the flags itself: a non-positive limit means "to the end", a negative offset is clamped to zero, and an offset past the end yields an empty window. Report `Total` from the full slice and `Items` from the window.
 
 - Table output:
     - [`output.NewTableBuilder() *output.TableBuilder`](../../cli/output/table_builder.go)
@@ -70,6 +74,29 @@ This subpackage provides shared helpers that commands can use for consistent out
 - Structured envelopes:
     - [`output.NewEnvelope(...)`](../../cli/output/envelope_factory.go)
     - [`output.Envelope`](../../cli/output/envelope.go)
+
+### Standard output flags
+
+[`output.StandardFlags()`](../../cli/output/standard_flag.go) is the shared flag set for a command that renders an envelope. [`output.DebugFlags()`](../../cli/output/standard_flag.go) returns the same flags with `--quiet` defaulted to `false` instead of `true`; the flag set is otherwise identical.
+
+| Flag             | Type   | Default (`StandardFlags`)             |
+|------------------|--------|---------------------------------------|
+| `--format`       | string | `table`                               |
+| `--no-color`     | bool   | `false`                               |
+| `--verbose`      | bool   | `false`                               |
+| `--verbosity`    | int    | `0` (accepts `-v`/`-vv`/`-vvv` through argument normalization) |
+| `--quiet`        | bool   | `true` (`false` under `DebugFlags`)   |
+| `--order`        | string | `asc`                                 |
+| `--limit`        | int    | `0` (unlimited)                       |
+| `--offset`       | int    | `0`                                   |
+| `--table-width`  | int    | `0` (built-in default)                |
+
+Note the flag is spelled `--table-width`, though its constant is `FlagNameTableMaxWidth`.
+
+Two behaviours are worth knowing before wiring a command against these, alongside the exit-code rule noted on `output.Render` above:
+
+* **`--format=json` emits the envelope document and nothing else.** [`JsonPrinter`](../../cli/output/json_printer.go) encodes the `Envelope` as indented JSON and writes no headers, banners or trailing prose, so the output pipes straight into `jq`. Selecting it also **implies `--no-color`**: [`NormalizeOption`](../../cli/output/option_parser.go) forces `NoColor` on for the json format, because a single machine-readable document must not carry ANSI escapes — passing `--no-color=false` alongside `--format=json` does not put them back.
+* **`--format` and `--order` reject an unrecognised value.** Both carry a flag `Validator`, so argument parsing fails with `unsupported output format "…", expected "table" or "json"` (respectively `unsupported sort order "…", expected "asc" or "desc"`) instead of quietly using the default. [`NormalizeOption`](../../cli/output/option_parser.go) *does* coerce an unsupported value to the default, but that is a defensive floor for an `Option` assembled in code, not the path a command-line argument takes.
 
 ## Usage
 

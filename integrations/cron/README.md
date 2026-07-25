@@ -10,7 +10,7 @@ The integration is published as independent Go modules so applications pull only
 * Melody v2 binding: [`./v2/`](./v2/) — `github.com/precision-soft/melody/integrations/cron/v2`
 * Melody v3 binding: [`./v3/`](./v3/) — `github.com/precision-soft/melody/integrations/cron/v3`
 
-The three bindings share the same exported API and behavior; they differ in the melody version they import, and the v3 binding additionally ships the built-in `k8s` template (see [Customizing the template](#customizing-the-template)). The examples below use the v3 import path; for v2, replace `/v3` with `/v2`; for v1, drop the `/v3` suffix entirely (the v1 binding lives at the module root, following Go's no-suffix convention for v0/v1).
+The three bindings share the same core exported API and behavior; they differ in the melody version they import, and the v3 binding's surface is a superset — it additionally ships the built-in `k8s` template (see [Customizing the template](#customizing-the-template)) with its errors and parameters, plus a `Commands` helper (see [Package surface](#package-surface)). The examples below use the v3 import path; for v2, replace `/v3` with `/v2`; for v1, drop the `/v3` suffix entirely (the v1 binding lives at the module root, following Go's no-suffix convention for v0/v1).
 
 ## What you get
 
@@ -61,20 +61,26 @@ The parameter names are exposed as constants:
 | _no parameter_                       | _no parameter_                  | `--heartbeat-command`     | repeatable; each value is one argv token of a custom heartbeat command. When set, overrides `--heartbeat-path`                                                                                                                                                                                                                   |
 | _no parameter_                       | _no parameter_                  | `--heartbeat-destination` | repeatable; restricts the heartbeat to the listed destinations. Values: `default` (the `--out` file), an absolute path, or a relative path matched against `dir(--out)`. When unset, the heartbeat goes to every destination                                                                                                     |
 
-Parameters are looked up only when the matching CLI flag was **not** explicitly set (urfave's `IsSet`).
+A parameter is looked up when the matching CLI flag was not explicitly set (urfave's `IsSet`) **or** when it was set to an empty value: an explicit `--user=` carries no value to use, so it falls through to `melody.cron.user` rather than forcing an empty result. Only a flag that is both set and non-empty short-circuits the cascade ([`resolveDefault`](./generate_command.go)).
 
 `--heartbeat-command` and `--heartbeat-destination` are CLI-only — they have no container-parameter fallback. The other flags (`--out`, `--logs-dir`, `--user`, `--binary`, `--heartbeat-path`, `--template`) cascade through the parameter system as described above.
 
 ## Cron expression validation
 
-The generator does **not** parse `Schedule.Minute / Hour / DayOfMonth / Month / DayOfWeek` against the crontab grammar. The only field-level checks performed at generation time are:
+The generator parses every `Schedule.Minute / Hour / DayOfMonth / Month / DayOfWeek` field against the crontab grammar and the bounds the target scheduler enforces, and **fails generation** when a field does not parse. A daemon treats one bad field as a parse error and refuses the *whole* crontab file with it — dropping every entry in that file, not just the offending one — so a bad field is caught before it can be written.
 
-* embedded whitespace (space, tab, newline, carriage return) is rejected — crontab fields must be single tokens;
-* embedded `%`, `\n`, `\r` are rejected anywhere in a rendered token (they would split or escape the line).
+The field-level checks performed at generation time are:
 
-Anything else passes through verbatim. That includes inputs that the cron daemon will silently reject at install time, e.g. `Minute: "99"`, `Hour: "abc"`, `DayOfMonth: "*/0"`, or unbalanced ranges like `"5-3"`. Validate the output before deploying — either with `crontab -T /path/to/generated/crontab` on the target host (`-T` is GNU `cronie`'s syntax-only check), with [crontab.guru](https://crontab.guru), or with a unit test that asserts on the generated entries.
+* any Unicode whitespace anywhere in a field is rejected — crontab fields must be single tokens (a vertical tab or a no-break space splits a crond line exactly as a plain space does);
+* `%`, `\n`, `\r` are rejected anywhere in a rendered token (they would split or escape the line);
+* a step on a single value (`5/2`) is rejected — the target schedulers disagree on that shape, so the explicit range must be written instead;
+* the field must parse as `*`, a number, a `low-high` range, a comma-separated list of those, and an optional `/step`, with every value inside the field's bounds.
 
-Keeping the validation surface minimal is a deliberate trade-off: a full grammar parser would either duplicate the cron daemon's own implementation (and inevitably diverge from real `cronie`/`vixie-cron`/`bsd-cron` quirks) or pull in a third-party dependency for a one-shot check.
+The bounds are `Minute` 0–59, `Hour` 0–23, `DayOfMonth` 1–31, `Month` 1–12, `DayOfWeek` 0–7 (7 aliases Sunday; the Kubernetes dialect bounds it at 6, as the robfig scheduler behind the `k8s` template does). Three-letter month and day names (`jan`, `mon`, …) are folded onto their numbers as complete range endpoints; a name glued to digits (`1jan`) or in step position stays put and fails the parse, exactly as the daemons refuse it. The `k8s` template additionally accepts a whole-field `?` in the day fields (the Quartz convention the robfig scheduler reads as the wildcard); the crontab dialects reject it.
+
+So each of `Minute: "99"`, `Hour: "abc"`, `DayOfMonth: "*/0"` and an unbalanced range like `"5-3"` is a **hard error** — `melody:cron:generate` reports `cron: entry "X" has an invalid Schedule.<field> ("...")` (wrapping [`ErrInvalidSchedule`](./errors.go)) and generation fails. On a single-destination run — the common case — that means no file is written at all. Note the multi-destination caveat below: schedule validation runs inside `Template.Render`, and `melody:cron:generate` renders and writes **one destination at a time**, so with entries routed to several files via `EntryConfig.DestinationFile` a bad schedule on a later destination leaves the earlier ones already written. A step wider than the field is the one permissive corner: it is clamped to the field's cardinality rather than rejected, because crond accepts it and admits the range's low value alone.
+
+The validation deliberately mirrors what the *generated artifact's* scheduler accepts, not one canonical grammar: the same rules drive the in-process runner, so a schedule the runner accepts is always one the generator can render.
 
 `melody:cron:generate` errors out when:
 
@@ -267,11 +273,13 @@ Render(entries []Entry, options RenderOptions) (string, error)
 }
 ```
 
-`Render` is called once per output destination — `entries` are already expanded for multi-instance and have their `Binary`/`User` defaulted; `options` carries the resolved heartbeat configuration for this specific destination. The returned string is written atomically to disk by `melody:cron:generate`. Any error (incl. `ValidateNoForbiddenChars` with your template's own forbidden-char list) aborts the generation before any file is touched.
+`Render` is called once per output destination — `entries` are already expanded for multi-instance and have their `Binary`/`User` defaulted; `options` carries the resolved heartbeat configuration for this specific destination. The returned string is written atomically to disk by `melody:cron:generate` — each individual file is a temp-file-plus-rename, so `crond` never observes a truncated crontab. Any error (including `ValidateNoForbiddenCharacters` with your template's own forbidden-character list) aborts the generation immediately.
+
+There is **no all-or-nothing guarantee across destinations.** `melody:cron:generate` walks the destinations in lexicographic order and renders and writes each one before moving to the next, so an error raised while rendering the third of four files leaves the first two already on disk and the last two absent. Per-file atomicity holds; a whole-run rollback does not. Validate a multi-destination configuration in a test, or treat a failed generation as "the output directory is now in an unknown state" and re-run once the error is fixed.
 
 ### Built-in templates
 
-`cron.BuiltinTemplates()` returns the list of templates shipped with the binding: `*CrontabTemplate{}` (`cron.TemplateNameCrontab == "crontab"`) in all three bindings, plus `*K8sTemplate{}` (`cron.TemplateNameK8s == "k8s"`) in the v3 binding only. `NewGenerateCommand` iterates this slice on construction, so you never register the built-ins by hand — they are always available even after you add your own.
+`cron.BuiltinTemplates()` returns the list of templates shipped with the binding: the `crontab` template (`cron.TemplateNameCrontab == "crontab"`) and the user-less `crontab-no-user` variant (`cron.TemplateNameCrontabNoUser == "crontab-no-user"`) in all three bindings, plus the `k8s` template (`cron.TemplateNameK8s == "k8s"`) in the v3 binding only. `NewGenerateCommand` iterates this slice on construction, so you never register the built-ins by hand — they are always available even after you add your own.
 
 ### Built-in `k8s` template (v3 binding only)
 
@@ -318,11 +326,11 @@ return "k8s_cronjob"
 }
 
 func (instance *KubernetesCronjobTemplate) Render(entries []melodycron.Entry, options melodycron.RenderOptions) (string, error) {
-forbidden := []melodycron.ForbiddenChar{
-{Char: '\t', Reason: "tabs break YAML indentation"},
+forbidden := []melodycron.ForbiddenCharacter{
+{Char: '\t', Reason: "tabs break yaml indentation"},
 }
 for _, entry := range entries {
-if validationErr := melodycron.ValidateNoForbiddenChars(entry.Command, forbidden, "k8s entry "+entry.Name); nil != validationErr {
+if validationErr := melodycron.ValidateNoForbiddenCharacters(entry.Command, forbidden, "k8s entry "+entry.Name); nil != validationErr {
 return "", validationErr
 }
 }
@@ -493,12 +501,22 @@ When no command declares a schedule and `--heartbeat-path` (after the cascade) i
 
 ## Package surface
 
-The three bindings expose the same identifiers. From any of `github.com/precision-soft/melody/integrations/cron`, `.../cron/v2`, or `.../cron/v3`:
+The v1, v2 and v3 bindings share a common core surface; **the v3 binding is a strict superset** — it additionally ships the built-in `k8s` template and its errors/parameters, plus a `Commands` helper. Do not treat the surface as identical across bindings: code written against the v3-only identifiers does not compile on v1/v2.
 
-* Types: `Schedule`, `EntryConfig`, `Configuration`, `ScheduledCommand`, `Entry`, `RenderOptions`, `GenerateCommand`, `Template`, `CrontabTemplate`, `ParameterRegistrar`, `ForbiddenChar`.
-* Constructors / helpers: `NewConfiguration`, `NewGenerateCommand`, `CommandName`, `Render`, `BuiltinTemplates`, `ValidateNoForbiddenChars`, `RegisterDefaultParameters`.
+Common to all three, from any of `github.com/precision-soft/melody/integrations/cron`, `.../cron/v2`, or `.../cron/v3`:
+
+* Types: `Schedule`, `EntryConfig`, `Configuration`, `ScheduledCommand`, `Entry`, `RenderOptions`, `GenerateCommand`, `RunnerCommand`, `RunnerDialect`, `Module`, `ModuleConfig`, `Template`, `CrontabTemplate`, `ParameterRegistrar`, `ForbiddenCharacter`.
+* Constructors / helpers: `NewConfiguration`, `NewGenerateCommand`, `NewRunnerCommand`, `NewModule`, `CommandName`, `Render`, `BuiltinTemplates`, `ValidateNoForbiddenCharacters`, `RegisterDefaultParameters`.
 * Parameter-name constants: `ParameterUser`, `ParameterLogsDir`, `ParameterBinary`, `ParameterDestinationFile`, `ParameterHeartbeatPath`, `ParameterHeartbeatAutoEnabled`, `ParameterTemplate`.
-* Template-name constants: `TemplateNameCrontab`.
-* Globals: `CrontabForbiddenChars`.
+* Template-name constants: `TemplateNameCrontab`, `TemplateNameCrontabNoUser`.
+* Globals: `CrontabForbiddenCharacters`.
+* Sentinel errors ([`./errors.go`](./errors.go)) for `errors.Is` matching: `ErrNoOutputPath`, `ErrNoLogsDir`, `ErrEntryEmptyUser`, `ErrEntryEmptyCommand`, `ErrDestinationEscape`, `ErrFieldContainsWhitespace`, `ErrSteppedSingleValue`, `ErrInvalidSchedule`, `ErrForbiddenCharacter`, `ErrTemplateNotFound`, `ErrHeartbeatUserMissing`, `ErrHeartbeatDestinationUnmatched`, `ErrHeartbeatDestinationDefaultMissing`, `ErrUnknownScheduledCommand`, `ErrDuplicateRunnerCommand`, `ErrSharedRunnerCommandFlags`, `ErrUnsupportedRunnerEntry`, `ErrUnknownRunnerDialect`.
 
-The v3 binding additionally exposes the built-in `k8s` template: `K8sTemplate`, `TemplateNameK8s`, and the `ParameterImage`/`ParameterNamespace`/`ParameterRestartPolicy` parameter-name constants.
+`ForbiddenChar`, `CrontabForbiddenChars` and `ValidateNoForbiddenChars` still exist in all three bindings as **deprecated** aliases of `ForbiddenCharacter`, `CrontabForbiddenCharacters` and `ValidateNoForbiddenCharacters` ([`./validation.go`](./validation.go)); use the spelled-out names in new code.
+
+The **v3 binding only** additionally exposes:
+
+* The built-in `k8s` template: `K8sTemplate`, `TemplateNameK8s`.
+* Its parameter-name constants: `ParameterImage`, `ParameterNamespace`, `ParameterRestartPolicy`.
+* Its sentinel errors: `ErrK8sImageMissing`, `ErrK8sInvalidRestartPolicy`, `ErrK8sInvalidName`, `ErrK8sDuplicateName`.
+* `Commands(configuration *Configuration) []clicontract.Command` ([`v3/command.go`](./v3/command.go)) — the integration's commands as a slice, for applications that wire `RegisterCliCommands` by hand instead of registering the module.

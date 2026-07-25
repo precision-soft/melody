@@ -190,7 +190,23 @@ The publish channel runs in **publisher-confirm mode**: `Send` (and the retry re
 When `DeadLetter` is `true`, the transport declares a dead-letter exchange (`<queue>.dlx`) and queue (`<queue>.dlq`), and points the main queue at it via `x-dead-letter-exchange`.
 
 - A handler success acknowledges the delivery (`Ack`).
-- A handler failure is retried under the consumer's `RetryPolicy` (max retries, base delay, optional dead-letter transport). The transport re-publishes the message carrying an incremented `x-redelivery-count` header, so the retry count survives across deliveries instead of relying on the broker's one-shot `redelivered` flag; a `DelayStamp` re-publishes through the `<queue>.delay` queue (per-message TTL, dead-lettered back to the main queue) so retries are spaced out by the configured backoff. Once the retries are exhausted the message is `Nack`ed without requeue so the broker routes it to the dead-letter exchange.
+- A handler failure is retried under the consumer's `RetryPolicy` (max retries, base delay, optional dead-letter transport). The transport re-publishes the message carrying an incremented `x-redelivery-count` header, so the retry count survives across deliveries instead of relying on the broker's one-shot `redelivered` flag; a `DelayStamp` parks the message in a delay queue that dead-letters back to the main queue, so retries are spaced out by the configured backoff (see [Delay buckets](#delay-buckets) below). Once the retries are exhausted the message is `Nack`ed without requeue so the broker routes it to the dead-letter exchange.
+
+### Delay buckets
+
+RabbitMQ expires only the **head** of a queue, so a single delay queue holding heterogeneous per-message TTLs stalls short delays behind long ones. The transport therefore declares one queue per delay tier — `<queue>.delay.<milliseconds>ms` — each with a uniform **queue-level** `x-message-ttl` and `x-dead-letter-routing-key` back to the main queue. A delayed message is parked in the largest bucket that does not exceed its requested delay, so every message in a bucket shares one TTL and no head-of-queue expiry can block another.
+
+The consequence to plan for: **an effective delay quantizes DOWN to its bucket.** With the default tiers a requested 45s delay fires at 5s, and 55m fires at 10m. [`TransportConfig.DelayBuckets`](./transport.go) overrides the tiers (ascending, positive, at most 8; a violation panics at construction) — add tiers wherever your retry policy needs the delay honoured more closely.
+
+| Requested delay | Default bucket | Queue                        |
+|-----------------|----------------|------------------------------|
+| `< 5s`          | none           | `<queue>.delay`              |
+| `5s` – `< 1m`   | `5s`           | `<queue>.delay.5000ms`       |
+| `1m` – `< 10m`  | `1m`           | `<queue>.delay.60000ms`      |
+| `10m` – `< 1h`  | `10m`          | `<queue>.delay.600000ms`     |
+| `>= 1h`         | `1h`           | `<queue>.delay.3600000ms`    |
+
+A delay **below the smallest bucket** keeps the legacy `<queue>.delay` queue with a precise per-message `expiration`, where head-of-line waiting is bounded by that smallest bucket. That queue is always declared, so messages parked by an older deployment still drain. A per-message expiration is clamped to ~49.7 days, the range RabbitMQ's 32-bit millisecond parse allows.
 - A delivery that cannot be decoded (missing or unknown `x-message-type`, bad body) is `Nack`ed without requeue. It is dead-lettered only when `DeadLetter` is enabled; otherwise the broker discards it (enable `DeadLetter` in production so undecodable deliveries are retained).
 
 ## Server-Sent Events backplane

@@ -175,17 +175,22 @@ func (instance *ConsumeCommand) consumeFrom(
     limit int64,
     concurrency int,
 ) error {
-    consumeContext, stop := signal.NotifyContext(runtimeInstance.Context(), os.Interrupt, syscall.SIGTERM)
+    signalContext, stop := signal.NotifyContext(runtimeInstance.Context(), os.Interrupt, syscall.SIGTERM)
     defer stop()
 
-    consumeRuntime := runtime.New(consumeContext, runtimeInstance.Scope(), runtimeInstance.Container())
+    /* two lifetimes, not one. The signal context stops the pull of NEW deliveries; the handler context outlives it so an in-flight handler, and above all its Ack/Nack, still run on a live context for the whole shutdownGrace. Sharing one context cancels the acknowledgement of a message whose side effects already committed, and any transport that honours the runtime context on publish then fails the Ack and lets the broker redeliver it, while a failed Nack loses the RedeliveryStamp increment so MaxRetries never converges. */
+    handlerContext, cancelHandlers := context.WithCancel(context.WithoutCancel(runtimeInstance.Context()))
+    defer cancelHandlers()
 
-    queue, receiveErr := transport.Receive(consumeRuntime)
+    signalRuntime := runtime.New(signalContext, runtimeInstance.Scope(), runtimeInstance.Container())
+    handlerRuntime := runtime.New(handlerContext, runtimeInstance.Scope(), runtimeInstance.Container())
+
+    queue, receiveErr := transport.Receive(signalRuntime)
     if nil != receiveErr {
         return receiveErr
     }
 
-    workerContext, cancelWorkers := context.WithCancel(consumeContext)
+    workerContext, cancelWorkers := context.WithCancel(signalContext)
     defer cancelWorkers()
 
     var reserved int64
@@ -210,7 +215,7 @@ func (instance *ConsumeCommand) consumeFrom(
                     return
                 case envelopeInstance, open := <-queue:
                     if false == open {
-                        if nil == consumeContext.Err() {
+                        if nil == signalContext.Err() {
                             loopErrOnce.Do(func() {
                                 loopErr = exception.NewError("transport delivery channel closed unexpectedly", nil, nil)
                             })
@@ -219,7 +224,7 @@ func (instance *ConsumeCommand) consumeFrom(
                         return
                     }
 
-                    instance.consumeRecovered(consumeRuntime, transport, envelopeInstance)
+                    instance.consumeRecovered(handlerRuntime, transport, envelopeInstance)
 
                     if limit > 0 && atomic.AddInt64(&processed, 1) >= limit {
                         cancelWorkers()
@@ -239,13 +244,14 @@ func (instance *ConsumeCommand) consumeFrom(
     select {
     case <-drained:
         return loopErr
-    case <-consumeContext.Done():
+    case <-signalContext.Done():
     }
 
     select {
     case <-drained:
         return loopErr
     case <-time.After(instance.shutdownGrace):
+        /* returning here runs the deferred cancelHandlers, so the grace is also the deadline past which whatever is still in flight is told to stop */
         return exception.NewError("consumer shutdown timed out waiting for in-flight handlers", nil, nil)
     }
 }

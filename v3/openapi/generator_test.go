@@ -460,6 +460,23 @@ func TestGenerate_StripsOptionalPathParameterMarker(t *testing.T) {
     }
 }
 
+/* a brace segment is a literal path component to the router, so an optional marker inside braces must not mint the shortened path the ":name?" spelling legitimately serves */
+func TestGenerate_BraceOptionalMarkerDoesNotMintAShortenedPath(t *testing.T) {
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "page.show", pattern: "/page/{slug?}", methods: []string{"GET"}},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+    if _, ok := document.Paths["/page"]; true == ok {
+        t.Fatalf("expected no shortened path for a brace segment the router matches literally, got %v", keysOf(document.Paths))
+    }
+
+    if 1 != len(document.Paths) {
+        t.Fatalf("expected exactly one path, got %v", keysOf(document.Paths))
+    }
+}
+
 func TestGenerate_BareWildcardGetsPositionalName(t *testing.T) {
     routes := []httpcontract.RouteDefinition{
         fakeRoute{name: "catchall", pattern: "/files/*", methods: []string{"GET"}},
@@ -638,5 +655,105 @@ func TestGenerate_ResponseWithoutBodyTypeIsDescribed(t *testing.T) {
 
     if "" != mediaType.Schema.Type {
         t.Fatalf("unexpected schema type: %s", mediaType.Schema.Type)
+    }
+}
+
+
+func TestGenerate_OptionalTailSegmentIsMirroredAsBothPaths(t *testing.T) {
+    registry := NewRegistry().Describe(
+        "page.show",
+        Descriptor{
+            Summary: "show a page",
+            Tags:    []string{"page"},
+        },
+    )
+
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "page.show", pattern: "/page/:slug?", methods: []string{"GET"}},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, registry)
+
+    long, present := document.Paths["/page/{slug}"]
+    if false == present {
+        t.Fatalf("expected the supplied-parameter path /page/{slug}, got %v", keysOf(document.Paths))
+    }
+
+    short, present := document.Paths["/page"]
+    if false == present {
+        t.Fatalf("expected the omitted-parameter path /page, got %v", keysOf(document.Paths))
+    }
+
+    if nil == short.Get || nil == long.Get {
+        t.Fatalf("expected a GET operation on both paths")
+    }
+
+    if 0 != len(short.Get.Parameters) {
+        t.Fatalf("expected no path parameter on the omitted-parameter path, got %+v", short.Get.Parameters)
+    }
+
+    if 1 != len(long.Get.Parameters) ||
+        "slug" != long.Get.Parameters[0].Name ||
+        "path" != long.Get.Parameters[0].In ||
+        false == long.Get.Parameters[0].Required {
+        t.Fatalf("expected a single required slug path parameter, got %+v", long.Get.Parameters)
+    }
+
+    if long.Get.OperationId == short.Get.OperationId {
+        t.Fatalf("expected distinct operation ids across the two paths, got %q", long.Get.OperationId)
+    }
+
+    if short.Get.Summary != long.Get.Summary || false == containsString(short.Get.Tags, "page") {
+        t.Fatalf("expected both paths to share the described operation, got %+v", short.Get)
+    }
+}
+
+func TestGenerate_OptionalTailSegmentAtTheRootMirrorsTheRootPath(t *testing.T) {
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "home", pattern: "/:locale?", methods: []string{"GET"}},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+    for _, path := range []string{"/", "/{locale}"} {
+        if _, present := document.Paths[path]; false == present {
+            t.Fatalf("expected the path %q, got %v", path, keysOf(document.Paths))
+        }
+    }
+}
+
+func TestGenerate_RequiredTailSegmentEmitsASinglePath(t *testing.T) {
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "page.show", pattern: "/page/:slug", methods: []string{"GET"}},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+    if 1 != len(document.Paths) {
+        t.Fatalf("expected a single path for a required parameter, got %v", keysOf(document.Paths))
+    }
+}
+
+func TestGenerate_MirroredPathDoesNotDisplaceARouteRegisteredThere(t *testing.T) {
+    for _, routes := range [][]httpcontract.RouteDefinition{
+        {
+            fakeRoute{name: "page.show", pattern: "/page/:slug?", methods: []string{"GET"}},
+            fakeRoute{name: "page.index", pattern: "/page", methods: []string{"GET"}},
+        },
+        {
+            fakeRoute{name: "page.index", pattern: "/page", methods: []string{"GET"}},
+            fakeRoute{name: "page.show", pattern: "/page/:slug?", methods: []string{"GET"}},
+        },
+    } {
+        document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+        operation := document.Paths["/page"].Get
+        if nil == operation {
+            t.Fatalf("expected a GET operation on /page")
+        }
+
+        if "page.index" != operation.OperationId {
+            t.Fatalf("expected the route registered at /page to own the operation, got %q", operation.OperationId)
+        }
     }
 }

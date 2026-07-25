@@ -367,6 +367,165 @@ func TestConsumeFrom_ShutdownGraceTimesOutWedgedHandler(t *testing.T) {
     }
 }
 
+type contextAwareTransport struct {
+    queue chan messagebuscontract.Envelope
+
+    ackCalls     int
+    ackErr       error
+    nackCalls    int
+    nackRequeue  bool
+    nackEnvelope messagebuscontract.Envelope
+    nackErr      error
+}
+
+func (instance *contextAwareTransport) Send(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope) error {
+    return nil
+}
+
+func (instance *contextAwareTransport) Receive(runtimeInstance runtimecontract.Runtime) (<-chan messagebuscontract.Envelope, error) {
+    return instance.queue, nil
+}
+
+func (instance *contextAwareTransport) Ack(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope) error {
+    instance.ackCalls++
+    instance.ackErr = runtimeInstance.Context().Err()
+
+    return instance.ackErr
+}
+
+func (instance *contextAwareTransport) Nack(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope, requeue bool) error {
+    instance.nackCalls++
+    instance.nackRequeue = requeue
+    instance.nackEnvelope = envelope
+    instance.nackErr = runtimeInstance.Context().Err()
+
+    return instance.nackErr
+}
+
+func (instance *contextAwareTransport) Close(runtimeInstance runtimecontract.Runtime) error {
+    return nil
+}
+
+func TestConsumeFrom_ShutdownGraceKeepsTheHandlerAndAckContextAlive(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    parentContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+    runtimeInstance := runtime.New(parentContext, serviceContainer.NewScope(), serviceContainer)
+
+    transport := &contextAwareTransport{queue: make(chan messagebuscontract.Envelope, 1)}
+    transport.queue <- NewEnvelope(consumeTestMessage{Value: 1})
+
+    started := make(chan struct{})
+    release := make(chan struct{})
+
+    var handlerContextErr error
+    locator := NewHandlerLocator()
+    RegisterHandler(locator, func(handlerRuntime runtimecontract.Runtime, message consumeTestMessage) error {
+        close(started)
+        <-release
+        handlerContextErr = handlerRuntime.Context().Err()
+
+        return nil
+    })
+
+    bus := NewManager("default", NewHandleMessageMiddleware(locator))
+    command := NewConsumeCommand(bus, nil).WithShutdownGrace(5 * time.Second)
+
+    done := make(chan error, 1)
+    go func() {
+        done <- command.consumeFrom(runtimeInstance, transport, 1, 1)
+    }()
+
+    select {
+    case <-started:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("the handler never started")
+    }
+
+    cancel()
+    close(release)
+
+    select {
+    case consumeErr := <-done:
+        if nil != consumeErr {
+            t.Fatalf("unexpected consume error: %v", consumeErr)
+        }
+    case <-time.After(10 * time.Second):
+        t.Fatalf("consumeFrom did not return after the in-flight handler finished")
+    }
+
+    if nil != handlerContextErr {
+        t.Fatalf("the shutdown signal cancelled the in-flight handler instead of letting the grace cover it: %v", handlerContextErr)
+    }
+
+    if 1 != transport.ackCalls {
+        t.Fatalf("expected exactly one ack, got %d", transport.ackCalls)
+    }
+
+    if nil != transport.ackErr {
+        t.Fatalf("the ack of a message whose side effects already committed ran on a cancelled context, so the broker redelivers it: %v", transport.ackErr)
+    }
+}
+
+func TestConsumeFrom_ShutdownGraceKeepsTheNackContextAlive(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    parentContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+    runtimeInstance := runtime.New(parentContext, serviceContainer.NewScope(), serviceContainer)
+
+    transport := &contextAwareTransport{queue: make(chan messagebuscontract.Envelope, 1)}
+    transport.queue <- NewEnvelope(consumeTestMessage{Value: 1})
+
+    started := make(chan struct{})
+    release := make(chan struct{})
+
+    locator := NewHandlerLocator()
+    RegisterHandler(locator, func(handlerRuntime runtimecontract.Runtime, message consumeTestMessage) error {
+        close(started)
+        <-release
+
+        return exception.NewError("handler always fails", nil, nil)
+    })
+
+    bus := NewManager("default", NewHandleMessageMiddleware(locator))
+    command := NewConsumeCommandWithRetry(bus, nil, RetryPolicy{MaxRetries: 2}).WithShutdownGrace(5 * time.Second)
+
+    done := make(chan error, 1)
+    go func() {
+        done <- command.consumeFrom(runtimeInstance, transport, 1, 1)
+    }()
+
+    select {
+    case <-started:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("the handler never started")
+    }
+
+    cancel()
+    close(release)
+
+    select {
+    case consumeErr := <-done:
+        if nil != consumeErr {
+            t.Fatalf("unexpected consume error: %v", consumeErr)
+        }
+    case <-time.After(10 * time.Second):
+        t.Fatalf("consumeFrom did not return after the in-flight handler finished")
+    }
+
+    if 1 != transport.nackCalls || false == transport.nackRequeue {
+        t.Fatalf("expected exactly one requeueing nack, got nackCalls=%d requeue=%v", transport.nackCalls, transport.nackRequeue)
+    }
+
+    if nil != transport.nackErr {
+        t.Fatalf("the requeue ran on a cancelled context, so the redelivery count never reaches the broker and MaxRetries never converges: %v", transport.nackErr)
+    }
+
+    if 1 != RedeliveryCount(transport.nackEnvelope) {
+        t.Fatalf("expected the requeued envelope to carry a redelivery count of 1, got %d", RedeliveryCount(transport.nackEnvelope))
+    }
+}
+
 func TestRetryDelay_IsCappedAndOverflowSafe(t *testing.T) {
     capped := NewConsumeCommandWithRetry(nil, nil, RetryPolicy{MaxRetries: 5, BaseDelay: time.Hour})
     if defaultMaxRetryDelay != capped.retryDelay(100) {

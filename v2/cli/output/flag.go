@@ -10,8 +10,6 @@ const (
     FlagNameVerbose       = "verbose"
     FlagNameVerbosity     = "verbosity"
     FlagNameQuiet         = "quiet"
-    FlagNameFields        = "fields"
-    FlagNameSortKey       = "sort"
     FlagNameOrder         = "order"
     FlagNameLimit         = "limit"
     FlagNameOffset        = "offset"

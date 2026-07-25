@@ -249,8 +249,6 @@ func suggestCliCommand(
             NoColor: true,
             Verbose: false,
             Quiet:   true,
-            Fields:  []string{},
-            SortKey: "",
             Order:   output.SortOrderAscending,
             Limit:   0,
             Offset:  0,

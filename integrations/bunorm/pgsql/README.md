@@ -21,7 +21,25 @@ Common parameter names:
 - `DB_USER`
 - `DB_PASSWORD`
 
-Pool and timeout defaults can be overridden via [`WithPoolConfig`](./provider.go) and [`WithTimeoutConfig`](./provider.go) using [`PoolConfig`](./pool_config.go) and [`TimeoutConfig`](./timeout_config.go).
+Pool, timeout and retry defaults can be overridden via the chainable [`WithPoolConfig`](./provider.go), [`WithTimeoutConfig`](./provider.go) and [`WithRetryConfig`](./provider.go) methods (or up front through [`NewProviderWithConfig`](./provider.go)) using [`PoolConfig`](./pool_config.go), [`TimeoutConfig`](./timeout_config.go) and [`RetryConfig`](./retry_config.go). [`TimeoutConfig`](./timeout_config.go) carries the **connect timeout only** — unlike the MySQL provider it has no read/write timeouts, because `pgdriver` exposes no separate read/write deadlines.
+
+### Defaults
+
+Applied when the matching config is not set ([`DefaultPoolConfig`](./pool_config.go), [`DefaultTimeoutConfig`](./timeout_config.go), [`DefaultRetryConfig`](./retry_config.go)):
+
+| Config          | Field                   | Default |
+|-----------------|-------------------------|---------|
+| `PoolConfig`    | `MaxOpenConnections`    | `50`    |
+| `PoolConfig`    | `MaxIdleConnections`    | `25`    |
+| `PoolConfig`    | `ConnectionMaxLifetime` | `5m`    |
+| `PoolConfig`    | `ConnectionMaxIdleTime` | `1m`    |
+| `TimeoutConfig` | `ConnectTimeout`        | `5s`    |
+| `RetryConfig`   | `MaxAttempts`           | `3`     |
+| `RetryConfig`   | `InitialDelay`          | `500ms` |
+| `RetryConfig`   | `MaxDelay`              | `5s`    |
+| `RetryConfig`   | `BackoffMultiplier`     | `2.0`   |
+
+Retrying is **opt-in**: without a `RetryConfig`, `Open` makes a single attempt.
 
 ## TLS
 

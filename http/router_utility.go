@@ -21,6 +21,8 @@ import (
     sessioncontract "github.com/precision-soft/melody/session/contract"
 )
 
+const sessionCookieSameSiteUnset = nethttp.SameSite(0)
+
 func wrapControllerWithContainer(
     controller any,
 ) httpcontract.Handler {
@@ -227,6 +229,11 @@ func writeResponse(
     persistenceRecorder, isPersistenceRecorder := writer.(sessionPersistenceRecorder)
     sessionAlreadyPersisted := true == isPersistenceRecorder && true == persistenceRecorder.SessionPersisted()
 
+    recorder, isRecorder := writer.(headerCommitRecorder)
+    responseIsDiscarded := true == isRecorder && true == recorder.HeadersWritten()
+
+    sessionInstance = republishedSession(request, sessionInstance)
+
     if false == sessionAlreadyPersisted && nil != sessionManager && nil != sessionInstance {
         sessionPersistFailed := false
 
@@ -238,47 +245,42 @@ func writeResponse(
                 logSessionPersistenceError(runtimeInstance, "failed to delete session", err)
             }
 
-            cookiePath := sessionCookiePolicy.Path
-            if "" == cookiePath {
-                cookiePath = "/"
-            }
-
             cookie := &nethttp.Cookie{
                 Name:     session.SessionCookieName,
                 Value:    "",
-                Path:     cookiePath,
+                Path:     resolveSessionCookiePath(sessionCookiePolicy),
                 Domain:   sessionCookiePolicy.Domain,
                 HttpOnly: true,
-                SameSite: sessionCookiePolicy.SameSite,
-                Secure:   "https" == detectSchemeWithForwardedHeadersPolicy(request.HttpRequest(), forwardedHeadersPolicy),
+                SameSite: resolveSessionCookieSameSite(sessionCookiePolicy),
+                Secure:   resolveSessionCookieSecure(request, forwardedHeadersPolicy, sessionCookiePolicy),
                 MaxAge:   -1,
             }
 
             SetCookie(response, cookie)
         } else if true == sessionInstance.IsModified() {
-            err := sessionManager.SaveSession(sessionInstance)
-            if nil != err {
-                /* @important same degradation as the delete path: log once and send the response without the session cookie; the session is intentionally not marked persisted so a later successful write could still commit it */
+            /* a discarded response carries no Set-Cookie, so storing a session the client does not already hold would write a row nothing can ever reference: a first-time visitor on a streamed response (Server-Sent Events commit the headers before the handler runs) would leave one unreachable session behind per reconnect. A session the request already names is stored as before, since it needs no cookie to be reachable — and the clear path above still destroys a session whatever the response does with it. */
+            if true == responseIsDiscarded && false == requestNamesSession(request, sessionInstance.Id()) {
                 sessionPersistFailed = true
-
-                logSessionPersistenceError(runtimeInstance, "failed to save session", err)
             } else {
-                cookiePath := sessionCookiePolicy.Path
-                if "" == cookiePath {
-                    cookiePath = "/"
-                }
+                err := sessionManager.SaveSession(sessionInstance)
+                if nil != err {
+                    /* @important same degradation as the delete path: log once and send the response without the session cookie; the session is intentionally not marked persisted so a later successful write could still commit it */
+                    sessionPersistFailed = true
 
-                cookie := &nethttp.Cookie{
-                    Name:     session.SessionCookieName,
-                    Value:    sessionInstance.Id(),
-                    Path:     cookiePath,
-                    Domain:   sessionCookiePolicy.Domain,
-                    HttpOnly: true,
-                    SameSite: sessionCookiePolicy.SameSite,
-                    Secure:   "https" == detectSchemeWithForwardedHeadersPolicy(request.HttpRequest(), forwardedHeadersPolicy),
-                }
+                    logSessionPersistenceError(runtimeInstance, "failed to save session", err)
+                } else {
+                    cookie := &nethttp.Cookie{
+                        Name:     session.SessionCookieName,
+                        Value:    sessionInstance.Id(),
+                        Path:     resolveSessionCookiePath(sessionCookiePolicy),
+                        Domain:   sessionCookiePolicy.Domain,
+                        HttpOnly: true,
+                        SameSite: resolveSessionCookieSameSite(sessionCookiePolicy),
+                        Secure:   resolveSessionCookieSecure(request, forwardedHeadersPolicy, sessionCookiePolicy),
+                    }
 
-                SetCookie(response, cookie)
+                    SetCookie(response, cookie)
+                }
             }
         }
 
@@ -288,8 +290,7 @@ func writeResponse(
     }
 
     /* @info a handler that streamed its own response (for example Server-Sent Events) has already committed the headers; whether it then returned no response or failed after committing, skip writing so we do not emit a superfluous WriteHeader over the in-flight stream. */
-    recorder, isRecorder := writer.(headerCommitRecorder)
-    if true == isRecorder && true == recorder.HeadersWritten() {
+    if true == responseIsDiscarded {
         closeDiscardedResponseBody(response, logging.LoggerFromRuntime(runtimeInstance))
         return
     }
@@ -305,6 +306,97 @@ func writeResponse(
             )
         }
     }
+}
+
+/* republishedSession prefers the session a handler published on the request over the one the kernel captured before routing, so rotating the session id (the session-fixation defence) reaches the store and the Set-Cookie. */
+func republishedSession(
+    request httpcontract.Request,
+    capturedSession sessioncontract.Session,
+) sessioncontract.Session {
+    publishedSession := sessionFromRequestAttribute(request)
+    if nil == publishedSession {
+        return capturedSession
+    }
+
+    return publishedSession
+}
+
+func sessionFromRequestAttribute(request httpcontract.Request) sessioncontract.Session {
+    if nil == request {
+        return nil
+    }
+
+    attributes := request.Attributes()
+    if true == internal.IsNilInterface(attributes) {
+        return nil
+    }
+
+    attributeValue, exists := attributes.Get(RequestAttributeSession)
+    if false == exists {
+        return nil
+    }
+
+    publishedSession, isSession := attributeValue.(sessioncontract.Session)
+    if false == isSession || true == internal.IsNilInterface(publishedSession) {
+        return nil
+    }
+
+    return publishedSession
+}
+
+func requestNamesSession(request httpcontract.Request, sessionId string) bool {
+    if nil == request || "" == sessionId {
+        return false
+    }
+
+    httpRequest := request.HttpRequest()
+    if nil == httpRequest {
+        return false
+    }
+
+    cookie, cookieErr := httpRequest.Cookie(session.SessionCookieName)
+    if nil != cookieErr || nil == cookie {
+        return false
+    }
+
+    return sessionId == cookie.Value
+}
+
+func resolveSessionCookiePath(sessionCookiePolicy httpcontract.SessionCookiePolicy) string {
+    if "" == sessionCookiePolicy.Path {
+        return "/"
+    }
+
+    return sessionCookiePolicy.Path
+}
+
+/* net/http has no name for the zero SameSite, and it emits no attribute for it — which is what an operator who only set Path or Domain would silently get. Treat it as unset and fall back to the framework default; SameSiteDefaultMode remains the way to ask for no attribute on purpose. */
+func resolveSessionCookieSameSite(sessionCookiePolicy httpcontract.SessionCookiePolicy) nethttp.SameSite {
+    if sessionCookieSameSiteUnset == sessionCookiePolicy.SameSite {
+        return nethttp.SameSiteLaxMode
+    }
+
+    return sessionCookiePolicy.SameSite
+}
+
+func resolveSessionCookieSecure(
+    request httpcontract.Request,
+    forwardedHeadersPolicy httpcontract.ForwardedHeadersPolicy,
+    sessionCookiePolicy httpcontract.SessionCookiePolicy,
+) bool {
+    if httpcontract.SessionCookieSecureAlways == sessionCookiePolicy.Secure {
+        return true
+    }
+
+    if httpcontract.SessionCookieSecureNever == sessionCookiePolicy.Secure {
+        return false
+    }
+
+    if nil == request {
+        return false
+    }
+
+    return "https" == detectSchemeWithForwardedHeadersPolicy(request.HttpRequest(), forwardedHeadersPolicy)
 }
 
 func logSessionPersistenceError(

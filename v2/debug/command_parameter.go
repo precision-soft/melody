@@ -156,15 +156,28 @@ func (instance *ParameterCommand) Run(
         )
     }
 
+    output.ApplySortOrder(items, option.Order)
+
+    total := len(items)
+    items = output.WindowItems(items, option.Limit, option.Offset)
+
     if output.FormatTable == option.Format {
         builder := output.NewTableBuilder()
 
-        builder.AddSummaryLine(
-            fmt.Sprintf(
-                "PARAMETERS: %d total",
-                len(items),
-            ),
+        summary := fmt.Sprintf(
+            "PARAMETERS: %d total",
+            total,
         )
+
+        if len(items) != total {
+            summary = fmt.Sprintf(
+                "%s | %d shown",
+                summary,
+                len(items),
+            )
+        }
+
+        builder.AddSummaryLine(summary)
 
         block := builder.AddBlock(
             "PARAMETERS",
@@ -187,7 +200,7 @@ func (instance *ParameterCommand) Run(
     } else {
         envelope.Data = output.NewListPayload(
             items,
-            len(items),
+            total,
             option.Limit,
             option.Offset,
         )

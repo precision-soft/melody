@@ -138,17 +138,6 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             request.Body = nethttp.MaxBytesReader(rawWriter, request.Body, int64(maxBodyBytes))
         }
 
-        sessionManager := session.SessionMustFromContainer(serviceContainer)
-        cookie, _ := request.Cookie(session.SessionCookieName)
-
-        var sessionInstance sessioncontract.Session
-        if nil != cookie {
-            sessionInstance = sessionManager.Session(cookie.Value)
-        }
-        if nil == sessionInstance {
-            sessionInstance = sessionManager.NewSession()
-        }
-
         scheme := detectSchemeWithForwardedHeadersPolicy(request, instance.options.ForwardedHeadersPolicy)
 
         matchResult, _ := instance.router.Match(
@@ -207,7 +196,6 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         }
 
         /* @important published after the route attributes so a route cannot replace what the kernel owns; the scheme is the one resolved through the configured forwarded-headers policy, which a listener has no access to — re-detecting without it reports http for every request a trusted proxy terminated as https */
-        melodyRequest.Attributes().Set(RequestAttributeSession, sessionInstance)
         melodyRequest.Attributes().Set(RequestAttributeScheme, scheme)
 
         routeName := melodyRequest.RouteName()
@@ -266,6 +254,9 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         finalResponse := (httpcontract.Response)(nil)
 
         eventDispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+
+        var sessionManager sessioncontract.Manager
+        var sessionInstance sessioncontract.Session
 
         defer func() {
             _, eventKernelTerminateErr := eventDispatcher.DispatchName(
@@ -390,6 +381,19 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 instance.options.SessionCookiePolicy,
             )
         }()
+
+        /* @important the session is loaded HERE, after the recovery defer is installed, and must not be moved back up with the rest of the request setup: both Manager.Session and Manager.NewSession turn a storage outage into a panic, and above the guard that panic escapes ServeHttp — net/http closes the connection with no response, the terminate listener never fires and the access-log line is lost */
+        sessionManager = session.SessionMustFromContainer(serviceContainer)
+
+        cookie, _ := request.Cookie(session.SessionCookieName)
+        if nil != cookie {
+            sessionInstance = sessionManager.Session(cookie.Value)
+        }
+        if nil == sessionInstance {
+            sessionInstance = sessionManager.NewSession()
+        }
+
+        melodyRequest.Attributes().Set(RequestAttributeSession, sessionInstance)
 
         kernelRequestEvent := NewKernelRequestEvent(runtimeInstance, melodyRequest)
         _, eventKernelRequestErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, kernelRequestEvent)

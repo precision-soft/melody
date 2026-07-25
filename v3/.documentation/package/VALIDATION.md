@@ -25,10 +25,7 @@ The package defines the validator service id:
 
 - [`ServiceValidator`](../../validation/const.go) (`"service.validator"`)
 
-Resolution helpers:
-
-- [`ValidatorMustFromContainer`](../../validation/service_resolver.go)
-- [`ValidatorFromContainer`](../../validation/service_resolver.go)
+Resolution helpers are documented alongside the userland API in the [Container access](#container-access-validation) section.
 
 ## Usage
 
@@ -75,6 +72,7 @@ func validateInput(input CreateUserInput) error {
 - Only exported struct fields are validated.
 - `json:"name"` influences the error field name when a non-empty json name is present.
 - `validate:"-"` disables validation for a field.
+- A struct whose **promoted json codec is `time.Time`'s** is skipped: such a value is an RFC 3339 string on the wire, `encoding/json` hands a body like that to the embedded time and populates nothing else, so no constraint declared inside the struct could be satisfied by any payload and enforcing one would reject every body the type is able to decode ([`promotesValidationTimeCodec`](../../validation/validator.go)). The `openapi` mirror advertises the same value as a `date-time` string with no properties, so the two agree. A tag on the **field holding** such a struct still applies. The promoted codec is resolved by Go's own selector rule — shallowest embedding depth wins, a tie promotes nothing — so a shallower marshaler embed that writes an object leaves the struct validated as the object it is. The skip also requires the type to refuse an object body — a struct that declares its own `UnmarshalJSON` accepting an object keeps its constraints enforced, since what a body can populate is decided by the unmarshaler, not by the marshaler the spec advertises.
 - `min`/`max` are **string byte-length** constraints (`MinLength`/`MaxLength`), not numeric range and not rune count. They stringify the value and compare `len()`, so on a numeric field they bound the number of digits, not the value — `max(value=130)` on an `int` accepts any value up to 130 bytes long. Use `greaterThan`/`lessThan` for a numeric range (as the `Age` field above does).
 - `greaterThan`/`lessThan` operate on numeric fields only and reject a non-numeric value; a floating-point `NaN` is rejected rather than silently passing the bound (`NaN` compares false against every threshold). The bound is an integer (a fractional bound is truncated toward zero), and the `openapi` generator emits the same truncated integer so the published spec matches what the server enforces.
 
@@ -106,10 +104,16 @@ func validateInput(input CreateUserInput) error {
 - [`validation.NewValidator()`](../../validation/validator.go)
 - [`validation.NewValidationError(field, message, code string, context map[string]any)`](../../validation/error.go)
 
+### Container access (validation)
+
+- [`const ServiceValidator`](../../validation/const.go)
+- [`ValidatorMustFromContainer(serviceContainer containercontract.Container)`](../../validation/service_resolver.go)
+- [`ValidatorFromContainer(serviceContainer containercontract.Container) *Validator`](../../validation/service_resolver.go) — returns `nil` rather than an error when the service cannot be resolved; the `Must` variant panics instead
+
 ### Constants
 
 - Constraints: [`ConstraintNotBlank`, `ConstraintEmail`, `ConstraintMinLength`, `ConstraintMaxLength`, `ConstraintRegex`, `ConstraintNumeric`, `ConstraintAlpha`, `ConstraintAlphanumeric`, `ConstraintGreaterThan`, `ConstraintLessThan`, `ConstraintNotEmpty`](../../validation)
-- Error codes (core): [`ErrorInvalidRuleSyntax`, `ErrorUnknownRule`](../../validation/const.go)
+- Error codes (core): [`ErrorInvalidRuleSyntax`, `ErrorUnknownRule`, `ErrorNestingDepthExceeded`](../../validation/const.go) — the last is reported against a field nested deeper than the 64-level ceiling recursive validation walks, and only when that field's type could carry a `validate` tag at all — an interface-typed member counts as one, its dynamic type being unknowable statically
 - Error codes (per-constraint):
     - `notBlank`: [`ConstraintNotBlankErrorIsBlank`](../../validation/constraint_not_blank.go)
     - `email`: [`ConstraintEmailErrorInvalidEmail`](../../validation/constraint_email.go)

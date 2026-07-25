@@ -39,6 +39,18 @@
 #
 # Everything runs inside the dev container against the compose stack, through the helpers in common.sh.
 # The example's .env.local is written and restored by the process-role check; it is git-ignored.
+#
+# EVERY check below drives the v3 example, and says so in the banner it prints at the start. That is not an
+# oversight to be generalized later. Some of them exercise a module that exists only in v3: wiring generate,
+# openapi generate, the outbox relay, the encrypt bulk command. The rest reach a framework primitive that v1 and
+# v2 do carry, but through something only the v3 EXAMPLE APPLICATION declares — example:exclusive:demo and
+# example:grant:demo, the command-owned --role flag, the process_role line its app:info prints, the
+# product:list --limit flag, the cron configuration the templates render, and the parameter the optional-env-key
+# check reads. Generalizing those would mean changing the v1 and v2 example applications, not this script.
+#
+# The coverage that DOES generalize across the three majors — boot, a public route, the login/session flow,
+# path-traversal containment, a 404, the command line and a single-SIGINT shutdown — lives in the run.sh harness,
+# one section per major.
 
 set -euo pipefail
 IFS=$'\n\t'
@@ -48,6 +60,12 @@ SCRIPT_DIRECTORY_STRING="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${SCRIPT_DIRECTORY_STRING}/common.sh"
 
 e2e_require_dev_service
+
+# state the scope in the output, so a reader never has to infer which major these checks covered
+info "stack checks drive the v3 example application only: ${EXAMPLE_DIRECTORY_STRING}"
+info "v3-only module: wiring generate, openapi generate, outbox relay, encrypt bulk"
+info "v3-only through the example app: exclusive/grant demo commands, command-owned --role, app:info process_role, product:list --limit, cron configuration, optional-env-key parameter"
+info "per-major coverage (boot, login/session, traversal, 404, cli, SIGINT) runs in .dev/e2e/run.sh for majors: ${MELODY_E2E_MAJORS:-<none>}"
 
 # ---------------------------------------------------------------------------------------------------
 # EXCLUSIVE COMMAND — two instances, one run

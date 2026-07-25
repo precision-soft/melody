@@ -18,6 +18,8 @@ This package covers the HTTP runtime behavior inside Melody:
 
 * [`http/contract`](../../http/contract)
   Public contracts for handler, request, response, router, kernel, URL generator, route groups, and route options.
+* [`http/cors`](../../http/cors)
+  CORS policy service, preflight middleware, and `kernel.response` listener that applies CORS headers to error responses.
 * [`http/middleware`](../../http/middleware)
   Built-in middlewares (CORS, compression, static, rate limiting) and middleware utilities.
 * [`http/middleware/pipeline`](../../http/middleware/pipeline)
@@ -36,7 +38,8 @@ This package covers the HTTP runtime behavior inside Melody:
 * Request and response primitives:
     * [`Request`](../../http/request.go) / [`NewRequest`](../../http/request.go)
     * [`Response`](../../http/response.go) / [`NewResponse`](../../http/response.go)
-    * Response helpers (`JsonResponse`, `HtmlResponse`, `RedirectFound`, …) in [`response.go`](../../http/response.go)
+    * Response helpers (`JsonResponse`, `HtmlResponse`, `RedirectFound`, `FileResponse`, `AttachmentResponse`, …) in [`response.go`](../../http/response.go)
+    * RFC 6266 Content-Disposition helper [`BuildContentDisposition`](../../http/response.go)
 
 * URL generation:
     * [`UrlGenerator`](../../http/url_generator.go) / [`NewUrlGenerator`](../../http/url_generator.go)
@@ -73,6 +76,32 @@ When a controller function declares a parameter of type
 This allows controllers to access request-scoped state via `runtimeInstance.Scope()` without registering `runtimecontract.Runtime` as a service.
 
 Implementation detail: see [`wrapControllerWithContainer`](../../http/router_utility.go).
+
+## Request body limits
+
+The HTTP kernel wraps `request.Body` with `http.MaxBytesReader` when `Http().MaxRequestBodyBytes()` is set to a positive value in the configuration (see [`kernel.go`](../../http/kernel.go)). A read past that limit fails, and net/http answers `413 Request Entity Too Large` and closes the connection, so an oversized body is never fully delivered to a controller.
+
+## Form parsing
+
+[`NewRequest`](../../http/request.go) only auto-parses the request body as form data when the method is `POST`, `PUT`, or `PATCH` and the `Content-Type` media type is `application/x-www-form-urlencoded` or `multipart/form-data`. JSON, XML, and other content types are left intact so handlers can read the raw body. For explicit reparsing, use [`ParseFormBody`](../../http/request.go).
+
+## CORS
+
+The [`http/cors`](../../http/cors) subpackage provides a dedicated CORS layer:
+
+* [`Service`](../../http/cors/service.go) — policy holder built from a [`Config`](../../http/cors/service.go). An empty `AllowOrigins` is defaulted to the wildcard, and a credentialed configuration holding that wildcard panics — unless `Config.AllowOriginFunc` decides origins, since the list is never consulted once a function is set.
+* [`Middleware`](../../http/cors/middleware.go) / [`DefaultMiddleware`](../../http/cors/middleware.go) / [`Restrictive`](../../http/cors/middleware.go) — answers a preflight with `204` and applies CORS headers on the happy path. A preflight is an `OPTIONS` carrying both an allowed `Origin` and an `Access-Control-Request-Method` ([`Service.IsPreflight`](../../http/cors/service.go)); a plain `OPTIONS` reaches the router instead. `Vary: Origin` is added to every response the chain produces, including one produced for a rejected origin or for a request carrying no `Origin` at all, so a shared cache cannot hand an origin-less body to an allowed cross-origin requester.
+* [`RegisterResponseListener`](../../http/cors/listener.go) — subscribes to `kernel.response` with [`ResponseListenerPriority`](../../http/cors/listener.go) (`-100`) so CORS headers reach browsers even when error handlers replace the controller response.
+
+## Url generation
+
+[`UrlGenerator.GeneratePath`](../../http/url_generator.go) builds a path from a route name and a parameter map, and a route's `defaults` ([`NewRouteOptions`](../../http/route_option.go)) fill the gaps:
+
+* A parameter the caller **omits** takes the route default, whatever that default is.
+* A parameter the caller supplies **empty** takes the route default when that default is non-empty. This is what keeps a non-trailing optional segment — the shape [`rejectNonTrailingOptionalParameter`](../../http/router.go) admits precisely because its default keeps the segment present — generating a path the matcher answers: `/:locale?/list/:page` with `{"locale": "", "page": "2"}` yields `/en/list/2` under a `locale` default of `en`, not the `/list/2` the router replies to with a `404`.
+* With no usable value left, an **optional** segment is dropped and a **required** one fails with `route parameter missing` or `route parameter may not be empty` — [`matchPath`](../../http/router_utility.go) refuses an empty segment for a named parameter, so emitting one would mint a url this router does not serve.
+
+A requirement declared on a parameter is validated against the value that is actually emitted, catch-all remainders included, so generation and matching agree.
 
 ## HTTP method semantics
 
@@ -248,7 +277,7 @@ router.HandleWithOptions(
 )
 ```
 
-On the frontend, the reference helper [`melody-routes.ts`](../../.example/assets/melody-routes.ts) (bundled into the example's frontend and available to vendor into your project; a usage example lives in [`.example/assets/routes-usage.ts`](../../.example/assets/routes-usage.ts)) loads the manifest and builds URLs from a route name and parameters with the same placeholder grammar the server-side router and Go `UrlGenerator` use, matched per path segment: required `:param`, optional `:param?` (dropped when no value is given), single wildcard `*name`, and catch-all `*name...` (or a trailing `*name`, which may span multiple slash-separated segments). Parameters not consumed by a placeholder fall back to the route's defaults and any leftovers are appended as query-string parameters.
+On the frontend, the reference helper [`melody-routes.ts`](../../.example/assets/melody-routes.ts) (bundled into the example's frontend and available to vendor into your project; a usage example lives in [`.example/assets/routes-usage.ts`](../../.example/assets/routes-usage.ts)) loads the manifest and builds URLs from a route name and parameters with the same placeholder grammar the server-side router and Go `UrlGenerator` use, matched per path segment: required `:param`, optional `:param?` (allowed only as the **final** segment, and dropped when no value is given), single wildcard `*name`, and catch-all `*name...` (or a trailing `*name`, which may span multiple slash-separated segments). Parameters not consumed by a placeholder fall back to the route's defaults and any leftovers are appended as query-string parameters.
 
 ```ts
 import { RouteGenerator, RouteManifest } from "./melody-routes";
@@ -260,11 +289,58 @@ const userPath = routes.path("user_show", { id: 42 });                   // /use
 const ordersPath = routes.path("user_show", { id: 42, tab: "orders" }); // /users/42?tab=orders
 ```
 
+## Session cookie
+
+The kernel loads a session from the incoming cookie, publishes it on the request as [`RequestAttributeSession`](../../http/request.go), and on the way out saves a modified session and emits its `Set-Cookie`. [`Kernel.SetSessionCookiePolicy`](../../http/contract/kernel.go) shapes that cookie through a [`SessionCookiePolicy`](../../http/contract/kernel.go):
+
+| Field      | Type                                                                       | Default when unset                     |
+|------------|----------------------------------------------------------------------------|----------------------------------------|
+| `Path`     | `string`                                                                   | `/`                                    |
+| `Domain`   | `string`                                                                   | omitted (host-only cookie)             |
+| `SameSite` | `nethttp.SameSite`                                                         | `SameSiteLaxMode`                      |
+| `Secure`   | [`SessionCookieSecurePolicy`](../../http/contract/kernel.go)                | derived from the resolved scheme        |
+
+`HttpOnly` is always set and is not configurable.
+
+### `Secure`
+
+[`SessionCookieSecurePolicy`](../../http/contract/kernel.go) has three values ([`resolveSessionCookieSecure`](../../http/router_utility.go)):
+
+* [`SessionCookieSecureFromScheme`](../../http/contract/kernel.go) — the **zero value and the default**. `Secure` is set when the scheme the forwarded-headers policy resolved is `https`, so a policy that does not mention `Secure` behaves as the framework always has.
+* [`SessionCookieSecureAlways`](../../http/contract/kernel.go) — forces `Secure` on regardless of the resolved scheme. This is the setting for a deployment whose proxy terminates TLS and forwards plaintext, but which is **not** trusted for `X-Forwarded-Proto`: scheme detection reports `http` there, so the derived policy would ship the session cookie without `Secure` even though every browser hop is HTTPS.
+* [`SessionCookieSecureNever`](../../http/contract/kernel.go) — forces `Secure` off. **Discouraged**: it is the only one of the three that can weaken the cookie relative to the deployment, and it does so unconditionally — a session cookie without `Secure` is sent over plaintext HTTP and can be captured. Reach for it only for a local development origin that genuinely has no TLS.
+
+### `SameSite`
+
+A policy that leaves `SameSite` at its zero value gets `SameSiteLaxMode`. `net/http` has no name for the zero `SameSite` and emits **no attribute** for it, which is what an operator who set only `Path` or `Domain` would otherwise silently get; treating it as unset and applying the framework default keeps the partial policy safe. Use `nethttp.SameSiteDefaultMode` to omit the attribute deliberately. See [`resolveSessionCookieSameSite`](../../http/router_utility.go).
+
+### Rotating the session id
+
+The response path saves and advertises the session published on [`RequestAttributeSession`](../../http/request.go) at the moment the response is written, not the one the kernel loaded before routing, so a handler can replace it. [`RegenerateRequestSession`](../../http/session.go) is that operation done whole: it rotates the id of the session the request carries — the defence against **session fixation** — and republishes the rotated session on the request, so one call is all a login handler needs.
+
+```go
+rotated, rotateErr := melodyhttp.RegenerateRequestSession(request)
+if nil != rotateErr {
+    return nil, rotateErr
+}
+
+rotated.Set(sessionKeyUserId, user.Id())
+```
+
+Call it **before** writing the authenticated identity, and write that identity to the session it returns. It reports an error rather than panicking when the request carries no session, has no runtime, or the session manager is not registered. [`session.Manager.RegenerateSession`](../../session/manager.go) is the storage-level primitive underneath, for code that holds no request; rotating through it means republishing the result yourself, and the session that went in is latched out of use so that forgetting to logs the client out rather than stranding it on a deleted id. The latch is what makes a rotated-away session unresurrectable: `Session.Set` lifts the cleared flag, nothing lifts the latch. A `Session` implementation from outside this package is only `Clear()`ed, which a later write still undoes.
+
+### Streamed responses
+
+No session row is written for a response the kernel discards because the handler already committed the headers — a streaming handler such as Server-Sent Events — **unless the request already names that session id** in its cookie.
+
+A discarded response carries no `Set-Cookie`, so saving a session the client does not already hold would write a row nothing can ever reference: a first-time visitor on a streamed endpoint would leave one unreachable session behind per reconnect. A session the request already names needs no cookie to be reachable and is saved as before. Clearing is unaffected: a cleared session is still deleted and its expiring cookie still emitted, whatever the response does. See [`requestNamesSession`](../../http/router_utility.go).
+
 ## Footguns & caveats
 
 * Server-Sent Events handlers must return `(nil, nil)` after streaming; returning a non-nil response would make the kernel write a second header/body.
 * [`ServerSentEventHub.Broadcast`](../../http/server_sent_event_hub.go) is non-blocking and drops events for subscribers whose buffer is full; delivery is **at-most-once**. Size the subscribe buffer for the expected burst, or treat the stream as best-effort. [`ServerSentEventHub.DroppedEventCount`](../../http/server_sent_event_hub.go) returns the cumulative number of dropped events so the loss can be surfaced as a metric.
 * Route names must be unique. URL generation relies on a [`RouteRegistry`](../../http/contract/route_registry.go) entry for the route name.
+* An optional route parameter (`:param?`) is only legal as the **last** segment of a pattern. An omitted optional is dropped wherever it sits, while a match only ever ends early at the tail, so `/blog/:locale?/posts` would let [`UrlGenerator`](../../http/url_generator.go) mint `/blog/posts` — a path this router answers with a `404`. Registering such a pattern panics at the definition site; move the optional to the end, or register the two patterns separately.
 * [`UrlGeneratorMustFromContainer`](../../http/service_resolver.go) is a fail-fast helper and will panic if `ServiceUrlGenerator` is missing or has an invalid type.
 * [`RateLimitMiddleware`](../../http/middleware/rate_limit.go) keys on the client IP alone when no [`SetKeyExtractor`](../../http/middleware/rate_limit.go) is given, so `SimpleRateLimit(n)` is a budget of `n` requests per minute per IP **across the whole service**, not per route. Set an explicit key extractor for a per-route or per-user budget. The IP comes from the direct peer, so behind a reverse proxy every client collapses onto the proxy's address: pass [`NewForwardedClientIpResolver`](../../http/middleware/client_ip.go) to [`SetClientIpResolver`](../../http/middleware/rate_limit.go) — it walks `X-Forwarded-For` against the trusted-proxy policy and falls back to the direct peer whenever the chain cannot be trusted.
 * Both in-memory limiters bound how many distinct keys they track ([`SetMaxKeys`](../../http/middleware/rate_limit.go), default 1,000,000), because the key is attacker-influenced and the map would otherwise grow without bound. Once the map is full and reclaiming idle entries frees nothing, a request under an unseen key is **denied** rather than tracked — a deliberate fail-closed choice, so size the ceiling above the distinct-client count you expect. Reclamation walks the map at most once per window, so the bound cannot be turned into a per-request cost.
@@ -274,7 +350,7 @@ const ordersPath = routes.path("user_show", { id: 42, tab: "orders" }); // /user
 * A credentialed configuration that decides origins through `AllowOriginFunc` is accepted; one with neither an origin list nor a function still panics on the defaulted wildcard, which is the combination the guard exists to prevent. See [`NewService`](../../http/cors/service.go).
 * A conditional request for a static file is answered `304 Not Modified` when `If-None-Match` carries the entity tag anywhere in its comma-separated list, or carries it in the weak `W/` form a proxy may have rewritten it into. The wildcard `*` is deliberately **not** honoured — it would turn an attacker-supplied header into an unconditional 304. See [`EtagMatchesIfNoneMatch`](../../http/static/etag.go).
 * The kernel publishes the scheme it resolved through the configured forwarded-headers policy on the request as [`RequestAttributeScheme`](../../http/request.go). A listener has no access to that policy, so re-detecting the scheme without it reports `http` for every request a trusted proxy terminated as `https`.
-* The request attributes the kernel owns are reserved under the framework's underscore prefix (`_session`, `_scheme`) and are set **after** the route attributes, so a route attribute cannot replace the session object or the resolved scheme. Read them through [`RequestAttributeSession`](../../http/request.go) and [`RequestAttributeScheme`](../../http/request.go), never through the literal key.
+* The request attributes the kernel owns are reserved under the framework's underscore prefix (`_session`, `_scheme`) and are set **after** the route attributes, so a route attribute cannot replace the session object or the resolved scheme. Read them through [`RequestAttributeSession`](../../http/request.go) and [`RequestAttributeScheme`](../../http/request.go), never through the literal key. The session attribute is the one place the kernel reads back what a handler wrote: the response path saves and advertises whatever session it holds when the response is written, which is what makes [`RegenerateRequestSession`](../../http/session.go) work.
 * A handler that panics with `net/http`'s `ErrAbortHandler` aborts the connection silently, as that sentinel documents, instead of being turned into a `500` plus an error log line. The check is on identity, so an application error merely wrapping the sentinel is unaffected.
 
 ## Userland API
@@ -293,6 +369,9 @@ const ordersPath = routes.path("user_show", { id: 42, tab: "orders" }); // /user
 * [`type RouteRegistry`](../../http/contract/route_registry.go)
 * [`type UrlGenerator`](../../http/contract/url_generator.go)
 * [`type Kernel`](../../http/contract/kernel.go)
+* [`type SessionCookiePolicy`](../../http/contract/kernel.go)
+* [`type SessionCookieSecurePolicy`](../../http/contract/kernel.go) — `SessionCookieSecureFromScheme` (zero value), `SessionCookieSecureAlways`, `SessionCookieSecureNever`
+* [`type ForwardedHeadersPolicy`](../../http/contract/kernel.go)
 * [`type Middleware`](../../http/contract/middleware.go)
 
 ### Core types and helpers (`http`)
@@ -307,6 +386,13 @@ const ordersPath = routes.path("user_show", { id: 42, tab: "orders" }); // /user
 * URL generator:
     * [`NewUrlGenerator(httpcontract.RouteRegistry)`](../../http/url_generator.go)
 
+* Route parameter requirements:
+    * [`type Requirement`](../../http/constraint.go)
+    * [`NewRequirement(parameterName string, pattern string) *Requirement`](../../http/constraint.go)
+    * [`NewRequirements(requirements ...Requirement) map[string]string`](../../http/constraint.go)
+    * [`RequireAlphaLowercase`](../../http/constraint.go) / [`RequireAlpha`](../../http/constraint.go) / [`RequireNumeric`](../../http/constraint.go) / [`RequireAlphaNumeric`](../../http/constraint.go)
+    * Constants: [`ConstraintAlphaLowercase`, `ConstraintAlpha`, `ConstraintNumeric`, `ConstraintAlphaNumeric`](../../http/constraint.go)
+
 * Server-Sent Events:
     * [`type ServerSentEvent`](../../http/server_sent_event.go)
     * [`type ServerSentEventWriter`](../../http/server_sent_event.go) with [`NewServerSentEventWriter(nethttp.ResponseWriter) (*ServerSentEventWriter, error)`](../../http/server_sent_event.go), [`(*ServerSentEventWriter).Send(ServerSentEvent) error`](../../http/server_sent_event.go), [`(*ServerSentEventWriter).Comment(string) error`](../../http/server_sent_event.go), [`(*ServerSentEventWriter).Ping() error`](../../http/server_sent_event.go). Both `Send` (`Id`/`Event`/`Data`) and `Comment` strip `CR`/`LF` from caller-supplied text so a dynamic value cannot inject extra Server-Sent Events fields or events; `Send` additionally treats a bare `CR`, `LF`, or `CRLF` inside `Data` as a data-line boundary per the EventSource specification.
@@ -315,10 +401,19 @@ const ordersPath = routes.path("user_show", { id: 42, tab: "orders" }); // /user
 
 * Response helpers:
     * [`JsonResponse`](../../http/response.go)
+    * [`JsonErrorResponse`](../../http/response.go)
     * [`HtmlResponse`](../../http/response.go)
+    * [`TextResponse`](../../http/response.go)
+    * [`EmptyResponse`](../../http/response.go)
+    * [`FileResponse`](../../http/response.go)
+    * [`AttachmentResponse`](../../http/response.go)
+    * [`BuildContentDisposition`](../../http/response.go)
     * [`RedirectResponse`](../../http/response.go)
     * [`RedirectFound`](../../http/response.go)
     * [`RedirectMovedPermanently`](../../http/response.go)
+
+* Session:
+    * [`RegenerateRequestSession(request httpcontract.Request) (sessioncontract.Session, error)`](../../http/session.go)
 
 * Container helpers:
     * [`const ServiceRouteRegistry`](../../http/service_resolver.go)
@@ -355,12 +450,31 @@ const ordersPath = routes.path("user_show", { id: 42, tab: "orders" }); // /user
 
 * Compression:
     * [`type CompressionConfig`](../../http/middleware/compression.go)
+    * [`NewCompressionConfig`](../../http/middleware/compression.go)
+    * [`DefaultCompressionConfig`](../../http/middleware/compression.go)
     * [`CompressionMiddleware`](../../http/middleware/compression.go)
     * [`DefaultCompressionMiddleware`](../../http/middleware/compression.go)
+    * Honors `Accept-Encoding` q-values (RFC 7231), emits `Vary: Accept-Encoding`, and streams the gzip output through [`io.Pipe`](https://pkg.go.dev/io#Pipe) so response bodies never fully land in memory.
 
 * Rate limiting:
     * [`RateLimitMiddleware`](../../http/middleware/rate_limit.go)
-    * `FixedWindowLimiter` / `SlidingWindowLimiter` in [`rate_limit.go`](../../http/middleware/rate_limit.go), each with `SetMaxKeys(int)`. `FixedWindowLimiter` restores the whole allowance at the window edge rather than proportionally to elapsed time, so an instant straddling that edge can admit up to twice the rate; `SlidingWindowLimiter` holds the rate over every trailing window. `TokenBucketLimiter` / `NewTokenBucketLimiter` / `NewTokenBucketLimiterWithClock` remain as deprecated aliases
+    * [`type RateLimitConfig`](../../http/middleware/rate_limit.go)
+    * [`NewRateLimitConfig`](../../http/middleware/rate_limit.go)
+    * [`type KeyExtractor`](../../http/middleware/rate_limit.go) (`func(httpcontract.Request) string`), set through [`RateLimitConfig.SetKeyExtractor`](../../http/middleware/rate_limit.go)
+    * [`type OnLimitExceeded`](../../http/middleware/rate_limit.go) (`func(httpcontract.Request) (httpcontract.Response, error)`)
+    * [`type ClientIpResolver`](../../http/middleware/rate_limit.go) (`func(httpcontract.Request) string`) — optional for trusted-proxy deployments
+    * [`DefaultClientIp`](../../http/middleware/rate_limit.go)
+    * [`NewForwardedClientIpResolver`](../../http/middleware/client_ip.go) — a `ClientIpResolver` that reads the client from `X-Forwarded-For` against the trusted-proxy policy; pass it to [`RateLimitConfig.SetClientIpResolver`](../../http/middleware/rate_limit.go) so per-IP limits behind a reverse proxy key on the client instead of the proxy
+    * [`SimpleRateLimit`](../../http/middleware/rate_limit.go) / [`IpRateLimit`](../../http/middleware/rate_limit.go) / [`UserRateLimit`](../../http/middleware/rate_limit.go)
+    * Limiters:
+        * [`type FixedWindowLimiter`](../../http/middleware/rate_limit.go) — restores the whole allowance at the window edge rather than proportionally to elapsed time, so an instant straddling that edge can admit up to twice the rate; `SlidingWindowLimiter` holds the rate over every trailing window
+        * [`type TokenBucketLimiter`](../../http/middleware/rate_limit.go) — deprecated alias of `FixedWindowLimiter`
+        * [`NewFixedWindowLimiter`](../../http/middleware/rate_limit.go) / [`NewFixedWindowLimiterWithClock`](../../http/middleware/rate_limit.go)
+        * [`NewTokenBucketLimiter`](../../http/middleware/rate_limit.go) / [`NewTokenBucketLimiterWithClock`](../../http/middleware/rate_limit.go) — deprecated
+        * [`FixedWindowLimiter.SetMaxKeys(int)`](../../http/middleware/rate_limit.go)
+        * [`type SlidingWindowLimiter`](../../http/middleware/rate_limit.go)
+        * [`NewSlidingWindowLimiter`](../../http/middleware/rate_limit.go) / [`NewSlidingWindowLimiterWithClock`](../../http/middleware/rate_limit.go)
+        * [`SlidingWindowLimiter.SetMaxKeys(int)`](../../http/middleware/rate_limit.go)
 
 * Static:
     * [`StaticMiddleware`](../../http/middleware/static.go)

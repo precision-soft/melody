@@ -19,10 +19,28 @@ Unlike the [MySQL provider](../../mysql/v3/README.md), this package ships no sel
 ### Options
 
 * [`WithPoolConfig`](./provider_option.go) — connection-pool sizing via [`NewPoolConfig`](./pool_config.go).
-* [`WithTimeoutConfig`](./provider_option.go) — connect/read/write timeouts via [`NewTimeoutConfig`](./timeout_config.go). A `ConnectTimeout` of `0` skips the bounded ping context (no artificial deadline on a healthy database).
-* [`WithRetryConfig`](./provider_option.go) — connection retry/backoff via [`NewRetryConfig`](./retry_config.go).
+* [`WithTimeoutConfig`](./provider_option.go) — the **connect timeout only** via [`NewTimeoutConfig`](./timeout_config.go). Unlike the MySQL provider, [`TimeoutConfig`](./timeout_config.go) here carries a single `ConnectTimeout` field: `pgdriver` exposes no separate read/write deadlines, so there are none to configure. A `ConnectTimeout` of `0` skips the bounded ping context (no artificial deadline on a healthy database).
+* [`WithRetryConfig`](./provider_option.go) — connection retry/backoff via [`NewRetryConfig`](./retry_config.go). Retrying is **opt-in**: without this option `Open` makes a single attempt.
 * [`WithPostBuildHook`](./provider_option.go) — advanced connector customization (see below).
 * [`WithInsecure`](./provider_option.go) / [`WithTlsConfig`](./provider_option.go) — TLS controls (see below).
+
+### Defaults
+
+Applied when the matching option is not set ([`DefaultPoolConfig`](./pool_config.go), [`DefaultTimeoutConfig`](./timeout_config.go), [`DefaultRetryConfig`](./retry_config.go)):
+
+| Config          | Field                   | Default              |
+|-----------------|-------------------------|----------------------|
+| `PoolConfig`    | `MaxOpenConnections`    | `50`                 |
+| `PoolConfig`    | `MaxIdleConnections`    | `25`                 |
+| `PoolConfig`    | `ConnectionMaxLifetime` | `5m`                 |
+| `PoolConfig`    | `ConnectionMaxIdleTime` | `1m`                 |
+| `TimeoutConfig` | `ConnectTimeout`        | `5s`                 |
+| `RetryConfig`   | `MaxAttempts`           | `3`                  |
+| `RetryConfig`   | `InitialDelay`          | `500ms`              |
+| `RetryConfig`   | `MaxDelay`              | `5s`                 |
+| `RetryConfig`   | `BackoffMultiplier`     | `2.0`                |
+
+`RetryConfig` values are also individually defaulted: a non-positive `InitialDelay`/`MaxDelay` or a `BackoffMultiplier` that is not at least `1` (including `NaN`) falls back to the value above, so a partially-filled config cannot collapse the backoff into a re-dial storm.
 
 ## TLS
 
@@ -72,7 +90,7 @@ defer namedLock.Release(runtime)
 - **Session-pinned.** Each held lock pins a dedicated `*sql.Conn` for its lifetime; `Release` runs `pg_advisory_unlock` on that same connection — on a fresh context, bounded by [`WithLockReleaseTimeout`](./lock.go) (default 5s) — before returning it to the pool.
 - **Reentrant within a `Lock`.** Calling `Acquire` on a lock that is already held verifies ownership and returns `(true, nil)`; if the lease was lost it re-acquires on a fresh connection.
 - **No TTL.** Session advisory locks do not auto-expire — the `ttl` passed to `CreateLock` is accepted only for interface compatibility. The lock is released by `Release` or when its connection drops (e.g. the process dies). For TTL-based auto-expiry, use the Redis backend in [`integrations/rueidis/v3`](../../../rueidis).
-- **`Refresh` verifies ownership.** Because there is nothing to extend, `Refresh` instead confirms the lock is still granted to the pinned connection via `pg_locks` and returns a "lock is no longer held" error if the lease was lost — matching the lost-lock signal of the other backends.
+- **`Refresh` is a liveness probe.** Because there is nothing to extend, `Refresh` instead pings the pinned connection (`PingContext`, on a fresh context bounded by the release timeout) rather than introspecting `pg_locks`: a session advisory lock is held for exactly as long as its backend session lives, so a connection that still answers still holds the lock. Only a genuinely dead session fails the refresh — its connection is then discarded and a "lock is no longer held" error returned, matching the lost-lock signal of the other backends. A transient cause such as a cancelled or expired request context can never be mistaken for a lost lock, because the probe does not use the caller's context.
 
 Unlike the MySQL package there is no `RegisterLockerService` helper or module; register the locker under the core `lock.ServiceLocker` service name yourself if handlers should resolve it via `lock.LockerMustFromResolver`.
 

@@ -114,13 +114,8 @@ if [ -n "${BASH_VERSION:-}" ]; then
         bash /app/.dev/validate/all.sh --staged "$@"
     }
 
-    melody_install_git_hooks() {
-        bash /app/.dev/git-hook/install.sh
-    }
-
     alias mva="melody_validate_all"
     alias mvs="melody_validate_staged"
-    alias mhooks="melody_install_git_hooks"
     # end melody
 
     # git

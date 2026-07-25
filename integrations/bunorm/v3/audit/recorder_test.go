@@ -78,6 +78,32 @@ func TestRecorder_RoutesPerEntityTableAndHonorsIgnoredFields(t *testing.T) {
     }
 }
 
+/* the changes column must never carry the JSON literal null: an idempotent update and an insert of a non-struct model both record nothing, and the delete path already writes [] for that, so a trail consumer running jsonb_array_length(changes::jsonb) must read 0 rather than error out. */
+func TestRecorder_EmptyChangeSetIsStoredAsAnEmptyArray(t *testing.T) {
+    storage := &fakeStorage{}
+    recorder := NewRecorderWithStorage(storage, NewRegistry("melody_audit"))
+
+    identical := parityAccount{Id: 1, Email: "same@example.com", Secret: "a"}
+
+    if recordErr := recorder.RecordUpdate(context.Background(), "parityAccount", "1", identical, identical); nil != recordErr {
+        t.Fatalf("record update: %v", recordErr)
+    }
+
+    if recordErr := recorder.RecordInsert(context.Background(), "parityAccount", "2", "not-a-model"); nil != recordErr {
+        t.Fatalf("record insert: %v", recordErr)
+    }
+
+    if 2 != len(storage.saves) {
+        t.Fatalf("expected two saves, got %d", len(storage.saves))
+    }
+
+    for _, save := range storage.saves {
+        if "[]" != save.entries[0].Changes {
+            t.Fatalf("expected an empty change-set to be stored as [], got %q for %s", save.entries[0].Changes, save.entries[0].Operation)
+        }
+    }
+}
+
 func TestRecorder_DeadLettersOnStorageFailure(t *testing.T) {
     storage := &fakeStorage{failWith: context.DeadlineExceeded}
     logger := &fakeLogger{}

@@ -50,6 +50,38 @@ func TestResolveTransportConfigOverrideWinsPerField(t *testing.T) {
     }
 }
 
+func TestDefaultTransportConfigPerHostIdlePoolFollowsMaxIdleConns(t *testing.T) {
+    config := DefaultTransportConfig()
+
+    if config.MaxIdleConns != config.MaxIdleConnsPerHost {
+        t.Fatalf(
+            "expected the per-host idle pool to default to MaxIdleConns %d, got %d",
+            config.MaxIdleConns,
+            config.MaxIdleConnsPerHost,
+        )
+    }
+}
+
+func TestResolveTransportConfigPerHostIdlePoolFollowsAnOverriddenTotal(t *testing.T) {
+    resolved := resolveTransportConfig(&TransportConfig{MaxIdleConns: 7})
+
+    if 7 != resolved.MaxIdleConnsPerHost {
+        t.Fatalf("expected an overridden MaxIdleConns to carry the per-host idle pool with it, got %d", resolved.MaxIdleConnsPerHost)
+    }
+
+    pinned := resolveTransportConfig(&TransportConfig{MaxIdleConns: 7, MaxIdleConnsPerHost: 3})
+
+    if 3 != pinned.MaxIdleConnsPerHost {
+        t.Fatalf("expected an explicit MaxIdleConnsPerHost 3 to win, got %d", pinned.MaxIdleConnsPerHost)
+    }
+
+    inherited := resolveTransportConfig(&TransportConfig{MaxIdleConnsPerHost: 5})
+
+    if 5 != inherited.MaxIdleConnsPerHost || 100 != inherited.MaxIdleConns {
+        t.Fatalf("expected a per-host override alone to leave the total at 100, got %+v", inherited)
+    }
+}
+
 func TestHttpClientConfigWithTransportRoundTrips(t *testing.T) {
     transport := &TransportConfig{DialTimeout: 3 * time.Second}
     config := NewHttpClientConfig("", 0, nil).WithTransport(transport)

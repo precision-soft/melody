@@ -63,11 +63,22 @@ func (instance *Migrator) MigrateDecrypt(ctx context.Context, spec TableSpec) (i
 
 func (instance *Migrator) encryptTransform(spec TableSpec) func(string) (string, error) {
     return func(value string) (string, error) {
-        if true == spec.Deterministic {
+        if false == spec.Deterministic {
+            return instance.cipher.Encrypt(value)
+        }
+
+        /* a value already sealed with a random nonce authenticates, so the deterministic seal would pass it through untouched: the column would stay randomized — every CiphertextCandidates equality lookup on it finding nothing — while the run reported the row as processed. Convert it in place, under the key it already carries so mode=encrypt never doubles as a key rotation. A value that authenticates under no key in the set is ordinary plaintext (marker-shaped or not) and is sealed under the current key, as the cipher does. */
+        keyId, markerShaped := keyIdOf(value)
+        if false == markerShaped {
             return instance.cipher.EncryptDeterministic(value)
         }
 
-        return instance.cipher.Encrypt(value)
+        plaintext, decryptErr := instance.cipher.Decrypt(value)
+        if nil != decryptErr {
+            return instance.cipher.EncryptDeterministic(value)
+        }
+
+        return instance.cipher.EncryptDeterministicWithKeyId(plaintext, keyId)
     }
 }
 

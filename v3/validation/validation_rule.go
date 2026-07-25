@@ -3,6 +3,7 @@ package validation
 import (
     "fmt"
     "strings"
+    "sync"
 
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
@@ -318,7 +319,40 @@ func parseIntStrict(valueString string) (int, bool) {
     return result, true
 }
 
+type parsedValidationTag struct {
+    rules []validationRule
+    err   error
+}
+
+/* parsedValidationTagCache memoizes the parse of a validate tag because applyFieldRules re-parses it for every value it reaches — once per element of an array, so a large payload re-scanned the same tag tens of thousands of times. Tags are read from struct tags, which are compile-time constants, so the key space is the program's own set of distinct tags and cannot be grown by a request. The cached rules are shared, so every consumer of a rule's parameter map must copy it before handing it out. */
+var parsedValidationTagCache sync.Map
+
 func parseValidationTag(tag string) ([]validationRule, error) {
+    if cached, exists := parsedValidationTagCache.Load(tag); true == exists {
+        parsed := cached.(parsedValidationTag)
+
+        return parsed.rules, parsed.err
+    }
+
+    rules, err := parseValidationTagUncached(tag)
+
+    /* LoadOrStore rather than Store so a concurrent first touch settles on ONE parse: the rules and their parameter maps are shared by identity, and a losing caller holding a second copy would defeat the memo it is meant to be reading from */
+    stored, _ := parsedValidationTagCache.LoadOrStore(tag, parsedValidationTag{rules: rules, err: err})
+    parsed := stored.(parsedValidationTag)
+
+    return parsed.rules, parsed.err
+}
+
+func copyValidationRuleParams(params map[string]string) map[string]string {
+    copied := make(map[string]string, len(params))
+    for key, value := range params {
+        copied[key] = value
+    }
+
+    return copied
+}
+
+func parseValidationTagUncached(tag string) ([]validationRule, error) {
     var rules []validationRule
 
     parts := splitByTopLevelComma(tag)

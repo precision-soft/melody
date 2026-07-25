@@ -654,3 +654,71 @@ func TestScheduleMatcher_RejectsANameGluedToDigits(t *testing.T) {
         t.Fatalf("expected a name in step position to fail the parse instead of folding")
     }
 }
+
+/* @info the kubernetes template renders a whole-field "?" the robfig scheduler reads as the wildcard with its star bit intact, so the runner's matcher must accept every schedule the generator emits: "?" parses under the kubernetes dialect alone and stays refused by the crontab and zero-value dialects, which crond would reject. */
+func TestScheduleMatcher_KubernetesDialectAcceptsWholeFieldQuestionMark(t *testing.T) {
+    for _, schedule := range []*Schedule{
+        {Minute: "0", Hour: "3", DayOfMonth: "?"},
+        {Minute: "0", Hour: "3", DayOfWeek: "?"},
+        {Minute: "0", Hour: "3", DayOfMonth: "?", DayOfWeek: "?"},
+    } {
+        if _, kubernetesErr := newScheduleMatcher(schedule, RunnerDialectKubernetes); nil != kubernetesErr {
+            t.Fatalf("expected the kubernetes dialect to accept the whole-field question mark in %+v, got %v", schedule, kubernetesErr)
+        }
+
+        if _, crontabErr := newScheduleMatcher(schedule, RunnerDialectCrontab); nil == crontabErr {
+            t.Fatalf("expected the crontab dialect to keep rejecting the question mark in %+v", schedule)
+        }
+
+        if _, defaultErr := newScheduleMatcher(schedule, ""); nil == defaultErr {
+            t.Fatalf("expected the zero-value dialect to keep rejecting the question mark in %+v", schedule)
+        }
+    }
+}
+
+/* @info the generator accepts "?" only whole-field and only in the day fields, so the matcher mirrors that exact set: inside a list, a step, a range, or a non-day field it dies in the numeric parse even under kubernetes. */
+func TestScheduleMatcher_QuestionMarkStaysWholeFieldAndDayOnly(t *testing.T) {
+    for _, schedule := range []*Schedule{
+        {Minute: "?"},
+        {Hour: "?"},
+        {Month: "?"},
+        {DayOfWeek: "?,5"},
+        {DayOfWeek: "?/2"},
+        {DayOfMonth: "?-5"},
+    } {
+        if _, kubernetesErr := newScheduleMatcher(schedule, RunnerDialectKubernetes); nil == kubernetesErr {
+            t.Fatalf("expected %+v to stay rejected under the kubernetes dialect", schedule)
+        }
+    }
+}
+
+/* @info robfig keeps the star bit on "?", so a day pair with one "?" combines with and: the named day restricts, the "?" side is unrestricted. */
+func TestScheduleMatcher_QuestionMarkDayFieldIsUnrestricted(t *testing.T) {
+    assertJuly2026Weekdays(t)
+
+    dayOfMonthFixed, dayOfMonthErr := newScheduleMatcher(&Schedule{Minute: "0", Hour: "3", DayOfMonth: "15", DayOfWeek: "?"}, RunnerDialectKubernetes)
+    if nil != dayOfMonthErr {
+        t.Fatalf("unexpected parse error: %v", dayOfMonthErr)
+    }
+
+    if false == dayOfMonthFixed.Matches(time.Date(2026, time.July, 15, 3, 0, 0, 0, time.UTC)) {
+        t.Fatal("expected the fixed day of month to match with an unrestricted day of week")
+    }
+
+    if true == dayOfMonthFixed.Matches(time.Date(2026, time.July, 20, 3, 0, 0, 0, time.UTC)) {
+        t.Fatal("expected a Monday outside the fixed day of month not to match: the question mark keeps its star bit, so the day fields combine with and")
+    }
+
+    dayOfWeekFixed, dayOfWeekErr := newScheduleMatcher(&Schedule{Minute: "0", Hour: "3", DayOfMonth: "?", DayOfWeek: "1"}, RunnerDialectKubernetes)
+    if nil != dayOfWeekErr {
+        t.Fatalf("unexpected parse error: %v", dayOfWeekErr)
+    }
+
+    if false == dayOfWeekFixed.Matches(time.Date(2026, time.July, 20, 3, 0, 0, 0, time.UTC)) {
+        t.Fatal("expected the Monday to match with an unrestricted day of month")
+    }
+
+    if true == dayOfWeekFixed.Matches(time.Date(2026, time.July, 15, 3, 0, 0, 0, time.UTC)) {
+        t.Fatal("expected a Wednesday not to match when only Monday is named")
+    }
+}

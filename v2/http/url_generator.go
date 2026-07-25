@@ -57,6 +57,12 @@ func (instance *UrlGenerator) GeneratePath(routeName string, parameters map[stri
                     value = defaultValue
                     exists = true
                 }
+            } else if "" == value {
+                /* a non-empty default also fills in for a parameter supplied EMPTY, not only for an absent one: rejectNonTrailingOptionalParameter admits a non-trailing optional exactly because its default keeps the segment present, and the natural caller passes the current locale, which is sometimes "". Dropping the segment here would mint a url matchPath binds one segment out of step and answers with a 404. */
+                defaultValue, hasDefault := defaults[paramName]
+                if true == hasDefault && "" != defaultValue {
+                    value = defaultValue
+                }
             }
 
             if false == exists {

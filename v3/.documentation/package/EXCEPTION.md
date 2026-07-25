@@ -19,6 +19,8 @@ Melody uses this package to:
 
 ## Responsibilities
 
+- Provide the structured error type itself:
+    - [`Error`](../../exception/error.go) — message + loggable context + wrapped cause + log level
 - Error constructors and error utilities:
     - [`NewError`](../../exception/error_new.go)
     - [`NewWarning`](../../exception/error_new.go)
@@ -114,13 +116,26 @@ func readFile(path string) []byte {
 - [`type ContextProvider`](../../exception/contract/context.go)
 - [`type AlreadyLogged`](../../exception/contract/already_logged.go)
 
+### The error type (`exception`)
+
+- [`type Error`](../../exception/error.go) — the structured error every constructor below returns. It carries a message, a loggable context, a wrapped cause and a log level, and it satisfies both [`exceptioncontract.ContextProvider`](../../exception/contract/context.go) and [`exceptioncontract.AlreadyLogged`](../../exception/contract/already_logged.go). All fields are unexported; the method set is the whole surface:
+    - `Error() string` / `Message() string` — the message. Both return the same value, so `Error` reads the message alone and never the cause chain.
+    - `Unwrap() error` / `CauseErr() error` — the wrapped cause, so `errors.Is` and `errors.As` traverse it.
+    - `Context() exceptioncontract.Context` — a **copy** of the context, so a caller cannot mutate the error's own map.
+    - `SetContext(context exceptioncontract.Context)` — replaces the context with a copy of the argument.
+    - `SetContextValue(key string, value any)` — sets one key in place, for enriching an error as it crosses a layer.
+    - `Level() loggingcontract.Level` — the level chosen by the constructor, which is what the logger records the error at.
+    - `AlreadyLogged() bool` / `MarkAsLogged()` — the duplicate-log guard; [`MarkLogged`](../../exception/utility.go) is the free-function form that also handles a non-`*Error`.
+
+  `Panic` takes an `*Error` rather than a plain `error`, so a foreign error is converted with [`FromError`](../../exception/utility.go) first.
+
 ### Constructors and utilities (`exception`)
 
-- Error constructors:
-    - [`NewError`](../../exception/error_new.go)
-    - [`NewWarning`](../../exception/error_new.go)
-    - [`NewInfo`](../../exception/error_new.go)
-    - [`NewEmergency`](../../exception/error_new.go)
+- Error constructors — all four share the signature `(message string, context exceptioncontract.Context, causeErr error) *Error` and differ only in the level they stamp:
+    - [`NewEmergency`](../../exception/error_new.go) — `LevelEmergency`
+    - [`NewError`](../../exception/error_new.go) — `LevelError`
+    - [`NewWarning`](../../exception/error_new.go) — `LevelWarning`
+    - [`NewInfo`](../../exception/error_new.go) — `LevelInfo`
 - Error utilities:
     - [`LogContext`](../../exception/utility.go)
     - [`FromError`](../../exception/utility.go)

@@ -30,6 +30,7 @@ Claiming is atomic through `SELECT ... FOR UPDATE SKIP LOCKED`, so the backing d
 | `delivery_attempts` | Every claim — drives the `MaxDeliveryAttempts` crash-poison cap.                    |
 | `available_at`      | When the row is next due (backoff scheduling + visibility timeout).                 |
 | `last_error`        | Last send/decode error, for operators.                                              |
+| `claim_token`       | Fencing token, rewritten on every claim. Every transition write (`RecordDeliveryAttempt`, `MarkSent`, `MarkDead`, the retry reschedule) is guarded on `claim_token = ?` as well as the in-flight status, so a stale run whose claim already lapsed and was re-claimed by another instance matches no row and cannot clobber the new owner. Guarding on status alone is not enough: a re-claim returns the row to the very in-flight state the stale run also holds. |
 
 ## Usage
 
@@ -80,6 +81,24 @@ app.RegisterModule(
 ```
 
 The module registers the store and relay under the canonical container names `service.outbox.store` / `service.outbox.relay` (resolvable through `StoreMustFromContainer` / `RelayMustFromContainer`) and exposes the relay lifecycle command.
+
+### Relay defaults
+
+Every [`RelayConfig`](./relay.go) tunable is optional; a non-positive value resolves to the default below:
+
+| Field                 | Default                     | Meaning                                                                                                        |
+|-----------------------|-----------------------------|----------------------------------------------------------------------------------------------------------------|
+| `BatchSize`           | `100`                       | Rows claimed per `RunOnce`.                                                                                    |
+| `MaxAttempts`         | `12`                        | Send failures after which the row is dead-lettered.                                                            |
+| `MaxDeliveryAttempts` | `2 × MaxAttempts` (`24`)    | Claims after which the row is dead-lettered as crash-poison. Must exceed `MaxAttempts` — every retry re-claim counts toward it, so a value at or below it (including an unset zero) is raised to the default rather than dead-lettering a normally-retrying row. |
+| `InitialBackoff`      | `15s`                       | Delay before the first retry.                                                                                  |
+| `MaxBackoff`          | `10m`                       | Cap on the grown delay.                                                                                        |
+| `BackoffFactor`       | `2.0`                       | Growth per prior attempt. A value below `1` resolves to the default.                                           |
+| `VisibilityTimeout`   | `5m`                        | How long a claimed row stays hidden before it re-surfaces — the net that recovers rows whose claimer crashed. Must comfortably exceed the time to drain one batch. |
+| `LockTtl`             | `30s`                       | Lease TTL for the optional single-drainer `Locker`; the lease is refreshed at half of it.                       |
+| `LockName`            | `melody:outbox:relay`       | Lock name used with that `Locker`.                                                                             |
+
+`Locker` itself has no default — without one, `SKIP LOCKED` alone already makes concurrent relays safe.
 
 ### Run the relay
 

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- relay: the distributed lease is released on a context detached from the run and bounded by a five-second timeout, and a release failure is logged instead of discarded. The release previously rode the run context, so an interrupt or termination signal cancelled it before the backend ever saw the delete: the lease survived for the whole `LockTtl` (thirty seconds by default), every other replica's `RunOnce` returned `0, nil` on each poll until it expired, and nothing was logged — outbox delivery stalled for a full lease lifetime on every graceful restart
+
 ## [v3.1.1] - 2026-07-24 - Published Count Follows the Broker
 
 ### Fixed

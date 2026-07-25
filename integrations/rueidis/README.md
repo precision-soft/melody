@@ -237,10 +237,12 @@ Entry point: [`NewTokenStore`](./v3/token_store.go) — ships in the v3 binding 
 
 A Redis-backed implementation of the core [`security/contract.RevocableTokenStore`](../../v3/security/contract/token_store.go). It is a drop-in replacement for `security.NewInMemoryTokenStore` behind an `OpaqueTokenValidator`, so revocation survives restarts and is shared across instances.
 
-Key schema:
+Key schema — the prefix is wrapped in a Redis Cluster **hash tag**, so every key of one store hashes to the same slot and the Lua scripts below stay single-slot ([`keyspace()`](./v3/token_store.go)):
 
-* `<prefix>:token:<token>` — JSON-encoded claims, with `PX` set to the ttl (`PutWithTtl`); `Put` stores it without expiry.
-* `<prefix>:user:<userIdentifier>` — a set of the user's token keys, so `DeleteByUser` revokes every token a user holds in one call.
+* `{<prefix>}:token:<token>` — JSON-encoded claims, with `PX` set to the ttl (`PutWithTtl`); `Put` stores it without expiry.
+* `{<prefix>}:user:<userIdentifier>` — a set of the user's token keys, so `DeleteByUser` revokes every token a user holds in one call.
+
+Note the braces when writing a `SCAN`/`KEYS` pattern by hand: with the default prefix `melody:token` ([`WithTokenStorePrefix`](./v3/token_store.go) overrides it) the pattern is `{melody:token}:token:*`, not `melody:token:token:*` — the latter matches nothing.
 
 The token string and user identifier are used verbatim as the trailing key segment. Redis keys are a flat namespace, so a `:` inside either value cannot collide across the fixed `:token:`/`:user:` segments nor between two distinct identifiers, and the values are never parsed back out of the key.
 

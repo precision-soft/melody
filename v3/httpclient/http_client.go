@@ -54,6 +54,7 @@ func NewHttpClient(config *HttpClientConfig) *HttpClient {
         DialContext:           (&net.Dialer{Timeout: transportConfig.DialTimeout, KeepAlive: transportConfig.KeepAlive}).DialContext,
         ForceAttemptHTTP2:     true,
         MaxIdleConns:          transportConfig.MaxIdleConns,
+        MaxIdleConnsPerHost:   transportConfig.MaxIdleConnsPerHost,
         IdleConnTimeout:       transportConfig.IdleConnTimeout,
         TLSHandshakeTimeout:   transportConfig.TlsHandshakeTimeout,
         ExpectContinueTimeout: transportConfig.ExpectContinueTimeout,

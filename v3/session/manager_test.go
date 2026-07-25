@@ -217,6 +217,108 @@ func TestManager_DeleteSession_ReturnsErrorWhenIdIsMalformed(t *testing.T) {
     }
 }
 
+func TestManager_RegenerateSession_MintsANewIdAndDropsTheOldEntry(t *testing.T) {
+    storage := NewInMemoryStorage()
+    manager := NewManager(storage, 30*time.Minute)
+
+    original := manager.NewSession()
+    original.Set("userId", "u-1")
+
+    saveErr := manager.SaveSession(original)
+    if nil != saveErr {
+        t.Fatalf("unexpected error: %v", saveErr)
+    }
+
+    originalId := original.Id()
+
+    rotated, regenerateErr := manager.RegenerateSession(original)
+    if nil != regenerateErr {
+        t.Fatalf("unexpected error: %v", regenerateErr)
+    }
+
+    if originalId == rotated.Id() {
+        t.Fatalf("expected a fresh session id after the rotation")
+    }
+
+    if "u-1" != rotated.String("userId") {
+        t.Fatalf("expected the values to survive the rotation, got %q", rotated.String("userId"))
+    }
+
+    if false == rotated.IsModified() {
+        t.Fatalf("expected the rotated session to be modified so the response path stores it")
+    }
+
+    if nil != manager.Session(originalId) {
+        t.Fatalf("expected the pre-rotation entry to be gone from storage")
+    }
+}
+
+func TestManager_RegenerateSession_MarksTheAbandonedSessionCleared(t *testing.T) {
+    manager := NewManager(NewInMemoryStorage(), 30*time.Minute)
+
+    original := manager.NewSession()
+    original.Set("userId", "u-1")
+
+    saveErr := manager.SaveSession(original)
+    if nil != saveErr {
+        t.Fatalf("unexpected error: %v", saveErr)
+    }
+
+    rotated, regenerateErr := manager.RegenerateSession(original)
+    if nil != regenerateErr {
+        t.Fatalf("unexpected error: %v", regenerateErr)
+    }
+
+    if false == original.IsCleared() {
+        t.Fatalf("expected the abandoned session to be marked cleared so a forgotten republish logs the client out")
+    }
+
+    if true == rotated.IsCleared() {
+        t.Fatalf("expected the rotated session to be live")
+    }
+
+    if "u-1" != rotated.String("userId") {
+        t.Fatalf("expected clearing the abandoned session to leave the carried-over values alone, got %q", rotated.String("userId"))
+    }
+}
+
+func TestManager_RegenerateSession_ReturnsErrorWhenSessionIsNil(t *testing.T) {
+    manager := NewManager(NewInMemoryStorage(), time.Minute)
+
+    rotated, err := manager.RegenerateSession(nil)
+    if nil == err {
+        t.Fatalf("expected error")
+    }
+
+    if nil != rotated {
+        t.Fatalf("expected no session when the rotation failed")
+    }
+}
+
+func TestManager_RegenerateSession_ReturnsErrorWhenIdIsMalformed(t *testing.T) {
+    manager := NewManager(NewInMemoryStorage(), time.Minute)
+
+    sessionInstance := &Session{
+        id:       "not-a-valid-hex-id",
+        values:   map[string]any{"a": "b"},
+        modified: false,
+        cleared:  false,
+    }
+
+    rotated, err := manager.RegenerateSession(sessionInstance)
+    if nil == err {
+        t.Fatalf("expected error for a malformed id")
+    }
+
+    if nil != rotated {
+        t.Fatalf("expected no session when the rotation failed")
+    }
+
+    if "not-a-valid-hex-id" != sessionInstance.Id() {
+        t.Fatalf("expected the original session to be left untouched by a failed rotation")
+    }
+}
+
 func TestIsValidSessionId(t *testing.T) {
     cases := map[string]bool{
         "":                                  false,
@@ -233,5 +335,57 @@ func TestIsValidSessionId(t *testing.T) {
         if result := isValidSessionId(value); expected != result {
             t.Fatalf("isValidSessionId(%q) = %v, want %v", value, result, expected)
         }
+    }
+}
+
+func TestManager_RegenerateSession_AbandonmentSurvivesALaterWriteToTheOriginal(t *testing.T) {
+    manager := NewManager(NewInMemoryStorage(), 30*time.Minute)
+
+    original := manager.NewSession()
+    original.Set("userId", "anonymous")
+
+    saveErr := manager.SaveSession(original)
+    if nil != saveErr {
+        t.Fatalf("unexpected error: %v", saveErr)
+    }
+
+    originalId := original.Id()
+
+    rotated, regenerateErr := manager.RegenerateSession(original)
+    if nil != regenerateErr {
+        t.Fatalf("unexpected error: %v", regenerateErr)
+    }
+
+    original.Set("userId", "u-1")
+
+    if false == original.IsCleared() {
+        t.Fatalf("expected a write to the abandoned session to leave it cleared, so the rotation cannot be undone")
+    }
+
+    if nil != manager.SaveSession(original) {
+        t.Fatalf("unexpected error saving the abandoned session")
+    }
+
+    if nil != manager.Session(originalId) {
+        t.Fatalf("expected the rotated-away id to stay gone from storage instead of being re-created under the authenticated identity")
+    }
+
+    if true == rotated.IsCleared() {
+        t.Fatalf("expected the rotated session to stay live")
+    }
+
+    rotated.Set("userId", "u-1")
+
+    if nil != manager.SaveSession(rotated) {
+        t.Fatalf("unexpected error saving the rotated session")
+    }
+
+    reloaded := manager.Session(rotated.Id())
+    if nil == reloaded {
+        t.Fatalf("expected the rotated session to be storable")
+    }
+
+    if "u-1" != reloaded.String("userId") {
+        t.Fatalf("expected the rotated session to carry the identity, got %q", reloaded.String("userId"))
     }
 }

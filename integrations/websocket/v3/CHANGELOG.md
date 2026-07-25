@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- handler: a received pong refreshes the connection's liveness mark, and a keepalive ping that could not be written is no longer read as a dead peer. Liveness previously advanced only when `Read` returned a data message, so a receive-only client bridged onto a broadcast hub never advanced it at all and the activity window was dead for exactly the connections it protects; and because the library serialises control frames behind the frame in flight, a ping issued while the handler was flushing to a slow client timed out without ever reaching the socket, and the connection was cancelled mid-write. The excuse is scoped to the ping a frame actually blocked: whether a write was in flight is sampled as the ping is issued, so a write that has completed excuses nothing — a write into a half-open connection succeeds for as long as the socket send buffer has room, and half-open detection must survive a hub that keeps broadcasting. **Behavioural change**: a configuration with `IdleTimeout` below `WriteTimeout` no longer turns transient write contention into a disconnect — a frame in flight excuses a timed-out ping until one interval past the configured write timeout, after which the write's own failure tears the connection down
+
 ## [v3.1.2] - 2026-07-11 - Connection Reaping, Close Handshake, and Scope-Lifetime Hardening
 
 ### Fixed

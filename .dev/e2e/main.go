@@ -10,12 +10,14 @@ so you can exercise one or all by invoking it by hand instead:
       -e REDIS_ADDRESS=redis:6379 \
       -e POSTGRES_DSN='postgres://melody:melody@postgres:5432/melody_test?sslmode=disable' \
       -e AMQP_DSN='amqp://guest:guest@rabbitmq:5672/' \
+      -e MINIO_ENDPOINT=localstack:4566 -e MINIO_ACCESS_KEY=test -e MINIO_SECRET_KEY=test \
       -e GOWORK=off melody-dev-1 \
       sh -c 'export PATH=/usr/local/go/bin:$PATH; cd /app/.dev/e2e && go run .'
 
 Sections:
-  - WEBSOCKET FAN-OUT      (in-process) — handshake + hub broadcast delivered to two live sockets
+  - WEBSOCKET FAN-OUT      (in-process) — handshake + hub broadcast delivered to two live sockets, then keepalive: a client that pongs stays, one that falls silent is reaped
   - ENCRYPT COMPARTMENTS   (in-process) — named-cipher isolation, redaction, unregistered compartment errors
+  - SESSION ID ROTATION    (in-process) — rotate + republish in one call, the destroyed id buys nothing, an unpublished rotation logs the client out
   - CROSS-APP HMAC AUTH    (redis)    — sign→verify, actor propagation, replay/audience/tamper rejection
   - CACHE                  (redis)    — set/get round-trip, time-to-live expiry, miss, atomic increment
   - RATE LIMIT             (redis)    — shared budget, window reset, fail-closed default, opt-in fail-open
@@ -25,11 +27,20 @@ Sections:
   - PGSQL ADVISORY LOCK    (postgres) — mutual exclusion, release hand-off
   - MIGRATE                (postgres) — up creates+seeds a table, down rolls it back; per-context isolation
   - AMQP PUBLISH/CONSUME   (rabbitmq) — round-trip publish → consume → ack, and delayed redelivery
+  - OBJECT STORAGE PUT     (localstack) — the declared-size contract: a short declaration is refused before the bucket is touched, so the object already at the key survives
   - MAIL                   (mailpit)  — smtp transport sends a whole session under the per-step deadline; mailpit confirms receipt
   - EXAMPLE OVER HTTP      (example)  — forwarded-client-ip trust boundary and the rate limit over real HTTP
+  - EXAMPLE APPLICATION v1 (example)  — the .example application of major 1, built and booted by the harness
+  - EXAMPLE APPLICATION v2 (example)  — the same, for major 2
+  - EXAMPLE APPLICATION v3 (example)  — the same, for major 3
 
-The websocket and encrypt sections need no backend and always run; the rest run only when their env var is
-set. Exits non-zero on the first unexpected outcome. */
+The per-major EXAMPLE APPLICATION sections build each major's .example into its own workspace, boot it on its own
+port and drive it end to end: a public route, the login flow through a real cookie jar, the protected route before
+and after login, logout, encoded path-traversal containment, a 404, three command-line invocations and a graceful
+shutdown on one SIGINT. MELODY_E2E_MAJORS selects which majors run and defaults to all three.
+
+The websocket, encrypt and session sections need no backend and always run; the rest run only when their env
+var is set. Exits non-zero on the first unexpected outcome. */
 package main
 
 import (
@@ -58,6 +69,10 @@ func main() {
 
     section("ENCRYPT COMPARTMENTS (in-process)")
     runEncryptCompartmentCheck()
+    sections++
+
+    section("SESSION ID ROTATION (in-process)")
+    runSessionRotationCheck()
     sections++
 
     redisAddress := os.Getenv("REDIS_ADDRESS")
@@ -107,6 +122,13 @@ func main() {
         sections++
     }
 
+    if endpoint := os.Getenv("MINIO_ENDPOINT"); "" != endpoint {
+        infrastructureSections++
+        section("OBJECT STORAGE PUT (live s3)")
+        runObjectStorageCheck(endpoint, os.Getenv("MINIO_ACCESS_KEY"), os.Getenv("MINIO_SECRET_KEY"))
+        sections++
+    }
+
     /* the section needs both halves — the smtp endpoint to send through and the mailpit api to verify the receipt — so clearing either variable skips it, per the clear-to-skip contract every backend variable follows; silently substituting a default for a cleared MAILPIT_API_URL would point the check at infrastructure the run explicitly opted out of. */
     if smtpAddress, mailpitApiUrl := os.Getenv("SMTP_ADDRESS"), os.Getenv("MAILPIT_API_URL"); "" != smtpAddress && "" != mailpitApiUrl {
         infrastructureSections++
@@ -129,11 +151,24 @@ func main() {
         }
     }
 
-    /* the in-process sections (websocket, encrypt) always run, so they can never witness a missing backend: the guard has to
-       count only the sections a backend gates, or a run against an empty environment reports "ALL 2 SECTIONS PASSED" and the
-       eleven that matter are silently skipped */
+    /* the per-major example sections need no backend of the harness's own: each application is configured from the .env beside
+       its own executable, which is what keeps clearing REDIS_ADDRESS (or any other backend variable) from reconfiguring them */
+    exampleMajors := exampleMajorList()
+    if 0 == len(exampleMajors) {
+        fmt.Printf("\nSKIPPED: %s is empty — no major's .example application was built, booted or driven\n", exampleMajorListVariable)
+    }
+
+    for _, major := range exampleMajors {
+        section(fmt.Sprintf("EXAMPLE APPLICATION %s (live, built from %s)", major.label, major.relativeDirectory))
+        runExampleApplicationCheck(major)
+        sections++
+    }
+
+    /* the in-process sections (websocket, encrypt, session) always run, so they can never witness a missing backend: the guard
+       has to count only the sections a backend gates, or a run against an empty environment reports "ALL 3 SECTIONS PASSED" and
+       the twelve that matter are silently skipped */
     if 0 == infrastructureSections {
-        fail("no infrastructure env set — expected one or more of REDIS_ADDRESS / POSTGRES_DSN / AMQP_DSN")
+        fail("no infrastructure env set — expected one or more of REDIS_ADDRESS / POSTGRES_DSN / AMQP_DSN / MINIO_ENDPOINT")
     }
 
     fmt.Printf("\nALL %d E2E SECTION(S) PASSED\n", sections)
@@ -178,5 +213,38 @@ func skip(format string, args ...any) {
 
 func fail(format string, args ...any) {
     fmt.Fprintf(os.Stderr, "FAIL  "+format+"\n", args...)
+    runFailureCleanup()
     os.Exit(1)
+}
+
+/* failureCleanupList holds the teardown steps a failing run must take before it exits. os.Exit runs no deferred
+function, so a section that started a child process has to register its teardown here or the process outlives the
+run and holds its port against the next one — which the next run would then report as an occupied port instead of
+the failure that actually happened. */
+var failureCleanupList []func()
+
+/* pushFailureCleanup registers a teardown step and returns the function that unregisters it, so a section that
+finished cleanly does not leave a stale entry behind for a later, unrelated failure to run. */
+func pushFailureCleanup(cleanup func()) func() {
+    index := len(failureCleanupList)
+    failureCleanupList = append(failureCleanupList, cleanup)
+
+    return func() {
+        if index < len(failureCleanupList) {
+            failureCleanupList[index] = nil
+        }
+    }
+}
+
+func runFailureCleanup() {
+    for index := len(failureCleanupList) - 1; 0 <= index; index-- {
+        cleanup := failureCleanupList[index]
+        if nil == cleanup {
+            continue
+        }
+
+        cleanup()
+    }
+
+    failureCleanupList = nil
 }

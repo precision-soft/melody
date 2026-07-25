@@ -212,6 +212,8 @@ type definitionNode struct {
     duplicates []*HttpMiddlewareDefinition
     inDegree   int
     out        []string
+    /* registration rank, so equal-priority definitions keep the order the application registered them in; the generated names carry that order as a decimal counter, which a lexicographic tie-break reads as 1, 10, 11, 2 and which sorts every factory ahead of every middleware */
+    order int
 }
 
 func orderDefinitions(definitions []*HttpMiddlewareDefinition) ([]*HttpMiddlewareDefinition, []string, bool) {
@@ -220,6 +222,7 @@ func orderDefinitions(definitions []*HttpMiddlewareDefinition) ([]*HttpMiddlewar
     }
 
     nodes := make(map[string]*definitionNode)
+    orderedNodes := make([]*definitionNode, 0, len(definitions))
     missingReferences := make([]string, 0)
 
     for _, definition := range definitions {
@@ -232,12 +235,16 @@ func orderDefinitions(definitions []*HttpMiddlewareDefinition) ([]*HttpMiddlewar
             continue
         }
 
-        nodes[definition.name] = &definitionNode{
+        node := &definitionNode{
             definition: definition,
             duplicates: []*HttpMiddlewareDefinition{definition},
             inDegree:   0,
             out:        make([]string, 0),
+            order:      len(orderedNodes),
         }
+
+        nodes[definition.name] = node
+        orderedNodes = append(orderedNodes, node)
     }
 
     addEdge := func(from string, to string) {
@@ -279,7 +286,7 @@ func orderDefinitions(definitions []*HttpMiddlewareDefinition) ([]*HttpMiddlewar
     }
 
     ready := make([]*definitionNode, 0)
-    for _, node := range nodes {
+    for _, node := range orderedNodes {
         if 0 == node.inDegree {
             ready = append(ready, node)
         }
@@ -294,7 +301,7 @@ func orderDefinitions(definitions []*HttpMiddlewareDefinition) ([]*HttpMiddlewar
                 return leftPriority < rightPriority
             }
 
-            return ready[left].definition.name < ready[right].definition.name
+            return ready[left].order < ready[right].order
         })
     }
 
@@ -334,10 +341,7 @@ func orderDefinitions(definitions []*HttpMiddlewareDefinition) ([]*HttpMiddlewar
         result = append(result, definitions...)
 
         sort.SliceStable(result, func(left int, right int) bool {
-            if result[left].priority != result[right].priority {
-                return result[left].priority < result[right].priority
-            }
-            return result[left].name < result[right].name
+            return result[left].priority < result[right].priority
         })
     }
 

@@ -334,3 +334,205 @@ func TestRouter_Match_EmptySegmentDoesNotSatisfyNamedParameter(t *testing.T) {
         t.Fatalf("expected the identifier to be bound, got %q", routeMatch.Params["id"])
     }
 }
+
+func TestRouter_AddRoute_RejectsOptionalSegmentBeforeAnotherSegment(t *testing.T) {
+    for _, pattern := range []string{"/blog/:locale?/posts", "/:locale?/blog", "/blog/:locale?/:page?"} {
+        router := NewRouter()
+
+        assertPanicWithExceptionMessage(
+            t,
+            func() {
+                router.Handle(
+                    nethttp.MethodGet,
+                    pattern,
+                    func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                        return TextResponse(200, "blog"), nil
+                    },
+                )
+            },
+            "optional route parameter must be the last pattern segment unless it has a default",
+        )
+    }
+}
+
+func TestRouter_AddRoute_AcceptsANonTrailingOptionalSegmentThatHasADefault(t *testing.T) {
+    routeRegistry := NewRouteRegistry()
+    router := NewRouterWithRouteRegistry(routeRegistry)
+
+    router.HandleWithOptions(
+        "/:locale?/list/:page",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(200, "list"), nil
+        },
+        NewRouteOptions(
+            "list",
+            []string{nethttp.MethodGet},
+            "",
+            nil,
+            nil,
+            map[string]string{
+                "locale": "en",
+            },
+            nil,
+            0,
+            nil,
+        ),
+    )
+
+    urlGenerator := NewUrlGenerator(routeRegistry)
+
+    generatedPath, generateErr := urlGenerator.GeneratePath("list", map[string]string{"page": "2"})
+    if nil != generateErr {
+        t.Fatalf("unexpected generate error: %v", generateErr)
+    }
+    if "/en/list/2" != generatedPath {
+        t.Fatalf("expected the default to be substituted, got %q", generatedPath)
+    }
+
+    if _, matched := router.Match(nethttp.MethodGet, generatedPath, "", ""); false == matched {
+        t.Fatalf("expected the generated path %q to match the route it came from", generatedPath)
+    }
+}
+
+func TestRouter_AddRoute_AcceptsOptionalSegmentAtTheTail(t *testing.T) {
+    router := NewRouter()
+
+    router.Handle(
+        nethttp.MethodGet,
+        "/blog/posts/:locale?",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(200, "blog"), nil
+        },
+    )
+
+    for _, requestPath := range []string{"/blog/posts", "/blog/posts/en"} {
+        if _, matched := router.Match(nethttp.MethodGet, requestPath, "", ""); false == matched {
+            t.Fatalf("expected %q to match a route with a trailing optional segment", requestPath)
+        }
+    }
+}
+
+func TestRouter_AddRoute_NonTrailingOptionalWithADefaultSurvivesASuppliedEmptyValue(t *testing.T) {
+    routeRegistry := NewRouteRegistry()
+    router := NewRouterWithRouteRegistry(routeRegistry)
+
+    router.HandleWithOptions(
+        "/:locale?/list/:page",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(200, "list"), nil
+        },
+        NewRouteOptions(
+            "list",
+            []string{nethttp.MethodGet},
+            "",
+            nil,
+            nil,
+            map[string]string{
+                "locale": "en",
+            },
+            nil,
+            0,
+            nil,
+        ),
+    )
+
+    urlGenerator := NewUrlGenerator(routeRegistry)
+
+    generatedPath, generateErr := urlGenerator.GeneratePath(
+        "list",
+        map[string]string{
+            "locale": "",
+            "page":   "2",
+        },
+    )
+    if nil != generateErr {
+        t.Fatalf("unexpected generate error: %v", generateErr)
+    }
+
+    if "/en/list/2" != generatedPath {
+        t.Fatalf("expected the default to fill in for the supplied empty value, got %q", generatedPath)
+    }
+
+    routeMatch, matched := router.Match(nethttp.MethodGet, generatedPath, "", "")
+    if false == matched {
+        t.Fatalf("expected the generated path %q to match the route it came from", generatedPath)
+    }
+
+    if "en" != routeMatch.Params["locale"] {
+        t.Fatalf("expected the locale to be bound to the default, got %q", routeMatch.Params["locale"])
+    }
+
+    if "2" != routeMatch.Params["page"] {
+        t.Fatalf("expected the page to be bound, got %q", routeMatch.Params["page"])
+    }
+}
+
+func TestRouter_AddRoute_NonTrailingOptionalWithAGroupSuppliedDefaultSurvivesASuppliedEmptyValue(t *testing.T) {
+    routeRegistry := NewRouteRegistry()
+    router := NewRouterWithRouteRegistry(routeRegistry)
+
+    group := router.Group("/shop")
+    group.WithDefaults(
+        map[string]string{
+            "locale": "en",
+        },
+    )
+
+    group.HandleWithOptions(
+        "/:locale?/list/:page",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(200, "list"), nil
+        },
+        NewRouteOptions("shop.list", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
+    )
+
+    urlGenerator := NewUrlGenerator(routeRegistry)
+
+    for _, parameters := range []map[string]string{
+        {"page": "2"},
+        {"locale": "", "page": "2"},
+    } {
+        generatedPath, generateErr := urlGenerator.GeneratePath("shop.list", parameters)
+        if nil != generateErr {
+            t.Fatalf("unexpected generate error: %v", generateErr)
+        }
+
+        if "/shop/en/list/2" != generatedPath {
+            t.Fatalf("expected the group default to be substituted, got %q", generatedPath)
+        }
+
+        if _, matched := router.Match(nethttp.MethodGet, generatedPath, "", ""); false == matched {
+            t.Fatalf("expected the generated path %q to match the route it came from", generatedPath)
+        }
+    }
+}
+
+func TestRouter_AddRoute_RejectsANonTrailingOptionalWhoseDefaultIsEmpty(t *testing.T) {
+    router := NewRouter()
+
+    assertPanicWithExceptionMessage(
+        t,
+        func() {
+            router.HandleWithOptions(
+                "/:locale?/list/:page",
+                func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                    return TextResponse(200, "list"), nil
+                },
+                NewRouteOptions(
+                    "list",
+                    []string{nethttp.MethodGet},
+                    "",
+                    nil,
+                    nil,
+                    map[string]string{
+                        "locale": "",
+                    },
+                    nil,
+                    0,
+                    nil,
+                ),
+            )
+        },
+        "optional route parameter must be the last pattern segment unless it has a default",
+    )
+}

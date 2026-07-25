@@ -61,6 +61,34 @@ func TestChangeSet_UpdateCapturesOnlyChangedFields(t *testing.T) {
     }
 }
 
+/* an empty change-set must always serialise as [], never as the JSON literal null: the delete path already writes [] for the same "nothing recorded" meaning, and a consumer running jsonb_array_length(changes) over the trail errors or reads 1 on null, which is also indistinguishable from a genuinely absent change-set. */
+func TestChangeSet_EmptyResultAlwaysSerialisesAsAnEmptyArray(t *testing.T) {
+    identical := product{Id: 1, Name: "same", Price: 10}
+
+    cases := map[string][]Change{
+        "idempotent update": ChangeSet(identical, identical),
+        "no models at all":  ChangeSet(nil, nil),
+        "non-struct insert": ChangeSet(nil, "not-a-model"),
+        "non-struct delete": ChangeSet(map[string]string{"a": "b"}, nil),
+        "typed nil pointer": ChangeSet(nil, (*product)(nil)),
+    }
+
+    for name, changes := range cases {
+        if 0 != len(changes) {
+            t.Fatalf("%s: expected an empty change-set, got %+v", name, changes)
+        }
+
+        payload, marshalErr := json.Marshal(changes)
+        if nil != marshalErr {
+            t.Fatalf("%s: marshal changes: %v", name, marshalErr)
+        }
+
+        if "[]" != string(payload) {
+            t.Fatalf("%s: expected an empty change-set to serialise as [], got %s", name, payload)
+        }
+    }
+}
+
 func TestChangeSet_InsertHasNewOnly(t *testing.T) {
     changes := ChangeSet(nil, product{Id: 1, Name: "fresh", Price: 5})
 

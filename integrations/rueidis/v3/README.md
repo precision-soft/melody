@@ -14,7 +14,7 @@ Import path: `github.com/precision-soft/melody/integrations/rueidis/v3`
 
 ## Provider
 
-[`NewProvider`](./provider.go) builds a [`Provider`](./provider.go) from optional options ([`WithClientConfig`](./provider.go), [`WithTimeoutConfig`](./provider.go)). `Open` takes a [`ConnectionParameters`](./connection_parameters.go) (address, user, password) and returns a `rueidis.Client`; a comma-separated address list is used as multiple init addresses.
+[`NewProvider`](./provider.go) builds a [`Provider`](./provider.go) from optional options ([`WithClientConfig`](./provider.go), [`WithTimeoutConfig`](./provider.go), [`WithRetryConfig`](./provider.go)). `Open` takes a [`ConnectionParameters`](./connection_parameters.go) (address, user, password) and returns a `rueidis.Client`; a comma-separated address list is used as multiple init addresses.
 
 ```go
 provider := rueidis.NewProvider()
@@ -29,6 +29,42 @@ Optional configuration:
 
 * [`ClientConfig`](./client_config.go) — client name, DB selection, TLS, client-side cache toggle, ping-on-start.
 * [`TimeoutConfig`](./timeout_config.go) — connect / command timeouts.
+* [`RetryConfig`](./retry_config.go) — the initial-connection retry (see below).
+
+### Connection retry
+
+[`WithRetryConfig`](./provider.go) makes `Open` re-dial a **transient** failure — a Redis that is not accepting connections yet — with capped exponential backoff, so a cold-start race between containers does not hard-fail the boot. It is **opt-in**: without it, `Open` makes a single attempt. A non-transient error is never retried and is returned immediately.
+
+```go
+provider := rueidis.NewProvider(
+    rueidis.WithRetryConfig(rueidis.DefaultRetryConfig()),
+)
+```
+
+[`RetryConfig`](./retry_config.go) fields, each resolved independently against [`DefaultRetryConfig`](./retry_config.go):
+
+| Field               | Default | Notes                                                                                                    |
+|---------------------|---------|----------------------------------------------------------------------------------------------------------|
+| `MaxAttempts`       | `3`     | Total attempts, not extra ones. `0` resolves to the default.                                             |
+| `InitialDelay`      | `500ms` | Delay before the second attempt. A non-positive value resolves to the default.                            |
+| `MaxDelay`          | `5s`    | Cap on the grown delay. A non-positive value resolves to the default.                                    |
+| `BackoffMultiplier` | `2.0`   | Growth per attempt. Anything not at least `1` — including `NaN` — resolves to the default; exactly `1` is a valid constant backoff. |
+
+Because each field is defaulted on its own, a partially filled `RetryConfig` cannot collapse the backoff into a re-dial storm. Retries are reported through the framework logger: a warning per retry, an error when the attempts run out, and an info line when a later attempt succeeds.
+
+### Defaults
+
+| Config          | Field              | Default |
+|-----------------|--------------------|---------|
+| `TimeoutConfig` | `ConnectTimeout`   | `3s`    |
+| `TimeoutConfig` | `CommandTimeout`   | `3s`    |
+| `ClientConfig`  | `ClientName`       | empty   |
+| `ClientConfig`  | `SelectDb`         | `0`     |
+| `ClientConfig`  | `DisableCache`     | `true`  |
+| `ClientConfig`  | `TlsConfig`        | `nil`   |
+| `ClientConfig`  | `PingOnStart`      | `true`  |
+| `ClientConfig`  | `DialTimeout`      | `5s`    |
+| `ClientConfig`  | `ConnWriteTimeout` | `5s`    |
 
 ## Distributed lock
 
@@ -104,13 +140,13 @@ Package: [`cache`](./cache). [`cache.NewBackend`](./cache/backend.go) wraps a `r
 
 ## Plug-and-play registration
 
-Each capability has a one-call registration helper that binds it to the canonical core service name, so handlers resolve it through the matching `*MustFromResolver` helper:
+Each capability has a one-call registration helper that binds it to a canonical service name, so handlers resolve it through the matching `*MustFromResolver` helper:
 
 ```go
-rueidis.RegisterClientService(registrar, client)              // service.redis.client
-rueidis.RegisterLockerService(registrar, client)              // core lock.ServiceLocker
-rueidis.RegisterTokenStoreService(registrar, client)          // security RevocableTokenStore
-rueidiscache.RegisterBackendService(registrar, client, "app:") // core cache.ServiceCacheBackend
+rueidis.RegisterClientService(registrar, client)               /* rueidis.ServiceClient, "service.rueidis.client" */
+rueidis.RegisterLockerService(registrar, client)               /* core lock.ServiceLocker */
+rueidis.RegisterTokenStoreService(registrar, client)           /* rueidis.ServiceTokenStore, "service.rueidis.token_store" */
+rueidiscache.RegisterBackendService(registrar, client, "app:") /* core cache.ServiceCacheBackend */
 ```
 
 `RegisterClientService`, `RegisterLockerService`, and `RegisterTokenStoreService` live in [`service_resolver.go`](./service_resolver.go); `RegisterBackendService` lives in [`cache/service_resolver.go`](./cache/service_resolver.go).

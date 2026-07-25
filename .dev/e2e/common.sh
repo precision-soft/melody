@@ -5,7 +5,7 @@
 #
 # How to add a new check (stack.sh style):
 #   1. section_start "MY CHECK" "${TAG_VALIDATE}" "e2e"
-#   2. run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . my:command"
+#   2. run_in_dev_capture "$(e2e_example_directory 3)" "go run . my:command"   # name the major the check drives
 #      then read RUN_IN_DEV_OUTPUT_STRING / RUN_IN_DEV_STATUS_INTEGER (never call it inside "$(...)")
 #   3. assert with check_pass "..." / check_fail "..." — every check needs a reachable fail branch;
 #      a check that cannot fail is a bug
@@ -27,7 +27,34 @@ E2E_SERVICE_NAME_STRING="dev"
 
 # paths as seen from inside the dev container
 E2E_HARNESS_DIRECTORY_STRING="/app/.dev/e2e"
-EXAMPLE_DIRECTORY_STRING="/app/v3/.example"
+
+# the .example application of every major, addressed by tree position rather than by one hardcoded directory:
+# e2e_example_directory <major> resolves it, so a check states which major it drives instead of inheriting one.
+EXAMPLE_DIRECTORY_V1_STRING="/app/.example"
+EXAMPLE_DIRECTORY_V2_STRING="/app/v2/.example"
+EXAMPLE_DIRECTORY_V3_STRING="/app/v3/.example"
+
+# the majors the example-driving coverage exercises. Unset means all three, because the project's convention is
+# that the default run is the full run; a shorter list narrows it ("1 3"), an empty value opts out entirely. The
+# run.sh harness reads the same variable, so both scripts agree on which majors a run covers.
+MELODY_E2E_MAJORS="${MELODY_E2E_MAJORS-1 2 3}"
+
+e2e_example_directory() {
+    local MAJOR_STRING="${1:?}"
+
+    case "${MAJOR_STRING}" in
+        1 | v1) printf '%s' "${EXAMPLE_DIRECTORY_V1_STRING}" ;;
+        2 | v2) printf '%s' "${EXAMPLE_DIRECTORY_V2_STRING}" ;;
+        3 | v3) printf '%s' "${EXAMPLE_DIRECTORY_V3_STRING}" ;;
+        *) fail "unknown melody major: ${MAJOR_STRING} (expected 1, 2 or 3)" ;;
+    esac
+}
+
+# stack.sh drives the v3 example throughout: every one of its checks either exercises a module that exists only in
+# v3 (wiring, openapi, outbox, encrypt) or reaches its property through a command, a parameter or an app:info line
+# that only the v3 example application declares. It names v3 explicitly here so the choice is visible; the
+# coverage that DOES generalize across the majors lives in the run.sh harness, one section per major.
+EXAMPLE_DIRECTORY_STRING="$(e2e_example_directory 3)"
 EXAMPLE_ENV_LOCAL_PATH_STRING="${EXAMPLE_DIRECTORY_STRING}/.env.local"
 
 # backend env defaults — the single source of truth for every e2e script. Each value is overridable from
@@ -38,6 +65,9 @@ EXAMPLE_ENV_LOCAL_PATH_STRING="${EXAMPLE_DIRECTORY_STRING}/.env.local"
 REDIS_ADDRESS="${REDIS_ADDRESS-redis:6379}"
 POSTGRES_DSN="${POSTGRES_DSN-postgres://melody:melody@postgres:5432/melody_test?sslmode=disable}"
 AMQP_DSN="${AMQP_DSN-amqp://guest:guest@rabbitmq:5672/}"
+MINIO_ENDPOINT="${MINIO_ENDPOINT-localstack:4566}"
+MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY-test}"
+MINIO_SECRET_KEY="${MINIO_SECRET_KEY-test}"
 SMTP_ADDRESS="${SMTP_ADDRESS-mailpit:1025}"
 MAILPIT_API_URL="${MAILPIT_API_URL-http://mailpit:8025}"
 EXAMPLE_BASE_URL="${EXAMPLE_BASE_URL-http://127.0.0.1:8080}"
@@ -72,10 +102,14 @@ e2e_dev_command() {
         " REDIS_ADDRESS='${REDIS_ADDRESS}'" \
         " POSTGRES_DSN='${POSTGRES_DSN}'" \
         " AMQP_DSN='${AMQP_DSN}'" \
+        " MINIO_ENDPOINT='${MINIO_ENDPOINT}'" \
+        " MINIO_ACCESS_KEY='${MINIO_ACCESS_KEY}'" \
+        " MINIO_SECRET_KEY='${MINIO_SECRET_KEY}'" \
         " SMTP_ADDRESS='${SMTP_ADDRESS}'" \
         " MAILPIT_API_URL='${MAILPIT_API_URL}'" \
         " EXAMPLE_BASE_URL='${EXAMPLE_BASE_URL}'" \
         " EXAMPLE_LOAD_BALANCER_URL='${EXAMPLE_LOAD_BALANCER_URL}'" \
+        " MELODY_E2E_MAJORS='${MELODY_E2E_MAJORS}'" \
         "; cd ${DIRECTORY_STRING} || exit 1; ${COMMAND_STRING}"
 }
 

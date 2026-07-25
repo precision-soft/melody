@@ -2,6 +2,7 @@ package cli
 
 import (
     "context"
+    "errors"
     "fmt"
     "io"
     "sort"
@@ -9,6 +10,7 @@ import (
     "time"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
+    "github.com/precision-soft/melody/v3/cli/output"
     "github.com/precision-soft/melody/v3/exception"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
@@ -85,6 +87,15 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
             Action: func(ctx context.Context, commandContext *clicontract.CommandContext) error {
                 writer := commandContext.Writer
                 if nil == writer {
+                    writer = io.Discard
+                }
+
+                /* in json mode the command writes one machine-readable document to this same stream, so the banner would make it unparseable from the first byte; nothing is lost because output.Meta already carries the command, arguments, start time and duration, and Envelope.Error carries the final status */
+                resolvedOption := output.NormalizeOption(
+                    output.ParseOptionFromCommand(commandContext),
+                )
+
+                if output.FormatJson == resolvedOption.Format {
                     writer = io.Discard
                 }
 
@@ -243,7 +254,7 @@ func aggregateCliErrors(runErr error, closeErrorByName map[string]error) error {
         )
     }
 
-    return exception.NewError(
+    aggregatedErr := exception.NewError(
         "cli command failed with shutdown errors",
         map[string]any{
             "runError":    runErr.Error(),
@@ -252,4 +263,12 @@ func aggregateCliErrors(runErr error, closeErrorByName map[string]error) error {
         },
         runErr,
     )
+
+    /* the exit code is resolved with errors.As, which matches the outermost ExitError in the chain: returning the aggregate unwrapped would hand the caller the command's own exit error instead, and the shutdown failures — carried only here — would never reach the log */
+    var exitError *exception.ExitError
+    if true == errors.As(runErr, &exitError) {
+        return exception.NewExitError(exitError.ExitCode(), aggregatedErr)
+    }
+
+    return aggregatedErr
 }

@@ -22,4 +22,14 @@ Integrations are optional modules that connect Melody to third-party systems (da
 
 ## Usage
 
-Each integration ships a `module.go` with `Register*` helpers that follow the same plug-and-play pattern, so wiring one looks the same as wiring any other. See each integration's README for import paths and a minimal example, and [`../v3/.example`](../v3/.example) for all of them wired together in one runnable application.
+Most integrations ship a `module.go` with a `NewModule` facade and `Register*` helpers that follow the same plug-and-play pattern, so wiring one looks the same as wiring any other. See each integration's README for import paths and a minimal example, and [`../v3/.example`](../v3/.example) for all of them wired together in one runnable application.
+
+Some deliberately do not, and are wired by hand instead:
+
+| Integration                                        | Why no module                                                                             |
+|----------------------------------------------------|-------------------------------------------------------------------------------------------|
+| [`bunorm`](./bunorm/) (all majors)                 | the core registry is built from application-owned `ProviderDefinition` values; register the `ManagerRegistry` and the default `Manager` as your own services |
+| [`bunorm/pgsql`](./bunorm/pgsql/) (all majors)     | provider and advisory-lock `Locker` are registered by the application; the MySQL sibling's v3 binding does ship one |
+| [`bunorm/mysql`](./bunorm/mysql/) v1 / v2          | the module (and `RegisterLockerService`) ships only in the v3 binding                      |
+| [`rueidis`](./rueidis/) v1 / v2                    | the module and the `Register*Service` helpers ship only in the v3 binding                  |
+| [`bunorm/v3/audit`](./bunorm/v3/audit/)            | a `Recorder`/`Tracker` is constructed and held by application code, not resolved by name   |

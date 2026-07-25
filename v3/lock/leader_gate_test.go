@@ -365,6 +365,112 @@ func TestLeaderGate_RefreshIntervalClampedToHalfTtl(t *testing.T) {
     }
 }
 
+func TestLeaderGate_RenewsTheLeaseWhileTheElectedHookRuns(t *testing.T) {
+    counting := &countingRefreshLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
+
+    runContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    hookEntered := make(chan struct{})
+    releaseHook := make(chan struct{})
+
+    gate := NewLeaderGateWithOptions(counting, "worker:elected-hook", time.Minute, LeaderGateOptions{
+        RetryInterval:   5 * time.Millisecond,
+        RefreshInterval: 5 * time.Millisecond,
+        OnElected: func(runtimeInstance runtimecontract.Runtime) {
+            close(hookEntered)
+            <-releaseHook
+        },
+    })
+
+    done := make(chan error, 1)
+    go func() {
+        done <- gate.Run(testRuntimeWithContext(runContext))
+    }()
+
+    <-hookEntered
+
+    waitUntil(t, 2*time.Second, func() bool {
+        return 0 < counting.refreshes()
+    }, "expected the lease to be renewed while the elected hook runs")
+
+    close(releaseHook)
+    cancel()
+    <-done
+}
+
+func TestLeaderGate_ElectedHookIsCancelledWhenTheLeaseIsLost(t *testing.T) {
+    failing := &switchableRefreshLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
+    failing.fail.Store(true)
+
+    runContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    hookReturned := make(chan struct{}, 8)
+
+    gate := NewLeaderGateWithOptions(failing, "worker:elected-cancel", time.Minute, LeaderGateOptions{
+        RetryInterval:   5 * time.Millisecond,
+        RefreshInterval: 5 * time.Millisecond,
+        OnElected: func(runtimeInstance runtimecontract.Runtime) {
+            <-runtimeInstance.Context().Done()
+
+            select {
+            case hookReturned <- struct{}{}:
+            default:
+            }
+        },
+    })
+
+    done := make(chan error, 1)
+    go func() {
+        done <- gate.Run(testRuntimeWithContext(runContext))
+    }()
+
+    select {
+    case <-hookReturned:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("a failed renewal never stopped the elected hook, so the gate can never demote")
+    }
+
+    cancel()
+    <-done
+}
+
+type countingRefreshLocker struct {
+    inner lockcontract.Locker
+    count atomic.Int64
+}
+
+func (instance *countingRefreshLocker) refreshes() int64 {
+    return instance.count.Load()
+}
+
+func (instance *countingRefreshLocker) CreateLock(name string, ttl time.Duration) lockcontract.Lock {
+    return &countingRefreshLock{
+        locker: instance,
+        inner:  instance.inner.CreateLock(name, ttl),
+    }
+}
+
+type countingRefreshLock struct {
+    locker *countingRefreshLocker
+    inner  lockcontract.Lock
+}
+
+func (instance *countingRefreshLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+    return instance.inner.Acquire(runtimeInstance)
+}
+
+func (instance *countingRefreshLock) Release(runtimeInstance runtimecontract.Runtime) error {
+    return instance.inner.Release(runtimeInstance)
+}
+
+func (instance *countingRefreshLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl time.Duration) error {
+    instance.locker.count.Add(1)
+
+    return instance.inner.Refresh(runtimeInstance, ttl)
+}
+
 /* contextSensitiveAcquireLocker fails Acquire with the call's context error, as a real backend does once the context is cancelled. */
 type contextSensitiveAcquireLocker struct {
     entered chan struct{}

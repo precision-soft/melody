@@ -900,6 +900,300 @@ func TestKernel_PublishesThePolicyResolvedSchemeOnTheRequest(t *testing.T) {
     }
 }
 
+type loadFailingSessionStorage struct{}
+
+func (instance *loadFailingSessionStorage) Load(sessionId string) (map[string]any, bool, error) {
+    return nil, false, exception.NewError("session backend down", nil, nil)
+}
+
+func (instance *loadFailingSessionStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+    return nil
+}
+
+func (instance *loadFailingSessionStorage) Delete(sessionId string) error {
+    return nil
+}
+
+func (instance *loadFailingSessionStorage) Close() error {
+    return nil
+}
+
+func TestKernel_SessionLoadFailureIsRecoveredIntoAnInternalServerError(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/session-load",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(nethttp.StatusOK, "ok"), nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainerWithSessionStorage(&loadFailingSessionStorage{})
+
+    terminateCount := 0
+
+    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher.AddListener(
+        kernelcontract.EventKernelTerminate,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            terminateCount = terminateCount + 1
+
+            return nil
+        },
+        0,
+    )
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/session-load", nil))
+
+    if nethttp.StatusInternalServerError != recorder.Code {
+        t.Fatalf("expected a session-store outage to produce a 500, got %d", recorder.Code)
+    }
+
+    if 1 != terminateCount {
+        t.Fatalf("expected the kernel terminate event to fire once for a failed session load, got %d", terminateCount)
+    }
+}
+
+func TestKernel_EmitsTheCookieOfTheSessionRepublishedOnTheRequest(t *testing.T) {
+    serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage())
+    sessionManager := session.SessionMustFromContainer(serviceContainer)
+
+    republishedId := ""
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/republish",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            replacement := sessionManager.NewSession()
+            replacement.Set("userId", "u-1")
+
+            request.Attributes().Set(RequestAttributeSession, replacement)
+
+            republishedId = replacement.Id()
+
+            return TextResponse(nethttp.StatusOK, "ok"), nil
+        },
+    )
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/republish", nil))
+
+    cookies := recorder.Result().Cookies()
+    if 1 != len(cookies) {
+        t.Fatalf("expected one session cookie for the republished session, got %d", len(cookies))
+    }
+
+    if republishedId != cookies[0].Value {
+        t.Fatalf("expected the republished session id %q in the cookie, got %q", republishedId, cookies[0].Value)
+    }
+}
+
+func TestKernel_RotatedSessionEmitsTheNewIdAndDropsTheOldEntry(t *testing.T) {
+    serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage())
+    sessionManager := session.SessionMustFromContainer(serviceContainer)
+
+    preRotationId := ""
+    rotatedId := ""
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/login",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            sessionValue, exists := request.Attributes().Get(RequestAttributeSession)
+            if false == exists {
+                t.Fatal("expected the request to carry a session")
+            }
+
+            sessionInstance, ok := sessionValue.(sessioncontract.Session)
+            if false == ok {
+                t.Fatal("expected the session attribute to be a session")
+            }
+
+            sessionInstance.Set("userId", "u-1")
+
+            saveErr := sessionManager.SaveSession(sessionInstance)
+            if nil != saveErr {
+                return nil, saveErr
+            }
+
+            preRotationId = sessionInstance.Id()
+
+            rotated, rotateErr := sessionManager.RegenerateSession(sessionInstance)
+            if nil != rotateErr {
+                return nil, rotateErr
+            }
+
+            request.Attributes().Set(RequestAttributeSession, rotated)
+
+            rotatedId = rotated.Id()
+
+            return TextResponse(nethttp.StatusOK, "ok"), nil
+        },
+    )
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/login", nil))
+
+    if preRotationId == rotatedId {
+        t.Fatalf("expected the rotation to change the session id")
+    }
+
+    cookies := recorder.Result().Cookies()
+    if 1 != len(cookies) {
+        t.Fatalf("expected one session cookie, got %d", len(cookies))
+    }
+
+    if rotatedId != cookies[0].Value {
+        t.Fatalf("expected the rotated session id %q in the cookie, got %q", rotatedId, cookies[0].Value)
+    }
+
+    if 0 != cookies[0].MaxAge {
+        t.Fatalf("expected a live session cookie for the republished rotation, got MaxAge %d", cookies[0].MaxAge)
+    }
+
+    if nil != sessionManager.Session(preRotationId) {
+        t.Fatalf("expected the pre-rotation session to be gone from storage")
+    }
+
+    reloaded := sessionManager.Session(rotatedId)
+    if nil == reloaded {
+        t.Fatalf("expected the rotated session to be stored")
+    }
+
+    if "u-1" != reloaded.String("userId") {
+        t.Fatalf("expected the values to survive the rotation, got %q", reloaded.String("userId"))
+    }
+}
+
+func TestKernel_RotationWithoutRepublishingClearsTheAbandonedSession(t *testing.T) {
+    serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage())
+    sessionManager := session.SessionMustFromContainer(serviceContainer)
+
+    existingSession := sessionManager.NewSession()
+    existingSession.Set("userId", "anonymous")
+
+    saveErr := sessionManager.SaveSession(existingSession)
+    if nil != saveErr {
+        t.Fatalf("unexpected error: %v", saveErr)
+    }
+
+    existingId := existingSession.Id()
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/login-without-republish",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            sessionValue, exists := request.Attributes().Get(RequestAttributeSession)
+            if false == exists {
+                t.Fatal("expected the request to carry a session")
+            }
+
+            sessionInstance, ok := sessionValue.(sessioncontract.Session)
+            if false == ok {
+                t.Fatal("expected the session attribute to be a session")
+            }
+
+            rotated, rotateErr := sessionManager.RegenerateSession(sessionInstance)
+            if nil != rotateErr {
+                return nil, rotateErr
+            }
+
+            rotated.Set("userId", "u-1")
+
+            return TextResponse(nethttp.StatusOK, "ok"), nil
+        },
+    )
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/login-without-republish", nil)
+    request.AddCookie(
+        &nethttp.Cookie{
+            Name:  session.SessionCookieName,
+            Value: existingId,
+        },
+    )
+
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, request)
+
+    cookies := recorder.Result().Cookies()
+    if 1 != len(cookies) {
+        t.Fatalf("expected the abandoned session to be cleared with one cookie, got %d", len(cookies))
+    }
+
+    if -1 != cookies[0].MaxAge {
+        t.Fatalf("expected a clearing cookie so a forgotten republish logs the client out instead of stranding it on a deleted session, got MaxAge %d", cookies[0].MaxAge)
+    }
+
+    if nil != sessionManager.Session(existingId) {
+        t.Fatalf("expected the pre-rotation session to be gone from storage")
+    }
+}
+
+func TestKernel_SessionCookiePolicyWithoutSameSiteKeepsTheLaxDefault(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/session-write",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            sessionValue, exists := request.Attributes().Get(RequestAttributeSession)
+            if false == exists {
+                t.Fatal("expected the request to carry a session")
+            }
+
+            sessionInstance, ok := sessionValue.(sessioncontract.Session)
+            if false == ok {
+                t.Fatal("expected the session attribute to be a session")
+            }
+
+            sessionInstance.Set("key", "value")
+
+            return TextResponse(nethttp.StatusOK, "ok"), nil
+        },
+    )
+
+    kernelInstance := NewKernel(router)
+    kernelInstance.SetSessionCookiePolicy(
+        httpcontract.SessionCookiePolicy{
+            Domain: "example.com",
+        },
+    )
+
+    handler := kernelInstance.ServeHttp(newHttpTestContainer())
+
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/session-write", nil))
+
+    cookies := recorder.Result().Cookies()
+    if 1 != len(cookies) {
+        t.Fatalf("expected one session cookie, got %d", len(cookies))
+    }
+
+    if nethttp.SameSiteLaxMode != cookies[0].SameSite {
+        t.Fatalf("expected a policy that only names the domain to keep the SameSite=Lax default, got %v", cookies[0].SameSite)
+    }
+
+    if "/" != cookies[0].Path {
+        t.Fatalf("expected the session cookie path fallback, got %q", cookies[0].Path)
+    }
+}
+
 func TestKernel_RouteAttributesCannotReplaceTheKernelOwnedAttributes(t *testing.T) {
     router := NewRouter()
 

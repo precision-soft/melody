@@ -31,7 +31,9 @@ The package defines the service name:
 
 - [`ServiceClock`](../../clock/service_resolver.go) (`"service.clock"`)
 
-If you want your own services to resolve a clock from the container, register `ServiceClock` as a `clockcontract.Clock` provider.
+`ServiceClock` is **already registered by the application during boot** — [`(*Application).bootContainer`](../../application/application_container.go) binds it to the kernel's own clock unconditionally, so `ClockMustFromResolver` works out of the box in any service, command or handler. Do **not** register it again from userland: a duplicate service id is recorded as a boot collision and the boot panics.
+
+Registering `ServiceClock` yourself is therefore only for a container you build and own — a unit test that assembles a bare `container.NewContainer()` rather than an `Application`, as below:
 
 ```go
 package main
@@ -88,6 +90,8 @@ func example() time.Time {
 
 ## Footguns & caveats
 
+- On an `Application`, `ServiceClock` is registered during boot; a userland registration of the same id is a **boot collision** and the boot panics. Register it only in a container you assembled yourself.
+- `NewApplication` builds the kernel with a [`SystemClock`](../../clock/system_clock.go) and there is no hook to substitute another one, so a `FrozenClock` cannot be injected into a booted application. Freeze time by constructing your own container/kernel in the test, or by taking a `clockcontract.Clock` as a constructor parameter of the service under test.
 - Registering `ServiceClock` only affects code that **resolves the clock from the container**.  
   The kernel stores its own clock instance (passed at construction time) and does not auto-resolve the clock from the container.
 - `ClockMustFromContainer` / `ClockMustFromResolver` are fail-fast helpers. They will panic (via Melody’s container/service resolver semantics) when the clock service is missing or has an invalid type.

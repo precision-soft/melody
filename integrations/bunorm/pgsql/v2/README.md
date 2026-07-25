@@ -2,7 +2,7 @@
 
 PostgreSQL provider module for Bun ORM integration with Melody.
 
-This module implements [`bunorm.Provider`](../provider.go) and produces a Bun database handle configured with the PostgreSQL dialect.
+This module implements [`bunorm.Provider`](../../v2/provider.go) and produces a Bun database handle configured with the PostgreSQL dialect.
 
 ## Import
 
@@ -13,7 +13,25 @@ This module implements [`bunorm.Provider`](../provider.go) and produces a Bun da
 
 [`pgsql.NewProvider`](./provider.go) builds a [`pgsql.Provider`](./provider.go) from optional [`ProviderOption`](./provider_option.go) values. Connection details (`Host`, `Port`, `Database`, `User`, `Password`) are supplied at open time through the [`bunorm.ConnectionParameters`](../../v2/connection_parameters.go) passed to `Open` — the provider itself holds only dialect/driver tuning.
 
-Pool and timeout defaults can be overridden via the chainable [`WithPoolConfig`](./provider.go) and [`WithTimeoutConfig`](./provider.go) methods using [`PoolConfig`](./pool_config.go) and [`TimeoutConfig`](./timeout_config.go).
+Pool and timeout defaults can be overridden via the chainable [`WithPoolConfig`](./provider.go) and [`WithTimeoutConfig`](./provider.go) methods using [`PoolConfig`](./pool_config.go) and [`TimeoutConfig`](./timeout_config.go). [`TimeoutConfig`](./timeout_config.go) carries the **connect timeout only** — unlike the MySQL provider it has no read/write timeouts, because `pgdriver` exposes no separate read/write deadlines.
+
+### Defaults
+
+Applied when the matching config is not set ([`DefaultPoolConfig`](./pool_config.go), [`DefaultTimeoutConfig`](./timeout_config.go), [`DefaultRetryConfig`](./retry_config.go)):
+
+| Config          | Field                   | Default |
+|-----------------|-------------------------|---------|
+| `PoolConfig`    | `MaxOpenConnections`    | `50`    |
+| `PoolConfig`    | `MaxIdleConnections`    | `25`    |
+| `PoolConfig`    | `ConnectionMaxLifetime` | `5m`    |
+| `PoolConfig`    | `ConnectionMaxIdleTime` | `1m`    |
+| `TimeoutConfig` | `ConnectTimeout`        | `5s`    |
+| `RetryConfig`   | `MaxAttempts`           | `3`     |
+| `RetryConfig`   | `InitialDelay`          | `500ms` |
+| `RetryConfig`   | `MaxDelay`              | `5s`    |
+| `RetryConfig`   | `BackoffMultiplier`     | `2.0`   |
+
+Retrying is **opt-in**: without a `RetryConfig`, `Open` makes a single attempt.
 
 ## TLS
 

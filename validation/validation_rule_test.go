@@ -212,3 +212,40 @@ func TestParseValidationTag_PosixNamedClassRegexParses(t *testing.T) {
         t.Fatalf("expected a single regex rule with the POSIX pattern intact, got %#v", rules)
     }
 }
+
+func TestParseValidationTag_MemoizesTheParsedTag(t *testing.T) {
+    const tag = "notBlank,min(value=2),regex(pattern=^[a-z]+$)"
+
+    first, firstErr := parseValidationTag(tag)
+    if nil != firstErr {
+        t.Fatalf("expected the tag to parse, got: %v", firstErr)
+    }
+
+    second, secondErr := parseValidationTag(tag)
+    if nil != secondErr {
+        t.Fatalf("expected the tag to parse, got: %v", secondErr)
+    }
+
+    if 0 == len(first) || 0 == len(second) {
+        t.Fatalf("expected parsed rules")
+    }
+
+    if &first[0] != &second[0] {
+        t.Fatalf("expected the same tag to be parsed once and memoized")
+    }
+}
+
+func TestParseValidationTag_MemoizesTheSyntaxError(t *testing.T) {
+    const tag = "min(1))"
+
+    _, firstErr := parseValidationTag(tag)
+    _, secondErr := parseValidationTag(tag)
+
+    if nil == firstErr || nil == secondErr {
+        t.Fatalf("expected a syntax error for %q", tag)
+    }
+
+    if firstErr != secondErr {
+        t.Fatalf("expected the syntax error to be memoized, got %v and %v", firstErr, secondErr)
+    }
+}

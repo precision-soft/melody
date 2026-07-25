@@ -19,6 +19,18 @@ The integration is split into independent Go modules so consumers can depend onl
     * `Database() *bun.DB`
     * `Close() error`
 
+## Connection parameters
+
+A provider opens a database from an explicit [`bunorm.ConnectionParameters`](./connection_parameters.go) value (`Host`, `Port`, `Database`, `User`, `Password`) carried on the [`bunorm.ProviderDefinition`](./provider_definition.go) as its `Params` field — the caller reads those values from config/environment and passes them in, rather than handing the provider parameter *names* to resolve for itself. `SafeContext()` returns the parameters with the password omitted, suitable for logging.
+
+The [`bunorm.Provider`](./provider.go) contract is a single method:
+
+```go
+Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error)
+```
+
+`ConnectionParams` remains as a deprecated alias of `ConnectionParameters`.
+
 ## Install
 
 ### Core
@@ -54,87 +66,88 @@ The pattern is:
 package main
 
 import (
-	"time"
+    "os"
+    "time"
 
-	"github.com/precision-soft/melody/v2/application"
-	"github.com/precision-soft/melody/v2/container"
-	containercontract "github.com/precision-soft/melody/v2/container/contract"
-
-	bunmysql "github.com/precision-soft/melody/integrations/bunorm/mysql/v2"
-	"github.com/precision-soft/melody/integrations/bunorm/v2"
+    bunmysql "github.com/precision-soft/melody/integrations/bunorm/mysql/v2"
+    "github.com/precision-soft/melody/integrations/bunorm/v2"
+    "github.com/precision-soft/melody/v2/application"
+    "github.com/precision-soft/melody/v2/container"
+    containercontract "github.com/precision-soft/melody/v2/container/contract"
+    "github.com/precision-soft/melody/v2/logging"
 )
 
 const (
-	ServiceManagerRegistryId = "service.database.manager.registry"
-	ServiceManagerDefaultId  = "service.database.manager.default"
+    ServiceManagerRegistryId = "service.database.manager.registry"
+    ServiceManagerDefaultId  = "service.database.manager.default"
 
-	ManagerPrimaryName = "primary"
-	ManagerAdminName   = "admin"
+    ManagerPrimaryName = "primary"
+    ManagerAdminName   = "admin"
 )
 
 func RegisterDatabaseServices(app *application.Application) {
-	app.RegisterService(
-		ServiceManagerRegistryId,
-		func(resolver containercontract.Resolver) (*bunorm.ManagerRegistry, error) {
-			providers := []bunorm.ProviderDefinition{
-				{
-					Name: ManagerPrimaryName,
-					Provider: bunmysql.NewProvider(
-						"DB_HOST",
-						"DB_PORT",
-						"DB_DATABASE",
-						"DB_USER",
-						"DB_PASSWORD",
-					).
-						WithPoolConfig(
-							bunmysql.NewPoolConfig(
-								25,
-								5,
-								300*time.Second,
-								60*time.Second,
-							),
-						).
-						WithTimeoutConfig(
-							bunmysql.NewTimeoutConfig(
-								10*time.Second,
-								30*time.Second,
-								30*time.Second,
-							),
-						),
-					IsDefault: true,
-				},
-				{
-					Name: ManagerAdminName,
-					Provider: bunmysql.NewProvider(
-						"ADMIN_DB_HOST",
-						"ADMIN_DB_PORT",
-						"ADMIN_DB_DATABASE",
-						"ADMIN_DB_USER",
-						"ADMIN_DB_PASSWORD",
-					),
-				},
-			}
+    app.RegisterService(
+        ServiceManagerRegistryId,
+        func(resolver containercontract.Resolver) (*bunorm.ManagerRegistry, error) {
+            return bunorm.NewManagerRegistry(
+                logging.LoggerMustFromResolver(resolver),
+                bunorm.ProviderDefinition{
+                    Name: ManagerPrimaryName,
+                    Provider: bunmysql.NewProvider().
+                        WithPoolConfig(
+                            bunmysql.NewPoolConfig(
+                                25,
+                                5,
+                                300*time.Second,
+                                60*time.Second,
+                            ),
+                        ).
+                        WithTimeoutConfig(
+                            bunmysql.NewTimeoutConfig(
+                                10*time.Second,
+                                30*time.Second,
+                                30*time.Second,
+                            ),
+                        ),
+                    Params: bunorm.ConnectionParameters{
+                        Host:     os.Getenv("DB_HOST"),
+                        Port:     os.Getenv("DB_PORT"),
+                        Database: os.Getenv("DB_DATABASE"),
+                        User:     os.Getenv("DB_USER"),
+                        Password: os.Getenv("DB_PASSWORD"),
+                    },
+                    IsDefault: true,
+                },
+                bunorm.ProviderDefinition{
+                    Name:     ManagerAdminName,
+                    Provider: bunmysql.NewProvider(),
+                    Params: bunorm.ConnectionParameters{
+                        Host:     os.Getenv("ADMIN_DB_HOST"),
+                        Port:     os.Getenv("ADMIN_DB_PORT"),
+                        Database: os.Getenv("ADMIN_DB_DATABASE"),
+                        User:     os.Getenv("ADMIN_DB_USER"),
+                        Password: os.Getenv("ADMIN_DB_PASSWORD"),
+                    },
+                },
+            )
+        },
+    )
 
-			return bunorm.NewManagerRegistry(
-				resolver,
-				providers...,
-			)
-		},
-	)
+    app.RegisterService(
+        ServiceManagerDefaultId,
+        func(resolver containercontract.Resolver) (*bunorm.Manager, error) {
+            registry := container.MustFromResolver[*bunorm.ManagerRegistry](
+                resolver,
+                ServiceManagerRegistryId,
+            )
 
-	app.RegisterService(
-		ServiceManagerDefaultId,
-		func(resolver containercontract.Resolver) (*bunorm.Manager, error) {
-			registry := container.MustFromResolver[*bunorm.ManagerRegistry](
-				resolver,
-				ServiceManagerRegistryId,
-			)
-
-			return registry.DefaultManager()
-		},
-	)
+            return registry.DefaultManager()
+        },
+    )
 }
 ```
+
+[`NewManagerRegistry`](./manager_registry.go) takes a `logging/contract.Logger` as its first argument (it is handed to every `Provider.Open`), then the provider definitions as variadic values. It fails with `ErrLoggerIsRequired` on a nil logger and `ErrNoProviderDefinitions` when no definition is given.
 
 ### Consuming the default database
 
@@ -181,7 +194,7 @@ func main() {
 
 Each dialect module implements [`bunorm.Provider`](./provider.go) and is responsible for:
 
-* Reading connection parameters.
+* Applying the [`bunorm.ConnectionParameters`](./connection_parameters.go) the registry hands it.
 * Building the driver connector.
 * Constructing a Bun database handle with the correct dialect.
 * Performing an initial `PingContext` and failing fast on errors.

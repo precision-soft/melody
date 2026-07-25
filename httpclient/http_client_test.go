@@ -5,6 +5,7 @@ import (
     "encoding/base64"
     "io"
     "math"
+    "net"
     "net/http"
     "net/http/httptest"
     "net/url"
@@ -631,5 +632,94 @@ func TestHttpClient_StripsRefererOnCrossOriginRedirect(t *testing.T) {
 
     if true == strings.Contains(receivedReferer, "QUERY-SECRET") {
         t.Fatalf("the url query secret leaked to the redirect target through Referer: %q", receivedReferer)
+    }
+}
+
+func TestNewHttpClient_TransportRetainsIdleConnectionsPerHost(t *testing.T) {
+    client := NewHttpClient(NewHttpClientConfig("https://upstream.test", 5*time.Second, nil))
+
+    transport, ok := client.client.Transport.(*http.Transport)
+    if false == ok {
+        t.Fatalf("expected the client to build a net/http transport")
+    }
+
+    if 0 == transport.MaxIdleConnsPerHost {
+        t.Fatalf(
+            "MaxIdleConnsPerHost is unset, so net/http retains only %d idle connections per host and MaxIdleConns %d is inert; one client per BaseUrl sends every request to a single host, so the pool closes nearly every connection it dials",
+            http.DefaultMaxIdleConnsPerHost,
+            transport.MaxIdleConns,
+        )
+    }
+
+    if transport.MaxIdleConns != transport.MaxIdleConnsPerHost {
+        t.Fatalf(
+            "expected the per-host idle pool to match MaxIdleConns %d, got %d",
+            transport.MaxIdleConns,
+            transport.MaxIdleConnsPerHost,
+        )
+    }
+}
+
+func TestHttpClient_ReusesPooledConnectionsAcrossConcurrentWaves(t *testing.T) {
+    const waveSize = 10
+
+    var dialed int64
+
+    arrived := make(chan struct{}, waveSize)
+    release := make(chan struct{}, 2*waveSize)
+
+    server := httptest.NewUnstartedServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        arrived <- struct{}{}
+        <-release
+
+        writer.WriteHeader(http.StatusOK)
+        _, _ = writer.Write([]byte("ok"))
+    }))
+    server.Config.ConnState = func(connection net.Conn, state http.ConnState) {
+        if http.StateNew == state {
+            atomic.AddInt64(&dialed, 1)
+        }
+    }
+    server.Start()
+    defer server.Close()
+
+    client := NewHttpClient(NewHttpClientConfig(server.URL, 30*time.Second, nil))
+
+    runWave := func() {
+        var wave sync.WaitGroup
+
+        for request := 0; request < waveSize; request++ {
+            wave.Add(1)
+
+            go func() {
+                defer wave.Done()
+
+                if _, err := client.Get("/"); nil != err {
+                    t.Errorf("unexpected error: %v", err)
+                }
+            }()
+        }
+
+        for request := 0; request < waveSize; request++ {
+            <-arrived
+        }
+
+        for request := 0; request < waveSize; request++ {
+            release <- struct{}{}
+        }
+
+        wave.Wait()
+    }
+
+    runWave()
+    runWave()
+
+    if int64(waveSize+3) < atomic.LoadInt64(&dialed) {
+        t.Fatalf(
+            "the second wave of %d concurrent requests dialled fresh sockets instead of reusing the pool: %d connections for %d requests",
+            waveSize,
+            atomic.LoadInt64(&dialed),
+            2*waveSize,
+        )
     }
 }

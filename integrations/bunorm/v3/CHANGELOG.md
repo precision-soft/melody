@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- encrypt: `melody:encrypt:database --mode=encrypt --deterministic` converts a column that was already bulk-encrypted with random nonces into its deterministic form, keeping the key each value already carries. Every such value previously authenticated under a live key and was passed through untouched: the command reported success and rows processed while converting nothing, the column stayed randomized, and every `CiphertextCandidates` equality lookup on it returned zero rows — a silent login or lookup failure. **Behavioural change**: a deterministic encrypt run over an already-encrypted column now rewrites those rows. It remains idempotent, and it never rotates keys, so `--mode=reencrypt --target-key=...` is still the only way to change a key
+- audit: an empty change-set is always serialised as `[]`. Only the "no models at all" case previously produced an empty array; an idempotent update whose before and after are identical — an idempotent `PUT` or a client retry — and any non-struct model left the change-set nil, so the `changes` column stored the json literal `null`. A trail consumer running `jsonb_array_length(changes::jsonb)` errored or read `1` instead of `0`, and the two shapes were indistinguishable from a genuinely absent change-set
+
 ## [v3.6.0] - 2026-07-25 - Truthful Delete Auditing, Reported Encryption Skips and Contained Registry Teardown
 
 ### Fixed

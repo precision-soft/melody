@@ -1,7 +1,12 @@
 package openapi
 
 import (
+    "encoding/json"
+    neturl "net/url"
     "reflect"
+    "regexp"
+    "sort"
+    "strings"
     "testing"
     "time"
 )
@@ -2226,5 +2231,527 @@ func TestSchemaFromType_NilTypeYieldsEmptySchema(t *testing.T) {
 
     if "" != schema.Type {
         t.Fatalf("unexpected schema type: %s", schema.Type)
+    }
+}
+
+
+type marshalerEmbedPrice struct {
+    Amount   int64  `json:"amount"`
+    Currency string `json:"currency"`
+}
+
+func (instance marshalerEmbedPrice) MarshalJSON() ([]byte, error) {
+    return []byte(`"USD 1.00"`), nil
+}
+
+type marshalerEmbedWeight struct {
+    Grams int `json:"grams"`
+}
+
+func (instance marshalerEmbedWeight) MarshalJSON() ([]byte, error) {
+    return []byte(`"1kg"`), nil
+}
+
+type marshalerEmbedLine struct {
+    marshalerEmbedPrice
+    Label string `json:"label"`
+}
+
+type marshalerEmbedAmbiguous struct {
+    marshalerEmbedPrice
+    marshalerEmbedWeight
+}
+
+type marshalerEmbedPointerReceiver struct {
+    Grams int `json:"grams"`
+}
+
+func (instance *marshalerEmbedPointerReceiver) MarshalJSON() ([]byte, error) {
+    return []byte(`"1kg"`), nil
+}
+
+type marshalerEmbedPointerHost struct {
+    marshalerEmbedPointerReceiver
+    Label string `json:"label"`
+}
+
+type marshalerEmbedPointerIndirectHost struct {
+    *marshalerEmbedPointerReceiver
+    Label string `json:"label"`
+}
+
+type timeEmbedEvent struct {
+    time.Time
+    Name string `json:"name"`
+}
+
+type timeEmbedHolder struct {
+    time.Time
+}
+
+type timeEmbedIndirectEvent struct {
+    timeEmbedHolder
+    Name string `json:"name"`
+}
+
+type timeEmbedBesideAMarshaler struct {
+    time.Time
+    marshalerEmbedPrice
+}
+
+type marshalerEmbedInterfaceHost struct {
+    json.Marshaler
+    X int `json:"x"`
+}
+
+func TestBuildSchema_EmbeddedTimeFollowsThePromotedCodec(t *testing.T) {
+    encoded, err := json.Marshal(
+        timeEmbedEvent{
+            Time: time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC),
+            Name: "launch",
+        },
+    )
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if `"2026-07-25T12:00:00Z"` != string(encoded) {
+        t.Fatalf("expected the promoted MarshalJSON to own the wire form, got %s", encoded)
+    }
+
+    schema := buildSchema(reflect.TypeOf(timeEmbedEvent{}), map[string]*Schema{}, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    if "string" != schema.Type || "date-time" != schema.Format {
+        t.Fatalf("expected the embedded time codec to be advertised as a date-time string, got %+v", schema)
+    }
+
+    if 0 != len(schema.Properties) {
+        t.Fatalf("expected no properties for a value encoded as a bare string, got %+v", schema.Properties)
+    }
+}
+
+func TestBuildSchema_NestedEmbeddedTimeFollowsThePromotedCodec(t *testing.T) {
+    encoded, err := json.Marshal(timeEmbedIndirectEvent{Name: "launch"})
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if `"0001-01-01T00:00:00Z"` != string(encoded) {
+        t.Fatalf("expected the twice-promoted MarshalJSON to own the wire form, got %s", encoded)
+    }
+
+    components := map[string]*Schema{}
+    schema := buildSchema(reflect.TypeOf(timeEmbedIndirectEvent{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    if "string" != schema.Type || "date-time" != schema.Format {
+        t.Fatalf("expected a date-time string, got %+v", schema)
+    }
+
+    if 0 != len(components) {
+        t.Fatalf("expected no component for a value encoded as a bare string, got %v", componentKeyList(components))
+    }
+}
+
+/* a user marshaler embed writes bytes reflection cannot read, so the enclosing object is still advertised as the spread of its fields — the schema does not match the wire, and narrowing to time.Time keeps that gap where it already was instead of moving it onto the embed's own component */
+func TestBuildSchema_UserMarshalerEmbedKeepsItsObjectSchema(t *testing.T) {
+    encoded, err := json.Marshal(marshalerEmbedLine{Label: "seat"})
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if `"USD 1.00"` != string(encoded) {
+        t.Fatalf("expected the promoted MarshalJSON to own the wire form, got %s", encoded)
+    }
+
+    components := map[string]*Schema{}
+    schema := buildSchema(reflect.TypeOf(marshalerEmbedLine{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    if "#/components/schemas/marshalerEmbedLine" != schema.Ref {
+        t.Fatalf("expected the enclosing type to keep its own component, got %+v", schema)
+    }
+
+    component, present := components["marshalerEmbedLine"]
+    if false == present {
+        t.Fatalf("expected a component for the enclosing type, got %v", componentKeyList(components))
+    }
+
+    for _, propertyName := range []string{"amount", "currency", "label"} {
+        if _, exists := component.Properties[propertyName]; false == exists {
+            t.Fatalf("expected the promoted property %q, got %+v", propertyName, component.Properties)
+        }
+    }
+}
+
+/* a pointer-receiver marshaler embed stays out of the enclosing VALUE's method set, so encoding/json spreads the fields for a value and calls the promoted method for a pointer; the object schema matches the value form */
+func TestBuildSchema_PointerReceiverMarshalerEmbedMatchesTheValueWireForm(t *testing.T) {
+    encoded, err := json.Marshal(marshalerEmbedPointerHost{Label: "seat"})
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if `{"grams":0,"label":"seat"}` != string(encoded) {
+        t.Fatalf("expected the value form to spread the embed's fields, got %s", encoded)
+    }
+
+    components := map[string]*Schema{}
+    schema := buildSchema(reflect.TypeOf(marshalerEmbedPointerHost{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    if "#/components/schemas/marshalerEmbedPointerHost" != schema.Ref {
+        t.Fatalf("expected the enclosing type to keep its own component, got %+v", schema)
+    }
+
+    component := components["marshalerEmbedPointerHost"]
+    for _, propertyName := range []string{"grams", "label"} {
+        if _, exists := component.Properties[propertyName]; false == exists {
+            t.Fatalf("expected the promoted property %q, got %+v", propertyName, component.Properties)
+        }
+    }
+}
+
+func TestPromotedMarshalerOrigin_APointerEmbedWithAPointerReceiverCodecIsUnresolved(t *testing.T) {
+    hostType := reflect.TypeOf(marshalerEmbedPointerIndirectHost{})
+
+    if false == hostType.Implements(jsonMarshalerInterfaceType) {
+        t.Fatalf("expected the pointer embed to promote its codec onto the enclosing value")
+    }
+
+    if true == reflect.TypeOf(marshalerEmbedPointerReceiver{}).Implements(jsonMarshalerInterfaceType) {
+        t.Fatalf("expected the dereferenced embed to keep its codec out of the value method set")
+    }
+
+    origin, depth, resolved := promotedMarshalerOrigin(hostType, map[reflect.Type]bool{})
+
+    if true == resolved {
+        t.Fatalf("expected an unresolvable promotion, got origin %v at depth %d", origin, depth)
+    }
+
+    if nil != origin || 0 != depth {
+        t.Fatalf("expected no origin and a zero depth for an unresolved promotion, got %v at depth %d", origin, depth)
+    }
+
+    encoded, err := json.Marshal(marshalerEmbedPointerIndirectHost{
+        marshalerEmbedPointerReceiver: &marshalerEmbedPointerReceiver{Grams: 1000},
+        Label:                         "seat",
+    })
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if `"1kg"` != string(encoded) {
+        t.Fatalf("expected the promoted pointer-receiver codec to own the wire form, got %s", encoded)
+    }
+
+    components := map[string]*Schema{}
+    schema := buildSchema(hostType, components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    if "#/components/schemas/marshalerEmbedPointerIndirectHost" != schema.Ref {
+        t.Fatalf("expected the unresolved promotion to keep the object schema, got %+v", schema)
+    }
+
+    component := components["marshalerEmbedPointerIndirectHost"]
+    for _, propertyName := range []string{"grams", "label"} {
+        if _, exists := component.Properties[propertyName]; false == exists {
+            t.Fatalf("expected the promoted property %q, got %+v", propertyName, component.Properties)
+        }
+    }
+}
+
+func TestBuildSchema_AmbiguousMarshalerEmbedsKeepPromotedProperties(t *testing.T) {
+    encoded, err := json.Marshal(marshalerEmbedAmbiguous{})
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if `{"amount":0,"currency":"","grams":0}` != string(encoded) {
+        t.Fatalf("expected two equal-depth marshalers to promote nothing, got %s", encoded)
+    }
+
+    components := map[string]*Schema{}
+    schema := buildSchema(reflect.TypeOf(marshalerEmbedAmbiguous{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    component, present := components["marshalerEmbedAmbiguous"]
+    if false == present {
+        t.Fatalf("expected an object component, got %+v", schema)
+    }
+
+    for _, propertyName := range []string{"amount", "currency", "grams"} {
+        if _, exists := component.Properties[propertyName]; false == exists {
+            t.Fatalf("expected the promoted property %q, got %+v", propertyName, component.Properties)
+        }
+    }
+}
+
+/* a time.Time embed beside another marshaler embed promotes no MarshalJSON — but time.Time's MarshalText is promoted unopposed, and encoding/json falls back to it, so the wire is a date-time string while the schema stays an object. Recognising this would mean modelling encoding/json's codec precedence, which is wider than the promoted-time case this file describes. */
+func TestBuildSchema_TimeEmbedBesideAMarshalerKeepsItsObjectSchema(t *testing.T) {
+    encoded, err := json.Marshal(timeEmbedBesideAMarshaler{})
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if `"0001-01-01T00:00:00Z"` != string(encoded) {
+        t.Fatalf("expected the promoted MarshalText to own the wire form, got %s", encoded)
+    }
+
+    if true == reflect.TypeOf(timeEmbedBesideAMarshaler{}).Implements(jsonMarshalerInterfaceType) {
+        t.Fatalf("expected two equal-depth marshaler embeds to promote no MarshalJSON")
+    }
+
+    components := map[string]*Schema{}
+    schema := buildSchema(reflect.TypeOf(timeEmbedBesideAMarshaler{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    if "#/components/schemas/timeEmbedBesideAMarshaler" != schema.Ref {
+        t.Fatalf("expected the enclosing type to keep its own component, got %+v", schema)
+    }
+}
+
+/* an embedded interface promotes MarshalJSON too, but its dynamic value decides the wire form, so nothing about the static type describes it; the object schema keeps a property for the interface field itself */
+func TestBuildSchema_EmbeddedMarshalerInterfaceKeepsItsObjectSchema(t *testing.T) {
+    components := map[string]*Schema{}
+    schema := buildSchema(reflect.TypeOf(marshalerEmbedInterfaceHost{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    if "#/components/schemas/marshalerEmbedInterfaceHost" != schema.Ref {
+        t.Fatalf("expected the enclosing type to keep its own component, got %+v", schema)
+    }
+
+    component := components["marshalerEmbedInterfaceHost"]
+    if _, exists := component.Properties["x"]; false == exists {
+        t.Fatalf("expected the sibling property, got %+v", component.Properties)
+    }
+}
+
+type timeEmbedShadowingObjectCodec struct {
+    Cents int `json:"cents"`
+}
+
+func (instance timeEmbedShadowingObjectCodec) MarshalJSON() ([]byte, error) {
+    return []byte(`{"cents":0}`), nil
+}
+
+type timeEmbedShadowedByAnObjectCodec struct {
+    timeEmbedShadowingObjectCodec
+    timeEmbedHolder
+}
+
+type timeEmbedShadowingScalarCodec string
+
+func (instance timeEmbedShadowingScalarCodec) MarshalJSON() ([]byte, error) {
+    return []byte(`"1kg"`), nil
+}
+
+type timeEmbedShadowedByAScalarCodec struct {
+    timeEmbedShadowingScalarCodec
+    timeEmbedHolder
+}
+
+type timeEmbedAboveADeeperCodec struct {
+    time.Time
+    marshalerEmbedLine
+}
+
+/* the promoted codec is the shallowest one, so a depth-1 marshaler embed beats a time.Time reached at depth 2: the wire form is the object that embed writes, and advertising a date-time string would promise a string where a body is an object */
+func TestBuildSchema_ShallowerMarshalerEmbedShadowsADeeperTimeCodec(t *testing.T) {
+    encoded, err := json.Marshal(timeEmbedShadowedByAnObjectCodec{})
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if `{"cents":0}` != string(encoded) {
+        t.Fatalf("expected the shallower MarshalJSON to own the wire form, got %s", encoded)
+    }
+
+    components := map[string]*Schema{}
+    schema := buildSchema(reflect.TypeOf(timeEmbedShadowedByAnObjectCodec{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    if "#/components/schemas/timeEmbedShadowedByAnObjectCodec" != schema.Ref {
+        t.Fatalf("expected the enclosing type to keep its object schema, got %+v", schema)
+    }
+
+    if "date-time" == schema.Format {
+        t.Fatalf("expected no date-time advertisement for a body encoded as an object, got %+v", schema)
+    }
+}
+
+/* a non-struct embed carries a codec of its own too, so it takes part in the promotion depth: skipping it would let a time.Time below it claim a promotion the string codec above already won */
+func TestBuildSchema_NonStructMarshalerEmbedShadowsADeeperTimeCodec(t *testing.T) {
+    encoded, err := json.Marshal(timeEmbedShadowedByAScalarCodec{})
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if `"1kg"` != string(encoded) {
+        t.Fatalf("expected the shallower MarshalJSON to own the wire form, got %s", encoded)
+    }
+
+    components := map[string]*Schema{}
+    schema := buildSchema(reflect.TypeOf(timeEmbedShadowedByAScalarCodec{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    if "date-time" == schema.Format {
+        t.Fatalf("expected no date-time advertisement for a body no time codec writes, got %+v", schema)
+    }
+
+    if "#/components/schemas/timeEmbedShadowedByAScalarCodec" != schema.Ref {
+        t.Fatalf("expected the enclosing type to keep its object schema, got %+v", schema)
+    }
+}
+
+/* the mirror of the two above: a time.Time embedded at depth 1 outranks a marshaler embed whose codec is declared at depth 2, and the date-time string is then the truthful advertisement */
+func TestBuildSchema_TimeEmbedOutranksADeeperMarshalerEmbed(t *testing.T) {
+    encoded, err := json.Marshal(timeEmbedAboveADeeperCodec{})
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if `"0001-01-01T00:00:00Z"` != string(encoded) {
+        t.Fatalf("expected the shallower time codec to own the wire form, got %s", encoded)
+    }
+
+    schema := buildSchema(reflect.TypeOf(timeEmbedAboveADeeperCodec{}), map[string]*Schema{}, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    if "string" != schema.Type || "date-time" != schema.Format {
+        t.Fatalf("expected a date-time string, got %+v", schema)
+    }
+}
+
+type timeEmbedWithADeclaredCodec struct {
+    timeEmbedHolder
+}
+
+func (instance timeEmbedWithADeclaredCodec) MarshalJSON() ([]byte, error) {
+    return []byte(`{"declared":true}`), nil
+}
+
+type timeEmbedPointerCycle struct {
+    *timeEmbedPointerCycle
+    time.Time
+}
+
+type timeEmbedNamedByATag struct {
+    time.Time `json:"at"`
+    Name      string `json:"name"`
+}
+
+/* a MarshalJSON declared on the enclosing type shadows the promoted one, but reflect.Method carries no declaring type: the promotion and the declaration are indistinguishable, so this shape keeps the date-time string while the wire form is whatever the declared codec writes */
+func TestBuildSchema_ADeclaredCodecOverATimeEmbedIsNotDistinguishable(t *testing.T) {
+    encoded, err := json.Marshal(timeEmbedWithADeclaredCodec{})
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if `{"declared":true}` != string(encoded) {
+        t.Fatalf("expected the declared codec to own the wire form, got %s", encoded)
+    }
+
+    schema := buildSchema(reflect.TypeOf(timeEmbedWithADeclaredCodec{}), map[string]*Schema{}, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    if "date-time" != schema.Format {
+        t.Fatalf("expected the undetectable declaration to leave the date-time string, got %+v", schema)
+    }
+}
+
+/* a codec reached through a cycle cannot be given a depth, so the promotion is left unresolved and the object schema stands even though the wire form is a date-time string: guessing the other way would advertise a string for every cyclic marshaler embed */
+func TestBuildSchema_TimeCodecBehindAPointerCycleKeepsItsObjectSchema(t *testing.T) {
+    encoded, err := json.Marshal(timeEmbedPointerCycle{})
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if `"0001-01-01T00:00:00Z"` != string(encoded) {
+        t.Fatalf("expected the promoted time codec to own the wire form, got %s", encoded)
+    }
+
+    components := map[string]*Schema{}
+    schema := buildSchema(reflect.TypeOf(timeEmbedPointerCycle{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    if "#/components/schemas/timeEmbedPointerCycle" != schema.Ref {
+        t.Fatalf("expected the unresolved promotion to keep the object schema, got %+v", schema)
+    }
+}
+
+/* a json name on the embed does not stop the method promotion, so the body is still an RFC 3339 string and the name is never spelled */
+func TestBuildSchema_JsonNamedTimeEmbedStillPromotesItsCodec(t *testing.T) {
+    encoded, err := json.Marshal(timeEmbedNamedByATag{Name: "launch"})
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if `"0001-01-01T00:00:00Z"` != string(encoded) {
+        t.Fatalf("expected the promoted codec to own the wire form, got %s", encoded)
+    }
+
+    schema := buildSchema(reflect.TypeOf(timeEmbedNamedByATag{}), map[string]*Schema{}, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    if "string" != schema.Type || "date-time" != schema.Format {
+        t.Fatalf("expected a date-time string, got %+v", schema)
+    }
+}
+
+
+var componentKeyGrammar = regexp.MustCompile(`^[a-zA-Z0-9.\-_]+$`)
+
+type genericPage[T any] struct {
+    Items []T `json:"items"`
+    Total int `json:"total"`
+}
+
+type genericPageUser struct {
+    Name string `json:"name"`
+}
+
+func componentKeyList(components map[string]*Schema) []string {
+    keys := make([]string, 0, len(components))
+    for key := range components {
+        keys = append(keys, key)
+    }
+    sort.Strings(keys)
+
+    return keys
+}
+
+func assertResolvableComponentReference(t *testing.T, schema *Schema, components map[string]*Schema) {
+    t.Helper()
+
+    tokens := strings.Split(schema.Ref, "/")
+    if 4 != len(tokens) || "#" != tokens[0] || "components" != tokens[1] || "schemas" != tokens[2] {
+        t.Fatalf("expected a three-token json pointer into the components, got %q", schema.Ref)
+    }
+
+    if false == componentKeyGrammar.MatchString(tokens[3]) {
+        t.Fatalf("expected a component key matching the openapi key grammar, got %q", tokens[3])
+    }
+
+    if _, present := components[tokens[3]]; false == present {
+        t.Fatalf("expected %q to resolve in the components, got %v", tokens[3], componentKeyList(components))
+    }
+}
+
+func TestSchemaComponentName_GenericInstantiatedWithASamePackageType(t *testing.T) {
+    components := map[string]*Schema{}
+
+    schema := buildSchema(reflect.TypeOf(genericPage[genericPageUser]{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    assertResolvableComponentReference(t, schema, components)
+}
+
+func TestSchemaComponentName_GenericInstantiatedWithACrossPackageType(t *testing.T) {
+    components := map[string]*Schema{}
+
+    schema := buildSchema(reflect.TypeOf(genericPage[neturl.URL]{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    assertResolvableComponentReference(t, schema, components)
+}
+
+func TestSchemaComponentName_DistinctGenericsThatSanitizeAlikeStayDisambiguated(t *testing.T) {
+    components := map[string]*Schema{}
+    names := map[reflect.Type]string{}
+    visited := map[reflect.Type]bool{}
+
+    first := buildSchema(reflect.TypeOf(genericPage[genericPageUser]{}), components, names, visited)
+    second := buildSchema(reflect.TypeOf(genericPage[*genericPageUser]{}), components, names, visited)
+
+    assertResolvableComponentReference(t, first, components)
+    assertResolvableComponentReference(t, second, components)
+
+    if first.Ref+"2" != second.Ref {
+        t.Fatalf("expected the colliding instantiation to be disambiguated as %q, got %q", first.Ref+"2", second.Ref)
     }
 }

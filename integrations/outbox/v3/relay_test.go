@@ -4,16 +4,75 @@ import (
     "context"
     "errors"
     "math"
+    "sync"
     "testing"
     "time"
 
     "github.com/precision-soft/melody/v3/container"
+    containercontract "github.com/precision-soft/melody/v3/container/contract"
     lockcontract "github.com/precision-soft/melody/v3/lock/contract"
+    "github.com/precision-soft/melody/v3/logging"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     "github.com/precision-soft/melody/v3/messagebus"
     messagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
+
+type logRecord struct {
+    level   loggingcontract.Level
+    message string
+}
+
+type recordingLogger struct {
+    mutex   sync.Mutex
+    records []logRecord
+}
+
+func (instance *recordingLogger) Log(level loggingcontract.Level, message string, logContext loggingcontract.Context) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.records = append(instance.records, logRecord{level: level, message: message})
+}
+
+func (instance *recordingLogger) Debug(message string, logContext loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelDebug, message, logContext)
+}
+
+func (instance *recordingLogger) Info(message string, logContext loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelInfo, message, logContext)
+}
+
+func (instance *recordingLogger) Warning(message string, logContext loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelWarning, message, logContext)
+}
+
+func (instance *recordingLogger) Error(message string, logContext loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelError, message, logContext)
+}
+
+func (instance *recordingLogger) Emergency(message string, logContext loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelEmergency, message, logContext)
+}
+
+func (instance *recordingLogger) errorMessages() []string {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    messages := make([]string, 0, len(instance.records))
+    for _, record := range instance.records {
+        if loggingcontract.LevelError != record.level {
+            continue
+        }
+
+        messages = append(messages, record.message)
+    }
+
+    return messages
+}
+
+var _ loggingcontract.Logger = (*recordingLogger)(nil)
 
 func relayTestRuntime() runtimecontract.Runtime {
     serviceContainer := container.NewContainer()
@@ -130,17 +189,25 @@ func (instance *fakeLocker) CreateLock(_ string, _ time.Duration) lockcontract.L
 }
 
 type fakeLock struct {
-    acquire      bool
-    refreshErr   error
-    refreshCalls int
+    acquire            bool
+    refreshErr         error
+    refreshCalls       int
+    releaseErr         error
+    releaseCalls       int
+    releaseContextErr  error
+    releaseHasDeadline bool
 }
 
 func (instance *fakeLock) Acquire(_ runtimecontract.Runtime) (bool, error) {
     return instance.acquire, nil
 }
 
-func (instance *fakeLock) Release(_ runtimecontract.Runtime) error {
-    return nil
+func (instance *fakeLock) Release(runtimeInstance runtimecontract.Runtime) error {
+    instance.releaseCalls++
+    instance.releaseContextErr = runtimeInstance.Context().Err()
+    _, instance.releaseHasDeadline = runtimeInstance.Context().Deadline()
+
+    return instance.releaseErr
 }
 
 func (instance *fakeLock) Refresh(_ runtimecontract.Runtime, _ time.Duration) error {
@@ -457,6 +524,98 @@ func TestRelay_RefreshesLeaseAndDrainsWholeBatch(t *testing.T) {
     }
     if 2 != published {
         t.Fatalf("expected both messages published, got %d", published)
+    }
+}
+
+type cancellingRepository struct {
+    fakeRepository
+    cancel context.CancelFunc
+}
+
+func (instance *cancellingRepository) ClaimDueMessages(ctx context.Context, limit int, visibility time.Duration) ([]Pending, error) {
+    instance.cancel()
+
+    return instance.fakeRepository.ClaimDueMessages(ctx, limit, visibility)
+}
+
+/* a signal cancels the run context mid-drain, so a release riding it would never reach the backend and the lease would survive its whole ttl, stalling every other replica. */
+func TestRelay_ReleasesLeaseOnAContextThatOutlivesCancellation(t *testing.T) {
+    runContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(runContext, serviceContainer.NewScope(), serviceContainer)
+
+    lock := &fakeLock{acquire: true}
+    repository := &cancellingRepository{
+        fakeRepository: fakeRepository{due: []Pending{{Id: 1, TypeName: "string", Payload: []byte("a")}}},
+        cancel:         cancel,
+    }
+
+    relay := NewRelay(RelayConfig{
+        Repository: repository,
+        Transport:  &fakeTransport{},
+        Codec:      &stringCodec{},
+        Locker:     &fakeLocker{lock: lock},
+    })
+
+    if _, runErr := relay.RunOnce(runtimeInstance); nil != runErr {
+        t.Fatalf("run once: %v", runErr)
+    }
+
+    if nil == runContext.Err() {
+        t.Fatal("expected the fixture to have cancelled the run context")
+    }
+
+    if 1 != lock.releaseCalls {
+        t.Fatalf("expected the lease to be released once, got %d", lock.releaseCalls)
+    }
+
+    if nil != lock.releaseContextErr {
+        t.Fatalf("expected the release to run on a live context, got %v", lock.releaseContextErr)
+    }
+
+    if false == lock.releaseHasDeadline {
+        t.Fatal("expected the release context to carry a bounded deadline")
+    }
+}
+
+/* a lease that could not be released stalls every other replica for the whole ttl, so the failure must be reported rather than discarded. */
+func TestRelay_ReportsAFailedLeaseRelease(t *testing.T) {
+    logger := &recordingLogger{}
+
+    serviceContainer := container.NewContainer()
+    container.MustRegister[loggingcontract.Logger](
+        serviceContainer,
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return logger, nil
+        },
+    )
+
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    lock := &fakeLock{acquire: true, releaseErr: errors.New("release script failed")}
+
+    relay := NewRelay(RelayConfig{
+        Repository: &fakeRepository{due: []Pending{{Id: 1, TypeName: "string", Payload: []byte("a")}}},
+        Transport:  &fakeTransport{},
+        Codec:      &stringCodec{},
+        Locker:     &fakeLocker{lock: lock},
+    })
+
+    if _, runErr := relay.RunOnce(runtimeInstance); nil != runErr {
+        t.Fatalf("run once: %v", runErr)
+    }
+
+    loggedMessages := logger.errorMessages()
+
+    if 1 != len(loggedMessages) {
+        t.Fatalf("expected exactly the release failure to be logged, got %v", loggedMessages)
+    }
+
+    if "outbox relay lease release failed" != loggedMessages[0] {
+        t.Fatalf("expected the release failure to be logged, got %q", loggedMessages[0])
     }
 }
 

@@ -30,7 +30,8 @@ func changeSetWithIgnore(before any, after any, ignore map[string]struct{}) []Ch
     var changes []Change
     collectChanges(&changes, structValue(before), structValue(after), ignore, false)
 
-    if nil == before && nil == after {
+    /* an empty result is returned as an empty slice, never a nil one: a nil slice marshals to the JSON literal null in the changes column, where a consumer reading it as an array errors out and cannot tell it from a genuinely absent change-set. An idempotent update and any non-struct model both land here. */
+    if 0 == len(changes) {
         return []Change{}
     }
 

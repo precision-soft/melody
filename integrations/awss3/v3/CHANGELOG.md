@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- storage: `Put` enforces the declared size without ever holding the body in memory, and a wrongly declared size can no longer leave a truncated object at the key. It previously uploaded first and probed the caller's reader afterwards, so a `size` shorter than the body was detected only after an S3 put had atomically replaced the key with the truncated body — and the remediating `RemoveObject` then deleted what was left, destroying any previously stored object beyond recovery on a bucket without versioning; if that remediation was refused (no `s3:DeleteObject`, or a cancelled context) its error was discarded, leaving the truncated object live while the caller was told the put had failed. A seekable body is now measured in place and streamed with nothing buffered. A body that cannot seek — an `http.Request.Body`, the natural argument of this call — is checked as MinIO consumes it and is cut off before its last declared byte the moment more body is found behind it, which leaves the upload short of its own content length: a single-shot request is refused by the bucket and a multipart upload is aborted, so nothing reaches the key. Bodies declared at or below MinIO's 16 MiB part size are validated in full before any request is issued, since MinIO uploads those as one committed request; memory therefore never scales with the body, and the spool never exceeds the part buffer MinIO itself allocates for the same upload
+- storage: the size check no longer treats a legal `(0, nil)` read as the end of the body — an over-read could go undetected and a silently truncated object was stored with `Put` reporting success — and it no longer spins on one either: consecutive empty reads are bounded and every read honours the runtime context, so a stalled body or a client that walked away fails the put instead of pinning a core and an upload. A correct size, a negative "unknown length" size, a zero declared size, and a body shorter than its declared size all behave exactly as before
+
 ## [v3.0.3] - 2026-07-06 - Standalone Module Resolution Fix
 
 ### Fixed

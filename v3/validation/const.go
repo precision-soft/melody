@@ -3,6 +3,7 @@ package validation
 const (
     ServiceValidator = "service.validator"
 
-    ErrorInvalidRuleSyntax = "invalidRuleSyntax"
-    ErrorUnknownRule       = "unknownRule"
+    ErrorInvalidRuleSyntax    = "invalidRuleSyntax"
+    ErrorUnknownRule          = "unknownRule"
+    ErrorNestingDepthExceeded = "nestingDepthExceeded"
 )

@@ -1,14 +1,18 @@
 package outbox
 
 import (
+    "context"
     "math"
     "strconv"
     "time"
 
     "github.com/precision-soft/melody/v3/exception"
+    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     lockcontract "github.com/precision-soft/melody/v3/lock/contract"
+    "github.com/precision-soft/melody/v3/logging"
     "github.com/precision-soft/melody/v3/messagebus"
     messagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
+    "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
@@ -22,6 +26,9 @@ const (
     defaultMaxBackoff        = 10 * time.Minute
     defaultBackoffFactor     = 2.0
 )
+
+/* the lease release must not ride the run context: a signal cancels it before the relay unwinds, the backend never sees the delete and the lease survives its whole LockTtl — during which every other replica's RunOnce returns without draining anything. */
+const lockReleaseTimeout = 5 * time.Second
 
 /* defaultMaxDeliveryAttemptsFactor multiplies the resolved MaxAttempts to derive the default MaxDeliveryAttempts when one is not configured, leaving generous head-room above the send-failure retry path so only a genuinely stuck (crash-poison) row trips the claim cap. */
 const defaultMaxDeliveryAttemptsFactor = 2
@@ -224,10 +231,41 @@ func (instance *Relay) acquireLease(runtimeInstance runtimecontract.Runtime) (fu
     }
 
     return func() {
-            _ = lock.Release(runtimeInstance)
-        }, func(runtime runtimecontract.Runtime) error {
-            return lock.Refresh(runtime, instance.config.LockTtl)
+            instance.releaseLease(runtimeInstance, lock)
+        }, func(refreshRuntime runtimecontract.Runtime) error {
+            return lock.Refresh(refreshRuntime, instance.config.LockTtl)
         }, true, nil
+}
+
+/* releaseLease drops the lease on a context detached from the run and bounded by lockReleaseTimeout, then reports a failure: a lease left behind is invisible otherwise, and it holds back every other replica until it expires. */
+func (instance *Relay) releaseLease(runtimeInstance runtimecontract.Runtime, lock lockcontract.Lock) {
+    releaseContext, cancelRelease := context.WithTimeout(
+        context.WithoutCancel(runtimeInstance.Context()),
+        lockReleaseTimeout,
+    )
+    defer cancelRelease()
+
+    releaseRuntime := runtime.New(releaseContext, runtimeInstance.Scope(), runtimeInstance.Container())
+
+    releaseErr := lock.Release(releaseRuntime)
+    if nil == releaseErr {
+        return
+    }
+
+    logger := logging.LoggerFromRuntime(runtimeInstance)
+    if nil == logger {
+        return
+    }
+
+    logger.Error(
+        "outbox relay lease release failed",
+        exception.LogContext(
+            releaseErr,
+            exceptioncontract.Context{
+                "lock": instance.config.LockName,
+            },
+        ),
+    )
 }
 
 /* outboxMessageId is the stable, deterministic message id derived from the outbox row id. The prefix namespaces it so it does not collide with ids other producers assign on the same transport. */

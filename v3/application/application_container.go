@@ -255,7 +255,7 @@ func (instance *Application) registerHttpSession() {
             func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
                 storage := session.SessionStorageMustFromResolver(resolver)
 
-                return session.NewManager(storage, 0), nil
+                return session.NewManager(storage, instance.configuration.Http().SessionTtl()), nil
             },
         )
     }

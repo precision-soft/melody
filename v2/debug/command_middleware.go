@@ -80,15 +80,28 @@ func (instance *MiddlewareCommand) Run(
         return items[leftIndex].Index < items[rightIndex].Index
     })
 
+    output.ApplySortOrder(items, option.Order)
+
+    total := len(items)
+    items = output.WindowItems(items, option.Limit, option.Offset)
+
     if output.FormatTable == option.Format {
         builder := output.NewTableBuilder()
 
-        builder.AddSummaryLine(
-            fmt.Sprintf(
-                "MIDDLEWARE: %d total",
-                len(items),
-            ),
+        summary := fmt.Sprintf(
+            "MIDDLEWARE: %d total",
+            total,
         )
+
+        if len(items) != total {
+            summary = fmt.Sprintf(
+                "%s | %d shown",
+                summary,
+                len(items),
+            )
+        }
+
+        builder.AddSummaryLine(summary)
 
         block := builder.AddBlock(
             "MIDDLEWARE",
@@ -106,7 +119,7 @@ func (instance *MiddlewareCommand) Run(
     } else {
         envelope.Data = output.NewListPayload(
             items,
-            len(items),
+            total,
             option.Limit,
             option.Offset,
         )

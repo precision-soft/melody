@@ -10,11 +10,12 @@ import (
 )
 
 type Session struct {
-    id       string
-    mutex    sync.RWMutex
-    values   map[string]any
-    modified bool
-    cleared  bool
+    id        string
+    mutex     sync.RWMutex
+    values    map[string]any
+    modified  bool
+    cleared   bool
+    abandoned bool
 }
 
 func (instance *Session) Id() string {
@@ -81,6 +82,16 @@ func (instance *Session) Clear() {
     instance.mutex.Unlock()
 }
 
+/* abandon is Clear with a latch: Set lifts the cleared flag, the latch nothing lifts. A session whose id the manager already deleted must never look live again, or the response path would save it back under that id and re-issue it. */
+func (instance *Session) abandon() {
+    instance.mutex.Lock()
+    instance.values = make(map[string]any)
+    instance.modified = true
+    instance.cleared = true
+    instance.abandoned = true
+    instance.mutex.Unlock()
+}
+
 func (instance *Session) All() map[string]any {
     instance.mutex.RLock()
     result := make(map[string]any, len(instance.values))
@@ -102,7 +113,7 @@ func (instance *Session) IsModified() bool {
 
 func (instance *Session) IsCleared() bool {
     instance.mutex.RLock()
-    value := instance.cleared
+    value := instance.cleared || instance.abandoned
     instance.mutex.RUnlock()
 
     return value

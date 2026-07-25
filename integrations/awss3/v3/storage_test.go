@@ -3,8 +3,12 @@ package awss3
 import (
     "context"
     "io"
+    "net/http"
+    "net/http/httptest"
     "os"
+    "strconv"
     "strings"
+    "sync"
     "testing"
     "time"
 
@@ -112,60 +116,30 @@ func TestNormalizeObjectKey_RejectsEmptyAndDotKeys(t *testing.T) {
     }
 }
 
-func TestReaderHasTrailingBytes_DetectsBodyLongerThanDeclaredSize(t *testing.T) {
-    /* @important mirrors the Put over-read guard: after minio consumes the declared size, a body exactly that size yields no more bytes while a longer body still yields one (which minio would silently truncate and store), so the guard must flag the latter to match LocalStorage's size-mismatch rejection */
-    declaredSize := 3
-
-    exhausted := strings.NewReader("abc")
-    if _, err := io.ReadFull(exhausted, make([]byte, declaredSize)); nil != err {
-        t.Fatalf("unexpected read error: %s", err.Error())
-    }
-    if true == readerHasTrailingBytes(exhausted) {
-        t.Fatalf("a body exactly the declared size must report no trailing bytes")
-    }
-
-    oversize := strings.NewReader("abcd")
-    if _, err := io.ReadFull(oversize, make([]byte, declaredSize)); nil != err {
-        t.Fatalf("unexpected read error: %s", err.Error())
-    }
-    if false == readerHasTrailingBytes(oversize) {
-        t.Fatalf("a body longer than the declared size must report a trailing byte so Put can reject it")
-    }
-}
-
-func TestBoundedPutReader_StripsReaderAtAndDetectsOverReadAtCorrectSize(t *testing.T) {
-    /* @important the over-read guard must not mis-fire on io.ReaderAt+io.Seeker readers (bytes.Reader/strings.Reader/os.File): minio's single-shot putObject wraps such a reader in an io.SectionReader and uploads via ReadAt without advancing the caller's sequential cursor, so probing the original afterward reports trailing bytes on every valid Put and deletes the stored object. boundedPutReader must hand minio a reader that is neither io.ReaderAt nor io.Seeker so the sequential path is forced and the original cursor advances by exactly the consumed size. */
+func TestBoundedPutReader_StripsReaderAtAndCapsWhatMinioCanStore(t *testing.T) {
+    /* @important minio's single-shot putObject wraps an io.ReaderAt+io.Seeker reader (bytes.Reader/strings.Reader/os.File) in an io.SectionReader and uploads it via ReadAt in one shot; the sequential path consumes the body one part buffer at a time instead, which is what lets a size-checked body cut an upload off before its last declared byte. boundedPutReader must therefore hand minio a reader that is neither io.ReaderAt nor io.Seeker. */
     exactBody := "exactly-sized-body"
     original := strings.NewReader(exactBody)
     putReader := boundedPutReader(original, int64(len(exactBody)))
 
     if _, isReaderAt := putReader.(io.ReaderAt); true == isReaderAt {
-        t.Fatalf("the reader handed to minio must not be an io.ReaderAt, or minio's SectionReader/ReadAt path leaves the caller's cursor at 0")
+        t.Fatalf("the reader handed to minio must not be an io.ReaderAt, or minio uploads it through a SectionReader in one shot")
     }
     if _, isSeeker := putReader.(io.Seeker); true == isSeeker {
         t.Fatalf("the reader handed to minio must not be an io.Seeker, or minio takes the SectionReader optimization")
     }
 
-    /* @important consuming the put reader (as minio's sequential path does, reading exactly the declared size) must advance the ORIGINAL reader's cursor, so an exact-size body reports no trailing byte — no manual pre-read of the original, unlike the older helper test */
     consumed, _ := io.Copy(io.Discard, putReader)
     if int64(len(exactBody)) != consumed {
         t.Fatalf("expected minio to read exactly %d bytes through the bounded reader, got %d", len(exactBody), consumed)
     }
-    if true == readerHasTrailingBytes(original) {
-        t.Fatalf("an exact-size body must report no trailing bytes after the bounded reader is consumed, so a valid Put is not wrongly rejected")
-    }
 
-    /* @important a body longer than the declared size: minio reads only `declared` bytes through the cap, leaving the rest on the original for the over-read probe to catch */
+    /* @important the cap bounds what minio can store at the declared size on any path, single-shot or multipart */
     longerBody := "declared-short-but-body-is-actually-longer"
-    overOriginal := strings.NewReader(longerBody)
     declared := int64(9)
-    overPutReader := boundedPutReader(overOriginal, declared)
-    overConsumed, _ := io.Copy(io.Discard, overPutReader)
+    overConsumed, _ := io.Copy(io.Discard, boundedPutReader(strings.NewReader(longerBody), declared))
     if declared != overConsumed {
         t.Fatalf("expected the bounded reader to cap minio's read at the declared %d bytes, got %d", declared, overConsumed)
-    }
-    if false == readerHasTrailingBytes(overOriginal) {
-        t.Fatalf("a body longer than the declared size must report a trailing byte so Put rejects it")
     }
 
     /* @important a negative size means unknown length: stream the reader whole with no cap, so the same reader instance is returned */
@@ -173,4 +147,589 @@ func TestBoundedPutReader_StripsReaderAtAndDetectsOverReadAtCorrectSize(t *testi
     if streamed != boundedPutReader(streamed, -1) {
         t.Fatalf("expected a negative size to stream the original reader unwrapped")
     }
+}
+
+func TestSizeCheckedReader_StopsShortOfTheDeclaredSizeWhenTheBodyIsLonger(t *testing.T) {
+    /* the upload must be left incomplete, not merely wrong: a request that carried every declared byte announces a content length it satisfied, and the bucket is entitled to commit it. Cutting the body off one byte early is what makes minio abort the multipart upload and the bucket refuse a single-shot put, so the object already at the key survives. */
+    declared := int64(16)
+    checked := newSizeCheckedReader(context.Background(), "invoices/2026-07.pdf", &sequentialReader{reader: strings.NewReader(strings.Repeat("b", 64))}, declared)
+
+    yielded, readErr := io.Copy(io.Discard, checked)
+    if nil == readErr {
+        t.Fatalf("expected a body longer than the declared size to be rejected")
+    }
+    if "storage object size does not match the declared size" != readErr.Error() {
+        t.Fatalf("expected a declared size mismatch, got %q", readErr.Error())
+    }
+    if false == checked.rejected.Load() {
+        t.Fatalf("the reader must report that it rejected the body, so Put can name the size mismatch instead of the transport failure")
+    }
+    if declared <= yielded {
+        t.Fatalf("expected fewer than the declared %d bytes to reach minio so the upload stays incomplete, got %d", declared, yielded)
+    }
+}
+
+func TestSizeCheckedReader_YieldsAnExactlySizedBodyWhole(t *testing.T) {
+    body := strings.Repeat("b", 64)
+
+    for _, testCase := range []struct {
+        name   string
+        reader io.Reader
+    }{
+        {name: "non-seekable", reader: &sequentialReader{reader: strings.NewReader(body)}},
+        {name: "non-seekable with zero length reads", reader: &stutteringReader{remaining: body}},
+    } {
+        checked := newSizeCheckedReader(context.Background(), "invoices/2026-07.pdf", testCase.reader, int64(len(body)))
+
+        loaded, readErr := io.ReadAll(checked)
+        if nil != readErr {
+            t.Fatalf("%s: unexpected error: %s", testCase.name, readErr.Error())
+        }
+        if body != string(loaded) {
+            t.Fatalf("%s: expected the whole body, got %d bytes", testCase.name, len(loaded))
+        }
+    }
+}
+
+func TestSizeCheckedReader_StopsWhenTheContextIsDone(t *testing.T) {
+    /* a slow body would otherwise pin an upload with no deadline of its own */
+    ctx, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    checked := newSizeCheckedReader(ctx, "invoices/2026-07.pdf", &sequentialReader{reader: strings.NewReader("an invoice body")}, 15)
+
+    if _, readErr := io.Copy(io.Discard, checked); nil == readErr {
+        t.Fatalf("expected a cancelled context to stop the body")
+    }
+}
+
+func TestSizeCheckedReader_RejectsADeclaredZeroSizeWithABodyBehindIt(t *testing.T) {
+    checked := newSizeCheckedReader(context.Background(), "invoices/2026-07.pdf", &sequentialReader{reader: strings.NewReader("x")}, 0)
+
+    if _, readErr := io.Copy(io.Discard, checked); nil == readErr {
+        t.Fatalf("expected a body behind a zero declared size to be rejected")
+    }
+}
+
+type recordedObjectRequest struct {
+    method string
+    path   string
+    body   string
+}
+
+type recordingObjectServer struct {
+    server      *httptest.Server
+    mutex       sync.Mutex
+    requestList []recordedObjectRequest
+}
+
+func newRecordingObjectServer(t *testing.T) *recordingObjectServer {
+    recorder := &recordingObjectServer{}
+
+    recorder.server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        body, _ := io.ReadAll(request.Body)
+
+        recordedBody := string(body)
+        if true == strings.HasPrefix(request.Header.Get("X-Amz-Content-Sha256"), "STREAMING-") {
+            recordedBody = decodeChunkedPutBody(recordedBody)
+        }
+
+        recorder.mutex.Lock()
+        recorder.requestList = append(recorder.requestList, recordedObjectRequest{
+            method: request.Method,
+            path:   request.URL.Path,
+            body:   recordedBody,
+        })
+        recorder.mutex.Unlock()
+
+        writer.Header().Set("ETag", "\"9a0364b9e99bb480dd25e1f0284c8555\"")
+        writer.WriteHeader(http.StatusOK)
+    }))
+
+    t.Cleanup(recorder.server.Close)
+
+    return recorder
+}
+
+func (instance *recordingObjectServer) newStorage(t *testing.T) *Storage {
+    client, clientErr := NewClient(Config{
+        Endpoint:  strings.TrimPrefix(instance.server.URL, "http://"),
+        AccessKey: "test",
+        SecretKey: "test",
+        Secure:    false,
+        Region:    "us-east-1",
+    })
+    if nil != clientErr {
+        t.Fatalf("client: %s", clientErr.Error())
+    }
+
+    return NewStorage(client, "melody-test")
+}
+
+func (instance *recordingObjectServer) recorded() []recordedObjectRequest {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return append([]recordedObjectRequest(nil), instance.requestList...)
+}
+
+/* minio signs an unencrypted put with the streaming signature, so the recorded body arrives wrapped in aws-chunked framing (a hex length plus signature line, the payload, then a zero length chunk) and has to be unwrapped before it can be compared with what the caller handed to Put */
+func decodeChunkedPutBody(body string) string {
+    var payload strings.Builder
+
+    remaining := body
+
+    for {
+        headerEnd := strings.Index(remaining, "\r\n")
+        if 0 > headerEnd {
+            return payload.String()
+        }
+
+        header := remaining[:headerEnd]
+        remaining = remaining[headerEnd+2:]
+
+        sizeText := header
+        if separatorIndex := strings.Index(header, ";"); 0 <= separatorIndex {
+            sizeText = header[:separatorIndex]
+        }
+
+        chunkSize, parseErr := strconv.ParseInt(sizeText, 16, 64)
+        if nil != parseErr || 0 >= chunkSize || int64(len(remaining)) < chunkSize {
+            return payload.String()
+        }
+
+        payload.WriteString(remaining[:chunkSize])
+        remaining = remaining[chunkSize:]
+
+        if true == strings.HasPrefix(remaining, "\r\n") {
+            remaining = remaining[2:]
+        }
+    }
+}
+
+type sequentialReader struct {
+    reader io.Reader
+}
+
+func (instance *sequentialReader) Read(buffer []byte) (int, error) {
+    return instance.reader.Read(buffer)
+}
+
+/* yields the body one byte at a time, returning a legal (0, nil) read before every byte and before the final io.EOF, which an over-read probe must not mistake for the end of the body */
+type stutteringReader struct {
+    remaining string
+    stutter   bool
+}
+
+func (instance *stutteringReader) Read(buffer []byte) (int, error) {
+    if 0 == len(buffer) {
+        return 0, nil
+    }
+
+    if false == instance.stutter {
+        instance.stutter = true
+
+        return 0, nil
+    }
+
+    instance.stutter = false
+
+    if "" == instance.remaining {
+        return 0, io.EOF
+    }
+
+    buffer[0] = instance.remaining[0]
+    instance.remaining = instance.remaining[1:]
+
+    return 1, nil
+}
+
+func TestPut_RejectsADeclaredSizeShorterThanTheBodyBeforeTouchingTheBucket(t *testing.T) {
+    body := "an invoice body that is a lot longer than the declared size"
+
+    cases := []struct {
+        name   string
+        reader io.Reader
+    }{
+        {name: "seekable", reader: strings.NewReader(body)},
+        {name: "non-seekable", reader: &sequentialReader{reader: strings.NewReader(body)}},
+        {name: "non-seekable with zero length reads", reader: &stutteringReader{remaining: body}},
+    }
+
+    for _, testCase := range cases {
+        recorder := newRecordingObjectServer(t)
+        store := recorder.newStorage(t)
+
+        putErr := store.Put(
+            newRuntime(),
+            "invoices/2026-07.pdf",
+            testCase.reader,
+            12,
+            storagecontract.PutOptions{ContentType: "application/pdf"},
+        )
+        if nil == putErr {
+            t.Fatalf("%s: expected a body longer than the declared size to be rejected", testCase.name)
+        }
+        if "storage object size does not match the declared size" != putErr.Error() {
+            t.Fatalf("%s: expected a declared size mismatch, got %q", testCase.name, putErr.Error())
+        }
+
+        if recordedList := recorder.recorded(); 0 != len(recordedList) {
+            t.Fatalf("%s: a rejected put must not reach the bucket, got %v", testCase.name, recordedList)
+        }
+    }
+}
+
+func TestPut_UploadsTheWholeBodyWhenTheDeclaredSizeMatches(t *testing.T) {
+    body := "exactly-sized-invoice-body"
+
+    cases := []struct {
+        name   string
+        reader io.Reader
+    }{
+        {name: "seekable", reader: strings.NewReader(body)},
+        {name: "non-seekable", reader: &sequentialReader{reader: strings.NewReader(body)}},
+        {name: "non-seekable with zero length reads", reader: &stutteringReader{remaining: body}},
+    }
+
+    for _, testCase := range cases {
+        recorder := newRecordingObjectServer(t)
+        store := recorder.newStorage(t)
+
+        putErr := store.Put(
+            newRuntime(),
+            "/invoices/../invoices/2026-07.pdf",
+            testCase.reader,
+            int64(len(body)),
+            storagecontract.PutOptions{ContentType: "application/pdf"},
+        )
+        if nil != putErr {
+            t.Fatalf("%s: put: %s", testCase.name, putErr.Error())
+        }
+
+        recordedList := recorder.recorded()
+        if 1 != len(recordedList) {
+            t.Fatalf("%s: expected exactly one request, got %v", testCase.name, recordedList)
+        }
+        if "PUT" != recordedList[0].method || "/melody-test/invoices/2026-07.pdf" != recordedList[0].path {
+            t.Fatalf("%s: unexpected request %v", testCase.name, recordedList[0])
+        }
+        if body != recordedList[0].body {
+            t.Fatalf("%s: expected the whole body to be stored, got %q", testCase.name, recordedList[0].body)
+        }
+    }
+}
+
+func TestPut_HandlesABodyShorterThanItsDeclaredSizeAndAnEmptyBody(t *testing.T) {
+    /* a body shorter than its declared size is left to minio, which refuses the put rather than storing a short object; the wait is minio's own retry ladder */
+    shortRecorder := newRecordingObjectServer(t)
+    shortStore := shortRecorder.newStorage(t)
+
+    shortErr := shortStore.Put(newRuntime(), "invoices/2026-07.pdf", &sequentialReader{reader: strings.NewReader("short")}, 4096, storagecontract.PutOptions{ContentType: "application/pdf"})
+    if nil == shortErr {
+        t.Fatalf("expected a body shorter than the declared size to be refused")
+    }
+    if "object storage put failed" != shortErr.Error() {
+        t.Fatalf("expected minio to refuse the short body, got %q", shortErr.Error())
+    }
+
+    for _, testCase := range []struct {
+        name   string
+        reader io.Reader
+    }{
+        {name: "seekable", reader: strings.NewReader("")},
+        {name: "non-seekable", reader: &sequentialReader{reader: strings.NewReader("")}},
+    } {
+        recorder := newRecordingObjectServer(t)
+        store := recorder.newStorage(t)
+
+        emptyErr := store.Put(newRuntime(), "invoices/empty.pdf", testCase.reader, 0, storagecontract.PutOptions{ContentType: "application/pdf"})
+        if nil != emptyErr {
+            t.Fatalf("%s: an empty body declared as zero bytes must be stored: %s", testCase.name, emptyErr.Error())
+        }
+
+        recordedList := recorder.recorded()
+        if 1 != len(recordedList) || "" != recordedList[0].body {
+            t.Fatalf("%s: expected one empty put, got %v", testCase.name, recordedList)
+        }
+    }
+}
+
+func TestValidatedPutBody_StreamsASeekableBodyAndSpoolsOnlyWhatASmallNonSeekableOneYields(t *testing.T) {
+    body := "exactly-sized-invoice-body"
+
+    seekable := strings.NewReader(body)
+    streamed, _, streamedErr := validatedPutBody(context.Background(), "invoices/2026-07.pdf", seekable, int64(len(body)))
+    if nil != streamedErr {
+        t.Fatalf("unexpected error: %s", streamedErr.Error())
+    }
+    if seekable != streamed {
+        t.Fatalf("a seekable body must be streamed straight to minio, not buffered")
+    }
+
+    /* a declared size can come from a client supplied content length, so the spool must hold what the body actually yields, never the declared size itself */
+    spooled, _, spooledErr := validatedPutBody(context.Background(), "invoices/2026-07.pdf", &sequentialReader{reader: strings.NewReader("tiny")}, putSpoolLimit)
+    if nil != spooledErr {
+        t.Fatalf("unexpected error: %s", spooledErr.Error())
+    }
+    loaded, _ := io.ReadAll(spooled)
+    if "tiny" != string(loaded) {
+        t.Fatalf("expected the spooled body to be preserved, got %q", string(loaded))
+    }
+
+    unknown := &sequentialReader{reader: strings.NewReader(body)}
+    unvalidated, _, unvalidatedErr := validatedPutBody(context.Background(), "invoices/2026-07.pdf", unknown, -1)
+    if nil != unvalidatedErr {
+        t.Fatalf("unexpected error: %s", unvalidatedErr.Error())
+    }
+    if unknown != unvalidated {
+        t.Fatalf("an unknown length body must be streamed unvalidated")
+    }
+}
+
+func TestValidatedPutBody_LooksPastAZeroLengthRead(t *testing.T) {
+    /* a (0, nil) read is legal and means nothing happened, so treating it as the end of the body would let an over-read through and store a silently truncated object */
+    _, _, trailingErr := validatedPutBody(context.Background(), "invoices/2026-07.pdf", &stutteringReader{remaining: "abcd"}, 3)
+    if nil == trailingErr {
+        t.Fatalf("a zero length read must not be taken for the end of the body")
+    }
+    if "storage object size does not match the declared size" != trailingErr.Error() {
+        t.Fatalf("expected a declared size mismatch, got %q", trailingErr.Error())
+    }
+
+    exhausted, _, exhaustedErr := validatedPutBody(context.Background(), "invoices/2026-07.pdf", &stutteringReader{remaining: "abc"}, 3)
+    if nil != exhaustedErr {
+        t.Fatalf("unexpected error: %s", exhaustedErr.Error())
+    }
+    loaded, _ := io.ReadAll(exhausted)
+    if "abc" != string(loaded) {
+        t.Fatalf("expected an exhausted stuttering body to be preserved, got %q", string(loaded))
+    }
+}
+
+/* generates a body of the requested length without allocating it, so a test can assert how much of a large body Put is willing to hold in memory; the filler tells one generated body from another once it is stored */
+type generatedBodyReader struct {
+    remaining int64
+    filler    byte
+    consumed  int64
+}
+
+func (instance *generatedBodyReader) Read(buffer []byte) (int, error) {
+    if 0 == instance.remaining {
+        return 0, io.EOF
+    }
+
+    limit := int64(len(buffer))
+    if instance.remaining < limit {
+        limit = instance.remaining
+    }
+
+    for index := int64(0); index < limit; index++ {
+        buffer[index] = instance.filler
+    }
+
+    instance.remaining -= limit
+    instance.consumed += limit
+
+    return int(limit), nil
+}
+
+/* a reader that only ever returns a legal (0, nil): nothing to deliver, no error, forever */
+type stalledBodyReader struct{}
+
+func (instance *stalledBodyReader) Read(buffer []byte) (int, error) {
+    return 0, nil
+}
+
+func TestValidatedPutBody_StreamsABodyAboveTheSpoolLimitInsteadOfHoldingItInMemory(t *testing.T) {
+    /* the natural call is store.Put(runtimeInstance, key, request.Body, request.ContentLength, options) and an http request body cannot seek, so buffering the declared size means a client that uploads gigabytes makes the process attempt an allocation of the same order — an unrecoverable out of memory that takes every other in-flight request with it */
+    declared := int64(4 * putSpoolLimit)
+    body := &generatedBodyReader{remaining: declared}
+
+    _, streaming, bodyErr := validatedPutBody(context.Background(), "uploads/big.bin", body, declared)
+    if nil != bodyErr {
+        t.Fatalf("unexpected error: %s", bodyErr.Error())
+    }
+    if nil == streaming {
+        t.Fatalf("a body above the spool limit must be handed to minio as a size-checked stream, not as a spooled buffer")
+    }
+
+    if putSpoolLimit < body.consumed {
+        t.Fatalf("a body of %d bytes must stream, %d bytes of it were drained into memory before the upload started", declared, body.consumed)
+    }
+}
+
+func TestValidatedPutBody_GivesUpOnABodyThatNeverYieldsAndNeverFails(t *testing.T) {
+    settled := make(chan error, 1)
+
+    go func() {
+        _, _, bodyErr := validatedPutBody(context.Background(), "uploads/stalled.bin", &stalledBodyReader{}, 32)
+        settled <- bodyErr
+    }()
+
+    select {
+    case bodyErr := <-settled:
+        if nil == bodyErr {
+            t.Fatalf("expected a body that never yields and never fails to be rejected")
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatalf("a body that legally returns (0, nil) forever was never given up on: it spins a core with no bound and no deadline")
+    }
+}
+
+func TestObjectStorage_RejectedPutPreservesTheStoredObject(t *testing.T) {
+    endpoint := os.Getenv("MINIO_ENDPOINT")
+    if "" == endpoint {
+        t.Skip("MINIO_ENDPOINT not set; skipping object storage integration test")
+    }
+
+    client, clientErr := NewClient(Config{
+        Endpoint:  endpoint,
+        AccessKey: os.Getenv("MINIO_ACCESS_KEY"),
+        SecretKey: os.Getenv("MINIO_SECRET_KEY"),
+        Secure:    false,
+    })
+    if nil != clientErr {
+        t.Fatalf("client: %v", clientErr)
+    }
+
+    bucket := "melody-test"
+    if ensureErr := EnsureBucket(context.Background(), client, bucket, ""); nil != ensureErr {
+        t.Fatalf("ensure bucket: %v", ensureErr)
+    }
+
+    store := NewStorage(client, bucket)
+    runtimeInstance := newRuntime()
+
+    key := "invoices/2026-07.pdf"
+    stored := strings.Repeat("original-invoice-body ", 256)
+
+    putErr := store.Put(runtimeInstance, key, strings.NewReader(stored), int64(len(stored)), storagecontract.PutOptions{ContentType: "application/pdf"})
+    if nil != putErr {
+        t.Fatalf("put: %v", putErr)
+    }
+
+    replacement := strings.Repeat("replacement-body ", 64)
+
+    cases := []struct {
+        name   string
+        reader io.Reader
+    }{
+        {name: "seekable", reader: strings.NewReader(replacement)},
+        {name: "non-seekable", reader: &sequentialReader{reader: strings.NewReader(replacement)}},
+        {name: "non-seekable with zero length reads", reader: &stutteringReader{remaining: replacement}},
+    }
+
+    for _, testCase := range cases {
+        rejectedErr := store.Put(runtimeInstance, key, testCase.reader, 17, storagecontract.PutOptions{ContentType: "application/pdf"})
+        if nil == rejectedErr {
+            t.Fatalf("%s: expected a body longer than the declared size to be rejected", testCase.name)
+        }
+
+        exists, existsErr := store.Exists(runtimeInstance, key)
+        if nil != existsErr || false == exists {
+            t.Fatalf("%s: the stored object must survive a rejected put: %v %v", testCase.name, exists, existsErr)
+        }
+
+        reader, getErr := store.Get(runtimeInstance, key)
+        if nil != getErr {
+            t.Fatalf("%s: the stored object must survive a rejected put: %v", testCase.name, getErr)
+        }
+        loaded, _ := io.ReadAll(reader)
+        reader.Close()
+
+        if stored != string(loaded) {
+            t.Fatalf("%s: the rejected put replaced the stored object: %d bytes instead of %d", testCase.name, len(loaded), len(stored))
+        }
+    }
+
+    if deleteErr := store.Delete(runtimeInstance, key); nil != deleteErr {
+        t.Fatalf("delete: %v", deleteErr)
+    }
+}
+
+func TestObjectStorage_StreamedPutAboveTheSpoolLimitIsAllOrNothing(t *testing.T) {
+    endpoint := os.Getenv("MINIO_ENDPOINT")
+    if "" == endpoint {
+        t.Skip("MINIO_ENDPOINT not set; skipping object storage integration test")
+    }
+
+    client, clientErr := NewClient(Config{
+        Endpoint:  endpoint,
+        AccessKey: os.Getenv("MINIO_ACCESS_KEY"),
+        SecretKey: os.Getenv("MINIO_SECRET_KEY"),
+        Secure:    false,
+    })
+    if nil != clientErr {
+        t.Fatalf("client: %v", clientErr)
+    }
+
+    bucket := "melody-test"
+    if ensureErr := EnsureBucket(context.Background(), client, bucket, ""); nil != ensureErr {
+        t.Fatalf("ensure bucket: %v", ensureErr)
+    }
+
+    store := NewStorage(client, bucket)
+    runtimeInstance := newRuntime()
+
+    key := "uploads/large.bin"
+
+    cases := []struct {
+        name     string
+        declared int64
+    }{
+        {name: "last part shorter than the part size", declared: putSpoolLimit + 1024},
+        /* a declared size that lands exactly on a part boundary is the case an over-read probe run after the upload cannot catch: minio fills its part buffer completely, and a reader error alongside a full buffer is dropped, so the truncated upload would be completed and the key replaced */
+        {name: "declared size on a part boundary", declared: 2 * putSpoolLimit},
+    }
+
+    for _, testCase := range cases {
+        /* above the spool limit nothing is held in memory: the body proves its own size to minio as it is streamed multipart, so an exactly sized one must still arrive whole */
+        putErr := store.Put(runtimeInstance, key, &generatedBodyReader{remaining: testCase.declared, filler: 'p'}, testCase.declared, storagecontract.PutOptions{ContentType: "application/octet-stream"})
+        if nil != putErr {
+            t.Fatalf("%s: put: %v", testCase.name, putErr)
+        }
+
+        if storedSize, storedFiller := storedObjectShape(t, store, runtimeInstance, key); testCase.declared != storedSize || 'p' != storedFiller {
+            t.Fatalf("%s: expected the whole %d byte streamed body to be stored, got %d bytes of %q", testCase.name, testCase.declared, storedSize, string(storedFiller))
+        }
+
+        /* a longer body carrying a different filler is cut off before its last declared byte, which leaves the multipart upload incomplete for minio to abort: the stored object must be untouched, filler included */
+        rejectedErr := store.Put(runtimeInstance, key, &generatedBodyReader{remaining: testCase.declared + 4096, filler: 'r'}, testCase.declared, storagecontract.PutOptions{ContentType: "application/octet-stream"})
+        if nil == rejectedErr {
+            t.Fatalf("%s: expected a streamed body longer than the declared size to be rejected", testCase.name)
+        }
+        if "storage object size does not match the declared size" != rejectedErr.Error() {
+            t.Fatalf("%s: expected a declared size mismatch, got %q", testCase.name, rejectedErr.Error())
+        }
+
+        survivedSize, survivedFiller := storedObjectShape(t, store, runtimeInstance, key)
+        if testCase.declared != survivedSize || 'p' != survivedFiller {
+            t.Fatalf("%s: the rejected streamed put replaced the stored object: %d bytes of %q instead of %d bytes of \"p\"", testCase.name, survivedSize, string(survivedFiller), testCase.declared)
+        }
+    }
+
+    if deleteErr := store.Delete(runtimeInstance, key); nil != deleteErr {
+        t.Fatalf("delete: %v", deleteErr)
+    }
+}
+
+func storedObjectShape(t *testing.T, store *Storage, runtimeInstance runtimecontract.Runtime, key string) (int64, byte) {
+    reader, getErr := store.Get(runtimeInstance, key)
+    if nil != getErr {
+        t.Fatalf("get: %v", getErr)
+    }
+    defer reader.Close()
+
+    head := make([]byte, 1)
+    if _, headErr := io.ReadFull(reader, head); nil != headErr {
+        t.Fatalf("read stored object: %v", headErr)
+    }
+
+    tail, copyErr := io.Copy(io.Discard, reader)
+    if nil != copyErr {
+        t.Fatalf("read stored object: %v", copyErr)
+    }
+
+    return tail + 1, head[0]
 }

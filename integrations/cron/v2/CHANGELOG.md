@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- cron: the in-process runner's kubernetes dialect now accepts a whole-field `?` in a day field, reading it as the wildcard with its star bit intact the way the robfig scheduler behind a CronJob manifest does. The dialect and its day rules already shipped here, and its documentation names the k8s template as the scheduler it follows, but the matcher refused `?` through the numeric parse — so a Quartz-conventional `Schedule{DayOfMonth: "?"}` panicked `NewRunnerCommand` at boot on a configuration the cluster runs happily. The crontab dialect and the zero value keep rejecting it, as crond has no `?`
+
 ## [v2.6.0] - 2026-07-24 - Name Folding and Bounds-Checked Schedule Validation
 
 ### Fixed

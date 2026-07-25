@@ -2,6 +2,8 @@ package websocket
 
 import (
     "context"
+    "io"
+    "net"
     nethttp "net/http"
     "net/http/httptest"
     goruntime "runtime"
@@ -165,6 +167,250 @@ func TestStreamHandler_IdleTimeoutDisconnectsUnresponsiveClient(t *testing.T) {
     for hub.SubscriberCount("demo") > 0 {
         if true == time.Now().After(disconnectDeadline) {
             t.Fatalf("expected the keepalive loop to disconnect an unresponsive client and drop its subscription")
+        }
+        time.Sleep(5 * time.Millisecond)
+    }
+}
+
+/* the accept-time activity mark is offset zero and only a data message advances it, so a receive-only client bridged onto a broadcast hub — the handler's primary case — leaves the activity window dead for exactly the connections it is meant to protect unless a received pong records liveness. */
+func TestPingLoop_ReceivedPongRefreshesTheActivityMark(t *testing.T) {
+    serverConnections := make(chan *coderwebsocket.Conn, 1)
+    handlerRelease := make(chan struct{})
+    defer close(handlerRelease)
+
+    server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+        connection, acceptErr := coderwebsocket.Accept(writer, request, &coderwebsocket.AcceptOptions{
+            OriginPatterns: []string{"*"},
+        })
+        if nil != acceptErr {
+            return
+        }
+        defer connection.CloseNow()
+
+        serverConnections <- connection
+
+        <-handlerRelease
+    }))
+    defer server.Close()
+
+    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancel()
+
+    clientConnection, _, dialErr := coderwebsocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+    if nil != dialErr {
+        t.Fatalf("dial: %v", dialErr)
+    }
+    defer clientConnection.CloseNow()
+
+    /* the client's blocking read is what answers the server pings with pongs */
+    go func() {
+        _, _, _ = clientConnection.Read(ctx)
+    }()
+
+    serverConnection := <-serverConnections
+
+    liveness := newConnectionLiveness()
+    liveness.recordActivity()
+
+    interval := 50 * time.Millisecond
+
+    loopContext, loopCancel := context.WithCancel(ctx)
+    defer loopCancel()
+
+    serviceContainer := container.NewContainer()
+    serverRuntime := runtime.New(loopContext, serviceContainer.NewScope(), serviceContainer)
+
+    go readLoop(loopContext, loopCancel, serverConnection, serverRuntime, Options{}, liveness)
+    go pingLoop(loopContext, loopCancel, serverConnection, interval, time.Second, liveness)
+
+    /* the accept-time mark is younger than one interval, so only a pong observed at or after the first tick can push it past that */
+    deadline := time.Now().Add(3 * time.Second)
+    for int64(interval) > liveness.lastActivityOffset.Load() {
+        if true == time.Now().After(deadline) {
+            t.Fatal("a received pong never refreshed the activity mark: the liveness window is dead for a receive-only client")
+        }
+        time.Sleep(5 * time.Millisecond)
+    }
+}
+
+/* a small kernel send buffer keeps the server parked inside connection.Write for as long as the client drains slowly, so the scenario reproduces without pushing megabytes. */
+type smallSendBufferListener struct {
+    net.Listener
+}
+
+func (instance *smallSendBufferListener) Accept() (net.Conn, error) {
+    connection, acceptErr := instance.Listener.Accept()
+    if nil != acceptErr {
+        return nil, acceptErr
+    }
+
+    if tcpConnection, isTcp := connection.(*net.TCPConn); true == isTcp {
+        _ = tcpConnection.SetWriteBuffer(4096)
+    }
+
+    return connection, nil
+}
+
+/* a keepalive ping is serialised behind the data frame the handler is flushing, so a ping issued while a slow client drains that frame never reaches the socket: its timeout tested nothing and must not be read as a dead peer. Any IdleTimeout below WriteTimeout would otherwise turn transient write contention into a disconnect mid-frame. */
+func TestStreamHandler_SlowClientDrainingOneFrameIsNotDisconnected(t *testing.T) {
+    hub := melodyhttp.NewServerSentEventHub()
+
+    handler := NewStreamHandler(hub, Options{
+        TopicResolver:  func(request httpcontract.Request) string { return "demo" },
+        OriginPatterns: []string{"*"},
+        IdleTimeout:    100 * time.Millisecond,
+        WriteTimeout:   10 * time.Second,
+    })
+
+    server := httptest.NewUnstartedServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+        serviceContainer := container.NewContainer()
+        runtimeInstance := runtime.New(request.Context(), serviceContainer.NewScope(), serviceContainer)
+        melodyRequest := melodyhttp.NewRequest(request, nil, runtimeInstance, nil)
+        handler(runtimeInstance, writer, melodyRequest)
+    }))
+
+    listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+    if nil != listenErr {
+        t.Fatalf("listen: %v", listenErr)
+    }
+
+    server.Listener = &smallSendBufferListener{Listener: listener}
+    server.Start()
+    defer server.Close()
+
+    ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+    defer cancel()
+
+    clientConnection, _, dialErr := coderwebsocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+    if nil != dialErr {
+        t.Fatalf("dial: %v", dialErr)
+    }
+    defer clientConnection.CloseNow()
+
+    clientConnection.SetReadLimit(4 << 20)
+
+    subscribeDeadline := time.Now().Add(2 * time.Second)
+    for hub.SubscriberCount("demo") < 1 {
+        if true == time.Now().After(subscribeDeadline) {
+            t.Fatalf("the websocket handler did not subscribe to the hub in time")
+        }
+        time.Sleep(time.Millisecond)
+    }
+
+    payload := strings.Repeat("p", 512*1024)
+
+    drained := make(chan error, 1)
+    go func() {
+        _, reader, readerErr := clientConnection.Reader(ctx)
+        if nil != readerErr {
+            drained <- readerErr
+
+            return
+        }
+
+        chunk := make([]byte, 8192)
+        total := 0
+        for {
+            read, readErr := reader.Read(chunk)
+            total += read
+
+            if io.EOF == readErr {
+                break
+            }
+
+            if nil != readErr {
+                drained <- readErr
+
+                return
+            }
+
+            /* drain slower than the server writes, so the handler stays parked inside connection.Write for several ping intervals */
+            time.Sleep(10 * time.Millisecond)
+        }
+
+        if len(payload) != total {
+            drained <- io.ErrUnexpectedEOF
+
+            return
+        }
+
+        drained <- nil
+    }()
+
+    if 1 != hub.Broadcast("demo", melodyhttp.ServerSentEvent{Event: "notification", Data: payload}) {
+        t.Fatalf("expected the broadcast to reach the subscriber")
+    }
+
+    select {
+    case drainErr := <-drained:
+        if nil != drainErr {
+            t.Fatalf("a healthy client that was slow to drain one frame was disconnected mid-write: %v", drainErr)
+        }
+    case <-time.After(25 * time.Second):
+        t.Fatal("the slow client never finished draining the frame")
+    }
+
+    clientConnection.Close(coderwebsocket.StatusNormalClosure, "")
+}
+
+/* a write that COMPLETED is no evidence the peer is alive: a write into a half-open connection succeeds for as long as the socket send buffer has room. A hub that keeps broadcasting must therefore not keep a peer that never pongs alive, or the descriptor, the hub subscription and the goroutines survive until the send buffer fills — minutes at a modest broadcast rate — while the ping loop that exists to detect exactly this excuses every timeout. */
+func TestStreamHandler_UnansweredPingsDisconnectAPeerThatKeepsAcceptingWrites(t *testing.T) {
+    hub := melodyhttp.NewServerSentEventHub()
+
+    handler := NewStreamHandler(hub, Options{
+        TopicResolver:  func(request httpcontract.Request) string { return "demo" },
+        OriginPatterns: []string{"*"},
+        IdleTimeout:    100 * time.Millisecond,
+        WriteTimeout:   500 * time.Millisecond,
+    })
+
+    server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+        serviceContainer := container.NewContainer()
+        runtimeInstance := runtime.New(request.Context(), serviceContainer.NewScope(), serviceContainer)
+        melodyRequest := melodyhttp.NewRequest(request, nil, runtimeInstance, nil)
+        handler(runtimeInstance, writer, melodyRequest)
+    }))
+    defer server.Close()
+
+    ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+    defer cancel()
+
+    /* the client never reads, so it never answers a ping: coder/websocket only replies while the application reads */
+    connection, _, dialErr := coderwebsocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+    if nil != dialErr {
+        t.Fatalf("dial: %v", dialErr)
+    }
+    defer connection.CloseNow()
+
+    subscribeDeadline := time.Now().Add(2 * time.Second)
+    for hub.SubscriberCount("demo") < 1 {
+        if true == time.Now().After(subscribeDeadline) {
+            t.Fatalf("the websocket handler did not subscribe to the hub in time")
+        }
+        time.Sleep(time.Millisecond)
+    }
+
+    /* a small event every third of an interval, as a hub bridging a busy topic would: every write completes into the send buffer while the peer answers nothing */
+    stopBroadcast := make(chan struct{})
+    defer close(stopBroadcast)
+
+    go func() {
+        payload := strings.Repeat("e", 200)
+
+        for {
+            select {
+            case <-stopBroadcast:
+                return
+            case <-time.After(30 * time.Millisecond):
+                hub.Broadcast("demo", melodyhttp.ServerSentEvent{Event: "notification", Data: payload})
+            }
+        }
+    }()
+
+    disconnectDeadline := time.Now().Add(3 * time.Second)
+    for 0 < hub.SubscriberCount("demo") {
+        if true == time.Now().After(disconnectDeadline) {
+            t.Fatalf("a peer that never answered a ping was held for 3s because writes to it kept succeeding: the keepalive loop no longer detects a half-open connection")
         }
         time.Sleep(5 * time.Millisecond)
     }
@@ -536,14 +782,54 @@ func TestConnectionLiveness_GraceUsesMonotonicBase(t *testing.T) {
 
     liveness.enterCallback()
 
-    if false == liveness.cannotAnswer(window, grace) {
+    if false == liveness.cannotAnswer(false, window, grace, grace) {
         t.Fatalf("a callback within the grace must be excused")
     }
 
     /* a callback whose start is older than the grace, measured from the monotonic
        base, must no longer be excused */
     liveness.callbackStartedOffset.Store(int64(liveness.elapsed()) - int64(2*grace))
-    if true == liveness.cannotAnswer(window, grace) {
+    if true == liveness.cannotAnswer(false, window, grace, grace) {
         t.Fatalf("a callback that outran the grace must no longer be excused")
+    }
+}
+
+/* a ping cannot even be written while the handler is flushing a data frame, so the timeout of a ping issued in that span is not evidence of a dead peer; a ping issued with the writer free tested the peer for real, and a write that completed in the meantime excuses nothing. */
+func TestConnectionLiveness_InFlightWriteExcusesOnlyThePingItQueuedBehindItself(t *testing.T) {
+    liveness := newConnectionLiveness()
+
+    window := 40 * time.Millisecond
+    callbackGrace := 200 * time.Millisecond
+    graceForWrite := 500 * time.Millisecond
+
+    /* age the activity mark out of its window so only the write branches can excuse */
+    liveness.lastActivityOffset.Store(int64(liveness.elapsed()) - int64(4*window))
+
+    if true == liveness.cannotAnswer(false, window, callbackGrace, graceForWrite) {
+        t.Fatalf("a silent peer with no write in flight must not be excused")
+    }
+
+    if false == liveness.cannotAnswer(true, window, callbackGrace, graceForWrite) {
+        t.Fatalf("a ping that could not be written past the frame in flight when it was issued must be excused")
+    }
+
+    liveness.enterWrite()
+
+    if false == liveness.cannotAnswer(false, window, callbackGrace, graceForWrite) {
+        t.Fatalf("a frame that started flushing after the ping was issued must still be excused while it is in flight")
+    }
+
+    liveness.writeStartedOffset.Store(int64(liveness.elapsed()) - int64(2*graceForWrite))
+    if true == liveness.cannotAnswer(false, window, callbackGrace, graceForWrite) {
+        t.Fatalf("a write that outran its grace must no longer excuse anything")
+    }
+
+    liveness.leaveWrite()
+
+    /* a write into a half-open connection completes for as long as the send buffer has room, so once it is done it is no evidence at all: the next ping goes out with the control-frame queue free and its timeout must be read as a death */
+    liveness.writeStartedOffset.Store(int64(liveness.elapsed()))
+
+    if true == liveness.cannotAnswer(false, window, callbackGrace, graceForWrite) {
+        t.Fatalf("a write that completed before the ping was issued must not excuse the ping's timeout")
     }
 }

@@ -6,8 +6,6 @@ type Option struct {
     VerbosityLevel int
     Verbose        bool
     Quiet          bool
-    Fields         []string
-    SortKey        string
     Order          SortOrder
     Limit          int
     Offset         int
@@ -21,8 +19,6 @@ func DefaultOption() Option {
         VerbosityLevel: 0,
         Verbose:        false,
         Quiet:          false,
-        Fields:         []string{},
-        SortKey:        "",
         Order:          SortOrderAscending,
         Limit:          0,
         Offset:         0,

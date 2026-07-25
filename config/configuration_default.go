@@ -21,6 +21,9 @@ func (instance *Configuration) registerDefaultParameters(
     instance.setDefaultParameter(HttpAddressKey, ":8080")
     instance.setDefaultParameter(HttpMaxRequestBodyBytesKey, 1048576)
 
+    /* zero leaves a session without an expiry, which is what melody has always stored */
+    instance.setDefaultParameter(HttpSessionTtlKey, 0)
+
     instance.setDefaultParameter(CliNameKey, "melody")
 
     instance.setDefaultParameter(CliDescriptionKey, "")

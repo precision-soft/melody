@@ -48,7 +48,7 @@ app.RegisterModule(melodycron.NewModule(melodycron.ModuleConfig{
 
 This module requires:
 
-* `github.com/precision-soft/melody/v3` ≥ v3.0.0
+* `github.com/precision-soft/melody/v3` ≥ v3.6.0 (the minimum this module's [`go.mod`](./go.mod) requires)
 * `github.com/urfave/cli/v3` ≥ v3.6.1
 
-Everything else is stdlib. The package surface is identical across all three bindings — see [Package surface](../README.md#package-surface) in the umbrella README for the full list, then the [umbrella README](../README.md) for the design details.
+Everything else is stdlib. This binding's package surface is a **superset** of the v1/v2 bindings': it additionally ships the built-in `k8s` template (`K8sTemplate`, `TemplateNameK8s`), its `ParameterImage`/`ParameterNamespace`/`ParameterRestartPolicy` constants, its `ErrK8sImageMissing`/`ErrK8sInvalidRestartPolicy`/`ErrK8sInvalidName`/`ErrK8sDuplicateName` errors, and the `Commands(configuration)` helper. See [Package surface](../README.md#package-surface) in the umbrella README for the full list, then the [umbrella README](../README.md) for the design details.

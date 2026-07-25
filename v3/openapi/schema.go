@@ -1,6 +1,7 @@
 package openapi
 
 import (
+    "encoding/json"
     "fmt"
     "reflect"
     "regexp"
@@ -10,6 +11,7 @@ import (
 )
 
 var timeType = reflect.TypeOf(time.Time{})
+var jsonMarshalerInterfaceType = reflect.TypeOf((*json.Marshaler)(nil)).Elem()
 
 /* @important the unsigned floor is applied here as well as on fields and collection elements: a request or response type handed in bare goes straight to buildSchema, so without this a top-level unsigned scalar advertises the negative range its decoder refuses */
 func schemaFromType(targetType reflect.Type, components map[string]*Schema, names map[reflect.Type]string) *Schema {
@@ -54,6 +56,10 @@ func buildSchema(targetType reflect.Type, components map[string]*Schema, names m
     case reflect.Map:
         return withNullable(&Schema{Type: "object", AdditionalProperties: elementSchema(targetType.Elem(), components, names, visited)}, nullable)
     case reflect.Struct:
+        if true == promotesEmbeddedTimeCodec(targetType) {
+            return withNullable(&Schema{Type: "string", Format: "date-time"}, nullable)
+        }
+
         return structSchemaReference(targetType, components, names, visited, nullable)
     default:
         return withNullable(&Schema{}, nullable)
@@ -88,7 +94,7 @@ func schemaComponentName(structType reflect.Type, names map[reflect.Type]string)
         return existing
     }
 
-    base := structType.Name()
+    base := sanitizeComponentName(structType.Name())
     candidate := base
     suffix := 2
     for true == componentNameInUse(candidate, names) {
@@ -99,6 +105,22 @@ func schemaComponentName(structType reflect.Type, names map[reflect.Type]string)
     names[structType] = candidate
 
     return candidate
+}
+
+var componentNamePackagePathPattern = regexp.MustCompile(`[A-Za-z0-9_.\-]*/`)
+var componentNameIllegalPattern = regexp.MustCompile(`[^A-Za-z0-9._\-]+`)
+
+/* an instantiated generic reports its type arguments as part of the type name — "Page[github.com/acme/app/api.User]" — and neither the brackets nor the import paths survive as a component key: the key grammar admits only letters, digits, ".", "-" and "_", and a raw "/" splits the "$ref" json pointer into tokens that resolve to nothing. Dropping the import paths keeps the qualified type name that carries the meaning, and folding the remaining punctuation to one underscore keeps the key derived only from the type, so it stays the same across runs; two type arguments that differ only in the folded punctuation collide, which the caller's numeric suffix then separates. */
+func sanitizeComponentName(name string) string {
+    sanitized := componentNamePackagePathPattern.ReplaceAllString(name, "")
+    sanitized = componentNameIllegalPattern.ReplaceAllString(sanitized, "_")
+    sanitized = strings.Trim(sanitized, "_")
+
+    if "" == sanitized {
+        return "Schema"
+    }
+
+    return sanitized
 }
 
 func componentNameInUse(candidate string, names map[reflect.Type]string) bool {
@@ -691,7 +713,89 @@ func isPromotedEmbed(field reflect.StructField) bool {
         embedded = embedded.Elem()
     }
 
-    return reflect.Struct == embedded.Kind() && embedded != timeType
+    return reflect.Struct == embedded.Kind()
+}
+
+/* an embedded time.Time promotes its MarshalJSON to the enclosing type, so encoding/json emits an RFC 3339 string for the whole value and never visits the sibling fields; advertising the promoted properties would describe a body that is never sent. The date-time string is emitted only when time.Time is the type the promotion actually travelled from — reachability alone is not it, because a shallower marshaler embed writing an object shadows a deeper time.Time and the string schema would then promise a string where the body is an object. Only a promoted time.Time is recognised, because it is the one embed whose wire form is derivable from its type — for any other marshaler embed the bytes are whatever its MarshalJSON writes, which reflection cannot read, so widening this to "the enclosing type implements json.Marshaler" would trade an object schema that is wrong for a $ref to the embed that is equally wrong. The validator's counterpart (validation/validator.go promotesValidationTimeCodec) asks the decode side as well, a struct being able to promote this codec while declaring an UnmarshalJSON that fills its fields; that question does not belong here, where only what is written is advertised, so the two predicates are deliberately not identical and promotedMarshalerOrigin below is what they share. */
+func promotesEmbeddedTimeCodec(structType reflect.Type) bool {
+    if false == structType.Implements(jsonMarshalerInterfaceType) {
+        return false
+    }
+
+    origin, depth, resolved := promotedMarshalerOrigin(structType, make(map[reflect.Type]bool))
+    if false == resolved {
+        return false
+    }
+
+    return 0 < depth && timeType == origin
+}
+
+/* promotedMarshalerOrigin reports which type declares the MarshalJSON in targetType's value method set, and at what embedding depth, following the selector rule the method set is built by: the candidate at the shallowest depth wins, and two candidates tied at that depth promote nothing at all. A non-struct embed is a candidate like any other — a marshaler embed of kind string still outranks a time.Time below it. Unresolved (false) is returned wherever reflection cannot settle the question, and every caller then keeps the object schema, which is the safe direction: an embed whose codec has a pointer receiver, and a cycle reached through a pointer embed. One shape stays out of reach entirely: reflect.Method carries no declaring type, so a MarshalJSON declared on targetType itself while an embed also carries one is indistinguishable from the promoted one, and such a type resolves to its embed. */
+func promotedMarshalerOrigin(targetType reflect.Type, path map[reflect.Type]bool) (reflect.Type, int, bool) {
+    if timeType == targetType {
+        return timeType, 0, true
+    }
+
+    if reflect.Struct != targetType.Kind() {
+        return targetType, 0, true
+    }
+
+    if true == path[targetType] {
+        return nil, 0, false
+    }
+    path[targetType] = true
+    defer delete(path, targetType)
+
+    var winner reflect.Type
+    winnerDepth := 0
+    winnerCount := 0
+
+    for index := 0; index < targetType.NumField(); index++ {
+        field := targetType.Field(index)
+        if false == field.Anonymous {
+            continue
+        }
+
+        if false == field.Type.Implements(jsonMarshalerInterfaceType) {
+            continue
+        }
+
+        embedded := field.Type
+        if reflect.Ptr == embedded.Kind() {
+            embedded = dereferencedStructType(embedded)
+
+            /* the promoted codec has a pointer receiver, so which type declares it cannot be followed through the embed. Outcome-neutral under the origin rule as it stands — a type that does not implement the interface can neither be time.Time nor promote its codec at a single shallowest depth, so falling through would reach the same object schema — and kept as the guard for a rule that stops being true. TestPromotedMarshalerOrigin_APointerEmbedWithAPointerReceiverCodecIsUnresolved pins it at the only level it is observable, this function's own return. */
+            if false == embedded.Implements(jsonMarshalerInterfaceType) {
+                return nil, 0, false
+            }
+        }
+
+        origin, originDepth, resolved := promotedMarshalerOrigin(embedded, path)
+        if false == resolved {
+            return nil, 0, false
+        }
+
+        originDepth++
+
+        if 0 == winnerCount || originDepth < winnerDepth {
+            winner = origin
+            winnerDepth = originDepth
+            winnerCount = 1
+
+            continue
+        }
+
+        if originDepth == winnerDepth {
+            winnerCount++
+        }
+    }
+
+    /* no embed carries a codec, or the shallowest ones tie and promote none: the method the caller found in the method set is declared on targetType */
+    if 1 != winnerCount {
+        return targetType, 0, true
+    }
+
+    return winner, winnerDepth, true
 }
 
 func withNullable(schema *Schema, nullable bool) *Schema {

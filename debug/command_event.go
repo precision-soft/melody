@@ -131,18 +131,31 @@ func (instance *EventCommand) Run(
         },
     )
 
+    output.ApplySortOrder(items, option.Order)
+
+    total := len(items)
+    items = output.WindowItems(items, option.Limit, option.Offset)
+
     if output.FormatTable == option.Format {
         builder := output.NewTableBuilder()
 
-        builder.AddSummaryLine(
-            fmt.Sprintf(
-                "EVENTS: %d total | LISTENERS: %d total | FROM SUBSCRIBERS: %d total | SUBSCRIBERS: %d total",
-                len(items),
-                listenerTotal,
-                fromSubscriberTotal,
-                subscriberOwnerTotal,
-            ),
+        summary := fmt.Sprintf(
+            "EVENTS: %d total | LISTENERS: %d total | FROM SUBSCRIBERS: %d total | SUBSCRIBERS: %d total",
+            total,
+            listenerTotal,
+            fromSubscriberTotal,
+            subscriberOwnerTotal,
         )
+
+        if len(items) != total {
+            summary = fmt.Sprintf(
+                "%s | %d shown",
+                summary,
+                len(items),
+            )
+        }
+
+        builder.AddSummaryLine(summary)
 
         block := builder.AddBlock(
             "EVENTS",
@@ -165,8 +178,19 @@ func (instance *EventCommand) Run(
                 []string{"event", "priority", "source", "owner", "listener"},
             )
 
-            sortedRegisteredEvents := make([]eventcontract.RegisteredEvent, 0, len(registeredEvents))
+            /* the listener detail follows the same window as the event block above, otherwise --limit lists three events and every listener in the application */
+            selectedEventNames := make(map[string]struct{}, len(items))
+            for _, item := range items {
+                selectedEventNames[item.EventName] = struct{}{}
+            }
+
+            sortedRegisteredEvents := make([]eventcontract.RegisteredEvent, 0, len(selectedEventNames))
             for _, registeredEvent := range registeredEvents {
+                _, isSelected := selectedEventNames[registeredEvent.EventName]
+                if false == isSelected {
+                    continue
+                }
+
                 sortedRegisteredEvents = append(sortedRegisteredEvents, registeredEvent)
             }
 
@@ -234,7 +258,7 @@ func (instance *EventCommand) Run(
     } else {
         envelope.Data = output.NewListPayload(
             items,
-            len(items),
+            total,
             option.Limit,
             option.Offset,
         )

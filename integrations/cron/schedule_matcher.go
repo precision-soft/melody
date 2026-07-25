@@ -95,6 +95,17 @@ func newScheduleMatcher(schedule *Schedule, dialect RunnerDialect) (*scheduleMat
         dayOfWeekExpression = normalizeCronNameTokens(fieldOrWildcard(schedule.DayOfWeek), cronDayOfWeekNameValues)
     }
 
+    /* the robfig scheduler reads a whole-field "?" in a day field as the wildcard with its star bit intact (the Quartz convention the kubernetes template renders), so that dialect matches it as "*"; the crontab dialect keeps refusing it through the numeric parse, as crond has no "?". */
+    if RunnerDialectKubernetes == resolvedDialect {
+        if "?" == dayOfMonthExpression {
+            dayOfMonthExpression = "*"
+        }
+
+        if "?" == dayOfWeekExpression {
+            dayOfWeekExpression = "*"
+        }
+    }
+
     minute, minuteErr := parseCronField(minuteExpression, minuteMinimum, minuteMaximum)
     if nil != minuteErr {
         return nil, minuteErr

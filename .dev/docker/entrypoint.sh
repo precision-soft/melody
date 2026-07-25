@@ -7,10 +7,6 @@ export PATH="/usr/local/go/bin:/usr/local/bin:${PATH}"
 
 cd ${WORKDIR}
 
-if [[ -d ".git" ]] && [[ -f ".dev/git-hook/install.sh" ]]; then
-    bash .dev/git-hook/install.sh || true
-fi
-
 mkdir -p /go/pkg/mod
 mkdir -p /go/cache/go-build
 touch ${HOME}/.bash_history

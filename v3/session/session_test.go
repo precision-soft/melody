@@ -66,6 +66,39 @@ func TestSession_Clear_SetsClearedFlagAndClearsValues(t *testing.T) {
     }
 }
 
+func TestSession_Abandon_IsNotUndoneByALaterSet(t *testing.T) {
+    storage := NewInMemoryStorage()
+    manager := NewManager(storage, 30*time.Minute)
+
+    clearedSession, ok := manager.NewSession().(*Session)
+    if false == ok {
+        t.Fatalf("expected a session")
+    }
+
+    clearedSession.Clear()
+    clearedSession.Set("a", "b")
+
+    if true == clearedSession.IsCleared() {
+        t.Fatalf("expected a write to lift the cleared flag")
+    }
+
+    abandonedSession, ok := manager.NewSession().(*Session)
+    if false == ok {
+        t.Fatalf("expected a session")
+    }
+
+    abandonedSession.abandon()
+    abandonedSession.Set("a", "b")
+
+    if false == abandonedSession.IsCleared() {
+        t.Fatalf("expected the abandoned session to stay cleared after a write")
+    }
+
+    if false == abandonedSession.IsModified() {
+        t.Fatalf("expected the write to still mark the session modified")
+    }
+}
+
 func TestSession_Delete_RemovesKey(t *testing.T) {
     storage := NewInMemoryStorage()
     manager := NewManager(storage, 30*time.Minute)

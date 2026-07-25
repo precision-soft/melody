@@ -2,7 +2,6 @@ package output
 
 import (
     "fmt"
-    "strings"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
 )
@@ -13,6 +12,11 @@ func StandardFlags() []clicontract.Flag {
             Name:  FlagNameFormat,
             Usage: "output format: table|json",
             Value: string(FormatTable),
+            Validator: func(value string) error {
+                _, parseErr := parseFormat(value)
+
+                return parseErr
+            },
         },
         &clicontract.BoolFlag{
             Name:  FlagNameNoColor,
@@ -35,19 +39,14 @@ func StandardFlags() []clicontract.Flag {
             Value: true,
         },
         &clicontract.StringFlag{
-            Name:  FlagNameFields,
-            Usage: "comma-separated list of fields to include (json only)",
-            Value: "",
-        },
-        &clicontract.StringFlag{
-            Name:  FlagNameSortKey,
-            Usage: "sort key (command-specific)",
-            Value: "",
-        },
-        &clicontract.StringFlag{
             Name:  FlagNameOrder,
             Usage: "sort order: asc|desc",
             Value: string(SortOrderAscending),
+            Validator: func(value string) error {
+                _, parseErr := parseSortOrder(value)
+
+                return parseErr
+            },
         },
         &clicontract.IntFlag{
             Name:  FlagNameLimit,
@@ -65,27 +64,6 @@ func StandardFlags() []clicontract.Flag {
             Value: 0,
         },
     }
-}
-
-func SplitFields(fieldsString string) []string {
-    trimmed := strings.TrimSpace(fieldsString)
-    if "" == trimmed {
-        return []string{}
-    }
-
-    raw := strings.Split(trimmed, ",")
-    result := make([]string, 0, len(raw))
-
-    for _, part := range raw {
-        field := strings.TrimSpace(part)
-        if "" == field {
-            continue
-        }
-
-        result = append(result, field)
-    }
-
-    return result
 }
 
 func DebugFlags() []clicontract.Flag {

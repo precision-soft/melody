@@ -16,25 +16,29 @@ Additional fields can be dropped globally or per entity via the `Registry` (see 
 
 ### Automatic capture (recommended)
 
-`Tracker` runs the bun write and records the matching entry in one call. Updates **and deletes** load the
-current row by primary key first (`SELECT ... FOR UPDATE`), so the recorded before-image is the row as the
-database held it, never the model the caller happened to pass:
+`Tracker` runs the bun write and records the matching entry in one call. An **update** loads the current row
+by primary key first (`SELECT ... FOR UPDATE`), so the recorded before-image is the row as the database held
+it, never the model the caller happened to pass:
 
 ```go
 recorder := audit.NewRecorder(auditDb, audit.DefaultTable)
 tracker := audit.NewTracker(appDb, recorder)
 
 ctx := audit.WithActor(ctx, "user-42")
-tracker.Update(ctx, "user", "42", &user)              // SELECT old, UPDATE, record diff — all in one transaction
-tracker.Delete(ctx, "user", "42", &User{Id: 42})      // SELECT old, DELETE, record the loaded row — same transaction
+tracker.Update(ctx, "user", "42", &user)              /* SELECT old, UPDATE, record diff — all in one transaction */
+tracker.Delete(ctx, "user", "42", &User{Id: 42})      /* DELETE, record the identifier — no before-image unless the entity opted in */
 ```
 
-`Delete` therefore needs no hydrated model: pass the primary key and the trail still carries every column's
-old value. Two consequences follow from that load:
+A **delete** does not load a before-image by default: it records the identifier, the actor and the time, and
+the trail asserts nothing about the deleted row's column values (see [Deletes](#deletes) for why, and for the
+per-entity `CaptureDeleteBeforeImage` opt-in that does load and lock the row). Two consequences follow from
+that default:
 
-- deleting a row that is already absent is an **error**, not a silently recorded no-op — nothing is deleted
-  and nothing is audited (the same contract `Update` imposes).
-- each audited delete costs one extra `SELECT` round trip.
+- an audited delete costs no extra `SELECT` round trip, and deleting a row that is already absent is a
+  silent no-op — nothing is deleted and nothing is audited (unlike `Update`, which errors when the row it
+  must read is gone).
+- deleted contents are **not** recoverable from the trail. A compliance trail that must retain them has to
+  opt the entity in — see [Deletes](#deletes).
 
 Pass `""` as the id to let the `Tracker` derive it from the model's bun primary key after the write — the common case for an autoincrement key, unknown until the INSERT populates the model. A caller-supplied id still wins, and a composite key is joined with `:`.
 

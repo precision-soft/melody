@@ -1,12 +1,15 @@
 package lock
 
 import (
+    "context"
+    "sync"
     "sync/atomic"
     "time"
 
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/internal"
     lockcontract "github.com/precision-soft/melody/v3/lock/contract"
+    "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
@@ -23,7 +26,7 @@ type LeaderGateOptions struct {
     /* RefreshInterval is the lease-renewal cadence while leading; defaults to half the ttl, or defaultSessionProbeInterval when the ttl is non-positive (session-style locks whose Refresh is a liveness probe). */
     RefreshInterval time.Duration
 
-    /* OnElected runs on the Run goroutine right after the gate becomes leader. */
+    /* OnElected runs on the Run goroutine right after the gate becomes leader, with the lease renewal already running underneath it. Its runtime carries a context cancelled when the lease is lost, so leader-only work stops instead of running alongside whoever holds the lock now; while it blocks, the gate cannot campaign again. */
     OnElected func(runtimeInstance runtimecontract.Runtime)
 
     /* OnLost runs on the Run goroutine right after leadership is lost to a failed renewal; cause is the renewal error. It does not run on a clean shutdown. */
@@ -141,9 +144,6 @@ func (instance *LeaderGate) Run(runtimeInstance runtimecontract.Runtime) error {
         }
 
         instance.isLeader.Store(true)
-        if nil != instance.options.OnElected {
-            instance.options.OnElected(runtimeInstance)
-        }
 
         lostCause := instance.lead(runtimeInstance, lock)
 
@@ -164,8 +164,42 @@ func (instance *LeaderGate) Run(runtimeInstance runtimecontract.Runtime) error {
     }
 }
 
-/* lead renews the held lease until the context ends (returns nil) or a renewal fails (returns the cause, so the gate demotes itself and re-campaigns). */
+/* lead holds the leadership term: it starts the lease renewal, runs OnElected underneath it, and blocks until the run context ends (returns nil) or a renewal fails (returns the cause, so the gate demotes itself and re-campaigns). The renewal must be running before OnElected is invoked — nothing would renew the lease while the hook works, so a hook that merely takes longer than the ttl lets a second instance acquire while this one still reports leadership and never demotes, since demotion only follows a failed renewal. */
 func (instance *LeaderGate) lead(runtimeInstance runtimecontract.Runtime, lock lockcontract.Lock) error {
+    termContext, cancel := context.WithCancel(runtimeInstance.Context())
+    defer cancel()
+
+    termRuntime := runtime.New(termContext, runtimeInstance.Scope(), runtimeInstance.Container())
+
+    var refreshFailure error
+    var waitGroup sync.WaitGroup
+
+    waitGroup.Add(1)
+    go func() {
+        defer waitGroup.Done()
+
+        refreshFailure = instance.refreshWhileLeading(termRuntime, lock)
+        if nil != refreshFailure {
+            /* the lease is gone; ending the term here stops OnElected rather than let leader-only work continue alongside whoever holds the lock now */
+            cancel()
+        }
+    }()
+
+    if nil != instance.options.OnElected {
+        instance.options.OnElected(termRuntime)
+    }
+
+    <-termContext.Done()
+
+    /* cancel before Wait so a renewal already blocked on an unresponsive backend is interrupted rather than wedging the campaign loop until the connection times out */
+    cancel()
+    waitGroup.Wait()
+
+    return refreshFailure
+}
+
+/* refreshWhileLeading renews the held lease at the configured cadence until the term context ends, returning the first renewal failure. */
+func (instance *LeaderGate) refreshWhileLeading(runtimeInstance runtimecontract.Runtime, lock lockcontract.Lock) error {
     refreshTtl := instance.ttl
     if 0 >= refreshTtl {
         /* session mode: a session locker ignores this ttl, while a lease locker rewrites the lease — renew for twice the probe cadence so the renewal never races the expiry it just set (see sessionProbeTtlFactor) */
@@ -181,6 +215,11 @@ func (instance *LeaderGate) lead(runtimeInstance runtimecontract.Runtime, lock l
             return nil
         case <-ticker.C:
             if refreshErr := lock.Refresh(runtimeInstance, refreshTtl); nil != refreshErr {
+                /* a shutdown cancels the very context the backend was called with, so the renewal in flight fails with the cancellation: that is the stop itself, not a lost lease, and reporting it would drive OnLost on every clean stop */
+                if nil != runtimeInstance.Context().Err() {
+                    return nil
+                }
+
                 return refreshErr
             }
         }

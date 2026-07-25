@@ -3,6 +3,7 @@ package http
 import (
     "encoding/json"
     nethttp "net/http"
+    "reflect"
 
     "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
@@ -49,6 +50,11 @@ func JsonHandler[Req any](
         }
 
         if true == decoder.More() {
+            return jsonHandlerError(settings, runtimeInstance, request, nethttp.StatusBadRequest, "invalid json")
+        }
+
+        /* a literal `null` body decodes without error and leaves a pointer instantiation nil, which the validator reports valid (it has nothing to walk) and the handler then dereferences — reject it as the invalid body it is */
+        if bodyValue := reflect.ValueOf(body); reflect.Ptr == bodyValue.Kind() && true == bodyValue.IsNil() {
             return jsonHandlerError(settings, runtimeInstance, request, nethttp.StatusBadRequest, "invalid json")
         }
 

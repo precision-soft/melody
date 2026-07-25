@@ -241,9 +241,30 @@ func (instance *adminSecurityModule) RegisterSecurity(builder *securityconfig.Bu
 var _ applicationcontract.HttpModule = (*adminSecurityModule)(nil)
 ```
 
+### Session fixation
+
+An application that carries its authenticated identity in the session (rather than in a stateless Bearer token) must **rotate the session id on any privilege change, above all at login**. Otherwise an attacker who can plant a known session id in the victim's browser before authentication — through a fixation vector such as a link, a subdomain-scoped cookie, or an XSS write — holds a cookie that becomes fully authenticated the moment the victim logs in.
+
+[`session.Manager.RegenerateSession`](../../session/manager.go) is the defence: it mints a fresh id, carries the current values over, and removes the storage entry the previous id pointed at, so the planted id no longer resolves to anything. Call it in the login handler **before** writing the identity into the session, and republish the returned session on [`RequestAttributeSession`](../../http/request.go) — the response path re-reads that attribute to decide what to save, so a rotation that is not republished writes the old values back under the old id and does not happen at all.
+
+```go
+rotated, rotateErr := sessionManager.RegenerateSession(sessionInstance)
+if nil != rotateErr {
+    return nil, rotateErr
+}
+
+request.Attributes().Set(melodyhttp.RequestAttributeSession, rotated)
+
+/* sessionKeyUserId is application-owned; the framework defines no session key for the identity */
+rotated.Set(sessionKeyUserId, user.Id())
+```
+
+Rotate on the way out too: logout should clear the session ([`Session.Clear`](../../session/session.go)), which deletes the stored entry and expires the browser cookie. See [SESSION](SESSION.md#rotating-the-session-id) for the full contract and its footguns, and the [session cookie](HTTP.md#session-cookie) section for the `Secure`/`SameSite` attributes that keep the rotated cookie from leaking in the first place.
+
 ## Footguns & caveats
 
 - `AccessControl` uses a deterministic match priority: exact match first, then longest prefix match (including segment-prefix rules), then regex rules in the order they were registered, then the empty-prefix fallback. See [`(*AccessControl).Match`](../../security/access_control.go).
+- A session-backed login that does not call [`RegenerateSession`](../../session/manager.go) is vulnerable to **session fixation**: the id the victim arrived with stays valid and authenticated. Rotating is a per-application responsibility — the framework cannot do it for you, because only the login handler knows when the privilege change happens. See [Session fixation](#session-fixation).
 - `SecurityContextSetOnRuntime` stores the context in the runtime scope under `security/contract.ServiceSecurityContext`.
 
 ## Userland API

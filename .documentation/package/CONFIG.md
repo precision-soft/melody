@@ -88,6 +88,25 @@ A self-reference — direct or through any chain of parameters and environment k
 
 A parameter may be declared as holding a credential so that the commands rendering the configuration redact it — the value reaching the services is untouched, this governs display only. Declare one through the module registrar with [`RegisterSecretParameter`](../../application/contract/parameter_module.go), or mark one melody auto-registered from the `.env` artifacts with [`MarkParameterSecret`](../../application/contract/parameter_module.go). The marking travels with the value: a parameter whose template reads a secret (a dsn assembling a password, through `%parameter%` or `%env(KEY)%`) becomes secret itself. [`Parameter.IsSecret`](../../config/parameter.go) reports the marking; `debug:parameters` renders a marked parameter as `********`.
 
+### Session ttl
+
+How long a stored session stays valid. Read through [`Http().SessionTtl()`](../../config/http.go).
+
+| Environment key            | Parameter name             | Default |
+|----------------------------|----------------------------|---------|
+| `MELODY_HTTP_SESSION_TTL`  | `kernel.http.session_ttl`  | `0`     |
+
+The value is a Go duration string, so it **must carry a unit** — `30m`, `24h`, `168h`. An environment value always arrives as a string and is parsed with `time.ParseDuration`, so a unit-less number such as `1800` is not "1800 seconds" but a parse failure that **fails the boot** with `invalid environment value`. A negative duration is rejected by validation (`session ttl must be zero or positive`).
+
+The default `0` means **no expiry**: the session is stored without an expiration and never lapses on its own. That is convenient in development but a leak in production, because nothing ever reclaims an abandoned session:
+
+- [`InMemoryStorage`](../../session/in_memory_storage.go), the default store, only ever deletes entries that carry an expiry — its background cleanup skips entries with none — so the map grows without bound for the process's whole lifetime;
+- [`FileStorage`](../../session/file_storage.go) holds every session in one map and re-serialises **the whole map** on every write, so each save gets progressively more expensive as the file grows and nothing is ever purged from it.
+
+A long-lived deployment should therefore set an explicit ttl.
+
+The ttl is a **lifetime since the last write, not an idle timeout.** The expiry is stamped when the session is stored, and a session is only stored when it was modified — [`Manager.SaveSession`](../../session/manager.go) returns early otherwise, and the response path calls it under the same condition — so reading a session never refreshes it. With `MELODY_HTTP_SESSION_TTL=30m` a user who logs in and then browses read-only pages is logged out 30 minutes after the login, however active they were; this is not `gc_maxlifetime`. The choice is deliberate: refreshing on read would turn every request carrying a session into a storage write, which on [`FileStorage`](../../session/file_storage.go) re-serialises the whole map. An application that wants a true idle timeout can buy one explicitly with a `kernel.request` listener that writes to the session — a last-seen timestamp, say — accepting the one storage write per request that costs.
+
 ### Typed accessors
 
 [`Parameter`](../../config/parameter.go) reads its value through `MustString`, `Bool`, `Int`, `Float` and `Duration`, converting from the native type or from the string an environment value always arrives as. Each fallible accessor reports an unset or non-convertible value as an error identified by environment key alone, keeping an inline credential out of the exception context.

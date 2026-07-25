@@ -151,25 +151,11 @@ func (instance *ContainerCommand) populateServiceList(
     serviceNames := serviceContainer.Names()
     sort.Strings(serviceNames)
 
+    output.ApplySortOrder(serviceNames, option.Order)
+
     total := len(serviceNames)
 
-    startIndex := option.Offset
-    if 0 > startIndex {
-        startIndex = 0
-    }
-    if total < startIndex {
-        startIndex = total
-    }
-
-    endIndex := total
-    if 0 < option.Limit {
-        /* startIndex+option.Limit overflows int for a large --limit and wraps negative, so the slice bound below panics; compare against the remaining count instead of forming the sum */
-        if option.Limit < total-startIndex {
-            endIndex = startIndex + option.Limit
-        }
-    }
-
-    selected := serviceNames[startIndex:endIndex]
+    selected := output.WindowItems(serviceNames, option.Limit, option.Offset)
 
     okItems := make([]containerServiceListItem, 0, len(selected))
     errorItems := make([]containerServiceListItem, 0, len(selected))
@@ -621,9 +607,18 @@ func (instance *ContainerCommand) populateSingleService(
         errorString = getErr.Error()
         errorContextJson = resolveErrorContextJson(getErr, option.VerbosityLevel)
 
+        /* a registered service that fails to build is a wiring problem inside the provider, not a missing registration; reporting both as notFound sends the operator after a registration that is in fact present */
+        errorCode := "debug.buildFailed"
+        errorMessage := "service failed to build"
+
+        if false == serviceContainer.Has(serviceName) {
+            errorCode = "debug.notFound"
+            errorMessage = "service not found"
+        }
+
         envelope.SetError(
-            "debug.notFound",
-            "service not found",
+            errorCode,
+            errorMessage,
             map[string]any{
                 "serviceName": serviceName,
             },

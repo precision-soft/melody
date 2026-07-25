@@ -24,8 +24,6 @@ type Flags struct {
     NoColor bool      `json:"noColor"`
     Verbose bool      `json:"verbose"`
     Quiet   bool      `json:"quiet"`
-    Fields  []string  `json:"fields"`
-    SortKey string    `json:"sortKey"`
     Order   SortOrder `json:"order"`
     Limit   int       `json:"limit"`
     Offset  int       `json:"offset"`

@@ -14,6 +14,7 @@ import (
     "github.com/precision-soft/melody/exception"
     httpcontract "github.com/precision-soft/melody/http/contract"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
+    "github.com/precision-soft/melody/session"
     "github.com/precision-soft/melody/session/contract"
 )
 
@@ -25,6 +26,10 @@ type stubSessionManager struct {
 func (instance *stubSessionManager) Session(sessionId string) contract.Session { return nil }
 
 func (instance *stubSessionManager) NewSession() contract.Session { return nil }
+
+func (instance *stubSessionManager) RegenerateSession(sessionInstance contract.Session) (contract.Session, error) {
+    return nil, nil
+}
 
 func (instance *stubSessionManager) SaveSession(sessionInstance contract.Session) error {
     instance.saveCalled++
@@ -317,6 +322,222 @@ func TestWriteResponse_ClearsSessionCookieWithMaxAgeNegative(t *testing.T) {
 
     if false == (0 >= cookie.MaxAge) {
         t.Fatalf("expected cleared cookie MaxAge to be non-positive")
+    }
+}
+
+func TestWriteResponse_ForcesTheSecureSessionCookieWhenThePolicyDemandsIt(t *testing.T) {
+    netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
+    netRequest.RemoteAddr = "127.0.0.1:1234"
+
+    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+
+    writer := httptest.NewRecorder()
+
+    sessionManager := &stubSessionManager{}
+    sessionInstance := &stubSession{
+        id:         "0123456789abcdef0123456789abcdef",
+        isModified: true,
+        isCleared:  false,
+    }
+
+    writeResponse(
+        newTestRuntime(),
+        melodyRequest,
+        writer,
+        EmptyResponse(nethttp.StatusOK),
+        sessionManager,
+        sessionInstance,
+        httpcontract.ForwardedHeadersPolicy{
+            TrustForwardedHeaders: false,
+            TrustedProxyList:      []string{},
+        },
+        httpcontract.SessionCookiePolicy{
+            Path:     "/",
+            Domain:   "",
+            SameSite: nethttp.SameSiteLaxMode,
+            Secure:   httpcontract.SessionCookieSecureAlways,
+        },
+    )
+
+    cookies := writer.Result().Cookies()
+    if 1 != len(cookies) {
+        t.Fatalf("expected one set-cookie, got %d", len(cookies))
+    }
+
+    if false == cookies[0].Secure {
+        t.Fatalf("expected the session cookie to be secure when the policy forces it behind a plaintext hop")
+    }
+}
+
+func TestWriteResponse_SessionCookieSecureNeverOverridesTheDetectedScheme(t *testing.T) {
+    netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
+    netRequest.RemoteAddr = "127.0.0.1:1234"
+    netRequest.TLS = &tls.ConnectionState{}
+
+    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+
+    writer := httptest.NewRecorder()
+
+    sessionManager := &stubSessionManager{}
+    sessionInstance := &stubSession{
+        id:         "0123456789abcdef0123456789abcdef",
+        isModified: true,
+        isCleared:  false,
+    }
+
+    writeResponse(
+        newTestRuntime(),
+        melodyRequest,
+        writer,
+        EmptyResponse(nethttp.StatusOK),
+        sessionManager,
+        sessionInstance,
+        httpcontract.ForwardedHeadersPolicy{
+            TrustForwardedHeaders: false,
+            TrustedProxyList:      []string{},
+        },
+        httpcontract.SessionCookiePolicy{
+            Path:     "/",
+            Domain:   "",
+            SameSite: nethttp.SameSiteLaxMode,
+            Secure:   httpcontract.SessionCookieSecureNever,
+        },
+    )
+
+    cookies := writer.Result().Cookies()
+    if 1 != len(cookies) {
+        t.Fatalf("expected one set-cookie, got %d", len(cookies))
+    }
+
+    if true == cookies[0].Secure {
+        t.Fatalf("expected the policy to win over the detected https scheme")
+    }
+}
+
+func TestWriteResponse_DoesNotStoreASessionTheDiscardedResponseCannotAdvertise(t *testing.T) {
+    netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/events", nil)
+    netRequest.RemoteAddr = "127.0.0.1:1234"
+
+    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+
+    writer := newRecordingResponseWriter(httptest.NewRecorder())
+    writer.WriteHeader(nethttp.StatusOK)
+
+    sessionManager := &stubSessionManager{}
+    sessionInstance := &stubSession{
+        id:         "0123456789abcdef0123456789abcdef",
+        isModified: true,
+        isCleared:  false,
+    }
+
+    writeResponse(
+        newTestRuntime(),
+        melodyRequest,
+        writer,
+        EmptyResponse(nethttp.StatusOK),
+        sessionManager,
+        sessionInstance,
+        httpcontract.ForwardedHeadersPolicy{
+            TrustForwardedHeaders: false,
+            TrustedProxyList:      []string{},
+        },
+        httpcontract.SessionCookiePolicy{
+            Path:     "/",
+            Domain:   "",
+            SameSite: nethttp.SameSiteLaxMode,
+        },
+    )
+
+    if 0 != sessionManager.saveCalled {
+        t.Fatalf("expected no stored session for a response whose Set-Cookie can never reach the client, got %d saves", sessionManager.saveCalled)
+    }
+
+    if true == writer.SessionPersisted() {
+        t.Fatalf("expected the session not to be marked persisted when it was never stored")
+    }
+}
+
+func TestWriteResponse_StillStoresASessionTheClientAlreadyHoldsOnADiscardedResponse(t *testing.T) {
+    netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/events", nil)
+    netRequest.RemoteAddr = "127.0.0.1:1234"
+    netRequest.AddCookie(
+        &nethttp.Cookie{
+            Name:  session.SessionCookieName,
+            Value: "0123456789abcdef0123456789abcdef",
+        },
+    )
+
+    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+
+    writer := newRecordingResponseWriter(httptest.NewRecorder())
+    writer.WriteHeader(nethttp.StatusOK)
+
+    sessionManager := &stubSessionManager{}
+    sessionInstance := &stubSession{
+        id:         "0123456789abcdef0123456789abcdef",
+        isModified: true,
+        isCleared:  false,
+    }
+
+    writeResponse(
+        newTestRuntime(),
+        melodyRequest,
+        writer,
+        EmptyResponse(nethttp.StatusOK),
+        sessionManager,
+        sessionInstance,
+        httpcontract.ForwardedHeadersPolicy{
+            TrustForwardedHeaders: false,
+            TrustedProxyList:      []string{},
+        },
+        httpcontract.SessionCookiePolicy{
+            Path:     "/",
+            Domain:   "",
+            SameSite: nethttp.SameSiteLaxMode,
+        },
+    )
+
+    if 1 != sessionManager.saveCalled {
+        t.Fatalf("expected the session the client already holds to be stored once, got %d saves", sessionManager.saveCalled)
+    }
+}
+
+func TestWriteResponse_StillDeletesAClearedSessionOnADiscardedResponse(t *testing.T) {
+    netRequest := httptest.NewRequest(nethttp.MethodPost, "http://example.com/logout", nil)
+    netRequest.RemoteAddr = "127.0.0.1:1234"
+
+    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+
+    writer := newRecordingResponseWriter(httptest.NewRecorder())
+    writer.WriteHeader(nethttp.StatusOK)
+
+    sessionManager := &stubSessionManager{}
+    sessionInstance := &stubSession{
+        id:         "0123456789abcdef0123456789abcdef",
+        isModified: false,
+        isCleared:  true,
+    }
+
+    writeResponse(
+        newTestRuntime(),
+        melodyRequest,
+        writer,
+        EmptyResponse(nethttp.StatusOK),
+        sessionManager,
+        sessionInstance,
+        httpcontract.ForwardedHeadersPolicy{
+            TrustForwardedHeaders: false,
+            TrustedProxyList:      []string{},
+        },
+        httpcontract.SessionCookiePolicy{
+            Path:     "/",
+            Domain:   "",
+            SameSite: nethttp.SameSiteLaxMode,
+        },
+    )
+
+    if 1 != sessionManager.deleteCalled {
+        t.Fatalf("expected a cleared session to be destroyed even when the response is discarded, got %d deletes", sessionManager.deleteCalled)
     }
 }
 

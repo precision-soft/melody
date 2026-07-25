@@ -174,3 +174,22 @@ func TestRouteGroup_MergesRequirementsAndDoesNotOverrideRouteRequirement(t *test
         t.Fatalf("expected error")
     }
 }
+
+func TestRouteGroup_RejectsAnOptionalSegmentInThePrefix(t *testing.T) {
+    router := NewRouter()
+    group := router.Group("/:locale?")
+
+    assertPanicWithExceptionMessage(
+        t,
+        func() {
+            group.HandleWithOptions(
+                "/list",
+                func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                    return EmptyResponse(200), nil
+                },
+                NewRouteOptions("list", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
+            )
+        },
+        "optional route parameter must be the last pattern segment unless it has a default",
+    )
+}

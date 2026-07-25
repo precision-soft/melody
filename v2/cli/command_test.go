@@ -1,14 +1,20 @@
 package cli
 
 import (
+    "bytes"
     "context"
+    "encoding/json"
     "errors"
+    "fmt"
     "strings"
     "testing"
+    "time"
 
     clicontract "github.com/precision-soft/melody/v2/cli/contract"
+    "github.com/precision-soft/melody/v2/cli/output"
     "github.com/precision-soft/melody/v2/container"
     containercontract "github.com/precision-soft/melody/v2/container/contract"
+    "github.com/precision-soft/melody/v2/exception"
     "github.com/precision-soft/melody/v2/internal/testhelper"
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
 )
@@ -264,5 +270,248 @@ func TestRegister_ActionCallsRunWithRuntimeInstance(t *testing.T) {
     }
     if registered != capturedCommandContext {
         t.Fatalf("expected cli command to be passed to Run")
+    }
+}
+
+func runRegisteredCommand(
+    t *testing.T,
+    arguments []string,
+) string {
+    t.Helper()
+
+    runtimeInstance := newTestRuntime()
+
+    rootCommand := NewCommandContext("app", "desc")
+
+    buffer := &bytes.Buffer{}
+
+    command := &testCommand{
+        nameValue:        "hello",
+        descriptionValue: "hello command",
+        flagsValue:       output.DebugFlags(),
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            _, _ = fmt.Fprint(commandContext.Writer, "{\"meta\":{}}\n")
+
+            return nil
+        },
+    }
+
+    Register(rootCommand, command, runtimeInstance)
+
+    rootCommand.Writer = buffer
+    rootCommand.ErrWriter = buffer
+    rootCommand.ExitErrHandler = func(
+        handlerContext context.Context,
+        handlerCommandContext *clicontract.CommandContext,
+        handlerErr error,
+    ) {
+    }
+
+    registered := rootCommand.Commands[0]
+    registered.Writer = buffer
+    registered.ErrWriter = buffer
+
+    commandArguments := make([]string, 0, len(arguments)+2)
+    commandArguments = append(commandArguments, "app", "hello")
+    commandArguments = append(commandArguments, arguments...)
+
+    runErr := rootCommand.Run(context.Background(), commandArguments)
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    return buffer.String()
+}
+
+func TestRegister_ActionEmitsNothingButTheDocumentInJsonFormat(t *testing.T) {
+    written := runRegisteredCommand(t, []string{"--format=json"})
+
+    if "{\"meta\":{}}\n" != written {
+        t.Fatalf("expected the rendered document alone, got %q", written)
+    }
+}
+
+func TestRegister_ActionEmitsTheBannerInTableFormat(t *testing.T) {
+    written := runRegisteredCommand(t, []string{"--format=table"})
+
+    if false == strings.Contains(written, "[hello] [started]") {
+        t.Fatalf("expected the started banner, got %q", written)
+    }
+    if false == strings.Contains(written, "[hello] [finished]") {
+        t.Fatalf("expected the finished banner, got %q", written)
+    }
+}
+
+type closeFailingContainer struct {
+    containercontract.Container
+    closeErr error
+}
+
+func (instance *closeFailingContainer) Close() error {
+    return instance.closeErr
+}
+
+func newCloseFailingRuntime(closeErr error) *testRuntime {
+    serviceContainer := container.NewContainer()
+    scope := serviceContainer.NewScope()
+
+    return &testRuntime{
+        contextValue:   context.Background(),
+        scopeValue:     scope,
+        containerValue: &closeFailingContainer{Container: serviceContainer, closeErr: closeErr},
+    }
+}
+
+func runRegisteredCommandWithRuntime(
+    runtimeInstance runtimecontract.Runtime,
+    command clicontract.Command,
+    arguments []string,
+) (string, error) {
+    rootCommand := NewCommandContext("app", "desc")
+
+    buffer := &bytes.Buffer{}
+
+    Register(rootCommand, command, runtimeInstance)
+
+    rootCommand.Writer = buffer
+    rootCommand.ErrWriter = buffer
+    rootCommand.ExitErrHandler = func(
+        handlerContext context.Context,
+        handlerCommandContext *clicontract.CommandContext,
+        handlerErr error,
+    ) {
+    }
+
+    registered := rootCommand.Commands[0]
+    registered.Writer = buffer
+    registered.ErrWriter = buffer
+
+    commandArguments := make([]string, 0, len(arguments)+2)
+    commandArguments = append(commandArguments, "app", command.Name())
+    commandArguments = append(commandArguments, arguments...)
+
+    runErr := rootCommand.Run(context.Background(), commandArguments)
+
+    return buffer.String(), runErr
+}
+
+func newEnvelopeErrorCommand() *testCommand {
+    return &testCommand{
+        nameValue:        "hello",
+        descriptionValue: "hello command",
+        flagsValue:       output.DebugFlags(),
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            option := output.NormalizeOption(
+                output.ParseOptionFromCommand(commandContext),
+            )
+
+            envelope := output.NewEnvelope(
+                output.NewMeta(
+                    "hello",
+                    nil,
+                    option,
+                    time.Now(),
+                    time.Duration(0),
+                    output.Version{},
+                ),
+            )
+
+            envelope.SetError(
+                "debug.notFound",
+                "service not found",
+                nil,
+                nil,
+            )
+
+            return output.Render(commandContext.Writer, envelope, option)
+        },
+    }
+}
+
+func TestRegister_ActionKeepsTheJsonDocumentAloneWhenTheEnvelopeCarriesAnError(t *testing.T) {
+    written, runErr := runRegisteredCommandWithRuntime(
+        newTestRuntime(),
+        newEnvelopeErrorCommand(),
+        []string{"--format=json"},
+    )
+
+    var exitError *exception.ExitError
+    if false == errors.As(runErr, &exitError) {
+        t.Fatalf("expected an exit error, got %v", runErr)
+    }
+
+    document := map[string]any{}
+
+    decodeErr := json.Unmarshal([]byte(written), &document)
+    if nil != decodeErr {
+        t.Fatalf("expected the stream to hold one json document, got %q (%v)", written, decodeErr)
+    }
+
+    if true == strings.Contains(written, "\x1b[") {
+        t.Fatalf("expected no ansi escape in the json stream, got %q", written)
+    }
+}
+
+func TestRegister_ActionReportsTheShutdownFailuresAlongsideTheCommandExitCode(t *testing.T) {
+    closeErr := errors.New("container close failed")
+
+    written, runErr := runRegisteredCommandWithRuntime(
+        newCloseFailingRuntime(closeErr),
+        newEnvelopeErrorCommand(),
+        []string{"--format=json"},
+    )
+
+    var exitError *exception.ExitError
+    if false == errors.As(runErr, &exitError) {
+        t.Fatalf("expected an exit error, got %v", runErr)
+    }
+
+    reportedErr := exitError.ErrorValue()
+    if nil == reportedErr {
+        t.Fatalf("expected the exit error to carry an error value")
+    }
+
+    if true == reportedErr.AlreadyLogged() {
+        t.Fatalf("the aggregate must stay loggable so the shutdown failures reach the log")
+    }
+
+    failures, hasFailures := reportedErr.Context()["failures"]
+    if false == hasFailures {
+        t.Fatalf("expected the exit error to carry the shutdown failures, got %v", reportedErr.Context())
+    }
+
+    if false == strings.Contains(fmt.Sprintf("%v", failures), "container close failed") {
+        t.Fatalf("expected the container close failure to be reported, got %v", failures)
+    }
+
+    document := map[string]any{}
+    if nil != json.Unmarshal([]byte(written), &document) {
+        t.Fatalf("expected the stream to hold one json document, got %q", written)
+    }
+}
+
+func TestRegister_ActionReportsTheShutdownFailuresWhenTheCommandItselfSucceeds(t *testing.T) {
+    closeErr := errors.New("container close failed")
+
+    command := &testCommand{
+        nameValue:        "hello",
+        descriptionValue: "hello command",
+        flagsValue:       output.DebugFlags(),
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            return nil
+        },
+    }
+
+    _, runErr := runRegisteredCommandWithRuntime(
+        newCloseFailingRuntime(closeErr),
+        command,
+        []string{"--format=json"},
+    )
+    if nil == runErr {
+        t.Fatalf("expected a shutdown failure to surface")
+    }
+
+    if false == strings.Contains(runErr.Error(), "failed to shutdown cli") {
+        t.Fatalf("expected the shutdown aggregate, got %q", runErr.Error())
     }
 }

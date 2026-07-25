@@ -52,6 +52,39 @@ tracingMiddleware := opentelemetry.NewTracingMiddleware(tracer, nil) // nil -> W
 
 The tracing middleware extracts the incoming trace context from request headers, starts a server span per request (named `<METHOD> <route>`), injects the span context into the runtime passed downstream, records method/route/status attributes, and marks the span as errored on a handler error or a 5xx response.
 
+### OTLP export
+
+The `TracerProvider` the tracing middleware needs is not something you have to assemble yourself: the [`otlp`](./otlp) subpackage ships one wired to an OTLP exporter.
+
+[`otlp.NewTracerProvider(ctx, otlp.Config{...})`](./otlp/tracer_provider.go) returns a batching `*sdktrace.TracerProvider`. The caller then owns its lifecycle — `Shutdown` must run on application exit to flush pending spans.
+
+[`otlp.NewModule`](./otlp/module.go) is the plug-and-play alternative and is the recommended path: it registers the provider as the container service `otlp.ServiceTracerProvider` (`"opentelemetry.otlp.tracer_provider"`) wrapped in a `Close()`-able handle, so the container's shutdown flushes for you, and it installs the tracing middleware itself.
+
+```go
+app.RegisterModule(otlp.NewModule(otlp.ModuleConfig{
+    Config: otlp.Config{
+        Endpoint:    "otel-collector:4317",
+        ServiceName: "my-service",
+        Insecure:    true,
+    },
+}))
+```
+
+[`otlp.Config`](./otlp/tracer_provider.go):
+
+| Field            | Meaning                                                                                                           | Default                          |
+|------------------|-------------------------------------------------------------------------------------------------------------------|----------------------------------|
+| `Endpoint`       | `host:port`, no scheme. **Required** — an empty value returns `otlp tracer provider endpoint is required`          | —                                |
+| `Protocol`       | `otlp.ProtocolGrpc` (`"grpc"`, collector port 4317) or `otlp.ProtocolHttp` (`"http"`, http/protobuf, port 4318)    | `grpc`                           |
+| `ServiceName`    | the `service.name` resource attribute                                                                             | `melody`                         |
+| `ServiceVersion` | the `service.version` resource attribute                                                                          | empty                            |
+| `SampleRatio`    | in `(0,1)` keeps that fraction of traces (parent-based); `0` or `>= 1` samples everything                          | sample everything                |
+| `Headers`        | extra exporter headers (for example a vendor auth token)                                                          | none                             |
+| `Insecure`       | skip transport security — for a collector on the local network                                                     | `false`                          |
+| `BatchTimeout`   | batch span processor flush interval                                                                                | `5s`                             |
+
+`ModuleConfig` additionally takes `TracerName` (default `melody`) and `Propagator` (nil selects W3C TraceContext). The endpoint and its credentials are deployment-owned, so read them from a parameter or `.env` rather than hardcoding them.
+
 ### Register as a module
 
 Bundle the middlewares and the `/metrics` route as a self-registering application module — one `RegisterModule` call `Use`s the middlewares and registers the metrics route (`MetricsRouteHandler` adapts the standard handler):
@@ -70,5 +103,6 @@ The metrics route is skipped when no handler or path is configured.
 
 - The route attribute uses the matched route pattern to keep metric cardinality bounded; unmatched requests are labelled `unmatched`.
 - The tracing middleware replaces the downstream runtime with one carrying the span context, so handlers and nested spans link correctly.
-- This integration provides HTTP traces and metrics; exporting traces to a collector (OTLP) is configured by the application on its `TracerProvider`.
+- The root package provides HTTP traces and metrics only — it holds no exporter. Export to a collector comes from the [`otlp`](./otlp) subpackage (see [OTLP export](#otlp-export)), or from a `TracerProvider` the application configures itself.
+- The OTLP `TracerProvider` must be shut down to flush pending spans. `otlp.NewModule` delegates that to the container's shutdown; a hand-built `otlp.NewTracerProvider` leaves it to the caller, and skipping it silently drops the last batch.
 - Tests run fully in-process (in-memory span recorder + Prometheus registry); no collector is required.

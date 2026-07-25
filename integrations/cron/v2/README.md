@@ -27,7 +27,7 @@ See the [umbrella README](../README.md#configuration-parameters) for the full wi
 
 This module requires:
 
-* `github.com/precision-soft/melody/v2` ≥ v2.0.0
+* `github.com/precision-soft/melody/v2` ≥ v2.7.0 (the minimum this module's [`go.mod`](./go.mod) requires)
 * `github.com/urfave/cli/v3` ≥ v3.6.1
 
-Everything else is stdlib. The package surface is shared across all three bindings, except the built-in `k8s` template, which ships in the v3 binding only — see [Package surface](../README.md#package-surface) in the umbrella README for the full list, then the [umbrella README](../README.md) for the design details.
+Everything else is stdlib. The package surface is shared across all three bindings, except the built-in `k8s` template and the `Commands` helper, which ship in the v3 binding only — see [Package surface](../README.md#package-surface) in the umbrella README for the full list, then the [umbrella README](../README.md) for the design details.

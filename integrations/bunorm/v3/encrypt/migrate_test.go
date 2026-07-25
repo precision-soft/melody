@@ -35,6 +35,108 @@ func TestEncryptTransform_DeterministicProducesSearchableCiphertext(t *testing.T
     }
 }
 
+/* a column already bulk-encrypted with random nonces authenticates under a live key, so the deterministic seal used to pass every value through unchanged: the command reported success and rows processed while the column stayed randomized and every CiphertextCandidates equality lookup on it returned nothing. */
+func TestEncryptTransform_DeterministicConvertsAnAlreadyRandomizedValue(t *testing.T) {
+    provider := NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2)})
+    cipher := NewCipher(provider)
+    migrator := &Migrator{cipher: cipher}
+
+    randomized, randomizedErr := cipher.EncryptWithKeyId("alice@example.com", "v2")
+    if nil != randomizedErr {
+        t.Fatalf("randomized encrypt: %v", randomizedErr)
+    }
+    if true == deterministicCandidateMatches(t, cipher, "alice@example.com", randomized) {
+        t.Fatalf("precondition: a randomized value must not be searchable")
+    }
+
+    converted, convertErr := migrator.encryptTransform(TableSpec{Deterministic: true})(randomized)
+    if nil != convertErr {
+        t.Fatalf("deterministic encrypt transform: %v", convertErr)
+    }
+
+    if converted == randomized {
+        t.Fatalf("expected a deterministic encrypt to convert a randomized value rather than pass it through unchanged")
+    }
+
+    if false == deterministicCandidateMatches(t, cipher, "alice@example.com", converted) {
+        t.Fatalf("expected the converted value to be searchable via CiphertextCandidates")
+    }
+}
+
+/* the conversion keeps the key the value already carries, so mode=encrypt never doubles as a key rotation; a retired key stays in the key set until re-encryption removes it, so the converted value still decrypts and still answers candidate lookups. */
+func TestEncryptTransform_DeterministicKeepsTheKeyTheValueCarries(t *testing.T) {
+    provider := NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2)})
+    cipher := NewCipher(provider)
+    migrator := &Migrator{cipher: cipher}
+
+    randomizedUnderRetiredKey, randomizedErr := cipher.EncryptWithKeyId("alice@example.com", "v1")
+    if nil != randomizedErr {
+        t.Fatalf("randomized encrypt: %v", randomizedErr)
+    }
+
+    converted, convertErr := migrator.encryptTransform(TableSpec{Deterministic: true})(randomizedUnderRetiredKey)
+    if nil != convertErr {
+        t.Fatalf("deterministic encrypt transform: %v", convertErr)
+    }
+
+    keyId, encrypted := keyIdOf(converted)
+    if false == encrypted || "v1" != keyId {
+        t.Fatalf("expected the converted value to keep key v1, got %q (encrypted=%v)", keyId, encrypted)
+    }
+
+    if plaintext, _ := cipher.Decrypt(converted); "alice@example.com" != plaintext {
+        t.Fatalf("expected the converted value to still decrypt to the original plaintext")
+    }
+
+    if false == deterministicCandidateMatches(t, cipher, "alice@example.com", converted) {
+        t.Fatalf("expected the converted value to be searchable via CiphertextCandidates")
+    }
+}
+
+/* a second pass must be a no-op: a value already deterministic under its key transforms to itself, so applyRow emits no assignment and the row is honestly counted as processed. */
+func TestEncryptTransform_DeterministicIsIdempotent(t *testing.T) {
+    provider := NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2)})
+    cipher := NewCipher(provider)
+    migrator := &Migrator{cipher: cipher}
+
+    transform := migrator.encryptTransform(TableSpec{Deterministic: true})
+
+    first, firstErr := transform("alice@example.com")
+    if nil != firstErr {
+        t.Fatalf("first deterministic encrypt transform: %v", firstErr)
+    }
+
+    second, secondErr := transform(first)
+    if nil != secondErr {
+        t.Fatalf("second deterministic encrypt transform: %v", secondErr)
+    }
+
+    if first != second {
+        t.Fatalf("expected a deterministic encrypt to be idempotent, got %q then %q", first, second)
+    }
+}
+
+/* a marker-shaped value that authenticates under no key in the set is ordinary plaintext, and the cipher seals it rather than storing it verbatim; the conversion path must not turn that into a run-killing decrypt error. */
+func TestEncryptTransform_DeterministicSealsAMarkerShapedPlaintext(t *testing.T) {
+    provider := NewStaticKeyProvider("v2", map[string][]byte{"v2": newKey(2)})
+    cipher := NewCipher(provider)
+    migrator := &Migrator{cipher: cipher}
+
+    foreign, foreignErr := NewCipher(NewStaticKeyProvider("v9", map[string][]byte{"v9": newKey(9)})).Encrypt("alice@example.com")
+    if nil != foreignErr {
+        t.Fatalf("foreign encrypt: %v", foreignErr)
+    }
+
+    converted, convertErr := migrator.encryptTransform(TableSpec{Deterministic: true})(foreign)
+    if nil != convertErr {
+        t.Fatalf("deterministic encrypt transform: %v", convertErr)
+    }
+
+    if false == deterministicCandidateMatches(t, cipher, foreign, converted) {
+        t.Fatalf("expected the unauthenticated value to be sealed as plaintext under the current key")
+    }
+}
+
 func TestReencryptTransform_ConvertsRandomizedSameKeyValueToDeterministic(t *testing.T) {
     provider := NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2)})
     cipher := NewCipher(provider)
