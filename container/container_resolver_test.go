@@ -135,3 +135,180 @@ func TestResolve_DuringCloseContainsAPanickingCloseOfTheDiscardedValue(t *testin
         t.Fatalf("expected the resolution that finished after Close to fail")
     }
 }
+
+/* @info The created value being nil unconditionally replaced whatever the provider stage had reported, so resolving a name nobody registered failed with "service provider returned nil" — a symptom — and demoted the real "service is not registered" into the cause chain, where callers reading the message never see it. */
+func TestServiceWithCreationGuard_MissingServiceReportsItsOwnFailure(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    _, getErr := serviceContainer.Get("app.missing")
+    if nil == getErr {
+        t.Fatalf("expected resolving an unregistered service to fail")
+    }
+
+    if "service is not registered" != getErr.Error() {
+        t.Fatalf("expected the missing registration to be the reported failure, got %q", getErr.Error())
+    }
+}
+
+/* @info A provider that genuinely returns (nil, nil) says nothing at all, so the generic report stays: it is the only thing that names the provider. */
+func TestServiceWithCreationGuard_SilentNilProviderKeepsTheGenericReport(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "app.silent",
+        func(resolver containercontract.Resolver) (*scopeTestService, error) {
+            return nil, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    _, getErr := serviceContainer.Get("app.silent")
+    if nil == getErr {
+        t.Fatalf("expected a provider returning nothing to fail")
+    }
+
+    if "service provider returned nil" != getErr.Error() {
+        t.Fatalf("expected the generic nil report, got %q", getErr.Error())
+    }
+}
+
+/* @info The store site is the last line of defence: whatever reaches it holding an entry read out of a request scope may not be written into the root container, because that publishes one request's substitutes to every request that follows. The refusal names the service and the scope entry so the wiring mistake is findable. */
+func TestServiceWithCreationGuard_RefusesAScopeResolvedInstanceInTheRootContainer(t *testing.T) {
+    serviceContainer := NewContainer().(*container)
+
+    scopeInstance := newScope(serviceContainer).(*scope)
+
+    overrideErr := scopeInstance.OverrideInstance("app.tag", &scopeTestService{value: "request-1"})
+    if nil != overrideErr {
+        t.Fatalf("unexpected override error: %v", overrideErr)
+    }
+
+    resolver := newScopeResolverContext(serviceContainer, scopeInstance)
+
+    storedInRoot := false
+
+    serviceContainer.mutex.Lock()
+    value, guardErr := serviceContainer.serviceWithCreationGuardLocked(
+        "service:app.consumer",
+        "app.consumer",
+        func() (*creationState, bool) {
+            state, exists := serviceContainer.creatingByName["app.consumer"]
+
+            return state, exists
+        },
+        func(state *creationState) {
+            serviceContainer.creatingByName["app.consumer"] = state
+        },
+        func() {
+            delete(serviceContainer.creatingByName, "app.consumer")
+        },
+        func() (any, bool) {
+            return nil, false
+        },
+        func(handedResolver containercontract.Resolver) (any, error, *providerDebugInfo) {
+            resolver.markScopeEntryConsumed("service:app.tag")
+
+            return &scopeTestService{value: "created"}, nil, nil
+        },
+        instanceStore{
+            inRoot: func(storedValue any) {
+                storedInRoot = true
+            },
+            inScope: nil,
+        },
+        resolver,
+    )
+    serviceContainer.mutex.Unlock()
+
+    if nil == guardErr {
+        t.Fatalf("expected the root store to be refused")
+    }
+
+    if true == storedInRoot {
+        t.Fatalf("expected the scope-resolved instance never to reach the root container")
+    }
+
+    if nil != value {
+        t.Fatalf("expected no value to be handed back after the refusal")
+    }
+
+    if "refusing to keep a scope-resolved service in the root container" != guardErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", guardErr.Error())
+    }
+}
+
+/* @info The creation guard is keyed by service name across the whole container, so two requests creating the same scope-bound service serialize: the second waits, then finds nothing to share, because the first kept its instance in its own scope. It has to build its own rather than report "service was not available after creation finished". */
+func TestServiceWithCreationGuard_ConcurrentScopesEachBuildTheirOwnInstance(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "app.consumer",
+        func(resolver containercontract.Resolver) (*scopeTestService, error) {
+            tag, getErr := resolver.Get("app.tag")
+            if nil != getErr {
+                return nil, getErr
+            }
+
+            return &scopeTestService{value: tag.(*scopeTestService).value}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    const scopeCount = 8
+
+    results := make([]string, scopeCount)
+    failures := make([]error, scopeCount)
+
+    start := make(chan struct{})
+
+    var waitGroup sync.WaitGroup
+
+    for index := 0; index < scopeCount; index = index + 1 {
+        waitGroup.Add(1)
+
+        go func(position int) {
+            defer waitGroup.Done()
+
+            tag := "request-" + string(rune('a'+position))
+
+            scopeInstance := serviceContainer.NewScope()
+            defer scopeInstance.Close()
+
+            overrideErr := scopeInstance.OverrideInstance("app.tag", &scopeTestService{value: tag})
+            if nil != overrideErr {
+                failures[position] = overrideErr
+
+                return
+            }
+
+            <-start
+
+            value, getErr := scopeInstance.Get("app.consumer")
+            if nil != getErr {
+                failures[position] = getErr
+
+                return
+            }
+
+            results[position] = value.(*scopeTestService).value
+        }(index)
+    }
+
+    close(start)
+    waitGroup.Wait()
+
+    for index := 0; index < scopeCount; index = index + 1 {
+        if nil != failures[index] {
+            t.Fatalf("scope %d failed to resolve: %v", index, failures[index])
+        }
+
+        expected := "request-" + string(rune('a'+index))
+        if expected != results[index] {
+            t.Fatalf("scope %d was served %q instead of its own %q", index, results[index], expected)
+        }
+    }
+}

@@ -12,6 +12,8 @@ import (
     "testing"
     "time"
 
+    "github.com/minio/minio-go/v7"
+
     "github.com/precision-soft/melody/v3/container"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -732,4 +734,230 @@ func storedObjectShape(t *testing.T, store *Storage, runtimeInstance runtimecont
     }
 
     return tail + 1, head[0]
+}
+
+/* a body that cancels the request context once it has delivered part of itself, which is what a client that walks away mid-upload looks like from inside Put */
+type disconnectingBodyReader struct {
+    remaining   int64
+    filler      byte
+    cancelAfter int64
+    delivered   int64
+    cancel      context.CancelFunc
+}
+
+func (instance *disconnectingBodyReader) Read(buffer []byte) (int, error) {
+    if 0 == instance.remaining {
+        return 0, io.EOF
+    }
+
+    if instance.cancelAfter <= instance.delivered {
+        instance.cancel()
+
+        return 0, context.Canceled
+    }
+
+    limit := int64(len(buffer))
+    if instance.remaining < limit {
+        limit = instance.remaining
+    }
+
+    if remainingBeforeCancel := instance.cancelAfter - instance.delivered; remainingBeforeCancel < limit {
+        limit = remainingBeforeCancel
+    }
+
+    for index := int64(0); index < limit; index++ {
+        buffer[index] = instance.filler
+    }
+
+    instance.remaining -= limit
+    instance.delivered += limit
+
+    return int(limit), nil
+}
+
+/* newMultipartAbortServer answers the two requests an abort is made of — the list of incomplete uploads for the bucket and the DELETE that removes one — and records every DELETE it serves, so a test can tell whether the abort actually left the process. */
+func newMultipartAbortServer(t *testing.T, uploadKey string, uploadId string) *multipartAbortServer {
+    recorder := &multipartAbortServer{}
+
+    recorder.server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        query := request.URL.Query()
+
+        if http.MethodDelete == request.Method && "" != query.Get("uploadId") {
+            recorder.mutex.Lock()
+            recorder.deletedUploadIdList = append(recorder.deletedUploadIdList, query.Get("uploadId"))
+            recorder.mutex.Unlock()
+
+            writer.WriteHeader(http.StatusNoContent)
+
+            return
+        }
+
+        if _, listsUploads := query["uploads"]; true == listsUploads {
+            writer.Header().Set("Content-Type", "application/xml")
+            writer.WriteHeader(http.StatusOK)
+            _, _ = io.WriteString(writer, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"+
+                "<ListMultipartUploadsResult><Bucket>melody-test</Bucket><IsTruncated>false</IsTruncated>"+
+                "<Upload><Key>"+uploadKey+"</Key><UploadId>"+uploadId+"</UploadId></Upload>"+
+                "</ListMultipartUploadsResult>")
+
+            return
+        }
+
+        writer.WriteHeader(http.StatusOK)
+    }))
+
+    t.Cleanup(recorder.server.Close)
+
+    return recorder
+}
+
+type multipartAbortServer struct {
+    server              *httptest.Server
+    mutex               sync.Mutex
+    deletedUploadIdList []string
+}
+
+func (instance *multipartAbortServer) newStorage(t *testing.T) *Storage {
+    client, clientErr := NewClient(Config{
+        Endpoint:  strings.TrimPrefix(instance.server.URL, "http://"),
+        AccessKey: "test",
+        SecretKey: "test",
+        Secure:    false,
+        Region:    "us-east-1",
+    })
+    if nil != clientErr {
+        t.Fatalf("client: %s", clientErr.Error())
+    }
+
+    return NewStorage(client, "melody-test")
+}
+
+func (instance *multipartAbortServer) deletedUploadIds() []string {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return append([]string(nil), instance.deletedUploadIdList...)
+}
+
+/* minio builds its own abort on the context the upload ran under, so a client that disconnects cancels the cleanup along with the upload and the initiated multipart upload survives on the bucket, billing for the parts already sent. The sweep therefore has to run on a context the dead request cannot reach. */
+func TestAbortOrphanedMultipartUpload_LeavesEvenWhenTheRequestContextIsAlreadyCancelled(t *testing.T) {
+    server := newMultipartAbortServer(t, "uploads/large.bin", "upload-id-42")
+    store := server.newStorage(t)
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    store.abortOrphanedMultipartUpload(cancelledContext, "uploads/large.bin", 40*1024*1024)
+
+    deleted := server.deletedUploadIds()
+    if 1 != len(deleted) || "upload-id-42" != deleted[0] {
+        t.Fatalf("expected the abort of upload-id-42 to reach the bucket on a cancelled request context, got %v", deleted)
+    }
+}
+
+/* the sweep is only ever needed when the request context is what killed the upload and only ever possible for a body that took the multipart path; anything else must cost the caller no request at all */
+func TestAbortOrphanedMultipartUpload_StaysQuietWhenThereIsNothingToSweep(t *testing.T) {
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    cases := []struct {
+        name string
+        ctx  context.Context
+        size int64
+    }{
+        {name: "live request context", ctx: context.Background(), size: 40 * 1024 * 1024},
+        {name: "declared size on the single-shot path", ctx: cancelledContext, size: putSpoolLimit},
+        {name: "empty body", ctx: cancelledContext, size: 0},
+    }
+
+    for _, testCase := range cases {
+        server := newMultipartAbortServer(t, "uploads/large.bin", "upload-id-42")
+        store := server.newStorage(t)
+
+        store.abortOrphanedMultipartUpload(testCase.ctx, "uploads/large.bin", testCase.size)
+
+        if deleted := server.deletedUploadIds(); 0 != len(deleted) {
+            t.Fatalf("%s: expected no abort request, got %v", testCase.name, deleted)
+        }
+    }
+}
+
+/* a multipart put whose client disconnects mid-body leaves an initiated upload on the bucket that holds every part already sent and bills for it until a lifecycle rule expires it, which most buckets do not carry; the key must come out of the incomplete upload list even though the request that started it is gone. */
+func TestObjectStorage_CancelledMultipartPutLeavesNoIncompleteUpload(t *testing.T) {
+    endpoint := os.Getenv("MINIO_ENDPOINT")
+    if "" == endpoint {
+        t.Skip("MINIO_ENDPOINT not set; skipping object storage integration test")
+    }
+
+    client, clientErr := NewClient(Config{
+        Endpoint:  endpoint,
+        AccessKey: os.Getenv("MINIO_ACCESS_KEY"),
+        SecretKey: os.Getenv("MINIO_SECRET_KEY"),
+        Secure:    false,
+    })
+    if nil != clientErr {
+        t.Fatalf("client: %v", clientErr)
+    }
+
+    bucket := "melody-test"
+    if ensureErr := EnsureBucket(context.Background(), client, bucket, ""); nil != ensureErr {
+        t.Fatalf("ensure bucket: %v", ensureErr)
+    }
+
+    store := NewStorage(client, bucket)
+
+    key := "uploads/disconnected.bin"
+
+    /* an orphan an earlier run left behind would make the assertion pass or fail for the wrong reason */
+    if removeErr := client.RemoveIncompleteUpload(context.Background(), bucket, key); nil != removeErr {
+        t.Fatalf("clear incomplete uploads: %v", removeErr)
+    }
+
+    if before := countIncompleteUploads(t, client, bucket, key); 0 != before {
+        t.Fatalf("precondition: expected no incomplete upload for %q, found %d", key, before)
+    }
+
+    declared := int64(40 * 1024 * 1024)
+
+    requestContext, cancelRequest := context.WithCancel(context.Background())
+    defer cancelRequest()
+
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(requestContext, serviceContainer.NewScope(), serviceContainer)
+
+    body := &disconnectingBodyReader{
+        remaining:   declared,
+        filler:      'd',
+        cancelAfter: declared / 2,
+        cancel:      cancelRequest,
+    }
+
+    putErr := store.Put(runtimeInstance, key, body, declared, storagecontract.PutOptions{ContentType: "application/octet-stream"})
+    if nil == putErr {
+        t.Fatalf("expected a put whose client disconnected mid-body to fail")
+    }
+
+    if after := countIncompleteUploads(t, client, bucket, key); 0 != after {
+        t.Fatalf("expected the cancelled multipart put to leave no incomplete upload, found %d", after)
+    }
+}
+
+func countIncompleteUploads(t *testing.T, client *minio.Client, bucket string, key string) int {
+    t.Helper()
+
+    listContext, cancelList := context.WithTimeout(context.Background(), 30*time.Second)
+    defer cancelList()
+
+    count := 0
+    for upload := range client.ListIncompleteUploads(listContext, bucket, key, true) {
+        if nil != upload.Err {
+            t.Fatalf("list incomplete uploads: %v", upload.Err)
+        }
+
+        if key == upload.Key {
+            count++
+        }
+    }
+
+    return count
 }

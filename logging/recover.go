@@ -8,6 +8,7 @@ import (
     loggingcontract "github.com/precision-soft/melody/logging/contract"
 )
 
+/* LogOnRecover recovers the panic in flight, logs it, and panics again with the same value when panicAgain is set. It never terminates the process. The helper is written to be installed with defer, which places it above every defer registered before it — the container teardown, the scope closes, the shutdown hooks — and a process exit from there would skip all of them, so the one thing a logging helper must not do is take the exit itself. A recovered *exception.ExitError is therefore logged like any other error and, under panicAgain, re-panicked unchanged so its exit code reaches whoever owns the process boundary; LogOnRecoverAndExit is the helper named for taking that exit. */
 func LogOnRecover(
     logger loggingcontract.Logger,
     panicAgain bool,
@@ -17,22 +18,21 @@ func LogOnRecover(
         return
     }
 
-    exitError, ok := recoveredValue.(*exception.ExitError)
-    if true == ok {
+    exitError, isExitError := recoveredValue.(*exception.ExitError)
+    if true == isExitError {
         err := exitError.ErrorValue()
 
-        if true == err.AlreadyLogged() {
-            echoExitToStderr(err, exitError.ExitCode())
-
-            os.Exit(exitError.ExitCode())
+        if nil != err && false == err.AlreadyLogged() {
+            LogError(logger, err)
+            err.MarkAsLogged()
         }
 
-        LogError(logger, err)
-        err.MarkAsLogged()
+        if true == panicAgain {
+            /* the wrapper is re-panicked rather than the error it carries: the exit code lives on the wrapper, and dropping it here would silently turn a deliberate exit code into the generic one an outer handler falls back to */
+            exception.Exit(exitError)
+        }
 
-        echoExitToStderr(err, exitError.ExitCode())
-
-        os.Exit(exitError.ExitCode())
+        return
     }
 
     if err, ok := recoveredValue.(*exception.Error); true == ok {

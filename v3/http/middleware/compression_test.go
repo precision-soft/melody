@@ -547,3 +547,177 @@ func TestCompressionMiddleware_NegativeMinSizeIsNormalized(t *testing.T) {
         t.Fatalf("expected non-nil response")
     }
 }
+
+/* A response another layer already encoded is one of several encodings of its URL just as a gzip one is, so a shared cache that stored it under the URL alone would replay a brotli body to a client that never asked for brotli. The already-encoded early return sat above the Vary helper, which is exactly the negotiated case where the header decides correctness. */
+func TestCompressionMiddleware_AddsVaryWhenResponseIsAlreadyEncoded(t *testing.T) {
+    config := NewCompressionConfig(6, 10, nil, nil)
+    middleware := CompressionMiddleware(config)
+
+    handler := middleware(
+        func(
+            runtimeInstance runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            response := &http.Response{}
+            response.SetStatusCode(200)
+            responseHeaders := make(nethttp.Header)
+            responseHeaders.Set("Content-Type", "text/plain")
+            responseHeaders.Set("Content-Encoding", "br")
+            responseHeaders.Set("Cache-Control", "public, max-age=3600")
+            response.SetHeaders(responseHeaders)
+            response.SetBodyReader(bytes.NewReader([]byte(strings.Repeat("melody ", 200))))
+
+            return response, nil
+        },
+    )
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/", nil)
+    request.Header.Set("Accept-Encoding", "br, gzip")
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    resultResponse, err := handler(nil, httptest.NewRecorder(), melodyRequest)
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if "Accept-Encoding" != resultResponse.Headers().Get("Vary") {
+        t.Fatalf("expected Vary: Accept-Encoding on an already-encoded response, got: %q", resultResponse.Headers().Get("Vary"))
+    }
+    if "br" != resultResponse.Headers().Get("Content-Encoding") {
+        t.Fatalf("expected the existing encoding to be left alone, got: %q", resultResponse.Headers().Get("Content-Encoding"))
+    }
+}
+
+/* An excluded path is still negotiated against Accept-Encoding by every other layer in front of it, so the response must still tell a cache that the URL has more than one representation. */
+func TestCompressionMiddleware_AddsVaryOnExcludedPath(t *testing.T) {
+    config := NewCompressionConfig(6, 10, nil, []string{"/assets"})
+    middleware := CompressionMiddleware(config)
+
+    handler := middleware(
+        func(
+            runtimeInstance runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            response := &http.Response{}
+            response.SetStatusCode(200)
+            responseHeaders := make(nethttp.Header)
+            responseHeaders.Set("Content-Type", "text/plain")
+            response.SetHeaders(responseHeaders)
+            response.SetBodyReader(bytes.NewReader([]byte(strings.Repeat("melody ", 200))))
+
+            return response, nil
+        },
+    )
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/assets/app.js", nil)
+    request.Header.Set("Accept-Encoding", "gzip")
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    resultResponse, err := handler(nil, httptest.NewRecorder(), melodyRequest)
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if "Accept-Encoding" != resultResponse.Headers().Get("Vary") {
+        t.Fatalf("expected Vary: Accept-Encoding on an excluded path, got: %q", resultResponse.Headers().Get("Vary"))
+    }
+    if "" != resultResponse.Headers().Get("Content-Encoding") {
+        t.Fatalf("expected an excluded path to stay uncompressed, got: %q", resultResponse.Headers().Get("Content-Encoding"))
+    }
+}
+
+/* An excluded content type is skipped because compressing it is pointless, not because the URL has a single representation; the header still has to be there. */
+func TestCompressionMiddleware_AddsVaryOnExcludedContentType(t *testing.T) {
+    config := NewCompressionConfig(6, 10, []string{"image/"}, nil)
+    middleware := CompressionMiddleware(config)
+
+    handler := middleware(
+        func(
+            runtimeInstance runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            response := &http.Response{}
+            response.SetStatusCode(200)
+            responseHeaders := make(nethttp.Header)
+            responseHeaders.Set("Content-Type", "image/png")
+            response.SetHeaders(responseHeaders)
+            response.SetBodyReader(bytes.NewReader([]byte(strings.Repeat("melody ", 200))))
+
+            return response, nil
+        },
+    )
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/logo.png", nil)
+    request.Header.Set("Accept-Encoding", "gzip")
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    resultResponse, err := handler(nil, httptest.NewRecorder(), melodyRequest)
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if "Accept-Encoding" != resultResponse.Headers().Get("Vary") {
+        t.Fatalf("expected Vary: Accept-Encoding on an excluded content type, got: %q", resultResponse.Headers().Get("Vary"))
+    }
+}
+
+type stalledBodyReader struct {
+    readCount int
+}
+
+/* Read answers the shape io.Reader permits but callers must not loop on: no bytes, no error, with room left in the destination. */
+func (instance *stalledBodyReader) Read(p []byte) (int, error) {
+    instance.readCount++
+
+    return 0, nil
+}
+
+/* A body reader answering (0, nil) forever pinned the peek loop, and with it a request goroutine, at full processor for the lifetime of the process. io.Reader makes tolerating a zero-byte read the caller's obligation, so the loop has to give up and let the request fail. */
+func TestCompressionMiddleware_StalledBodyReaderDoesNotSpin(t *testing.T) {
+    config := NewCompressionConfig(6, 1024, nil, nil)
+    middleware := CompressionMiddleware(config)
+
+    reader := &stalledBodyReader{}
+
+    handler := middleware(
+        func(
+            runtimeInstance runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            response := &http.Response{}
+            response.SetStatusCode(200)
+            responseHeaders := make(nethttp.Header)
+            responseHeaders.Set("Content-Type", "text/plain")
+            response.SetHeaders(responseHeaders)
+            response.SetBodyReader(reader)
+
+            return response, nil
+        },
+    )
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/", nil)
+    request.Header.Set("Accept-Encoding", "gzip")
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    handlerReturned := make(chan error, 1)
+    go func() {
+        _, err := handler(nil, httptest.NewRecorder(), melodyRequest)
+        handlerReturned <- err
+    }()
+
+    select {
+    case err := <-handlerReturned:
+        if nil == err {
+            t.Fatalf("expected a stuck body reader to fail the request, got a nil error")
+        }
+        if false == errors.Is(err, io.ErrNoProgress) {
+            t.Fatalf("expected io.ErrNoProgress from a reader making no progress, got: %v", err)
+        }
+    case <-time.After(5 * time.Second):
+        t.Fatalf("the peek loop never returned after %d reads; a body reader answering (0, nil) spins a request goroutine at full processor forever", reader.readCount)
+    }
+}

@@ -1,11 +1,15 @@
 package debug
 
 import (
+    "context"
     "encoding/json"
     "errors"
     "fmt"
+    "os"
+    "os/exec"
     "strings"
     "testing"
+    "time"
     "unicode/utf8"
 
     "github.com/precision-soft/melody/v3/container"
@@ -286,5 +290,144 @@ func TestContainerCommand_WalksEveryServiceExactlyOnceWhenPagingDescending(t *te
         if 1 != count {
             t.Fatalf("service %q was returned %d times while paging descending", value, count)
         }
+    }
+}
+
+/* the reproduction below cannot run inside the test binary: a self-referential error context sends the redaction walk into unbounded recursion, and the resulting stack overflow is a runtime fatal error that no recover contains, so it takes down whatever process runs it. TestMain therefore doubles as a probe entry point — when the environment variable names a probe the process runs that reproduction and exits instead of running the suite — and the tests re-execute this binary, bound it with a deadline and assert on the child's exit status. */
+const errorContextProbeEnvironmentVariable = "MELODY_DEBUG_ERROR_CONTEXT_PROBE"
+
+func TestMain(mainInstance *testing.M) {
+    probeName := os.Getenv(errorContextProbeEnvironmentVariable)
+    if "" != probeName {
+        runErrorContextProbe(probeName)
+
+        os.Exit(0)
+    }
+
+    os.Exit(mainInstance.Run())
+}
+
+/* newCyclicErrorContext builds the context a producer creates by parking a reference to the context inside itself. The self-reference is stored as a plain map[string]any because that is what the walk descends into; the named contract type is converted at the top of resolveErrorContextJson. */
+func newCyclicErrorContext() exceptioncontract.Context {
+    payload := map[string]any{
+        "serviceName": "broken.service",
+    }
+    payload["self"] = payload
+
+    return exceptioncontract.Context{
+        "payload": payload,
+    }
+}
+
+func newCyclicSliceErrorContext() exceptioncontract.Context {
+    payload := make([]any, 2)
+    payload[0] = "first"
+    payload[1] = payload
+
+    return exceptioncontract.Context{
+        "payload": payload,
+    }
+}
+
+func runErrorContextProbe(probeName string) {
+    switch probeName {
+    case "cyclicMapContext":
+        resolveErrorContextJson(exception.NewError("boom", newCyclicErrorContext(), nil), 3)
+
+    case "cyclicSliceContext":
+        resolveErrorContextJson(exception.NewError("boom", newCyclicSliceErrorContext(), nil), 3)
+
+    default:
+        os.Exit(97)
+    }
+}
+
+func assertErrorContextProbeExitsCleanly(t *testing.T, probeName string, budget time.Duration) {
+    t.Helper()
+
+    binaryPath, executableErr := os.Executable()
+    if nil != executableErr {
+        t.Fatalf("could not locate the test binary to re-execute: %v", executableErr)
+    }
+
+    ctx, cancel := context.WithTimeout(context.Background(), budget)
+    defer cancel()
+
+    command := exec.CommandContext(ctx, binaryPath)
+    command.Env = append(os.Environ(), errorContextProbeEnvironmentVariable+"="+probeName)
+
+    combinedOutput, runErr := command.CombinedOutput()
+
+    if nil != ctx.Err() {
+        t.Fatalf("the %s probe was still running after %s and had to be killed, so the walk does not terminate; output: %s", probeName, budget, combinedOutput)
+    }
+
+    if nil == runErr {
+        return
+    }
+
+    exitErr := (*exec.ExitError)(nil)
+    if true == errors.As(runErr, &exitErr) {
+        t.Fatalf("the %s probe died with exit status %d instead of returning; output: %s", probeName, exitErr.ExitCode(), combinedOutput)
+    }
+
+    t.Fatalf("could not run the %s probe: %v; output: %s", probeName, runErr, combinedOutput)
+}
+
+/* @info a service-resolution error whose context holds itself must not take the debug:container command — and with it the process — down; the redaction runs before json.Marshal, deliberately, so encoding/json's own cycle detector never gets the chance to turn this into a clean error */
+func TestResolveErrorContextJson_SelfReferentialMapContextTerminates(t *testing.T) {
+    assertErrorContextProbeExitsCleanly(t, "cyclicMapContext", 30*time.Second)
+}
+
+/* @info the same loop closed through a slice element rather than a map key */
+func TestResolveErrorContextJson_SelfReferentialSliceContextTerminates(t *testing.T) {
+    assertErrorContextProbeExitsCleanly(t, "cyclicSliceContext", 30*time.Second)
+}
+
+/* @info the guarded rendering must still be usable: the surviving keys are printed and the point where the loop closed is named, rather than the whole context being dropped */
+func TestResolveErrorContextJson_RendersTheCycleAsAMarker(t *testing.T) {
+    result := resolveErrorContextJson(exception.NewError("boom", newCyclicErrorContext(), nil), 3)
+
+    /* the rendered context is JSON, where encoding/json escapes the marker's angle brackets, so the marker is looked for in the form the encoder actually writes */
+    encodedMarker, markerErr := json.Marshal(errorContextCycleMarker)
+    if nil != markerErr {
+        t.Fatalf("could not encode the cycle marker: %v", markerErr)
+    }
+
+    if false == strings.Contains(result, string(encodedMarker)) {
+        t.Fatalf("expected the closed loop to be rendered as %s, got %q", encodedMarker, result)
+    }
+    if false == strings.Contains(result, "broken.service") {
+        t.Fatalf("expected the keys around the loop to survive the guard, got %q", result)
+    }
+}
+
+/* @info the guard is scoped to the current path, not to everything the walk has ever seen: one map handed to two sibling keys is not a cycle, and marking the second occurrence would be a silent wrong answer about the operator's own data */
+func TestSanitizeErrorContextValue_SharedSiblingContainerIsNotACycle(t *testing.T) {
+    shared := map[string]any{
+        "serviceName": "shared.service",
+    }
+
+    sanitized := sanitizeErrorContextValue(map[string]any{
+        "first":  shared,
+        "second": shared,
+    })
+
+    encoded, marshalErr := json.Marshal(sanitized)
+    if nil != marshalErr {
+        t.Fatalf("the sanitized context must stay marshalable: %v", marshalErr)
+    }
+
+    /* the encoder escapes the marker's angle brackets, so the marker is looked for in the form it actually writes */
+    encodedMarker, markerErr := json.Marshal(errorContextCycleMarker)
+    if nil != markerErr {
+        t.Fatalf("could not encode the cycle marker: %v", markerErr)
+    }
+
+    if true == strings.Contains(string(encoded), string(encodedMarker)) {
+        t.Fatalf("a container reached twice through sibling keys is not a cycle, got %s", encoded)
+    }
+    if 2 != strings.Count(string(encoded), "shared.service") {
+        t.Fatalf("expected both sibling keys to render the shared container, got %s", encoded)
     }
 }

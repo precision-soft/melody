@@ -105,3 +105,10 @@ func TestPrefersHtml_HonoursQualityValues(t *testing.T) {
         }
     }
 }
+
+func TestPrefersHtml_CaseInsensitive(t *testing.T) {
+    request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/", "Text/HTML,Application/JSON")
+    if false == PrefersHtml(request) {
+        t.Fatalf("expected true for case-insensitive html before json")
+    }
+}

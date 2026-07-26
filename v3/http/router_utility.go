@@ -680,6 +680,14 @@ func matchPath(
         if true == strings.HasPrefix(routePart, ":") {
             /* @important an empty segment does not satisfy a named parameter: "/users//profile" would otherwise bind an empty id that a handler cannot tell from a supplied one */
             if "" == pathPart {
+                /* a trailing optional reached through the root is omitted rather than refused: "/" is the one path whose trailing slash cannot be trimmed away, so it splits into two empty segments and the optional lands on the second one. UrlGenerator mints exactly "/" for this shape and the openapi document advertises it, so refusing it would 404 a url the framework itself produced. The parameter is left unbound, which is what an omitted optional means everywhere else. */
+                if true == isLastPattern && pathIndex == len(pathSegments)-1 && true == strings.HasSuffix(routePart, "?") {
+                    pathIndex++
+                    patternIndex++
+
+                    continue
+                }
+
                 return nil, false
             }
 

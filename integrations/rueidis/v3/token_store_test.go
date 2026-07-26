@@ -1,11 +1,14 @@
 package rueidis
 
 import (
+    "context"
+    "strconv"
     "strings"
     "testing"
     "time"
 
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
+    redisclient "github.com/redis/rueidis"
 )
 
 func TestRedisTokenStore_PutThenLookupRoundTrips(t *testing.T) {
@@ -280,4 +283,209 @@ func TestNewTokenStore_ScanCountOverride(t *testing.T) {
     if 512 != store.scanCount {
         t.Fatalf("expected overridden scan count 512, got %d", store.scanCount)
     }
+}
+
+func tokenStorePttl(t *testing.T, client redisclient.Client, key string) int64 {
+    t.Helper()
+
+    pttl, pttlErr := client.Do(context.Background(), client.B().Pttl().Key(key).Build()).AsInt64()
+    if nil != pttlErr {
+        t.Fatalf("pttl %q: %v", key, pttlErr)
+    }
+
+    return pttl
+}
+
+/* only the token key ever carried PX; the per-user index set carried no expiry at all, so a user who logs in and out leaves an ever-growing set of dead member names behind for as long as the Redis lives — nothing sweeps it unless PurgeExpired is scheduled, and nothing here schedules it. */
+func TestRedisTokenStore_PutGivesTheUserIndexAnExpiryThatOutlivesItsToken(t *testing.T) {
+    client := newTokenStoreClient(t)
+    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:indexttl"))
+
+    store.PutWithTtl("token-indexed", securitycontract.Claims{UserIdentifier: "helen"}, 30*time.Second)
+    defer store.DeleteByUser("helen")
+
+    tokenPttl := tokenStorePttl(t, client, store.tokenKey("token-indexed"))
+    indexPttl := tokenStorePttl(t, client, store.userKey("helen"))
+
+    if 0 >= indexPttl {
+        t.Fatalf("expected the user index to carry an expiry, got pttl %d", indexPttl)
+    }
+
+    if indexPttl <= tokenPttl {
+        t.Fatalf("expected the user index (pttl %d) to outlive its token (pttl %d), or a live token would become unrevocable", indexPttl, tokenPttl)
+    }
+}
+
+/* the index set is how DeleteByUser finds a user's tokens, so its expiry may only ever be raised: a shorter-lived token added later must not pull the deadline in front of a token that lives longer. */
+func TestRedisTokenStore_PutRaisesButNeverShortensTheUserIndexExpiry(t *testing.T) {
+    client := newTokenStoreClient(t)
+    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:indexraise"))
+
+    store.PutWithTtl("token-long", securitycontract.Claims{UserIdentifier: "ivan"}, 5*time.Minute)
+    defer store.DeleteByUser("ivan")
+
+    afterLong := tokenStorePttl(t, client, store.userKey("ivan"))
+
+    store.PutWithTtl("token-short", securitycontract.Claims{UserIdentifier: "ivan"}, 2*time.Second)
+
+    afterShort := tokenStorePttl(t, client, store.userKey("ivan"))
+    if 4*time.Minute.Milliseconds() > afterShort {
+        t.Fatalf("expected the index to keep the long-lived deadline (was %d), got %d", afterLong, afterShort)
+    }
+
+    store.PutWithTtl("token-longer", securitycontract.Claims{UserIdentifier: "ivan"}, 30*time.Minute)
+
+    if afterLonger := tokenStorePttl(t, client, store.userKey("ivan")); 25*time.Minute.Milliseconds() > afterLonger {
+        t.Fatalf("expected a longer-lived token to raise the index deadline, got %d", afterLonger)
+    }
+}
+
+/* a token with no expiry is revocable forever, so the set that indexes it must never expire either */
+func TestRedisTokenStore_NonExpiringTokenKeepsTheUserIndexPersistent(t *testing.T) {
+    client := newTokenStoreClient(t)
+    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:indexpersist"))
+
+    store.PutWithTtl("token-expiring", securitycontract.Claims{UserIdentifier: "judy"}, 10*time.Second)
+    store.Put("token-forever", securitycontract.Claims{UserIdentifier: "judy"})
+    defer store.DeleteByUser("judy")
+
+    if indexPttl := tokenStorePttl(t, client, store.userKey("judy")); -1 != indexPttl {
+        t.Fatalf("expected the index of a non-expiring token to be persistent, got pttl %d", indexPttl)
+    }
+}
+
+func sscanCallCount(t *testing.T, client redisclient.Client) int64 {
+    t.Helper()
+
+    info, infoErr := client.Do(context.Background(), client.B().Info().Section("commandstats").Build()).ToString()
+    if nil != infoErr {
+        t.Fatalf("info commandstats: %v", infoErr)
+    }
+
+    for _, line := range strings.Split(info, "\n") {
+        if false == strings.HasPrefix(line, "cmdstat_sscan:") {
+            continue
+        }
+
+        for _, field := range strings.Split(strings.TrimPrefix(strings.TrimSpace(line), "cmdstat_sscan:"), ",") {
+            if false == strings.HasPrefix(field, "calls=") {
+                continue
+            }
+
+            calls, parseErr := strconv.ParseInt(strings.TrimPrefix(field, "calls="), 10, 64)
+            if nil != parseErr {
+                t.Fatalf("parse %q: %v", field, parseErr)
+            }
+
+            return calls
+        }
+    }
+
+    return 0
+}
+
+/* Redis runs a script with every other client blocked, so reading a whole index set inside one script makes a revocation stall the entire server for as long as that user's token history is: measured at ~4.9ms over 1k tokens, ~224ms over 100k and around two seconds over a million. The walk has to be incremental, and the batch handed to any one script has to be bounded by this side, because SSCAN treats its count as a hint and can return more. */
+func TestRedisTokenStore_DeleteByUserRevokesInBoundedBatches(t *testing.T) {
+    client := newTokenStoreClient(t)
+    store := NewTokenStore(
+        client,
+        WithTokenStorePrefix("melody:token:test:batched"),
+        WithTokenStoreScanCount(10),
+    )
+
+    tokenCount := 250
+    for index := 0; index < tokenCount; index++ {
+        store.Put("batched-token-"+strconv.Itoa(index), securitycontract.Claims{UserIdentifier: "karl"})
+    }
+
+    /* another user's live token must survive a revocation that walks past it */
+    store.Put("batched-token-other", securitycontract.Claims{UserIdentifier: "lena"})
+    defer store.DeleteByUser("lena")
+
+    before := sscanCallCount(t, client)
+
+    removed := store.DeleteByUser("karl")
+    if tokenCount != removed {
+        t.Fatalf("expected %d tokens removed, got %d", tokenCount, removed)
+    }
+
+    /* one script over the whole set needs no cursor at all; a bounded walk needs one round trip per batch */
+    if calls := sscanCallCount(t, client) - before; 2 > calls {
+        t.Fatalf("expected the revocation to walk the index in more than one bounded batch, got %d sscan calls", calls)
+    }
+
+    for index := 0; index < tokenCount; index++ {
+        if _, exists, _ := store.Lookup(newTokenStoreRuntime(), "batched-token-"+strconv.Itoa(index)); true == exists {
+            t.Fatalf("expected batched-token-%d to be revoked", index)
+        }
+    }
+
+    if indexPttl := tokenStorePttl(t, client, store.userKey("karl")); -2 != indexPttl {
+        t.Fatalf("expected the emptied index set to be gone, got pttl %d", indexPttl)
+    }
+
+    found, exists, lookupErr := store.Lookup(newTokenStoreRuntime(), "batched-token-other")
+    if nil != lookupErr || false == exists || "lena" != found.UserIdentifier {
+        t.Fatalf("expected another user's token to survive: %+v %v %v", found, exists, lookupErr)
+    }
+}
+
+/* the purge reads the same sets a revocation does and has to hold the server for no longer, so it walks them the same way. It is in fact the operation that meets the biggest ones: it exists because dead members accumulate inside an index that is still alive, so the set it is handed is the whole history of an account that never stopped logging in — read into a single script, that is a multi-second freeze of every other client of that Redis. */
+func TestRedisTokenStore_PurgeExpiredPrunesInBoundedBatches(t *testing.T) {
+    client := newTokenStoreClient(t)
+    store := NewTokenStore(
+        client,
+        WithTokenStorePrefix("melody:token:test:purgebatched"),
+        WithTokenStoreScanCount(10),
+    )
+
+    defer store.DeleteByUser("mona")
+
+    staleCount := 250
+    for index := 0; index < staleCount; index++ {
+        tokenString := "purge-batched-token-" + strconv.Itoa(index)
+
+        store.Put(tokenString, securitycontract.Claims{UserIdentifier: "mona"})
+
+        /* dropping the token key from underneath the index leaves exactly the state a purge exists for: a set that is still alive holding members whose tokens are gone */
+        if deleteErr := client.Do(
+            context.Background(),
+            client.B().Del().Key(store.tokenKey(tokenString)).Build(),
+        ).Error(); nil != deleteErr {
+            t.Fatalf("del: %v", deleteErr)
+        }
+    }
+
+    store.Put("purge-batched-token-live", securitycontract.Claims{UserIdentifier: "mona"})
+
+    before := sscanCallCount(t, client)
+
+    if pruned := store.PurgeExpired(); staleCount != pruned {
+        t.Fatalf("expected %d stale index members pruned, got %d", staleCount, pruned)
+    }
+
+    /* one script over the whole set needs no cursor at all; a bounded walk needs one round trip per batch */
+    if calls := sscanCallCount(t, client) - before; 2 > calls {
+        t.Fatalf("expected the purge to walk the index in more than one bounded batch, got %d sscan calls", calls)
+    }
+
+    if members := tokenStoreCardinality(t, client, store.userKey("mona")); 1 != members {
+        t.Fatalf("expected only the live token left in the index, got %d members", members)
+    }
+
+    found, exists, lookupErr := store.Lookup(newTokenStoreRuntime(), "purge-batched-token-live")
+    if nil != lookupErr || false == exists || "mona" != found.UserIdentifier {
+        t.Fatalf("expected the live token to survive the purge: %+v %v %v", found, exists, lookupErr)
+    }
+}
+
+func tokenStoreCardinality(t *testing.T, client redisclient.Client, key string) int64 {
+    t.Helper()
+
+    cardinality, cardinalityErr := client.Do(context.Background(), client.B().Scard().Key(key).Build()).AsInt64()
+    if nil != cardinalityErr {
+        t.Fatalf("scard %q: %v", key, cardinalityErr)
+    }
+
+    return cardinality
 }

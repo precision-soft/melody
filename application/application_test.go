@@ -8,7 +8,7 @@ import (
 )
 
 func TestAssertPanics_UsesRecover(t *testing.T) {
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         exception.Panic(exception.NewError("test", nil, nil))
-    })
+    }, "test")
 }

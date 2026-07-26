@@ -25,7 +25,10 @@ func NewApplication(
     embeddedEnvFiles fs.FS,
     embeddedPublicFiles fs.FS,
 ) *Application {
-    defer logging.LogOnRecover(logging.EmergencyLogger(), true)
+    /* NewApplication is the outermost frame an application error can reach — there is no application yet, so nothing above it can log or answer for the failure. It therefore owns the process boundary and takes the exit itself, through the helper named for it; logging.LogOnRecover deliberately does not exit, so leaving that one here would let a construction failure walk out as a bare runtime panic. */
+    defer func() {
+        logging.LogOnRecoverAndExit(logging.EmergencyLogger(), recover(), 1)
+    }()
 
     if nil == ctx {
         ctx = context.Background()

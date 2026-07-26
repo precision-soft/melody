@@ -21,6 +21,9 @@
 #   - OUTBOX FACTORIES   /outbox/enqueue on the dev-supervised example writes through the lazily-resolved
 #                        store, melody:outbox:relay publishes it from a separate process and /outbox/status
 #                        shows the sent count grow
+#   - MESSAGE BUS        POST /messagebus/demo on the dev-supervised example hands the message to the async
+#                        transport instead of handling it inline, and melody:messagebus:consume handles it
+#                        from a separate process — exactly one message, on a queue drained first
 #   - ENCRYPT FACTORY    melody:encrypt:database resolves its database through the module factory at the
 #                        first run and bulk-encrypts the two-factor columns
 #   - CRON RUNNER FLAG   product:list reads its declared --limit default when the flag is not passed and
@@ -61,6 +64,15 @@ SCRIPT_DIRECTORY_STRING="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 e2e_require_dev_service
 
+# the number of checks a COMPLETE run executes, asserted by finish_checks at the end. No assertion can notice its
+# own absence, so deleting or commenting out a check block would otherwise still end in ALL STACK CHECKS PASSED,
+# with the run simply doing less. Adding or removing a check means changing this number in the same edit — the
+# mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
+# the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
+# fewer checks; it is already red from the check_fail that branch raised
+EXPECTED_CHECK_COUNT_INTEGER=44
+readonly EXPECTED_CHECK_COUNT_INTEGER
+
 # state the scope in the output, so a reader never has to infer which major these checks covered
 info "stack checks drive the v3 example application only: ${EXAMPLE_DIRECTORY_STRING}"
 info "v3-only module: wiring generate, openapi generate, outbox relay, encrypt bulk"
@@ -71,7 +83,7 @@ info "per-major coverage (boot, login/session, traversal, 404, cli, SIGINT) runs
 # EXCLUSIVE COMMAND — two instances, one run
 # ---------------------------------------------------------------------------------------------------
 
-section_start "EXCLUSIVE COMMAND ACROSS TWO INSTANCES" "${TAG_VALIDATE}" "e2e"
+check_section_start "EXCLUSIVE COMMAND ACROSS TWO INSTANCES" "${TAG_VALIDATE}" "e2e"
 
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "rm -f /tmp/exclusive-first.log /tmp/exclusive-second.log
     go run . example:exclusive:demo --hold 4s > /tmp/exclusive-first.log 2>&1 &
@@ -118,7 +130,7 @@ printf '%s\n' "${EXCLUSIVE_OUTPUT_STRING}"
 # instead of letting the empty output trip the exclusivity assertions below and blame the lock primitive
 if printf '%s' "${EXCLUSIVE_OUTPUT_STRING}" | grep -q 'holder_marker_timeout=1'; then
     check_fail "the holder never printed the start marker within the wait budget (cold build cache still compiling?) — mutual exclusion was not exercised, this is not a lock failure"
-    section_end "EXCLUSIVE COMMAND ACROSS TWO INSTANCES" "success" "${TAG_VALIDATE}" "e2e"
+    check_section_end "EXCLUSIVE COMMAND ACROSS TWO INSTANCES" "${TAG_VALIDATE}" "e2e"
 else
 
 STARTED_COUNT_INTEGER="$(printf '%s' "${EXCLUSIVE_OUTPUT_STRING}" | grep -c 'exclusive tick: started' || true)"
@@ -155,7 +167,7 @@ else
     check_fail "the contender entered the command body while the holder held the lock"
 fi
 
-section_end "EXCLUSIVE COMMAND ACROSS TWO INSTANCES" "success" "${TAG_VALIDATE}" "e2e"
+check_section_end "EXCLUSIVE COMMAND ACROSS TWO INSTANCES" "${TAG_VALIDATE}" "e2e"
 
 fi
 
@@ -163,7 +175,7 @@ fi
 # PROCESS ROLE — default, flag, .env, precedence, validation
 # ---------------------------------------------------------------------------------------------------
 
-section_start "PROCESS ROLE RESOLUTION" "${TAG_VALIDATE}" "e2e"
+check_section_start "PROCESS ROLE RESOLUTION" "${TAG_VALIDATE}" "e2e"
 
 restore_example_env_local() {
     docker_compose_no_log exec -T "${E2E_SERVICE_NAME_STRING}" rm -f "${EXAMPLE_ENV_LOCAL_PATH_STRING}" </dev/null || true
@@ -234,13 +246,13 @@ else
     check_fail "an unsupported --role value exited non-zero but without the invalid-role diagnostic, so the rejection came from somewhere else (${UNSUPPORTED_ROLE_OUTPUT_STRING:-<empty>})"
 fi
 
-section_end "PROCESS ROLE RESOLUTION" "success" "${TAG_VALIDATE}" "e2e"
+check_section_end "PROCESS ROLE RESOLUTION" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
 # CRON — the user-less crontab template (busybox crond / per-user crontabs)
 # ---------------------------------------------------------------------------------------------------
 
-section_start "CRON CRONTAB-NO-USER TEMPLATE" "${TAG_VALIDATE}" "e2e"
+check_section_start "CRON CRONTAB-NO-USER TEMPLATE" "${TAG_VALIDATE}" "e2e"
 
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "rm -f /tmp/crontab-with-user; go run . melody:cron:generate --out /tmp/crontab-with-user >/dev/null 2>&1; cat /tmp/crontab-with-user 2>/dev/null"
 CRONTAB_WITH_USER_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
@@ -271,13 +283,13 @@ else
     fi
 fi
 
-section_end "CRON CRONTAB-NO-USER TEMPLATE" "success" "${TAG_VALIDATE}" "e2e"
+check_section_end "CRON CRONTAB-NO-USER TEMPLATE" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
 # CRON IN-PROCESS RUNNER — the same Configuration drives melody:cron:run, which ticks in-process
 # ---------------------------------------------------------------------------------------------------
 
-section_start "CRON IN-PROCESS RUNNER" "${TAG_VALIDATE}" "e2e"
+check_section_start "CRON IN-PROCESS RUNNER" "${TAG_VALIDATE}" "e2e"
 
 # a clean exit alone would also pass with a runner that never parsed the Configuration; the example
 # schedules product:list with a system user, which the in-process runner reports with a warning at Run
@@ -303,13 +315,13 @@ else
     check_fail "the runner did not report the user-carrying entry (${RUNNER_WARNING_BEFORE_INTEGER:-0} -> ${RUNNER_WARNING_AFTER_INTEGER:-0}), so nothing proves it parsed the Configuration"
 fi
 
-section_end "CRON IN-PROCESS RUNNER" "success" "${TAG_VALIDATE}" "e2e"
+check_section_end "CRON IN-PROCESS RUNNER" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
 # COMMAND-OWNED ROLE FLAG — a command's own --role after the command name is not the runtime process role
 # ---------------------------------------------------------------------------------------------------
 
-section_start "COMMAND-OWNED ROLE FLAG" "${TAG_VALIDATE}" "e2e"
+check_section_start "COMMAND-OWNED ROLE FLAG" "${TAG_VALIDATE}" "e2e"
 
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:grant:demo --role admin --user ada 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
 GRANT_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
@@ -320,13 +332,13 @@ else
     check_fail "the command-owned --role flag did not reach the command (${GRANT_OUTPUT_STRING:-<empty>})"
 fi
 
-section_end "COMMAND-OWNED ROLE FLAG" "success" "${TAG_VALIDATE}" "e2e"
+check_section_end "COMMAND-OWNED ROLE FLAG" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
 # LAZY SERVICE RESOLUTION — the container.Lazy handle resolves the user service at first run, not at boot
 # ---------------------------------------------------------------------------------------------------
 
-section_start "LAZY SERVICE RESOLUTION" "${TAG_VALIDATE}" "e2e"
+check_section_start "LAZY SERVICE RESOLUTION" "${TAG_VALIDATE}" "e2e"
 
 # one invocation on purpose: the lazy-resolution marker and the grant line must come from the SAME run,
 # proving the handle resolved inside the command body and the command still completed its work afterwards
@@ -345,13 +357,13 @@ else
     check_fail "the grant line did not print from the lazy-resolution invocation (${LAZY_GRANT_OUTPUT_STRING:-<empty>})"
 fi
 
-section_end "LAZY SERVICE RESOLUTION" "success" "${TAG_VALIDATE}" "e2e"
+check_section_end "LAZY SERVICE RESOLUTION" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
 # OUTBOX FACTORIES END-TO-END — http enqueue on the supervised app, relay from a separate cli process
 # ---------------------------------------------------------------------------------------------------
 
-section_start "OUTBOX FACTORIES END-TO-END" "${TAG_VALIDATE}" "e2e"
+check_section_start "OUTBOX FACTORIES END-TO-END" "${TAG_VALIDATE}" "e2e"
 
 # the http half runs against the example the dev container already supervises on EXAMPLE_BASE_URL (the
 # same loopback address run.sh uses); wget is the http client the dev image ships (no curl). The relay
@@ -385,7 +397,7 @@ printf '%s\n' "${OUTBOX_OUTPUT_STRING}"
 # `./dc restart dev` forces a resync when in doubt
 if ! printf '%s' "${OUTBOX_OUTPUT_STRING}" | grep -q 'outbox_reachable=1'; then
     check_fail "the dev-supervised example on EXAMPLE_BASE_URL is unreachable or lacks the outbox routes (stale supervised binary? reflex restarts it on .go/.env changes; ./dc restart dev forces a resync) — the outbox factories were not exercised"
-    section_end "OUTBOX FACTORIES END-TO-END" "success" "${TAG_VALIDATE}" "e2e"
+    check_section_end "OUTBOX FACTORIES END-TO-END" "${TAG_VALIDATE}" "e2e"
 else
 
 if printf '%s' "${OUTBOX_OUTPUT_STRING}" | grep -q '"enqueued":true'; then
@@ -410,7 +422,144 @@ else
     check_fail "the sent count did not grow (${OUTBOX_BEFORE_SENT_INTEGER:-0} -> ${OUTBOX_AFTER_SENT_INTEGER:-0}) — the relay published nothing"
 fi
 
-section_end "OUTBOX FACTORIES END-TO-END" "success" "${TAG_VALIDATE}" "e2e"
+check_section_end "OUTBOX FACTORIES END-TO-END" "${TAG_VALIDATE}" "e2e"
+
+fi
+
+# ---------------------------------------------------------------------------------------------------
+# MESSAGE BUS ASYNC TRANSPORT — http dispatch hands the message to the broker, a separate consumer handles it
+# ---------------------------------------------------------------------------------------------------
+
+check_section_start "MESSAGE BUS ASYNC TRANSPORT" "${TAG_VALIDATE}" "e2e"
+
+# The property is that a dispatch does NOT handle its message inline: the example routes WelcomeEmail to the
+# "async" transport (config/messagebus.go), so POST /messagebus/demo on the supervised app must hand the message
+# to rabbitmq and return, and the handler must run only when melody:messagebus:consume pulls it from a SEPARATE
+# process. That is why this check lives here and not in the run.sh harness: the consumer is a second process with
+# its own lifecycle, started, bounded, killed and read for its exit status while the supervised app keeps serving.
+#
+# The handler's own marker ("welcome email sent", written by messagehandler.HandleWelcomeEmail to the example's
+# MELODY_LOG_PATH file, var/log/dev.log) is counted at three points, and the MIDDLE one carries the check: after
+# the http dispatch it must NOT have grown. A marker that grew there means the message was handled inline and the
+# async transport was never involved — and the http response is a 202 either way, so nothing else reveals it.
+#
+# The queue is DRAINED first, and that is load-bearing rather than hygiene: a message left in rabbitmq by an
+# earlier run (or by an interrupted consume) would be picked up by this run's consumer and stand in for this run's
+# message, so the +1 assertion would pass without the dispatch having contributed anything.
+#
+# Neither consumer is bounded with `timeout`, even though the dev image ships it: `timeout go run .` signals
+# `go run`, which dies and ORPHANS the compiled binary it started — the consumer then keeps running and keeps
+# eating messages out of the queue for the rest of the session (measured: four orphans stealing this check's own
+# messages). Each consumer is therefore started as a background job in its OWN process group (`set -m`) and the
+# whole group is signalled, which reaches the compiled child. This is the background-PID-and-kill pattern the
+# exclusive-command check uses, with the process group added because of the `go run` indirection.
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "STATUS_BODY=\$(wget -q -O- \"\${EXAMPLE_BASE_URL}/health\" 2>/dev/null || true)
+    case \"\${STATUS_BODY}\" in
+        *'\"success\":true'*) echo messagebus_reachable=1 ;;
+        *) echo messagebus_reachable=0; exit 0 ;;
+    esac
+    # drain: consume with no limit until the queue is empty, then stop the consumer by signalling its process group
+    set -m
+    go run . melody:messagebus:consume --transport async --limit 0 >/tmp/messagebus-drain.log 2>&1 &
+    DRAIN_PID=\$!
+    set +m
+    DRAIN_STARTED=0
+    for _ in \$(seq 1 900); do
+        if grep -q 'messagebus:consume\\] \\[started' /tmp/messagebus-drain.log 2>/dev/null; then
+            DRAIN_STARTED=1
+            break
+        fi
+        sleep 0.2
+    done
+    if [ \"\${DRAIN_STARTED}\" -ne 1 ]; then
+        echo 'drain_start_timeout=1'
+        cat /tmp/messagebus-drain.log
+        kill -TERM -- -\${DRAIN_PID} 2>/dev/null || true
+        wait \${DRAIN_PID} 2>/dev/null || true
+        exit 0
+    fi
+    sleep 3
+    kill -TERM -- -\${DRAIN_PID} 2>/dev/null || true
+    wait \${DRAIN_PID} 2>/dev/null || true
+    BEFORE_HANDLED=\$(grep -c 'welcome email sent' var/log/dev.log 2>/dev/null || true)
+    echo \"before_handled=\${BEFORE_HANDLED:-0}\"
+    wget -q -O- --post-data='' \"\${EXAMPLE_BASE_URL}/messagebus/demo\" 2>/dev/null || true
+    echo ''
+    sleep 2
+    INLINE_HANDLED=\$(grep -c 'welcome email sent' var/log/dev.log 2>/dev/null || true)
+    echo \"inline_handled=\${INLINE_HANDLED:-0}\"
+    set -m
+    go run . melody:messagebus:consume --transport async --limit 1 >/tmp/messagebus-consume.log 2>&1 &
+    CONSUME_PID=\$!
+    set +m
+    CONSUME_EXITED=0
+    for _ in \$(seq 1 900); do
+        if ! kill -0 \${CONSUME_PID} 2>/dev/null; then
+            CONSUME_EXITED=1
+            break
+        fi
+        sleep 0.2
+    done
+    if [ \"\${CONSUME_EXITED}\" -ne 1 ]; then
+        echo 'consume_timeout=1'
+        kill -TERM -- -\${CONSUME_PID} 2>/dev/null || true
+        wait \${CONSUME_PID} 2>/dev/null || true
+        cat /tmp/messagebus-consume.log
+        exit 0
+    fi
+    wait \${CONSUME_PID}
+    echo \"consume_status=\$?\"
+    AFTER_HANDLED=\$(grep -c 'welcome email sent' var/log/dev.log 2>/dev/null || true)
+    echo \"after_handled=\${AFTER_HANDLED:-0}\""
+MESSAGE_BUS_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+
+printf '%s\n' "${MESSAGE_BUS_OUTPUT_STRING}"
+
+# the supervised app is one half of this check; when it is down nothing about the transport was exercised, so say
+# that distinctly instead of letting the empty responses trip the assertions below
+if ! printf '%s' "${MESSAGE_BUS_OUTPUT_STRING}" | grep -q 'messagebus_reachable=1'; then
+    check_fail "the dev-supervised example on EXAMPLE_BASE_URL is unreachable (reflex restarts it on .go/.env changes; ./dc restart dev forces a resync) — nothing was exercised: no message was dispatched and no consumer ran, this is not a message bus failure"
+    check_section_end "MESSAGE BUS ASYNC TRANSPORT" "${TAG_VALIDATE}" "e2e"
+elif printf '%s' "${MESSAGE_BUS_OUTPUT_STRING}" | grep -q 'drain_start_timeout=1'; then
+    check_fail "the draining consumer never printed its start marker within the wait budget (cold build cache still compiling?) — the queue was NOT drained, so nothing below would have been this run's own message; this is not a message bus failure"
+    check_section_end "MESSAGE BUS ASYNC TRANSPORT" "${TAG_VALIDATE}" "e2e"
+elif printf '%s' "${MESSAGE_BUS_OUTPUT_STRING}" | grep -q 'consume_timeout=1'; then
+    check_fail "melody:messagebus:consume --limit 1 never exited within the wait budget — it received no message to consume, so the async delivery could not be observed"
+    check_section_end "MESSAGE BUS ASYNC TRANSPORT" "${TAG_VALIDATE}" "e2e"
+else
+
+if printf '%s' "${MESSAGE_BUS_OUTPUT_STRING}" | grep -q '"status":"dispatched"'; then
+    check_pass "POST /messagebus/demo dispatched the message on the supervised application"
+else
+    check_fail "POST /messagebus/demo did not report \"status\":\"dispatched\""
+fi
+
+MESSAGE_BUS_BEFORE_INTEGER="$(printf '%s' "${MESSAGE_BUS_OUTPUT_STRING}" | grep -o 'before_handled=[0-9]*' | head -1 | cut -d= -f2 || true)"
+MESSAGE_BUS_INLINE_INTEGER="$(printf '%s' "${MESSAGE_BUS_OUTPUT_STRING}" | grep -o 'inline_handled=[0-9]*' | head -1 | cut -d= -f2 || true)"
+MESSAGE_BUS_AFTER_INTEGER="$(printf '%s' "${MESSAGE_BUS_OUTPUT_STRING}" | grep -o 'after_handled=[0-9]*' | head -1 | cut -d= -f2 || true)"
+
+# the assertion that carries the section: an inline handler would already have logged the marker here
+if [[ "${MESSAGE_BUS_INLINE_INTEGER:-0}" -eq "${MESSAGE_BUS_BEFORE_INTEGER:-0}" ]]; then
+    check_pass "the handler had NOT run after the http dispatch (${MESSAGE_BUS_BEFORE_INTEGER:-0} -> ${MESSAGE_BUS_INLINE_INTEGER:-0}) — the message went to the async transport instead of being handled inline"
+else
+    check_fail "the handler ran during the http dispatch (${MESSAGE_BUS_BEFORE_INTEGER:-0} -> ${MESSAGE_BUS_INLINE_INTEGER:-0}) — the message was handled inline and never reached the async transport"
+fi
+
+if printf '%s' "${MESSAGE_BUS_OUTPUT_STRING}" | grep -q 'consume_status=0'; then
+    check_pass "melody:messagebus:consume --transport async --limit 1 ran as a separate process and exited zero"
+else
+    check_fail "melody:messagebus:consume --transport async --limit 1 did not exit zero"
+fi
+
+# exactly one, not "grew": more than one would mean the drain left a message behind and this run's assertion was
+# standing on somebody else's message
+if [[ "$((${MESSAGE_BUS_AFTER_INTEGER:-0} - ${MESSAGE_BUS_INLINE_INTEGER:-0}))" -eq 1 ]]; then
+    check_pass "the separate consumer handled exactly one message (${MESSAGE_BUS_INLINE_INTEGER:-0} -> ${MESSAGE_BUS_AFTER_INTEGER:-0})"
+else
+    check_fail "the marker moved by $((${MESSAGE_BUS_AFTER_INTEGER:-0} - ${MESSAGE_BUS_INLINE_INTEGER:-0})) after the consume (${MESSAGE_BUS_INLINE_INTEGER:-0} -> ${MESSAGE_BUS_AFTER_INTEGER:-0}), wanted exactly 1"
+fi
+
+check_section_end "MESSAGE BUS ASYNC TRANSPORT" "${TAG_VALIDATE}" "e2e"
 
 fi
 
@@ -418,7 +567,7 @@ fi
 # ENCRYPT FACTORY COMMAND — the bulk command resolves its database through the module factory at first run
 # ---------------------------------------------------------------------------------------------------
 
-section_start "ENCRYPT FACTORY COMMAND" "${TAG_VALIDATE}" "e2e"
+check_section_start "ENCRYPT FACTORY COMMAND" "${TAG_VALIDATE}" "e2e"
 
 # the completion log line is asserted alongside the exit code: a zero exit alone would also pass with a
 # command that failed to wire the migration at all, while the "migration finished" marker (written to the
@@ -444,13 +593,13 @@ else
     check_fail "the migration-finished marker did not appear (${ENCRYPT_MARKER_BEFORE_INTEGER:-0} -> ${ENCRYPT_MARKER_AFTER_INTEGER:-0}), so nothing proves the bulk path ran"
 fi
 
-section_end "ENCRYPT FACTORY COMMAND" "success" "${TAG_VALIDATE}" "e2e"
+check_section_end "ENCRYPT FACTORY COMMAND" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
 # CRON RUNNER FLAG DEFAULT — an unset flag reads back its declared default; an explicit value still wins
 # ---------------------------------------------------------------------------------------------------
 
-section_start "CRON RUNNER FLAG DEFAULT" "${TAG_VALIDATE}" "e2e"
+check_section_start "CRON RUNNER FLAG DEFAULT" "${TAG_VALIDATE}" "e2e"
 
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . product:list 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
 PRODUCT_DEFAULT_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
@@ -470,13 +619,13 @@ else
     check_fail "product:list --limit 2 did not override the declared default"
 fi
 
-section_end "CRON RUNNER FLAG DEFAULT" "success" "${TAG_VALIDATE}" "e2e"
+check_section_end "CRON RUNNER FLAG DEFAULT" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
 # GRACEFUL SIGNAL SHUTDOWN — one SIGINT while serving http exits zero through NewSignalContext
 # ---------------------------------------------------------------------------------------------------
 
-section_start "GRACEFUL SIGNAL SHUTDOWN" "${TAG_VALIDATE}" "e2e"
+check_section_start "GRACEFUL SIGNAL SHUTDOWN" "${TAG_VALIDATE}" "e2e"
 
 # melody derives the project directory from the executable location, so the binary is built into its own
 # directory beside a copy of the example's .env; a .env.local there overrides the http address to a port
@@ -571,13 +720,13 @@ else
     fi
 fi
 
-section_end "GRACEFUL SIGNAL SHUTDOWN" "success" "${TAG_VALIDATE}" "e2e"
+check_section_end "GRACEFUL SIGNAL SHUTDOWN" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
 # WIRING GENERATE — the generator runs in the real application and reproduces the committed file
 # ---------------------------------------------------------------------------------------------------
 
-section_start "WIRING GENERATE" "${TAG_VALIDATE}" "e2e"
+check_section_start "WIRING GENERATE" "${TAG_VALIDATE}" "e2e"
 
 # the unit test compares against the same project directory the application runs with, but only this
 # invocation proves the command works from inside the app: a drift between the bind-set directories and
@@ -608,13 +757,13 @@ else
     check_fail "the regenerated wiring drifted from the committed file (${WIRING_OUTPUT_STRING})"
 fi
 
-section_end "WIRING GENERATE" "success" "${TAG_VALIDATE}" "e2e"
+check_section_end "WIRING GENERATE" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
 # OPENAPI GENERATE — the generator runs in the real application and emits a well-formed document
 # ---------------------------------------------------------------------------------------------------
 
-section_start "OPENAPI GENERATE" "${TAG_VALIDATE}" "e2e"
+check_section_start "OPENAPI GENERATE" "${TAG_VALIDATE}" "e2e"
 
 # the unit tests exercise the schema mirror on synthetic types; only this invocation proves the command
 # builds a document from the application's real routes and request types
@@ -641,13 +790,13 @@ else
     check_fail "the generated document is missing operations or schemas (${OPENAPI_OUTPUT_STRING})"
 fi
 
-section_end "OPENAPI GENERATE" "success" "${TAG_VALIDATE}" "e2e"
+check_section_end "OPENAPI GENERATE" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
 # PARAMETER SECRETS — the marked credentials and the dsn assembled from one are redacted
 # ---------------------------------------------------------------------------------------------------
 
-section_start "PARAMETER SECRETS" "${TAG_VALIDATE}" "e2e"
+check_section_start "PARAMETER SECRETS" "${TAG_VALIDATE}" "e2e"
 
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:parameters --format json 2>/dev/null"
 # whitespace is stripped so each json object greps as one line whatever the printer's indentation
@@ -660,7 +809,11 @@ else
     check_fail "MYSQL_PASSWORD is not redacted: ${MYSQL_PASSWORD_ENTRY_STRING:-<entry missing>}"
 fi
 
-if printf '%s' "${MYSQL_PASSWORD_ENTRY_STRING}" | grep -q 'melody'; then
+# a negative over an ABSENT entry proves nothing: a renamed parameter, a crashed debug:parameters or a dead
+# docker exec all leave an empty string, which carries no credential and would pass. The entry has to exist first
+if [[ "" = "${MYSQL_PASSWORD_ENTRY_STRING}" ]]; then
+    check_fail "the MYSQL_PASSWORD entry is missing from debug:parameters, so nothing was inspected for a raw credential"
+elif printf '%s' "${MYSQL_PASSWORD_ENTRY_STRING}" | grep -q 'melody'; then
     check_fail "the MYSQL_PASSWORD entry leaks the raw credential: ${MYSQL_PASSWORD_ENTRY_STRING}"
 else
     check_pass "the MYSQL_PASSWORD entry carries no raw credential"
@@ -682,7 +835,10 @@ else
     check_fail "the assembled dsn is not redacted: ${DSN_ENTRY_STRING:-<entry missing>}"
 fi
 
-if printf '%s' "${DSN_ENTRY_STRING}" | grep -q 'tcp('; then
+# same shape as the password negative: an empty entry carries no assembled value either, so it is asserted present
+if [[ "" = "${DSN_ENTRY_STRING}" ]]; then
+    check_fail "the app.database.dsn entry is missing from debug:parameters, so nothing was inspected for the assembled value"
+elif printf '%s' "${DSN_ENTRY_STRING}" | grep -q 'tcp('; then
     check_fail "the dsn entry leaks the assembled value: ${DSN_ENTRY_STRING}"
 else
     check_pass "the dsn entry carries no assembled value"
@@ -695,13 +851,13 @@ else
     check_fail "the ordinary parameter is not printed in clear: ${TITLE_ENTRY_STRING:-<entry missing>}"
 fi
 
-section_end "PARAMETER SECRETS" "success" "${TAG_VALIDATE}" "e2e"
+check_section_end "PARAMETER SECRETS" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
 # OPTIONAL ENV KEY — the default processor's fallback, an .env.local override, the empty fallback
 # ---------------------------------------------------------------------------------------------------
 
-section_start "OPTIONAL ENV KEY" "${TAG_VALIDATE}" "e2e"
+check_section_start "OPTIONAL ENV KEY" "${TAG_VALIDATE}" "e2e"
 
 trap restore_example_env_local EXIT
 restore_example_env_local
@@ -741,8 +897,8 @@ fi
 restore_example_env_local
 trap - EXIT
 
-section_end "OPTIONAL ENV KEY" "success" "${TAG_VALIDATE}" "e2e"
+check_section_end "OPTIONAL ENV KEY" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
 
-finish_checks "stack"
+finish_checks "stack" "${EXPECTED_CHECK_COUNT_INTEGER}"

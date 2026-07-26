@@ -54,6 +54,8 @@ Resolution helpers:
 
 - [`LoggerMustFromContainer`](../../logging/service_resolver.go)
 - [`LoggerFromContainer`](../../logging/service_resolver.go)
+- [`LoggerMustFromResolver`](../../logging/service_resolver.go)
+- [`LoggerFromResolver`](../../logging/service_resolver.go)
 - [`LoggerMustFromRuntime`](../../logging/service_resolver.go)
 - [`LoggerFromRuntime`](../../logging/service_resolver.go)
 
@@ -119,9 +121,11 @@ func runWithScopedLogger(
 
 ## Footguns & caveats
 
-- `LogOnRecover` / `LogOnRecoverAndExit` will treat Melody’s `exception.ExitError` specially and terminate the process via `os.Exit(...)`. See [`recover.go`](../../logging/recover.go).
+- `LogOnRecover` **never terminates the process.** It recovers the panic in flight, logs it once — an `*exception.Error` already marked as logged is not logged again — and, when `panicAgain` is set, panics again with the same value. A recovered `exception.ExitError` is logged like any other error and re-raised as the wrapper it was, not as the error it carries, so the exit code it holds survives for whoever owns the process boundary. This is the helper a `defer` in a library-like position wants: installed with `defer`, it sits above every defer registered before it — the container teardown, the scope closes, the shutdown hooks — and an `os.Exit` from there would skip all of them. With `panicAgain` false it swallows the panic, which is a decision to make deliberately. See [`recover.go`](../../logging/recover.go).
+- `LogOnRecoverAndExit` is the helper named for taking the exit, and the one to use only where the process boundary is yours. It takes the recovered value as an argument rather than calling `recover()` itself, logs it, and calls `os.Exit(...)` — with the code carried by `exception.ExitError` when the panic was one, with the `exitCode` it was given otherwise. Before a non-zero exit it echoes one line to stderr (`melody: exiting with code %d after unrecovered error: ...`), so a failing process is never completely silent on the standard streams even when the configured logger writes to a file; a zero exit code adds nothing. See [`recover.go`](../../logging/recover.go).
 - `NewRequestLogger` will not modify context if `requestId` is empty; it returns the base logger unchanged. See [`request_logger.go`](../../logging/request_logger.go).
 - Context keys should be camelCase. This is relied on across Melody (for example `processId`, `requestId`).
+- [`NewJsonLogger`](../../logging/json_logger.go) serializes writes through an internal mutex so concurrent calls produce cleanly-separated JSON lines on the underlying writer.
 
 ## Userland API
 
@@ -179,7 +183,7 @@ Implemented in:
 #### Recovery
 
 - [`LogOnRecover(logger loggingcontract.Logger, panicAgain bool)`](../../logging/recover.go)
-- [`LogOnRecoverAndExit(logger loggingcontract.Logger, exitCode int)`](../../logging/recover.go)
+- [`LogOnRecoverAndExit(logger loggingcontract.Logger, recovered any, exitCode int)`](../../logging/recover.go)
 
 #### Emergency logger
 
@@ -193,3 +197,5 @@ Implemented in:
 - [`LoggerFromRuntime(runtimeInstance runtimecontract.Runtime) loggingcontract.Logger`](../../logging/service_resolver.go)
 - [`LoggerMustFromContainer(serviceContainer containercontract.Container)`](../../logging/service_resolver.go)
 - [`LoggerFromContainer(serviceContainer containercontract.Container) (loggingcontract.Logger, error)`](../../logging/service_resolver.go)
+- [`LoggerMustFromResolver(resolver containercontract.Resolver)`](../../logging/service_resolver.go)
+- [`LoggerFromResolver(resolver containercontract.Resolver) (loggingcontract.Logger, error)`](../../logging/service_resolver.go)

@@ -81,7 +81,7 @@ func (instance *FileServer) ServeReader(
         return 0, nil, nil, false
     }
 
-    statusCode, headers, file, fileInfo, ok := instance.serveForStreaming(request)
+    statusCode, headers, file, fileInfo, ok := instance.serveForStreaming(request, logger)
     if false == ok {
         return 0, nil, nil, false
     }
@@ -164,7 +164,7 @@ func (instance *FileServer) Serve(
     if nethttp.MethodHead == request.HttpRequest().Method {
         resolved.headers.Set("Content-Length", formatContentLength(resolved.fileInfo.Size()))
 
-        logger.Info(
+        logger.Debug(
             "static serve head success",
             loggingcontract.Context{
                 "relativePath": resolved.relativePath,
@@ -195,7 +195,7 @@ func (instance *FileServer) Serve(
         resolved.headers.Set("Content-Length", formatContentLength(resolved.fileInfo.Size()))
     }
 
-    logger.Info(
+    logger.Debug(
         "static serve success",
         loggingcontract.Context{
             "relativePath": resolved.relativePath,
@@ -211,12 +211,40 @@ func (instance *FileServer) resolveAndOpen(
     request httpcontract.Request,
     logger loggingcontract.Logger,
 ) (*resolvedFile, bool) {
+    method := request.HttpRequest().Method
+
+    if false == isRetrievalMethod(method) {
+        if nil != logger {
+            logger.Info(
+                "static serve method not eligible",
+                loggingcontract.Context{
+                    "method": method,
+                },
+            )
+        }
+
+        return nil, false
+    }
+
     requestPath := request.HttpRequest().URL.Path
+
+    if true == hasExcludedPathPrefix(requestPath, instance.config.excludedPathList) {
+        if nil != logger {
+            logger.Debug(
+                "static serve excluded path",
+                loggingcontract.Context{
+                    "path": requestPath,
+                },
+            )
+        }
+
+        return nil, false
+    }
 
     if "" != instance.config.stripPrefix {
         if true == strings.HasPrefix(requestPath, instance.config.stripPrefix) {
             if nil != logger {
-                logger.Info(
+                logger.Debug(
                     "static serve strip prefix match",
                     loggingcontract.Context{
                         "path":        requestPath,
@@ -244,7 +272,7 @@ func (instance *FileServer) resolveAndOpen(
         }
     } else {
         if nil != logger {
-            logger.Info(
+            logger.Debug(
                 "static serve without strip prefix",
                 loggingcontract.Context{
                     "path": requestPath,
@@ -253,13 +281,50 @@ func (instance *FileServer) resolveAndOpen(
         }
     }
 
-    cleanedPath := path.Clean("/" + requestPath)
+    receivedPath := requestPath
+    if false == strings.HasPrefix(receivedPath, "/") {
+        receivedPath = "/" + receivedPath
+    }
+
+    cleanedPath := path.Clean(receivedPath)
+
     if "." == cleanedPath || "" == cleanedPath {
         cleanedPath = "/"
     }
 
     if "/" == cleanedPath {
+        /* the mount root answers with the configured index file, and keeps answering it for the spellings that fold into the root, because that page is what a browser asks for by visiting the site. The index file is named by configuration and never by the request, so this resolution cannot be aimed at another file. */
         cleanedPath = "/" + instance.config.indexFile
+    } else {
+        /* the file has to sit at exactly the path that was received. path.Clean folds "..", "//", "/./" and a trailing slash away, and serving the folded target under the received spelling puts the file behind a URL access control never saw: the matchers in front of the application compare the raw path, so a rule on "/internal/" does not fire for "/open/../internal/secret.json". A refusal is the only answer that keeps the two views of the request in agreement — a redirect would still teach the client a spelling that reaches the file while sidestepping the rule. The strip prefix is configuration rather than client input, so the comparison rebuilds the whole path around it: comparing only the remainder would let a doubled slash at the prefix boundary be absorbed by the strip and pass unnoticed. */
+        canonicalPath := strings.TrimSuffix(instance.config.stripPrefix, "/") + cleanedPath
+
+        if canonicalPath != request.HttpRequest().URL.Path {
+            if nil != logger {
+                logger.Warning(
+                    "static serve non canonical path",
+                    loggingcontract.Context{
+                        "path":          request.HttpRequest().URL.Path,
+                        "canonicalPath": canonicalPath,
+                    },
+                )
+            }
+
+            return nil, false
+        }
+
+        if true == hasDotPrefixedPathElement(cleanedPath, instance.config.allowedDotPrefixList) {
+            if nil != logger {
+                logger.Warning(
+                    "static serve dot prefixed path element",
+                    loggingcontract.Context{
+                        "cleanedPath": cleanedPath,
+                    },
+                )
+            }
+
+            return nil, false
+        }
     }
 
     relativePath := strings.TrimPrefix(cleanedPath, "/")
@@ -269,7 +334,7 @@ func (instance *FileServer) resolveAndOpen(
     }
 
     if nil != logger {
-        logger.Info(
+        logger.Debug(
             "static serve path resolved",
             loggingcontract.Context{
                 "mode":         instance.config.mode,
@@ -296,7 +361,7 @@ func (instance *FileServer) resolveAndOpen(
     file, openErr := instance.fileSystem.Open(relativePath)
     if nil != openErr {
         if nil != logger {
-            logger.Error(
+            logger.Debug(
                 "static serve open failed",
                 exception.LogContext(
                     openErr,
@@ -315,7 +380,7 @@ func (instance *FileServer) resolveAndOpen(
         _ = file.Close()
 
         if nil != logger {
-            logger.Error(
+            logger.Debug(
                 "static serve stat failed",
                 exception.LogContext(
                     statErr,
@@ -373,7 +438,7 @@ func (instance *FileServer) resolveAndOpen(
         ifNoneMatch := request.Header("If-None-Match")
         if true == EtagMatchesIfNoneMatch(ifNoneMatch, etag) {
             if nil != logger {
-                logger.Info(
+                logger.Debug(
                     "static serve 304 by etag",
                     loggingcontract.Context{
                         "relativePath": relativePath,
@@ -393,31 +458,35 @@ func (instance *FileServer) resolveAndOpen(
             }, true
         }
 
-        ifModifiedSince := request.Header("If-Modified-Since")
-        if "" != ifModifiedSince {
-            if clientTime, parseErr := time.Parse(nethttp.TimeFormat, ifModifiedSince); nil == parseErr {
-                modifiedAt := fileInfo.ModTime().UTC().Truncate(time.Second)
+        /* the modification date is only consulted when no entity tag was offered: a client that sent one has already stated which bytes it holds, and the tag is the accurate answer to that question. Consulting the date as well turns a deploy that rewrites content while preserving modification times — a checkout, a rsync with --times, a container image rebuild — into a 304 for every cache that just proved, by offering a tag that does not match, that it holds different bytes. */
+        if "" == strings.TrimSpace(ifNoneMatch) {
+            ifModifiedSince := request.Header("If-Modified-Since")
+            if "" != ifModifiedSince {
+                /* the field carries any of the three date formats an HTTP date may take, and only one of them is nethttp.TimeFormat; parsing that one alone silently re-sends the whole body to a client whose cache writes asctime or the RFC 850 form */
+                if clientTime, parseErr := nethttp.ParseTime(ifModifiedSince); nil == parseErr {
+                    modifiedAt := fileInfo.ModTime().UTC().Truncate(time.Second)
 
-                if false == modifiedAt.After(clientTime) {
-                    if nil != logger {
-                        logger.Info(
-                            "static serve 304 by last-modified",
-                            loggingcontract.Context{
-                                "relativePath":    relativePath,
-                                "ifModifiedSince": ifModifiedSince,
-                            },
-                        )
+                    if false == modifiedAt.After(clientTime) {
+                        if nil != logger {
+                            logger.Debug(
+                                "static serve 304 by last-modified",
+                                loggingcontract.Context{
+                                    "relativePath":    relativePath,
+                                    "ifModifiedSince": ifModifiedSince,
+                                },
+                            )
+                        }
+
+                        _ = file.Close()
+
+                        return &resolvedFile{
+                            relativePath: relativePath,
+                            file:         nil,
+                            fileInfo:     fileInfo,
+                            headers:      headers,
+                            notModified:  true,
+                        }, true
                     }
-
-                    _ = file.Close()
-
-                    return &resolvedFile{
-                        relativePath: relativePath,
-                        file:         nil,
-                        fileInfo:     fileInfo,
-                        headers:      headers,
-                        notModified:  true,
-                    }, true
                 }
             }
         }
@@ -432,14 +501,18 @@ func (instance *FileServer) resolveAndOpen(
     }, true
 }
 
+/* the streaming resolution carries the same log record as the buffered one: every static byte a running application serves is resolved here, so a refusal that stays silent — a traversal attempt, a symlink escape, a path the file system rejects — leaves the only trace of the attempt nowhere */
 func (instance *FileServer) serveForStreaming(
     request httpcontract.Request,
+    logger loggingcontract.Logger,
 ) (int, nethttp.Header, fs.File, fs.FileInfo, bool) {
+    logger = logging.EnsureLogger(logger)
+
     if nil == request {
         return 0, nil, nil, nil, false
     }
 
-    resolved, ok := instance.resolveAndOpen(request, nil)
+    resolved, ok := instance.resolveAndOpen(request, logger)
     if false == ok {
         return 0, nil, nil, nil, false
     }

@@ -39,6 +39,8 @@ type Application struct {
     moduleConfigurations  map[string]any
     bootCollisions        []bootCollision
     unappliedSecretMarks  []string
+    /* set when the framework had to supply the cache backend itself, because the one it supplies keeps every entry it is ever given; runHttp is what turns it into a warning, and only there */
+    unboundedDefaultCacheBackend bool
 }
 
 func (instance *Application) Boot() kernelcontract.Kernel {
@@ -208,6 +210,9 @@ func (instance *Application) ProcessRole() string {
 func (instance *Application) Run() {
     _ = instance.Boot()
 
+    /* boot is the last moment a parameter can still change anything: from here the wiring is done and the process is serving requests or executing a command, both against services that already read what they needed. Telling the configuration so is what turns a late Resolve into an error instead of a silent rewrite under those readers. */
+    markConfigurationServing(instance.configuration)
+
     defer instance.logOnRecoverAndExit()
 
     defer instance.Close()
@@ -311,6 +316,20 @@ func (instance *Application) logOnRecoverAndExit() {
     }
 
     logging.LogOnRecoverAndExit(logger, recoveredValue, 1)
+}
+
+/* servingMarker is the part of a configuration that can be told the wiring phase is over. It is asked for rather than demanded: only the application emits the signal, so requiring every configcontract.Configuration — every test double included — to carry the method would cost more than it buys. */
+type servingMarker interface {
+    MarkServing()
+}
+
+func markConfigurationServing(configuration configcontract.Configuration) {
+    marker, isMarker := configuration.(servingMarker)
+    if false == isMarker {
+        return
+    }
+
+    marker.MarkServing()
 }
 
 var _ applicationcontract.ParameterRegistrar = (*Application)(nil)

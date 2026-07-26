@@ -76,7 +76,12 @@ func TestEnrichContextWithCause_NestedCause_BuildsFullChain(t *testing.T) {
         t.Fatalf("expected causeChain to be []string")
     }
 
-    if 2 < len(causeChain) {
+    if 2 != len(causeChain) {
+        t.Fatalf("expected the cause chain to carry the middle and root causes, got %v", causeChain)
+    }
+
+    if "middle" != causeChain[0] || "root" != causeChain[1] {
+        t.Fatalf("expected the cause chain to name the middle and root causes in order, got %v", causeChain)
     }
 
     causeContextChainValue, hasCauseContextChain := enrichedContext["causeContextChain"]
@@ -115,5 +120,38 @@ func TestLogError_NilLogger_DoesNotPrintEmptyContext(t *testing.T) {
 
     if true == strings.Contains(output, "context=") {
         t.Fatalf("did not expect context output for empty context")
+    }
+}
+
+func TestLogError_NilError_DoesNothing(t *testing.T) {
+    var buffer bytes.Buffer
+
+    originalWriter := log.Writer()
+    log.SetOutput(&buffer)
+    defer func() {
+        log.SetOutput(originalWriter)
+    }()
+
+    LogError(nil, nil)
+
+    if 0 != buffer.Len() {
+        t.Fatalf("expected no output for nil error")
+    }
+}
+
+func TestLogError_PlainError_NilLogger_PrintsError(t *testing.T) {
+    var buffer bytes.Buffer
+
+    originalWriter := log.Writer()
+    log.SetOutput(&buffer)
+    defer func() {
+        log.SetOutput(originalWriter)
+    }()
+
+    LogError(nil, errors.New("plain error"))
+
+    output := buffer.String()
+    if false == strings.Contains(output, "plain error") {
+        t.Fatalf("expected plain error in output, got: %s", output)
     }
 }

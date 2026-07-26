@@ -106,8 +106,7 @@ func (instance *FileStorage) Load(sessionId string) (map[string]any, bool, error
     }
 
     if 0 != entry.ExpiresAt && time.Now().UnixNano() >= entry.ExpiresAt {
-        delete(instance.sessionById, sessionId)
-
+        /* the flush is what drops this entry: purgeExpiredLocked runs inside it against the same clock and the same predicate, so naming the session again here would only duplicate the removal */
         flushErr := instance.flushLocked()
         if nil != flushErr {
             return nil, false, flushErr
@@ -122,6 +121,19 @@ func (instance *FileStorage) Load(sessionId string) (map[string]any, bool, error
 func (instance *FileStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
     if "" == sessionId {
         return exception.NewError("session id is required in save session", nil, nil)
+    }
+
+    /* a value stored with SetShared is a handle, and this storage keeps sessions as JSON on disk: nothing it writes can load back as the same value. Refusing the save is the only honest answer available here — encoding the envelope would put an empty object in the file and hand the next request a session that looks intact and has quietly lost what was shared through it, which is precisely the failure the shared/copied distinction exists to make visible. The refusal is whole-session and happens before anything is touched, matching how the rest of this storage commits: a Save that returns an error leaves no trace of itself. The key is named so the caller knows which write to reconsider; the session id is not, because it is a credential and errors get logged. */
+    for key, value := range data {
+        if _, isShared := value.(sharedValue); true == isShared {
+            return exception.NewError(
+                "session value stored with set shared cannot be persisted by the file storage",
+                exceptioncontract.Context{
+                    "key": key,
+                },
+                nil,
+            )
+        }
     }
 
     expiresAt := int64(0)
@@ -225,7 +237,9 @@ func (instance *FileStorage) Close() error {
     return nil
 }
 
-/* purgeExpiredLocked drops every lapsed session before a snapshot is written. Without it an expired session is only ever removed when a Load happens to name it, so entries accumulate forever in the map and in the file — and because every Save rewrites the whole snapshot, the write cost grows with everything that ever expired. */
+/* purgeExpiredLocked drops every lapsed session before a snapshot is written. Without it an expired session is only ever removed when a Load happens to name it, so entries accumulate forever in the map and in the file — and because every Save rewrites the whole snapshot, the write cost grows with everything that ever expired.
+
+This is the one place a lapsed entry is removed: no caller deletes the session it just found expired, they all rely on the flush below reaching this. Anything that narrows the predicate here — leaving a class of lapsed entries in place — has to give those callers their explicit delete back. */
 func (instance *FileStorage) purgeExpiredLocked() {
     now := time.Now().UnixNano()
 
@@ -236,6 +250,7 @@ func (instance *FileStorage) purgeExpiredLocked() {
     }
 }
 
+/* flushLocked writes the snapshot, and purges first — unconditionally, on every path that reaches it. That is what lets Load answer an expired session without deleting it itself; a flush that stopped purging would leave the lapsed entry in the file. */
 func (instance *FileStorage) flushLocked() error {
     instance.purgeExpiredLocked()
 

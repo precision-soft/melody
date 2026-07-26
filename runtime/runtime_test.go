@@ -206,7 +206,7 @@ func TestRuntime_ScopeCloseReturnsErrorOnGet(t *testing.T) {
         t.Fatalf("expected closed-scope error")
     }
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         _ = runtimeInstance.Scope().MustGet("x")
-    })
+    }, "failed to get service from scope")
 }

@@ -630,3 +630,67 @@ func TestRegisterRuntime_ConcurrentWithReadsOfAReferencedParameter(t *testing.T)
 
     waitGroup.Wait()
 }
+
+/* @info A post-boot Resolve cannot reconfigure a running application: every service copied out the values it needed while it was built and none of them looks again. What it still does is rewrite the whole parameter store underneath readers entitled to treat it as settled, so once the application runs it is refused instead of half-honoured. */
+func TestConfiguration_ResolveIsRefusedOnceServing(t *testing.T) {
+    configuration, newConfigurationErr := NewConfiguration(
+        &Environment{
+            values: map[string]string{
+                "APP_TAG": "tag",
+            },
+        },
+        "/srv/app",
+    )
+    if nil != newConfigurationErr {
+        t.Fatalf("expected the configuration to build, got %v", newConfigurationErr)
+    }
+
+    configuration.RegisterRuntime("app.tag", "%env(APP_TAG)%")
+
+    /* the documented manual construction resolves before it serves and has to keep working */
+    if resolveErr := configuration.Resolve(); nil != resolveErr {
+        t.Fatalf("expected the pre-serving resolve to succeed, got %v", resolveErr)
+    }
+
+    configuration.MarkServing()
+
+    resolveErr := configuration.Resolve()
+    if nil == resolveErr {
+        t.Fatalf("expected a resolve to be refused once the application serves")
+    }
+
+    if false == strings.Contains(resolveErr.Error(), "begun serving") {
+        t.Fatalf("expected the refusal to say why, got %q", resolveErr.Error())
+    }
+
+    if "tag" != configuration.MustGet("app.tag").MustString() {
+        t.Fatalf("expected the value resolved before serving to be untouched, got %q", configuration.MustGet("app.tag").MustString())
+    }
+}
+
+/* @info Registering a parameter after boot still works: it resolves itself on registration, which is what keeps a late module functioning without reopening the whole store. */
+func TestConfiguration_RegisterRuntimeStillResolvesOnceServing(t *testing.T) {
+    configuration, newConfigurationErr := NewConfiguration(
+        &Environment{
+            values: map[string]string{
+                "APP_TAG": "tag",
+            },
+        },
+        "/srv/app",
+    )
+    if nil != newConfigurationErr {
+        t.Fatalf("expected the configuration to build, got %v", newConfigurationErr)
+    }
+
+    if resolveErr := configuration.Resolve(); nil != resolveErr {
+        t.Fatalf("expected the pre-serving resolve to succeed, got %v", resolveErr)
+    }
+
+    configuration.MarkServing()
+
+    configuration.RegisterRuntime("app.late", "%env(APP_TAG)%")
+
+    if "tag" != configuration.MustGet("app.late").MustString() {
+        t.Fatalf("expected the late parameter to resolve on registration, got %q", configuration.MustGet("app.late").MustString())
+    }
+}

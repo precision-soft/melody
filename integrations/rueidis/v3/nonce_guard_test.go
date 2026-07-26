@@ -1,6 +1,7 @@
 package rueidis
 
 import (
+    "fmt"
     "testing"
     "time"
 )
@@ -9,7 +10,8 @@ func TestRedisNonceGuard_FirstUseThenReplay(t *testing.T) {
     client := newTokenStoreClient(t)
     guard := NewNonceGuardWithPrefix(client, "melody:nonce:test")
 
-    nonce := "nonce-replay-1"
+    /* the nonce carries the clock so two runs of this package inside the remembered window cannot collide: the guard is doing its job when it reports a fixed nonce as already seen, and a test that reads that as a failure is testing the previous run */
+    nonce := fmt.Sprintf("nonce-replay-%d", time.Now().UnixNano())
 
     seenFirst, firstErr := guard.Remember(newTokenStoreRuntime(), nonce, 5*time.Second)
     if nil != firstErr {
@@ -34,7 +36,7 @@ func TestRedisNonceGuard_NonPositiveTtlIsNotStored(t *testing.T) {
     client := newTokenStoreClient(t)
     guard := NewNonceGuardWithPrefix(client, "melody:nonce:test")
 
-    seen, rememberErr := guard.Remember(newTokenStoreRuntime(), "nonce-expired", 0)
+    seen, rememberErr := guard.Remember(newTokenStoreRuntime(), fmt.Sprintf("nonce-expired-%d", time.Now().UnixNano()), 0)
     if nil != rememberErr {
         t.Fatalf("remember: %v", rememberErr)
     }

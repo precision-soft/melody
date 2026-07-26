@@ -396,6 +396,7 @@ Rotate on the way out too: logout should clear the session ([`Session.Clear`](..
 - A session-backed login that does not call [`RegenerateSession`](../../session/manager.go) is vulnerable to **session fixation**: the id the victim arrived with stays valid and authenticated. Rotating is a per-application responsibility — the framework cannot do it for you, because only the login handler knows when the privilege change happens. See [Session fixation](#session-fixation).
 - `SecurityContextSetOnRuntime` stores the context in the runtime scope under `security/contract.ServiceSecurityContext`.
 - `JwtTokenValidator` requires the `exp` claim by default: a signed token without `exp` is rejected unless you set `JwtConfig{AllowWithoutExpiry: true}`. This differs from RFC 7519, which treats registered claims as optional — so a token that looks valid but omits `exp` resolves to an anonymous token, not an authenticated one.
+- [`ApiKeyHeaderAuthenticator`](../../security/api_key_authenticator.go) compares the supplied header against the expected value with [`crypto/subtle.ConstantTimeCompare`](https://pkg.go.dev/crypto/subtle#ConstantTimeCompare) so timing differences do not leak the expected key.
 
 ## Userland API
 
@@ -472,6 +473,9 @@ Rotate on the way out too: logout should clear the session ([`Session.Clear`](..
 - [`NewRoleVoter()`](../../security/voter.go)
 - [`NewRoleHierarchyVoter(roleHierarchy *RoleHierarchy, delegate *RoleVoter)`](../../security/role_hierarchy_voter.go)
 - [`NewSecurityContext(firewall *CompiledFirewall, token securitycontract.Token)`](../../security/security_context.go)
+- [`NewFirewall(rules ...securitycontract.Rule)`](../../security/firewall.go)
+- [`NewFirewallManager(compiledConfiguration *CompiledConfiguration)`](../../security/firewall_manager.go)
+- [`NewFirewallRegistry(compiledConfiguration *CompiledConfiguration)`](../../security/firewall_registry.go)
 - [`NewCompiledFirewall(...)`](../../security/compiled_configuration.go)
 - [`NewCompiledConfiguration(...)`](../../security/compiled_configuration.go)
 

@@ -301,7 +301,7 @@ func (instance *Validator) validateStruct(value reflect.Value, path string, dept
                         continue
                     }
 
-                    /* a type reached by several equal-depth paths has its fields duplicated per path so a diamond annihilates in the dominance pick, as in encoding/json; two copies decide every tie, so the count is capped there instead of doubling through stacked diamonds */
+                    /* a type reached by several equal-depth paths has its fields duplicated per path so a diamond annihilates in the dominance pick, as in encoding/json; two copies decide every tie, so the count is capped there. The count is how many times this level reaches the type, one increment per embed occurrence, exactly as encoding/json's typeFields counts it — adding the parent's own count instead would cascade an ancestor diamond onto every type below it and annihilate a name that a payload does populate. */
                     nextItem, exists := nextByType[embeddedType]
                     if false == exists {
                         nextItem = &embeddedLevelItem{
@@ -312,7 +312,7 @@ func (instance *Validator) validateStruct(value reflect.Value, path string, dept
                         nextLevel = append(nextLevel, nextItem)
                     }
 
-                    nextItem.count = nextItem.count + item.count
+                    nextItem.count = nextItem.count + 1
                     if 2 < nextItem.count {
                         nextItem.count = 2
                     }

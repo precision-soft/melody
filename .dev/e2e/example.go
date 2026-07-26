@@ -757,7 +757,7 @@ func runExampleCommand(major exampleMajor, workspace string, arguments ...string
     command.Env = exampleRunEnvironment()
 
     output, runErr := command.CombinedOutput()
-    plain := exampleAnsiPattern.ReplaceAllString(string(output), "")
+    plain := exampleStripAnsi(string(output))
 
     if nil != runErr {
         fail("[%s] %s exited %v:\n%s", major.label, strings.Join(arguments, " "), runErr, exampleTail(plain, 20))

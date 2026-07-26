@@ -4,6 +4,7 @@ on:
     push:
         branches: [ main ]
     pull_request:
+    workflow_dispatch:
 
 jobs:
     # vet + test for every workspace module, across the build-tag matrix the
@@ -36,13 +37,26 @@ jobs:
             # framework pin in its go.mod — surfaces only when someone runs
             # run.sh/stack.sh by hand. Mirrors run_e2e_harness_checks in
             # `.dev/validate/all.sh`.
-            -   name: vet the e2e harness module (outside the workspace)
+            -   name: vet and test the e2e harness module (outside the workspace)
                 if: matrix.tags == ''
                 env:
                     GOWORK: "off"
                 run: |
                     set -euo pipefail
                     (cd .dev/e2e && go vet ./...)
+                    (cd .dev/e2e && go test -count=1 ./...)
+
+    # the package documents against the code of every major. The three majors are near-copies whose
+    # documents drifted independently, and nothing compared them: a symbol one major documents while
+    # another ships it undocumented is invisible to every compiler and every test. Reads the tree only,
+    # so it needs neither Go nor a service container. Mirrors run_documentation_checks in
+    # `.dev/validate/all.sh`.
+    documentation:
+        runs-on: ubuntu-latest
+        steps:
+            -   uses: actions/checkout@v4
+            -   name: package documentation against every major
+                run: .dev/validate/documentation.sh
 
     # the race detector over the concurrency-carrying packages of the core majors
     # and the cron runner. The matrix job runs them without it, so a lost mutex or
@@ -73,8 +87,11 @@ jobs:
                     done
 
     # the env-gated live suites the matrix job cannot exercise: real RabbitMQ,
-    # Redis, MySQL, PostgreSQL and S3 (localstack) service containers, -race on
-    # the concurrency-critical ones. Mirrors the manual container run.
+    # Redis, MySQL, PostgreSQL and S3 (localstack) service containers. Every
+    # integration module is discovered and run with the race detector, so a module
+    # added later joins this lane on its own and a race inside an integration —
+    # which no other lane covers — is caught. Mirrors run_live_go_suites in
+    # `.dev/validate/all.sh`.
     live:
         runs-on: ubuntu-latest
         services:
@@ -129,18 +146,39 @@ jobs:
                 with:
                     go-version-file: go.work
                     cache: true
-            -   name: live suites (race on the concurrency-critical ones)
+            -   name: live suites (every integration module, race detector on)
                 run: |
                     set -euo pipefail
-                    (cd integrations/amqp/v3 && go test -race -count=1 ./...)
-                    (cd integrations/rueidis/v3 && go test -race -count=1 ./...)
-                    (cd integrations/rueidis/v2 && go test -count=1 ./...)
-                    (cd integrations/rueidis && go test -count=1 ./...)
-                    (cd integrations/bunorm/mysql/v3 && go test -race -count=1 ./...)
-                    (cd integrations/bunorm/mysql/v2 && go test -count=1 ./...)
-                    (cd integrations/bunorm/mysql && go test -count=1 ./...)
-                    (cd integrations/bunorm/pgsql/v3 && go test -race -count=1 ./...)
-                    (cd integrations/bunorm/pgsql/v2 && go test -count=1 ./...)
-                    (cd integrations/bunorm/pgsql && go test -count=1 ./...)
-                    (cd integrations/outbox/v3 && go test -race -count=1 ./...)
-                    (cd integrations/awss3/v3 && go test -count=1 ./...)
+                    # discovered rather than listed, mirroring run_live_go_suites in
+                    # `.dev/validate/all.sh`: a module added later joins this lane
+                    # without anyone remembering to register it. The suites are gated
+                    # on their backend environment variables, so a module with no live
+                    # test simply runs its ordinary tests again.
+                    find integrations -name go.mod -print0 |
+                        while IFS= read -r -d '' MODULE_GO_MOD_PATH; do
+                            MODULE_DIRECTORY="$(dirname "${MODULE_GO_MOD_PATH}")"
+                            echo "::group::live ${MODULE_DIRECTORY}"
+                            (cd "${MODULE_DIRECTORY}" && go test -race -count=1 ./...)
+                            echo "::endgroup::"
+                        done
+
+    # the live e2e harness and the stack checks: the only lane that drives booted applications over the
+    # wire. Every other job compiles the harness and runs its unit tests, so a middleware whose ordering
+    # only matters once a real request traverses the chain, a route the router registers but never answers,
+    # or a session cookie that never reaches the wire is invisible to all of them. Unlike the jobs above
+    # this one needs the compose stack rather than service containers — prometheus and the load balancer
+    # are configured from files in `.dev/docker/`, which a `services:` container cannot mount — so it runs
+    # `.dev/validate/all.sh --e2e`, the same entry point a developer runs, and the stack comes up through
+    # the same wrapper. It is kept off pull requests because it builds the dev image and boots four
+    # applications; `workflow_dispatch` runs it on a branch on demand.
+    e2e:
+        if: github.event_name != 'pull_request'
+        runs-on: ubuntu-latest
+        timeout-minutes: 45
+        steps:
+            -   uses: actions/checkout@v4
+            -   name: live e2e harness and stack checks
+                run: .dev/validate/all.sh --e2e
+            -   name: compose logs on failure
+                if: failure()
+                run: docker compose -f .dev/docker/docker-compose.yml --env-file .dev/docker/.env logs --tail=200

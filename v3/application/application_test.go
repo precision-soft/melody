@@ -75,7 +75,7 @@ func (instance *testKernel) Clock() clockcontract.Clock {
 var _ kernelcontract.Kernel = (*testKernel)(nil)
 
 func TestAssertPanics_UsesRecover(t *testing.T) {
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         exception.Panic(exception.NewError("test", nil, nil))
-    })
+    }, "test")
 }

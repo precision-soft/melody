@@ -108,3 +108,43 @@ func TestEncryptedString_MasksPlaintextWhenFormatted(t *testing.T) {
         t.Fatalf("explicit string conversion must still expose the value")
     }
 }
+
+/* the column read path is where a truncated ciphertext actually surfaces: Scan must refuse it rather than hand the model a marker and half a base64 blob as though the application had stored them. */
+func TestEncryptedString_ScanReportsATruncatedCiphertext(t *testing.T) {
+    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(7)})
+    cipherInstance := NewCipher(provider)
+    UseCipher(cipherInstance)
+    defer UseCipher(nil)
+
+    sealed, encryptErr := cipherInstance.Encrypt("personal data")
+    if nil != encryptErr {
+        t.Fatalf("encrypt: %v", encryptErr)
+    }
+
+    truncated := truncateSealed(t, sealed, 8)
+
+    var scanned EncryptedString
+    if scanErr := scanned.Scan([]byte(truncated)); nil == scanErr {
+        t.Fatalf("expected scan to report the truncated ciphertext, got %q", string(scanned))
+    }
+
+    if "" != string(scanned) {
+        t.Fatalf("expected no value on a failed scan, got %q", string(scanned))
+    }
+}
+
+/* a column still holding unconverted rows must keep reading while it is encrypted one write at a time. */
+func TestEncryptedString_ScanStillPassesGenuinePlaintextThrough(t *testing.T) {
+    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(7)})
+    UseCipher(NewCipher(provider))
+    defer UseCipher(nil)
+
+    var scanned EncryptedString
+    if scanErr := scanned.Scan([]byte("not encrypted yet")); nil != scanErr {
+        t.Fatalf("expected plaintext to pass through, got %v", scanErr)
+    }
+
+    if "not encrypted yet" != string(scanned) {
+        t.Fatalf("expected the plaintext unchanged, got %q", string(scanned))
+    }
+}

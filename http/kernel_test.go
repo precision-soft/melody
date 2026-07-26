@@ -1242,3 +1242,111 @@ func TestKernel_RouteAttributesCannotReplaceTheKernelOwnedAttributes(t *testing.
         t.Fatalf("expected the kernel-published session to survive a route attribute")
     }
 }
+
+/* @info A handler returning (nil, nil) was answered with an empty 204 written straight out, without kernel.response ever being dispatched — so the one hook that decorates a response never saw it. Measured with the framework's own cross-origin wiring, a nil-returning DELETE came back with no Access-Control-Allow-Origin at all while the identical explicit 204 carried the full set, and the access log recorded status 0. */
+func TestKernel_DispatchesResponseEventForHandlerReturningNoResponse(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodDelete,
+        "/nothing",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return nil, nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainer()
+
+    dispatchCount := 0
+    observedStatusCode := -1
+
+    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher.AddListener(
+        kernelcontract.EventKernelResponse,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            responseEvent, ok := eventValue.Payload().(*KernelResponseEvent)
+            if false == ok {
+                return nil
+            }
+
+            dispatchCount = dispatchCount + 1
+
+            if nil == responseEvent.Response() {
+                return nil
+            }
+
+            observedStatusCode = responseEvent.Response().StatusCode()
+            responseEvent.Response().Headers().Set("Access-Control-Allow-Origin", "https://example.test")
+
+            return nil
+        },
+        0,
+    )
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    request := httptest.NewRequest(nethttp.MethodDelete, "/nothing", nil)
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, request)
+
+    if 1 != dispatchCount {
+        t.Fatalf("expected kernel.response to be dispatched once for the handler that returned no response, got %d dispatches", dispatchCount)
+    }
+
+    if nethttp.StatusNoContent != observedStatusCode {
+        t.Fatalf("expected the listener to be handed the synthesized status %d, got %d", nethttp.StatusNoContent, observedStatusCode)
+    }
+
+    if nethttp.StatusNoContent != recorder.Code {
+        t.Fatalf("expected status %d, got %d", nethttp.StatusNoContent, recorder.Code)
+    }
+
+    if "https://example.test" != recorder.Header().Get("Access-Control-Allow-Origin") {
+        t.Fatalf("expected the listener's header to reach the client, got %q", recorder.Header().Get("Access-Control-Allow-Origin"))
+    }
+}
+
+/* @info A listener may still replace the synthesized empty response, the same way it may replace any other. */
+func TestKernel_ResponseListenerMayReplaceTheSynthesizedEmptyResponse(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/nothing",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return nil, nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainer()
+
+    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher.AddListener(
+        kernelcontract.EventKernelResponse,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            responseEvent, ok := eventValue.Payload().(*KernelResponseEvent)
+            if false == ok {
+                return nil
+            }
+
+            responseEvent.SetResponse(TextResponse(nethttp.StatusTeapot, "replaced"))
+
+            return nil
+        },
+        0,
+    )
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/nothing", nil)
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, request)
+
+    if nethttp.StatusTeapot != recorder.Code {
+        t.Fatalf("expected the listener-replaced status %d, got %d", nethttp.StatusTeapot, recorder.Code)
+    }
+
+    if "replaced" != recorder.Body.String() {
+        t.Fatalf("expected the listener-replaced body, got %q", recorder.Body.String())
+    }
+}

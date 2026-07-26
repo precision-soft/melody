@@ -1,10 +1,21 @@
 package encrypt
 
+import (
+    "sync/atomic"
+)
+
+var fakeCipherSequenceNumber atomic.Uint64
+
 func NewFakeCipher() Cipher {
-    return &fakeCipher{}
+    return &fakeCipher{
+        instanceNumber: fakeCipherSequenceNumber.Add(1),
+    }
 }
 
-type fakeCipher struct{}
+/* the instance number is what keeps two fakes apart: a zero-size struct puts every instance at the same address, so two fakes installed in different registry compartments would compare EQUAL and any assertion that they stayed apart would hold whichever compartment the registry answered from. */
+type fakeCipher struct {
+    instanceNumber uint64
+}
 
 func (instance *fakeCipher) Encrypt(plaintext string) (string, error) {
     return plaintext, nil

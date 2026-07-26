@@ -28,7 +28,11 @@ func ChangeSet(before any, after any) []Change {
 
 func changeSetWithIgnore(before any, after any, ignore map[string]struct{}) []Change {
     var changes []Change
-    collectChanges(&changes, structValue(before), structValue(after), ignore, false)
+
+    /* the embed walk carries a visit record from the root down because Go rejects `type Node struct { Node }` but permits `type Node struct { *Node }`: such an embed can point back at a struct the walk is already inside, and that loop has no nil for the pointer chase to stop on. Seeding the record with the two root pointers means the first embed leading back to the model itself is recognised as the cycle it is, instead of replaying the model's own fields one level down before the guard catches it. */
+    seen := map[embedVisitKey]struct{}{}
+
+    collectChanges(&changes, structValue(before, seen, false), structValue(after, seen, true), ignore, false, seen)
 
     /* an empty result is returned as an empty slice, never a nil one: a nil slice marshals to the JSON literal null in the changes column, where a consumer reading it as an array errors out and cannot tell it from a genuinely absent change-set. An idempotent update and any non-struct model both land here. */
     if 0 == len(changes) {
@@ -38,7 +42,13 @@ func changeSetWithIgnore(before any, after any, ignore map[string]struct{}) []Ch
     return changes
 }
 
-func collectChanges(changes *[]Change, beforeValue reflect.Value, afterValue reflect.Value, ignore map[string]struct{}, forceRedact bool) {
+/* the before and after graphs are keyed apart so a pointer the two sides share — the ordinary shape for an embed the statement did not touch — is not mistaken for a cycle and dropped from the change-set */
+type embedVisitKey struct {
+    pointer uintptr
+    after   bool
+}
+
+func collectChanges(changes *[]Change, beforeValue reflect.Value, afterValue reflect.Value, ignore map[string]struct{}, forceRedact bool, seen map[embedVisitKey]struct{}) {
     var structType reflect.Type
     if true == beforeValue.IsValid() {
         structType = beforeValue.Type()
@@ -64,15 +74,22 @@ func collectChanges(changes *[]Change, beforeValue reflect.Value, afterValue ref
 
             var embeddedBefore reflect.Value
             var embeddedAfter reflect.Value
+            beforeCycle := false
+            afterCycle := false
             if true == oldUsable {
-                embeddedBefore = structValueOf(beforeValue.Field(index))
+                embeddedBefore, beforeCycle = structValueOf(beforeValue.Field(index), seen, false)
             }
             if true == newUsable {
-                embeddedAfter = structValueOf(afterValue.Field(index))
+                embeddedAfter, afterCycle = structValueOf(afterValue.Field(index), seen, true)
+            }
+
+            /* an embed leading back to a struct the walk is already inside contributes nothing: the frame that first reached that struct reports its fields, and descending again would repeat them until the stack is gone. Either side closing the loop drops the whole embed, because walking the other side alone would read as fields appearing or vanishing when nothing about them changed. */
+            if true == beforeCycle || true == afterCycle {
+                continue
             }
 
             embedRedact := forceRedact || "redact" == field.Tag.Get("audit")
-            collectChanges(changes, embeddedBefore, embeddedAfter, ignore, embedRedact)
+            collectChanges(changes, embeddedBefore, embeddedAfter, ignore, embedRedact, seen)
             continue
         }
 
@@ -135,10 +152,7 @@ func isAuditableEmbed(field reflect.StructField) bool {
         return false
     }
 
-    embedded := field.Type
-    for reflect.Ptr == embedded.Kind() {
-        embedded = embedded.Elem()
-    }
+    embedded := dereferencePointerType(field.Type)
 
     if reflect.Struct != embedded.Kind() {
         return false
@@ -147,19 +161,27 @@ func isAuditableEmbed(field reflect.StructField) bool {
     return baseModelType != embedded && encryptedStringType != embedded && encryptedDeterministicStringType != embedded && reflect.TypeOf(time.Time{}) != embedded
 }
 
-func structValueOf(value reflect.Value) reflect.Value {
+/* structValueOf resolves a value to the struct behind it and records every pointer it walks through, reporting as its second result whether the chase met a pointer this walk had already been through. Go permits `type Node struct { *Node }` where it rejects the non-pointer form, so an embedded pointer can lead back to a struct the walk is already inside; that loop carries no nil to end the chase and, unrecorded, the embed recursion runs until the stack is gone — a fatal error, not a panic, so nothing downstream can recover it. */
+func structValueOf(value reflect.Value, seen map[embedVisitKey]struct{}, after bool) (reflect.Value, bool) {
     for reflect.Ptr == value.Kind() {
         if true == value.IsNil() {
-            return reflect.Value{}
+            return reflect.Value{}, false
         }
+
+        key := embedVisitKey{pointer: value.Pointer(), after: after}
+        if _, visited := seen[key]; true == visited {
+            return reflect.Value{}, true
+        }
+        seen[key] = struct{}{}
+
         value = value.Elem()
     }
 
     if reflect.Struct != value.Kind() {
-        return reflect.Value{}
+        return reflect.Value{}, false
     }
 
-    return value
+    return value, false
 }
 
 func valuesEqual(left any, right any) bool {
@@ -186,24 +208,30 @@ func asTime(value any) (time.Time, bool) {
     }
 }
 
-func structValue(value any) reflect.Value {
+func structValue(value any, seen map[embedVisitKey]struct{}, after bool) reflect.Value {
     if nil == value {
         return reflect.Value{}
     }
 
-    reflected := reflect.ValueOf(value)
-    for reflect.Ptr == reflected.Kind() {
-        if true == reflected.IsNil() {
-            return reflect.Value{}
+    resolved, _ := structValueOf(reflect.ValueOf(value), seen, after)
+
+    return resolved
+}
+
+/* dereferencePointerType follows a pointer type down to what it ultimately points at. The chase is not guaranteed to reach a non-pointer: `type Pointer *Pointer` is legal Go and its element is itself, so an unrecorded loop spins at full processor forever, which is a hang no recover and no request timeout can undo. The first type met twice ends the chase and is returned as-is; it is a pointer type, so every caller reads it as "not one of the encrypted string types" and "not a struct", which is the same answer the chase would have produced had it been able to finish. */
+func dereferencePointerType(pointerType reflect.Type) reflect.Type {
+    visited := map[reflect.Type]struct{}{}
+
+    for reflect.Ptr == pointerType.Kind() {
+        if _, seen := visited[pointerType]; true == seen {
+            return pointerType
         }
-        reflected = reflected.Elem()
+        visited[pointerType] = struct{}{}
+
+        pointerType = pointerType.Elem()
     }
 
-    if reflect.Struct != reflected.Kind() {
-        return reflect.Value{}
-    }
-
-    return reflected
+    return pointerType
 }
 
 func isRedactedField(field reflect.StructField) bool {
@@ -211,10 +239,7 @@ func isRedactedField(field reflect.StructField) bool {
         return true
     }
 
-    fieldType := field.Type
-    for reflect.Ptr == fieldType.Kind() {
-        fieldType = fieldType.Elem()
-    }
+    fieldType := dereferencePointerType(field.Type)
 
     if fieldType == encryptedStringType || fieldType == encryptedDeterministicStringType {
         return true
@@ -315,10 +340,7 @@ func valueContainsRedactTagReflect(value reflect.Value, seen map[redactVisitKey]
                 return true
             }
 
-            subFieldType := subField.Type
-            for reflect.Ptr == subFieldType.Kind() {
-                subFieldType = subFieldType.Elem()
-            }
+            subFieldType := dereferencePointerType(subField.Type)
             if subFieldType == encryptedStringType || subFieldType == encryptedDeterministicStringType {
                 return true
             }
@@ -334,10 +356,23 @@ func valueContainsRedactTagReflect(value reflect.Value, seen map[redactVisitKey]
     }
 }
 
+/* typeContainsRedactTag answers whether a redact tag is reachable from fieldType. The type graph it walks is finite but freely cyclic — `type Attributes map[string]Attributes`, `type Node []Node` and `type Pointer *Pointer` are all legal Go, as are the same shapes spread across two named types — so every type is recorded before it is taken apart, both in the element chase and in the recursion, and a type met a second time ends that branch.
+
+Ending it with false is the exact answer rather than a concession. The walk is a reachability question whose result is an OR over the fields, and the first true returns straight out through every frame; a type already under examination can therefore only be reached from a frame that is still exploring it and will report any tag it finds on its own. False here means no redact tag is reachable by any path, and the alternative — answering true for a back-edge — would redact every self-referential shape, `type Category struct { Children []Category }` included, turning the audit trail into a column of placeholders. */
 func typeContainsRedactTag(fieldType reflect.Type, seen map[reflect.Type]struct{}) bool {
     for reflect.Ptr == fieldType.Kind() || reflect.Slice == fieldType.Kind() || reflect.Array == fieldType.Kind() {
+        if _, visited := seen[fieldType]; true == visited {
+            return false
+        }
+        seen[fieldType] = struct{}{}
+
         fieldType = fieldType.Elem()
     }
+
+    if _, visited := seen[fieldType]; true == visited {
+        return false
+    }
+    seen[fieldType] = struct{}{}
 
     if reflect.Map == fieldType.Kind() {
         if true == typeContainsRedactTag(fieldType.Key(), seen) {
@@ -349,11 +384,6 @@ func typeContainsRedactTag(fieldType reflect.Type, seen map[reflect.Type]struct{
     if reflect.Struct != fieldType.Kind() {
         return false
     }
-
-    if _, visited := seen[fieldType]; true == visited {
-        return false
-    }
-    seen[fieldType] = struct{}{}
 
     for index := 0; index < fieldType.NumField(); index++ {
         subField := fieldType.Field(index)

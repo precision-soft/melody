@@ -12,7 +12,7 @@ It coordinates configuration resolution, container bootstrapping, module wiring 
 ## Subpackages
 
 - [`application/contract`](../../application/contract)
-  Public module contracts (`Module`, `ModuleProvider`, `ParameterModule`, `ServiceModule`, `HttpModule`, `CliModule`, `EventModule`, `ConfigModule`).
+  Public module contracts (`Module`, `ModuleProvider`, `ParameterModule`, `ServiceModule`, `HttpModule`, `HttpMiddlewareModule`, `HttpMiddlewareRegistrar`, `CliModule`, `EventModule`, `ConfigModule`).
 
 ## Responsibilities
 
@@ -40,6 +40,18 @@ Runtime mode is determined by [`ParseRuntimeFlags`](../../application/cli.go):
 
 - `--mode=http` or `--mode=cli` (also `-mode=...`)
 - When no explicit mode is provided, non-runtime arguments imply CLI mode.
+
+## Middleware ordering
+
+An [`HttpMiddlewareModule`](../../application/contract/http_middleware_module.go) registers middleware through [`HttpMiddlewareRegistrar`](../../application/contract/http_middleware_module.go): `Use` registers at `MiddlewarePriorityDefault` (`0`) and `UseWithPriority` states the value. [`(*HttpMiddleware).UseFactories`](../../application/http_middleware.go) and [`UseFactoriesWithPriority`](../../application/http_middleware.go) do the same for a middleware that has to be built from the kernel.
+
+The order is decided when the pipeline is built, not at registration:
+
+1. A **lower** priority value ends up **further out** in the chain: it wraps everything after it, so it runs earlier on the way in and sees the response last on the way out.
+2. Registrations at **equal priority** keep **registration order**, the first registered being the outer one. A factory registration and a direct one share one registration sequence, so they compete on the same footing.
+3. `before` / `after` edges declared on a [`pipeline.NewHttpMiddlewareDefinition`](../../http/middleware/pipeline/definition.go) override both. The registrar exposes priority only; edges are for a pipeline assembled directly through [`pipeline.NewBuilder`](../../http/middleware/pipeline/builder.go).
+
+A middleware that answers a request itself, without calling `next`, short-circuits everything ordered inside it — the framework's own static middleware serves a matching file and returns without calling the rest of the chain. It is registered at a priority below the default, which keeps it outermost, so a request for a file that exists is answered before anything registered through the registrar observes it. [`(*HttpMiddleware).LastBuildReport`](../../application/http_middleware.go) reports the chain that was actually built and `debug:middleware` renders it. See [HTTP](HTTP.md) for the full ordering contract and for what a `before`/`after` edge does to the build when it names a definition that is not there.
 
 ## Usage
 
@@ -189,6 +201,8 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 - [`ServiceModule`](../../application/contract/service_module.go)
 - [`ServiceRegistrar`](../../application/contract/service_module.go)
 - [`HttpModule`](../../application/contract/http_module.go)
+- [`HttpMiddlewareModule`](../../application/contract/http_middleware_module.go)
+- [`HttpMiddlewareRegistrar`](../../application/contract/http_middleware_module.go)
 - [`CliModule`](../../application/contract/cli_module.go)
 - [`EventModule`](../../application/contract/event_module.go)
 
@@ -196,7 +210,10 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 
 - [`Application`](../../application/application.go)
 - [`RuntimeFlags`](../../application/cli.go)
+- [`RouteRegistrar`](../../application/application.go) — `func(kernelInstance kernelcontract.Kernel)` function alias used for deferred HTTP route registration
 - [`HttpMiddleware`](../../application/http_middleware.go)
+- [`MiddlewareFactory`](../../application/http_middleware.go) — `func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware` function alias used by `UseFactories` / `UseFactoriesWithPriority`
+- [`SecurityModule`](../../application/security_module.go) — module contract for registering security configuration via `RegisterSecurity(builder *securityconfig.Builder)`
 
 ### Constructors
 

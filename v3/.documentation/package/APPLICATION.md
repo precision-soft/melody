@@ -12,7 +12,7 @@ It coordinates configuration resolution, container bootstrapping, module wiring 
 ## Subpackages
 
 - [`application/contract`](../../application/contract)
-  Public module contracts (`Module`, `ModuleProvider`, `ParameterModule`, `ServiceModule`, `HttpModule`, `HttpMiddlewareModule`, `CliModule`, `EventModule`, `ConfigModule`).
+  Public module contracts (`Module`, `ModuleProvider`, `ParameterModule`, `ServiceModule`, `HttpModule`, `HttpMiddlewareModule`, `HttpMiddlewareRegistrar`, `HttpHandlerDecoratorModule`, `CliModule`, `EventModule`, `ConfigModule`).
 
 ## Responsibilities
 
@@ -58,6 +58,89 @@ Like `--mode`, the `--role` flag never implies CLI mode and is stripped from `os
 ## Service registration
 
 `Application` is itself a container registrar: [`ServiceRegistrar`](../../application/contract/service_module.go) embeds [`container/contract.Registrar`](../../container/contract/registrar.go), so a `RegisterServices` hook reaches the container's own typed helpers — `container.MustRegisterType` and anything generated on top of it (see [WIRING](WIRING.md)) — through `registrar.Register` / `registrar.MustRegister`, not only the name-based `RegisterService`. A duplicate registration is absorbed into the aggregated boot-collision report whichever entry point produced it, naming the user's registration call site.
+
+## Middleware ordering
+
+An [`HttpMiddlewareModule`](../../application/contract/http_middleware_module.go) registers middleware through [`HttpMiddlewareRegistrar`](../../application/contract/http_middleware_module.go): `Use` registers at `MiddlewarePriorityDefault` (`0`) and `UseWithPriority` states the value. [`(*HttpMiddleware).UseFactories`](../../application/http_middleware.go) and [`UseFactoriesWithPriority`](../../application/http_middleware.go) do the same for a middleware that has to be built from the kernel.
+
+The order is decided when the pipeline is built, not at registration:
+
+1. A **lower** priority value ends up **further out** in the chain: it wraps everything after it, so it runs earlier on the way in and sees the response last on the way out.
+2. Registrations at **equal priority** keep **registration order**, the first registered being the outer one. A factory registration and a direct one share one registration sequence, so they compete on the same footing.
+3. `before` / `after` edges declared on a [`pipeline.NewHttpMiddlewareDefinition`](../../http/middleware/pipeline/definition.go) override both. The registrar exposes priority only; edges are for a pipeline assembled directly through [`pipeline.NewBuilder`](../../http/middleware/pipeline/builder.go).
+
+A middleware that answers a request itself, without calling `next`, short-circuits everything ordered inside it — the framework's own static middleware serves a matching file and returns without calling the rest of the chain. It is registered at a priority below the default, which keeps it outermost, so a request for a file that exists is answered before anything registered through the registrar observes it. [`(*HttpMiddleware).LastBuildReport`](../../application/http_middleware.go) reports the chain that was actually built and `debug:middleware` renders it. See [HTTP](HTTP.md) for the full ordering contract and for what a `before`/`after` edge does to the build when it names a definition that is not there.
+
+The chain is not the outermost thing there is, though: a request that a `kernel.request` listener answers never reaches it at all. Wrapping *those* too is what [Handler decorators](#handler-decorators) are for.
+
+## Handler decorators
+
+A **handler decorator** and a middleware are two different seams, and the distance between them is the reason both exist. [`HttpHandlerDecorator`](../../application/contract/http_handler_decorator_module.go) is `func(next nethttp.Handler) nethttp.Handler` — plain `net/http` — and it wraps the single handler [`(*Kernel).ServeHttp`](../../http/kernel.go) produces, which [`runHttp`](../../application/application_http.go) then hands to `nethttp.Server` as its `Handler`. A middleware is `func(next httpcontract.Handler) httpcontract.Handler` and is composed *inside* that handler, around the routed one.
+
+Everything the kernel does for a request therefore happens **inside** what a decorator wraps: opening the container scope, building the request logger, stamping `X-Request-Id` on the writer, loading the session, dispatching `kernel.request`, matching the route, recovering a panic, dispatching `kernel.response` and `kernel.terminate`. The middleware chain is the last of those steps and it is not always reached — when a `kernel.request` listener produces a response, the kernel writes it and returns without ever building the chain, and the same holds for `kernel.controller`. An access-control denial is exactly that shape. So a middleware observes only requests that reached the handler stage — which does include the kernel's own `404` and `405` fallbacks, since the chain is wrapped around those too, but not one answered before the chain was built — while a decorator observes **every** request the server accepted: the `401` and `403` the security listener wrote, the response a listener substituted, the `500` the recovery path produced. That is where a metric, a trace span or a per-request timer belongs, because those want the requests the chain never saw as much as the ones it did.
+
+What a decorator gives up in exchange is the request itself. It runs before the container scope exists, so there is no scoped service to resolve, no [`httpcontract.Request`](../../http/contract/request.go), no [`runtimecontract.Runtime`](../../runtime/contract/runtime.go) — only the raw `*nethttp.Request` and `nethttp.ResponseWriter`. Reading the status code means wrapping the writer; reading the request id means reading `X-Request-Id` back off `writer.Header()` after `next` returns, since the kernel sets it there. A decorator also sits outside the kernel's panic recovery for the one case the kernel deliberately re-panics — `net/http`'s `ErrAbortHandler` — so work that must happen on the way out belongs in a `defer`, not on the line after the `next` call.
+
+Decorators come from two places and share one order:
+
+1. [`(*Application).RegisterHttpHandlerDecorator`](../../application/application_http.go) registers one directly. It panics after boot, and it panics on a `nil` decorator rather than storing one.
+2. A module implementing [`HttpHandlerDecoratorModule`](../../application/contract/http_handler_decorator_module.go) returns a slice from `RegisterHttpHandlerDecorators(kernelInstance)` during boot. A `nil` entry in that slice is skipped, not stored.
+
+**The first registered decorator is the outermost**: [`runHttp`](../../application/application_http.go) wraps the kernel handler last-to-first, so registration order reads outside-in, the same way the middleware chain does. Direct registrations all happen before `Boot`, and a module's hook runs during it, so a directly registered decorator is always outside every module-contributed one.
+
+```go
+package main
+
+import (
+	nethttp "net/http"
+	"sync/atomic"
+	"time"
+
+	applicationcontract "github.com/precision-soft/melody/v3/application/contract"
+	kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
+)
+
+var servedRequestCount atomic.Int64
+var servedNanoseconds atomic.Int64
+
+type observabilityModule struct{}
+
+func (instance *observabilityModule) Name() string {
+	return "observability"
+}
+
+func (instance *observabilityModule) Description() string {
+	return "times every request, the short-circuited ones included"
+}
+
+func (instance *observabilityModule) RegisterHttpHandlerDecorators(
+	kernelInstance kernelcontract.Kernel,
+) []applicationcontract.HttpHandlerDecorator {
+	_ = kernelInstance
+
+	return []applicationcontract.HttpHandlerDecorator{
+		func(next nethttp.Handler) nethttp.Handler {
+			return nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+				startedAt := time.Now()
+
+				/*
+				 * deferred rather than written after the call, so an aborted
+				 * connection — which the kernel re-panics with ErrAbortHandler —
+				 * is still counted.
+				 */
+				defer func() {
+					servedRequestCount.Add(1)
+					servedNanoseconds.Add(int64(time.Since(startedAt)))
+				}()
+
+				next.ServeHTTP(writer, request)
+			})
+		},
+	}
+}
+
+var _ applicationcontract.HttpHandlerDecoratorModule = (*observabilityModule)(nil)
+```
 
 ## Usage
 
@@ -204,6 +287,10 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 - [`ServiceModule`](../../application/contract/service_module.go)
 - [`ServiceRegistrar`](../../application/contract/service_module.go)
 - [`HttpModule`](../../application/contract/http_module.go)
+- [`HttpMiddlewareModule`](../../application/contract/http_middleware_module.go)
+- [`HttpMiddlewareRegistrar`](../../application/contract/http_middleware_module.go)
+- [`HttpHandlerDecoratorModule`](../../application/contract/http_handler_decorator_module.go)
+- [`HttpHandlerDecorator`](../../application/contract/http_handler_decorator_module.go)
 - [`CliModule`](../../application/contract/cli_module.go)
 - [`EventModule`](../../application/contract/event_module.go)
 
@@ -211,7 +298,10 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 
 - [`Application`](../../application/application.go)
 - [`RuntimeFlags`](../../application/cli.go)
+- [`RouteRegistrar`](../../application/application.go) — `func(kernelInstance kernelcontract.Kernel)` function alias used for deferred HTTP route registration
 - [`HttpMiddleware`](../../application/http_middleware.go)
+- [`MiddlewareFactory`](../../application/http_middleware.go) — `func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware` function alias used by `UseFactories` / `UseFactoriesWithPriority`
+- [`SecurityModule`](../../application/security_module.go) — module contract for registering security configuration via `RegisterSecurity(builder *securityconfig.Builder)`
 
 ### Constructors
 
@@ -237,6 +327,8 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 - [`(*Application).RegisterHttpRoute(method, pattern, handler)`](../../application/application_http.go)
 - [`(*Application).RegisterHttpMiddlewares(middlewares...)`](../../application/application_http.go)
 - [`(*Application).RegisterHttpMiddlewareFactories(factories...)`](../../application/application_http.go)
+- [`(*Application).RegisterHttpHandlerDecorator(decorator)`](../../application/application_http.go) — see [Handler decorators](#handler-decorators)
+- [`(*Application).OnHttpShutdown(hook)`](../../application/application_http.go) — runs the moment the http server begins shutting down, before it waits for connections to drain, which is how a Server-Sent Events stream or a websocket is released instead of blocking the whole shutdown timeout
 
 ### Middleware helpers
 

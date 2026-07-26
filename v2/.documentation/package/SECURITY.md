@@ -266,6 +266,7 @@ Rotate on the way out too: logout should clear the session ([`Session.Clear`](..
 - `AccessControl` uses a deterministic match priority: exact match first, then longest prefix match (including segment-prefix rules), then regex rules in the order they were registered, then the empty-prefix fallback. See [`(*AccessControl).Match`](../../security/access_control.go).
 - A session-backed login that does not call [`RegenerateSession`](../../session/manager.go) is vulnerable to **session fixation**: the id the victim arrived with stays valid and authenticated. Rotating is a per-application responsibility — the framework cannot do it for you, because only the login handler knows when the privilege change happens. See [Session fixation](#session-fixation).
 - `SecurityContextSetOnRuntime` stores the context in the runtime scope under `security/contract.ServiceSecurityContext`.
+- [`ApiKeyHeaderAuthenticator`](../../security/api_key_authenticator.go) compares the supplied header against the expected value with [`crypto/subtle.ConstantTimeCompare`](https://pkg.go.dev/crypto/subtle#ConstantTimeCompare) so timing differences do not leak the expected key.
 
 ## Userland API
 
@@ -321,9 +322,15 @@ Rotate on the way out too: logout should clear the session ([`Session.Clear`](..
 - [`NewApiKeyHeaderAuthenticator(headerName string, expectedValue string, userId string, roles []string)`](../../security/api_key_authenticator.go)
 - [`NewAuthenticatorManager(authenticators ...securitycontract.Authenticator)`](../../security/authenticator_manager.go)
 - [`NewAuthenticatorTokenSource(authenticatorManager *AuthenticatorManager)`](../../security/token_source.go)
+- [`NewResolverTokenSource(resolver securitycontract.TokenResolver)`](../../security/token_source.go)
 - [`NewAccessDecisionManager(strategy securitycontract.DecisionStrategy, voters ...securitycontract.Voter)`](../../security/access_decision_manager.go)
+- [`NewAccessDecisionManagerWithVoters(strategy securitycontract.DecisionStrategy, voters []securitycontract.Voter)`](../../security/access_decision_manager.go)
 - [`NewRoleVoter()`](../../security/voter.go)
+- [`NewRoleHierarchyVoter(roleHierarchy *RoleHierarchy, delegate *RoleVoter)`](../../security/role_hierarchy_voter.go)
 - [`NewSecurityContext(firewall *CompiledFirewall, token securitycontract.Token)`](../../security/security_context.go)
+- [`NewFirewall(rules ...securitycontract.Rule)`](../../security/firewall.go)
+- [`NewFirewallManager(compiledConfiguration *CompiledConfiguration)`](../../security/firewall_manager.go)
+- [`NewFirewallRegistry(compiledConfiguration *CompiledConfiguration)`](../../security/firewall_registry.go)
 - [`NewCompiledFirewall(...)`](../../security/compiled_configuration.go)
 - [`NewCompiledConfiguration(...)`](../../security/compiled_configuration.go)
 

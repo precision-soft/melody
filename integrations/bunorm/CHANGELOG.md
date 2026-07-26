@@ -6,8 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-## [v1.0.2] - 2026-07-25 - Contained Manager Registry Teardown
-
 ### Fixed
 
 - the manager registry no longer wedges permanently when opening a database panics while the registry is being closed. The section that publishes the opened manager released its lock without a defer, so a panic from the database's own `Close` unwound with the lock held and the recovery path then blocked on that same lock — after which every later call to the registry blocked forever, silently. A provider returning a nil database was enough to trigger it
@@ -31,9 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `errors.go` — error sentinels: `ErrResolverIsRequired`, `ErrNoProviderDefinitions`, `ErrProviderDefinitionNameIsRequired`, `ErrProviderIsRequired`, `ErrProviderDefinitionNameMustBeUnique`, `ErrMultipleDefaultProviderDefinitions`
 - `README.md` — service registration patterns
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v1.0.2...HEAD
-
-[v1.0.2]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v1.0.1...integrations/bunorm/v1.0.2
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v1.0.1...HEAD
 
 [v1.0.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v1.0.0...integrations/bunorm/v1.0.1
 

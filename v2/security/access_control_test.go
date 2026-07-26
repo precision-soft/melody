@@ -419,21 +419,21 @@ func TestAccessControlRule_RejectsAnAttributeListThatNormalizesToEmpty(t *testin
         {"   "},
         {"", "  "},
     } {
-        testhelper.AssertPanics(t, func() {
+        testhelper.AssertPanicsWithError(t, func() {
             NewAccessControlRule("/admin", attributes...)
-        })
+        }, "access control rule requires at least one attribute")
 
-        testhelper.AssertPanics(t, func() {
+        testhelper.AssertPanicsWithError(t, func() {
             NewAccessControlExactRule("/admin", attributes...)
-        })
+        }, "access control rule requires at least one attribute")
 
-        testhelper.AssertPanics(t, func() {
+        testhelper.AssertPanicsWithError(t, func() {
             NewAccessControlRegexRule("^/admin", attributes...)
-        })
+        }, "access control rule requires at least one attribute")
 
-        testhelper.AssertPanics(t, func() {
+        testhelper.AssertPanicsWithError(t, func() {
             NewAccessControlRuleWithSegmentPrefix("/admin", attributes...)
-        })
+        }, "access control rule requires at least one attribute")
     }
 
     rule := NewAccessControlRule("/admin", "", "ROLE_ADMIN", "   ")

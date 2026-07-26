@@ -4,12 +4,14 @@
 # the dev-container exec wrappers and the check pass/fail accounting. Source it; never execute it.
 #
 # How to add a new check (stack.sh style):
-#   1. section_start "MY CHECK" "${TAG_VALIDATE}" "e2e"
+#   1. check_section_start "MY CHECK" "${TAG_VALIDATE}" "e2e"
 #   2. run_in_dev_capture "$(e2e_example_directory 3)" "go run . my:command"   # name the major the check drives
 #      then read RUN_IN_DEV_OUTPUT_STRING / RUN_IN_DEV_STATUS_INTEGER (never call it inside "$(...)")
 #   3. assert with check_pass "..." / check_fail "..." — every check needs a reachable fail branch;
 #      a check that cannot fail is a bug
-#   4. section_end "MY CHECK" "success" "${TAG_VALIDATE}" "e2e" and keep finish_checks last in the script
+#   4. check_section_end "MY CHECK" "${TAG_VALIDATE}" "e2e" — it reports the status the section's own checks
+#      earned, so never call section_end with a hardcoded "success" from a check script
+#   5. keep finish_checks last in the script and raise its expected check count by the number of checks added
 
 if [[ "1" = "${MELODY_E2E_COMMON_SOURCED:-0}" ]]; then
     return 0
@@ -72,8 +74,24 @@ SMTP_ADDRESS="${SMTP_ADDRESS-mailpit:1025}"
 MAILPIT_API_URL="${MAILPIT_API_URL-http://mailpit:8025}"
 EXAMPLE_BASE_URL="${EXAMPLE_BASE_URL-http://127.0.0.1:8080}"
 EXAMPLE_LOAD_BALANCER_URL="${EXAMPLE_LOAD_BALANCER_URL-http://load-balancer:80}"
+# the harness's OWN connection to the database the example writes through: the mysql and two-factor sections
+# re-read a column out of band instead of trusting the value the application reported, and delete the row they
+# created. Clearing it keeps both sections running with their out-of-band halves announced as skipped.
+# The credentials are the example's own (v3/.example/.env) and the address is the compose service name on the
+# compose network, as seen from inside the dev container.
+MYSQL_DSN="${MYSQL_DSN-melody:melody@tcp(mysql:3306)/melody_example}"
+# the dev prometheus that scrapes the example's /metrics (.dev/docker/prometheus/prometheus.yml). The port is the
+# IN-NETWORK 9090, not the 9091 the host mapping publishes: every e2e variable addresses the compose services from
+# inside the dev container. Clearing it skips the scrape half of the metrics section.
+PROMETHEUS_URL="${PROMETHEUS_URL-http://prometheus:9090}"
 
 CHECK_FAILURE_COUNT_INTEGER=0
+CHECK_EXECUTED_COUNT_INTEGER=0
+
+# the failure count the section currently open began with; check_section_end compares against it to report the
+# status that section's own checks earned. One variable is enough because the check sections are flat — a check
+# script opens one section, asserts, closes it and opens the next.
+CHECK_SECTION_FAILURE_BASELINE_INTEGER=0
 
 RUN_IN_DEV_OUTPUT_STRING=""
 RUN_IN_DEV_STATUS_INTEGER=0
@@ -109,6 +127,8 @@ e2e_dev_command() {
         " MAILPIT_API_URL='${MAILPIT_API_URL}'" \
         " EXAMPLE_BASE_URL='${EXAMPLE_BASE_URL}'" \
         " EXAMPLE_LOAD_BALANCER_URL='${EXAMPLE_LOAD_BALANCER_URL}'" \
+        " MYSQL_DSN='${MYSQL_DSN}'" \
+        " PROMETHEUS_URL='${PROMETHEUS_URL}'" \
         " MELODY_E2E_MAJORS='${MELODY_E2E_MAJORS}'" \
         "; cd ${DIRECTORY_STRING} || exit 1; ${COMMAND_STRING}"
 }
@@ -145,20 +165,53 @@ run_in_dev_capture() {
 
 check_pass() {
     printf 'PASS  %s\n' "${1}"
+    CHECK_EXECUTED_COUNT_INTEGER="$((CHECK_EXECUTED_COUNT_INTEGER + 1))"
 }
 
 check_fail() {
     printf 'FAIL  %s\n' "${1}" >&2
     CHECK_FAILURE_COUNT_INTEGER="$((CHECK_FAILURE_COUNT_INTEGER + 1))"
+    CHECK_EXECUTED_COUNT_INTEGER="$((CHECK_EXECUTED_COUNT_INTEGER + 1))"
 }
 
-# prints the summary and exits non-zero when any check failed; the label names the check family ("stack")
+# opens a check section and snapshots the failure counter, so its end can report what the section actually did
+check_section_start() {
+    CHECK_SECTION_FAILURE_BASELINE_INTEGER="${CHECK_FAILURE_COUNT_INTEGER}"
+
+    section_start "$@"
+}
+
+# closes a check section with the status its own checks earned: "failure" when the failure counter moved while the
+# section ran, "success" otherwise. A check script must never pass the status itself — a hardcoded "success" is
+# how a section that ran a check_fail still printed a green banner
+check_section_end() {
+    local TITLE_STRING="${1:?}"
+    shift
+
+    local STATUS_STRING="success"
+    if [[ ${CHECK_FAILURE_COUNT_INTEGER} -gt ${CHECK_SECTION_FAILURE_BASELINE_INTEGER} ]]; then
+        STATUS_STRING="failure"
+    fi
+
+    section_end "${TITLE_STRING}" "${STATUS_STRING}" "$@"
+}
+
+# prints the summary and exits non-zero when any check failed; the label names the check family ("stack"). The
+# expected count is what makes a DELETED check block red: no individual assertion can notice its own absence, so
+# the run states up front how many checks a complete pass executes and finishes by comparing it with the number
+# that actually ran
 finish_checks() {
     local LABEL_STRING="${1:?}"
+    local EXPECTED_COUNT_INTEGER="${2:-}"
+
+    if [[ "" != "${EXPECTED_COUNT_INTEGER}" && ${EXPECTED_COUNT_INTEGER} -ne ${CHECK_EXECUTED_COUNT_INTEGER} ]]; then
+        check_fail "the run executed ${CHECK_EXECUTED_COUNT_INTEGER} ${LABEL_STRING} check(s), expected ${EXPECTED_COUNT_INTEGER} — a check block was skipped, removed or added (update the expected count in the same change)"
+    fi
 
     if [[ 0 -lt ${CHECK_FAILURE_COUNT_INTEGER} ]]; then
         fail "${CHECK_FAILURE_COUNT_INTEGER} ${LABEL_STRING} check(s) failed"
     fi
 
-    printf '\nALL %s CHECKS PASSED\n' "$(utility_to_upper "${LABEL_STRING}")"
+    printf '\nALL %s CHECKS PASSED (%s of %s)\n' \
+        "$(utility_to_upper "${LABEL_STRING}")" "${CHECK_EXECUTED_COUNT_INTEGER}" "${EXPECTED_COUNT_INTEGER:-${CHECK_EXECUTED_COUNT_INTEGER}}"
 }

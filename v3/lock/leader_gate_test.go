@@ -503,3 +503,135 @@ func (instance *contextSensitiveAcquireLock) Release(runtimeInstance runtimecont
 func (instance *contextSensitiveAcquireLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl time.Duration) error {
     return nil
 }
+
+/* hangingRefreshLocker acquires and releases through the real locker but never answers a renewal: the store took the call and went quiet, the way a wedged connection or an unresponsive replica does. The call comes back only when the context handed to it is cancelled, which is precisely the deadline a renewal must carry. */
+type hangingRefreshLocker struct {
+    inner lockcontract.Locker
+}
+
+func (instance *hangingRefreshLocker) CreateLock(name string, ttl time.Duration) lockcontract.Lock {
+    return &hangingRefreshLock{inner: instance.inner.CreateLock(name, ttl)}
+}
+
+type hangingRefreshLock struct {
+    inner lockcontract.Lock
+}
+
+func (instance *hangingRefreshLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+    return instance.inner.Acquire(runtimeInstance)
+}
+
+func (instance *hangingRefreshLock) Release(runtimeInstance runtimecontract.Runtime) error {
+    return instance.inner.Release(runtimeInstance)
+}
+
+func (instance *hangingRefreshLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl time.Duration) error {
+    <-runtimeInstance.Context().Done()
+
+    return exception.NewError("lock refresh never answered", nil, runtimeInstance.Context().Err())
+}
+
+/* A renewal that takes longer than the lease is not the same failure the cadence clamp defends against: nothing lets the lease lapse in the schedule, the call itself simply never comes back. With leadership derived from "did the last renewal return an error", there is no error to derive it from, so the holder keeps claiming the lock while the lease runs out underneath it and a second instance acquires — two leaders, both certain. */
+func TestLeaderGate_ARenewalThatNeverAnswersNeverYieldsTwoLeaders(t *testing.T) {
+    innerLocker := NewInMemoryLocker(clock.NewSystemClock())
+
+    ttl := 400 * time.Millisecond
+    options := LeaderGateOptions{
+        RetryInterval:   20 * time.Millisecond,
+        RefreshInterval: 200 * time.Millisecond,
+    }
+
+    firstContext, firstCancel := context.WithCancel(context.Background())
+    defer firstCancel()
+    secondContext, secondCancel := context.WithCancel(context.Background())
+    defer secondCancel()
+
+    first := NewLeaderGateWithOptions(&hangingRefreshLocker{inner: innerLocker}, "worker:split-brain", ttl, options)
+    second := NewLeaderGateWithOptions(innerLocker, "worker:split-brain", ttl, options)
+
+    var waitGroup sync.WaitGroup
+    waitGroup.Add(2)
+    go func() {
+        defer waitGroup.Done()
+        _ = first.Run(testRuntimeWithContext(firstContext))
+    }()
+    go func() {
+        defer waitGroup.Done()
+        _ = second.Run(testRuntimeWithContext(secondContext))
+    }()
+
+    /* long enough for the lease to lapse several times over under the renewal that never answers */
+    deadline := time.Now().Add(2 * time.Second)
+    for time.Now().Before(deadline) {
+        if true == first.IsLeader() && true == second.IsLeader() {
+            firstCancel()
+            secondCancel()
+            waitGroup.Wait()
+
+            t.Fatalf("both gates claimed the same lock: the lease lapsed under a renewal that never answered")
+        }
+
+        time.Sleep(5 * time.Millisecond)
+    }
+
+    firstCancel()
+    secondCancel()
+    waitGroup.Wait()
+}
+
+/* IsLeader and the hooks are two signals for one fact, and LOCK.md tells callers to combine them, so the claim must fall the moment the lease is provably lost — not when the hook that was elected finally unwinds, which is a duration the gate does not control and a hook ignoring its cancelled context never reaches at all. */
+func TestLeaderGate_LeadershipDropsWhileTheElectedHookIsStillRunning(t *testing.T) {
+    failing := &switchableRefreshLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
+    failing.fail.Store(true)
+
+    runContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    hookEntered := make(chan struct{})
+    releaseHook := make(chan struct{})
+
+    gate := NewLeaderGateWithOptions(failing, "worker:hook-unwind", time.Minute, LeaderGateOptions{
+        RetryInterval:   5 * time.Millisecond,
+        RefreshInterval: 5 * time.Millisecond,
+        OnElected: func(runtimeInstance runtimecontract.Runtime) {
+            close(hookEntered)
+
+            /* a hook that outlives the lease: the gate cannot campaign again while it runs, so leadership is whatever IsLeader says it is */
+            <-releaseHook
+        },
+    })
+
+    done := make(chan error, 1)
+    go func() {
+        done <- gate.Run(testRuntimeWithContext(runContext))
+    }()
+
+    <-hookEntered
+
+    waitUntil(t, 2*time.Second, func() bool {
+        return false == gate.IsLeader()
+    }, "expected the gate to stop claiming a lease it lost, without waiting for the elected hook to return")
+
+    close(releaseHook)
+    cancel()
+    <-done
+}
+
+/* The budget of one renewal has to expire while the lease it renews is still valid, or abandoning the call buys nothing: by the time the gate demoted, the lock would already be someone else's. Half the cadence — itself at most half the lease — leaves the other half to notice and stop the work. */
+func TestLeaderGate_TheRenewalBudgetExpiresWellBeforeTheLease(t *testing.T) {
+    locker := NewInMemoryLocker(clock.NewSystemClock())
+
+    for _, ttl := range []time.Duration{100 * time.Millisecond, 400 * time.Millisecond, 30 * time.Second, 5 * time.Minute} {
+        gate := NewLeaderGateWithOptions(locker, "worker:budget", ttl, LeaderGateOptions{})
+
+        timeout := resolveRefreshTimeout(gate.options.RefreshInterval)
+
+        if 0 >= timeout {
+            t.Fatalf("a ttl of %v derived a non-positive renewal budget %v, which expires before the call is made", ttl, timeout)
+        }
+
+        if timeout >= ttl/2 {
+            t.Fatalf("a ttl of %v derived a renewal budget of %v, which outlives the lease it renews", ttl, timeout)
+        }
+    }
+}

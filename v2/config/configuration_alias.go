@@ -53,6 +53,10 @@ var environmentKeyAliasMap = map[string][]string{
         StaticCacheMaxAgeKey,
         KernelStaticCacheMaxAge,
     },
+    StaticExcludedPathsKey: {
+        StaticExcludedPathsKey,
+        KernelStaticExcludedPaths,
+    },
     HttpMaxRequestBodyBytesKey: {
         HttpMaxRequestBodyBytesKey,
         KernelHttpMaxRequestBodyBytes,

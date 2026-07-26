@@ -100,9 +100,9 @@ func TestRegister_PanicsOnNilRootCommand(t *testing.T) {
         },
     }
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         Register(nil, command, runtimeInstance)
-    })
+    }, "root cli command may not be nil")
 }
 
 func TestRegister_PanicsOnNilCommand(t *testing.T) {
@@ -110,9 +110,9 @@ func TestRegister_PanicsOnNilCommand(t *testing.T) {
 
     rootCommand := NewCommandContext("app", "desc")
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         Register(rootCommand, nil, runtimeInstance)
-    })
+    }, "cli command may not be nil")
 }
 
 func TestRegister_PanicsOnNilRuntime(t *testing.T) {
@@ -127,9 +127,9 @@ func TestRegister_PanicsOnNilRuntime(t *testing.T) {
         },
     }
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         Register(rootCommand, command, nil)
-    })
+    }, "runtime instance may not be nil in cli register")
 }
 
 func TestRegister_PanicsOnEmptyCommandName(t *testing.T) {
@@ -145,9 +145,9 @@ func TestRegister_PanicsOnEmptyCommandName(t *testing.T) {
         },
     }
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         Register(rootCommand, command, runtimeInstance)
-    })
+    }, "cli command name may not be empty")
 }
 
 func TestRegister_AppendsCommandAndBindsFields(t *testing.T) {
@@ -221,9 +221,9 @@ func TestRegister_PanicsOnDuplicateCommandName(t *testing.T) {
 
     Register(rootCommand, commandA, runtimeInstance)
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         Register(rootCommand, commandB, runtimeInstance)
-    })
+    }, "cli command name already registered")
 }
 
 func TestRegister_ActionCallsRunWithRuntimeInstance(t *testing.T) {

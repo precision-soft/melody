@@ -63,9 +63,9 @@ func TestPrefersHtml_ReturnsFalseForWildcard(t *testing.T) {
 }
 
 func TestPrefersHtml_CaseInsensitive(t *testing.T) {
-    request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/", "Text/HTML")
+    request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/", "Text/HTML,Application/JSON")
     if false == PrefersHtml(request) {
-        t.Fatalf("expected true for case-insensitive text/html match")
+        t.Fatalf("expected true for case-insensitive html before json")
     }
 }
 
@@ -117,5 +117,12 @@ func TestPrefersHtml_HonoursQualityValues(t *testing.T) {
         if testCase.expected != actual {
             t.Fatalf("Accept %q: expected prefersHtml=%v, got %v", testCase.acceptHeader, testCase.expected, actual)
         }
+    }
+}
+
+func TestPrefersHtml_ReturnsFalseForNeither(t *testing.T) {
+    request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/", "application/xml,text/plain")
+    if true == PrefersHtml(request) {
+        t.Fatalf("expected false when neither text/html nor application/json is present")
     }
 }

@@ -106,7 +106,107 @@ func copyAnyValueAtDepth(value any, depth int) any {
         }
 
         return copiedMap.Interface()
+    case reflect.Pointer:
+        return copyPointerAtDepth(reflectedValue, value, depth)
+    case reflect.Struct:
+        return copyStructAtDepth(reflectedValue, value, depth)
+    case reflect.Array:
+        return copyArrayAtDepth(reflectedValue, value, depth)
     }
 
     return value
+}
+
+/* a pointer handed through a copy addresses the very value the source keeps reading, so the copy isolates nothing: a consumer that writes through it writes into the original. The pointee is copied into a fresh allocation and the returned pointer addresses that. Identity is deliberately not preserved — two pointers that addressed one value in the source address two values in the copy — because a copy whose holder can still reach the source is not a copy. */
+func copyPointerAtDepth(reflectedValue reflect.Value, value any, depth int) any {
+    if true == reflectedValue.IsNil() {
+        return value
+    }
+
+    copiedPointer := reflect.New(reflectedValue.Type().Elem())
+
+    copiedElement := copyAnyValueAtDepth(reflectedValue.Elem().Interface(), depth+1)
+    if nil != copiedElement {
+        copiedPointer.Elem().Set(reflect.ValueOf(copiedElement))
+    }
+
+    return copiedPointer.Interface()
+}
+
+/* a struct travels inside an interface as a copy of its own bytes, so its scalar fields are isolated already; its slice, map and pointer fields are not, because those fields are headers that keep addressing the source's memory. That is how a consumer which only reads the copy still writes into the original. Every exported field that can carry such a reference is copied.
+
+Unexported fields cannot be read or written through reflection without unsafe, so they stay as the whole-struct assignment left them: shallow. That limit is also what keeps the handle types usable through a copy — an *os.File, a *sql.DB, the location inside a time.Time are reached through unexported fields, and duplicating them would produce a structurally valid value that no longer names the thing it stood for.
+
+A struct with no exported field that can alias is returned as it arrived, so the common case — a time, a decoded number, a plain record of scalars — allocates nothing. */
+func copyStructAtDepth(reflectedValue reflect.Value, value any, depth int) any {
+    structType := reflectedValue.Type()
+
+    var copiedStruct reflect.Value
+
+    for index := 0; index < structType.NumField(); index++ {
+        field := structType.Field(index)
+
+        if false == field.IsExported() {
+            continue
+        }
+
+        if false == kindMayAliasSource(field.Type.Kind()) {
+            continue
+        }
+
+        if false == copiedStruct.IsValid() {
+            copiedStruct = reflect.New(structType).Elem()
+            copiedStruct.Set(reflectedValue)
+        }
+
+        copiedField := copyAnyValueAtDepth(reflectedValue.Field(index).Interface(), depth+1)
+        if nil == copiedField {
+            copiedStruct.Field(index).Set(reflect.Zero(field.Type))
+
+            continue
+        }
+
+        copiedStruct.Field(index).Set(reflect.ValueOf(copiedField))
+    }
+
+    if false == copiedStruct.IsValid() {
+        return value
+    }
+
+    return copiedStruct.Interface()
+}
+
+/* an array is copied whole when it is assigned, so only its elements can still address the source. An array of scalars is returned as it arrived rather than walked, which is what keeps a checksum or an identifier free of any cost. */
+func copyArrayAtDepth(reflectedValue reflect.Value, value any, depth int) any {
+    arrayType := reflectedValue.Type()
+
+    if false == kindMayAliasSource(arrayType.Elem().Kind()) {
+        return value
+    }
+
+    copiedArray := reflect.New(arrayType).Elem()
+    copiedArray.Set(reflectedValue)
+
+    for index := 0; index < reflectedValue.Len(); index++ {
+        copiedElement := copyAnyValueAtDepth(reflectedValue.Index(index).Interface(), depth+1)
+        if nil == copiedElement {
+            copiedArray.Index(index).Set(reflect.Zero(arrayType.Elem()))
+
+            continue
+        }
+
+        copiedArray.Index(index).Set(reflect.ValueOf(copiedElement))
+    }
+
+    return copiedArray.Interface()
+}
+
+/* the kinds whose value still names memory the source keeps using: a slice or map header, a pointer, an interface holding any of those, and the two composites that can contain them. Every other kind is duplicated by the assignment itself, so walking it would allocate for nothing. Chan and Func are absent on purpose — each names a single shared thing that has no copy, so aliasing is the only behaviour available for them. */
+func kindMayAliasSource(kind reflect.Kind) bool {
+    switch kind {
+    case reflect.Slice, reflect.Map, reflect.Pointer, reflect.Interface, reflect.Struct, reflect.Array:
+        return true
+    }
+
+    return false
 }

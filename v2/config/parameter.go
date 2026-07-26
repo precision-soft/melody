@@ -4,6 +4,7 @@ import (
     "fmt"
     "strconv"
     "strings"
+    "sync"
     "sync/atomic"
     "time"
 
@@ -26,10 +27,26 @@ func NewParameter(environmentKey string, environmentValue any, value any, isDefa
 type Parameter struct {
     environmentKey   string
     environmentValue any
-    value            any
-    isDefault        bool
+    /* @important valueMutex guards value on its own, because the configuration lock does not reach the readers: a service handed the *Parameter reads it through the accessors below without ever touching the configuration, while Resolve rewrites every parameter under the configuration write lock. Two different locks around the same field are no lock at all, so the write side goes through storeValue and every read through loadValue. */
+    valueMutex sync.RWMutex
+    value      any
+    isDefault  bool
     /* @important atomic because MarkSecret may mark a parameter under the configuration lock while a consumer that already holds the pointer asks IsSecret without it */
     isSecret atomic.Bool
+}
+
+func (instance *Parameter) loadValue() any {
+    instance.valueMutex.RLock()
+    defer instance.valueMutex.RUnlock()
+
+    return instance.value
+}
+
+func (instance *Parameter) storeValue(value any) {
+    instance.valueMutex.Lock()
+    defer instance.valueMutex.Unlock()
+
+    instance.value = value
 }
 
 func (instance *Parameter) EnvironmentKey() string {
@@ -41,7 +58,7 @@ func (instance *Parameter) EnvironmentValue() any {
 }
 
 func (instance *Parameter) Value() any {
-    return instance.value
+    return instance.loadValue()
 }
 
 func (instance *Parameter) IsDefault() bool {
@@ -54,7 +71,7 @@ func (instance *Parameter) IsSecret() bool {
 }
 
 func (instance *Parameter) String() string {
-    stringValue, ok := instance.value.(string)
+    stringValue, ok := instance.loadValue().(string)
     if true == ok {
         return stringValue
     }
@@ -63,7 +80,9 @@ func (instance *Parameter) String() string {
 }
 
 func (instance *Parameter) MustString() string {
-    stringValue, ok := instance.value.(string)
+    value := instance.loadValue()
+
+    stringValue, ok := value.(string)
     if true == ok {
         return stringValue
     }
@@ -73,7 +92,7 @@ func (instance *Parameter) MustString() string {
             "cannot convert parameter value to string",
             map[string]any{
                 "environmentKey": instance.environmentKey,
-                "valueType":      fmt.Sprintf("%T", instance.value),
+                "valueType":      fmt.Sprintf("%T", value),
             },
             nil,
         ),
@@ -83,12 +102,14 @@ func (instance *Parameter) MustString() string {
 }
 
 func (instance *Parameter) Bool() (bool, error) {
-    boolValue, ok := instance.value.(bool)
+    value := instance.loadValue()
+
+    boolValue, ok := value.(bool)
     if true == ok {
         return boolValue, nil
     }
 
-    stringValue, ok := instance.value.(string)
+    stringValue, ok := value.(string)
     if true == ok {
         parsedValue, boolFromStringErr := internal.BoolFromString(stringValue)
         if nil != boolFromStringErr {
@@ -114,12 +135,14 @@ func (instance *Parameter) Bool() (bool, error) {
 }
 
 func (instance *Parameter) Int() (int, error) {
-    intValue, ok := instance.value.(int)
+    value := instance.loadValue()
+
+    intValue, ok := value.(int)
     if true == ok {
         return intValue, nil
     }
 
-    stringValue, ok := instance.value.(string)
+    stringValue, ok := value.(string)
     if true == ok {
         parsedValue, atoiErr := strconv.Atoi(strings.TrimSpace(stringValue))
         if nil != atoiErr {
@@ -145,7 +168,7 @@ func (instance *Parameter) Int() (int, error) {
 }
 
 func (instance *Parameter) Float() (float64, error) {
-    floatValue, isSet, floatErr := internal.Float64(instance.value, instance.environmentKey)
+    floatValue, isSet, floatErr := internal.Float64(instance.loadValue(), instance.environmentKey)
     if nil != floatErr || false == isSet {
         return 0, exception.NewError(
             "cannot convert parameter value to float",
@@ -160,7 +183,7 @@ func (instance *Parameter) Float() (float64, error) {
 }
 
 func (instance *Parameter) Duration() (time.Duration, error) {
-    durationValue, isSet, durationErr := internal.Duration(instance.value, instance.environmentKey)
+    durationValue, isSet, durationErr := internal.Duration(instance.loadValue(), instance.environmentKey)
     if nil != durationErr || false == isSet {
         return 0, exception.NewError(
             "cannot convert parameter value to duration",

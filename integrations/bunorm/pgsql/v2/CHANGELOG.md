@@ -6,8 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-## [v2.0.7] - 2026-07-25 - Connection-Abort Retry Markers
-
 ### Fixed
 
 - `provider.go` — transient-error detection recognises a connection abort through explicit markers for both spellings its platforms give it (`software caused connection abort` and `established connection was aborted`), and the deprecated `net.Error.Temporary()` call is removed: the interface was deprecated in Go 1.18 for its ill-defined semantics, and the one retryable case it uniquely caught is now covered by the marker
@@ -62,9 +60,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Code moved to `integrations/bunorm/pgsql/v2/` with matching module path
 - Dependencies: `github.com/precision-soft/melody/integrations/bunorm/v2 v2.0.0`, `github.com/precision-soft/melody/v2 v2.0.0`
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v2.0.7...HEAD
-
-[v2.0.7]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v2.0.6...integrations/bunorm/pgsql/v2.0.7
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v2.0.6...HEAD
 
 [v2.0.6]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v2.0.5...integrations/bunorm/pgsql/v2.0.6
 

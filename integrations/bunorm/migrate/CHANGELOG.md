@@ -6,8 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-## [v1.2.1] - 2026-07-25 - Migration Lock Release on an Interrupted Run
-
 ### Fixed
 
 - the migration lock is released on a context detached from the command's own, so interrupting a running migration no longer leaves the lock row behind and refusing every later migration until someone runs the unlock command by hand. The cancelled context made the delete fail before it reached the database, and the failure was discarded; it is now reported
@@ -49,9 +47,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `migrate.go` — `migrate.Up()` / `UpWithOption()` — forward-migration convenience; `Down()` / `DownWithOption()` — rollback convenience
 - `README.md` — migration workflow documentation; CLI commands introduced in the v2 binding
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v1.2.1...HEAD
-
-[v1.2.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v1.2.0...integrations/bunorm/migrate/v1.2.1
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v1.2.0...HEAD
 
 [v1.2.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v1.1.1...integrations/bunorm/migrate/v1.2.0
 

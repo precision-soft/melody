@@ -72,15 +72,15 @@ func TestEvent_Constructors(t *testing.T) {
 }
 
 func TestEvent_Constructors_PanicOnEmptyName(t *testing.T) {
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         NewEvent("", nil, clock.NewSystemClock())
-    })
+    }, "event name may not be empty")
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         NewEventWithTimestamp("", nil, time.Now())
-    })
+    }, "event name may not be empty")
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         NewEventFromEvent(NewEventWithTimestamp("", nil, time.Now()))
-    })
+    }, "event name may not be empty")
 }

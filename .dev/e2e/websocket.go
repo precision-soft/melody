@@ -22,8 +22,11 @@ func runWebsocketCheck() {
     hub := melodyhttp.NewServerSentEventHub()
     defer hub.Shutdown()
 
+    /* IdleTimeout is required; this half of the check is about the fan-out, so it is set far past the
+    check's own lifetime and no ping ever fires */
     streamHandler := melodywebsocket.NewStreamHandler(hub, melodywebsocket.Options{
         OriginPatterns: []string{"*"},
+        IdleTimeout:    30 * time.Second,
     })
 
     server := serveWebsocketHandler(streamHandler)

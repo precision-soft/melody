@@ -12,15 +12,18 @@ fi
 . "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/utility.sh"
 
 MODE_STRING="all"
+SKIP_LIVE_BOOLEAN="false"
 if [[ "" = "${1-}" ]]; then
     :
 elif [[ "-h" = "${1-}" ]]; then
-    println "usage: all.sh [-h] [--all | --staged | --live]"
+    println "usage: all.sh [-h] [--all | --staged | --live | --e2e] [--skip-live]"
     println ""
-    println "  -h         show this help and exit"
-    println "  --all      validate all modules and the live integration suites (default)"
-    println "  --staged   validate only modules with staged changes"
-    println "  --live     run only the live integration suites (mirrors the ci live job)"
+    println "  -h           show this help and exit"
+    println "  --all        validate all modules, the live integration suites and the live e2e run (default)"
+    println "  --staged     validate only modules with staged changes"
+    println "  --live       run only the live integration suites (mirrors the ci live job)"
+    println "  --e2e        run only the live e2e harness and stack checks (mirrors the ci e2e job)"
+    println "  --skip-live  leave the live suites and the e2e run out of --all, for a hand run with no backends"
     exit 0
 elif [[ "--staged" = "${1-}" ]]; then
     MODE_STRING="staged"
@@ -28,8 +31,17 @@ elif [[ "--all" = "${1-}" ]]; then
     MODE_STRING="all"
 elif [[ "--live" = "${1-}" ]]; then
     MODE_STRING="live"
+elif [[ "--e2e" = "${1-}" ]]; then
+    MODE_STRING="e2e"
+elif [[ "--skip-live" = "${1-}" ]]; then
+    MODE_STRING="all"
+    SKIP_LIVE_BOOLEAN="true"
 else
     fail "unknown flag: ${1}"
+fi
+
+if [[ "--skip-live" = "${2-}" ]]; then
+    SKIP_LIVE_BOOLEAN="true"
 fi
 
 SERVICE_NAME_STRING="dev"
@@ -98,37 +110,27 @@ LIVE_SERVICE_NAME_STRING_LIST=(
 
 LIVE_ENVIRONMENT_EXPORT_STRING="export AMQP_DSN='amqp://guest:guest@rabbitmq:5672/' REDIS_ADDRESS='redis:6379' MYSQL_DSN='melody:melody@tcp(mysql:3306)/melody_example' PGSQL_HOST='postgres' PGSQL_PORT='5432' PGSQL_DATABASE='melody_test' PGSQL_USER='melody' PGSQL_PASSWORD='melody' POSTGRES_DSN='postgres://melody:melody@postgres:5432/melody_test?sslmode=disable' MINIO_ENDPOINT='localstack:4566' MINIO_ACCESS_KEY='test' MINIO_SECRET_KEY='test'"
 
-LIVE_SUITE_SPECIFICATION_STRING_LIST=(
-    "integrations/amqp/v3 -race"
-    "integrations/rueidis/v3 -race"
-    "integrations/rueidis/v2"
-    "integrations/rueidis"
-    "integrations/bunorm/mysql/v3 -race"
-    "integrations/bunorm/mysql/v2"
-    "integrations/bunorm/mysql"
-    "integrations/bunorm/pgsql/v3 -race"
-    "integrations/bunorm/pgsql/v2"
-    "integrations/bunorm/pgsql"
-    "integrations/outbox/v3 -race"
-    "integrations/awss3/v3"
-)
 
+# every integration module is discovered rather than listed, so a module added later joins this lane without
+# anyone remembering to register it — the list that had to be maintained by hand is exactly the one that gets
+# forgotten. The suites are gated on their backend environment variables, so a module with no live test simply
+# runs its ordinary tests again, and the detector runs over all of them because a race in an integration is
+# caught by nothing else.
 run_live_go_suites() {
     docker_compose up -d --wait "${LIVE_SERVICE_NAME_STRING_LIST[@]}"
 
     local BATCH_COMMAND_LIST=()
 
-    local LIVE_SUITE_SPECIFICATION_STRING
-    for LIVE_SUITE_SPECIFICATION_STRING in "${LIVE_SUITE_SPECIFICATION_STRING_LIST[@]}"; do
-        local LIVE_MODULE_RELATIVE_PATH_STRING="${LIVE_SUITE_SPECIFICATION_STRING%% *}"
-
-        local LIVE_RACE_FLAG_STRING=""
-        if [[ "${LIVE_SUITE_SPECIFICATION_STRING}" != "${LIVE_MODULE_RELATIVE_PATH_STRING}" ]]; then
-            LIVE_RACE_FLAG_STRING="${LIVE_SUITE_SPECIFICATION_STRING#* } "
+    local LIVE_MODULE_DIRECTORY_STRING
+    while IFS= read -r LIVE_MODULE_DIRECTORY_STRING; do
+        if [[ "" = "${LIVE_MODULE_DIRECTORY_STRING}" ]]; then
+            continue
         fi
 
-        BATCH_COMMAND_LIST+=("${LIVE_ENVIRONMENT_EXPORT_STRING} && cd ${CONTAINER_ROOT_PATH}/${LIVE_MODULE_RELATIVE_PATH_STRING} && go test ${LIVE_RACE_FLAG_STRING}-count=1 ./...")
-    done
+        local LIVE_MODULE_RELATIVE_PATH_STRING="${LIVE_MODULE_DIRECTORY_STRING#${REPOSITORY_ROOT_DIRECTORY_STRING}/}"
+
+        BATCH_COMMAND_LIST+=("${LIVE_ENVIRONMENT_EXPORT_STRING} && cd ${CONTAINER_ROOT_PATH}/${LIVE_MODULE_RELATIVE_PATH_STRING} && go test -race -count=1 ./...")
+    done < <(get_integration_module_directory_list)
 
     run_section "melody live integration suites (mirrors the ci live job)" "${TAG_VALIDATE}" "go" -- \
         run_batch_in_service_shell "${SERVICE_NAME_STRING}" "${BATCH_COMMAND_LIST[@]}"
@@ -168,14 +170,65 @@ run_race_go_suites() {
 
 # the e2e harness module is deliberately outside go.work (it builds GOWORK=off against the local replaces),
 # so no other lane compiles it: a break in the harness — or a stale framework pin in its go.mod — would
-# otherwise surface only when someone runs run.sh or stack.sh by hand
+# otherwise surface only when someone runs run.sh or stack.sh by hand. Its own unit tests run here too:
+# they cover the parsing the harness does before it ever reaches a backend — the section catalogue, the
+# server-sent-event frame reader, the prometheus exposition reader, the token minters — and nothing else
+# executes them, so without this lane a harness assertion could stop working and every live run would
+# still report a pass.
 run_e2e_harness_checks() {
     if [[ ! -f "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/e2e/go.mod" ]]; then
         return 0
     fi
 
     run_section "melody e2e harness module (.dev/e2e, GOWORK=off)" "${TAG_VALIDATE}" "go" -- \
-        run_batch_in_service_shell "${SERVICE_NAME_STRING}" "cd ${CONTAINER_ROOT_PATH}/.dev/e2e && GOWORK=off go vet ./..."
+        run_batch_in_service_shell "${SERVICE_NAME_STRING}" \
+        "cd ${CONTAINER_ROOT_PATH}/.dev/e2e && GOWORK=off go vet ./..." \
+        "cd ${CONTAINER_ROOT_PATH}/.dev/e2e && GOWORK=off go test -count=1 ./..."
+}
+
+# the package documents against the code of every major. The three majors are near-copies whose documents
+# drifted independently, and nothing compared them: a symbol one major documents while another ships it
+# undocumented is invisible to every compiler and every test. Reads the tree only, so it needs no container
+# and costs seconds.
+run_documentation_checks() {
+    if [[ ! -x "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/documentation.sh" ]]; then
+        return 0
+    fi
+
+    run_section "melody package documentation against every major (mirrors the ci documentation job)" "${TAG_VALIDATE}" "docs" -- \
+        "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/documentation.sh"
+}
+
+# the two live e2e scripts. Every other lane compiles the harness and runs its unit tests; nothing until here
+# actually drives a booted application over the wire, and that is the only place a whole class of defect shows
+# up at all — a middleware ordering that only matters once a real request traverses the chain, a route the
+# router registers but never answers, a session cookie that never reaches the wire. The scripts are host
+# scripts: each execs into the dev container itself, so this lane brings the stack up and hands off. mailpit
+# and prometheus join the live backends because the mail and metric sections scrape them directly, and the
+# load balancer because a stack check asserts what it routes.
+E2E_SERVICE_NAME_STRING_LIST=(
+    "rabbitmq"
+    "redis"
+    "mysql"
+    "postgres"
+    "localstack"
+    "mailpit"
+    "prometheus"
+    "load-balancer"
+)
+
+run_e2e_live_checks() {
+    if [[ ! -x "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/e2e/run.sh" ]]; then
+        return 0
+    fi
+
+    docker_compose up -d --wait "${E2E_SERVICE_NAME_STRING_LIST[@]}"
+
+    run_section "melody e2e harness live run (.dev/e2e/run.sh)" "${TAG_VALIDATE}" "e2e" -- \
+        "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/e2e/run.sh"
+
+    run_section "melody e2e stack checks (.dev/e2e/stack.sh)" "${TAG_VALIDATE}" "e2e" -- \
+        "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/e2e/stack.sh"
 }
 
 get_versioned_module_directory_list() {
@@ -310,6 +363,13 @@ main() {
         return 0
     fi
 
+    if [[ "e2e" = "${MODE_STRING}" ]]; then
+        run_e2e_live_checks
+
+        success "validation completed"
+        return 0
+    fi
+
     if [[ "all" = "${MODE_STRING}" ]]; then
         run_go_checks "${ROOT_DIRECTORY_STRING}" "melody framework (root module)"
 
@@ -329,9 +389,16 @@ main() {
 
         run_e2e_harness_checks
 
+        run_documentation_checks
+
         run_race_go_suites
 
-        run_live_go_suites
+        if [[ "true" = "${SKIP_LIVE_BOOLEAN}" ]]; then
+            info "skip live integration suites and live e2e run (--skip-live)"
+        else
+            run_live_go_suites
+            run_e2e_live_checks
+        fi
 
         success "validation completed"
         return 0

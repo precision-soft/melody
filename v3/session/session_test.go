@@ -123,3 +123,62 @@ func TestSession_String_ReturnsEmptyWhenMissing(t *testing.T) {
         t.Fatalf("expected empty string")
     }
 }
+
+/* sharedCounter stands for what SetShared exists to carry: a value whose identity is the point, so that a test can tell the one that was stored from a faithful copy of it. */
+type sharedCounter struct {
+    count int
+}
+
+func TestSession_SetShared_GetAndAllReturnTheStoredHandle(t *testing.T) {
+    sessionInstance := &Session{
+        id:       "id",
+        values:   map[string]any{},
+        modified: false,
+        cleared:  false,
+    }
+
+    handle := &sharedCounter{count: 1}
+
+    sessionInstance.SetShared("counter", handle)
+
+    if handle != sessionInstance.Get("counter") {
+        t.Fatalf("expected get to return the stored handle")
+    }
+
+    if handle != sessionInstance.All()["counter"] {
+        t.Fatalf("expected all to return the stored handle and not its envelope")
+    }
+
+    if false == sessionInstance.IsModified() {
+        t.Fatalf("expected modified")
+    }
+}
+
+func TestSession_SetShared_StoresTheValueBehindAnEnvelopeForStorage(t *testing.T) {
+    sessionInstance := &Session{
+        id:       "id",
+        values:   map[string]any{},
+        modified: false,
+        cleared:  false,
+    }
+
+    handle := &sharedCounter{count: 1}
+
+    sessionInstance.Set("copied", handle)
+    sessionInstance.SetShared("shared", handle)
+
+    stored := sessionInstance.storedValues()
+
+    envelope, isEnvelope := stored["shared"].(sharedValue)
+    if false == isEnvelope {
+        t.Fatalf("expected the shared value to reach storage in its envelope")
+    }
+
+    if handle != envelope.value {
+        t.Fatalf("expected the envelope to carry the stored handle")
+    }
+
+    if handle != stored["copied"] {
+        t.Fatalf("expected a value stored with set to reach storage bare")
+    }
+}

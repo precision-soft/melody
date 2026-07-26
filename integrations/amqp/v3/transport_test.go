@@ -1864,3 +1864,160 @@ func TestStartConsumeLoop_RefusesOnceCloseHasBegun(t *testing.T) {
         t.Fatalf("a refused start must leave the wait group at zero, so nothing outlives the join")
     }
 }
+
+/* the incremented RedeliveryStamp / DeadLetterAttemptStamp only ever reach the broker on the re-publish, so a requeue that abandons it and hands the original delivery back returns the message with the counts it arrived with. MaxRetries and MaxDeadLetterAttempts are then measured against the same numbers on every delivery and the message never dead-letters; a transient publish failure is therefore attempted again, and only a bounded number of times so a permanent one still reaches a verdict. */
+func TestPublishRequeue_RetriesABoundedNumberOfTimesBeforeGivingUp(t *testing.T) {
+    dialCount := 0
+
+    instance := &Transport{
+        queue:       "orders",
+        closeSignal: make(chan struct{}),
+        reconnect:   ReconnectConfig{InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond, BackoffFactor: 1},
+        dialer: func() (*amqp091.Connection, error) {
+            dialCount++
+
+            return nil, exception.NewError("dial refused", nil, nil)
+        },
+    }
+
+    publishErr := instance.publishRequeue(
+        newReconnectRuntime(context.Background()),
+        "",
+        "orders",
+        amqp091.Publishing{},
+    )
+    if nil == publishErr {
+        t.Fatalf("expected the re-publish to fail once every attempt is spent")
+    }
+
+    /* every attempt is a publish, and a publish already retries once on a freshly dialed connection */
+    if 2*republishAttemptCount != dialCount {
+        t.Fatalf("expected %d dial attempts across %d re-publish attempts, got %d", 2*republishAttemptCount, republishAttemptCount, dialCount)
+    }
+}
+
+/* a transport that is shutting down must not spend its attempts against a broker it is disconnecting from */
+func TestPublishRequeue_ClosingTransportStopsWithoutRetrying(t *testing.T) {
+    dialCount := 0
+
+    instance := &Transport{
+        queue:       "orders",
+        closeSignal: make(chan struct{}),
+        reconnect:   ReconnectConfig{InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond, BackoffFactor: 1},
+        closing:     true,
+        dialer: func() (*amqp091.Connection, error) {
+            dialCount++
+
+            return nil, exception.NewError("dial refused", nil, nil)
+        },
+    }
+
+    if publishErr := instance.publishRequeue(newReconnectRuntime(context.Background()), "", "orders", amqp091.Publishing{}); nil == publishErr {
+        t.Fatalf("expected the re-publish to fail on a closing transport")
+    }
+
+    /* a closing transport refuses to hand out a publish channel at all, so the attempt never reaches the dialer and the loop must not spin on that refusal */
+    if 0 != dialCount {
+        t.Fatalf("expected a closing transport never to dial, got %d", dialCount)
+    }
+}
+
+/* the loop the retry counters exist to break: the re-publish is the only carrier of the advanced counts, so a requeue of the ORIGINAL delivery hands the message back with x-redelivery-count unchanged, the consumer reads the same count again, requeues again, and nothing ever reaches the dead-letter queue — at full speed, because the DelayStamp is discarded with the envelope too. */
+func TestTransport_RequeueThatCannotCarryItsCountersDeadLettersInsteadOfLooping(t *testing.T) {
+    dsn := os.Getenv("AMQP_DSN")
+    if "" == dsn {
+        t.Skip("AMQP_DSN not set; skipping amqp integration test")
+    }
+
+    provider := NewProvider()
+    connection, openErr := provider.Open(dsn)
+    if nil != openErr {
+        t.Fatalf("open connection: %v", openErr)
+    }
+    defer provider.Close(connection)
+
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, "amqp.test.uncounted")
+
+    queueName := "melody.amqp.uncounted"
+    transport := NewTransport(TransportConfig{
+        Connection: connection,
+        Queue:      queueName,
+        Prefetch:   1,
+        Registry:   registry,
+        DeadLetter: true,
+    })
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+    defer transport.Close(runtimeInstance)
+
+    /* the queues survive the run, so anything an earlier one parked in them would be read as this run's result */
+    purgeQueue(t, connection, queueName)
+    purgeQueue(t, connection, queueName+".dlq")
+
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "uncounted"})); nil != sendErr {
+        t.Fatalf("send: %v", sendErr)
+    }
+
+    queue, receiveErr := transport.Receive(runtimeInstance)
+    if nil != receiveErr {
+        t.Fatalf("receive: %v", receiveErr)
+    }
+
+    delivered := receiveWithin(t, queue, 10*time.Second)
+    if 0 != melodymessagebus.RedeliveryCount(delivered) {
+        t.Fatalf("expected initial redelivery count 0, got %d", melodymessagebus.RedeliveryCount(delivered))
+    }
+
+    /* a delay below the smallest bucket routes the re-publish through the per-message-ttl delay queue; deleting that queue makes the publish unroutable for good, which is the shape of every permanent re-publish failure */
+    deleteQueue(t, connection, queueName+".delay")
+
+    retried := delivered.
+        WithStamp(melodymessagebus.RedeliveryStamp{Count: 1}).
+        WithStamp(melodymessagebus.DelayStamp{Delay: 100 * time.Millisecond})
+
+    if nackErr := transport.Nack(runtimeInstance, retried, true); nil != nackErr {
+        t.Fatalf("nack requeue: %v", nackErr)
+    }
+
+    select {
+    case looped := <-queue:
+        t.Fatalf("expected no redelivery, got the message back with redelivery count %d", melodymessagebus.RedeliveryCount(looped))
+    case <-time.After(3 * time.Second):
+    }
+
+    if false == drainedToDeadLetter(t, connection, queueName+".dlq", 10*time.Second) {
+        t.Fatalf("expected the requeue that could not carry its counters to reach the dead-letter queue")
+    }
+}
+
+func deleteQueue(t *testing.T, connection *amqp091.Connection, queueName string) {
+    t.Helper()
+
+    channel, channelErr := connection.Channel()
+    if nil != channelErr {
+        t.Fatalf("open delete channel: %v", channelErr)
+    }
+    defer channel.Close()
+
+    if _, deleteErr := channel.QueueDelete(queueName, false, false, false); nil != deleteErr {
+        t.Fatalf("delete queue %q: %v", queueName, deleteErr)
+    }
+}
+
+/* purgeQueue empties a durable test queue on its own channel, tolerating a queue that does not exist yet: a purge of an unknown queue is a channel-level error, which would take the caller's channel down with it. */
+func purgeQueue(t *testing.T, connection *amqp091.Connection, queueName string) {
+    t.Helper()
+
+    channel, channelErr := connection.Channel()
+    if nil != channelErr {
+        t.Fatalf("open purge channel: %v", channelErr)
+    }
+    defer channel.Close()
+
+    _, _ = channel.QueuePurge(queueName, false)
+}

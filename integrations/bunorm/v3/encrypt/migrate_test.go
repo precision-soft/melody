@@ -7,6 +7,7 @@ import (
     "errors"
     "io"
     "strings"
+    "sync"
     "testing"
 
     "github.com/uptrace/bun"
@@ -79,7 +80,7 @@ func TestEncryptTransform_DeterministicKeepsTheKeyTheValueCarries(t *testing.T) 
         t.Fatalf("deterministic encrypt transform: %v", convertErr)
     }
 
-    keyId, encrypted := keyIdOf(converted)
+    keyId, encrypted, _ := keyIdOf(converted)
     if false == encrypted || "v1" != keyId {
         t.Fatalf("expected the converted value to keep key v1, got %q (encrypted=%v)", keyId, encrypted)
     }
@@ -195,6 +196,22 @@ func TestReencryptTransform_RandomizedSameKeyRewritesDeterministicValue(t *testi
 type stubMigrateDriver struct {
     rowsAffected int64
     served       bool
+    mutex        sync.Mutex
+    queryList    []string
+}
+
+func (instance *stubMigrateDriver) record(query string) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.queryList = append(instance.queryList, query)
+}
+
+func (instance *stubMigrateDriver) recorded() []string {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return append([]string(nil), instance.queryList...)
 }
 
 func (instance *stubMigrateDriver) Open(name string) (driver.Conn, error) {
@@ -206,6 +223,8 @@ type stubMigrateConnection struct {
 }
 
 func (instance *stubMigrateConnection) Prepare(query string) (driver.Stmt, error) {
+    instance.shared.record(query)
+
     return &stubMigrateStatement{shared: instance.shared, query: query}, nil
 }
 
@@ -235,6 +254,11 @@ func (instance *stubMigrateStatement) Exec(arguments []driver.Value) (driver.Res
 }
 
 func (instance *stubMigrateStatement) Query(arguments []driver.Value) (driver.Rows, error) {
+    /* the capacity pre-flight probes the widest value not already sealed; the stub answers "no such value" so the probe returns a row rather than no rows at all */
+    if true == strings.Contains(instance.query, "MAX(LENGTH(") {
+        return &stubMigrateRows{columns: []string{"longest"}, remaining: [][]driver.Value{{nil}}}, nil
+    }
+
     if false == strings.Contains(instance.query, "ORDER BY") || true == instance.shared.served {
         return &stubMigrateRows{}, nil
     }
@@ -257,10 +281,15 @@ func (instance *stubMigrateResult) RowsAffected() (int64, error) {
 }
 
 type stubMigrateRows struct {
+    columns   []string
     remaining [][]driver.Value
 }
 
 func (instance *stubMigrateRows) Columns() []string {
+    if 0 != len(instance.columns) {
+        return instance.columns
+    }
+
     return []string{"id", "secret"}
 }
 
@@ -301,6 +330,27 @@ func newStubMigrator(t *testing.T, driverName string, rowsAffected int64) *Migra
     }
 }
 
+func newRecordingStubMigrator(t *testing.T, driverName string, rowsAffected int64) (*Migrator, *stubMigrateDriver) {
+    t.Helper()
+
+    stub := &stubMigrateDriver{rowsAffected: rowsAffected}
+    sql.Register(driverName, stub)
+
+    sqlDatabase, openErr := sql.Open(driverName, "stub")
+    if nil != openErr {
+        t.Fatalf("open stub database: %v", openErr)
+    }
+
+    t.Cleanup(func() { _ = sqlDatabase.Close() })
+
+    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+
+    return &Migrator{
+        db:     bun.NewDB(sqlDatabase, mysqldialect.New()),
+        cipher: NewCipher(provider),
+    }, stub
+}
+
 /* @info the update is guarded on the value read for the row, so a row that changed under the run matches zero rows and keeps its plaintext; counting it as processed and exiting zero let a deployment gated on the exit code proceed over values that were never migrated */
 func TestMigrate_ReportsRowsTheGuardedUpdateDidNotTouch(t *testing.T) {
     migrator := newStubMigrator(t, "zzMigrateSkipStub", 0)
@@ -337,5 +387,120 @@ func TestMigrate_CountsRowsTheUpdateApplied(t *testing.T) {
 
     if 1 != processed {
         t.Fatalf("expected the applied row to be counted, got %d", processed)
+    }
+}
+
+/* the pre-image guard is evaluated under the COLUMN's collation unless the comparison says otherwise, and every collation the migrator meets in practice equates values it exists to tell apart: MySQL 8's default utf8mb4_0900_ai_ci ignores casing, and any PAD SPACE collation ignores trailing whitespace. A concurrent write of either shape then matches the value that was read, the update applies, that write is destroyed and no skip is recorded. */
+func TestApplyRow_GuardsThePreImageOnBytesRatherThanTheColumnCollation(t *testing.T) {
+    migrator, stub := newRecordingStubMigrator(t, "zzMigrateGuardShapeStub", 1)
+
+    if _, runErr := migrator.MigrateEncrypt(
+        context.Background(),
+        TableSpec{Table: "user", PrimaryKey: "id", Columns: []string{"secret"}},
+    ); nil != runErr {
+        t.Fatalf("unexpected error: %v", runErr)
+    }
+
+    var updateSql string
+    for _, query := range stub.recorded() {
+        if true == strings.HasPrefix(query, "UPDATE ") {
+            updateSql = query
+        }
+    }
+
+    if "" == updateSql {
+        t.Fatalf("expected the run to issue an update, recorded %v", stub.recorded())
+    }
+
+    if false == strings.Contains(updateSql, "CAST(`secret` AS BINARY) = ?") {
+        t.Fatalf("expected the pre-image guard to compare bytes, got %q", updateSql)
+    }
+
+    if true == strings.Contains(updateSql, "AND `secret` = ?") {
+        t.Fatalf("expected no collation-dependent pre-image comparison, got %q", updateSql)
+    }
+}
+
+/* a seal expands its input by roughly a third plus fifty characters, so an in-place encryption needs a wider column than the plaintext ever did. The numbers the capacity check and the README quote are pinned here against real seals: a VARCHAR(255) holds the sealed form of 152 bytes and overflows at 153. */
+func TestSealedProbeLength_PinsTheExpansionAVarchar255StopsFitting(t *testing.T) {
+    migrator := &Migrator{cipher: NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)}))}
+
+    cases := []struct {
+        plaintextByteLength int
+        expected            int
+    }{
+        /* 11 marker characters, a two character key id, a colon, and the base64 of a 12 byte nonce plus the plaintext plus a 16 byte tag */
+        {plaintextByteLength: 0, expected: 52},
+        {plaintextByteLength: 152, expected: 254},
+        {plaintextByteLength: 153, expected: 256},
+        {plaintextByteLength: 200, expected: 318},
+    }
+
+    for _, testCase := range cases {
+        measured, measureErr := migrator.sealedProbeLength(testCase.plaintextByteLength, "")
+        if nil != measureErr {
+            t.Fatalf("%d bytes: %v", testCase.plaintextByteLength, measureErr)
+        }
+
+        if testCase.expected != measured {
+            t.Fatalf("expected %d plaintext bytes to seal to %d characters, got %d", testCase.plaintextByteLength, testCase.expected, measured)
+        }
+    }
+}
+
+/* a rotation seals under the key it is rotating TO, and the key id is stored in the value, so a measurement taken under the current key reports a width the run then overflows by exactly the difference between the two ids. */
+func TestSealedProbeLength_MeasuresUnderTheKeyIdTheRunWillSealWith(t *testing.T) {
+    migrator := &Migrator{cipher: NewCipher(NewStaticKeyProvider(
+        "v1",
+        map[string][]byte{"v1": newKey(1), "2026-07-rotated": newKey(2)},
+    ))}
+
+    current, currentErr := migrator.sealedProbeLength(100, "")
+    if nil != currentErr {
+        t.Fatalf("measure under the current key: %v", currentErr)
+    }
+
+    rotated, rotatedErr := migrator.sealedProbeLength(100, "2026-07-rotated")
+    if nil != rotatedErr {
+        t.Fatalf("measure under the target key: %v", rotatedErr)
+    }
+
+    if current+len("2026-07-rotated")-len("v1") != rotated {
+        t.Fatalf(
+            "expected the target key id to widen the measurement by the difference in key id length, got %d under %q and %d under %q",
+            current,
+            "v1",
+            rotated,
+            "2026-07-rotated",
+        )
+    }
+}
+
+/* an already-sealed value is handed back unchanged and is already stored in the column, so it must never be measured as a plaintext that still has to grow — otherwise a second run over a migrated column would demand a column wide enough to seal the ciphertext. */
+func TestLongestUnsealedLength_ExcludesValuesThatAreAlreadySealed(t *testing.T) {
+    migrator, stub := newRecordingStubMigrator(t, "zzMigrateUnsealedProbeStub", 1)
+
+    _, hasUnsealed, probeErr := migrator.longestUnsealedLength(context.Background(), "user", "secret")
+    if nil != probeErr {
+        t.Fatalf("unexpected error: %v", probeErr)
+    }
+
+    if true == hasUnsealed {
+        t.Fatalf("expected a column of already-sealed values to report nothing left to seal")
+    }
+
+    var probeSql string
+    for _, query := range stub.recorded() {
+        if true == strings.Contains(query, "MAX(LENGTH(") {
+            probeSql = query
+        }
+    }
+
+    if "" == probeSql {
+        t.Fatalf("expected a length probe query, recorded %v", stub.recorded())
+    }
+
+    if false == strings.Contains(probeSql, "CAST(`secret` AS BINARY) NOT LIKE ?") {
+        t.Fatalf("expected the probe to exclude already-sealed values byte-exactly, got %q", probeSql)
     }
 }

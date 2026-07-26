@@ -69,10 +69,16 @@ This subpackage provides shared helpers that commands can use for consistent out
 
 - Table output:
     - [`output.NewTableBuilder() *output.TableBuilder`](../../cli/output/table_builder.go)
+    - [`output.NewTablePrinter(tableMaxWidth int) *output.TablePrinter`](../../cli/output/table_printer.go)
     - [`output.NewDefaultTablePrinter() *output.TablePrinter`](../../cli/output/table_printer.go)
 
 - Structured envelopes:
     - [`output.NewEnvelope(...)`](../../cli/output/envelope_factory.go)
+    - [`output.NewMeta(...)`](../../cli/output/envelope_factory.go)
+    - [`output.NewWarning(code, message, details)`](../../cli/output/envelope_factory.go)
+    - [`output.NewError(code, message, details, cause)`](../../cli/output/envelope_factory.go)
+    - [`output.NewErrorCause(message, details)`](../../cli/output/envelope_factory.go)
+    - [`output.NewListPayload[T](...)`](../../cli/output/list_payload.go)
     - [`output.Envelope`](../../cli/output/envelope.go)
 
 ### Standard output flags

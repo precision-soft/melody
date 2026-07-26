@@ -536,3 +536,79 @@ func TestRouter_AddRoute_RejectsANonTrailingOptionalWhoseDefaultIsEmpty(t *testi
         "optional route parameter must be the last pattern segment unless it has a default",
     )
 }
+
+func TestRouter_AddRoute_ServesATrailingOptionalReachedThroughTheRoot(t *testing.T) {
+    routeRegistry := NewRouteRegistry()
+    router := NewRouterWithRouteRegistry(routeRegistry)
+
+    router.HandleWithOptions(
+        "/:page?",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(200, "home"), nil
+        },
+        NewRouteOptions(
+            "home",
+            []string{nethttp.MethodGet},
+            "",
+            nil,
+            nil,
+            nil,
+            nil,
+            0,
+            nil,
+        ),
+    )
+
+    urlGenerator := NewUrlGenerator(routeRegistry)
+
+    generatedPath, generateErr := urlGenerator.GeneratePath("home", nil)
+    if nil != generateErr {
+        t.Fatalf("unexpected generate error: %v", generateErr)
+    }
+
+    if "/" != generatedPath {
+        t.Fatalf("expected the omitted optional to generate the root path, got %q", generatedPath)
+    }
+
+    matchResult, matched := router.Match(nethttp.MethodGet, generatedPath, "", "")
+    if false == matched {
+        t.Fatalf("expected the generated path %q to match the route it came from", generatedPath)
+    }
+
+    if _, bound := matchResult.Params["page"]; true == bound {
+        t.Fatalf("expected the omitted optional to stay unbound, got %v", matchResult.Params)
+    }
+}
+
+func TestRouter_Match_NeverAdvertisesAnEmptyAllowedMethod(t *testing.T) {
+    router := NewRouter()
+
+    router.Handle(
+        "",
+        "/empty-method",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(200, "never"), nil
+        },
+    )
+
+    matchResult, matched := router.Match(nethttp.MethodGet, "/empty-method", "", "")
+    if true == matched {
+        t.Fatalf("expected a route declared with an empty method to stay unreachable")
+    }
+
+    advertised, carried := matchResult.RouteAttributes[RouteAttributeMethods]
+    if false == carried {
+        return
+    }
+
+    methodList, ok := advertised.([]string)
+    if false == ok {
+        t.Fatalf("expected the advertised methods to be a string list, got %T", advertised)
+    }
+
+    for _, methodName := range methodList {
+        if "" == methodName {
+            t.Fatalf("expected no empty method token among the advertised methods, got %q", methodList)
+        }
+    }
+}

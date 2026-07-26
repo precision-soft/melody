@@ -14,6 +14,9 @@ import (
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
 )
 
+/* maxConsecutiveEmptyPeekReads bounds how many (0, nil) results the peek loop accepts from a response body before it declares the reader stuck. The value matches the identical bound in bufio, so a reader that already works under bufio.Reader keeps working here. */
+const maxConsecutiveEmptyPeekReads = 100
+
 type CompressionConfig struct {
     level                int
     minSize              int
@@ -120,6 +123,13 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
                 return response, nextMiddlewareErr
             }
 
+            if nil == response.Headers() {
+                response.SetHeaders(make(nethttp.Header))
+            }
+
+            /* emitted on every path so a shared cache cannot serve one encoding of the URL to a client that asked for another. The paths that skip compression need it most: a body some other layer already encoded, an excluded path and an excluded content type are all negotiated against Accept-Encoding just the same, and a Cache-Control: public response stored under the URL alone would then be replayed to a client that cannot decode it. */
+            addVaryAcceptEncoding(response.Headers())
+
             httpRequest := request.HttpRequest()
             if nil == httpRequest {
                 return response, nil
@@ -135,10 +145,6 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
                 return response, nil
             }
 
-            if nil == response.Headers() {
-                response.SetHeaders(make(nethttp.Header))
-            }
-
             if "" != response.Headers().Get("Content-Encoding") {
                 return response, nil
             }
@@ -149,8 +155,6 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
                     return response, nil
                 }
             }
-
-            addVaryAcceptEncoding(response.Headers())
 
             if false == acceptsGzip(httpRequest.Header.Get("Accept-Encoding")) {
                 return response, nil
@@ -169,6 +173,7 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
             peekSize := config.MinSize()
             peekBuffer := make([]byte, peekSize)
             peeked := 0
+            emptyReads := 0
             var peekErr error
             for peeked < peekSize {
                 readCount, readErr := originalReader.Read(peekBuffer[peeked:])
@@ -177,6 +182,19 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
                     peekErr = readErr
                     break
                 }
+
+                if 0 == readCount {
+                    /* the destination slice is never empty here, so io.Reader permits (0, nil) only as a state the caller must tolerate rather than loop on; an unbounded loop would pin this request's goroutine at full processor for the lifetime of the process. Give up exactly as bufio does and let the request fail instead. */
+                    emptyReads++
+                    if maxConsecutiveEmptyPeekReads <= emptyReads {
+                        peekErr = io.ErrNoProgress
+                        break
+                    }
+
+                    continue
+                }
+
+                emptyReads = 0
             }
 
             if nil != peekErr && io.EOF != peekErr {

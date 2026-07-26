@@ -27,9 +27,9 @@ func (instance *nilMapStorage) Close() error {
 }
 
 func TestNewManager_PanicsWhenStorageIsNil(t *testing.T) {
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         _ = NewManager(nil, time.Minute)
-    })
+    }, "session storage is nil")
 }
 
 func TestManager_Session_ReturnsNilWhenIdEmpty(t *testing.T) {
@@ -368,5 +368,45 @@ func TestManager_RegenerateSession_AbandonmentSurvivesALaterWriteToTheOriginal(t
 
     if "u-1" != reloaded.String("userId") {
         t.Fatalf("expected the rotated session to carry the identity, got %q", reloaded.String("userId"))
+    }
+}
+
+func TestManager_RegenerateSession_CarriesASharedValueOverAsTheSameHandle(t *testing.T) {
+    storage := NewInMemoryStorage()
+    defer storage.Close()
+
+    manager := NewManager(storage, 30*time.Minute)
+
+    sessionInstance := manager.NewSession()
+
+    handle := &sharedCounter{count: 1}
+    sessionInstance.SetShared("counter", handle)
+
+    saveErr := manager.SaveSession(sessionInstance)
+    if nil != saveErr {
+        t.Fatalf("expected the session to be saved, got %v", saveErr)
+    }
+
+    rotatedSession, regenerateErr := manager.RegenerateSession(sessionInstance)
+    if nil != regenerateErr {
+        t.Fatalf("expected the session to rotate, got %v", regenerateErr)
+    }
+
+    if handle != rotatedSession.Get("counter") {
+        t.Fatalf("expected the rotated session to carry the very handle over")
+    }
+
+    saveErr = manager.SaveSession(rotatedSession)
+    if nil != saveErr {
+        t.Fatalf("expected the rotated session to be saved, got %v", saveErr)
+    }
+
+    reloadedSession := manager.Session(rotatedSession.Id())
+    if nil == reloadedSession {
+        t.Fatalf("expected the rotated session to load")
+    }
+
+    if handle != reloadedSession.Get("counter") {
+        t.Fatalf("expected the shared value to stay shared through rotation and storage")
     }
 }

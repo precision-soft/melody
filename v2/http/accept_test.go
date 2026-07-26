@@ -105,3 +105,10 @@ func TestPrefersHtml_HonoursQualityValues(t *testing.T) {
         }
     }
 }
+
+func TestPrefersHtml_ReturnsFalseForNeither(t *testing.T) {
+    request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/", "application/xml,text/plain")
+    if true == PrefersHtml(request) {
+        t.Fatalf("expected false when neither text/html nor application/json is present")
+    }
+}

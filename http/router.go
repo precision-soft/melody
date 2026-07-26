@@ -430,6 +430,11 @@ func (instance *Router) match(method string, path string, host string, scheme st
 
         if false == matchesMethod(routeDefinition.methods, method) {
             for _, allowedMethod := range routeDefinition.methods {
+                /* an empty method never matches, so advertising it would put a bare comma in the Allow header, which is not a valid method token */
+                if "" == allowedMethod {
+                    continue
+                }
+
                 allowedMethodsSet[allowedMethod] = struct{}{}
             }
             continue

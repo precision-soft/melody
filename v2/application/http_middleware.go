@@ -16,6 +16,7 @@ import (
 const (
     MiddlewareGroupHttp = "http"
 
+    /* the pipeline sorts ascending and the first entry becomes the outermost wrapper, so a priority above the default keeps the static file server innermost. The file server answers the requests it recognizes and never calls the rest of the chain, so from the outermost position that short circuit also skips every middleware the application registered with Use — the rate limiter, the compressor, the access log — for exactly the requests that read files off disk. Innermost, the application's own middleware still wraps them. */
     MiddlewarePriorityStatic = -1000
     MiddlewareNameStatic     = "static"
 

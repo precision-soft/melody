@@ -6,8 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-## [v1.1.1] - 2026-07-25 - Rate Limiter Call Timeout on the Runtime Path
-
 ### Fixed
 
 - `rate_limit.go` — `RateLimiter.AllowWithRuntime` now applies the configured call timeout. It passed the runtime context straight through, and melody's http kernel attaches no deadline to a request context, so `WithRateLimiterCallTimeout` was dead on the exact path every http middleware uses: a Redis TCP black-hole (a partial partition, not a clean refusal) made every gated request hang under the recommended `FailureModeClosed` instead of failing fast. The runtime context is now capped with the call timeout (`context.WithTimeout` keeps the earlier deadline, so a request carrying a tighter one still wins), governing both entry points.
@@ -48,9 +46,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `cache/backend.go` — `cache.Backend` wrapper around `rueidis.Client` with `Get()`, `Set()`, `Delete()`, `Has()`, `ClearByPrefix()`, `Many()`, `SetMultiple()`, `DeleteMultiple()`, `Increment()`, `Decrement()`
 - `cache/backend_service.go` — `cache.BackendService` wrapper; `WithContext()` binds a backend to a specific context; `BackendFromRuntime()` obtains a backend from the Melody runtime with bound context
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v1.1.1...HEAD
-
-[v1.1.1]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v1.1.0...integrations/rueidis/v1.1.1
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v1.1.0...HEAD
 
 [v1.1.0]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v1.0.2...integrations/rueidis/v1.1.0
 

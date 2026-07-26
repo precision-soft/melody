@@ -46,6 +46,41 @@ type resolverContext struct {
     stack             []string
     /* stackTypes runs parallel to stack: the canonical type of a type node, nil for a name node. The collection exclusion compares type identity through it, because two distinct types from same-named packages share a String() and a string comparison would exclude a service that is not on the path at all. */
     stackTypes []reflect.Type
+    /* consumedScopeEntries names what this resolution has read out of the request scope while building the service currently in creation. A value assembled from one of those entries holds the request they belong to, so it may not be kept as a process-lifetime singleton; the names travel into the refusal when a store would still put it in the root container. The set is put aside and restored around every creation, so a sibling that read nothing from the scope stays a singleton while the taint still reaches whoever depends on the tainted service. */
+    consumedScopeEntries []string
+}
+
+func (instance *resolverContext) markScopeEntryConsumed(entryKey string) {
+    for _, existing := range instance.consumedScopeEntries {
+        if existing == entryKey {
+            return
+        }
+    }
+
+    instance.consumedScopeEntries = append(instance.consumedScopeEntries, entryKey)
+}
+
+/* scopeInstanceStore names the two places a service resolved through this context may be kept. The scope target is absent when no scope drove the resolution, which is what makes a scope-tainted value landing in the root container refusable instead of merely unlikely. */
+func (instance *resolverContext) scopeInstanceStore(
+    serviceName string,
+    canonicalType reflect.Type,
+    storeInRoot func(value any),
+) instanceStore {
+    if nil == instance.scopeInstance {
+        return instanceStore{
+            inRoot:  storeInRoot,
+            inScope: nil,
+        }
+    }
+
+    scopeInstance := instance.scopeInstance
+
+    return instanceStore{
+        inRoot: storeInRoot,
+        inScope: func(value any) error {
+            return scopeInstance.storeCreatedInstance(serviceName, canonicalType, value)
+        },
+    }
 }
 
 func (instance *resolverContext) Get(serviceName string) (any, error) {
@@ -78,6 +113,8 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
         }
 
         if true == exists {
+            instance.markScopeEntryConsumed(nodeKey)
+
             return value, nil
         }
     }
@@ -108,10 +145,7 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
         func() {
             delete(instance.containerInstance.creatingByName, serviceName)
         },
-        func() (any, bool) {
-            value, exists := instance.containerInstance.instances[serviceName]
-            return value, exists
-        },
+        instance.lookupByName(serviceName, nodeKey),
         func(resolver containercontract.Resolver) (any, error, *providerDebugInfo) {
             if false == providerExists {
                 return nil, exception.NewError(
@@ -141,11 +175,51 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
                 providerFunctionString: providerFunctionString,
             }
         },
-        func(value any) {
-            instance.containerInstance.instances[serviceName] = value
-        },
+        instance.scopeInstanceStore(
+            serviceName,
+            nil,
+            func(value any) {
+                instance.containerInstance.instances[serviceName] = value
+            },
+        ),
         instance,
     )
+}
+
+/* lookupByName is the creation guard's lookup for a named service: an instance this request scope already holds — an installed override, or one the scope itself built — comes before the process-wide one, and reading it is recorded, because whatever is being assembled around it is scope-bound too. A scope that closed underneath the resolution reports nothing here; the store is where that failure is raised. */
+func (instance *resolverContext) lookupByName(serviceName string, nodeKey string) createWithGuardLookupFunc {
+    return func() (any, bool) {
+        if nil != instance.scopeInstance {
+            scopeValue, scopeExists, lookupErr := instance.scopeInstance.lookupInstanceByName(serviceName)
+            if nil == lookupErr && true == scopeExists {
+                instance.markScopeEntryConsumed(nodeKey)
+
+                return scopeValue, true
+            }
+        }
+
+        value, exists := instance.containerInstance.instances[serviceName]
+
+        return value, exists
+    }
+}
+
+/* lookupByType is lookupByName's counterpart for a type-keyed resolution. */
+func (instance *resolverContext) lookupByType(canonicalTargetType reflect.Type, nodeKey string) createWithGuardLookupFunc {
+    return func() (any, bool) {
+        if nil != instance.scopeInstance {
+            scopeValue, scopeExists, lookupErr := instance.scopeInstance.lookupInstanceByType(canonicalTargetType)
+            if nil == lookupErr && true == scopeExists {
+                instance.markScopeEntryConsumed(nodeKey)
+
+                return scopeValue, true
+            }
+        }
+
+        value, exists := instance.containerInstance.typeInstances[canonicalTargetType]
+
+        return value, exists
+    }
 }
 
 func (instance *resolverContext) MustGet(serviceName string) any {
@@ -209,6 +283,8 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
         }
 
         if true == exists {
+            instance.markScopeEntryConsumed(nodeKey)
+
             return value, nil
         }
     }
@@ -264,10 +340,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
             func() {
                 delete(instance.containerInstance.creatingByName, serviceName)
             },
-            func() (any, bool) {
-                resolvedValue, exists := instance.containerInstance.instances[serviceName]
-                return resolvedValue, exists
-            },
+            instance.lookupByName(serviceName, "service:"+serviceName),
             func(resolver containercontract.Resolver) (any, error, *providerDebugInfo) {
                 if false == providerExists {
                     return nil, exception.NewError(
@@ -297,10 +370,14 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
                     providerFunctionString: providerFunctionString,
                 }
             },
-            func(resolvedValue any) {
-                instance.containerInstance.instances[serviceName] = resolvedValue
-                instance.containerInstance.typeInstances[canonicalTargetType] = resolvedValue
-            },
+            instance.scopeInstanceStore(
+                serviceName,
+                canonicalTargetType,
+                func(resolvedValue any) {
+                    instance.containerInstance.instances[serviceName] = resolvedValue
+                    instance.containerInstance.typeInstances[canonicalTargetType] = resolvedValue
+                },
+            ),
             instance,
         )
     }
@@ -321,10 +398,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
         func() {
             delete(instance.containerInstance.creatingByType, typeKey)
         },
-        func() (any, bool) {
-            value, exists := instance.containerInstance.typeInstances[canonicalTargetType]
-            return value, exists
-        },
+        instance.lookupByType(canonicalTargetType, nodeKey),
         func(resolver containercontract.Resolver) (any, error, *providerDebugInfo) {
             if false == providerExists {
                 return nil, exception.NewError(
@@ -354,9 +428,13 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
                 providerFunctionString: providerFunctionString,
             }
         },
-        func(value any) {
-            instance.containerInstance.typeInstances[canonicalTargetType] = value
-        },
+        instance.scopeInstanceStore(
+            "",
+            canonicalTargetType,
+            func(value any) {
+                instance.containerInstance.typeInstances[canonicalTargetType] = value
+            },
+        ),
         instance,
     )
 }

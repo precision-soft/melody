@@ -137,3 +137,82 @@ func TestDirFileSystem_OpenNonExistentPathReturnsError(t *testing.T) {
         t.Fatalf("expected error")
     }
 }
+
+/* the padded and the exact spelling name two different files, and only the exact one exists: collapsing them would resolve a request the rules in front of the application judged on the padded spelling */
+func TestDirFileSystem_OpenDoesNotTrimTheName(t *testing.T) {
+    directory := t.TempDir()
+
+    filePath := filepath.Join(directory, "file.txt")
+    if writeErr := os.WriteFile(filePath, []byte("hello"), 0o644); nil != writeErr {
+        t.Fatalf("write error: %v", writeErr)
+    }
+
+    fileSystem := osDirFileSystem(directory)
+
+    for _, name := range []string{
+        " file.txt",
+        "file.txt ",
+        "\tfile.txt",
+    } {
+        file, err := fileSystem.Open(name)
+        if nil == err {
+            _ = file.Close()
+
+            t.Fatalf("expected %q not to resolve to the untrimmed name", name)
+        }
+    }
+
+    file, err := fileSystem.Open("file.txt")
+    if nil != err {
+        t.Fatalf("open error: %v", err)
+    }
+    defer file.Close()
+}
+
+func TestHasExcludedPathPrefix_MatchesTheRawRequestPathLikeThePrefixMatcher(t *testing.T) {
+    excludedPathList := []string{"/admin", "/api/internal"}
+
+    excluded := []string{
+        "/admin",
+        "/admin/",
+        "/admin/users.json",
+        "/administration/report.csv",
+        "/api/internal/health",
+    }
+
+    for _, requestPath := range excluded {
+        if false == hasExcludedPathPrefix(requestPath, excludedPathList) {
+            t.Fatalf("expected %q to be excluded", requestPath)
+        }
+    }
+
+    retained := []string{
+        "/",
+        "/index.html",
+        "/api/public/health",
+        "/assets/admin.css",
+    }
+
+    for _, requestPath := range retained {
+        if true == hasExcludedPathPrefix(requestPath, excludedPathList) {
+            t.Fatalf("expected %q not to be excluded", requestPath)
+        }
+    }
+}
+
+func TestHasExcludedPathPrefix_EmptyListExcludesNothing(t *testing.T) {
+    if true == hasExcludedPathPrefix("/index.html", []string{}) {
+        t.Fatalf("expected an empty list to exclude nothing")
+    }
+
+    if true == hasExcludedPathPrefix("/index.html", nil) {
+        t.Fatalf("expected a nil list to exclude nothing")
+    }
+}
+
+func TestHasExcludedPathPrefix_EmptyEntryExcludesEverything(t *testing.T) {
+    /* the prefix comparison is the one security.NewPathPrefixMatcher makes, where an empty prefix matches every path; the configuration refuses such an entry precisely because it reaches this outcome. */
+    if false == hasExcludedPathPrefix("/index.html", []string{""}) {
+        t.Fatalf("expected an empty entry to exclude every path")
+    }
+}

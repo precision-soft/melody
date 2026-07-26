@@ -5,9 +5,12 @@ import (
     "os"
     "path/filepath"
     "strconv"
+    "strings"
     "sync"
     "testing"
     "time"
+
+    "github.com/precision-soft/melody/exception"
 )
 
 func TestFileStorage_Close_DoesNotCloseInjectedFile(t *testing.T) {
@@ -179,6 +182,24 @@ func TestFileStorage_Save_PersistsAcrossInstances_ByInjectedFile(t *testing.T) {
     }
 }
 
+/* expireStoredEntry rewinds a stored entry's expiry so it lapses without waiting for the wall clock. FileStorage
+reads time.Now directly, and Save purges anything already lapsed before it returns, so a ttl short enough to expire
+on its own never leaves an entry for Load to find. */
+func expireStoredEntry(t *testing.T, storage *FileStorage, sessionId string) {
+    t.Helper()
+
+    storage.mutex.Lock()
+    defer storage.mutex.Unlock()
+
+    entry, exists := storage.sessionById[sessionId]
+    if false == exists {
+        t.Fatalf("expected %q to be stored before its expiry is rewound", sessionId)
+    }
+
+    entry.ExpiresAt = time.Now().Add(-time.Hour).UnixNano()
+    storage.sessionById[sessionId] = entry
+}
+
 func TestFileStorage_Load_ExpiredEntryIsDeleted(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
@@ -189,11 +210,16 @@ func TestFileStorage_Load_ExpiredEntryIsDeleted(t *testing.T) {
     }
     defer storage.Close()
 
-    if saveErr := storage.Save("expired", map[string]any{"k": "v"}, time.Nanosecond); nil != saveErr {
+    /* a ttl that outlives Save, so both entries reach the file and stay in the map */
+    if saveErr := storage.Save("expired", map[string]any{"k": "v"}, time.Hour); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
-    time.Sleep(10 * time.Millisecond)
+    if saveErr := storage.Save("live", map[string]any{"k": "live"}, time.Hour); nil != saveErr {
+        t.Fatalf("unexpected save error: %s", saveErr.Error())
+    }
+
+    expireStoredEntry(t, storage, "expired")
 
     data, exists, loadErr := storage.Load("expired")
     if nil != loadErr {
@@ -201,13 +227,27 @@ func TestFileStorage_Load_ExpiredEntryIsDeleted(t *testing.T) {
     }
 
     if true == exists {
-        t.Fatalf("expected expired entry to be removed")
+        t.Fatalf("expected expired entry to be reported as absent, got data=%v", data)
     }
 
     if nil != data {
-        t.Fatalf("expected nil data for expired entry")
+        t.Fatalf("expected nil data for expired entry, got %v", data)
     }
 
+    if _, stillStored := storage.sessionById["expired"]; true == stillStored {
+        t.Fatalf("expected the expired entry to be dropped from the in-memory state")
+    }
+
+    liveData, liveExists, liveErr := storage.Load("live")
+    if nil != liveErr {
+        t.Fatalf("unexpected live load error: %s", liveErr.Error())
+    }
+    if false == liveExists || "live" != liveData["k"] {
+        t.Fatalf("expected the unexpired sibling to survive, got exists=%v data=%v", liveExists, liveData)
+    }
+
+    /* the file still carried the entry with its original future expiry, so a reader that sees it gone proves Load
+       rewrote the snapshot rather than merely reporting the entry as absent */
     storage2, err := NewFileStorageFromPath(path)
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
@@ -221,6 +261,61 @@ func TestFileStorage_Load_ExpiredEntryIsDeleted(t *testing.T) {
 
     if true == existsAfterReload {
         t.Fatalf("expected expired entry to be persisted as removed")
+    }
+
+    _, liveExistsAfterReload, liveReloadErr := storage2.Load("live")
+    if nil != liveReloadErr {
+        t.Fatalf("unexpected live reload error: %s", liveReloadErr.Error())
+    }
+
+    if false == liveExistsAfterReload {
+        t.Fatalf("expected the unexpired sibling to survive the rewrite")
+    }
+}
+
+/* an entry nobody loads is only ever dropped by the purge every flush runs; without it the map and the snapshot
+grow with everything that ever expired */
+func TestFileStorage_Save_PurgesEntriesThatLapsedWithoutBeingLoaded(t *testing.T) {
+    directory := t.TempDir()
+    path := filepath.Join(directory, "session.json")
+
+    storage, err := NewFileStorageFromPath(path)
+    if nil != err {
+        t.Fatalf("unexpected storage error: %s", err.Error())
+    }
+    defer storage.Close()
+
+    if saveErr := storage.Save("lapsed", map[string]any{"k": "v"}, time.Hour); nil != saveErr {
+        t.Fatalf("unexpected save error: %s", saveErr.Error())
+    }
+
+    if saveErr := storage.Save("keeper", map[string]any{"k": "keeper"}, time.Hour); nil != saveErr {
+        t.Fatalf("unexpected save error: %s", saveErr.Error())
+    }
+
+    expireStoredEntry(t, storage, "lapsed")
+
+    /* an unrelated Save is the only thing that happens: nothing ever names the lapsed entry */
+    if saveErr := storage.Save("keeper", map[string]any{"k": "keeper"}, time.Hour); nil != saveErr {
+        t.Fatalf("unexpected save error: %s", saveErr.Error())
+    }
+
+    if _, stillStored := storage.sessionById["lapsed"]; true == stillStored {
+        t.Fatalf("expected the lapsed entry to be purged from the in-memory state")
+    }
+
+    reader, err := NewFileStorageFromPath(path)
+    if nil != err {
+        t.Fatalf("unexpected storage error: %s", err.Error())
+    }
+    defer reader.Close()
+
+    if _, stillPersisted := reader.sessionById["lapsed"]; true == stillPersisted {
+        t.Fatalf("expected the lapsed entry to be purged from the snapshot")
+    }
+
+    if _, keeperPersisted := reader.sessionById["keeper"]; false == keeperPersisted {
+        t.Fatalf("expected the unexpired entry to survive the purge")
     }
 }
 
@@ -496,5 +591,122 @@ func TestFileStorage_Save_TtlBeyondYear2262IsKeptNotPurged(t *testing.T) {
     }
     if false == reloadExists || "v" != reloadData["k"].(string) {
         t.Fatalf("expected the session to persist across instances, got exists=%v data=%v", reloadExists, reloadData)
+    }
+}
+
+/* @info Loading an expired session must remove it from the map and from the file, and the flush is the only thing that does it: purgeExpiredLocked runs inside flushLocked against the same clock and the same predicate, so Load names no session of its own. This pins that mechanism — if the purge ever stops covering a lapsed entry, the explicit delete has to come back. */
+func TestFileStorage_LoadingAnExpiredSessionRemovesItFromTheFile(t *testing.T) {
+    directory := t.TempDir()
+    path := filepath.Join(directory, "sessions.json")
+
+    storage, newErr := NewFileStorageFromPath(path)
+    if nil != newErr {
+        t.Fatalf("unexpected storage error: %v", newErr)
+    }
+
+    saveErr := storage.Save("expired", map[string]any{"user": "alice"}, time.Millisecond)
+    if nil != saveErr {
+        t.Fatalf("unexpected save error: %v", saveErr)
+    }
+
+    saveErr = storage.Save("live", map[string]any{"user": "bob"}, time.Hour)
+    if nil != saveErr {
+        t.Fatalf("unexpected save error: %v", saveErr)
+    }
+
+    time.Sleep(5 * time.Millisecond)
+
+    _, exists, loadErr := storage.Load("expired")
+    if nil != loadErr {
+        t.Fatalf("unexpected load error: %v", loadErr)
+    }
+
+    if true == exists {
+        t.Fatalf("expected the expired session not to be handed back")
+    }
+
+    if _, stillThere := storage.sessionById["expired"]; true == stillThere {
+        t.Fatalf("expected the expired session to be gone from the map")
+    }
+
+    reopened, reopenErr := NewFileStorageFromPath(path)
+    if nil != reopenErr {
+        t.Fatalf("unexpected reopen error: %v", reopenErr)
+    }
+
+    if _, persisted := reopened.sessionById["expired"]; true == persisted {
+        t.Fatalf("expected the expired session to be gone from the file")
+    }
+
+    if _, persisted := reopened.sessionById["live"]; false == persisted {
+        t.Fatalf("expected the live session to survive the purge")
+    }
+}
+
+func TestFileStorage_Save_RefusesASessionHoldingASharedValue(t *testing.T) {
+    path := filepath.Join(t.TempDir(), "sessions.json")
+
+    storage, err := NewFileStorageFromPath(path)
+    if nil != err {
+        t.Fatalf("expected the storage to open, got %v", err)
+    }
+
+    defer storage.Close()
+
+    manager := NewManager(storage, 30*time.Minute)
+
+    sessionInstance := manager.NewSession()
+    sessionInstance.Set("plain", "value")
+    sessionInstance.SetShared("counter", &sharedCounter{count: 1})
+
+    saveErr := manager.SaveSession(sessionInstance)
+    if nil == saveErr {
+        t.Fatalf("expected the save to be refused")
+    }
+
+    if false == strings.Contains(saveErr.Error(), "set shared") {
+        t.Fatalf("expected the refusal to name the reason, got %v", saveErr)
+    }
+
+    refusal, isRefusal := saveErr.(*exception.Error)
+    if false == isRefusal {
+        t.Fatalf("expected a framework error, got %T", saveErr)
+    }
+
+    if "counter" != refusal.Context()["key"] {
+        t.Fatalf("expected the refusal to name the key, got %v", refusal.Context())
+    }
+
+    if _, hasSessionId := refusal.Context()["sessionId"]; true == hasSessionId {
+        t.Fatalf("expected the refusal to keep the session id out of the reported context")
+    }
+
+    _, exists, loadErr := storage.Load(sessionInstance.Id())
+    if nil != loadErr {
+        t.Fatalf("expected the load to succeed, got %v", loadErr)
+    }
+
+    if true == exists {
+        t.Fatalf("expected a refused save to persist nothing")
+    }
+
+    sessionInstance.Delete("counter")
+
+    saveErr = manager.SaveSession(sessionInstance)
+    if nil != saveErr {
+        t.Fatalf("expected the session to save once the shared value is gone, got %v", saveErr)
+    }
+
+    data, exists, loadErr := storage.Load(sessionInstance.Id())
+    if nil != loadErr {
+        t.Fatalf("expected the load to succeed, got %v", loadErr)
+    }
+
+    if false == exists {
+        t.Fatalf("expected the session to be persisted")
+    }
+
+    if "value" != data["plain"] {
+        t.Fatalf("expected the plain value to be persisted, got %v", data["plain"])
     }
 }

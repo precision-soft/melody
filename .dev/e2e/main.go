@@ -30,14 +30,38 @@ Sections:
   - OBJECT STORAGE PUT     (localstack) — the declared-size contract: a short declaration is refused before the bucket is touched, so the object already at the key survives
   - MAIL                   (mailpit)  — smtp transport sends a whole session under the per-step deadline; mailpit confirms receipt
   - EXAMPLE OVER HTTP      (example)  — forwarded-client-ip trust boundary and the rate limit over real HTTP
+  - OPENAPI SERVED         (example)  — the document the SERVING process builds: the booted routes, a typed response's component schema, every $ref resolving
+  - TRANSLATION            (example)  — both catalogues, all three ICU plural branches, the locale fallback chain, and the token firewall's own json entry point
+  - TOKEN AUTHENTICATION   (example)  — a token minted by the application's own auth:token command; refusals for no header, a foreign key, a flipped signature and alg:none
+  - SWITCH-USER IMPERSONATION (example) — both identities under a switch; a caller without the switch role stays itself; an unknown target fails closed
+  - HMAC OVER HTTP         (example)  — an internal:sign envelope verified across a real process boundary; refusals for replay, tamper, body and query mismatch
+  - TWO-FACTOR             (example)  — enroll and verify with totp:code; refusals for replay, whitespace-normalised replay, an expired code and a user never enrolled
+  - MYSQL AND AUDIT        (example + mysql) — encrypted at rest, re-read out of band through the harness's own connection; the audit trail's exact entries and change set
+  - MULTIPART              (example)  — a multipart body reaches the handler unread and byte-identical; the urlencoded twin is drained and restored
+  - SERVER-SENT EVENTS     (example + redis) — preamble and headers, in-process and cross-replica delivery, id/retry framing, id sanitisation, origin suppression, topic isolation, malformed payloads
+  - METRICS                (example + prometheus) — the counter and the histogram grow by EXACTLY the requests issued, a control route stays put, and a real prometheus scrapes the endpoint
   - EXAMPLE APPLICATION v1 (example)  — the .example application of major 1, built and booted by the harness
   - EXAMPLE APPLICATION v2 (example)  — the same, for major 2
   - EXAMPLE APPLICATION v3 (example)  — the same, for major 3
+
+The eleven example-over-http sections all drive the ONE application the dev container supervises on
+EXAMPLE_BASE_URL, so they share a fixture and observe two rules stated in examplehttp.go beside the calls: no
+section other than EXAMPLE OVER HTTP may call /ratelimit/demo (it asserts an exact exhaustion point), and nothing
+may touch /outbox/* (a stack.sh check asserts its sent-count delta). METRICS runs last of the group because its
+assertions are exact request-count deltas.
 
 The per-major EXAMPLE APPLICATION sections build each major's .example into its own workspace, boot it on its own
 port and drive it end to end: a public route, the login flow through a real cookie jar, the protected route before
 and after login, logout, encoded path-traversal containment, a 404, three command-line invocations and a graceful
 shutdown on one SIGINT. MELODY_E2E_MAJORS selects which majors run and defaults to all three.
+
+Clear-to-skip recipes beyond the backend variables above:
+
+    MYSQL_DSN=       — MYSQL AND AUDIT keeps its application-side half and announces that the ciphertext was NOT
+                       re-read out of band; TWO-FACTOR announces the enrollment row it left behind
+    PROMETHEUS_URL=  — METRICS keeps its delta assertions and announces that no collector was proven to read the
+                       endpoint
+    REDIS_ADDRESS=   — additionally skips SERVER-SENT EVENTS entirely (the cross-replica half needs the backplane)
 
 The websocket, encrypt and session sections need no backend and always run; the rest run only when their env
 var is set. Exits non-zero on the first unexpected outcome. */
@@ -149,6 +173,66 @@ func main() {
             runExampleHttpCheck(baseUrl, os.Getenv("EXAMPLE_LOAD_BALANCER_URL"), redisAddress)
             sections++
         }
+
+        /* the sections below drive the SAME supervised application over http and are gated on EXAMPLE_BASE_URL
+           alone: none of them touches redis directly, so clearing REDIS_ADDRESS must not take them out too. The
+           one exception states its own second gate — the server-sent-event section needs the redis backplane to
+           reach the application as a second replica. They run in this order for a reason: METRICS asserts EXACT
+           request-count deltas, so it goes last and its deltas bracket only its own requests. */
+        infrastructureSections++
+
+        section("OPENAPI SERVED (live example application)")
+        runOpenApiCheck(baseUrl)
+        sections++
+
+        section("TRANSLATION (live example application)")
+        runTranslationCheck(baseUrl)
+        sections++
+
+        section("TOKEN AUTHENTICATION (live example application)")
+        runTokenAuthCheck(baseUrl)
+        sections++
+
+        section("SWITCH-USER IMPERSONATION (live example application)")
+        runImpersonationCheck(baseUrl)
+        sections++
+
+        section("HMAC OVER HTTP (live example application)")
+        runInternalAuthCheck(baseUrl)
+        sections++
+
+        section("TWO-FACTOR (live example application)")
+        runTwoFactorCheck(baseUrl)
+        sections++
+
+        /* the mint workspace is shared by the sections above, so it cannot be torn down by whichever of them
+           finishes first */
+        releaseExampleMintWorkspace()
+
+        section("MYSQL AND AUDIT (live example application)")
+        runMysqlCheck(baseUrl)
+        sections++
+
+        section("MULTIPART (live example application)")
+        runMultipartCheck(baseUrl)
+        sections++
+
+        /* the server-sent-event section needs BOTH halves: the application to stream from and redis to reach it
+           through as a second replica. Clearing either one must announce what did not run rather than degrade to a
+           single-replica check that silently drops the cross-replica, origin-suppression and framing coverage. */
+        if "" == redisAddress {
+            fmt.Println("\nSKIPPED: SERVER-SENT EVENTS needs REDIS_ADDRESS — the cross-replica delivery, id/retry framing, id sanitisation, origin suppression, topic isolation and malformed-payload coverage did not run")
+        } else {
+            section("SERVER-SENT EVENTS (live example application + redis backplane)")
+            runServerSentEventCheck(baseUrl, redisAddress)
+            sections++
+        }
+
+        /* LAST of the group on purpose: the metrics assertions are exact request-count deltas, so anything issued
+           against this application afterwards would move a counter that was already measured */
+        section("METRICS (live example application)")
+        runMetricsCheck(baseUrl)
+        sections++
     }
 
     /* the per-major example sections need no backend of the harness's own: each application is configured from the .env beside

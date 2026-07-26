@@ -1,10 +1,15 @@
 package audit
 
 import (
+    "context"
     "encoding/json"
+    "errors"
+    "os"
+    "os/exec"
     "reflect"
     "strings"
     "testing"
+    "time"
 
     "github.com/uptrace/bun"
 
@@ -583,5 +588,203 @@ func TestValueContainsRedactTag_SharedBackingArraySliceNotFalseDeduped(t *testin
 
     if false == valueContainsRedactTag(value) {
         t.Fatalf("expected the redact-tagged secretHolder at Full[1] to be detected; the longer slice shares a backing array with the shorter Head[:1] and was falsely deduped, skipping the secret")
+    }
+}
+
+/* the reproductions below cannot run inside the test binary: a stack overflow is a runtime fatal error that no recover contains, and a spinning element chase never returns at all, so either one takes the whole binary down with it. TestMain therefore doubles as a probe entry point — when the environment variable names a probe the process runs that reproduction and exits instead of running the suite — and each test re-executes this binary, bounds it with a deadline and asserts on the child's exit status. */
+const changeProbeEnvironmentVariable = "MELODY_AUDIT_CHANGE_PROBE"
+
+func TestMain(mainInstance *testing.M) {
+    probeName := os.Getenv(changeProbeEnvironmentVariable)
+    if "" != probeName {
+        runChangeProbe(probeName)
+
+        os.Exit(0)
+    }
+
+    os.Exit(mainInstance.Run())
+}
+
+/* type cyclicAttributes is the map shape the type walk cannot answer by descending: its element is itself */
+type cyclicAttributes map[string]cyclicAttributes
+
+type cyclicMapModel struct {
+    Id         int64            `bun:"id,pk"`
+    Attributes cyclicAttributes `bun:"attributes"`
+}
+
+/* type cyclicSlice is the slice shape whose element chase never reaches a non-slice */
+type cyclicSlice []cyclicSlice
+
+type cyclicSliceModel struct {
+    Id   int64       `bun:"id,pk"`
+    Data cyclicSlice `bun:"data"`
+}
+
+/* type cyclicPointer is the pointer shape whose element chase never reaches a non-pointer */
+type cyclicPointer *cyclicPointer
+
+type cyclicPointerModel struct {
+    Id     int64         `bun:"id,pk"`
+    Cursor cyclicPointer `bun:"cursor"`
+}
+
+type cyclicPointerCarrier struct {
+    Cursor cyclicPointer
+}
+
+type cyclicPointerNestedModel struct {
+    Id      int64                `bun:"id,pk"`
+    Carrier cyclicPointerCarrier `bun:"carrier"`
+}
+
+/* CyclicEmbeddedNode is the embed Go permits only through a pointer, and the pointer may close a loop with no nil to end it */
+type CyclicEmbeddedNode struct {
+    *CyclicEmbeddedNode
+    Name string `bun:"name"`
+}
+
+func runChangeProbe(probeName string) {
+    switch probeName {
+    case "cyclicMapType":
+        ChangeSet(cyclicMapModel{Id: 1}, cyclicMapModel{Id: 2})
+
+    case "cyclicSliceType":
+        ChangeSet(cyclicSliceModel{Id: 1}, cyclicSliceModel{Id: 2})
+
+    case "cyclicPointerType":
+        ChangeSet(cyclicPointerModel{Id: 1}, cyclicPointerModel{Id: 2})
+
+    case "cyclicPointerNestedType":
+        ChangeSet(cyclicPointerNestedModel{Id: 1}, cyclicPointerNestedModel{Id: 2})
+
+    case "cyclicEmbeddedPointer":
+        before := &CyclicEmbeddedNode{Name: "before"}
+        before.CyclicEmbeddedNode = before
+
+        after := &CyclicEmbeddedNode{Name: "after"}
+        after.CyclicEmbeddedNode = after
+
+        ChangeSet(before, after)
+
+    case "mutuallyCyclicEmbeddedPointer":
+        before := &CyclicEmbeddedNode{Name: "before"}
+        beforeNext := &CyclicEmbeddedNode{Name: "before-next"}
+        before.CyclicEmbeddedNode = beforeNext
+        beforeNext.CyclicEmbeddedNode = before
+
+        after := &CyclicEmbeddedNode{Name: "after"}
+        afterNext := &CyclicEmbeddedNode{Name: "after-next"}
+        after.CyclicEmbeddedNode = afterNext
+        afterNext.CyclicEmbeddedNode = after
+
+        ChangeSet(before, after)
+
+    default:
+        os.Exit(97)
+    }
+}
+
+func assertChangeProbeExitsCleanly(t *testing.T, probeName string, budget time.Duration) {
+    t.Helper()
+
+    binaryPath, executableErr := os.Executable()
+    if nil != executableErr {
+        t.Fatalf("could not locate the test binary to re-execute: %v", executableErr)
+    }
+
+    ctx, cancel := context.WithTimeout(context.Background(), budget)
+    defer cancel()
+
+    command := exec.CommandContext(ctx, binaryPath)
+    command.Env = append(os.Environ(), changeProbeEnvironmentVariable+"="+probeName)
+
+    combinedOutput, runErr := command.CombinedOutput()
+
+    if nil != ctx.Err() {
+        t.Fatalf("the %s probe was still running after %s and had to be killed, so the walk does not terminate; output: %s", probeName, budget, combinedOutput)
+    }
+
+    if nil == runErr {
+        return
+    }
+
+    exitErr := (*exec.ExitError)(nil)
+    if true == errors.As(runErr, &exitErr) {
+        t.Fatalf("the %s probe died with exit status %d instead of returning; output: %s", probeName, exitErr.ExitCode(), combinedOutput)
+    }
+
+    t.Fatalf("could not run the %s probe: %v; output: %s", probeName, runErr, combinedOutput)
+}
+
+/* @info a field whose map type contains itself must not send the redact-tag type walk into unbounded recursion; the walk runs for every non-anonymous field of every audited insert, update and delete, and a stack overflow there is a fatal error that takes the process down with no recover and no rollback */
+func TestIsRedactedField_SelfReferentialMapTypeTerminates(t *testing.T) {
+    assertChangeProbeExitsCleanly(t, "cyclicMapType", 30*time.Second)
+}
+
+/* @info `type Node []Node` is legal Go and its element chase never reaches a non-slice, so the chase spins at full processor instead of overflowing: the process never dies, it just stops serving */
+func TestIsRedactedField_SelfReferentialSliceTypeTerminates(t *testing.T) {
+    assertChangeProbeExitsCleanly(t, "cyclicSliceType", 30*time.Second)
+}
+
+/* @info `type Pointer *Pointer` is legal Go and spins the same chase, both where the field type is dereferenced for the encrypted string check and inside the redact-tag type walk */
+func TestIsRedactedField_SelfReferentialPointerTypeTerminates(t *testing.T) {
+    assertChangeProbeExitsCleanly(t, "cyclicPointerType", 30*time.Second)
+}
+
+/* @info the same pointer shape reached as a nested struct field, where the value walk dereferences sub-field types of its own */
+func TestValueContainsRedactTag_SelfReferentialPointerSubFieldTypeTerminates(t *testing.T) {
+    assertChangeProbeExitsCleanly(t, "cyclicPointerNestedType", 30*time.Second)
+}
+
+/* @info Go rejects `type Node struct { Node }` but permits `type Node struct { *Node }`, so an embed can point back at the struct the walk is already inside; the embed recursion has no nil to stop on and overflows the stack, which a deferred recover around ChangeSet does not catch */
+func TestChangeSet_SelfEmbeddedPointerCycleTerminates(t *testing.T) {
+    assertChangeProbeExitsCleanly(t, "cyclicEmbeddedPointer", 30*time.Second)
+}
+
+/* @info the same loop closed over two nodes rather than one */
+func TestChangeSet_MutuallyEmbeddedPointerCycleTerminates(t *testing.T) {
+    assertChangeProbeExitsCleanly(t, "mutuallyCyclicEmbeddedPointer", 30*time.Second)
+}
+
+/* @info the cycle guard must not swallow a finite embed chain: three distinct nodes are three distinct pointers, and every field they carry still belongs in the change-set */
+func TestChangeSet_FiniteEmbeddedPointerChainIsStillWalked(t *testing.T) {
+    before := &CyclicEmbeddedNode{Name: "root"}
+    before.CyclicEmbeddedNode = &CyclicEmbeddedNode{Name: "middle"}
+    before.CyclicEmbeddedNode.CyclicEmbeddedNode = &CyclicEmbeddedNode{Name: "leaf-before"}
+
+    after := &CyclicEmbeddedNode{Name: "root"}
+    after.CyclicEmbeddedNode = &CyclicEmbeddedNode{Name: "middle"}
+    after.CyclicEmbeddedNode.CyclicEmbeddedNode = &CyclicEmbeddedNode{Name: "leaf-after"}
+
+    changes := ChangeSet(before, after)
+
+    nameChange, found := findChange(changes, "name")
+    if false == found {
+        t.Fatalf("expected the deepest embed of a finite chain to still be diffed, got %+v", changes)
+    }
+    if "leaf-before" != nameChange.Old || "leaf-after" != nameChange.New {
+        t.Fatalf("expected the change from the third node of the chain, got %+v", nameChange)
+    }
+}
+
+/* @info the redact-tag type walk must keep answering true for a self-referential type that does carry a tag somewhere; guarding the cycle may not turn into refusing to look */
+func TestIsRedactedField_CyclicTypeStillReportsAReachableRedactTag(t *testing.T) {
+    type taggedNode struct {
+        Secret   string `audit:"redact"`
+        Children []any
+    }
+    type cyclicHolder struct {
+        Attributes cyclicAttributes
+        Tagged     taggedNode
+    }
+
+    holderType := reflect.TypeOf(cyclicHolder{})
+
+    if true == isRedactedField(holderType.Field(0)) {
+        t.Fatalf("a cyclic map type that reaches no redact tag must not be reported as redacted, or every self-referential shape is replaced by a placeholder")
+    }
+    if false == isRedactedField(holderType.Field(1)) {
+        t.Fatalf("a redact tag reachable from the field type must still be found once the cycle guard is in place")
     }
 }

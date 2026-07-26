@@ -22,6 +22,9 @@ const minimumRefreshInterval = 1 * time.Millisecond
 /* sessionProbeTtlFactor gives the probe a lease margin. A session locker ignores the ttl handed to Refresh (its Refresh is a pure liveness probe), but a lease locker rewrites the lease to now+ttl: passing the probe interval itself would renew a lease at exactly the moment it expires, so every probe would race its own expiry and lose about half the time — cancelling callback spuriously and, worse, letting the lease lapse so a second instance can acquire and run alongside it. Renewing for twice the probe interval keeps the same one-interval margin the positive-ttl path gets from refreshing at ttl/2. */
 const sessionProbeTtlFactor = 2
 
+/* refreshTimeoutDivisor derives the per-call budget of one renewal from the renewal cadence. A renewal issued at t was preceded by one that landed around t minus the cadence, so the lease it wrote lapses around t plus the cadence — half of that is the deadline at which the call is abandoned, leaving the other half to notice, demote and stop the work before the lease is anyone else's. The cadence itself is at most half the ttl, so the budget is at most a quarter of it. */
+const refreshTimeoutDivisor = 2
+
 /* defaultReleaseTimeout bounds the detached release call that runs after callback: the caller's context may already be cancelled by then (a SIGTERM between a cron tick and its release), and a release skipped because of that cancellation would leave the lock held until the ttl lapses — losing the very next tick. */
 const defaultReleaseTimeout = 5 * time.Second
 
@@ -117,6 +120,7 @@ func refreshWhileHeld(
     done <-chan struct{},
 ) error {
     refreshInterval, refreshTtl := resolveRefreshSchedule(ttl)
+    refreshTimeout := resolveRefreshTimeout(refreshInterval)
 
     ticker := time.NewTicker(refreshInterval)
     defer ticker.Stop()
@@ -128,7 +132,7 @@ func refreshWhileHeld(
         case <-runtimeInstance.Context().Done():
             return nil
         case <-ticker.C:
-            if refreshErr := lock.Refresh(runtimeInstance, refreshTtl); nil != refreshErr {
+            if refreshErr := refreshOnce(runtimeInstance, lock, refreshTtl, refreshTimeout); nil != refreshErr {
                 /* callback finished, or the caller cancelled — a SIGTERM cancels the very context the backend was called with, so the refresh in flight fails with the cancellation. Either way the failure is the shutdown itself, not a lost lease, and reporting it would turn a clean stop into an error. */
                 select {
                 case <-done:
@@ -159,6 +163,31 @@ func resolveRefreshSchedule(ttl time.Duration) (time.Duration, time.Duration) {
     }
 
     return refreshInterval, refreshTtl
+}
+
+/* resolveRefreshTimeout bounds a single renewal call. Without a deadline of its own a renewal inherits only the term context, which nothing cancels while the work runs, so a store that accepts the call and never answers — a wedged connection, a backend that stopped replying — leaves the renewal parked forever: the lease lapses in silence, a second instance acquires it, and this one never learns of it because the only demotion signal is a call that returned an error. The deadline turns that silence into the error the caller demotes on, in time to stop the work before the lease is gone. It is floored at the same minimum the cadence is, so a caller's absurd cadence cannot derive a zero or negative timeout that context.WithTimeout would treat as already expired. */
+func resolveRefreshTimeout(refreshInterval time.Duration) time.Duration {
+    timeout := refreshInterval / refreshTimeoutDivisor
+    if minimumRefreshInterval > timeout {
+        timeout = minimumRefreshInterval
+    }
+
+    return timeout
+}
+
+/* refreshOnce renews the lease on a runtime whose context carries the renewal deadline, derived from the caller's so a shutdown still cancels the call in flight. The caller keeps testing its OWN context to tell a shutdown from a lost lease: the deadline lives only on the child, so an expired renewal reads as the lease failure it is. */
+func refreshOnce(
+    runtimeInstance runtimecontract.Runtime,
+    lock lockcontract.Lock,
+    ttl time.Duration,
+    timeout time.Duration,
+) error {
+    refreshContext, cancel := context.WithTimeout(runtimeInstance.Context(), timeout)
+    defer cancel()
+
+    refreshRuntime := runtime.New(refreshContext, runtimeInstance.Scope(), runtimeInstance.Container())
+
+    return lock.Refresh(refreshRuntime, ttl)
 }
 
 /* releaseDetached releases the lock on a runtime detached from the caller's context: by release time that context may already be cancelled, and a release that silently fails because of it would keep the lock held until the ttl lapses. */

@@ -1,6 +1,8 @@
 package config
 
 import (
+    "time"
+
     melodyawss3 "github.com/precision-soft/melody/integrations/awss3/v3"
     melodyencrypt "github.com/precision-soft/melody/integrations/bunorm/v3/encrypt"
     melodycron "github.com/precision-soft/melody/integrations/cron/v3"
@@ -73,7 +75,11 @@ func Configure(app *melodyapplication.Application) {
         Hub:       moduleInstance.serverSentEventHub,
         Path:      "/ws",
         RouteName: "example.websocket",
-        Options:   melodywebsocket.Options{OriginPatterns: []string{"*"}},
+        /* @info IdleTimeout is required: the keepalive ping is the only thing that reaps a browser tab that went away without a fin, and 30s is a comfortable interval for one. */
+        Options: melodywebsocket.Options{
+            OriginPatterns: []string{"*"},
+            IdleTimeout:    30 * time.Second,
+        },
     }))
 
     if nil != moduleInstance.storageClient {

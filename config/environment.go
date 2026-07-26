@@ -32,6 +32,7 @@ const (
     StaticIndexFileKey         = "MELODY_STATIC_INDEX_FILE"
     StaticEnableCacheKey       = "MELODY_STATIC_ENABLE_CACHE"
     StaticCacheMaxAgeKey       = "MELODY_STATIC_CACHE_MAX_AGE"
+    StaticExcludedPathsKey     = "MELODY_STATIC_EXCLUDED_PATHS"
 
     KernelDefaultMode             = "kernel.default_mode"
     KernelProcessRole             = "kernel.process_role"
@@ -48,6 +49,7 @@ const (
     KernelStaticIndexFile         = "kernel.static.index_file"
     KernelStaticEnableCache       = "kernel.static.enable_cache"
     KernelStaticCacheMaxAge       = "kernel.static.cache_max_age"
+    KernelStaticExcludedPaths     = "kernel.static.excluded_paths"
 
     KernelProjectDir = "kernel.project_dir"
     KernelLogsDir    = "kernel.logs_dir"

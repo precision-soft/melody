@@ -825,3 +825,119 @@ func TestTokenBucketLimiter_DeprecatedAliasStillConstructsTheFixedWindowLimiter(
         t.Fatalf("expected the allowance to be spent")
     }
 }
+
+func allowingNext() httpcontract.Handler {
+    return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return http.TextResponse(200, "ok"), nil
+    }
+}
+
+/* IpRateLimit builds its config internally and hands back only the middleware, so the resolver the documentation prescribes for a deployment behind a reverse proxy could never be reached: every client shared the proxy's single budget. The additive variant takes the resolver up front. */
+func TestIpRateLimitWithResolver_ChargesTheForwardedClient(t *testing.T) {
+    resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
+    handler := IpRateLimitWithResolver(1, resolver)(allowingNext())
+
+    _, firstErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
+    if nil != firstErr {
+        t.Fatalf("the first client's only request must pass, got: %v", firstErr)
+    }
+
+    _, secondErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:6666", "203.0.113.8"))
+    if nil != secondErr {
+        t.Fatalf("a different client behind the same proxy must have its own budget, got: %v", secondErr)
+    }
+
+    _, thirdErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:7777", "203.0.113.7"))
+    if nil == thirdErr {
+        t.Fatalf("the first client's second request must exhaust its own budget")
+    }
+}
+
+/* The direct-peer behaviour of the original helper is correct without a proxy in front and stays exactly as it was, so an application that upgrades keeps compiling and keeps its semantics. */
+func TestIpRateLimit_StillChargesTheDirectPeer(t *testing.T) {
+    handler := IpRateLimit(1)(allowingNext())
+
+    _, firstErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
+    if nil != firstErr {
+        t.Fatalf("the first request must pass, got: %v", firstErr)
+    }
+
+    _, secondErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:6666", "203.0.113.8"))
+    if nil == secondErr {
+        t.Fatalf("without a resolver both clients key the direct peer and share one budget")
+    }
+}
+
+func TestSimpleRateLimitWithResolver_ChargesTheForwardedClient(t *testing.T) {
+    resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
+    handler := SimpleRateLimitWithResolver(1, resolver)(allowingNext())
+
+    _, firstErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
+    if nil != firstErr {
+        t.Fatalf("the first client's only request must pass, got: %v", firstErr)
+    }
+
+    _, secondErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:6666", "203.0.113.8"))
+    if nil != secondErr {
+        t.Fatalf("a different client behind the same proxy must have its own budget, got: %v", secondErr)
+    }
+
+    _, thirdErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:7777", "203.0.113.7"))
+    if nil == thirdErr {
+        t.Fatalf("the first client's second request must exhaust its own budget")
+    }
+}
+
+/* UserRateLimit falls back to the client address for a request carrying no user id, so unauthenticated traffic behind a proxy shared one budget — the traffic a limiter is most needed for. */
+func TestUserRateLimitWithResolver_ChargesTheForwardedClientWhenAnonymous(t *testing.T) {
+    resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
+    anonymous := func(request httpcontract.Request) string { return "" }
+    handler := UserRateLimitWithResolver(1, anonymous, resolver)(allowingNext())
+
+    _, firstErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
+    if nil != firstErr {
+        t.Fatalf("the first client's only request must pass, got: %v", firstErr)
+    }
+
+    _, secondErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:6666", "203.0.113.8"))
+    if nil != secondErr {
+        t.Fatalf("a different anonymous client behind the same proxy must have its own budget, got: %v", secondErr)
+    }
+
+    _, thirdErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:7777", "203.0.113.7"))
+    if nil == thirdErr {
+        t.Fatalf("the first client's second request must exhaust its own budget")
+    }
+}
+
+/* An identified user is keyed by id whatever the resolver says, so the resolver only governs the anonymous fallback. */
+func TestUserRateLimitWithResolver_KeepsKeyingIdentifiedUsersById(t *testing.T) {
+    resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
+    identified := func(request httpcontract.Request) string { return "user-1" }
+    handler := UserRateLimitWithResolver(1, identified, resolver)(allowingNext())
+
+    _, firstErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
+    if nil != firstErr {
+        t.Fatalf("the user's only request must pass, got: %v", firstErr)
+    }
+
+    _, secondErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:6666", "203.0.113.8"))
+    if nil == secondErr {
+        t.Fatalf("one user reaching the service from two addresses must still share one budget")
+    }
+}
+
+/* A nil resolver is the documented way to ask for the direct peer, so the additive variants must behave exactly like the originals when given one. */
+func TestRateLimitWithResolver_NilResolverKeepsTheDirectPeer(t *testing.T) {
+    handler := IpRateLimitWithResolver(1, nil)(allowingNext())
+
+    _, firstErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
+    if nil != firstErr {
+        t.Fatalf("the first request must pass, got: %v", firstErr)
+    }
+
+    _, secondErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:6666", "203.0.113.8"))
+    if nil == secondErr {
+        t.Fatalf("a nil resolver must key the direct peer, so both clients share one budget")
+    }
+}

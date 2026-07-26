@@ -9,16 +9,35 @@
 # all, so the default run exercises everything. Override any of them to point at other infrastructure, or
 # clear one to skip its section:
 #
-#   REDIS_ADDRESS= .dev/e2e/run.sh                 # skip the redis-backed sections (the example http one too: it resets
-#                                                  # the rate limit counters straight in redis)
+#   REDIS_ADDRESS= .dev/e2e/run.sh                 # skip the redis-backed sections (EXAMPLE OVER HTTP too: it resets
+#                                                  # the rate limit counters straight in redis, and SERVER-SENT EVENTS,
+#                                                  # whose cross-replica half needs the backplane)
 #   MINIO_ENDPOINT= .dev/e2e/run.sh                # skip the object storage section
-#   EXAMPLE_BASE_URL= .dev/e2e/run.sh              # skip the live example http section
+#   EXAMPLE_BASE_URL= .dev/e2e/run.sh              # skip ALL eleven sections that drive the supervised example
+#   MYSQL_DSN= .dev/e2e/run.sh                     # keep MYSQL AND AUDIT but skip the out-of-band re-read of the
+#                                                  # ciphertext, and leave the two-factor enrollment row behind
+#                                                  # (both are announced, never silent)
+#   PROMETHEUS_URL= .dev/e2e/run.sh                # keep the metric deltas but skip the scrape half
 #   MELODY_E2E_MAJORS='1 3' .dev/e2e/run.sh        # drive the v1 and v3 example applications, leave v2 out
 #   MELODY_E2E_MAJORS= .dev/e2e/run.sh             # skip the per-major example application sections
 #
-# The example http section drives the .example application the dev container already serves on :8080. It
-# calls it over the loopback on purpose: 127.0.0.1 sits outside the example's trusted proxy list, which is
-# what proves a spoofed X-Forwarded-For cannot mint a fresh rate limit budget.
+# The example http sections drive the .example application the dev container already serves on :8080. EXAMPLE
+# OVER HTTP calls it over the loopback on purpose: 127.0.0.1 sits outside the example's trusted proxy list, which
+# is what proves a spoofed X-Forwarded-For cannot mint a fresh rate limit budget.
+#
+# Ten further sections drive that same supervised application: OPENAPI SERVED (the document the serving process
+# builds), TRANSLATION (catalogues, ICU plurals, the fallback chain and the token firewall's json entry point),
+# TOKEN AUTHENTICATION and SWITCH-USER IMPERSONATION (credentials minted by the application's own auth:token
+# command), HMAC OVER HTTP (an internal:sign envelope verified across a real process boundary), TWO-FACTOR
+# (enroll/verify with totp:code plus four refusals), MYSQL AND AUDIT (encrypted at rest, re-read out of band),
+# MULTIPART (a multipart body the framework leaves unread and its urlencoded twin), SERVER-SENT EVENTS (the harness
+# joins the redis backplane as a second replica) and METRICS, which runs LAST because it asserts exact
+# request-count deltas and any later request would move them.
+#
+# Because all eleven share one application, no new section may call /ratelimit/demo (EXAMPLE OVER HTTP asserts the
+# exact call at which the budget is exhausted), none may log in or carry a cookie jar, and none may touch
+# /outbox/* (a stack.sh check asserts its sent-count delta). The rule is repeated in .dev/e2e/examplehttp.go,
+# beside the calls it governs.
 #
 # The per-major EXAMPLE APPLICATION sections drive a DIFFERENT application: for each major listed in
 # MELODY_E2E_MAJORS (all three by default) the harness builds that major's .example into its own workspace

@@ -4,6 +4,7 @@ import (
     "errors"
     nethttp "net/http"
     "net/http/httptest"
+    "strings"
     "testing"
     "time"
 
@@ -558,4 +559,129 @@ func TestRouter_AddRoute_RejectsANonTrailingOptionalWhoseDefaultIsEmpty(t *testi
         },
         "optional route parameter must be the last pattern segment unless it has a default",
     )
+}
+func TestRouter_AddRoute_ServesATrailingOptionalReachedThroughTheRoot(t *testing.T) {
+    routeRegistry := NewRouteRegistry()
+    router := NewRouterWithRouteRegistry(routeRegistry)
+
+    router.HandleWithOptions(
+        "/:page?",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(200, "home"), nil
+        },
+        NewRouteOptions(
+            "home",
+            []string{nethttp.MethodGet},
+            "",
+            nil,
+            nil,
+            nil,
+            nil,
+            0,
+            nil,
+        ),
+    )
+
+    urlGenerator := NewUrlGenerator(routeRegistry)
+
+    generatedPath, generateErr := urlGenerator.GeneratePath("home", nil)
+    if nil != generateErr {
+        t.Fatalf("unexpected generate error: %v", generateErr)
+    }
+
+    if "/" != generatedPath {
+        t.Fatalf("expected the omitted optional to generate the root path, got %q", generatedPath)
+    }
+
+    matchResult, matched := router.Match(nethttp.MethodGet, generatedPath, "", "")
+    if false == matched {
+        t.Fatalf("expected the generated path %q to match the route it came from", generatedPath)
+    }
+
+    if _, bound := matchResult.Params["page"]; true == bound {
+        t.Fatalf("expected the omitted optional to stay unbound, got %v", matchResult.Params)
+    }
+}
+
+func TestRouter_Match_NeverAdvertisesAnEmptyAllowedMethod(t *testing.T) {
+    router := NewRouter()
+
+    router.Handle(
+        "",
+        "/empty-method",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(200, "never"), nil
+        },
+    )
+
+    matchResult, matched := router.Match(nethttp.MethodGet, "/empty-method", "", "")
+    if true == matched {
+        t.Fatalf("expected a route declared with an empty method to stay unreachable")
+    }
+
+    advertised, carried := matchResult.RouteAttributes[RouteAttributeMethods]
+    if false == carried {
+        return
+    }
+
+    methodList, ok := advertised.([]string)
+    if false == ok {
+        t.Fatalf("expected the advertised methods to be a string list, got %T", advertised)
+    }
+
+    for _, methodName := range methodList {
+        if "" == methodName {
+            t.Fatalf("expected no empty method token among the advertised methods, got %q", methodList)
+        }
+    }
+}
+
+func TestRouter_AllowHeaderRespectsMethodPolicy(t *testing.T) {
+    newGetOnlyKernel := func() *Kernel {
+        router := NewRouter()
+        router.Handle(
+            nethttp.MethodGet,
+            "/hello",
+            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                return TextResponse(200, "ok"), nil
+            },
+        )
+
+        return NewKernel(router)
+    }
+
+    allowFor := func(kernel *Kernel) string {
+        handler := kernel.ServeHttp(newHttpTestContainer())
+        request := httptest.NewRequest(nethttp.MethodPost, "/hello", nil)
+        recorder := httptest.NewRecorder()
+        handler.ServeHTTP(recorder, request)
+
+        if 405 != recorder.Code {
+            t.Fatalf("expected 405, got %d", recorder.Code)
+        }
+
+        return recorder.Header().Get("Allow")
+    }
+
+    /* default policy advertises the synthetic OPTIONS and HEAD it actually honors */
+    defaultAllow := allowFor(newGetOnlyKernel())
+    if false == strings.Contains(defaultAllow, nethttp.MethodOptions) || false == strings.Contains(defaultAllow, nethttp.MethodHead) {
+        t.Fatalf("default policy Allow must advertise OPTIONS and HEAD, got %q", defaultAllow)
+    }
+
+    /* with both policy flags off, OPTIONS and HEAD in fact return 405, so Allow must not promise them */
+    restricted := newGetOnlyKernel()
+    restricted.options.MethodPolicy.AutomaticOptions = false
+    restricted.options.MethodPolicy.HeadFallbackToGet = false
+    restrictedAllow := allowFor(restricted)
+
+    if true == strings.Contains(restrictedAllow, nethttp.MethodOptions) {
+        t.Fatalf("Allow must not advertise OPTIONS when AutomaticOptions is off, got %q", restrictedAllow)
+    }
+    if true == strings.Contains(restrictedAllow, nethttp.MethodHead) {
+        t.Fatalf("Allow must not advertise HEAD when HeadFallbackToGet is off, got %q", restrictedAllow)
+    }
+    if false == strings.Contains(restrictedAllow, nethttp.MethodGet) {
+        t.Fatalf("Allow must still advertise the real GET method, got %q", restrictedAllow)
+    }
 }

@@ -4,6 +4,7 @@ import (
     "encoding/json"
     "errors"
     "fmt"
+    "reflect"
     "sort"
     "strings"
     "time"
@@ -288,25 +289,56 @@ func (instance *ContainerCommand) populateServiceList(
     )
 }
 
+/* the placeholder a container that contains itself is rendered as, so the operator sees where the loop closed instead of a truncated blob or nothing at all */
+const errorContextCycleMarker = "<cycle>"
+
+/* the walk records the containers on the current path only, and drops each one again on the way out. An error context may legitimately hand the same map or slice to two sibling keys, and rendering the second one as a cycle would be a silent wrong answer; a container is only a cycle when it is its own ancestor. A slice is keyed on its backing pointer together with its length, so two views of the same array are told apart rather than collapsed. */
+type errorContextVisitKey struct {
+    pointer uintptr
+    length  uintptr
+}
+
 func sanitizeErrorContextValue(value any) any {
+    return sanitizeErrorContextValueTracked(value, map[errorContextVisitKey]struct{}{})
+}
+
+/* the context handed in at the top of resolveErrorContextJson is the caller's own map, redacted before it reaches json.Marshal so the fallbacks cannot print what the redaction exists to strip. That ordering puts this walk ahead of encoding/json's cycle detector, so the walk carries its own: a context holding itself — `context["self"] = context`, which any producer can build — would otherwise recurse until the stack is gone, and a stack overflow is a fatal error that no recover in the command layer turns into a reported failure. */
+func sanitizeErrorContextValueTracked(value any, seen map[errorContextVisitKey]struct{}) any {
     if nil == value {
         return nil
     }
 
     mapValue, isMap := value.(map[string]any)
     if true == isMap {
-        return sanitizeErrorContextMap(mapValue)
+        key := errorContextVisitKey{pointer: reflect.ValueOf(mapValue).Pointer()}
+        if _, visited := seen[key]; true == visited {
+            return errorContextCycleMarker
+        }
+        seen[key] = struct{}{}
+        defer delete(seen, key)
+
+        return sanitizeErrorContextMap(mapValue, seen)
     }
 
     sliceValue, isSlice := value.([]any)
     if true == isSlice {
-        return sanitizeErrorContextSlice(sliceValue)
+        pointer := reflect.ValueOf(sliceValue).Pointer()
+        if 0 != pointer {
+            key := errorContextVisitKey{pointer: pointer, length: uintptr(len(sliceValue)) + 1}
+            if _, visited := seen[key]; true == visited {
+                return errorContextCycleMarker
+            }
+            seen[key] = struct{}{}
+            defer delete(seen, key)
+        }
+
+        return sanitizeErrorContextSlice(sliceValue, seen)
     }
 
     return value
 }
 
-func sanitizeErrorContextMap(value map[string]any) map[string]any {
+func sanitizeErrorContextMap(value map[string]any, seen map[errorContextVisitKey]struct{}) map[string]any {
     result := map[string]any{}
 
     for key, itemValue := range value {
@@ -314,17 +346,17 @@ func sanitizeErrorContextMap(value map[string]any) map[string]any {
             continue
         }
 
-        result[key] = sanitizeErrorContextValue(itemValue)
+        result[key] = sanitizeErrorContextValueTracked(itemValue, seen)
     }
 
     return result
 }
 
-func sanitizeErrorContextSlice(value []any) []any {
+func sanitizeErrorContextSlice(value []any, seen map[errorContextVisitKey]struct{}) []any {
     result := make([]any, 0, len(value))
 
     for _, itemValue := range value {
-        result = append(result, sanitizeErrorContextValue(itemValue))
+        result = append(result, sanitizeErrorContextValueTracked(itemValue, seen))
     }
 
     return result

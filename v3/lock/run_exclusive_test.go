@@ -435,3 +435,44 @@ func TestRunExclusive_ContextCancellationIsShutdownNotLostLease(t *testing.T) {
         t.Fatalf("a cancelled refresh during shutdown must not be reported as a lost lease: %v", err)
     }
 }
+
+/* The holder has the same shape as the leader gate: a renewal that never answers returns no error, so nothing cancels the child runtime and the callback keeps working while the lease lapses and another instance acquires — two runs of the same exclusive work at once. The renewal deadline is what turns the silence into the cancellation the callback is written to obey. */
+func TestRunExclusive_ARenewalThatNeverAnswersStopsTheCallback(t *testing.T) {
+    locker := &hangingRefreshLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
+
+    runContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    ttl := 400 * time.Millisecond
+    cancelled := false
+
+    ran, err := RunExclusive(
+        testRuntimeWithContext(runContext),
+        locker,
+        "job:hanging-refresh",
+        ttl,
+        func(childRuntime runtimecontract.Runtime) error {
+            select {
+            case <-childRuntime.Context().Done():
+                cancelled = true
+
+                return nil
+            case <-time.After(8 * ttl):
+                /* far past the lease: whoever acquired it in the meantime is running the same work */
+                return nil
+            }
+        },
+    )
+
+    if false == ran {
+        t.Fatalf("the holder must report that it ran")
+    }
+
+    if false == cancelled {
+        t.Fatalf("the callback kept working past the lease while the renewal never answered")
+    }
+
+    if nil == err {
+        t.Fatalf("a renewal that never answered must be reported as a lost lease")
+    }
+}

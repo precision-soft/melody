@@ -146,13 +146,13 @@ func TestEventDispatcher_AddListener_SortsByPriorityDescending(t *testing.T) {
 func TestEventDispatcher_AddListener_PanicsOnInvalidInput(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         _ = dispatcher.AddListener("", func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error { return nil }, 0)
-    })
+    }, "event name is required to add a listener")
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         _ = dispatcher.AddListener("e", nil, 0)
-    })
+    }, "event listener is required to add a listener")
 }
 
 func TestEventDispatcher_Dispatch_PanicsOnNilEvent(t *testing.T) {
@@ -160,11 +160,12 @@ func TestEventDispatcher_Dispatch_PanicsOnNilEvent(t *testing.T) {
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
 
-    testhelper.AssertPanics(
+    testhelper.AssertPanicsWithError(
         t,
         func() {
             _, _ = dispatcher.Dispatch(runtimeInstance, nil)
         },
+        "event may not be nil",
     )
 }
 
@@ -173,11 +174,12 @@ func TestEventDispatcher_Dispatch_PanicsOnEmptyName(t *testing.T) {
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
 
-    testhelper.AssertPanics(
+    testhelper.AssertPanicsWithError(
         t,
         func() {
             _, _ = dispatcher.Dispatch(runtimeInstance, &emptyNameEvent{})
         },
+        "event name may not be empty",
     )
 }
 
@@ -186,11 +188,12 @@ func TestEventDispatcher_DispatchName_PanicsOnEmptyName(t *testing.T) {
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
 
-    testhelper.AssertPanics(
+    testhelper.AssertPanicsWithError(
         t,
         func() {
             _, _ = dispatcher.DispatchName(runtimeInstance, "", nil)
         },
+        "event name may not be empty",
     )
 }
 
@@ -467,15 +470,15 @@ func TestEventDispatcher_AddSubscriber_HappyPathRegistersListeners(t *testing.T)
 func TestEventDispatcher_AddSubscriber_PanicsOnInvalidDefinitions(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         dispatcher.AddSubscriber(nil)
-    })
+    }, "event subscriber may not be nil")
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         dispatcher.AddSubscriber(&testSubscriber{events: nil})
-    })
+    }, "subscribed events may not be nil")
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         dispatcher.AddSubscriber(
             &testSubscriber{
                 events: map[string][]eventcontract.SubscribedEvent{
@@ -485,9 +488,9 @@ func TestEventDispatcher_AddSubscriber_PanicsOnInvalidDefinitions(t *testing.T) 
                 },
             },
         )
-    })
+    }, "event name may not be empty")
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         dispatcher.AddSubscriber(
             &testSubscriber{
                 events: map[string][]eventcontract.SubscribedEvent{
@@ -495,9 +498,9 @@ func TestEventDispatcher_AddSubscriber_PanicsOnInvalidDefinitions(t *testing.T) 
                 },
             },
         )
-    })
+    }, "subscribed event list may not be nil")
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         dispatcher.AddSubscriber(
             &testSubscriber{
                 events: map[string][]eventcontract.SubscribedEvent{
@@ -505,9 +508,9 @@ func TestEventDispatcher_AddSubscriber_PanicsOnInvalidDefinitions(t *testing.T) 
                 },
             },
         )
-    })
+    }, "subscribed event may not be nil")
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         dispatcher.AddSubscriber(
             &testSubscriber{
                 events: map[string][]eventcontract.SubscribedEvent{
@@ -515,7 +518,7 @@ func TestEventDispatcher_AddSubscriber_PanicsOnInvalidDefinitions(t *testing.T) 
                 },
             },
         )
-    })
+    }, "subscribed event listener is required")
 }
 
 func TestEventDispatcher_RemoveListener_RemovesListenerAndKeepsOthers(t *testing.T) {

@@ -35,11 +35,7 @@ func NewForwardedClientIpResolver(policy httpcontract.ForwardedHeadersPolicy) Cl
             }
 
             /* the first untrusted hop from the right is the client the nearest trusted proxy attested; anything further left is client-controlled and must not be believed */
-            hopHostString := hop
-            if hostFromSplit, _, splitErr := net.SplitHostPort(hopHostString); nil == splitErr && "" != strings.TrimSpace(hostFromSplit) {
-                /* proxies such as IIS/ARR and Azure Application Gateway append host:port to X-Forwarded-For; strip the port exactly as the trusted-hop check does so the real client is not mistaken for garbage */
-                hopHostString = hostFromSplit
-            }
+            hopHostString := bareAddressFromAuthority(hop)
 
             hopAddress, hopAddressErr := netip.ParseAddr(hopHostString)
             if nil != hopAddressErr {
@@ -54,6 +50,24 @@ func NewForwardedClientIpResolver(policy httpcontract.ForwardedHeadersPolicy) Cl
         /* every hop was a trusted proxy: the client is the leftmost infrastructure address; fall back to the direct peer rather than guess */
         return DefaultClientIp(request)
     }
+}
+
+/* bareAddressFromAuthority reduces a peer address or an X-Forwarded-For entry to the bare address literal netip.ParseAddr accepts. A trusted edge may write any of four shapes: a bare address, host:port, a bracketed IPv6 literal with a port, or a bracketed IPv6 literal without one. net.SplitHostPort covers only the two ported shapes, and netip.ParseAddr rejects the brackets the fourth still carries, so a bracketed literal without a port would be read as garbage — every IPv6 client behind such an edge would then collapse onto the proxy's own rate limit bucket while IPv4 clients kept theirs. Proxies such as IIS/ARR and Azure Application Gateway append the port, so strip it here too and the real client is not mistaken for garbage either way. */
+func bareAddressFromAuthority(value string) string {
+    trimmedValue := strings.TrimSpace(value)
+    if "" == trimmedValue {
+        return ""
+    }
+
+    if hostFromSplit, _, splitErr := net.SplitHostPort(trimmedValue); nil == splitErr && "" != strings.TrimSpace(hostFromSplit) {
+        return strings.TrimSpace(hostFromSplit)
+    }
+
+    if true == strings.HasPrefix(trimmedValue, "[") && true == strings.HasSuffix(trimmedValue, "]") {
+        return strings.TrimSpace(trimmedValue[1 : len(trimmedValue)-1])
+    }
+
+    return trimmedValue
 }
 
 func forwardedForAddresses(request httpcontract.Request) []string {
@@ -76,13 +90,9 @@ func forwardedForAddresses(request httpcontract.Request) []string {
 
 /* isTrustedProxyAddress reports whether the host string matches the trusted proxy list of exact addresses and CIDR prefixes — the per-address form of the request-level check the http kernel applies for scheme detection. */
 func isTrustedProxyAddress(hostString string, trustedProxyList []string) bool {
-    trimmedHostString := strings.TrimSpace(hostString)
+    trimmedHostString := bareAddressFromAuthority(hostString)
     if "" == trimmedHostString {
         return false
-    }
-
-    if hostFromSplit, _, splitErr := net.SplitHostPort(trimmedHostString); nil == splitErr && "" != strings.TrimSpace(hostFromSplit) {
-        trimmedHostString = hostFromSplit
     }
 
     hostAddress, hostAddressErr := netip.ParseAddr(trimmedHostString)

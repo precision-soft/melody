@@ -149,9 +149,9 @@ func TestParseRuntimeFlags_PanicsOnInvalidMode(t *testing.T) {
 
     os.Args = []string{"app", "--mode", "invalid"}
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         _ = ParseRuntimeFlags(config.ModeHttp)
-    })
+    }, "invalid mode: --mode is a runtime flag")
 }
 
 func TestParseRuntimeFlags_RoleDefaultsToAll(t *testing.T) {
@@ -223,9 +223,9 @@ func TestParseRuntimeFlags_PanicsOnInvalidRole(t *testing.T) {
 
     os.Args = []string{"app", "--role=manager"}
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         _ = ParseRuntimeFlags(config.ModeHttp)
-    })
+    }, "invalid role: --role is a runtime flag")
 }
 
 func TestStripRuntimeFlagsFromOsArgs_StripsRoleFlags(t *testing.T) {
@@ -417,9 +417,9 @@ func TestParseRuntimeFlags_PanicsOnExplicitlyEmptyRole(t *testing.T) {
 
     os.Args = []string{"app", "--role="}
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         _ = ParseRuntimeFlags(config.ModeHttp)
-    })
+    }, "invalid role: --role is a runtime flag")
 }
 
 /* @info A bare `--role` that cannot consume its dash-leading next token is still explicitly present with no value, so it must fail closed rather than silently resolve to RoleAll. */
@@ -431,9 +431,9 @@ func TestParseRuntimeFlags_PanicsOnBareRoleWithoutValue(t *testing.T) {
 
     os.Args = []string{"app", "--role", "--mode=http"}
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         _ = ParseRuntimeFlags(config.ModeHttp)
-    })
+    }, "invalid role: --role is a runtime flag")
 }
 
 /* @info An explicitly present but empty `--mode=` (e.g. expanded from an unset env var) must fail closed like an invalid mode instead of silently booting the configured default. */
@@ -445,9 +445,9 @@ func TestParseRuntimeFlags_PanicsOnExplicitlyEmptyMode(t *testing.T) {
 
     os.Args = []string{"app", "--mode="}
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         _ = ParseRuntimeFlags(config.ModeHttp)
-    })
+    }, "invalid mode: --mode is a runtime flag")
 }
 
 /* @info When a runtime flag is supplied more than once before the subcommand, the last occurrence wins. */
@@ -474,9 +474,9 @@ func TestParseRuntimeFlags_PanicsWhenLastRoleOccurrenceIsEmpty(t *testing.T) {
 
     os.Args = []string{"app", "--role=web", "--role=", "someCommand"}
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         _ = ParseRuntimeFlags(config.ModeHttp)
-    })
+    }, "invalid role: --role is a runtime flag")
 }
 
 /* @info A bare `--role` before the subcommand consumes the following token as its value even when that token was meant as the command name, so an unintended value like a command name fails role validation. */
@@ -488,7 +488,7 @@ func TestParseRuntimeFlags_BareRoleBeforeCommandConsumesIt(t *testing.T) {
 
     os.Args = []string{"app", "--role=web", "--role", "someCommand"}
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         _ = ParseRuntimeFlags(config.ModeHttp)
-    })
+    }, "invalid role: --role is a runtime flag")
 }

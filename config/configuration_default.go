@@ -21,8 +21,8 @@ func (instance *Configuration) registerDefaultParameters(
     instance.setDefaultParameter(HttpAddressKey, ":8080")
     instance.setDefaultParameter(HttpMaxRequestBodyBytesKey, 1048576)
 
-    /* zero leaves a session without an expiry, which is what melody has always stored */
-    instance.setDefaultParameter(HttpSessionTtlKey, 0)
+    /* a bounded lifetime is what an application gets by not choosing one, because the unbounded storage it would otherwise fill is also what it gets by not choosing one; zero stays available as the explicit way to ask for no expiry */
+    instance.setDefaultParameter(HttpSessionTtlKey, DefaultSessionTtl.String())
 
     instance.setDefaultParameter(CliNameKey, "melody")
 
@@ -38,6 +38,9 @@ func (instance *Configuration) registerDefaultParameters(
     instance.setDefaultParameter(StaticIndexFileKey, "index.html")
     instance.setDefaultParameter(StaticEnableCacheKey, true)
     instance.setDefaultParameter(StaticCacheMaxAgeKey, 3600)
+
+    /* an empty list keeps the built-in file server answering for every path it recognizes, which is what melody has always served */
+    instance.setDefaultParameter(StaticExcludedPathsKey, "")
 }
 
 func (instance *Configuration) setDefaultParameter(

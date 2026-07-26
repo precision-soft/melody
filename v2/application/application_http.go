@@ -5,11 +5,13 @@ import (
     "errors"
     nethttp "net/http"
 
+    "github.com/precision-soft/melody/v2/cache"
     "github.com/precision-soft/melody/v2/exception"
     "github.com/precision-soft/melody/v2/http"
     httpcontract "github.com/precision-soft/melody/v2/http/contract"
     kernelcontract "github.com/precision-soft/melody/v2/kernel/contract"
     "github.com/precision-soft/melody/v2/logging"
+    loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
 )
 
 func (instance *Application) RegisterHttpRoute(
@@ -85,6 +87,9 @@ func (instance *Application) runHttp(
     applyHttpServerTimeouts(httpServer, configuration)
 
     logger := logging.LoggerMustFromContainer(instance.kernel.ServiceContainer())
+
+    instance.warnOnUnboundedDefaultCacheBackend(logger)
+
     logger.Info(
         "starting http server on `"+configuration.Http().Address()+"` with env `"+configuration.Kernel().Env()+"`",
         nil,
@@ -126,4 +131,16 @@ func (instance *Application) runHttp(
 
         return nil
     }
+}
+
+/* warnOnUnboundedDefaultCacheBackend reports, once at boot, that the cache melody wired by default carries no item ceiling. Whether an entry ever leaves the map is then decided entirely by the caller: a key cached with a positive ttl is reclaimed by the sweep, and one cached without stays for as long as the process lives, with nothing to evict it under memory pressure. The constructor's second argument sets how often that sweep runs, not how long an entry lives. The warning is raised from the http path alone on purpose: a command runs and exits, taking its map with it, so there is genuinely nothing to warn a cli invocation about, and a warning it cannot act on would only teach it to ignore the ones it can. */
+func (instance *Application) warnOnUnboundedDefaultCacheBackend(logger loggingcontract.Logger) {
+    if false == instance.unboundedDefaultCacheBackend {
+        return
+    }
+
+    logger.Warning(
+        "the default in-memory cache backend carries no item ceiling, so a key cached without a ttl is kept until this process exits and nothing evicts it under memory pressure; register `"+cache.ServiceCacheBackend+"` with cache.NewInMemoryBackend(maxItems, cleanupInterval, clock) for a bounded one, or with a shared backend",
+        nil,
+    )
 }

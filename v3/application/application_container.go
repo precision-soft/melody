@@ -207,6 +207,9 @@ func (instance *Application) registerCache() {
     }
 
     if false == serviceContainer.Has(cache.ServiceCacheBackend) {
+        /* the fallback backend is deliberately left unarmed in both dimensions — an item ceiling melody picked would evict an application's entries behind its back, and an expiry melody picked would drop them early — so what it costs is carried to the http path as a warning instead of being decided here */
+        instance.unboundedDefaultCacheBackend = true
+
         instance.RegisterService(
             cache.ServiceCacheBackend,
             func(resolver containercontract.Resolver) (cachecontract.Backend, error) {

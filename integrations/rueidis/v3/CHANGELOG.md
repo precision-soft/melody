@@ -6,14 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-## [v3.6.0] - 2026-07-25 - Bounded Backplane Publish and Connection-Abort Retries
-
 ### Added
 
 - server-sent event backplane: `WithServerSentEventBackplaneCallTimeout` bounds one `Publish` round trip (default 1s) so a request broadcasting an event fails fast instead of hanging on an unresponsive store — the caller is typically an http handler whose context carries no deadline. A non-positive value falls back to the default. The timeout derives from the backplane's own context, so `Close` cancels an in-flight publish too
 
 ### Fixed
 
+- `PurgeExpired` walks each user index in bounded batches rather than reading it whole inside one script, so maintenance no longer blocks every other client of that Redis for as long as the set is large — measured at two seconds for a million tokens against under three milliseconds for the longest batch now. It also counts what it actually removed rather than what it found, since a shrinking set can hand the same member back to a later batch
+- the per-user token index carries an expiry that outlives the longest-lived token it lists, so revoking by user no longer walks a set that grows without bound. The index was created without one and never pruned, while the tokens it named expired underneath it
+- `DeleteByUser` revokes in bounded batches rather than reading the whole index in one script. A single script over a large index blocks every other client of that Redis for as long as it runs — measured at 2.86 seconds for a million tokens; the longest batch is now 7.7 milliseconds for the same set
 - `provider.go` — transient-error detection recognises a connection abort through explicit markers for both spellings its platforms give it (`software caused connection abort` and `established connection was aborted`), aligning with the bunorm providers
 
 ## [v3.5.1] - 2026-07-24 - Reconnect Backoff Clamps
@@ -120,9 +121,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `v3/connection_params.go` — `ConnectionConfig` renamed to `ConnectionParams` with value semantics
 - Dependencies pinned to `github.com/precision-soft/melody/v3 v3.0.0`
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.6.0...HEAD
-
-[v3.6.0]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.5.1...integrations/rueidis/v3.6.0
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.5.1...HEAD
 
 [v3.5.1]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.5.0...integrations/rueidis/v3.5.1
 

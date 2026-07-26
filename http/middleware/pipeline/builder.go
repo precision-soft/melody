@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+    "fmt"
     "sort"
     "strings"
 
@@ -42,6 +43,11 @@ func (instance *Builder) Build(
     }
 
     selected := instance.selectDefinitions(environment, group, report)
+
+    gatingErr := validateReferenceGating(instance.definitions, group)
+    if nil != gatingErr {
+        return nil, report, gatingErr
+    }
 
     ordered, missingReferences, cycleDetected := orderDefinitions(selected)
     report.SetMissingReference(missingReferences)
@@ -206,6 +212,154 @@ func isEnabledForGroup(definition *HttpMiddlewareDefinition, group string) bool 
     return false
 }
 
+/* validateReferenceGating refuses a before or after reference whose target is not active everywhere the referring definition is active. selectDefinitions drops a definition whose environment or group gating does not match; orderDefinitions then sees the surviving reference as a name no node carries and reports it as missing, and Build turns that into the error the application boots on. A pipeline where an always-on middleware orders itself against a dev-only one therefore starts in dev and refuses to start in prod, which is the one place the failure must not be discovered.
+
+The declared sets are compared, never the environment being booted, so the same reference is refused in every environment rather than only in the one that happens to drop the target. An empty set is the universal one — a definition that names no environments runs in all of them — so an always-on definition may only reference another always-on definition, while a dev-only definition may reference a dev-only or an always-on one. Groups carry the same meaning and are checked the same way.
+
+A name no definition carries at all is left alone: that is an ordinary missing reference, and the ordering pass reports every one of them together. */
+func validateReferenceGating(definitions []*HttpMiddlewareDefinition, group string) error {
+    if 0 == len(definitions) {
+        return nil
+    }
+
+    byName := make(map[string][]*HttpMiddlewareDefinition)
+    for _, definition := range definitions {
+        if "" == definition.name {
+            continue
+        }
+
+        byName[definition.name] = append(byName[definition.name], definition)
+    }
+
+    for _, definition := range definitions {
+        if "" == definition.name {
+            continue
+        }
+
+        for _, referencedName := range referencedNames(definition) {
+            targets, exists := byName[referencedName]
+            if false == exists {
+                continue
+            }
+
+            reason := gatingReason(definition, targets)
+            if "" == reason {
+                continue
+            }
+
+            /* the reason belongs in the message, not only in the context: an application boots on this error and the operator reading the panic has to be told which two definitions and which gating are at fault without unwrapping anything */
+            return exception.NewError(
+                fmt.Sprintf("middleware pipeline has an unsatisfiable reference: %s", reason),
+                exceptioncontract.Context{
+                    "group":      group,
+                    "middleware": definition.name,
+                    "references": referencedName,
+                    "reason":     reason,
+                },
+                nil,
+            )
+        }
+    }
+
+    return nil
+}
+
+/* referencedNames lists the definitions this one orders itself against, in the order the edges are added, so the first unsatisfiable reference reported is stable across builds. */
+func referencedNames(definition *HttpMiddlewareDefinition) []string {
+    names := make([]string, 0, len(definition.after)+len(definition.before))
+
+    for _, afterName := range definition.after {
+        if "" == afterName {
+            continue
+        }
+
+        names = append(names, afterName)
+    }
+
+    for _, beforeName := range definition.before {
+        if "" == beforeName {
+            continue
+        }
+
+        names = append(names, beforeName)
+    }
+
+    return names
+}
+
+/* gatingReason explains why none of the definitions registered under the referenced name is active everywhere the referrer is, and returns an empty string when one of them is. Duplicates registered under one name are each a candidate: a single one that covers the referrer is enough, because that one is selected wherever the referrer is. */
+/* gatingReason weighs the environment gating alone. An environment is a property of the running process, so a reference that survives one environment and vanishes in another is a defect the declared sets can settle once, at every boot. A group is a property of the build being asked for: several groups are built in one process, each from its own selection, so a reference unsatisfiable in some other group says nothing about this one — the selection has already dropped what this group does not carry, and a target missing from it is reported as a missing reference like any other. */
+func gatingReason(referrer *HttpMiddlewareDefinition, targets []*HttpMiddlewareDefinition) string {
+    for _, target := range targets {
+        if true == coversDeclaredSet(target.enabledEnvironments, referrer.enabledEnvironments) {
+            return ""
+        }
+    }
+
+    target := targets[0]
+
+    return describeReference(
+        referrer.name,
+        target.name,
+        "environment",
+        referrer.enabledEnvironments,
+        target.enabledEnvironments,
+    )
+}
+
+/* coversDeclaredSet reports whether the declared set admits at least everything the other one admits. An empty slice is the universal set, so it covers anything and is covered only by another universal set. */
+func coversDeclaredSet(superset []string, subset []string) bool {
+    if 0 == len(superset) {
+        return true
+    }
+
+    if 0 == len(subset) {
+        return false
+    }
+
+    for _, value := range subset {
+        found := false
+
+        for _, allowed := range superset {
+            if allowed == value {
+                found = true
+                break
+            }
+        }
+
+        if false == found {
+            return false
+        }
+    }
+
+    return true
+}
+
+func describeReference(
+    referrerName string,
+    targetName string,
+    dimension string,
+    referrerSet []string,
+    targetSet []string,
+) string {
+    return fmt.Sprintf(
+        "%q is enabled in %s and %q only in %s, so the reference is dropped wherever %q is not enabled",
+        referrerName,
+        describeDeclaredSet(dimension, referrerSet),
+        targetName,
+        describeDeclaredSet(dimension, targetSet),
+        targetName,
+    )
+}
+
+func describeDeclaredSet(dimension string, values []string) string {
+    if 0 == len(values) {
+        return fmt.Sprintf("every %s", dimension)
+    }
+
+    return fmt.Sprintf("%s %s", dimension, strings.Join(values, ", "))
+}
+
 type definitionNode struct {
     /* definition drives ordering (priority, before/after edges); duplicates share a name and therefore a node, so every one of them is kept here and emitted together at the node's position — keying the map on the name alone silently dropped all but the last, defeating allowDuplicates */
     definition *HttpMiddlewareDefinition
@@ -247,17 +401,18 @@ func orderDefinitions(definitions []*HttpMiddlewareDefinition) ([]*HttpMiddlewar
         orderedNodes = append(orderedNodes, node)
     }
 
+    /* every edge has the iterated definition on one of its two ends, and that end was given a node above, so at most one end can be missing and the missing one is always the name the definition referenced */
     addEdge := func(from string, to string) {
         fromNode, fromExists := nodes[from]
         toNode, toExists := nodes[to]
 
-        if false == fromExists || false == toExists {
-            if true == fromExists && false == toExists {
-                missingReferences = append(missingReferences, to)
-            }
-            if false == fromExists && true == toExists {
-                missingReferences = append(missingReferences, from)
-            }
+        if false == toExists {
+            missingReferences = append(missingReferences, to)
+            return
+        }
+
+        if false == fromExists {
+            missingReferences = append(missingReferences, from)
             return
         }
 

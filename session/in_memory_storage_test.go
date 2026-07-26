@@ -179,3 +179,197 @@ func TestInMemoryStorage_ConcurrentLoadSaveIsRaceFree(t *testing.T) {
 
     waitGroup.Wait()
 }
+
+func TestInMemoryStorage_SaveDeepCopiesNestedMaps(t *testing.T) {
+    storage := NewInMemoryStorage()
+    defer storage.Close()
+
+    input := map[string]any{"profile": map[string]any{"name": "original"}}
+    if saveErr := storage.Save("session", input, time.Hour); nil != saveErr {
+        t.Fatalf("save failed: %v", saveErr)
+    }
+
+    input["profile"].(map[string]any)["name"] = "mutated"
+
+    loaded, _, loadErr := storage.Load("session")
+    if nil != loadErr {
+        t.Fatalf("load failed: %v", loadErr)
+    }
+
+    if "original" != loaded["profile"].(map[string]any)["name"] {
+        t.Fatalf("mutating the caller's nested map after Save leaked into internal storage")
+    }
+}
+
+func TestInMemoryStorage_LoadDeepCopiesNestedMaps(t *testing.T) {
+    storage := NewInMemoryStorage()
+    defer storage.Close()
+
+    if saveErr := storage.Save("session", map[string]any{"profile": map[string]any{"name": "original"}}, time.Hour); nil != saveErr {
+        t.Fatalf("save failed: %v", saveErr)
+    }
+
+    loaded, _, loadErr := storage.Load("session")
+    if nil != loadErr {
+        t.Fatalf("load failed: %v", loadErr)
+    }
+
+    nested, ok := loaded["profile"].(map[string]any)
+    if false == ok {
+        t.Fatalf("expected a nested map")
+    }
+    nested["name"] = "mutated"
+
+    reloaded, _, reloadErr := storage.Load("session")
+    if nil != reloadErr {
+        t.Fatalf("reload failed: %v", reloadErr)
+    }
+
+    if "original" != reloaded["profile"].(map[string]any)["name"] {
+        t.Fatalf("mutating a nested map returned by Load leaked into internal storage")
+    }
+}
+
+func TestInMemoryStorage_LoadDeepCopiesSlicesOfMaps(t *testing.T) {
+    store := NewInMemoryStorage()
+    defer store.Close()
+
+    if saveErr := store.Save("session", map[string]any{"permissions": []any{map[string]any{"action": "read"}}}, time.Hour); nil != saveErr {
+        t.Fatalf("save failed: %v", saveErr)
+    }
+
+    loaded, _, loadErr := store.Load("session")
+    if nil != loadErr {
+        t.Fatalf("load failed: %v", loadErr)
+    }
+
+    loaded["permissions"].([]any)[0].(map[string]any)["action"] = "write"
+
+    reloaded, _, reloadErr := store.Load("session")
+    if nil != reloadErr {
+        t.Fatalf("reload failed: %v", reloadErr)
+    }
+
+    if "read" != reloaded["permissions"].([]any)[0].(map[string]any)["action"] {
+        t.Fatalf("mutating a map inside a slice returned by Load leaked into internal storage")
+    }
+}
+
+func TestInMemoryStorage_LoadDoesNotDeleteConcurrentlySavedEntry(t *testing.T) {
+    storage := NewInMemoryStorage()
+    defer storage.Close()
+
+    const sessionId = "race-session"
+    const loaders = 6
+
+    for iteration := 0; iteration < 20000; iteration++ {
+        if saveErr := storage.Save(sessionId, map[string]any{"v": "expired"}, time.Nanosecond); nil != saveErr {
+            t.Fatalf("seed save failed: %v", saveErr)
+        }
+
+        start := make(chan struct{})
+        var wait sync.WaitGroup
+        wait.Add(loaders + 1)
+
+        for loader := 0; loader < loaders; loader++ {
+            go func() {
+                defer wait.Done()
+                <-start
+                storage.Load(sessionId)
+            }()
+        }
+        go func() {
+            defer wait.Done()
+            <-start
+            storage.Save(sessionId, map[string]any{"v": "fresh"}, time.Hour)
+        }()
+
+        close(start)
+        wait.Wait()
+
+        data, found, loadErr := storage.Load(sessionId)
+        if nil != loadErr {
+            t.Fatalf("iteration %d: final load failed: %v", iteration, loadErr)
+        }
+        if false == found {
+            t.Fatalf("iteration %d: a concurrently saved fresh session was deleted by the expired-entry cleanup in Load", iteration)
+        }
+        if "fresh" != data["v"] {
+            t.Fatalf("iteration %d: expected fresh session data, got: %v", iteration, data["v"])
+        }
+    }
+}
+
+func TestInMemoryStorage_SharedValueKeepsItsIdentityAcrossASaveLoadRoundTrip(t *testing.T) {
+    storage := NewInMemoryStorage()
+    defer storage.Close()
+
+    manager := NewManager(storage, 30*time.Minute)
+
+    sessionInstance := manager.NewSession()
+
+    handle := &sharedCounter{count: 1}
+    sessionInstance.SetShared("counter", handle)
+
+    saveErr := manager.SaveSession(sessionInstance)
+    if nil != saveErr {
+        t.Fatalf("expected the session to be saved, got %v", saveErr)
+    }
+
+    loadedSession := manager.Session(sessionInstance.Id())
+    if nil == loadedSession {
+        t.Fatalf("expected the session to load")
+    }
+
+    loadedHandle, isHandle := loadedSession.Get("counter").(*sharedCounter)
+    if false == isHandle {
+        t.Fatalf("expected the shared handle back")
+    }
+
+    if handle != loadedHandle {
+        t.Fatalf("expected the very handle that was stored, got a copy")
+    }
+
+    loadedHandle.count = 2
+
+    if 2 != handle.count {
+        t.Fatalf("expected a write through the loaded handle to reach the shared value")
+    }
+}
+
+func TestInMemoryStorage_SetIsStillIsolatedAcrossASaveLoadRoundTrip(t *testing.T) {
+    storage := NewInMemoryStorage()
+    defer storage.Close()
+
+    manager := NewManager(storage, 30*time.Minute)
+
+    sessionInstance := manager.NewSession()
+
+    handle := &sharedCounter{count: 1}
+    sessionInstance.Set("counter", handle)
+
+    saveErr := manager.SaveSession(sessionInstance)
+    if nil != saveErr {
+        t.Fatalf("expected the session to be saved, got %v", saveErr)
+    }
+
+    loadedSession := manager.Session(sessionInstance.Id())
+    if nil == loadedSession {
+        t.Fatalf("expected the session to load")
+    }
+
+    loadedHandle, isHandle := loadedSession.Get("counter").(*sharedCounter)
+    if false == isHandle {
+        t.Fatalf("expected a counter back")
+    }
+
+    if handle == loadedHandle {
+        t.Fatalf("expected a value stored with set to load as a copy")
+    }
+
+    loadedHandle.count = 2
+
+    if 1 != handle.count {
+        t.Fatalf("expected the stored value to be untouched by a write through the copy")
+    }
+}

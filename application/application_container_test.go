@@ -5,6 +5,8 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/cache"
+    cachecontract "github.com/precision-soft/melody/cache/contract"
     "github.com/precision-soft/melody/clock"
     clockcontract "github.com/precision-soft/melody/clock/contract"
     "github.com/precision-soft/melody/config"
@@ -113,14 +115,14 @@ func TestApplicationRegisterService_PanicsAfterBoot(t *testing.T) {
 
     applicationInstance.Boot()
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         applicationInstance.RegisterService(
             "service.test",
             func(resolver containercontract.Resolver) (*os.File, error) {
                 return nil, nil
             },
         )
-    })
+    }, "may not register services after boot")
 }
 
 type ttlRecordingSessionStorage struct {
@@ -235,5 +237,34 @@ func TestApplicationRegisterHttpSession_KeepsAnUnconfiguredTtlUnbounded(t *testi
 
     if 0 != storage.savedTtl {
         t.Fatalf("expected an unconfigured session ttl to stay unbounded, got %v", storage.savedTtl)
+    }
+}
+
+/* @info The framework's fallback cache backend is unbounded in both dimensions, so the application has to be told; the flag is what carries that to the http path, and it must be set exactly when melody supplied the backend itself. */
+func TestApplicationRegisterCache_MarksTheFallbackBackendAsUnbounded(t *testing.T) {
+    applicationInstance := newSessionTtlTestApplication(t, "30m")
+
+    applicationInstance.registerCache()
+
+    if false == applicationInstance.unboundedDefaultCacheBackend {
+        t.Fatalf("expected the fallback in-memory cache backend to be marked unbounded")
+    }
+}
+
+/* @info An application that brought its own backend chose its own bounds, and melody has nothing to warn it about. */
+func TestApplicationRegisterCache_LeavesAnApplicationSuppliedBackendUnmarked(t *testing.T) {
+    applicationInstance := newSessionTtlTestApplication(t, "30m")
+
+    applicationInstance.RegisterService(
+        cache.ServiceCacheBackend,
+        func(resolver containercontract.Resolver) (cachecontract.Backend, error) {
+            return cache.NewInMemoryBackend(128, time.Hour, clock.NewSystemClock()), nil
+        },
+    )
+
+    applicationInstance.registerCache()
+
+    if true == applicationInstance.unboundedDefaultCacheBackend {
+        t.Fatalf("expected an application-supplied cache backend to leave the warning unarmed")
     }
 }
