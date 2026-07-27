@@ -306,3 +306,60 @@ func TestContainer_ConcurrentGet_SingleFactoryCall(t *testing.T) {
         t.Fatalf("expected factory to be called once")
     }
 }
+
+type hasTypeProbe struct {
+    value string
+}
+
+/* @info Has and Get have to agree about the same container. A registration made from a provider returning *T is filed under *T, and GetByType canonicalises before it looks — so asking HasType with the value type was answered "no" for a service the very next GetByType resolves happily. A caller that guards a resolution with HasType then took the branch for a service that is registered. */
+func TestHasType_AnswersForTheValueTypeOfAPointerRegistration(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "app.probe",
+        func(resolver containercontract.Resolver) (*hasTypeProbe, error) {
+            return &hasTypeProbe{value: "probe"}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    valueType := reflect.TypeOf(hasTypeProbe{})
+
+    if false == serviceContainer.HasType(valueType) {
+        t.Fatalf("expected HasType to answer for the value type of a pointer registration")
+    }
+
+    _, getByTypeErr := serviceContainer.GetByType(valueType)
+    if nil != getByTypeErr {
+        t.Fatalf("expected GetByType to resolve the same type HasType reported: %v", getByTypeErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+
+    if false == scopeInstance.HasType(valueType) {
+        t.Fatalf("expected the scope to answer the same way the container does")
+    }
+
+    _, scopeGetErr := scopeInstance.GetByType(valueType)
+    if nil != scopeGetErr {
+        t.Fatalf("expected the scope to resolve the type it reported: %v", scopeGetErr)
+    }
+}
+
+/* @info An override installed on a scope is filed under the canonical type of the value, so the scope has to canonicalise before it answers for one too. */
+func TestHasType_AnswersForTheValueTypeOfAScopeOverride(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    scopeInstance := serviceContainer.NewScope()
+
+    overrideErr := scopeInstance.OverrideInstance("app.override", &hasTypeProbe{value: "override"})
+    if nil != overrideErr {
+        t.Fatalf("unexpected override error: %v", overrideErr)
+    }
+
+    if false == scopeInstance.HasType(reflect.TypeOf(hasTypeProbe{})) {
+        t.Fatalf("expected the scope to answer for the value type of an installed override")
+    }
+}

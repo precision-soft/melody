@@ -47,6 +47,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     )
 
     router.HandleNamed("example.platform.demo", "GET", "/platform/demo", handler.PlatformDemoHandler())
+    router.HandleNamed("example.scoped.trail.demo", "GET", "/scoped/trail/demo", handler.ScopedTrailDemoHandler())
 
     router.HandleNamed("example.messagebus.demo", "POST", "/messagebus/demo", handler.MessageBusDemoHandler())
 

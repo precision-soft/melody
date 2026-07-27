@@ -11,6 +11,7 @@ import (
     melodycontainer "github.com/precision-soft/melody/v3/container"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     contract2 "github.com/precision-soft/melody/v3/event/contract"
+    http "github.com/precision-soft/melody/v3/http"
 )
 
 /* RegisterGeneratedServices registers every service discovered under the scanned packages. */
@@ -208,6 +209,30 @@ func RegisterGeneratedServices(registrar containercontract.Registrar) {
         registrar,
         func(resolver containercontract.Resolver) (*reporting.ReportFormatter, error) {
             return reporting.NewReportFormatter(), nil
+        },
+    )
+}
+
+/* RegisterGeneratedServicesScoped registers every scope-owned service discovered under the scanned packages. What it registers is built once per scope and closed when that scope closes. */
+func RegisterGeneratedServicesScoped(registrar containercontract.ScopedRegistrar) {
+    melodycontainer.MustRegisterScoped(
+        registrar,
+        reporting.ServiceRequestReportTrail,
+        func(resolver containercontract.Resolver) (*reporting.RequestReportTrail, error) {
+            requestContext, requestContextErr := melodycontainer.FromResolverByType[*http.RequestContext](resolver)
+            if nil != requestContextErr {
+                return nil, requestContextErr
+            }
+
+            formatter, formatterErr := melodycontainer.FromResolverByType[*reporting.ReportFormatter](resolver)
+            if nil != formatterErr {
+                return nil, formatterErr
+            }
+
+            return reporting.NewRequestReportTrail(
+                requestContext,
+                formatter,
+            )
         },
     )
 }

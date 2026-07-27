@@ -118,20 +118,26 @@ func (instance *container) HasType(targetType reflect.Type) bool {
         return false
     }
 
+    /* @important the lookup is canonical because the registrations are: a service registered from a provider returning *T is filed under *T, and GetByType canonicalises before it looks. Asking with the value type therefore used to be answered "no" for a service GetByType resolves happily, so Has and Get disagreed about the same container. */
+    canonicalType := canonicalServiceType(targetType)
+    if nil == canonicalType {
+        return false
+    }
+
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
 
-    _, exists := instance.typeInstances[targetType]
+    _, exists := instance.typeInstances[canonicalType]
     if true == exists {
         return true
     }
 
-    _, exists = instance.typeProviders[targetType]
+    _, exists = instance.typeProviders[canonicalType]
     if true == exists {
         return true
     }
 
-    registeredServiceNames, existsName := instance.typeRegistrationNamesByType[targetType]
+    registeredServiceNames, existsName := instance.typeRegistrationNamesByType[canonicalType]
     if true == existsName && 0 < len(registeredServiceNames) {
         return true
     }

@@ -85,3 +85,15 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
 }
 
 var _ melodyapplicationcontract.ServiceModule = (*Module)(nil)
+
+/* RegisterScopedServices declares the services that belong to one scope — one http request here. The
+generator emits them into their own function because the two registrars share no method: this hook receives a
+scoped registrar, RegisterServices receives a container one, and handing either to the other does not compile.
+
+What lands here is built on the first resolution through a scope, shared by everything inside that request,
+and closed when the request ends. Regenerate with the same command the container services use. */
+func (instance *Module) RegisterScopedServices(registrar melodyapplicationcontract.ScopedServiceRegistrar) {
+    generated.RegisterGeneratedServicesScoped(registrar)
+}
+
+var _ melodyapplicationcontract.ScopedServiceModule = (*Module)(nil)

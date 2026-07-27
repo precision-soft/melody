@@ -218,12 +218,10 @@ func (instance *container) closeInternal() error {
         assignRepresentative(nodeKey, value)
     }
 
-    adjacency := make(map[string]map[string]struct{}, len(canonicalNodeKeys))
-    inDegree := make(map[string]int, len(canonicalNodeKeys))
-
-    for _, nodeKey := range canonicalNodeKeys {
-        inDegree[nodeKey] = 0
-    }
+    /* the graph is stated in the container's own node keys, so it is translated into the canonical keys the
+    teardown walks — the ones an alias of the same instance was collapsed onto — before the shared ordering
+    runs over it */
+    canonicalEdges := make(map[string]map[string]struct{}, len(canonicalNodeKeys))
 
     for dependentKey, dependencySet := range instance.dependencyGraph {
         canonicalDependent, dependentCreated := representativeOf[dependentKey]
@@ -237,81 +235,19 @@ func (instance *container) closeInternal() error {
                 continue
             }
 
-            if canonicalDependent == canonicalDependency {
-                continue
-            }
-
-            dependencies, exists := adjacency[canonicalDependent]
+            dependencies, exists := canonicalEdges[canonicalDependent]
             if false == exists {
                 dependencies = make(map[string]struct{})
-                adjacency[canonicalDependent] = dependencies
-            }
-
-            if _, alreadyAdded := dependencies[canonicalDependency]; true == alreadyAdded {
-                continue
+                canonicalEdges[canonicalDependent] = dependencies
             }
 
             dependencies[canonicalDependency] = struct{}{}
-            inDegree[canonicalDependency] = inDegree[canonicalDependency] + 1
         }
     }
 
-    available := make([]string, 0, len(createdNodeKeys))
-    for nodeKey, degree := range inDegree {
-        if 0 == degree {
-            available = append(available, nodeKey)
-        }
-    }
+    closeOrder, remaining := teardownCloseOrder(canonicalNodeKeys, canonicalEdges)
 
-    availableHeap := &nodeKeyHeap{
-        items: available,
-    }
-    heap.Init(availableHeap)
-
-    closeOrder := make([]string, 0, len(createdNodeKeys))
-
-    for 0 < availableHeap.Len() {
-        current := heap.Pop(availableHeap).(string)
-
-        closeOrder = append(closeOrder, current)
-
-        dependencies, exists := adjacency[current]
-        if false == exists {
-            continue
-        }
-
-        for dependencyKey := range dependencies {
-            inDegree[dependencyKey] = inDegree[dependencyKey] - 1
-            if 0 == inDegree[dependencyKey] {
-                heap.Push(
-                    availableHeap,
-                    dependencyKey,
-                )
-            }
-        }
-    }
-
-    remaining := make([]string, 0)
-    for nodeKey, degree := range inDegree {
-        if 0 < degree {
-            remaining = append(remaining, nodeKey)
-        }
-    }
-
-    sort.Slice(
-        remaining,
-        func(leftIndex int, rightIndex int) bool {
-            return remaining[leftIndex] > remaining[rightIndex]
-        },
-    )
-
-    dependencyCycleDetected := false
-    if 0 < len(remaining) {
-        dependencyCycleDetected = true
-        for _, nodeKey := range remaining {
-            closeOrder = append(closeOrder, nodeKey)
-        }
-    }
+    dependencyCycleDetected := 0 < len(remaining)
 
     candidates := make([]closeCandidate, 0, len(closeOrder))
 
@@ -523,4 +459,110 @@ func pointerKeyOf(value any) (pointerIdentity, bool) {
     }
 
     return pointerIdentity{}, false
+}
+
+/* teardownCloseOrder puts a set of created services into the order they have to be closed in: a dependent
+before everything it depends on, so nothing is torn down while something still using it is alive. Ties are
+broken by the node key descending, which is the order both teardowns used before either had a graph, so
+adding an edge never reshuffles the services around it.
+
+The edges are expected in the same key space as the nodes; an edge naming a node that was not created is
+dropped rather than followed, and a self-edge is ignored. What a cycle leaves behind is returned separately
+and appended last, so the caller can both close it and report it.
+
+The container and the request scope share this walk because they answer the same question about different
+sets: the container asks it of everything it built for the process, the scope of everything it built for one
+request. Two implementations of it would be two chances to order a teardown differently. */
+func teardownCloseOrder(
+    nodeKeys []string,
+    edges map[string]map[string]struct{},
+) ([]string, []string) {
+    adjacency := make(map[string]map[string]struct{}, len(nodeKeys))
+    inDegree := make(map[string]int, len(nodeKeys))
+
+    for _, nodeKey := range nodeKeys {
+        inDegree[nodeKey] = 0
+    }
+
+    for dependentKey, dependencySet := range edges {
+        if _, created := inDegree[dependentKey]; false == created {
+            continue
+        }
+
+        for dependencyKey := range dependencySet {
+            if _, created := inDegree[dependencyKey]; false == created {
+                continue
+            }
+
+            if dependentKey == dependencyKey {
+                continue
+            }
+
+            dependencies, exists := adjacency[dependentKey]
+            if false == exists {
+                dependencies = make(map[string]struct{})
+                adjacency[dependentKey] = dependencies
+            }
+
+            if _, alreadyAdded := dependencies[dependencyKey]; true == alreadyAdded {
+                continue
+            }
+
+            dependencies[dependencyKey] = struct{}{}
+            inDegree[dependencyKey] = inDegree[dependencyKey] + 1
+        }
+    }
+
+    available := make([]string, 0, len(nodeKeys))
+    for nodeKey, degree := range inDegree {
+        if 0 == degree {
+            available = append(available, nodeKey)
+        }
+    }
+
+    availableHeap := &nodeKeyHeap{
+        items: available,
+    }
+    heap.Init(availableHeap)
+
+    closeOrder := make([]string, 0, len(nodeKeys))
+
+    for 0 < availableHeap.Len() {
+        current := heap.Pop(availableHeap).(string)
+
+        closeOrder = append(closeOrder, current)
+
+        dependencies, exists := adjacency[current]
+        if false == exists {
+            continue
+        }
+
+        for dependencyKey := range dependencies {
+            inDegree[dependencyKey] = inDegree[dependencyKey] - 1
+            if 0 == inDegree[dependencyKey] {
+                heap.Push(
+                    availableHeap,
+                    dependencyKey,
+                )
+            }
+        }
+    }
+
+    cycleNodeKeys := make([]string, 0)
+    for nodeKey, degree := range inDegree {
+        if 0 < degree {
+            cycleNodeKeys = append(cycleNodeKeys, nodeKey)
+        }
+    }
+
+    sort.Slice(
+        cycleNodeKeys,
+        func(leftIndex int, rightIndex int) bool {
+            return cycleNodeKeys[leftIndex] > cycleNodeKeys[rightIndex]
+        },
+    )
+
+    closeOrder = append(closeOrder, cycleNodeKeys...)
+
+    return closeOrder, cycleNodeKeys
 }

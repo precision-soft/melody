@@ -1,9 +1,7 @@
 package container
 
 import (
-    "container/heap"
     "reflect"
-    "sort"
     "strings"
     "sync"
     "sync/atomic"
@@ -192,11 +190,23 @@ func (instance *scope) HasType(targetType reflect.Type) bool {
         return false
     }
 
+    /* @important every lookup is canonical, because that is the key both the overrides and the registrations are filed under: an override is stored under canonicalServiceType of the value's type, and GetByType canonicalises before it looks. Asking with the value type was answered "no" for a service the very next GetByType resolves. */
+    canonicalType := canonicalServiceType(targetType)
+    if nil == canonicalType {
+        return false
+    }
+
     /* @important the same ordering as Has: the scope answers first and lets its lock go before the container is asked, since the container reaches into the scope while holding its own lock */
     instance.mutex.RLock()
-    _, exists := instance.typeInstances[targetType]
+    _, exists := instance.typeInstances[canonicalType]
     if false == exists {
-        _, exists = instance.createdTypeInstances[targetType]
+        _, exists = instance.createdTypeInstances[canonicalType]
+    }
+    if false == exists {
+        _, exists = instance.ownTypeRegistrationNamesByType[canonicalType]
+    }
+    if false == exists {
+        _, exists = instance.ownTypeProviders[canonicalType]
     }
     instance.mutex.RUnlock()
 
@@ -204,30 +214,15 @@ func (instance *scope) HasType(targetType reflect.Type) bool {
         return true
     }
 
-    /* @important the scoped lookups canonicalise the type, because that is the key the registrations are filed under. The two lookups above deliberately do not, mirroring container.HasType — a pre-existing gap that is not this branch's to inherit. */
-    canonicalType := canonicalServiceType(targetType)
-    if nil != canonicalType {
-        instance.mutex.RLock()
-        _, scopedExists := instance.ownTypeRegistrationNamesByType[canonicalType]
-        if false == scopedExists {
-            _, scopedExists = instance.ownTypeProviders[canonicalType]
-        }
-        instance.mutex.RUnlock()
-
-        if true == scopedExists {
-            return true
-        }
-
-        if _, planned := instance.plan.typeRegistrationNamesByType[canonicalType]; true == planned {
-            return true
-        }
-
-        if _, planned := instance.plan.typeProviders[canonicalType]; true == planned {
-            return true
-        }
+    if _, planned := instance.plan.typeRegistrationNamesByType[canonicalType]; true == planned {
+        return true
     }
 
-    return containerInstance.HasType(targetType)
+    if _, planned := instance.plan.typeProviders[canonicalType]; true == planned {
+        return true
+    }
+
+    return containerInstance.HasType(canonicalType)
 }
 
 func (instance *scope) OverrideInstance(serviceName string, value any) error {
@@ -482,7 +477,7 @@ func closeCreatedScopeInstances(
         valueOfNodeKey[nodeKey] = value
     }
 
-    closeOrder, cycleNodeKeys := scopeCloseOrder(nodeKeys, dependencyGraph)
+    closeOrder, cycleNodeKeys := teardownCloseOrder(nodeKeys, dependencyGraph)
 
     closedPointers := make(map[pointerIdentity]struct{})
     closedValues := make(map[any]struct{})
@@ -538,103 +533,6 @@ func closeCreatedScopeInstances(
         },
         nil,
     )
-}
-
-/* scopeCloseOrder puts the services the scope built into the order they have to be closed in: a dependent before everything it depends on, so nothing is torn down while something still using it is alive. Ties are broken by the node key descending, which is what the walk did before it had a graph, so adding an edge never reshuffles the services around it.
-
-An edge naming a node the scope did not build is dropped rather than followed: a scoped service reaching a container singleton records nothing here, and a dependency whose creation failed was never stored. What a cycle leaves behind is closed last and reported, exactly as the container's teardown reports its own. */
-func scopeCloseOrder(
-    nodeKeys []string,
-    dependencyGraph map[string]map[string]struct{},
-) ([]string, []string) {
-    adjacency := make(map[string]map[string]struct{}, len(nodeKeys))
-    inDegree := make(map[string]int, len(nodeKeys))
-
-    for _, nodeKey := range nodeKeys {
-        inDegree[nodeKey] = 0
-    }
-
-    for dependentKey, dependencySet := range dependencyGraph {
-        if _, created := inDegree[dependentKey]; false == created {
-            continue
-        }
-
-        for dependencyKey := range dependencySet {
-            if _, created := inDegree[dependencyKey]; false == created {
-                continue
-            }
-
-            if dependentKey == dependencyKey {
-                continue
-            }
-
-            dependencies, exists := adjacency[dependentKey]
-            if false == exists {
-                dependencies = make(map[string]struct{})
-                adjacency[dependentKey] = dependencies
-            }
-
-            if _, alreadyAdded := dependencies[dependencyKey]; true == alreadyAdded {
-                continue
-            }
-
-            dependencies[dependencyKey] = struct{}{}
-            inDegree[dependencyKey] = inDegree[dependencyKey] + 1
-        }
-    }
-
-    available := make([]string, 0, len(nodeKeys))
-    for nodeKey, degree := range inDegree {
-        if 0 == degree {
-            available = append(available, nodeKey)
-        }
-    }
-
-    availableHeap := &nodeKeyHeap{
-        items: available,
-    }
-    heap.Init(availableHeap)
-
-    closeOrder := make([]string, 0, len(nodeKeys))
-
-    for 0 < availableHeap.Len() {
-        current := heap.Pop(availableHeap).(string)
-
-        closeOrder = append(closeOrder, current)
-
-        dependencies, exists := adjacency[current]
-        if false == exists {
-            continue
-        }
-
-        for dependencyKey := range dependencies {
-            inDegree[dependencyKey] = inDegree[dependencyKey] - 1
-            if 0 == inDegree[dependencyKey] {
-                heap.Push(
-                    availableHeap,
-                    dependencyKey,
-                )
-            }
-        }
-    }
-
-    cycleNodeKeys := make([]string, 0)
-    for nodeKey, degree := range inDegree {
-        if 0 < degree {
-            cycleNodeKeys = append(cycleNodeKeys, nodeKey)
-        }
-    }
-
-    sort.Slice(
-        cycleNodeKeys,
-        func(leftIndex int, rightIndex int) bool {
-            return cycleNodeKeys[leftIndex] > cycleNodeKeys[rightIndex]
-        },
-    )
-
-    closeOrder = append(closeOrder, cycleNodeKeys...)
-
-    return closeOrder, cycleNodeKeys
 }
 
 func (instance *scope) lookupInstanceByName(serviceName string) (any, bool, error) {

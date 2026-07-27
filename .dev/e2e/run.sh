@@ -27,7 +27,8 @@
 #
 # Ten further sections drive that same supervised application: OPENAPI SERVED (the document the serving process
 # builds), TRANSLATION (catalogues, ICU plurals, the fallback chain and the token firewall's json entry point),
-# TOKEN AUTHENTICATION and SWITCH-USER IMPERSONATION (credentials minted by the application's own auth:token
+# SCOPED SERVICE (a service declared by a //melody:scoped constructor, proven to be one instance per request
+# and none between requests), TOKEN AUTHENTICATION and SWITCH-USER IMPERSONATION (credentials minted by the application's own auth:token
 # command), HMAC OVER HTTP (an internal:sign envelope verified across a real process boundary), TWO-FACTOR
 # (enroll/verify with totp:code plus four refusals), MYSQL AND AUDIT (encrypted at rest, re-read out of band),
 # MULTIPART (a multipart body the framework leaves unread and its urlencoded twin), SERVER-SENT EVENTS (the harness

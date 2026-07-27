@@ -189,6 +189,10 @@ func main() {
         runOpenApiCheck(baseUrl)
         sections++
 
+        section("SCOPED SERVICE (live example application)")
+        runScopedServiceCheck(baseUrl)
+        sections++
+
         section("TRANSLATION (live example application)")
         runTranslationCheck(baseUrl)
         sections++
