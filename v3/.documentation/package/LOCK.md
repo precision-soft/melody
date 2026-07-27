@@ -89,7 +89,11 @@ ran, runErr := lock.RunExclusive(
 )
 ```
 
-While the callback runs, the lease is refreshed on a background goroutine at half the `ttl`. A failed refresh **cancels the child runtime** handed to the callback — the lease may now belong to another instance, so leader-only work must stop rather than keep going alongside it — and `RunExclusive` then returns `(true, <exclusive run lost the lock lease while running>)` wrapping the refresh failure and carrying the callback's own error in its context.
+While the callback runs, the lease is refreshed on a background goroutine at half the `ttl`. Each renewal is issued under a deadline of its own, one whole cadence, so a store that accepts the call and never answers cannot park the renewal forever — but the deadline bounds the **call**, it does not decide the lease. What decides is the lease clock: `RunExclusive` remembers the instant the last successful renewal lapses and demotes only once that instant is within half a cadence, so a renewal that answers slowly still renewed, and a single dropped renewal is survived by the one behind it — which is the whole reason the cadence is half the `ttl` rather than the `ttl` itself.
+
+Once the lease can no longer be saved, the demotion **cancels the child runtime** handed to the callback — the lease may now belong to another instance, so leader-only work must stop rather than keep going alongside it — and `RunExclusive` returns `(true, <exclusive run lost the lock lease while running>)` wrapping the renewal failure and carrying the callback's own error in its context.
+
+`LeaderGate` does not share that policy: it leaves the term on the **first** failed renewal, so a store that drops one connection costs it a term it had not lost. The two differ deliberately for now — the gate's semantics are pinned by tests that predate this and changing them is a behavioural change rather than a repair.
 
 An `Acquire` that errors fails **closed**: `(false, err)`, because an unreachable store must not double-run the work. A shutdown is not an error: when the runtime context is already cancelled, an `Acquire` that fails with that cancellation returns `(false, nil)`, so a graceful stop does not read as a failed run. The release always runs on a detached, 5-second-bounded context, so a `SIGTERM` between a cron tick and its release cannot leave the lock held until the `ttl` lapses.
 

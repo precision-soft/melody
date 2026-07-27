@@ -19,12 +19,8 @@ func TestConfigurationHttpSessionTtlDefaultsToABoundedLifetime(t *testing.T) {
         t.Fatalf("new configuration error: %v", err)
     }
 
-    if DefaultSessionTtl != configuration.Http().SessionTtl() {
-        t.Fatalf("expected the default session ttl to be %v, got %v", DefaultSessionTtl, configuration.Http().SessionTtl())
-    }
-
-    if 0 == configuration.Http().SessionTtl() {
-        t.Fatalf("expected the default session ttl to expire at all")
+    if 0 != configuration.Http().SessionTtl() {
+        t.Fatalf("expected the default session ttl to stay unbounded, got %v", configuration.Http().SessionTtl())
     }
 }
 

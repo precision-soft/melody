@@ -224,6 +224,9 @@ func (instance *Application) registerHttpSession() {
     serviceContainer := instance.kernel.ServiceContainer()
 
     if false == serviceContainer.Has(session.ServiceSessionStorage) {
+        /* the fallback storage keeps its entries in this process and nothing outside it can expire them, so what it costs is carried to the http path as a warning rather than being decided here — the same shape the fallback cache backend uses, and for the same reason: a lifetime melody picked would end sessions the application never agreed to end */
+        instance.defaultInMemorySessionStorage = true
+
         instance.RegisterService(
             session.ServiceSessionStorage,
             func(resolver containercontract.Resolver) (sessioncontract.Storage, error) {

@@ -297,10 +297,48 @@ func TestStackScript_MessageBusConsumersAreSignalledAsAProcessGroup(t *testing.T
             )
         }
     }
-    if false == strings.Contains(region, "set -m") {
-        t.Fatal("each consumer must be started in its own process group (set -m) so the compiled child can be signalled")
+    /* every background launch is checked, not the region as a whole. A `strings.Contains` over the region is
+       satisfied by the first consumer's guard and says nothing about the second — and the second is the long one,
+       the very consumer the prose above describes as orphaning itself and going on eating the queue. Removing
+       `set -m` from it alone left the old assertion green. */
+    regionLineList := strings.Split(region, "\n")
+
+    launchCountInteger := 0
+    for lineIndex, line := range regionLineList {
+        trimmed := strings.TrimSpace(line)
+
+        if false == strings.Contains(trimmed, "melody:messagebus:consume") || false == strings.HasSuffix(trimmed, "&") {
+            continue
+        }
+
+        launchCountInteger = launchCountInteger + 1
+
+        precedingIndex := lineIndex - 1
+        for 0 <= precedingIndex {
+            preceding := strings.TrimSpace(regionLineList[precedingIndex])
+            if "" != preceding && false == strings.HasPrefix(preceding, "#") {
+                break
+            }
+            precedingIndex = precedingIndex - 1
+        }
+
+        if 0 > precedingIndex || "set -m" != strings.TrimSpace(regionLineList[precedingIndex]) {
+            t.Fatalf(
+                "the consumer started at %q is not preceded by set -m, so it does not get its own process group and the compiled child it leaves behind cannot be signalled",
+                trimmed,
+            )
+        }
     }
-    if false == strings.Contains(region, "kill -TERM -- -") {
-        t.Fatal("the consumers must be terminated by process group, not by the go run pid alone")
+
+    if 2 > launchCountInteger {
+        t.Fatalf("expected the drain and the consume consumers to be started as background jobs, found %d", launchCountInteger)
+    }
+
+    if launchCountInteger > strings.Count(region, "kill -TERM -- -") {
+        t.Fatalf(
+            "%d consumers are started but only %d process-group terminations are issued; each must be terminated by group, not by the go run pid alone",
+            launchCountInteger,
+            strings.Count(region, "kill -TERM -- -"),
+        )
     }
 }

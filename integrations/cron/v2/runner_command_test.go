@@ -1699,3 +1699,87 @@ func TestRunnerCommand_CommandInsideItsTimeoutIsUntouched(t *testing.T) {
         t.Fatalf("expected the command to complete once, completed %d", job.completed.Load())
     }
 }
+
+/* @info The deadline is opt-in. Every entry configured before it existed leaves Timeout at zero, and a default of one hour would have begun cutting a ninety-minute job short at sixty on the upgrade that introduced it — a run the entry never asked to be bounded and whose scope would then be torn down under it. An entry that wants the bound asks for it. */
+func TestTimeoutOfEntry_ZeroLeavesTheRunUnbounded(t *testing.T) {
+    if 0 != timeoutOfEntry(&ScheduledCommand{Config: &EntryConfig{}}) {
+        t.Fatalf("expected an entry that sets no timeout to run unbounded, got %v", timeoutOfEntry(&ScheduledCommand{Config: &EntryConfig{}}))
+    }
+
+    if 0 != timeoutOfEntry(&ScheduledCommand{}) {
+        t.Fatalf("expected an entry with no configuration at all to run unbounded, got %v", timeoutOfEntry(&ScheduledCommand{}))
+    }
+
+    /* a negative value is carried through rather than folded to zero, so the entry's own opt-out stays legible in the run's error context; downstream both read as unbounded, which commandContextOf is what decides */
+    if 0 < timeoutOfEntry(&ScheduledCommand{Config: &EntryConfig{Timeout: -time.Second}}) {
+        t.Fatalf("expected a negative timeout to leave the run unbounded, got %v", timeoutOfEntry(&ScheduledCommand{Config: &EntryConfig{Timeout: -time.Second}}))
+    }
+
+    if 90*time.Minute != timeoutOfEntry(&ScheduledCommand{Config: &EntryConfig{Timeout: 90 * time.Minute}}) {
+        t.Fatalf("expected the entry's own timeout to be used, got %v", timeoutOfEntry(&ScheduledCommand{Config: &EntryConfig{Timeout: 90 * time.Minute}}))
+    }
+}
+
+/* @info the unwind window is per entry, because how long an honest unwind takes is a property of the work rather than of the runner: a batch to flush is not a job that returns the moment its context is cancelled. An entry that names none falls to the runner's default, which is what a caller replacing that default means by replacing it. */
+func TestGracefulTimeoutOf_TakesTheEntrysOwnWindowAndFallsBackToTheRunnerDefault(t *testing.T) {
+    runner := &RunnerCommand{unwindGrace: commandUnwindGrace}
+
+    entryWithoutWindow := &scheduledRunEntry{gracefulTimeout: gracefulTimeoutOfEntry(&ScheduledCommand{Config: &EntryConfig{}})}
+    if commandUnwindGrace != runner.gracefulTimeoutOf(entryWithoutWindow) {
+        t.Fatalf("expected an entry naming no window to take the runner default, got %v", runner.gracefulTimeoutOf(entryWithoutWindow))
+    }
+
+    entryWithWindow := &scheduledRunEntry{gracefulTimeout: gracefulTimeoutOfEntry(&ScheduledCommand{Config: &EntryConfig{GracefulTimeout: 20 * time.Minute}})}
+    if 20*time.Minute != runner.gracefulTimeoutOf(entryWithWindow) {
+        t.Fatalf("expected the entry's own window to be used, got %v", runner.gracefulTimeoutOf(entryWithWindow))
+    }
+
+    /* a negative window is not an opt-out: without a deadline the window is never reached, and honouring it would tear the scope down the instant the deadline landed */
+    entryWithNegativeWindow := &scheduledRunEntry{gracefulTimeout: gracefulTimeoutOfEntry(&ScheduledCommand{Config: &EntryConfig{GracefulTimeout: -time.Second}})}
+    if commandUnwindGrace != runner.gracefulTimeoutOf(entryWithNegativeWindow) {
+        t.Fatalf("expected a negative window to read as unset, got %v", runner.gracefulTimeoutOf(entryWithNegativeWindow))
+    }
+}
+
+/* @info the window an entry names governs the run end to end, not just the resolver: this drives the real invoke with a command that ignores its context and asserts the abandon lands after the entry's window rather than after the runner's much longer default. */
+func TestRunnerCommand_AnEntrysGracefulWindowGovernsWhenItIsAbandoned(t *testing.T) {
+    job := newWedgedCommand("job:top")
+    defer close(job.release)
+
+    configuration := NewConfiguration().
+        Schedule("job:top", &EntryConfig{
+            Schedule:        &Schedule{Minute: "0"},
+            Timeout:         50 * time.Millisecond,
+            GracefulTimeout: 50 * time.Millisecond,
+        })
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+
+    var closedScopes atomic.Int64
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(
+        context.Background(),
+        serviceContainer.NewScope(),
+        closeCountingContainer{Container: serviceContainer, closed: &closedScopes},
+    )
+
+    completed := make(chan error, 1)
+    go func() {
+        completed <- runner.invoke(runtimeInstance, runner.entries[0])
+    }()
+
+    var invokeErr error
+    select {
+    case invokeErr = <-completed:
+    case <-time.After(5 * time.Second):
+        t.Fatal("invoke never returned: the entry's own graceful window did not govern the abandon, the runner default did")
+    }
+
+    if nil == invokeErr || false == errors.Is(invokeErr, ErrCommandTimeout) {
+        t.Fatalf("expected the abandoned command to be reported as a timeout, got %v", invokeErr)
+    }
+
+    if 1 != closedScopes.Load() {
+        t.Fatalf("expected the child scope to be released on the abandon path, closed %d", closedScopes.Load())
+    }
+}

@@ -1477,17 +1477,17 @@ func applyEmptyValueSpace(schema *Schema) {
         schema.MinProperties = &minProperties
         schema.MaxProperties = &maxProperties
     case "":
-        /* @important a $ref (or a nullable allOf-wrapped $ref) carries no Type; it denotes a struct component, so contradict it at the object level under allOf — the documented $ref is preserved as a member, but the impossible minProperties/maxProperties sibling means no value satisfies the conjunction */
-        minProperties := 1
-        maxProperties := 0
-        contradiction := &Schema{MinProperties: &minProperties, MaxProperties: &maxProperties}
+        /* @important a $ref (or a nullable allOf-wrapped $ref) carries no Type, so nothing here knows what it denotes — and it need not be a struct. A named collection is promoted to a component too, and once it is, an object-level contradiction stops contradicting anything: JSON Schema draft-04 §5.4.1 and §5.4.2 — the dialect this document declares, OpenApi 3.0.3 — apply minProperties and maxProperties to object instances ONLY and ignore them for every other type. `["a"]` therefore satisfies the whole allOf while the validator rejects it, and the specification advertises payloads the server refuses, which is the inverse of what a mirror is for. The inline path for the same verdict emits minItems/maxItems and DOES bind, so the two paths contradicted each other as well.
+
+        `not: {}` is the type-agnostic form: the empty schema admits every value, so its negation admits none, whatever the referenced component turns out to be. */
+        contradiction := &Schema{Not: &Schema{}}
         if "" != schema.Ref {
             schema.AllOf = []*Schema{{Ref: schema.Ref}, contradiction}
             schema.Ref = ""
         } else if nil != schema.AllOf {
             schema.AllOf = append(schema.AllOf, contradiction)
         } else {
-            /* @important an interface field carries neither a type nor a $ref, so the object-level contradiction would not bind — the empty schema admits every value; not against the empty schema is the one advertisement no value satisfies */
+            /* an interface field carries neither a type nor a $ref, so there is nothing to conjoin with: the refusal is written directly */
             schema.Not = &Schema{}
         }
     }

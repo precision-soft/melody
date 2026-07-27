@@ -303,6 +303,13 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 - [`MiddlewareFactory`](../../application/http_middleware.go) — `func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware` function alias used by `UseFactories` / `UseFactoriesWithPriority`
 - [`SecurityModule`](../../application/security_module.go) — module contract for registering security configuration via `RegisterSecurity(builder *securityconfig.Builder)`
 
+### Constants
+
+- [`MiddlewareGroupHttp`](../../application/http_middleware.go)
+- [`MiddlewareNameStatic`](../../application/http_middleware.go)
+- [`MiddlewarePriorityStatic`](../../application/http_middleware.go)
+- [`MiddlewarePriorityDefault`](../../application/http_middleware.go)
+
 ### Constructors
 
 - [`NewApplication(embeddedPublicFiles, embeddedConfigFiles)`](../../application/application_new.go)

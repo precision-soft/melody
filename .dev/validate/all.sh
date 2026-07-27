@@ -143,11 +143,15 @@ run_live_go_suites() {
 # logger's shared writer, the message bus dispatch, the cron runner's parallel dispatch), and only the
 # detector sees them race — several of those tests assert nothing at all, so without this lane they can only
 # ever pass. validation carries the process-lifetime parse and constraint memos that concurrent requests share,
-# and openapi the schema memo, so both belong here too. No service containers needed.
+# and openapi the schema memo, so both belong here too. session, http and internal carry the state a request
+# actually touches — the storages every concurrent request reads and writes, the middleware chain, the deep copy
+# that guards one request's data from another's — and their suites hold tests written specifically to catch a
+# race, with a goroutine and a wait group, which without this lane could only ever pass. No service containers
+# needed; the three add some four seconds per major.
 RACE_SUITE_SPECIFICATION_STRING_LIST=(
-    ". ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/... ./validation/..."
-    "v2 ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/... ./validation/..."
-    "v3 ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/... ./mailer/... ./lock/... ./messagebus/... ./validation/... ./openapi/..."
+    ". ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/... ./validation/... ./session/... ./http/... ./internal/..."
+    "v2 ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/... ./validation/... ./session/... ./http/... ./internal/..."
+    "v3 ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/... ./mailer/... ./lock/... ./messagebus/... ./validation/... ./openapi/... ./session/... ./http/... ./internal/..."
     "integrations/cron ./..."
     "integrations/cron/v2 ./..."
     "integrations/cron/v3 ./..."
@@ -177,7 +181,7 @@ run_race_go_suites() {
 # still report a pass.
 run_e2e_harness_checks() {
     if [[ ! -f "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/e2e/go.mod" ]]; then
-        return 0
+        fail "the e2e harness module is missing: .dev/e2e/go.mod does not exist, so the harness lane cannot run. It is not optional — reporting success here would mean the whole lane silently contributed nothing"
     fi
 
     run_section "melody e2e harness module (.dev/e2e, GOWORK=off)" "${TAG_VALIDATE}" "go" -- \
@@ -192,7 +196,7 @@ run_e2e_harness_checks() {
 # and costs seconds.
 run_documentation_checks() {
     if [[ ! -x "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/documentation.sh" ]]; then
-        return 0
+        fail "the documentation check is missing or not executable: .dev/validate/documentation.sh. It is not optional — the ci job invokes it directly, so a skip here reports a pass locally against a lane that fails in ci; restore it or chmod +x it"
     fi
 
     run_section "melody package documentation against every major (mirrors the ci documentation job)" "${TAG_VALIDATE}" "docs" -- \
@@ -218,9 +222,14 @@ E2E_SERVICE_NAME_STRING_LIST=(
 )
 
 run_e2e_live_checks() {
-    if [[ ! -x "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/e2e/run.sh" ]]; then
-        return 0
-    fi
+    local E2E_SCRIPT_PATH_STRING
+    for E2E_SCRIPT_PATH_STRING in \
+        "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/e2e/run.sh" \
+        "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/e2e/stack.sh"; do
+        if [[ ! -x "${E2E_SCRIPT_PATH_STRING}" ]]; then
+            fail "the live e2e script is missing or not executable: ${E2E_SCRIPT_PATH_STRING#${REPOSITORY_ROOT_DIRECTORY_STRING}/}. It is not optional — this is the only lane that drives a booted application over the wire, so a skip here reports a pass for the class of defect nothing else can see; restore it or chmod +x it"
+        fi
+    done
 
     docker_compose up -d --wait "${E2E_SERVICE_NAME_STRING_LIST[@]}"
 
@@ -439,6 +448,13 @@ main() {
     else
         info "skip .dev/e2e harness (no staged changes)"
     fi
+
+    # ungated on purpose, unlike every lane above it. The check reads the whole tree rather than the staged
+    # subset, and the drift it reports is precisely between two things that are rarely staged together: a
+    # staged source file that adds an exported symbol makes an unstaged document wrong, so gating it on the
+    # staged paths would skip it in the one commit that introduced the gap. It needs no container and costs
+    # seconds, which is what makes running it every time affordable.
+    run_documentation_checks
 
     section_end "staged validation" "success" "${TAG_VALIDATE}" "staged"
     success "validation completed"

@@ -59,8 +59,6 @@ func (instance *stubSession) String(key string) string { return "" }
 
 func (instance *stubSession) Set(key string, value any) {}
 
-func (instance *stubSession) SetShared(key string, value any) {}
-
 func (instance *stubSession) Has(key string) bool { return false }
 
 func (instance *stubSession) Delete(key string) {}

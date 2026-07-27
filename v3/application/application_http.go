@@ -8,12 +8,14 @@ import (
 
     applicationcontract "github.com/precision-soft/melody/v3/application/contract"
     "github.com/precision-soft/melody/v3/cache"
+    "github.com/precision-soft/melody/v3/config"
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+    "github.com/precision-soft/melody/v3/session"
 )
 
 func (instance *Application) RegisterHttpRoute(
@@ -122,6 +124,8 @@ func (instance *Application) runHttp(
     logger := logging.LoggerMustFromContainer(instance.kernel.ServiceContainer())
 
     instance.warnOnUnboundedDefaultCacheBackend(logger)
+
+    instance.warnOnUnboundedDefaultSessionStorage(logger)
 
     /* net/http runs these the moment Shutdown is called, on their own goroutines, so a streaming handler is released while the server drains the rest; wrapping each one recovers a panicking hook through the framework logger (a bare goroutine would otherwise crash the drain) and counts it into shutdownHooksDone so runHttp can join the hooks before returning */
     var shutdownHooksDone sync.WaitGroup
@@ -260,4 +264,24 @@ func waitForHttpShutdownHooks(
     case <-done:
     case <-ctx.Done():
     }
+}
+
+/* warnOnUnboundedDefaultSessionStorage reports, once at boot, the one combination in which sessions grow without anything ever reclaiming them: the storage melody wired itself, which lives in this process and which nothing outside it can expire, together with a lifetime of zero, which asks it to keep every entry forever.
+
+Either half alone is a deliberate and reasonable choice. A shared storage with no expiry is the operator's to prune, and the in-memory one with a lifetime set reclaims on its own. Together they are neither, and the growth does not come from anything the application wrote: melody mints a session for every request that arrives without a session cookie, so a single write on a public path — a csrf token, a flash message, a locale — turns every such request into a permanent entry, and an unauthenticated caller decides how many arrive.
+
+It is raised from the http path alone, the way the cache warning is: a command builds its map, runs and takes it away with it. */
+func (instance *Application) warnOnUnboundedDefaultSessionStorage(logger loggingcontract.Logger) {
+    if false == instance.defaultInMemorySessionStorage {
+        return
+    }
+
+    if 0 != instance.configuration.Http().SessionTtl() {
+        return
+    }
+
+    logger.Warning(
+        "the default in-memory session storage is paired with an unbounded session ttl, so every request that arrives without a session cookie can leave an entry that is kept until this process exits; set `"+config.HttpSessionTtlKey+"` to the lifetime this deployment wants, or register `"+session.ServiceSessionStorage+"` with a shared storage an operator can expire",
+        nil,
+    )
 }

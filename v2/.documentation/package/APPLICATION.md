@@ -215,6 +215,13 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 - [`MiddlewareFactory`](../../application/http_middleware.go) — `func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware` function alias used by `UseFactories` / `UseFactoriesWithPriority`
 - [`SecurityModule`](../../application/security_module.go) — module contract for registering security configuration via `RegisterSecurity(builder *securityconfig.Builder)`
 
+### Constants
+
+- [`MiddlewareGroupHttp`](../../application/http_middleware.go)
+- [`MiddlewareNameStatic`](../../application/http_middleware.go)
+- [`MiddlewarePriorityStatic`](../../application/http_middleware.go)
+- [`MiddlewarePriorityDefault`](../../application/http_middleware.go)
+
 ### Constructors
 
 - [`NewApplication(embeddedPublicFiles, embeddedConfigFiles)`](../../application/application_new.go)
@@ -234,6 +241,7 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 - [`(*Application).RegisterParameter(name, value)`](../../application/application.go)
 - [`(*Application).RegisterService(name, factory)`](../../application/application_container.go)
 - [`(*Application).RegisterModule(module)`](../../application/application_module.go)
+- [`(*Application).RegisterModuleProvider(provider)`](../../application/application_module.go) — registers every module returned by a [`ModuleProvider`](../../application/contract/module.go). `RegisterModule` also expands a module that additionally implements `ModuleProvider`, so a single registration can contribute a whole group of capability-modules.
 - [`(*Application).RegisterCliCommand(command)`](../../application/application_cli.go)
 - [`(*Application).RegisterHttpRoute(method, pattern, handler)`](../../application/application_http.go)
 - [`(*Application).RegisterHttpMiddlewares(middlewares...)`](../../application/application_http.go)

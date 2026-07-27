@@ -1174,9 +1174,48 @@ type notEmptyOnStructRequest struct {
     } `json:"inline" validate:"notEmpty"`
 }
 
+/* isImpossibleObject reports whether a member EXCLUDES every value, rather than whether it merely carries a particular pair of keywords.
+
+The distinction is the whole assertion. `minProperties: 1` beside `maxProperties: 0` reads as impossible, and is — for an object. JSON Schema draft-04 §5.4.1 and §5.4.2, the dialect this document declares, apply both to object instances only and ignore them for every other type, so the same pair sitting beside a $ref that resolves to a named collection excludes nothing at all and `["a"]` satisfies the conjunction the mirror published as unsatisfiable. Asserting on the keywords let that through; asserting on the exclusion does not, whatever form the exclusion takes. */
 func isImpossibleObject(schema *Schema) bool {
-    return nil != schema && nil != schema.MinProperties && 1 == *schema.MinProperties &&
-        nil != schema.MaxProperties && 0 == *schema.MaxProperties
+    if nil == schema {
+        return false
+    }
+
+    /* `not: {}` — the empty schema admits everything, so its negation admits nothing, for every instance type */
+    if nil != schema.Not && true == isEmptySchema(schema.Not) {
+        return true
+    }
+
+    /* the object-level contradiction still counts where the member itself says it is an object, because there the keywords do bind */
+    if "object" == schema.Type &&
+        nil != schema.MinProperties && 1 == *schema.MinProperties &&
+        nil != schema.MaxProperties && 0 == *schema.MaxProperties {
+        return true
+    }
+
+    /* the collection-level contradiction, likewise, where the member says it is one */
+    if "array" == schema.Type &&
+        nil != schema.MinItems && 1 == *schema.MinItems &&
+        nil != schema.MaxItems && 0 == *schema.MaxItems {
+        return true
+    }
+
+    return false
+}
+
+/* isEmptySchema reports whether a schema constrains nothing, which is what makes its negation exclude everything. */
+func isEmptySchema(schema *Schema) bool {
+    if nil == schema {
+        return false
+    }
+
+    return "" == schema.Ref && "" == schema.Type && 0 == len(schema.Properties) && 0 == len(schema.AllOf) &&
+        nil == schema.Items && nil == schema.Not && nil == schema.Enum &&
+        nil == schema.MinProperties && nil == schema.MaxProperties &&
+        nil == schema.MinItems && nil == schema.MaxItems &&
+        nil == schema.MinLength && nil == schema.MaxLength &&
+        nil == schema.Minimum && nil == schema.Maximum && "" == schema.Pattern
 }
 
 func TestBuildSchema_NotEmptyOnStructIsUnsatisfiable(t *testing.T) {

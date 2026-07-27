@@ -56,22 +56,6 @@ The framework's own `Session` is latched out of use rather than merely cleared, 
 
 See [Versioning policy for breaking changes](#versioning-policy-for-breaking-changes) for why an added contract method ships as a MINOR, and [`package/SESSION.md`](./package/SESSION.md) for what a rotation has to guarantee.
 
-### Compile-level: `session/contract.Session` gained `SetShared`
-
-**What changed.** [`session/contract.Session`](../session/contract/session.go) declares `SetShared(key string, value any)`. `Set` stores a value the storage layer is free to copy — every entry is deep-copied on the way into the store and on the way out of it, which is what keeps a session read on one request from writing into another request's data — while `SetShared` stores the handle itself, so `Get` hands back that very value and every reader of the session reaches the one object. The write decides the semantics and `Get` honours whichever was chosen, so there is no `GetShared` and no `IsShared` to implement alongside it.
-
-**Symptom.** An out-of-tree implementation of `session/contract.Session` no longer satisfies the interface, so the assignment that hands it to the framework fails to compile with `missing method SetShared`.
-
-**Remedy.** Implement it. An implementation backed by an in-process map already stores what it is given, so delegating is both the shortest implementation and the honest one:
-
-```go
-func (instance *CustomSession) SetShared(key string, value any) {
-	instance.Set(key, value)
-}
-```
-
-An implementation whose storage serialises cannot carry a handle across a round trip, and should refuse the save rather than write something that loads back as a plain copy — [`FileStorage.Save`](../session/file_storage.go) refuses the whole session before touching anything and names the offending key. See [`package/SESSION.md`](./package/SESSION.md) for the distinction and what each write is for.
-
 ### Compile-level: `config/contract.HttpConfiguration` gained `StaticExcludedPaths`
 
 **What changed.** [`config/contract.HttpConfiguration`](../config/contract/http.go) declares `StaticExcludedPaths() []string`, the path prefixes the built-in file server declines before it looks at the disk. The framework's own implementation reads them from `MELODY_STATIC_EXCLUDED_PATHS` (`kernel.static.excluded_paths`), a comma-separated list that is empty by default. Since the built-in file server sits outermost in the pipeline, excluding a prefix is how an application takes a part of the url back — to put authentication in front of a directory, or to serve it from a root of its own.
@@ -93,6 +77,14 @@ func (instance *CustomHttpConfiguration) StaticExcludedPaths() []string {
 **Symptom.** A custom command that constructed an `output.Option` literal naming `Fields` or `SortKey`, or that called `output.SplitFields`, no longer compiles. At runtime, an invocation passing `--fields` or `--sort` now fails as an unknown flag instead of being silently ignored.
 
 **Remedy.** Drop the fields from the literal and drop the call. A command that genuinely wants a projection or a sort key declares its own flag and applies it to the payload it builds.
+
+### Boot-level: `websocket/v3` refuses a zero `IdleTimeout`
+
+**What changed.** [`websocket.NewStreamHandler`](../integrations/websocket/v3/handler.go) panics on `Options.IdleTimeout` of zero, where zero previously meant "no keepalive" and was documented as the default. The keepalive ping is the only thing that can reap a peer that goes away without a fin: `Accept` hijacks the connection out of `http.Server`'s read and write timeouts, the read loop then blocks with no deadline of its own, and a write into a half-open socket keeps succeeding for as long as the send buffer has room — so a broadcast is no liveness signal either. Left at zero, connections opened and abandoned accumulate for the life of the process, each costing a descriptor, a hub subscription and three goroutines.
+
+**Symptom.** The application fails to boot. `RegisterHttpRoutes` panics with a message naming the field and a value to start from, rather than the handler being built and the leak beginning.
+
+**Remedy.** Set it. `30 * time.Second` suits a browser client, which answers the ping inside the protocol stack where the page's JavaScript never sees it; a mobile client on a metered link wants a longer interval, and an internal service that holds long-lived streams longer still. There is deliberately no default: the right interval is a property of the peer, and a value melody picked would be wrong for half of them while looking deliberate.
 
 ### Routing: a non-final optional parameter without a default is refused at registration
 

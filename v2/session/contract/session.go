@@ -9,8 +9,6 @@ type Session interface {
 
     Set(key string, value any)
 
-    SetShared(key string, value any)
-
     Has(key string) bool
 
     Delete(key string)

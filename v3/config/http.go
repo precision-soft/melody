@@ -19,8 +19,10 @@ var (
 /* MinimumSessionTtl is the shortest session lifetime that can still describe a session. Below it the value is not a short session, it is a broken one: the storage purges every lapsed entry on the write that stores the new one, so a ttl smaller than the time that write takes makes SaveSession report success and persist nothing — a login that answers "welcome" and leaves the user logged out. A session also has to survive the response reaching the client and the client coming back, which no sub-second lifetime does, and a second is the finest unit http itself dates anything in. Zero keeps its own meaning of "no expiry" and is not affected. */
 const MinimumSessionTtl = time.Second
 
-/* DefaultSessionTtl is the lifetime a stored session gets when MELODY_HTTP_SESSION_TTL says nothing. It is bounded on purpose: melody mints a session for every request that arrives without a session cookie, so the moment an application writes to a session on a public path — a csrf token, a flash message, a locale — an unbounded default turns every cookie-less request into a permanent entry in the default in-memory storage, and the growth comes from the framework rather than from anything the application chose. A day is long enough that no ordinary browsing session is cut short by it and short enough that abandoned entries leave. An application that genuinely wants sessions without an expiry still asks for one by setting the value to zero explicitly. */
-const DefaultSessionTtl = 24 * time.Hour
+/* DefaultSessionTtl is the lifetime a stored session gets when MELODY_HTTP_SESSION_TTL says nothing. It is zero — no expiry — which is what every deployment that predates the setting already had, so upgrading does not start logging users out at a lifetime nobody chose.
+
+Zero is not free of hazard, and the hazard is worth naming here rather than discovering in a memory graph: melody mints a session for every request that arrives without a session cookie, so once an application writes to a session on a public path — a csrf token, a flash message, a locale — an unbounded lifetime turns every cookie-less request into a permanent entry. That is survivable in a shared store an operator can expire, and it is not in the default in-memory one, which is why the application warns at boot when it finds both together rather than quietly picking a lifetime on the deployment's behalf. Set this to what the deployment actually wants. */
+const DefaultSessionTtl = 0 * time.Second
 
 func newHttpConfiguration(
     address string,

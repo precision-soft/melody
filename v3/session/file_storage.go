@@ -123,19 +123,6 @@ func (instance *FileStorage) Save(sessionId string, data map[string]any, ttl tim
         return exception.NewError("session id is required in save session", nil, nil)
     }
 
-    /* a value stored with SetShared is a handle, and this storage keeps sessions as JSON on disk: nothing it writes can load back as the same value. Refusing the save is the only honest answer available here — encoding the envelope would put an empty object in the file and hand the next request a session that looks intact and has quietly lost what was shared through it, which is precisely the failure the shared/copied distinction exists to make visible. The refusal is whole-session and happens before anything is touched, matching how the rest of this storage commits: a Save that returns an error leaves no trace of itself. The key is named so the caller knows which write to reconsider; the session id is not, because it is a credential and errors get logged. */
-    for key, value := range data {
-        if _, isShared := value.(sharedValue); true == isShared {
-            return exception.NewError(
-                "session value stored with set shared cannot be persisted by the file storage",
-                exceptioncontract.Context{
-                    "key": key,
-                },
-                nil,
-            )
-        }
-    }
-
     expiresAt := int64(0)
     if 0 < ttl {
         /* @important time.Time.UnixNano is only defined up to 2262-04-11 and wraps to a negative int64 past it; a caller using a very large ttl as a "never expire" value would otherwise land a negative ExpiresAt that Load and purgeExpiredLocked read as already lapsed and drop the session on the same Save, so saturate at the maximum representable instant the way InMemoryStorage keeps such sessions */

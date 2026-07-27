@@ -306,13 +306,29 @@ func (instance *Migrator) columnWidth(ctx context.Context, table string, column 
 /* sealedProbeFiller is one ASCII byte, so a probe of n of them is exactly n plaintext bytes. */
 const sealedProbeFiller = "a"
 
+/* base64GroupPlaintextBytes and base64GroupEncodedCharacters are the invariant that lets a width be computed instead of allocated: raw-standard base64 turns every three input bytes into exactly four characters, and the seal's base64 covers a buffer that grows one byte per plaintext byte. */
+const (
+    base64GroupPlaintextBytes    = 3
+    base64GroupEncodedCharacters = 4
+)
+
 /* sealedProbeLength measures what the cipher produces for a plaintext of the given byte length. Measuring beats computing: the seal's marker, key id, nonce, tag and base64 padding all feed the width, and a probe through the live cipher stays correct through any of them changing.
 
 The probe is sealed under the key the run will actually use, which is not the current one when a rotation names another: a key id is part of what is stored, so measuring under a shorter one would report a width the run then overflows. An empty key id means the run seals under the current key, as an ordinary encryption does.
 
 Everything a seal emits is ASCII, so the byte count it returns is also a character count and can be compared with a column width straight away. */
 func (instance *Migrator) sealedProbeLength(plaintextByteLength int, keyId string) (int, error) {
-    probe := strings.Repeat(sealedProbeFiller, plaintextByteLength)
+    if 0 > plaintextByteLength {
+        return 0, exception.NewError("migrate cannot measure a negative plaintext width", map[string]any{"plaintextByteLength": plaintextByteLength}, nil)
+    }
+
+    /* the probe is at most two bytes long whatever the column holds, and the rest is arithmetic that is exact rather than approximate. A seal is a fixed prefix followed by the raw-standard base64 of a buffer that grows one byte per plaintext byte, and raw-standard base64 encodes every three input bytes as exactly four characters: EncodedLen(x+3) == EncodedLen(x)+4 in integer arithmetic, with no rounding anywhere. So the width for n bytes is the width for n mod 3 bytes plus four for every whole group of three beyond it.
+
+    Sealing n bytes to find out was what this did, and it is unusable at the widths it is asked about: `longest` comes from SELECT MAX(LENGTH(col)), so a 64 MiB row cost some 320 MB resident to measure, and a LONGTEXT may hold 4 GiB — a measurement that costs more memory than the batched migration it is measuring FOR, and an out-of-memory kill is not something the caller can recover from. Measuring the remainder through the live cipher keeps what measuring was for: the marker, the key id, the nonce, the tag and the base64 alphabet are still read off a real seal rather than assumed here, so any of them changing is still followed. */
+    remainderLength := plaintextByteLength % base64GroupPlaintextBytes
+    wholeGroupCount := (plaintextByteLength - remainderLength) / base64GroupPlaintextBytes
+
+    probe := strings.Repeat(sealedProbeFiller, remainderLength)
 
     var sealed string
     var sealErr error
@@ -327,7 +343,7 @@ func (instance *Migrator) sealedProbeLength(plaintextByteLength int, keyId strin
         return 0, exception.NewError("migrate could not measure the encrypted width", map[string]any{"keyId": keyId}, sealErr)
     }
 
-    return len(sealed), nil
+    return len(sealed) + wholeGroupCount*base64GroupEncodedCharacters, nil
 }
 
 const skippedSampleSize = 10

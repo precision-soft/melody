@@ -504,3 +504,57 @@ func TestLongestUnsealedLength_ExcludesValuesThatAreAlreadySealed(t *testing.T) 
         t.Fatalf("expected the probe to exclude already-sealed values byte-exactly, got %q", probeSql)
     }
 }
+
+/* @info The width is computed from a probe of at most two bytes plus arithmetic, and it has to agree with what the cipher actually emits for every plaintext length — not on average, exactly, since the number decides whether a column is declared wide enough. Sealing the full length to find out was the old way and is unusable at the widths this is asked about: `longest` comes from SELECT MAX(LENGTH(col)), so a 64 MiB row cost hundreds of megabytes resident, and LONGTEXT reaches 4 GiB. Every residue class mod three is covered, together with the boundaries where base64 rounds. */
+func TestSealedProbeLength_AgreesWithASealOfTheFullPlaintext(t *testing.T) {
+    provider := NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2)})
+    cipher := NewCipher(provider)
+    migrator := &Migrator{cipher: cipher}
+
+    for _, keyId := range []string{"", "v1", "v2"} {
+        for plaintextByteLength := 0; plaintextByteLength <= 64; plaintextByteLength = plaintextByteLength + 1 {
+            computed, computedErr := migrator.sealedProbeLength(plaintextByteLength, keyId)
+            if nil != computedErr {
+                t.Fatalf("key %q length %d: %v", keyId, plaintextByteLength, computedErr)
+            }
+
+            fullProbe := strings.Repeat(sealedProbeFiller, plaintextByteLength)
+
+            var sealed string
+            var sealErr error
+            if "" == keyId {
+                sealed, sealErr = cipher.Encrypt(fullProbe)
+            } else {
+                sealed, sealErr = cipher.EncryptWithKeyId(fullProbe, keyId)
+            }
+            if nil != sealErr {
+                t.Fatalf("key %q length %d: sealing the full probe: %v", keyId, plaintextByteLength, sealErr)
+            }
+
+            if len(sealed) != computed {
+                t.Fatalf(
+                    "key %q length %d: the computed width is %d and the cipher emits %d",
+                    keyId,
+                    plaintextByteLength,
+                    computed,
+                    len(sealed),
+                )
+            }
+        }
+    }
+}
+
+/* @info the point of the rewrite: a width that a column could actually hold must be answerable without allocating it. LONGTEXT reaches 4 GiB, and the old measurement sealed the whole thing. */
+func TestSealedProbeLength_AnswersAHugeWidthWithoutAllocatingIt(t *testing.T) {
+    provider := NewStaticKeyProvider("v2", map[string][]byte{"v2": newKey(2)})
+    migrator := &Migrator{cipher: NewCipher(provider)}
+
+    computed, computedErr := migrator.sealedProbeLength(512*1024*1024, "")
+    if nil != computedErr {
+        t.Fatalf("unexpected error: %v", computedErr)
+    }
+
+    if computed <= 512*1024*1024 {
+        t.Fatalf("a sealed value is wider than its plaintext; got %d for 512 MiB", computed)
+    }
+}

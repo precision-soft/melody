@@ -319,3 +319,47 @@ func TestEnvironmentSource_ResolvesReferenceInsideTheEnvironmentName(t *testing.
         t.Fatalf("expected the environment key itself to be resolved, got %q", values[EnvKey])
     }
 }
+
+/* @info A dollar followed by anything a key name may not start with is data, and a key name is what godotenv says it is: upper case, digits, underscore. `pa$sword` is a password that had always been read literally, and admitting lower case turned it into a reference to a key named `sword` that no file defines — which fails the boot of an application whose configuration never changed. The dot did the same to a value such as `$1.50` once it carried a digit. */
+func TestEnvironmentSource_KeepsALowerCaseDollarSequenceAsData(t *testing.T) {
+    source := writeDotEnvFiles(t, map[string]string{
+        ".env": "DB_PASSWORD=pa$sword\nPRICE=$1.50\nMIXED=pa$sWORD\n",
+    })
+
+    values, loadErr := source.Load()
+    if nil != loadErr {
+        t.Fatalf("a value carrying a literal dollar failed the load: %s", loadErr.Error())
+    }
+
+    if "pa$sword" != values["DB_PASSWORD"] {
+        t.Fatalf("expected the literal dollar to survive as data, got %q", values["DB_PASSWORD"])
+    }
+
+    if "$1.50" != values["PRICE"] {
+        t.Fatalf("expected a dollar before a digit to survive as data, got %q", values["PRICE"])
+    }
+
+    if "pa$sWORD" != values["MIXED"] {
+        t.Fatalf("expected a dollar before a lower-case letter to survive as data whatever follows it, got %q", values["MIXED"])
+    }
+}
+
+/* @info the control: an upper-case name after the dollar IS a reference, in both the bare and the braced form, so narrowing the character set did not disable the feature it belongs to. */
+func TestEnvironmentSource_StillResolvesAnUpperCaseReference(t *testing.T) {
+    source := writeDotEnvFiles(t, map[string]string{
+        ".env": "DB_USER=app\nBARE=$DB_USER\nBRACED=${DB_USER}-1\n",
+    })
+
+    values, loadErr := source.Load()
+    if nil != loadErr {
+        t.Fatalf("unexpected load error: %s", loadErr.Error())
+    }
+
+    if "app" != values["BARE"] {
+        t.Fatalf("expected the bare reference to resolve, got %q", values["BARE"])
+    }
+
+    if "app-1" != values["BRACED"] {
+        t.Fatalf("expected the braced reference to resolve, got %q", values["BRACED"])
+    }
+}

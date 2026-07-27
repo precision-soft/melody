@@ -2021,3 +2021,14 @@ func purgeQueue(t *testing.T, connection *amqp091.Connection, queueName string) 
 
     _, _ = channel.QueuePurge(queueName, false)
 }
+
+/* @info A re-publish that the broker refuses leaves the original delivery on the channel, and what happens to it is the transport's at-least-once guarantee. With a dead-letter queue bound, refusing without requeue routes it there: kept, visible, recoverable. Without one, the same refusal DESTROYS it — the broker has nowhere to route it — so the delivery goes back on the queue instead. The triggers are exactly the conditions that produce a refused re-publish: a max-length policy with overflow=reject-publish, an unroutable return, a queue that filled. A message is worth more than an accurate redelivery count. */
+func TestRequeueOnRejectedRepublish_KeepsTheMessageWhenNothingElseWould(t *testing.T) {
+    if false == requeueOnRejectedRepublish(false) {
+        t.Fatal("without a dead-letter queue a refusal discards the message, so it must be requeued instead: at-least-once becomes at-most-once otherwise")
+    }
+
+    if true == requeueOnRejectedRepublish(true) {
+        t.Fatal("with a dead-letter queue the refusal routes the message there, which keeps it and preserves the counts; requeuing instead would loop it")
+    }
+}

@@ -32,7 +32,8 @@ func NewEvent(
 }
 
 func NewEventFromEvent(event eventcontract.Event) *Event {
-    if nil == event {
+    /* the parameter is an interface, so a nil *Event handed in as one is not equal to nil and would pass a plain comparison, then dereference on the first accessor below — a runtime panic naming a memory address instead of the framework error the caller can act on. NewEvent above tests its clock the same way for the same reason. */
+    if true == internal.IsNilInterface(event) {
         exception.Panic(
             exception.NewError("event value may not be nil", nil, nil),
         )

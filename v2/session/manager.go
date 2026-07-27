@@ -74,7 +74,7 @@ func (instance *Manager) RegenerateSession(sessionInstance sessioncontract.Sessi
         )
     }
 
-    values := sessionValuesForStorage(sessionInstance)
+    values := sessionInstance.All()
 
     /* the fresh id is minted before the previous entry is removed, so a storage outage while probing for it leaves the session that is still in use intact */
     rotatedId := instance.uniqueSessionId()
@@ -117,19 +117,7 @@ func (instance *Manager) SaveSession(sessionInstance sessioncontract.Session) er
         return exception.NewError("session id is required in save session", nil, nil)
     }
 
-    return instance.storage.Save(sessionId, sessionValuesForStorage(sessionInstance), instance.ttl)
-}
-
-/* sessionValuesForStorage is what the storage and rotation paths read instead of All: it keeps a value stored with SetShared in the envelope that carries its sharedness, which All strips because All answers readers. Take All here and a shared value would reach the storage bare and come back a copy — the storage cannot tell what it was asked to keep whole.
-
-A foreign Session implementation has only All, and only values that were stored through its own Set, so unwrapping is not something it can lose. */
-func sessionValuesForStorage(sessionInstance sessioncontract.Session) map[string]any {
-    concreteSession, isConcrete := sessionInstance.(*Session)
-    if false == isConcrete {
-        return sessionInstance.All()
-    }
-
-    return concreteSession.storedValues()
+    return instance.storage.Save(sessionId, sessionInstance.All(), instance.ttl)
 }
 
 func (instance *Manager) DeleteSession(sessionId string) error {

@@ -222,6 +222,12 @@ func validateReferenceGating(definitions []*HttpMiddlewareDefinition, group stri
         return nil
     }
 
+    /* only what this build carries is weighed, which is what the paragraph above says and what the pass did not do: it was handed every definition the builder holds, so building the `web` group reported an unsatisfiable reference between two definitions confined to `api` — a pair `web` never assembles and whose gating says nothing about it. Several groups are built in one process, and a group that refuses to build because of another group's declarations refuses for a reason no request to it could ever reach. */
+    definitions = definitionsEnabledForGroup(definitions, group)
+    if 0 == len(definitions) {
+        return nil
+    }
+
     byName := make(map[string][]*HttpMiddlewareDefinition)
     for _, definition := range definitions {
         if "" == definition.name {
@@ -264,6 +270,26 @@ func validateReferenceGating(definitions []*HttpMiddlewareDefinition, group stri
     return nil
 }
 
+
+
+/* definitionsEnabledForGroup keeps the definitions the named group assembles. The environment is deliberately not applied: an environment is a property of the running process and the whole point of the check is to settle, at every boot, a reference that would survive one environment and vanish in another. */
+func definitionsEnabledForGroup(definitions []*HttpMiddlewareDefinition, group string) []*HttpMiddlewareDefinition {
+    enabled := make([]*HttpMiddlewareDefinition, 0, len(definitions))
+
+    for _, definition := range definitions {
+        if false == isEnabledForGroup(definition, group) {
+            continue
+        }
+
+        enabled = append(enabled, definition)
+    }
+
+    return enabled
+}
+
+/* supportedEnvironments lists every value config.validateEnvironment admits. A name registered across all of them is registered everywhere, which is what lets the union of same-named definitions answer a reference from an always-on one. It is a copy, deliberately: importing config here would tie the middleware pipeline to the configuration package for one slice. TestSupportedEnvironments_MatchesTheConfigurationPackage fails if the two ever diverge. */
+var supportedEnvironments = []string{"dev", "prod"}
+
 /* referencedNames lists the definitions this one orders itself against, in the order the edges are added, so the first unsatisfiable reference reported is stable across builds. */
 func referencedNames(definition *HttpMiddlewareDefinition) []string {
     names := make([]string, 0, len(definition.after)+len(definition.before))
@@ -296,6 +322,11 @@ func gatingReason(referrer *HttpMiddlewareDefinition, targets []*HttpMiddlewareD
         }
     }
 
+    /* no single registration covers the referrer, but the referenced NAME is what the edge orders against and every registration under it answers to that name: what has to be present wherever the referrer runs is one of them, not one particular one. Splitting a middleware across environments is the ordinary way to write it — an `auth` for development beside an `auth` for production — and requiring either alone to cover an always-on referrer refuses a configuration that boots correctly in both. */
+    if true == coversDeclaredSet(unionOfDeclaredSets(targets), referrer.enabledEnvironments) {
+        return ""
+    }
+
     target := targets[0]
 
     return describeReference(
@@ -305,6 +336,38 @@ func gatingReason(referrer *HttpMiddlewareDefinition, targets []*HttpMiddlewareD
         referrer.enabledEnvironments,
         target.enabledEnvironments,
     )
+}
+
+
+/* unionOfDeclaredSets merges the environment sets of every registration under one name, and reports the merge as universal — the empty slice the rest of this file reads as "everywhere" — when it names every environment a melody process is allowed to run in.
+
+That last step is what makes the union answer an always-on referrer at all. The environment is not free-form: config.validateEnvironment refuses to boot on anything that is not `dev` or `prod`, so a name registered for both is registered for every environment that can exist, and treating the merge as merely `{dev, prod}` would refuse a configuration no process can ever fall outside of. The list is duplicated here rather than imported to keep the pipeline free of a dependency on config; supportedEnvironments carries the guard against the two drifting apart. */
+func unionOfDeclaredSets(definitions []*HttpMiddlewareDefinition) []string {
+    merged := make([]string, 0, len(definitions))
+    seen := make(map[string]bool, len(definitions))
+
+    for _, definition := range definitions {
+        if 0 == len(definition.enabledEnvironments) {
+            return nil
+        }
+
+        for _, environment := range definition.enabledEnvironments {
+            if true == seen[environment] {
+                continue
+            }
+
+            seen[environment] = true
+            merged = append(merged, environment)
+        }
+    }
+
+    for _, environment := range supportedEnvironments {
+        if false == seen[environment] {
+            return merged
+        }
+    }
+
+    return nil
 }
 
 /* coversDeclaredSet reports whether the declared set admits at least everything the other one admits. An empty slice is the universal set, so it covers anything and is covered only by another universal set. */

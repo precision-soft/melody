@@ -16,7 +16,7 @@ import (
 const (
     MiddlewareGroupHttp = "http"
 
-    /* the pipeline sorts ascending and the first entry becomes the outermost wrapper, so a priority above the default keeps the static file server innermost. The file server answers the requests it recognizes and never calls the rest of the chain, so from the outermost position that short circuit also skips every middleware the application registered with Use — the rate limiter, the compressor, the access log — for exactly the requests that read files off disk. Innermost, the application's own middleware still wraps them. */
+    /* the pipeline sorts ascending and the first entry becomes the outermost wrapper, so a priority BELOW the default puts the static file server outermost, which is where it is. A request for a file that exists is therefore answered before anything registered through Use observes it: the file server never calls the rest of the chain, so the rate limiter, the compressor and the access log are all skipped for exactly the requests that read files off disk. That is the deliberate trade — the alternative is running the whole application chain for every asset — and an application that needs its own middleware to see static requests registers that middleware below this priority rather than above it. */
     MiddlewarePriorityStatic = -1000
     MiddlewareNameStatic     = "static"
 

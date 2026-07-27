@@ -5,12 +5,9 @@ import (
     "os"
     "path/filepath"
     "strconv"
-    "strings"
     "sync"
     "testing"
     "time"
-
-    "github.com/precision-soft/melody/v3/exception"
 )
 
 func TestFileStorage_Close_DoesNotCloseInjectedFile(t *testing.T) {
@@ -594,7 +591,9 @@ func TestFileStorage_AtomicWrite_DoesNotLeaveTempFiles(t *testing.T) {
     }
 }
 
-/* @info Loading an expired session must remove it from the map and from the file, and the flush is the only thing that does it: purgeExpiredLocked runs inside flushLocked against the same clock and the same predicate, so Load names no session of its own. This pins that mechanism — if the purge ever stops covering a lapsed entry, the explicit delete has to come back. */
+/* @info Loading an expired session must remove it from the map and from the file, and the flush inside Load is the only thing that does it: purgeExpiredLocked runs inside flushLocked against the same clock and the same predicate, so Load names no session of its own. This pins that mechanism — if the purge ever stops covering a lapsed entry, the explicit delete has to come back.
+
+Both sessions are stored with a lifetime that cannot lapse while they are being written, and the one under test is aged afterwards by rewriting its stored instant rather than by sleeping. A short ttl plus a sleep does not pin this: the second Save flushes too, and the purge inside that flush drops an entry the first Save aged past its lifetime while the file was being written, so Load is handed a session that is already gone and the branch this test names is never entered. It stayed green with the flush removed from Load entirely. */
 func TestFileStorage_LoadingAnExpiredSessionRemovesItFromTheFile(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "sessions.json")
@@ -604,7 +603,7 @@ func TestFileStorage_LoadingAnExpiredSessionRemovesItFromTheFile(t *testing.T) {
         t.Fatalf("unexpected storage error: %v", newErr)
     }
 
-    saveErr := storage.Save("expired", map[string]any{"user": "alice"}, time.Millisecond)
+    saveErr := storage.Save("expired", map[string]any{"user": "alice"}, time.Hour)
     if nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
@@ -614,7 +613,9 @@ func TestFileStorage_LoadingAnExpiredSessionRemovesItFromTheFile(t *testing.T) {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
 
-    time.Sleep(5 * time.Millisecond)
+    agedEntry := storage.sessionById["expired"]
+    agedEntry.ExpiresAt = time.Now().Add(-time.Hour).UnixNano()
+    storage.sessionById["expired"] = agedEntry
 
     _, exists, loadErr := storage.Load("expired")
     if nil != loadErr {
@@ -640,73 +641,5 @@ func TestFileStorage_LoadingAnExpiredSessionRemovesItFromTheFile(t *testing.T) {
 
     if _, persisted := reopened.sessionById["live"]; false == persisted {
         t.Fatalf("expected the live session to survive the purge")
-    }
-}
-
-func TestFileStorage_Save_RefusesASessionHoldingASharedValue(t *testing.T) {
-    path := filepath.Join(t.TempDir(), "sessions.json")
-
-    storage, err := NewFileStorageFromPath(path)
-    if nil != err {
-        t.Fatalf("expected the storage to open, got %v", err)
-    }
-
-    defer storage.Close()
-
-    manager := NewManager(storage, 30*time.Minute)
-
-    sessionInstance := manager.NewSession()
-    sessionInstance.Set("plain", "value")
-    sessionInstance.SetShared("counter", &sharedCounter{count: 1})
-
-    saveErr := manager.SaveSession(sessionInstance)
-    if nil == saveErr {
-        t.Fatalf("expected the save to be refused")
-    }
-
-    if false == strings.Contains(saveErr.Error(), "set shared") {
-        t.Fatalf("expected the refusal to name the reason, got %v", saveErr)
-    }
-
-    refusal, isRefusal := saveErr.(*exception.Error)
-    if false == isRefusal {
-        t.Fatalf("expected a framework error, got %T", saveErr)
-    }
-
-    if "counter" != refusal.Context()["key"] {
-        t.Fatalf("expected the refusal to name the key, got %v", refusal.Context())
-    }
-
-    if _, hasSessionId := refusal.Context()["sessionId"]; true == hasSessionId {
-        t.Fatalf("expected the refusal to keep the session id out of the reported context")
-    }
-
-    _, exists, loadErr := storage.Load(sessionInstance.Id())
-    if nil != loadErr {
-        t.Fatalf("expected the load to succeed, got %v", loadErr)
-    }
-
-    if true == exists {
-        t.Fatalf("expected a refused save to persist nothing")
-    }
-
-    sessionInstance.Delete("counter")
-
-    saveErr = manager.SaveSession(sessionInstance)
-    if nil != saveErr {
-        t.Fatalf("expected the session to save once the shared value is gone, got %v", saveErr)
-    }
-
-    data, exists, loadErr := storage.Load(sessionInstance.Id())
-    if nil != loadErr {
-        t.Fatalf("expected the load to succeed, got %v", loadErr)
-    }
-
-    if false == exists {
-        t.Fatalf("expected the session to be persisted")
-    }
-
-    if "value" != data["plain"] {
-        t.Fatalf("expected the plain value to be persisted, got %v", data["plain"])
     }
 }

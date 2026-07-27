@@ -402,12 +402,15 @@ func isDotEnvKeyName(name string) bool {
     return true
 }
 
+/* the name a reference may carry is exactly what godotenv expands, upper case and digits and underscore, and nothing else. It is deliberately narrower than what a key name may be, because the two questions are different: this one decides whether a dollar in a VALUE opens a reference at all, and every character admitted here is a character that stops being data.
+
+Admitting lower case cost a literal that had always worked. `DB_PASSWORD=pa$sword` is a password, not a reference to a key named `sword` — but with lower case admitted it parses as one, no such key exists, and the boot fails on a value that had been read literally for as long as the file existed. The dot cost the same for a value such as `LABEL=$1.50` once a digit followed. godotenv's own expansion (`parser.go`, `expandVarRegex`) admits `[A-Z0-9_]` for exactly this reason, and matching it is what keeps a value that godotenv read as data reading as data here. */
 func isDotEnvKeyNameStartCharacter(character byte) bool {
-    return ('A' <= character && 'Z' >= character) || ('a' <= character && 'z' >= character) || '_' == character
+    return ('A' <= character && 'Z' >= character) || '_' == character
 }
 
 func isDotEnvKeyNameCharacter(character byte) bool {
-    return true == isDotEnvKeyNameStartCharacter(character) || ('0' <= character && '9' >= character) || '.' == character
+    return true == isDotEnvKeyNameStartCharacter(character) || ('0' <= character && '9' >= character)
 }
 
 func preprocessDotEnvContent(content string) (string, error) {

@@ -617,21 +617,39 @@ func TestLeaderGate_LeadershipDropsWhileTheElectedHookIsStillRunning(t *testing.
     <-done
 }
 
-/* The budget of one renewal has to expire while the lease it renews is still valid, or abandoning the call buys nothing: by the time the gate demoted, the lock would already be someone else's. Half the cadence — itself at most half the lease — leaves the other half to notice and stop the work. */
-func TestLeaderGate_TheRenewalBudgetExpiresWellBeforeTheLease(t *testing.T) {
+/* @info The budget of one renewal is a deadline on the CALL, not a verdict on the lease, so what it has to satisfy is that it never outlives the cadence it sits inside: an attempt that outlived it would still be in flight against the same lock when its successor started. The previous invariant — a budget well below the lease — was both wrong and untested where it mattered: it read the budget as the demotion signal, and it was sampled only at ttls of 100ms and up, where the floor never engages. Below two milliseconds the floor engaged on the cadence and on the budget independently and produced a budget LARGER than the cadence, which the old assertion never saw. */
+func TestLeaderGate_TheRenewalBudgetNeverOutlivesTheCadenceItSitsInside(t *testing.T) {
     locker := NewInMemoryLocker(clock.NewSystemClock())
 
-    for _, ttl := range []time.Duration{100 * time.Millisecond, 400 * time.Millisecond, 30 * time.Second, 5 * time.Minute} {
+    ttlList := []time.Duration{
+        time.Nanosecond,
+        time.Microsecond,
+        500 * time.Microsecond,
+        time.Millisecond,
+        2 * time.Millisecond,
+        100 * time.Millisecond,
+        400 * time.Millisecond,
+        30 * time.Second,
+        5 * time.Minute,
+    }
+
+    for _, ttl := range ttlList {
         gate := NewLeaderGateWithOptions(locker, "worker:budget", ttl, LeaderGateOptions{})
 
-        timeout := resolveRefreshTimeout(gate.options.RefreshInterval)
+        refreshInterval := gate.options.RefreshInterval
+        timeout := resolveRefreshTimeout(refreshInterval)
 
         if 0 >= timeout {
             t.Fatalf("a ttl of %v derived a non-positive renewal budget %v, which expires before the call is made", ttl, timeout)
         }
 
-        if timeout >= ttl/2 {
-            t.Fatalf("a ttl of %v derived a renewal budget of %v, which outlives the lease it renews", ttl, timeout)
+        if timeout > refreshInterval {
+            t.Fatalf(
+                "a ttl of %v derived a renewal budget of %v inside a cadence of %v: the attempt would still be running when its successor started",
+                ttl,
+                timeout,
+                refreshInterval,
+            )
         }
     }
 }

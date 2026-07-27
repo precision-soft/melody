@@ -1,9 +1,13 @@
 package main
 
 import (
+    "encoding/base64"
+    "encoding/json"
     "strings"
     "testing"
     "time"
+
+    security "github.com/precision-soft/melody/v3/security"
 )
 
 /* mintTestOutput reproduces the shape a real mint prints: the boot log as json objects on stdout, then the command
@@ -136,9 +140,52 @@ func TestExampleMintDelayDiagnostic_OnlySpeaksWhenTheMintOutranTheCredential(t *
 }
 
 /* the mirrored lifetime has to match defaultHmacSignerTtl in v3/security/hmac_signer.go: a value larger than the
-real one would let a stale-credential 401 be reported as a genuine refusal. */
+real one would let a stale-credential 401 be reported as a genuine refusal.
+
+The signer's default is read out of an envelope it actually mints rather than compared against a second literal.
+That constant is unexported, so a test that names 30s twice only says the harness agrees with itself: changing
+defaultHmacSignerTtl to 10s — the exact drift this test exists to catch — left it green. Signing one request with
+Ttl unset and subtracting the envelope's own iat from its exp measures what the framework does. */
 func TestExampleHmacEnvelopeLifetime_MirrorsTheSignerDefault(t *testing.T) {
-    if 30*time.Second != exampleHmacEnvelopeLifetime {
-        t.Fatalf("the mirrored envelope lifetime is %s, wanted the signer's 30s default", exampleHmacEnvelopeLifetime)
+    signer := security.NewHmacEnvelopeSigner(security.HmacEnvelopeSignerConfig{
+        App: "lifetime-probe",
+        Secrets: security.NewStaticHmacSecretProvider(
+            "probe-key-1",
+            map[string]security.HmacKey{
+                "probe-key-1": {App: "lifetime-probe", Secret: []byte("lifetime-probe-secret-000000001")},
+            },
+        ),
+    })
+
+    headerValue, signErr := signer.Sign("GET", "/probe", nil, nil)
+    if nil != signErr {
+        t.Fatalf("unexpected signing error: %v", signErr)
+    }
+
+    parts := strings.Split(headerValue, ".")
+    if 3 != len(parts) {
+        t.Fatalf("the internal-auth header has %d parts, wanted 3: %q", len(parts), headerValue)
+    }
+
+    payloadBytes, decodeErr := base64.RawURLEncoding.DecodeString(parts[1])
+    if nil != decodeErr {
+        t.Fatalf("the envelope payload is not base64url: %v", decodeErr)
+    }
+
+    var envelope struct {
+        IssuedAt  int64 `json:"iat"`
+        ExpiresAt int64 `json:"exp"`
+    }
+    if unmarshalErr := json.Unmarshal(payloadBytes, &envelope); nil != unmarshalErr {
+        t.Fatalf("the envelope payload is not json: %v", unmarshalErr)
+    }
+
+    signerDefault := time.Duration(envelope.ExpiresAt-envelope.IssuedAt) * time.Second
+    if signerDefault != exampleHmacEnvelopeLifetime {
+        t.Fatalf(
+            "the mirrored envelope lifetime is %s and the signer mints %s; update exampleHmacEnvelopeLifetime to match defaultHmacSignerTtl in v3/security/hmac_signer.go",
+            exampleHmacEnvelopeLifetime,
+            signerDefault,
+        )
     }
 }

@@ -224,3 +224,106 @@ func TestRunHttp_StaysSilentWhenTheApplicationBoundedItsCacheBackend(t *testing.
         t.Fatalf("expected no cache warning, got %v", warnings)
     }
 }
+
+const unboundedSessionWarningFragment = "default in-memory session storage"
+
+func newSessionWarningTestApplication(t *testing.T, sessionTtl string, logger loggingcontract.Logger) *Application {
+    t.Helper()
+
+    values := map[string]string{
+        config.HttpAddressKey: "127.0.0.1:34519",
+    }
+    if "" != sessionTtl {
+        values[config.HttpSessionTtlKey] = sessionTtl
+    }
+
+    environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: values})
+    if nil != environmentErr {
+        t.Fatalf("unexpected environment error: %v", environmentErr)
+    }
+
+    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+    if nil != configurationErr {
+        t.Fatalf("unexpected configuration error: %v", configurationErr)
+    }
+
+    applicationInstance := &Application{
+        configuration:        configuration,
+        runtimeFlags:         NewRuntimeFlags(config.ModeHttp),
+        kernel:               newTestKernel(),
+        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerOptions(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
+        moduleConfigurations: make(map[string]any),
+    }
+
+    applicationInstance.RegisterService(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return logger, nil
+        },
+    )
+
+    applicationInstance.registerHttpSession()
+
+    return applicationInstance
+}
+
+/* @info The storage melody wired itself lives in this process and nothing outside it can expire an entry; with a ttl of zero nothing inside it can either. A request that arrives without a session cookie gets a session regardless of who sent it, so the pair is the one combination in which an unauthenticated caller decides how much memory this process keeps. */
+func TestRunHttp_WarnsAboutTheDefaultSessionStorageWithAnUnboundedTtl(t *testing.T) {
+    logger := &warningRecordingLogger{}
+
+    applicationInstance := newSessionWarningTestApplication(t, "", logger)
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    runErr := applicationInstance.runHttp(cancelledContext)
+    if nil != runErr {
+        t.Fatalf("unexpected run http error: %v", runErr)
+    }
+
+    warnings := logger.warningsContaining(unboundedSessionWarningFragment)
+    if 1 != len(warnings) {
+        t.Fatalf("expected exactly one session warning on the http path, got %d: %v", len(warnings), warnings)
+    }
+}
+
+/* @info a lifetime the deployment chose reclaims the entries the default storage holds, so there is nothing left to warn about. */
+func TestRunHttp_StaysSilentWhenTheSessionTtlIsBounded(t *testing.T) {
+    logger := &warningRecordingLogger{}
+
+    applicationInstance := newSessionWarningTestApplication(t, "30m", logger)
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    runErr := applicationInstance.runHttp(cancelledContext)
+    if nil != runErr {
+        t.Fatalf("unexpected run http error: %v", runErr)
+    }
+
+    warnings := logger.warningsContaining(unboundedSessionWarningFragment)
+    if 0 != len(warnings) {
+        t.Fatalf("expected no session warning when the ttl is bounded, got %v", warnings)
+    }
+}
+
+/* @info a storage the application registered is the operator's to expire, so an unbounded ttl beside it is a choice rather than a hazard melody introduced. */
+func TestRunHttp_StaysSilentWhenTheApplicationRegisteredItsSessionStorage(t *testing.T) {
+    logger := &warningRecordingLogger{}
+
+    applicationInstance := newSessionWarningTestApplication(t, "", logger)
+    applicationInstance.defaultInMemorySessionStorage = false
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    runErr := applicationInstance.runHttp(cancelledContext)
+    if nil != runErr {
+        t.Fatalf("unexpected run http error: %v", runErr)
+    }
+
+    warnings := logger.warningsContaining(unboundedSessionWarningFragment)
+    if 0 != len(warnings) {
+        t.Fatalf("expected no session warning when the application supplied the storage, got %v", warnings)
+    }
+}

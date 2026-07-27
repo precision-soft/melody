@@ -2,6 +2,7 @@ package static
 
 import (
     "bytes"
+    "io/fs"
     "net/http"
     "os"
     "strings"
@@ -9,6 +10,7 @@ import (
     "testing/fstest"
     "time"
 
+    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     "github.com/precision-soft/melody/v3/internal/testhelper"
     "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
@@ -1416,5 +1418,99 @@ func TestFileServer_ExcludedPathListDefaultsToExcludingNothing(t *testing.T) {
 
     if false == served {
         t.Fatalf("expected the default configuration to exclude nothing")
+    }
+}
+
+/* refusingFileSystem answers every open with one chosen error, which is how the two shapes of open failure are told apart without a symlink the test would have to build on a filesystem that may not support one. */
+type refusingFileSystem struct {
+    openErr error
+}
+
+func (instance *refusingFileSystem) Open(name string) (fs.File, error) {
+    return nil, instance.openErr
+}
+
+/* levelRecordingLogger keeps what was written and at which level, since the level is the whole assertion here. */
+type levelRecordingLogger struct {
+    loggingcontract.Logger
+    warningMessages []string
+    debugMessages   []string
+}
+
+func (instance *levelRecordingLogger) Warning(message string, context exceptioncontract.Context) {
+    instance.warningMessages = append(instance.warningMessages, message)
+}
+
+func (instance *levelRecordingLogger) Debug(message string, context exceptioncontract.Context) {
+    instance.debugMessages = append(instance.debugMessages, message)
+}
+
+func newRefusingFileServer(openErr error) *FileServer {
+    return &FileServer{
+        config: NewFileServerConfig(
+            ModeFilesystem,
+            "/does-not-matter",
+            "index.html",
+            "",
+            false,
+            0,
+            false,
+        ),
+        fileSystem: &refusingFileSystem{openErr: openErr},
+    }
+}
+
+/* @info A path whose symlinks resolve outside the served directory comes back from resolveAndOpen as fs.ErrPermission, and it is the only thing here that does. Recorded at debug it was byte-identical to a mistyped stylesheet href — the very indistinguishability the logging on this path exists to end — so the level is what carries the distinction and is what this pins. */
+func TestFileServer_AnEscapeRefusalIsRecordedAtWarningRatherThanDebug(t *testing.T) {
+    logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
+
+    server := newRefusingFileServer(fs.ErrPermission)
+
+    _, _, _, _, served := server.serveForStreaming(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/app.css"),
+        logger,
+    )
+
+    if true == served {
+        t.Fatal("expected the refused path not to be served")
+    }
+
+    if 1 != len(logger.warningMessages) {
+        t.Fatalf("expected the escape refusal to be recorded at warning, got warnings=%v debug=%v", logger.warningMessages, logger.debugMessages)
+    }
+
+    if false == strings.Contains(logger.warningMessages[0], "outside the served directory") {
+        t.Fatalf("expected the warning to name what was refused, got %q", logger.warningMessages[0])
+    }
+}
+
+/* @info the control: an ordinary miss stays at debug. The static server is consulted for every request no route answered, so warning on a miss would file one record per non-asset request and teach an operator to filter the message out — taking the refusal above with it. */
+func TestFileServer_AnOrdinaryMissStaysAtDebug(t *testing.T) {
+    logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
+
+    server := newRefusingFileServer(fs.ErrNotExist)
+
+    _, _, _, _, served := server.serveForStreaming(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/app.css"),
+        logger,
+    )
+
+    if true == served {
+        t.Fatal("expected the missing path not to be served")
+    }
+
+    if 0 != len(logger.warningMessages) {
+        t.Fatalf("expected no warning for an ordinary miss, got %v", logger.warningMessages)
+    }
+
+    missRecorded := false
+    for _, message := range logger.debugMessages {
+        if true == strings.Contains(message, "static serve open failed") {
+            missRecorded = true
+        }
+    }
+
+    if false == missRecorded {
+        t.Fatalf("expected the miss to be recorded at debug, got %v", logger.debugMessages)
     }
 }

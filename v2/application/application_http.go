@@ -6,12 +6,14 @@ import (
     nethttp "net/http"
 
     "github.com/precision-soft/melody/v2/cache"
+    "github.com/precision-soft/melody/v2/config"
     "github.com/precision-soft/melody/v2/exception"
     "github.com/precision-soft/melody/v2/http"
     httpcontract "github.com/precision-soft/melody/v2/http/contract"
     kernelcontract "github.com/precision-soft/melody/v2/kernel/contract"
     "github.com/precision-soft/melody/v2/logging"
     loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
+    "github.com/precision-soft/melody/v2/session"
 )
 
 func (instance *Application) RegisterHttpRoute(
@@ -90,6 +92,8 @@ func (instance *Application) runHttp(
 
     instance.warnOnUnboundedDefaultCacheBackend(logger)
 
+    instance.warnOnUnboundedDefaultSessionStorage(logger)
+
     logger.Info(
         "starting http server on `"+configuration.Http().Address()+"` with env `"+configuration.Kernel().Env()+"`",
         nil,
@@ -141,6 +145,26 @@ func (instance *Application) warnOnUnboundedDefaultCacheBackend(logger loggingco
 
     logger.Warning(
         "the default in-memory cache backend carries no item ceiling, so a key cached without a ttl is kept until this process exits and nothing evicts it under memory pressure; register `"+cache.ServiceCacheBackend+"` with cache.NewInMemoryBackend(maxItems, cleanupInterval, clock) for a bounded one, or with a shared backend",
+        nil,
+    )
+}
+
+/* warnOnUnboundedDefaultSessionStorage reports, once at boot, the one combination in which sessions grow without anything ever reclaiming them: the storage melody wired itself, which lives in this process and which nothing outside it can expire, together with a lifetime of zero, which asks it to keep every entry forever.
+
+Either half alone is a deliberate and reasonable choice. A shared storage with no expiry is the operator's to prune, and the in-memory one with a lifetime set reclaims on its own. Together they are neither, and the growth does not come from anything the application wrote: melody mints a session for every request that arrives without a session cookie, so a single write on a public path — a csrf token, a flash message, a locale — turns every such request into a permanent entry, and an unauthenticated caller decides how many arrive.
+
+It is raised from the http path alone, the way the cache warning is: a command builds its map, runs and takes it away with it. */
+func (instance *Application) warnOnUnboundedDefaultSessionStorage(logger loggingcontract.Logger) {
+    if false == instance.defaultInMemorySessionStorage {
+        return
+    }
+
+    if 0 != instance.configuration.Http().SessionTtl() {
+        return
+    }
+
+    logger.Warning(
+        "the default in-memory session storage is paired with an unbounded session ttl, so every request that arrives without a session cookie can leave an entry that is kept until this process exits; set `"+config.HttpSessionTtlKey+"` to the lifetime this deployment wants, or register `"+session.ServiceSessionStorage+"` with a shared storage an operator can expire",
         nil,
     )
 }

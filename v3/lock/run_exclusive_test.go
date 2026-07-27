@@ -2,6 +2,7 @@ package lock
 
 import (
     "context"
+    "sync/atomic"
     "testing"
     "time"
 
@@ -474,5 +475,165 @@ func TestRunExclusive_ARenewalThatNeverAnswersStopsTheCallback(t *testing.T) {
 
     if nil == err {
         t.Fatalf("a renewal that never answered must be reported as a lost lease")
+    }
+}
+
+/* slowSucceedingRefreshLock answers every renewal successfully, but only after a delay — the shape of a store that is under load rather than gone. */
+type slowSucceedingRefreshLocker struct {
+    delay time.Duration
+}
+
+func (instance *slowSucceedingRefreshLocker) CreateLock(name string, ttl time.Duration) lockcontract.Lock {
+    return &slowSucceedingRefreshLock{delay: instance.delay}
+}
+
+type slowSucceedingRefreshLock struct {
+    delay time.Duration
+}
+
+func (instance *slowSucceedingRefreshLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+    return true, nil
+}
+
+func (instance *slowSucceedingRefreshLock) Release(runtimeInstance runtimecontract.Runtime) error {
+    return nil
+}
+
+func (instance *slowSucceedingRefreshLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl time.Duration) error {
+    select {
+    case <-time.After(instance.delay):
+        return nil
+    case <-runtimeInstance.Context().Done():
+        return runtimeInstance.Context().Err()
+    }
+}
+
+/* @info A renewal that ANSWERS, inside the lease it is renewing, renewed it — however long the store took to say so. Demoting on the latency of one call instead of on the lease clock cancels work that was never in danger and, under a LeaderGate, drops a term that was never lost. The delay here sits above the old per-call verdict (a quarter of the ttl) and below the lease, which is exactly the band that used to report a lost lock. */
+func TestRunExclusive_ASlowButSuccessfulRenewalDoesNotLoseTheLease(t *testing.T) {
+    ttl := 200 * time.Millisecond
+    locker := &slowSucceedingRefreshLocker{delay: 80 * time.Millisecond}
+
+    completed := false
+
+    ran, runErr := RunExclusive(
+        testRuntimeWithContext(context.Background()),
+        locker,
+        "worker:slow-store",
+        ttl,
+        func(runtimeInstance runtimecontract.Runtime) error {
+            time.Sleep(500 * time.Millisecond)
+            completed = true
+
+            return nil
+        },
+    )
+
+    if false == ran {
+        t.Fatal("expected the exclusive run to have taken the lock")
+    }
+
+    if nil != runErr {
+        t.Fatalf("expected a slow but successful renewal to keep the lease, got %v", runErr)
+    }
+
+    if false == completed {
+        t.Fatal("the callback was cancelled: a renewal that succeeded inside the lease was read as a lost lock")
+    }
+}
+
+/* @info the other half of the invariant: a renewal that keeps failing must still demote, and must do so before the lease it last wrote can be acquired by anyone else rather than after. */
+func TestRunExclusive_APersistentlyFailingRenewalStillLosesTheLease(t *testing.T) {
+    ttl := 200 * time.Millisecond
+    locker := &refreshFailingLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
+
+    completed := false
+
+    ran, runErr := RunExclusive(
+        testRuntimeWithContext(context.Background()),
+        locker,
+        "worker:dead-store",
+        ttl,
+        func(runtimeInstance runtimecontract.Runtime) error {
+            select {
+            case <-runtimeInstance.Context().Done():
+                return runtimeInstance.Context().Err()
+            case <-time.After(5 * time.Second):
+                completed = true
+
+                return nil
+            }
+        },
+    )
+
+    if false == ran {
+        t.Fatal("expected the exclusive run to have taken the lock")
+    }
+
+    if nil == runErr {
+        t.Fatal("expected a renewal that never succeeds to lose the lease")
+    }
+
+    if true == completed {
+        t.Fatal("expected the callback to be cancelled once the lease could no longer be saved")
+    }
+}
+
+/* intermittentRefreshLock fails the first renewal and answers every one after it, which is what a store that dropped a connection and reconnected looks like from here. */
+type intermittentRefreshLocker struct{}
+
+func (instance *intermittentRefreshLocker) CreateLock(name string, ttl time.Duration) lockcontract.Lock {
+    return &intermittentRefreshLock{}
+}
+
+type intermittentRefreshLock struct {
+    attempts atomic.Int64
+}
+
+func (instance *intermittentRefreshLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+    return true, nil
+}
+
+func (instance *intermittentRefreshLock) Release(runtimeInstance runtimecontract.Runtime) error {
+    return nil
+}
+
+func (instance *intermittentRefreshLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl time.Duration) error {
+    if 1 == instance.attempts.Add(1) {
+        return exception.NewError("refresh dropped by the store", nil, nil)
+    }
+
+    return nil
+}
+
+/* @info One failed renewal is not a lost lease. The renewal cadence is half the ttl precisely so that a lost attempt still leaves a whole second attempt before the lease lapses; a policy that demotes on the first failure throws that margin away and turns every dropped connection into cancelled work and, under a LeaderGate, a dropped term. What must demote is the lease clock — the attempt after the failure lands, rewrites the lease, and nothing was ever in danger. */
+func TestRunExclusive_ASingleFailedRenewalIsSurvivedByTheNextOne(t *testing.T) {
+    ttl := 200 * time.Millisecond
+    locker := &intermittentRefreshLocker{}
+
+    completed := false
+
+    ran, runErr := RunExclusive(
+        testRuntimeWithContext(context.Background()),
+        locker,
+        "worker:flaky-store",
+        ttl,
+        func(runtimeInstance runtimecontract.Runtime) error {
+            time.Sleep(500 * time.Millisecond)
+            completed = true
+
+            return nil
+        },
+    )
+
+    if false == ran {
+        t.Fatal("expected the exclusive run to have taken the lock")
+    }
+
+    if nil != runErr {
+        t.Fatalf("expected one dropped renewal to be survived by the next, got %v", runErr)
+    }
+
+    if false == completed {
+        t.Fatal("the callback was cancelled: a single dropped renewal was read as a lost lock, throwing away the whole point of renewing at half the ttl")
     }
 }

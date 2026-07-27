@@ -6,6 +6,7 @@ import (
     "testing"
 
     clockcontract "github.com/precision-soft/melody/v2/clock/contract"
+    "github.com/precision-soft/melody/v2/config"
     configcontract "github.com/precision-soft/melody/v2/config/contract"
     containercontract "github.com/precision-soft/melody/v2/container/contract"
     eventcontract "github.com/precision-soft/melody/v2/event/contract"
@@ -293,5 +294,67 @@ func TestBuild_LeavesUngatedPipelinesAlone(t *testing.T) {
     }
     if 2 != len(middlewares) {
         t.Fatalf("expected both middlewares, got %d", len(middlewares))
+    }
+}
+
+/* @info Splitting one middleware across environments is how a configuration that differs per environment is ordinarily written: an `auth` wired for development beside an `auth` wired for production, both registered under the one name the rest of the pipeline orders against. What has to be present wherever the referrer runs is A middleware called `auth`, not one particular registration of it — so the union of the registrations is what answers the reference. Weighing them one at a time refused this in dev AND in prod, for a configuration that boots correctly in both. */
+func TestBuild_AcceptsAReferenceCoveredByTheUnionOfSameNamedDefinitions(t *testing.T) {
+    developmentAuth := NewHttpMiddlewareDefinition("auth", 0, nil, nil, []string{"http"}, []string{"dev"}, passthroughFactory(), false, true)
+    productionAuth := NewHttpMiddlewareDefinition("auth", 0, nil, nil, []string{"http"}, []string{"prod"}, passthroughFactory(), false, true)
+    audit := NewHttpMiddlewareDefinition("audit", 0, nil, []string{"auth"}, []string{"http"}, nil, passthroughFactory(), false, false)
+
+    for _, environment := range []string{"dev", "prod"} {
+        if _, _, buildErr := buildIn(environment, developmentAuth, productionAuth, audit); nil != buildErr {
+            t.Fatalf("environment %q: the two auth registrations cover every environment between them, so the reference is satisfiable: %v", environment, buildErr)
+        }
+    }
+}
+
+/* @info the control: a union that still leaves a gap is still refused. Two registrations covering dev and staging do not answer an always-on referrer, which runs in production too, and that is the mistake the check exists to catch. */
+func TestBuild_StillRefusesAReferenceTheUnionDoesNotCover(t *testing.T) {
+    developmentAuth := NewHttpMiddlewareDefinition("auth", 0, nil, nil, []string{"http"}, []string{"dev"}, passthroughFactory(), false, true)
+    stagingAuth := NewHttpMiddlewareDefinition("auth", 0, nil, nil, []string{"http"}, []string{"staging"}, passthroughFactory(), false, true)
+    audit := NewHttpMiddlewareDefinition("audit", 0, nil, []string{"auth"}, []string{"http"}, nil, passthroughFactory(), false, false)
+
+    _, _, buildErr := buildIn("dev", developmentAuth, stagingAuth, audit)
+    if nil == buildErr {
+        t.Fatal("an always-on referrer is not covered by registrations confined to dev and staging; production carries none of them")
+    }
+}
+
+/* @info supportedEnvironments is a copy of what config.validateEnvironment admits, and the union of same-named definitions is only universal because of it: a name registered for every supported environment is registered everywhere. If config ever admits a third environment and this list does not learn about it, the union silently stops covering an always-on referrer and a configuration that boots everywhere starts being refused. The comment above the copy promises this guard; here it is. */
+func TestSupportedEnvironments_MatchesTheConfigurationPackage(t *testing.T) {
+    fromConfiguration := []string{config.EnvDevelopment, config.EnvProduction}
+
+    if len(fromConfiguration) != len(supportedEnvironments) {
+        t.Fatalf("the pipeline knows %d environments and config admits %d: %v vs %v", len(supportedEnvironments), len(fromConfiguration), supportedEnvironments, fromConfiguration)
+    }
+
+    for _, environment := range fromConfiguration {
+        found := false
+        for _, known := range supportedEnvironments {
+            if known == environment {
+                found = true
+            }
+        }
+
+        if false == found {
+            t.Fatalf("config admits the environment %q and the pipeline does not know it, so the union of same-named definitions can no longer cover an always-on reference", environment)
+        }
+    }
+}
+
+/* @info Several groups are built from one builder in one process, each from its own selection. A pair of definitions confined to `api` says nothing about the `web` build, which assembles neither of them — yet the gating pass was handed every definition the builder holds, so `web` refused to build over a reference no request to it could reach. The check still fires for the group that does carry the pair. */
+func TestBuild_GatingOfAnotherGroupDoesNotRefuseThisOne(t *testing.T) {
+    profiler := NewHttpMiddlewareDefinition("profiler", 0, nil, nil, []string{"api"}, []string{"dev"}, passthroughFactory(), false, false)
+    audit := NewHttpMiddlewareDefinition("audit", 0, []string{"profiler"}, nil, []string{"api"}, nil, passthroughFactory(), false, false)
+    page := NewHttpMiddlewareDefinition("page", 0, nil, nil, []string{"web"}, nil, passthroughFactory(), false, false)
+
+    if _, _, buildErr := NewBuilder(profiler, audit, page).Build(&gatingTestKernel{environment: "dev"}, "web"); nil != buildErr {
+        t.Fatalf("the web group assembles neither definition of the api pair, so their gating cannot make it unbuildable: %v", buildErr)
+    }
+
+    if _, _, buildErr := NewBuilder(profiler, audit, page).Build(&gatingTestKernel{environment: "dev"}, "api"); nil == buildErr {
+        t.Fatal("the api group does carry the pair, so the unsatisfiable reference must still be refused there")
     }
 }

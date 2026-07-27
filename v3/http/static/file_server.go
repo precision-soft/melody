@@ -1,6 +1,7 @@
 package static
 
 import (
+    "errors"
     "fmt"
     "io"
     "io/fs"
@@ -360,17 +361,7 @@ func (instance *FileServer) resolveAndOpen(
 
     file, openErr := instance.fileSystem.Open(relativePath)
     if nil != openErr {
-        if nil != logger {
-            logger.Debug(
-                "static serve open failed",
-                exception.LogContext(
-                    openErr,
-                    exceptioncontract.Context{
-                        "relativePath": relativePath,
-                    },
-                ),
-            )
-        }
+        logOpenFailure(logger, relativePath, openErr)
 
         return nil, false
     }
@@ -547,4 +538,28 @@ var fallbackContentTypeByExtension = map[string]string{
     ".webp":  "image/webp",
     ".woff":  "font/woff",
     ".woff2": "font/woff2",
+}
+
+/* logOpenFailure separates a refusal from a miss, which the level is the only thing that can say. The static server is consulted for every request a route did not answer, so a path that simply names no file is the ordinary case and is recorded at debug along with the successful resolutions; anything louder files one record per request that is not a static asset, and an operator learns to filter the whole message out.
+
+A permission error is not that case. The only thing that produces one here is the escape check in the local filesystem: a path whose symlinks resolve outside the base directory. Recorded at debug it is byte-identical to a typo in a stylesheet href, which is exactly the indistinguishability the logging on this path exists to end. */
+func logOpenFailure(logger loggingcontract.Logger, relativePath string, openErr error) {
+    if nil == logger {
+        return
+    }
+
+    logContext := exception.LogContext(
+        openErr,
+        exceptioncontract.Context{
+            "relativePath": relativePath,
+        },
+    )
+
+    if true == errors.Is(openErr, fs.ErrPermission) {
+        logger.Warning("static serve refused a path that resolves outside the served directory", logContext)
+
+        return
+    }
+
+    logger.Debug("static serve open failed", logContext)
 }

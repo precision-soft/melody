@@ -38,6 +38,8 @@ type Application struct {
     unappliedSecretMarks  []string
     /* set when the framework had to supply the cache backend itself, because the one it supplies keeps every entry it is ever given; runHttp is what turns it into a warning, and only there */
     unboundedDefaultCacheBackend bool
+    /* set when the framework had to supply the session storage itself; paired with an unbounded session ttl it is the same unbounded growth, reached from the request path rather than from anything the application wrote */
+    defaultInMemorySessionStorage bool
 }
 
 func (instance *Application) Boot() kernelcontract.Kernel {
