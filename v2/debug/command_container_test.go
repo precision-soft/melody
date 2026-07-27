@@ -431,3 +431,62 @@ func TestSanitizeErrorContextValue_SharedSiblingContainerIsNotACycle(t *testing.
         t.Fatalf("expected both sibling keys to render the shared container, got %s", encoded)
     }
 }
+
+/* @info The cycle guard above answers a context that holds itself. It says nothing about one that is merely very deep, and until this bound nothing else did either: the walk descended until the goroutine stack was gone, which is `fatal error: stack overflow` — not a panic, so no recover in the command layer turns it into a reported failure and the process dies rendering a debug page. Measured with the stack capped at 16 MiB it took some five hundred thousand levels; the production cap of a gigabyte scales that up rather than removing it.
+
+The depth used here is one past the bound rather than half a million, because what has to be pinned is the refusal, not the machine's stack size — a test that needs a real overflow to fail can only fail by killing the test binary. */
+func TestSanitizeErrorContextValue_RefusesToDescendPastTheDepthBound(t *testing.T) {
+    deepest := map[string]any{"leaf": "value"}
+
+    current := deepest
+    for index := 0; index < maximumErrorContextDepth+1; index = index + 1 {
+        current = map[string]any{"next": current}
+    }
+
+    sanitized, isMap := sanitizeErrorContextValue(current).(map[string]any)
+    if false == isMap {
+        t.Fatalf("expected the sanitized context to stay a map, got %T", sanitizeErrorContextValue(current))
+    }
+
+    for index := 0; index < maximumErrorContextDepth-1; index = index + 1 {
+        next, exists := sanitized["next"]
+        if false == exists {
+            t.Fatalf("the walk stopped at depth %d, well before the bound", index)
+        }
+
+        nextMap, isNextMap := next.(map[string]any)
+        if false == isNextMap {
+            t.Fatalf("the walk stopped at depth %d with %v, well before the bound", index, next)
+        }
+
+        sanitized = nextMap
+    }
+
+    if errorContextDepthMarker != sanitized["next"] {
+        t.Fatalf("expected the subtree past the bound to be replaced with %q, got %v", errorContextDepthMarker, sanitized["next"])
+    }
+}
+
+/* @info the control: an ordinary error context, which nests a handful of levels, must come through untouched. A bound that truncated real contexts would trade a rare fatal error for an everyday loss of the information the page exists to show. */
+func TestSanitizeErrorContextValue_LeavesAnOrdinaryContextIntact(t *testing.T) {
+    sanitized, isMap := sanitizeErrorContextValue(map[string]any{
+        "service": "app.pool",
+        "cause": map[string]any{
+            "driver": "pgsql",
+            "attempts": []any{
+                map[string]any{"at": "1", "error": "refused"},
+            },
+        },
+    }).(map[string]any)
+    if false == isMap {
+        t.Fatal("expected a map")
+    }
+
+    cause := sanitized["cause"].(map[string]any)
+    attempts := cause["attempts"].([]any)
+    attempt := attempts[0].(map[string]any)
+
+    if "refused" != attempt["error"] {
+        t.Fatalf("an ordinary context did not survive the walk: %v", sanitized)
+    }
+}
