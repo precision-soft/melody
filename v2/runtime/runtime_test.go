@@ -55,6 +55,13 @@ func (instance containerStub) Register(serviceName string, provider any, options
 func (instance containerStub) MustRegister(serviceName string, provider any, options ...containercontract.RegisterOption) {
 }
 
+func (instance containerStub) RegisterScoped(serviceName string, provider any, options ...containercontract.RegisterOption) error {
+    return errors.New("not implemented")
+}
+
+func (instance containerStub) MustRegisterScoped(serviceName string, provider any, options ...containercontract.RegisterOption) {
+}
+
 func (instance containerStub) Get(serviceName string) (any, error) {
     return nil, errors.New("not implemented")
 }
@@ -163,6 +170,13 @@ func (instance scopeStub) OverrideProtectedInstance(serviceName string, value an
 }
 
 func (instance scopeStub) MustOverrideProtectedInstance(serviceName string, value any) {
+}
+
+func (instance scopeStub) RegisterScoped(serviceName string, provider any, options ...containercontract.RegisterOption) error {
+    return errors.New("not implemented")
+}
+
+func (instance scopeStub) MustRegisterScoped(serviceName string, provider any, options ...containercontract.RegisterOption) {
 }
 
 func (instance scopeStub) Close() error {

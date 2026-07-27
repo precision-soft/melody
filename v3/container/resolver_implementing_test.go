@@ -457,3 +457,107 @@ func TestAllImplementing_SiblingNameIsCollectedWhenTheCollectorResolvesByType(t 
         t.Fatalf("expected the sibling to be collected and the collector excluded, got %v", dispatcher.handlers)
     }
 }
+
+type requestHandler struct {
+}
+
+func (instance *requestHandler) Handle() string {
+    return "request"
+}
+
+/* @info A scoped registration absent from a collection is the quietest failure this feature can produce: the handler is simply never dispatched to, with no error anywhere to say a member is missing. The scope therefore merges its own registrations with the container's rather than delegating. */
+func TestAllImplementing_CollectsScopedRegistrationsOnAScope(t *testing.T) {
+    serviceContainer := newCollectionContainer(t)
+
+    MustRegisterScopedType(serviceContainer, func(resolver containercontract.Resolver) (*requestHandler, error) {
+        return &requestHandler{}, nil
+    })
+
+    scopeInstance := serviceContainer.NewScope()
+
+    handlers, allImplementingErr := AllImplementing[collectableHandler](scopeInstance)
+    if nil != allImplementingErr {
+        t.Fatalf("unexpected collection error: %v", allImplementingErr)
+    }
+
+    collected := make(map[string]struct{}, len(handlers))
+    for _, handler := range handlers {
+        collected[handler.Handle()] = struct{}{}
+    }
+
+    if _, gathered := collected["request"]; false == gathered {
+        t.Fatalf("expected the scoped handler to take part in a collection gathered on the scope, got %v", collected)
+    }
+
+    if _, gathered := collected["invoice"]; false == gathered {
+        t.Fatalf("expected the container handlers to keep taking part, got %v", collected)
+    }
+}
+
+/* @info The container's own collection must stay free of scoped members: a process-lifetime dispatcher holding a handler built for one request would hold that request for the life of the process. */
+func TestAllImplementing_AContainerCollectionExcludesScopedRegistrations(t *testing.T) {
+    serviceContainer := newCollectionContainer(t)
+
+    MustRegisterScopedType(serviceContainer, func(resolver containercontract.Resolver) (*requestHandler, error) {
+        return &requestHandler{}, nil
+    })
+
+    handlers, allImplementingErr := AllImplementing[collectableHandler](serviceContainer)
+    if nil != allImplementingErr {
+        t.Fatalf("unexpected collection error: %v", allImplementingErr)
+    }
+
+    for _, handler := range handlers {
+        if "request" == handler.Handle() {
+            t.Fatalf("expected the container collection to leave the scoped handler out")
+        }
+    }
+}
+
+/* @info A container provider collecting through the resolver it was handed must gather only container members, even while the resolution that reached it came through a scope: the dispatcher it is building is a process singleton, and a handler built for one request would be held by it for the life of the process. */
+func TestAllImplementing_AContainerProviderCollectingThroughAScopeExcludesScopedRegistrations(t *testing.T) {
+    serviceContainer := newCollectionContainer(t)
+
+    MustRegisterScopedType(serviceContainer, func(resolver containercontract.Resolver) (*requestHandler, error) {
+        return &requestHandler{}, nil
+    })
+
+    collectedNames := make([]string, 0)
+
+    registerErr := serviceContainer.Register(
+        "app.dispatcher",
+        func(resolver containercontract.Resolver) (*plainService, error) {
+            handlers, allImplementingErr := AllImplementing[collectableHandler](resolver)
+            if nil != allImplementingErr {
+                return nil, allImplementingErr
+            }
+
+            for _, handler := range handlers {
+                collectedNames = append(collectedNames, handler.Handle())
+            }
+
+            return &plainService{}, nil
+        },
+        WithoutTypeRegistration(),
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+
+    _, getErr := scopeInstance.Get("app.dispatcher")
+    if nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    for _, collectedName := range collectedNames {
+        if "request" == collectedName {
+            t.Fatalf("expected a container provider's collection to leave the scoped handler out, got %v", collectedNames)
+        }
+    }
+
+    if 0 == len(collectedNames) {
+        t.Fatalf("expected the container provider to collect the container handlers")
+    }
+}

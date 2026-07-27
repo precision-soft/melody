@@ -170,6 +170,13 @@ func (instance *testScope) MustOverrideProtectedInstance(serviceName string, val
     }
 }
 
+func (instance *testScope) RegisterScoped(serviceName string, provider any, options ...containercontract.RegisterOption) error {
+    return nil
+}
+
+func (instance *testScope) MustRegisterScoped(serviceName string, provider any, options ...containercontract.RegisterOption) {
+}
+
 func (instance *testScope) Close() error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()

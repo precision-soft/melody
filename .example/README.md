@@ -88,6 +88,38 @@ cronConfiguration := cron.NewConfiguration().
 
 Cron defaults (user, logs directory, destination file, template, heartbeat) come from the parameter system in [`config/parameter.go`](./config/parameter.go). The user is sourced from `APP_CRON_USER`, and the heartbeat is enabled via the `APP_CRON_HEARTBEAT_AUTO_ENABLED` opt-in (which auto-derives `<logs-dir>/heartbeat.crontab` from `melody.cron.logs_dir`) — both env vars live in [`.env`](./.env). [`config/cron.go`](./config/cron.go) reads `app.cron.product_user` (backed by `APP_CRON_PRODUCT_USER`) at registration time and applies it as the per-command user on the `product:list` schedule, demonstrating how the parameter cascade feeds custom values into `cron.Configuration` entries.
 
+### Live integrations: database, cache and clock
+
+Beside cron, the example wires [`integrations/bunorm`](../integrations/bunorm/) with its
+[mysql provider](../integrations/bunorm/mysql/), [`integrations/rueidis`](../integrations/rueidis/) with its
+[cache backend](../integrations/rueidis/cache/), and the framework's own [`clock`](../clock/).
+
+Each one is gated on an endpoint parameter, and an unset endpoint leaves the integration unwired: no service,
+no route, nothing dialled. That is what keeps the example bootable with no containers at all — the demo routes
+are simply absent. The endpoints ship in [`.env`](./.env) pointing at the docker-compose service names, and a
+configured-but-unreachable endpoint is a warning rather than a boot failure, so `go run .` works on a laptop.
+
+| route | what it proves |
+|---|---|
+| `GET /integration/report/` | the clock-stamped catalogue report, served from the cache once warm — the one demo that needs no backend |
+| `GET /integration/cache/` | a redis round trip: a clock-stamped value written through the backend and read straight back |
+| `GET /integration/database/` | a mysql round trip: the demo table created if absent, a note appended, read back by its identifier, and the table counted |
+| `GET /integration/ratelimit/` | the redis rate limiter, five requests per minute per client |
+
+The `catalog:note` command writes a note and prints the latest ones over the same repository, so the database is
+reachable from the command line as well as from a request.
+
+Two details are worth reading in the source rather than guessed at:
+
+- [`config/bootstrap_resolver.go`](./config/bootstrap_resolver.go) explains why an integration provider cannot
+  resolve the configuration through the application's own container while the modules are being wired: boot runs
+  the module hooks before it registers the framework's services. The database sidesteps it by opening lazily;
+  redis cannot, because the rate-limit middleware is handed a live limiter at the moment a route is declared.
+- The clock is injected into [`config/middleware.go`](./config/middleware.go) rather than read from the wall.
+  That is what makes the `X-Example-Duration-Ms` header assertable at all — a frozen clock advanced by the
+  handler underneath lets [`config/middleware_test.go`](./config/middleware_test.go) demand an exact value,
+  which no test can do against `time.Now`.
+
 ### [`main.go`](./main.go) (why it stays small)
 
 `main.go` intentionally contains minimal logic.

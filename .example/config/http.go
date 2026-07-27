@@ -8,6 +8,8 @@ import (
     handleruser "github.com/precision-soft/melody/.example/handler/user"
     "github.com/precision-soft/melody/.example/route"
     melodyapplicationcontract "github.com/precision-soft/melody/application/contract"
+    melodyhttpcontract "github.com/precision-soft/melody/http/contract"
+    melodyhttpmiddleware "github.com/precision-soft/melody/http/middleware"
     melodykernelcontract "github.com/precision-soft/melody/kernel/contract"
 )
 
@@ -23,6 +25,8 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     router.HandleNamed(route.LogoutName, "GET", route.LogoutPattern, handler.LogoutHandler())
 
     router.HandleNamed(route.RoutesName, "GET", route.RoutesPattern, handler.RoutesHandler())
+
+    instance.registerIntegrationRoutes(router)
 
     router.HandleNamed(route.CategoriesApiReadAllName, "GET", route.CategoriesApiReadAllPattern, handlercategory.ApiReadAllHandler())
 
@@ -45,6 +49,45 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     router.HandleNamed(route.UsersApiReadName, "GET", route.UsersApiReadPattern, handleruser.ApiReadHandler())
     router.HandleNamed(route.UsersApiUpdateName, "PUT", route.UsersApiUpdatePattern, handleruser.ApiUpdateHandler())
     router.HandleNamed(route.UsersApiDeleteName, "DELETE", route.UsersApiDeletePattern, handleruser.ApiDeleteHandler())
+}
+
+/* registerIntegrationRoutes declares only what the environment actually gave the example. A demo route whose backend was never wired would answer 500 to every request and say nothing about why, so an unconfigured integration simply has no route. */
+func (instance *Module) registerIntegrationRoutes(router melodyhttpcontract.Router) {
+    if nil != instance.redisCacheBackend {
+        router.HandleNamed(
+            route.IntegrationCacheName,
+            "GET",
+            route.IntegrationCachePattern,
+            handler.CacheDemoHandler(instance.redisCacheBackend),
+        )
+    }
+
+    if nil != instance.redisRateLimiter {
+        rateLimitConfig := melodyhttpmiddleware.NewRateLimitConfig(instance.redisRateLimiter, nil, nil)
+
+        router.HandleNamed(
+            route.IntegrationRateLimitName,
+            "GET",
+            route.IntegrationRateLimitPattern,
+            melodyhttpmiddleware.RateLimitMiddleware(rateLimitConfig)(handler.RateLimitDemoHandler()),
+        )
+    }
+
+    if nil != instance.databaseRegistry {
+        router.HandleNamed(
+            route.IntegrationDatabaseName,
+            "GET",
+            route.IntegrationDatabasePattern,
+            handler.DatabaseDemoHandler(),
+        )
+    }
+
+    router.HandleNamed(
+        route.IntegrationReportName,
+        "GET",
+        route.IntegrationReportPattern,
+        handler.ReportDemoHandler(),
+    )
 }
 
 var _ melodyapplicationcontract.HttpModule = (*Module)(nil)

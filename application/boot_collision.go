@@ -11,8 +11,10 @@ import (
 )
 
 const (
-    bootCollisionKindService       = "service"
-    bootCollisionKindServiceType   = "serviceType"
+    bootCollisionKindService           = "service"
+    bootCollisionKindServiceType       = "serviceType"
+    bootCollisionKindScopedService     = "scopedService"
+    bootCollisionKindScopedServiceType = "scopedServiceType"
     bootCollisionKindParameter     = "parameter"
     bootCollisionKindConfiguration = "configuration"
     bootCollisionKindCliCommand    = "cliCommand"

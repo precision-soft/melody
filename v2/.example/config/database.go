@@ -1,0 +1,85 @@
+package config
+
+import (
+    "time"
+
+    "github.com/precision-soft/melody/v2/.example/repository"
+    melodyapplicationcontract "github.com/precision-soft/melody/v2/application/contract"
+    melodycontainercontract "github.com/precision-soft/melody/v2/container/contract"
+    melodyexception "github.com/precision-soft/melody/v2/exception"
+    melodybunorm "github.com/precision-soft/melody/integrations/bunorm/v2"
+    melodymysql "github.com/precision-soft/melody/integrations/bunorm/mysql/v2"
+    melodykernelcontract "github.com/precision-soft/melody/v2/kernel/contract"
+    melodylogging "github.com/precision-soft/melody/v2/logging"
+    "github.com/uptrace/bun"
+)
+
+const (
+    ServiceExampleDatabaseRegistry = "service.example.database.registry"
+    ServiceExampleDatabase         = "service.example.database"
+)
+
+/* buildDatabase declares the connection without opening it. bunorm's registry validates the definitions here and dials on the first Manager call, which lands after the framework has registered its own services.
+
+This major's bunorm takes the connection values and a logger directly, rather than the parameter names v1 resolves through a container, so the values are read here and the emergency logger carries the retry reporting: the framework's own logger does not exist yet while the modules are being wired, and the emergency one is what the framework itself writes through in that window.
+
+An unset host leaves the registry nil and the database unwired: no services, no routes, no dial. */
+func (instance *Module) buildDatabase(kernelInstance melodykernelcontract.Kernel) {
+    host := parameterValue(kernelInstance, ParameterDatabaseHost)
+    if "" == host {
+        return
+    }
+
+    provider := melodymysql.NewProvider().
+        WithPoolConfig(melodymysql.NewPoolConfig(10, 2, 5*time.Minute, time.Minute)).
+        WithRetryConfig(melodymysql.NewRetryConfig(10, time.Second, 5*time.Second, 2.0))
+
+    registry, registryErr := melodybunorm.NewManagerRegistry(
+        melodylogging.EmergencyLogger(),
+        melodybunorm.ProviderDefinition{
+            Name:     "default",
+            Provider: provider,
+            Params: melodybunorm.ConnectionParameters{
+                Host:     host,
+                Port:     parameterValue(kernelInstance, ParameterDatabasePort),
+                Database: parameterValue(kernelInstance, ParameterDatabaseName),
+                User:     parameterValue(kernelInstance, ParameterDatabaseUser),
+                Password: parameterValue(kernelInstance, ParameterDatabasePassword),
+            },
+            IsDefault: true,
+        },
+    )
+    if nil != registryErr {
+        melodyexception.Panic(melodyexception.FromError(registryErr))
+    }
+
+    instance.databaseRegistry = registry
+}
+
+func (instance *Module) registerDatabaseServices(registrar melodyapplicationcontract.ServiceRegistrar) {
+    if nil == instance.databaseRegistry {
+        return
+    }
+
+    registry := instance.databaseRegistry
+
+    /* the registry is what the container closes at shutdown, and closing it is what closes the pool */
+    registrar.RegisterService(
+        ServiceExampleDatabaseRegistry,
+        func(resolver melodycontainercontract.Resolver) (*melodybunorm.ManagerRegistry, error) {
+            return registry, nil
+        },
+    )
+
+    registrar.RegisterService(
+        ServiceExampleDatabase,
+        func(resolver melodycontainercontract.Resolver) (*bun.DB, error) {
+            return registry.DefaultDatabase()
+        },
+    )
+
+    registrar.RegisterService(
+        repository.ServiceCatalogNoteRepository,
+        repository.CatalogNoteRepositoryProvider(ServiceExampleDatabase),
+    )
+}

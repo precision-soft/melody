@@ -29,7 +29,7 @@ The application boot is split around configuration resolve:
 
 1. **Pre-resolve**: modules may register module-level configurations via [`ConfigModule`](../../application/contract/config_module.go), then register parameters via [`ParameterModule`](../../application/contract/parameter_module.go).
 2. **Resolve**: application configuration is resolved.
-3. **Post-resolve**: modules may register services via [`ServiceModule`](../../application/contract/service_module.go), then register security/events/CLI/HTTP.
+3. **Post-resolve**: modules may register services via [`ServiceModule`](../../application/contract/service_module.go), then request-lifetime services via [`ScopedServiceModule`](../../application/contract/scoped_service_module.go), then register security/events/CLI/HTTP.
 
 This allows HTTP/CLI module code to read resolved configuration values during registration, e.g.
 `kernelInstance.Config().MustGet("my.param").String()`.
@@ -286,6 +286,10 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 - [`ParameterRegistrar`](../../application/contract/parameter_module.go)
 - [`ServiceModule`](../../application/contract/service_module.go)
 - [`ServiceRegistrar`](../../application/contract/service_module.go)
+- [`ScopedServiceModule`](../../application/contract/scoped_service_module.go)  
+  `RegisterScopedServices(registrar)` declares services whose lifetime is one scope — one http request, one command run. What it registers is built on the first resolution through a scope and closed when that scope closes. The hook is a separate interface, so an existing module is unaffected by its arrival.
+- [`ScopedServiceRegistrar`](../../application/contract/scoped_service_module.go)  
+  Shares no method with `ServiceRegistrar`: a container provider handed to the scoped hook, or a scoped provider handed to `RegisterServices`, does not compile. See [CONTAINER](CONTAINER.md) for what the two lifetimes may read.
 - [`HttpModule`](../../application/contract/http_module.go)
 - [`HttpMiddlewareModule`](../../application/contract/http_middleware_module.go)
 - [`HttpMiddlewareRegistrar`](../../application/contract/http_middleware_module.go)

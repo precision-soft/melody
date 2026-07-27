@@ -45,6 +45,14 @@
 # a public route, a real login flow through a cookie jar, the protected route before and after login, logout,
 # encoded path-traversal containment, a 404, three command-line invocations and a single-SIGINT shutdown.
 # Every line those sections print is prefixed with the major it ran against.
+#
+# The v1 and v2 sections additionally drive their live-integration demos, between the login and the logout: the
+# clock-stamped catalogue report (no backend needed), a redis cache round trip whose key the harness reads back
+# out of band, a mysql note written and re-read out of band and then removed again, and the exact exhaustion
+# point of the redis rate limiter. They keep their own key prefixes (melody-example-app:), so the counter the
+# EXAMPLE OVER HTTP section measures on the supervised application is never spent by them; v3's per-major run
+# leaves the demos alone for the same reason. Clearing REDIS_ADDRESS or MYSQL_DSN skips the out-of-band
+# verification, not the application's behaviour — the example still wires the integration and still serves it.
 
 set -euo pipefail
 IFS=$'\n\t'

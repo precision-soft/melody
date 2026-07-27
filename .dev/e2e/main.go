@@ -61,7 +61,11 @@ Clear-to-skip recipes beyond the backend variables above:
                        re-read out of band; TWO-FACTOR announces the enrollment row it left behind
     PROMETHEUS_URL=  — METRICS keeps its delta assertions and announces that no collector was proven to read the
                        endpoint
-    REDIS_ADDRESS=   — additionally skips SERVER-SENT EVENTS entirely (the cross-replica half needs the backplane)
+    REDIS_ADDRESS=   — additionally skips SERVER-SENT EVENTS entirely (the cross-replica half needs the backplane),
+                       and the per-major cache and rate-limit demos announce that they were not verified out of
+                       band. The example applications read their own .env beside their own executable, so a
+                       cleared variable never reconfigures them: it only withdraws the harness's ability to check
+                       what they did. MYSQL_DSN= likewise leaves the demo notes those runs wrote behind
 
 The websocket, encrypt and session sections need no backend and always run; the rest run only when their env
 var is set. Exits non-zero on the first unexpected outcome. */
@@ -236,7 +240,10 @@ func main() {
     }
 
     /* the per-major example sections need no backend of the harness's own: each application is configured from the .env beside
-       its own executable, which is what keeps clearing REDIS_ADDRESS (or any other backend variable) from reconfiguring them */
+       its own executable, which is what keeps clearing REDIS_ADDRESS (or any other backend variable) from reconfiguring them.
+       The harness's own connections are handed in for the out-of-band half of the integration demos — the read that proves the
+       application really reached the backend rather than merely reporting that it did. Clearing one of them therefore skips the
+       verification, not the application's behaviour: the example still wires and still serves the demo. */
     exampleMajors := exampleMajorList()
     if 0 == len(exampleMajors) {
         fmt.Printf("\nSKIPPED: %s is empty — no major's .example application was built, booted or driven\n", exampleMajorListVariable)
@@ -244,7 +251,7 @@ func main() {
 
     for _, major := range exampleMajors {
         section(fmt.Sprintf("EXAMPLE APPLICATION %s (live, built from %s)", major.label, major.relativeDirectory))
-        runExampleApplicationCheck(major)
+        runExampleApplicationCheck(major, redisAddress, os.Getenv("MYSQL_DSN"))
         sections++
     }
 

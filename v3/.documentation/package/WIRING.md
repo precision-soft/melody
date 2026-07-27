@@ -27,6 +27,8 @@ A bind maps an argument name to a parameter name, declared in one of three scope
 
 `//melody:ignore` skips a constructor entirely. `//melody:service SomeConstant` additionally registers the service under the name the package already exports (referencing the constant, not copying its value), so the name-based lookups a package exposes keep resolving once its registration moves to the generator.
 
+`//melody:scoped` marks a constructor as request-lifetime: it is emitted into a second generated function, `<function>Scoped(registrar containercontract.ScopedRegistrar)`, through `MustRegisterScoped` / `MustRegisterScopedType`. Two functions rather than one, because the two registrars arrive at two different module hooks and neither satisfies the other — call the first from `RegisterServices` and the second from `RegisterScopedServices` (see [APPLICATION](APPLICATION.md) and [CONTAINER](CONTAINER.md)). The scoped function is emitted only when a constructor carries the directive, so a project that declares nothing scoped regenerates the file it already had.
+
 Generation **fails** when a scalar argument no bind covers, and — when run through the command, which executes inside the booted application — when a bind points at a parameter the running configuration does not declare. A constructor the generator cannot wire (generic, variadic, returning more than a value and an error, returning only an `error`, `any` or a bare scalar) is reported with its location and reason rather than dropped silently, as is every declared bind that matched no argument. `--strict` turns those losses into a failure.
 
 ## The command
@@ -37,7 +39,7 @@ Generation **fails** when a scalar argument no bind covers, and — when run thr
 cli.RegisterCommand(wiring.NewGenerateCommand(config.NewWiringBindSet()))
 ```
 
-Flags: `--out <path>` (write to a file relative to the project directory; prints to stdout when empty), `--package <name>` (default `config`), `--function <name>` (default `RegisterGeneratedServices`), `--strict`, `--tags <a,b>` (build tags the target binary carries), `--report-vendor` (name the vendor directories the scan stepped over), `--report-excluded` (name the build-excluded files that hold a constructor candidate). The committed generated file is what the application registers, so it is regenerated whenever a scanned constructor changes and kept under version control.
+Flags: `--out <path>` (write to a file relative to the project directory; prints to stdout when empty), `--package <name>` (default `config`), `--function <name>` (default `RegisterGeneratedServices`), `--scoped-function <name>` (default: the registration function name with `Scoped` appended; only emitted when a constructor carries `//melody:scoped`), `--strict`, `--tags <a,b>` (build tags the target binary carries), `--report-vendor` (name the vendor directories the scan stepped over), `--report-excluded` (name the build-excluded files that hold a constructor candidate). The committed generated file is what the application registers, so it is regenerated whenever a scanned constructor changes and kept under version control.
 
 A file the build excludes contributes nothing to the binary the wiring is generated for, so the scan skips it — the unsatisfied half of a tag pair, a foreign `GOOS` suffix, a `//go:build ignore` script. `--tags` tells the scan which tags the binary carries, so a constructor gated on one of them is scanned instead of dropped with its service silently missing; the value is a comma-separated list of plain tag identifiers, not a constraint expression, and anything else is rejected rather than quietly matching no file. The generated source is then specific to that tag set and must be built with the same tags, since it names constructors an untagged build does not have. `--report-excluded` names the excluded files that do hold a constructor candidate, so a service missing from the output traces back to the tag it needs; `--strict` does not fail on them, because the scan cannot know which target the file was written for.
 
@@ -100,3 +102,4 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
 - `//melody:bind argumentName=parameter.name` — bind a scalar argument to a parameter, on the constructor.
 - `//melody:service SomeExportedConstant` — also register the service under the exported name constant.
 - `//melody:ignore` — skip the constructor.
+- `//melody:scoped` — register the service for one scope rather than for the process, in the generated scoped function.

@@ -7,12 +7,21 @@ import (
     melodyapplicationcontract "github.com/precision-soft/melody/v2/application/contract"
     melodycache "github.com/precision-soft/melody/v2/cache"
     melodycachecontract "github.com/precision-soft/melody/v2/cache/contract"
+    melodyclock "github.com/precision-soft/melody/v2/clock"
     melodycontainercontract "github.com/precision-soft/melody/v2/container/contract"
     melodyevent "github.com/precision-soft/melody/v2/event"
     melodykernelcontract "github.com/precision-soft/melody/v2/kernel/contract"
 )
 
 func (instance *Module) RegisterServices(kernelInstance melodykernelcontract.Kernel, registrar melodyapplicationcontract.ServiceRegistrar) {
+    /* the live integrations are built before anything is registered, because what they yield decides which services and routes exist at all */
+    instance.buildRedis(kernelInstance)
+    instance.buildDatabase(kernelInstance)
+
+    instance.registerRedisServices(registrar)
+    instance.registerDatabaseServices(registrar)
+    instance.registerCatalogReportService(registrar)
+
     registrar.RegisterService(
         melodycache.ServiceCacheSerializer,
         func(resolver melodycontainercontract.Resolver) (melodycachecontract.Serializer, error) {
@@ -94,3 +103,31 @@ func (instance *Module) RegisterServices(kernelInstance melodykernelcontract.Ker
 }
 
 var _ melodyapplicationcontract.ServiceModule = (*Module)(nil)
+
+/* registerCatalogReportService wires the report against whatever the environment gave the example: the redis backend when one was built, and the note repository when a database was configured. Both are optional, and the service degrades to what it can actually reach rather than being absent. */
+func (instance *Module) registerCatalogReportService(registrar melodyapplicationcontract.ServiceRegistrar) {
+    cacheBackend := instance.redisCacheBackend
+    hasDatabase := nil != instance.databaseRegistry
+
+    registrar.RegisterService(
+        service.ServiceCatalogReportService,
+        func(resolver melodycontainercontract.Resolver) (*service.CatalogReportService, error) {
+            clockInstance := melodyclock.ClockMustFromResolver(resolver)
+
+            var backend service.CatalogReportBackend
+            if nil != cacheBackend {
+                backend = cacheBackend
+            }
+
+            if false == hasDatabase {
+                return service.NewCatalogReportService(clockInstance, backend, nil), nil
+            }
+
+            return service.NewCatalogReportService(
+                clockInstance,
+                backend,
+                repository.MustGetCatalogNoteRepository(resolver),
+            ), nil
+        },
+    )
+}

@@ -13,6 +13,20 @@ const (
     RoutesName    = "example.routes"
     RoutesPattern = "/routes/"
 
+    IntegrationPrefix = "/integration"
+
+    IntegrationCacheName    = "example.integration.cache"
+    IntegrationCachePattern = IntegrationPrefix + "/cache/"
+
+    IntegrationDatabaseName    = "example.integration.database"
+    IntegrationDatabasePattern = IntegrationPrefix + "/database/"
+
+    IntegrationRateLimitName    = "example.integration.ratelimit"
+    IntegrationRateLimitPattern = IntegrationPrefix + "/ratelimit/"
+
+    IntegrationReportName    = "example.integration.report"
+    IntegrationReportPattern = IntegrationPrefix + "/report/"
+
     ProductsPrefix = "/products"
 
     ProductsListPageName    = "example.products.list.page"

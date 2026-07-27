@@ -174,68 +174,55 @@ func TestServiceWithCreationGuard_SilentNilProviderKeepsTheGenericReport(t *test
     }
 }
 
-/* @info The store site is the last line of defence: whatever reaches it holding an entry read out of a request scope may not be written into the root container, because that publishes one request's substitutes to every request that follows. The refusal names the service and the scope entry so the wiring mistake is findable. */
-func TestServiceWithCreationGuard_RefusesAScopeResolvedInstanceInTheRootContainer(t *testing.T) {
+/* @info A provider that panics unwinds through the guard's recovery, so restoring scope visibility inline after the provider call would never run. The resolution that continues above the failed frame belongs to the caller, and leaving it suspended would hide the scope from every service resolved after the failure. */
+func TestServiceWithCreationGuard_RestoresScopeVisibilityAfterAPanickingProvider(t *testing.T) {
     serviceContainer := NewContainer().(*container)
 
-    scopeInstance := newScope(serviceContainer).(*scope)
-
-    overrideErr := scopeInstance.OverrideInstance("app.tag", &scopeTestService{value: "request-1"})
-    if nil != overrideErr {
-        t.Fatalf("unexpected override error: %v", overrideErr)
-    }
+    scopeInstance := newScope(serviceContainer, serviceContainer.scopePlanForNewScope()).(*scope)
 
     resolver := newScopeResolverContext(serviceContainer, scopeInstance)
 
-    storedInRoot := false
-
     serviceContainer.mutex.Lock()
-    value, guardErr := serviceContainer.serviceWithCreationGuardLocked(
-        "service:app.consumer",
-        "app.consumer",
-        func() (*creationState, bool) {
-            state, exists := serviceContainer.creatingByName["app.consumer"]
+    _, guardErr := serviceContainer.serviceWithCreationGuardLocked(
+        guardedCreation{
+            requestedKey: "service:app.panicking",
+            creatingKey:  "app.panicking",
+            getCreatingState: func() (*creationState, bool) {
+                state, exists := serviceContainer.creatingByName["app.panicking"]
 
-            return state, exists
-        },
-        func(state *creationState) {
-            serviceContainer.creatingByName["app.consumer"] = state
-        },
-        func() {
-            delete(serviceContainer.creatingByName, "app.consumer")
-        },
-        func() (any, bool) {
-            return nil, false
-        },
-        func(handedResolver containercontract.Resolver) (any, error, *providerDebugInfo) {
-            resolver.markScopeEntryConsumed("service:app.tag")
-
-            return &scopeTestService{value: "created"}, nil, nil
-        },
-        instanceStore{
-            inRoot: func(storedValue any) {
-                storedInRoot = true
+                return state, exists
             },
-            inScope: nil,
+            setCreatingState: func(state *creationState) {
+                serviceContainer.creatingByName["app.panicking"] = state
+            },
+            clearCreatingState: func() {
+                delete(serviceContainer.creatingByName, "app.panicking")
+            },
+            lookup: func() (any, bool) {
+                return nil, false
+            },
+            create: func(handedResolver containercontract.Resolver) (any, error, *providerDebugInfo) {
+                panic("the provider gives up")
+            },
+            store: containerInstanceStore(func(storedValue any) {
+                serviceContainer.instances["app.panicking"] = storedValue
+            }),
+            suspendsScope: true,
         },
         resolver,
     )
     serviceContainer.mutex.Unlock()
 
     if nil == guardErr {
-        t.Fatalf("expected the root store to be refused")
+        t.Fatalf("expected the panicking provider to fail the resolution")
     }
 
-    if true == storedInRoot {
-        t.Fatalf("expected the scope-resolved instance never to reach the root container")
+    if true == resolver.scopeSuspended {
+        t.Fatalf("expected scope visibility to be restored after the panic")
     }
 
-    if nil != value {
-        t.Fatalf("expected no value to be handed back after the refusal")
-    }
-
-    if "refusing to keep a scope-resolved service in the root container" != guardErr.Error() {
-        t.Fatalf("unexpected refusal message: %q", guardErr.Error())
+    if false == resolver.scopeVisible() {
+        t.Fatalf("expected the resolution to see its scope again after the panic")
     }
 }
 

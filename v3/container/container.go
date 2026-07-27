@@ -24,6 +24,12 @@ func NewContainer() containercontract.Container {
         typeRegistrationNamesByType: make(map[reflect.Type][]string),
         collectionPriorityByName:    make(map[string]int),
         dependencyGraph:             make(map[string]map[string]struct{}),
+
+        scopedProviders:                   make(map[string]providerAny),
+        scopedTypeProviders:               make(map[reflect.Type]providerAny),
+        scopedTypeRegistrationNamesByType: make(map[reflect.Type][]string),
+        scopedCollectionPriorityByName:    make(map[string]int),
+        scopedReplacesContainerService:    make(map[string]bool),
     }
 }
 
@@ -40,9 +46,17 @@ type container struct {
     typeRegistrationNamesByType map[reflect.Type][]string
     collectionPriorityByName    map[string]int
     dependencyGraph             map[string]map[string]struct{}
-    isClosed                    bool
-    closeErr                    error
-    closeOnce                   sync.Once
+    /* the scoped registrations: providers of services the SCOPES of this container own, kept apart from the container's own so nothing resolved against the container can reach them. They are the source the immutable plan below is built from, never read on the request path. */
+    scopedProviders                   map[string]providerAny
+    scopedTypeProviders               map[reflect.Type]providerAny
+    scopedTypeRegistrationNamesByType map[reflect.Type][]string
+    scopedCollectionPriorityByName    map[string]int
+    scopedReplacesContainerService    map[string]bool
+    /* the published plan every new scope is bound to by reference. A registration clears it and the next scope rebuilds it, so creating a scope costs one atomic load once boot has settled. */
+    scopePlanPointer atomic.Pointer[scopePlan]
+    isClosed         bool
+    closeErr         error
+    closeOnce        sync.Once
 }
 
 func (instance *container) Get(serviceName string) (any, error) {
@@ -251,7 +265,7 @@ func (instance *container) MustOverrideProtectedInstance(serviceName string, val
 }
 
 func (instance *container) NewScope() containercontract.Scope {
-    return newScope(instance)
+    return newScope(instance, instance.scopePlanForNewScope())
 }
 
 func (instance *container) Names() []string {
@@ -321,6 +335,16 @@ func (instance *container) register(
         )
     }
 
+    if true == instance.scopedRegistrationBlocksLocked(serviceName) {
+        return exception.NewError(
+            "service name is already registered as a scoped service",
+            map[string]any{
+                "serviceName": serviceName,
+            },
+            ErrScopedServiceIdAlreadyRegistered,
+        )
+    }
+
     instance.providers[serviceName] = provider
 
     if 0 != registerOption.CollectionPriority {
@@ -364,6 +388,18 @@ func (instance *container) registerType(
         }
 
         return nil
+    }
+
+    if scopedServiceName, blocked := instance.scopedTypeRegistrationBlocksLocked(canonicalType); true == blocked {
+        return exception.NewError(
+            "service type is already registered as a scoped service type",
+            map[string]any{
+                "serviceName":       serviceName,
+                "serviceType":       canonicalType.String(),
+                "scopedServiceName": scopedServiceName,
+            },
+            ErrScopedServiceTypeAlreadyRegistered,
+        )
     }
 
     existingServiceNames, exists := instance.typeRegistrationNamesByType[canonicalType]

@@ -20,6 +20,7 @@ const (
     bindDirective     = "//melody:bind"
     ignoreDirective   = "//melody:ignore"
     serviceDirective  = "//melody:service"
+    scopedDirective   = "//melody:scoped"
 )
 
 /* Constructor is one discovered provider function, described in the terms the generator emits: where it lives, what it returns and what it needs. */
@@ -32,7 +33,9 @@ type Constructor struct {
     ReturnType  *TypeReference
     /* ServiceNameIdentifier is the exported constant a //melody:service directive names. The generated file references the constant rather than copying its value, so the service name keeps a single definition. Empty registers the service by type alone. */
     ServiceNameIdentifier string
-    ReturnsError          bool
+    /* IsScoped marks a constructor a //melody:scoped directive declares as request-lifetime. It is emitted into the scoped registration function instead of the container one, so the service is built once per scope and closed with it. */
+    IsScoped     bool
+    ReturnsError bool
     Arguments             []*Argument
     DirectiveBinds        map[string]string
 }
@@ -323,6 +326,7 @@ type constructorDirectives struct {
     binds                 map[string]string
     serviceNameIdentifier string
     isIgnored             bool
+    isScoped              bool
 }
 
 func parseDirectives(functionDeclaration *ast.FuncDecl) *constructorDirectives {
@@ -339,6 +343,12 @@ func parseDirectives(functionDeclaration *ast.FuncDecl) *constructorDirectives {
 
         if ignoreDirective == text {
             directives.isIgnored = true
+
+            continue
+        }
+
+        if _, isScoped := directiveRemainder(text, scopedDirective); true == isScoped {
+            directives.isScoped = true
 
             continue
         }
@@ -480,6 +490,7 @@ func describeConstructor(
         PackageName:           packageName,
         ReturnType:            returnType,
         ServiceNameIdentifier: directives.serviceNameIdentifier,
+        IsScoped:              directives.isScoped,
         ReturnsError:          returnsError,
         Arguments:             arguments,
         DirectiveBinds:        directives.binds,

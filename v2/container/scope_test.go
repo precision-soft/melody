@@ -8,7 +8,6 @@ import (
     "testing"
 
     containercontract "github.com/precision-soft/melody/v2/container/contract"
-    "github.com/precision-soft/melody/v2/exception"
 )
 
 type scopeTestService struct {
@@ -535,28 +534,6 @@ func TestScope_CloseLeavesOverridesAndRootSingletonsAlone(t *testing.T) {
 }
 
 
-
-type healthyScopeService struct {
-    closeCalls *int32
-}
-
-func (instance *healthyScopeService) Close() error {
-    atomic.AddInt32(instance.closeCalls, 1)
-
-    return nil
-}
-
-type panickingScopeService struct {
-    closeCalls *int32
-}
-
-func (instance *panickingScopeService) Close() error {
-    atomic.AddInt32(instance.closeCalls, 1)
-
-    exception.Panic(exception.NewError("close panicked", nil, nil))
-
-    return nil
-}
 
 /* scopeLifetimeProbe counts how many times it was built and closed, which is the whole question a request scope poses about a container service. */
 type scopeLifetimeProbe struct {

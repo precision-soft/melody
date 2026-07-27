@@ -49,6 +49,10 @@ func (instance *GenerateCommand) Flags() []clicontract.Flag {
             Usage: "name of the generated registration function",
             Value: "RegisterGeneratedServices",
         },
+        &clicontract.StringFlag{
+            Name:  "scoped-function",
+            Usage: "name of the generated scope-owned registration function; defaults to the registration function name with Scoped appended, and is only emitted when a constructor carries //melody:scoped",
+        },
         &clicontract.BoolFlag{
             Name:  "strict",
             Usage: "fail when a declared bind matched no constructor argument or a constructor was skipped",
@@ -94,6 +98,7 @@ func (instance *GenerateCommand) Run(
         ProjectDirectory:   projectDirectory,
         PackageName:        commandContext.String("package"),
         FunctionName:       commandContext.String("function"),
+        ScopedFunctionName: commandContext.String("scoped-function"),
         BindSet:            instance.bindSet,
         DeclaredParameters: declaredParameters,
         BuildTags:          buildTags,
@@ -176,6 +181,10 @@ func (instance *GenerateCommand) writeReport(
     report *GenerateReport,
 ) {
     fmt.Fprintf(commandContext.Writer, "registered %d constructors\n", report.ConstructorCount)
+
+    if 0 < report.ScopedConstructorCount {
+        fmt.Fprintf(commandContext.Writer, "registered %d scoped constructors\n", report.ScopedConstructorCount)
+    }
 
     for _, skipped := range report.Skipped {
         fmt.Fprintf(

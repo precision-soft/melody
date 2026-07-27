@@ -28,7 +28,7 @@ Two properties matter and neither can be proven in-process:
 
 The section runs when EXAMPLE_BASE_URL is set and needs REDIS_ADDRESS to clear the counters first. */
 func runExampleHttpCheck(baseUrl string, loadBalancerUrl string, redisAddress string) {
-    resetExampleRateLimitCounters(redisAddress)
+    resetExampleRateLimitCounters("example http", redisAddress, exampleRateLimitPrefix)
 
     client := &http.Client{Timeout: 5 * time.Second}
 
@@ -81,7 +81,7 @@ func runExampleLoadBalancerCheck(client *http.Client, loadBalancerUrl string, re
         return
     }
 
-    resetExampleRateLimitCounters(redisAddress)
+    resetExampleRateLimitCounters("example http", redisAddress, exampleRateLimitPrefix)
 
     balancerSpentAt := 0
     for attempt := 1; attempt <= exampleRateLimitBudget+1; attempt++ {
@@ -132,11 +132,13 @@ func requestRateLimitDemo(client *http.Client, baseUrl string, hostHeader string
     return response.StatusCode
 }
 
-/* resetExampleRateLimitCounters clears the counters the example's limiter wrote, so a re-run inside the same
-fixed window starts from a full budget instead of inheriting a spent one. */
-func resetExampleRateLimitCounters(redisAddress string) {
+/* resetExampleRateLimitCounters clears the counters one limiter wrote, so a section starts from a full budget
+instead of inheriting a spent one. The prefix is a parameter because the applications under test keep separate
+counters: they share one redis, and a section that measures an exact exhaustion point cannot have another
+application spending its budget. */
+func resetExampleRateLimitCounters(label string, redisAddress string, prefix string) {
     if "" == redisAddress {
-        fail("example http: REDIS_ADDRESS is required to clear the example rate limit counters")
+        fail("%s: REDIS_ADDRESS is required to clear the rate limit counters", label)
     }
 
     client := openRedis(redisAddress)
@@ -144,9 +146,9 @@ func resetExampleRateLimitCounters(redisAddress string) {
 
     ctx := context.Background()
 
-    keys, keysErr := client.Do(ctx, client.B().Keys().Pattern(exampleRateLimitPrefix+"*").Build()).AsStrSlice()
+    keys, keysErr := client.Do(ctx, client.B().Keys().Pattern(prefix+"*").Build()).AsStrSlice()
     if nil != keysErr {
-        fail("example http: list rate limit keys: %v", keysErr)
+        fail("%s: list rate limit keys: %v", label, keysErr)
     }
 
     if 0 == len(keys) {
@@ -154,6 +156,6 @@ func resetExampleRateLimitCounters(redisAddress string) {
     }
 
     if deleteErr := client.Do(ctx, client.B().Del().Key(keys...).Build()).Error(); nil != deleteErr {
-        fail("example http: clear rate limit keys: %v", deleteErr)
+        fail("%s: clear rate limit keys: %v", label, deleteErr)
     }
 }

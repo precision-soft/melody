@@ -96,13 +96,23 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
         scope := serviceContainer.NewScope()
 
-        /* @important close the scope before anything that can fail, so a panic during request-logger setup cannot leak it; the logger is captured by reference and nil-guarded for the pre-setup failure path */
+        /* @important close the scope before anything that can fail, so a panic during request-logger setup cannot leak it; the logger is captured by reference and nil-guarded for the pre-setup failure path.
+
+        The report falls back to the emergency logger rather than being dropped: the request logger is read after the scope it was installed into has closed, which is safe only because it is an override and Close leaves overrides alone. A close failure is the one thing that must never go unreported, so the path that has no request logger to name still says what happened. */
         var requestLogger loggingcontract.Logger
         defer func() {
             scopeCloseErr := scope.Close()
-            if nil != scopeCloseErr && nil != requestLogger {
-                requestLogger.Error("failed to close service container scope", exception.LogContext(scopeCloseErr))
+            if nil == scopeCloseErr {
+                return
             }
+
+            if nil != requestLogger {
+                requestLogger.Error("failed to close service container scope", exception.LogContext(scopeCloseErr))
+
+                return
+            }
+
+            logging.EmergencyLogger().Error("failed to close service container scope", exception.LogContext(scopeCloseErr))
         }()
 
         requestLogger, requestId, requestIdLoggerErr := instance.requestIdLogger(serviceContainer, scope)

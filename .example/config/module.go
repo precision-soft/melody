@@ -2,9 +2,34 @@ package config
 
 import (
     melodyapplicationcontract "github.com/precision-soft/melody/application/contract"
+    melodybunorm "github.com/precision-soft/melody/integrations/bunorm"
+    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis"
+    melodyrueidiscache "github.com/precision-soft/melody/integrations/rueidis/cache"
+    "github.com/redis/rueidis"
 )
 
-type Module struct{}
+const (
+    /* the parameter names the live integrations read. An unset endpoint leaves the integration unwired: no service, no route, nothing dialled — which is what keeps the example bootable with no backend at all. */
+    ParameterDatabaseHost     = "app.database.host"
+    ParameterDatabasePort     = "app.database.port"
+    ParameterDatabaseName     = "app.database.name"
+    ParameterDatabaseUser     = "app.database.user"
+    ParameterDatabasePassword = "app.database.password"
+
+    ParameterRedisAddress  = "app.redis.address"
+    ParameterRedisUser     = "app.redis.user"
+    ParameterRedisPassword = "app.redis.password"
+)
+
+type Module struct {
+    /* the database is held as its registry rather than as a *bun.DB: the registry opens on first use — after the framework's own services exist — and its Close reaches the pool, which a bare handle on a module field would never get. */
+    databaseRegistry *melodybunorm.ManagerRegistry
+
+    /* redis is opened while the modules are wired, because the rate-limit middleware needs a live limiter at the moment a route is declared. The asymmetry with the database is the point: each integration is wired the way its own API allows. */
+    redisClient       rueidis.Client
+    redisCacheBackend *melodyrueidiscache.BackendService
+    redisRateLimiter  *melodyrueidis.RateLimiter
+}
 
 func NewExampleModule() *Module {
     return &Module{}

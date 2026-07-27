@@ -31,6 +31,11 @@ The container is responsible for:
     - [`MustFromResolver`](../../container/resolver.go)
     - [`FromResolverByType`](../../container/resolver.go)
     - [`MustFromResolverByType`](../../container/resolver.go)
+- Provide typed scoped registration helpers:
+    - [`RegisterScoped`](../../container/container_register_scoped.go)
+    - [`MustRegisterScoped`](../../container/container_register_scoped.go)
+    - [`RegisterScopedType`](../../container/container_register_scoped.go)
+    - [`MustRegisterScopedType`](../../container/container_register_scoped.go)
 - Provide scope overlays:
     - [`Container.NewScope`](../../container/container.go)
 - Provide deterministic shutdown:
@@ -159,6 +164,41 @@ func example() {
 
 ## Userland API
 
+### Scoped services
+
+A service registered with `RegisterScoped` belongs to one scope — one http request, one command run — instead of to the process. It is built lazily on the first resolution through a scope, shared by everything inside that scope, and closed when the scope closes. The root container never sees it, and two scopes never share one instance.
+
+```go
+/* a process-lifetime service */
+container.MustRegister(registrar, ServiceAuditWriter,
+    func(resolver containercontract.Resolver) (*AuditWriter, error) {
+        return NewAuditWriter(bunorm.RepositoryMustFromResolver(resolver)), nil
+    })
+
+/* a request-lifetime service: it may read both the scope and the container */
+container.MustRegisterScoped(registrar, ServiceAuditTrail,
+    func(resolver containercontract.Resolver) (*AuditTrail, error) {
+        return NewAuditTrail(
+            http.RequestContextMustFromResolver(resolver),
+            AuditWriterMustFromResolver(resolver),
+        ), nil
+    })
+```
+
+The lifetime is spelled in the verb, and the two registrar interfaces share no method: `Registrar` has `Register`/`MustRegister`, `ScopedRegistrar` has `RegisterScoped`/`MustRegisterScoped`. Handing one where the other is expected does not compile, which is what keeps a container provider from being registered as scoped — a mistake that would otherwise rebuild and close it once per request without ever failing.
+
+The direction stays one-way. A scoped service reads both levels; a container provider is refused anything only a scope carries, with the same "service is not registered" a wiring mistake gets anywhere else. A container service that needs request data takes it as a method argument.
+
+A name — or a registered type — claimed at both lifetimes is refused where it is made, in either order, unless the scoped registration declares [`Replacing()`](../../container/register_option.go). It admits substitution, not decoration: a scoped provider that resolves the name it replaces re-enters itself and is reported as a circular dependency.
+
+The declaration lives on [`ScopeManager`](../../container/contract/scope.go) — the interface the container satisfies by being the thing that makes scopes — rather than beside the container's own registrations. A scope does not exist until a request arrives, so what a scope will own has to be declared at boot by whatever will be creating them.
+
+`Scope.RegisterScoped` adds a service to one live scope, layered over the plan the container was booted with. It is the rare case; a scoped service is normally declared at boot so every scope gets it.
+
+### Scope teardown
+
+`Close` closes what the scope built and nothing else: an override belongs to whoever installed it, and a singleton reached through the scope belongs to the root container. Services the scope built are closed in dependency order, dependents before their dependencies. An override that has nowhere else to be closed can join the teardown with [`ClosedWithScope()`](../../container/override_option.go) through `OverrideProtectedInstanceWithOptions`.
+
 ### Contracts (`container/contract`)
 
 - [`type Container`](../../container/contract/container.go)
@@ -167,6 +207,11 @@ func example() {
 - [`type OverrideService`](../../container/contract/override.go)
 - [`type ScopeManager`](../../container/contract/scope.go)
 - [`type Scope`](../../container/contract/scope.go)
+- [`type ScopedRegistrar`](../../container/contract/scoped_registrar.go)
+- [`type ScopeManager`](../../container/contract/scope.go)
+- [`type OverrideServiceWithOptions`](../../container/contract/override.go)
+- [`type OverrideOption`](../../container/contract/override.go)
+- [`type OverrideOptions`](../../container/contract/override.go)
 - [`type Provider[T]`](../../container/contract/provider.go)
 - [`type RegisterOption`](../../container/contract/registrar.go)
 - [`type RegisterOptions`](../../container/contract/registrar.go)
@@ -179,9 +224,17 @@ func example() {
     - [`MustRegister[T]`](../../container/container_register.go)
     - [`RegisterType[T]`](../../container/container_register.go)
     - [`MustRegisterType[T]`](../../container/container_register.go)
+- Typed scoped registration:
+    - [`RegisterScoped[T]`](../../container/container_register_scoped.go)
+    - [`MustRegisterScoped[T]`](../../container/container_register_scoped.go)
+    - [`RegisterScopedType[T]`](../../container/container_register_scoped.go)
+    - [`MustRegisterScopedType[T]`](../../container/container_register_scoped.go)
 - Registration options:
     - [`WithTypeRegistration(isStrict bool)`](../../container/register_option.go)
     - [`WithoutTypeRegistration()`](../../container/register_option.go)
+    - [`Replacing()`](../../container/register_option.go)
+- Override options:
+    - [`ClosedWithScope()`](../../container/override_option.go)
 - Typed resolution:
     - [`FromResolver[T]`](../../container/resolver.go)
     - [`MustFromResolver[T]`](../../container/resolver.go)

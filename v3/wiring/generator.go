@@ -27,6 +27,8 @@ type GenerateRequest struct {
     ProjectDirectory string
     PackageName      string
     FunctionName     string
+    /* ScopedFunctionName names the function the scope-owned registrations are emitted into. It defaults to the container function's name with Scoped appended, and the function is only emitted when something carries the scoped directive. */
+    ScopedFunctionName string
     BindSet          *BindSet
     /* DeclaredParameters is the set of parameter names the application declares. When it is empty the generator cannot check a bind target and says so instead of assuming the target exists. */
     DeclaredParameters map[string]bool
@@ -36,6 +38,8 @@ type GenerateRequest struct {
 
 type GenerateReport struct {
     ConstructorCount int
+    /* ScopedConstructorCount counts the constructors emitted into the scoped registration function, so the command can report the two lifetimes apart. */
+    ScopedConstructorCount int
     Skipped          []*SkippedConstructor
     /* SkippedVendorDirectories names the vendor trees the scan stepped over; strict does not fail on them — they cannot contribute services — but the command can name them on request. */
     SkippedVendorDirectories []string
@@ -56,6 +60,11 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
         functionName = "RegisterGeneratedServices"
     }
 
+    scopedFunctionName := request.ScopedFunctionName
+    if "" == scopedFunctionName {
+        scopedFunctionName = functionName + "Scoped"
+    }
+
     report := &GenerateReport{
         Skipped:                  make([]*SkippedConstructor, 0),
         SkippedVendorDirectories: make([]string, 0),
@@ -73,6 +82,27 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
     if false == token.IsIdentifier(functionName) || "_" == functionName || "init" == functionName {
         return "", nil, exception.NewError(
             "the generated function name cannot be declared and referenced in the generated file",
+            map[string]any{
+                "function": functionName,
+            },
+            nil,
+        )
+    }
+
+    if false == token.IsIdentifier(scopedFunctionName) || "_" == scopedFunctionName || "init" == scopedFunctionName {
+        return "", nil, exception.NewError(
+            "the generated scoped function name cannot be declared and referenced in the generated file",
+            map[string]any{
+                "function": scopedFunctionName,
+            },
+            nil,
+        )
+    }
+
+    /* the two functions share one file, so one name cannot serve both: the second declaration would not compile, and which of the two lifetimes survived would be a coin flip */
+    if functionName == scopedFunctionName {
+        return "", nil, exception.NewError(
+            "the generated function names must differ, or the file declares the same function twice",
             map[string]any{
                 "function": functionName,
             },
@@ -106,7 +136,23 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
         )
     }
 
+    if true == importAliases.takenAlias[scopedFunctionName] ||
+        containerContractImportAlias == scopedFunctionName ||
+        containerImportAlias == scopedFunctionName ||
+        configImportAlias == scopedFunctionName ||
+        exceptionImportAlias == scopedFunctionName ||
+        mathImportAlias == scopedFunctionName {
+        return "", nil, exception.NewError(
+            "the generated scoped function name collides with an identifier the generated file spells",
+            map[string]any{
+                "function": scopedFunctionName,
+            },
+            nil,
+        )
+    }
+
     importAliases.reserveIdentifier(functionName)
+    importAliases.reserveIdentifier(scopedFunctionName)
     importAliases.reserve(containerContractImportPath, containerContractImportAlias)
     importAliases.reserve(containerImportPath, containerImportAlias)
     importAliases.reserve(configImportPath, configImportAlias)
@@ -114,6 +160,7 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
     importAliases.reserve(mathImportPath, mathImportAlias)
 
     providerBlocks := make([]string, 0)
+    scopedProviderBlocks := make([]string, 0)
     unusedDirectiveBinds := make([]string, 0)
 
     for _, packageBinding := range request.BindSet.Packages() {
@@ -140,6 +187,17 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
 
             unusedDirectiveBinds = append(unusedDirectiveBinds, constructorUnusedDirectiveBinds...)
 
+            if true == constructor.IsScoped {
+                scopedProviderBlocks = append(
+                    scopedProviderBlocks,
+                    renderProvider(constructor, resolvedArguments, importAliases),
+                )
+
+                report.ScopedConstructorCount = report.ScopedConstructorCount + 1
+
+                continue
+            }
+
             providerBlocks = append(
                 providerBlocks,
                 renderProvider(constructor, resolvedArguments, importAliases),
@@ -154,8 +212,10 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
     source := renderFile(
         request.PackageName,
         functionName,
+        scopedFunctionName,
         importAliases,
         providerBlocks,
+        scopedProviderBlocks,
     )
 
     return source, report, nil

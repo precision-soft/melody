@@ -75,6 +75,13 @@ func (instance *Application) bootModulesPostConfigurationResolve() {
         }
     }
 
+    /* the scoped registrations come after the process-lifetime ones and before the framework's own, so a module scoping a name the framework registers later meets the refusal from either side and lands in the aggregated boot report beside its siblings */
+    for _, moduleInstance := range instance.modules {
+        if scopedServiceModule, ok := moduleInstance.(applicationcontract.ScopedServiceModule); true == ok {
+            scopedServiceModule.RegisterScopedServices(instance.kernel, instance)
+        }
+    }
+
     securityBuilder := securityconfig.NewBuilder()
     for _, moduleInstance := range instance.modules {
         if securityModule, ok := moduleInstance.(SecurityModule); true == ok {

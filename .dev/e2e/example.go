@@ -41,12 +41,16 @@ type exampleMajor struct {
     label             string
     relativeDirectory string
     port              int
+    /* integrationDemos is off for v3 on purpose. Its example drives the same rate-limit counter that
+    EXAMPLE OVER HTTP measures an exact exhaustion point on against the supervised application, so running
+    the demos here as well would spend a budget another section is counting. */
+    integrationDemos bool
 }
 
 var exampleMajorCatalog = []exampleMajor{
-    {number: 1, label: "v1", relativeDirectory: ".example", port: 18081},
-    {number: 2, label: "v2", relativeDirectory: "v2/.example", port: 18082},
-    {number: 3, label: "v3", relativeDirectory: "v3/.example", port: 18083},
+    {number: 1, label: "v1", relativeDirectory: ".example", port: 18081, integrationDemos: true},
+    {number: 2, label: "v2", relativeDirectory: "v2/.example", port: 18082, integrationDemos: true},
+    {number: 3, label: "v3", relativeDirectory: "v3/.example", port: 18083, integrationDemos: false},
 }
 
 /* exampleMajorList resolves the majors to exercise from MELODY_E2E_MAJORS, which accepts space or comma
@@ -126,7 +130,7 @@ which is what keeps the coverage repeatable:
 The binary is built UNTAGGED on purpose: under melody_env_embedded the env files are baked in at build time from
 the example directory, so a .env.local written into the workspace afterwards would be ignored and the
 application would fight the supervised one for :8080. */
-func runExampleApplicationCheck(major exampleMajor) {
+func runExampleApplicationCheck(major exampleMajor, redisAddress string, mysqlDsn string) {
     workspace := filepath.Join(os.TempDir(), "melody-e2e-example-"+major.label)
 
     prepareExampleWorkspace(major, workspace)
@@ -146,7 +150,7 @@ func runExampleApplicationCheck(major exampleMajor) {
     waitForExampleReadiness(major, application)
     pass("[%s] built from %s and answered %s on port %d", major.label, major.relativeDirectory, exampleReadinessRoute, major.port)
 
-    runExampleHttpAssertions(major)
+    runExampleHttpAssertions(major, application, redisAddress, mysqlDsn)
     runExampleCliAssertions(major, workspace)
     assertExampleGracefulShutdown(major, application)
 
@@ -463,13 +467,20 @@ const (
     exampleStaticAsset        = "/assets/app.css"
 )
 
-func runExampleHttpAssertions(major exampleMajor) {
+func runExampleHttpAssertions(major exampleMajor, application *exampleApplication, redisAddress string, mysqlDsn string) {
     client := newExampleClient(major)
 
     assertExamplePublicRoutes(major, client)
     assertExampleAnonymousRejection(major, client)
     assertExampleLoginFlow(major, client)
     assertExampleStaticTraversal(major, client)
+
+    /* the demo routes sit under the example's ROLE_USER catch-all, so they are driven here — between the
+    login and the logout — with the session the login flow established */
+    if true == major.integrationDemos {
+        runExampleIntegrationAssertions(major, client, application, redisAddress, mysqlDsn)
+    }
+
     assertExampleLogout(major, client)
 }
 

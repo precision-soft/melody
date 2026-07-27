@@ -3,29 +3,32 @@ package config
 import (
     nethttp "net/http"
     "strconv"
-    "time"
 
     melodyapplicationcontract "github.com/precision-soft/melody/application/contract"
+    melodyclockcontract "github.com/precision-soft/melody/clock/contract"
     melodyhttpcontract "github.com/precision-soft/melody/http/contract"
     melodykernelcontract "github.com/precision-soft/melody/kernel/contract"
     melodyruntimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
 func (instance *Module) RegisterHttpMiddlewares(kernelInstance melodykernelcontract.Kernel, registrar melodyapplicationcontract.HttpMiddlewareRegistrar) {
-    registrar.Use(NewTimingMiddleware())
+    registrar.Use(NewTimingMiddleware(kernelInstance.Clock()))
 }
 
-func NewTimingMiddleware() melodyhttpcontract.Middleware {
+/* NewTimingMiddleware measures how long a request took and reports it in a header.
+
+The clock is injected rather than read from the wall, which is what makes the header assertable: a frozen clock advanced by the handler under it lets a test state the exact duration the header must carry, and no test can state that against time.Now. */
+func NewTimingMiddleware(clockInstance melodyclockcontract.Clock) melodyhttpcontract.Middleware {
     return func(next melodyhttpcontract.Handler) melodyhttpcontract.Handler {
         return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-            startedAt := time.Now()
+            startedAt := clockInstance.Now()
 
             response, err := next(runtimeInstance, writer, request)
             if nil != err {
                 return response, err
             }
 
-            duration := time.Since(startedAt).Milliseconds()
+            duration := clockInstance.Now().Sub(startedAt).Milliseconds()
             if nil != response {
                 response.Headers().Set("X-Example-Duration-Ms", strconv.FormatInt(duration, 10))
             }

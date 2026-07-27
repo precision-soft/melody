@@ -20,7 +20,21 @@ func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.P
     registrar.RegisterParameter("app.default_refresh_interval", "5m")
     registrar.RegisterParameter("app.refresh_interval", "%env(default:app.default_refresh_interval:APP_REFRESH_INTERVAL)%")
 
+    /* @info the live integrations read their endpoints from parameters, each with a registered fallback so a partially set environment cannot leave a name the providers resolve undefined. An empty value is the switch: the example then wires the integration not at all. */
+    registrar.RegisterParameter("app.database.default_port", "3306")
+    registrar.RegisterParameter(ParameterDatabaseHost, "%env(default::MYSQL_HOST)%")
+    registrar.RegisterParameter(ParameterDatabasePort, "%env(default:app.database.default_port:MYSQL_PORT)%")
+    registrar.RegisterParameter(ParameterDatabaseName, "%env(default::MYSQL_DATABASE)%")
+    registrar.RegisterParameter(ParameterDatabaseUser, "%env(default::MYSQL_USER)%")
+    registrar.RegisterParameter(ParameterDatabasePassword, "%env(default::MYSQL_PASSWORD)%")
+
+    registrar.RegisterParameter(ParameterRedisAddress, "%env(default::REDIS_ADDRESS)%")
+    registrar.RegisterParameter(ParameterRedisUser, "%env(default::REDIS_USER)%")
+    registrar.RegisterParameter(ParameterRedisPassword, "%env(default::REDIS_PASSWORD)%")
+
     registrar.MarkParameterSecret("APP_API_TOKEN")
+    registrar.MarkParameterSecret("MYSQL_PASSWORD")
+    registrar.MarkParameterSecret("REDIS_PASSWORD")
 }
 
 var _ melodyapplicationcontract.ParameterModule = (*Module)(nil)
