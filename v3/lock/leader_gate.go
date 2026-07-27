@@ -19,6 +19,9 @@ const defaultLeaderRetryFloor = 1 * time.Second
 const defaultMaxCampaignBackoff = 1 * time.Minute
 
 /* LeaderGateOptions tunes a LeaderGate; every zero value resolves to a sensible default derived from the ttl. */
+/* defaultMaxConsecutiveRefreshFailures is the threshold a gate takes when its options name none. Three, because two consecutive losses are still comfortably a reconnect and the third says the store is not coming back inside a window that matters. At the default cadence it is unreachable — three renewals at half the ttl outlast the lease — so it changes nothing for a gate that did not ask for a denser cadence. */
+const defaultMaxConsecutiveRefreshFailures = 3
+
 type LeaderGateOptions struct {
     /* RetryInterval is the pause between failed campaigns while another instance leads; defaults to half the ttl, floored at one second. */
     RetryInterval time.Duration
@@ -31,6 +34,13 @@ type LeaderGateOptions struct {
 
     /* OnLost runs on the Run goroutine right after leadership is lost to a failed renewal; cause is the renewal error. It does not run on a clean shutdown. */
     OnLost func(runtimeInstance runtimecontract.Runtime, cause error)
+
+    /* MaxConsecutiveRefreshFailures is how many renewals in a row may fail before the gate leaves its term, whatever the lease still says. Zero takes the default of three; a negative value removes the threshold and leaves the lease clock as the only signal.
+
+    It exists because the two things a failed renewal can mean are not the same. A store that dropped a connection and reconnected is transient — and the lease it wrote is still the store's own promise that nobody else gets this lock until it lapses, which is why the cadence is half the lease: a lost renewal is meant to be survivable. Leaving on the first one turns an eight-second failover into a cancelled term, a re-election and work restarted from the beginning, for a lock that was never in danger.
+
+    A store that is simply gone is not transient, and there the gate should stop being useful rather than wait out a lease it will certainly not renew. The threshold is what tells the two apart in the one configuration where the lease clock cannot: at the default cadence of half the ttl, three failures already outlast the lease, so the lease clock decides and this never fires. It bites only where the cadence is deliberately much denser than the lease, which is itself the operator saying they want to hear about failure quickly. */
+    MaxConsecutiveRefreshFailures int
 
     /* OnCampaignError runs on the Run goroutine for every campaign that could not even ask the store who leads — the gate then backs off and campaigns again, so without this hook the error is never seen. A store outage and a permanent misconfiguration (a redis locker built with a non-positive ttl, whose Acquire fails closed on every call) are indistinguishable from the outside: both look exactly like a deployment that quietly elects no leader and does no work. */
     OnCampaignError func(runtimeInstance runtimecontract.Runtime, cause error)
@@ -73,6 +83,9 @@ func NewLeaderGateWithOptions(
     }
     if minimumRefreshInterval > resolved.RefreshInterval {
         resolved.RefreshInterval = minimumRefreshInterval
+    }
+    if 0 == resolved.MaxConsecutiveRefreshFailures {
+        resolved.MaxConsecutiveRefreshFailures = defaultMaxConsecutiveRefreshFailures
     }
 
     return &LeaderGate{
@@ -238,6 +251,8 @@ func (instance *LeaderGate) refreshWhileLeading(runtimeInstance runtimecontract.
     ticker := time.NewTicker(instance.options.RefreshInterval)
     defer ticker.Stop()
 
+    consecutiveFailureCount := 0
+
     for {
         select {
         case <-runtimeInstance.Context().Done():
@@ -251,12 +266,38 @@ func (instance *LeaderGate) refreshWhileLeading(runtimeInstance runtimecontract.
                     return nil
                 }
 
-                return refreshErr
+                consecutiveFailureCount = consecutiveFailureCount + 1
+
+                if true == instance.refreshFailureEndsTheTerm(consecutiveFailureCount) {
+                    return refreshErr
+                }
+
+                continue
             }
+
+            consecutiveFailureCount = 0
 
             instance.leaseExpiry.Store(refreshIssuedAt.Add(refreshTtl).UnixNano())
         }
     }
+}
+
+
+/* refreshFailureEndsTheTerm answers the one question a failed renewal poses: is the lock still ours to hold? Two things say no, and they answer different failures.
+
+The lease clock is the authority. Until the lease this gate last wrote lapses, the store refuses the lock to everyone else whether or not this process can still reach it — so a renewal that failed while the lease runs has cost nothing yet, and leaving on it gives up availability for no exclusivity gained.
+
+The consecutive-failure threshold covers what the lease clock cannot see: a gate whose cadence is far denser than its lease would otherwise keep working for the whole lease against a store that has plainly gone. At the default cadence the threshold is unreachable and the lease decides. */
+func (instance *LeaderGate) refreshFailureEndsTheTerm(consecutiveFailureCount int) bool {
+    if true == leaseIsBeyondRecovery(time.Now(), time.Unix(0, instance.leaseExpiry.Load()), instance.options.RefreshInterval) {
+        return true
+    }
+
+    if 0 >= instance.options.MaxConsecutiveRefreshFailures {
+        return false
+    }
+
+    return consecutiveFailureCount >= instance.options.MaxConsecutiveRefreshFailures
 }
 
 /* nextCampaignBackoff doubles the campaign backoff after an acquire error and caps it, but never below the configured RetryInterval: a RetryInterval slower than defaultMaxCampaignBackoff must never make outage retries faster than the healthy campaign cadence (which would hammer an already-struggling store and spam OnCampaignError). It also floors an overflowed doubling back to the cap. */

@@ -653,3 +653,251 @@ func TestLeaderGate_TheRenewalBudgetNeverOutlivesTheCadenceItSitsInside(t *testi
         }
     }
 }
+
+/* countedFailureLocker fails the first failureCount renewals and answers every one after them, which is the shape of a store that dropped a connection and came back. */
+type countedFailureLocker struct {
+    inner        lockcontract.Locker
+    failureCount int64
+    attempts     atomic.Int64
+}
+
+func (instance *countedFailureLocker) CreateLock(name string, ttl time.Duration) lockcontract.Lock {
+    return &countedFailureLock{locker: instance, inner: instance.inner.CreateLock(name, ttl)}
+}
+
+type countedFailureLock struct {
+    locker *countedFailureLocker
+    inner  lockcontract.Lock
+}
+
+func (instance *countedFailureLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+    return instance.inner.Acquire(runtimeInstance)
+}
+
+func (instance *countedFailureLock) Release(runtimeInstance runtimecontract.Runtime) error {
+    return instance.inner.Release(runtimeInstance)
+}
+
+func (instance *countedFailureLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl time.Duration) error {
+    if instance.locker.attempts.Add(1) <= instance.locker.failureCount {
+        return exception.NewError("lease lost", nil, nil)
+    }
+
+    return instance.inner.Refresh(runtimeInstance, ttl)
+}
+
+/* @info A store that drops a connection and reconnects must not cost a term. The lease the gate last wrote is the store's own promise that nobody else gets this lock until it lapses — which is exactly why the cadence is half the lease — so a renewal lost while the lease runs has cost nothing, and the one behind it lands. Leaving on the first failure turned an eight-second failover into a cancelled term, a re-election, and leader work restarted from the beginning for a lock that was never in danger. */
+func TestLeaderGate_ASingleFailedRenewalDoesNotCostTheTerm(t *testing.T) {
+    failing := &countedFailureLocker{inner: NewInMemoryLocker(clock.NewSystemClock()), failureCount: 1}
+
+    runContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    var lostCount atomic.Int64
+    elected := make(chan struct{}, 16)
+
+    gate := NewLeaderGateWithOptions(failing, "worker:blip", time.Minute, LeaderGateOptions{
+        RetryInterval:   5 * time.Millisecond,
+        RefreshInterval: 5 * time.Millisecond,
+        OnElected: func(runtimeInstance runtimecontract.Runtime) {
+            elected <- struct{}{}
+        },
+        OnLost: func(runtimeInstance runtimecontract.Runtime, cause error) {
+            lostCount.Add(1)
+        },
+    })
+
+    done := make(chan struct{})
+    go func() {
+        _ = gate.Run(testRuntimeWithContext(runContext))
+        close(done)
+    }()
+
+    select {
+    case <-elected:
+    case <-time.After(2 * time.Second):
+        t.Fatal("the gate never became leader")
+    }
+
+    /* well past several cadences, so a gate that leaves on the first failure has certainly done so by now */
+    time.Sleep(200 * time.Millisecond)
+
+    if 0 != lostCount.Load() {
+        t.Fatalf("one dropped renewal ended the term %d time(s); the lease had a full minute left and no other instance could have taken the lock", lostCount.Load())
+    }
+
+    if false == gate.IsLeader() {
+        t.Fatal("the gate stopped claiming leadership over a lease that is still valid")
+    }
+
+    cancel()
+    <-done
+}
+
+/* @info the other half: a store that is simply gone must end the term rather than let leader work run out the whole lease. The lease clock cannot see this on its own here — the cadence is far denser than the lease, so the lease still has a minute left — which is precisely the gap the consecutive-failure threshold covers. */
+func TestLeaderGate_ThresholdConsecutiveFailuresEndTheTermWhileTheLeaseIsStillValid(t *testing.T) {
+    failing := &switchableRefreshLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
+    failing.fail.Store(true)
+
+    runContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    lost := make(chan error, 16)
+    elected := make(chan struct{}, 16)
+
+    gate := NewLeaderGateWithOptions(failing, "worker:gone", time.Minute, LeaderGateOptions{
+        RetryInterval:                 5 * time.Millisecond,
+        RefreshInterval:               5 * time.Millisecond,
+        MaxConsecutiveRefreshFailures: 3,
+        OnElected: func(runtimeInstance runtimecontract.Runtime) {
+            elected <- struct{}{}
+        },
+        OnLost: func(runtimeInstance runtimecontract.Runtime, cause error) {
+            lost <- cause
+        },
+    })
+
+    done := make(chan struct{})
+    go func() {
+        _ = gate.Run(testRuntimeWithContext(runContext))
+        close(done)
+    }()
+
+    select {
+    case <-elected:
+    case <-time.After(2 * time.Second):
+        t.Fatal("the gate never became leader")
+    }
+
+    select {
+    case cause := <-lost:
+        if nil == cause {
+            t.Fatal("expected the demotion to carry the renewal failure")
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatal("three consecutive failed renewals did not end the term: a gate whose cadence is far denser than its lease would keep working for the whole lease against a store that has plainly gone")
+    }
+
+    cancel()
+    <-done
+}
+
+/* @info the threshold is a knob, and turning it off has to leave the lease clock as the only signal — that is what a deployment asks for when it would rather run out the lease than give up a term early. */
+func TestLeaderGate_ANegativeThresholdLeavesOnlyTheLeaseClock(t *testing.T) {
+    gate := NewLeaderGateWithOptions(
+        NewInMemoryLocker(clock.NewSystemClock()),
+        "worker:lease-only",
+        time.Minute,
+        LeaderGateOptions{MaxConsecutiveRefreshFailures: -1},
+    )
+
+    if false == gate.refreshFailureEndsTheTerm(1000) {
+        /* the lease is unset outside a term, so the lease clock alone already says the term is over; what matters is that the threshold did not decide it */
+        t.Fatal("expected the lease clock to answer on its own")
+    }
+
+    gate.leaseExpiry.Store(time.Now().Add(time.Minute).UnixNano())
+
+    if true == gate.refreshFailureEndsTheTerm(1000) {
+        t.Fatal("a negative threshold must be off: a thousand failures may not end a term whose lease has a minute left")
+    }
+}
+
+/* @info the default has to be reachable only where it is meant to be. At the documented cadence of half the ttl, three renewals already outlast the lease, so the lease clock decides and the threshold changes nothing for a gate that did not ask for a denser cadence. */
+func TestLeaderGate_TheDefaultThresholdIsUnreachableAtTheDefaultCadence(t *testing.T) {
+    ttl := time.Minute
+
+    gate := NewLeaderGateWithOptions(NewInMemoryLocker(clock.NewSystemClock()), "worker:default", ttl, LeaderGateOptions{})
+
+    if defaultMaxConsecutiveRefreshFailures != gate.options.MaxConsecutiveRefreshFailures {
+        t.Fatalf("expected the default threshold, got %d", gate.options.MaxConsecutiveRefreshFailures)
+    }
+
+    thresholdWindow := time.Duration(gate.options.MaxConsecutiveRefreshFailures) * gate.options.RefreshInterval
+    if thresholdWindow <= ttl {
+        t.Fatalf(
+            "the default threshold fires after %s, inside a lease of %s: it would decide instead of the lease clock in an ordinary deployment",
+            thresholdWindow,
+            ttl,
+        )
+    }
+}
+
+/* alternatingRefreshLocker fails every other renewal: losses that never land back to back, the shape of a lossy link rather than a store that has gone. */
+type alternatingRefreshLocker struct {
+    inner    lockcontract.Locker
+    attempts atomic.Int64
+}
+
+func (instance *alternatingRefreshLocker) CreateLock(name string, ttl time.Duration) lockcontract.Lock {
+    return &alternatingRefreshLock{locker: instance, inner: instance.inner.CreateLock(name, ttl)}
+}
+
+type alternatingRefreshLock struct {
+    locker *alternatingRefreshLocker
+    inner  lockcontract.Lock
+}
+
+func (instance *alternatingRefreshLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+    return instance.inner.Acquire(runtimeInstance)
+}
+
+func (instance *alternatingRefreshLock) Release(runtimeInstance runtimecontract.Runtime) error {
+    return instance.inner.Release(runtimeInstance)
+}
+
+func (instance *alternatingRefreshLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl time.Duration) error {
+    if 0 == instance.locker.attempts.Add(1)%2 {
+        return exception.NewError("lease lost", nil, nil)
+    }
+
+    return instance.inner.Refresh(runtimeInstance, ttl)
+}
+
+/* @info The threshold counts failures that are CONSECUTIVE, so a renewal that lands has to clear the count. Without the reset the counter only ever climbs: a lossy link that drops one renewal in two — every one of them survived by the next — still reaches three eventually and ends a term that was never lost, which is the flapping the threshold exists to prevent rather than cause. Over the window below the gate accumulates far more than three individual failures and none of them are adjacent. */
+func TestLeaderGate_ScatteredFailuresNeverAccumulateIntoADemotion(t *testing.T) {
+    failing := &alternatingRefreshLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
+
+    runContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    var lostCount atomic.Int64
+    elected := make(chan struct{}, 16)
+
+    gate := NewLeaderGateWithOptions(failing, "worker:lossy", time.Minute, LeaderGateOptions{
+        RetryInterval:                 5 * time.Millisecond,
+        RefreshInterval:               5 * time.Millisecond,
+        MaxConsecutiveRefreshFailures: 3,
+        OnElected: func(runtimeInstance runtimecontract.Runtime) {
+            elected <- struct{}{}
+        },
+        OnLost: func(runtimeInstance runtimecontract.Runtime, cause error) {
+            lostCount.Add(1)
+        },
+    })
+
+    done := make(chan struct{})
+    go func() {
+        _ = gate.Run(testRuntimeWithContext(runContext))
+        close(done)
+    }()
+
+    select {
+    case <-elected:
+    case <-time.After(2 * time.Second):
+        t.Fatal("the gate never became leader")
+    }
+
+    time.Sleep(300 * time.Millisecond)
+
+    if 0 != lostCount.Load() {
+        t.Fatalf(
+            "scattered failures ended the term %d time(s) after %d renewal attempts: the consecutive counter is not being cleared by the renewals that land",
+            lostCount.Load(),
+            failing.attempts.Load(),
+        )
+    }
+
+    cancel()
+    <-done
+}

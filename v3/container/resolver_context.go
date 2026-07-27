@@ -46,8 +46,17 @@ type resolverContext struct {
     stack             []string
     /* stackTypes runs parallel to stack: the canonical type of a type node, nil for a name node. The collection exclusion compares type identity through it, because two distinct types from same-named packages share a String() and a string comparison would exclude a service that is not on the path at all. */
     stackTypes []reflect.Type
+    /* scopeSuspended is set while a provider registered on the CONTAINER builds its service, and it is what keeps the two apart. The container is request-agnostic: a service it owns is one instance for the whole process, so its construction may read only what the container holds. A request scope layers over the container for the code that runs inside a request, not underneath the container's own wiring, and a factory that reached through it would assemble a process-lifetime singleton out of one request's values.
+
+    Suspension is a refusal, not a substitution. A container provider that asks for something only a scope carries — the request context — is told the service does not exist, which is a wiring mistake reported where it is made; a provider that asks for the logger gets the container's agnostic one, because that is the logger a process-lifetime service should hold. Only the service actually being requested is looked up through the scope, which is the layering a caller means by resolving through a scope at all. */
+    scopeSuspended bool
     /* consumedScopeEntries names what this resolution has read out of the request scope while building the service currently in creation. A value assembled from one of those entries holds the request they belong to, so it may not be kept as a process-lifetime singleton; the names travel into the refusal when a store would still put it in the root container. The set is put aside and restored around every creation, so a sibling that read nothing from the scope stays a singleton while the taint still reaches whoever depends on the tainted service. */
     consumedScopeEntries []string
+}
+
+/* scopeVisible reports whether this resolution may read the request scope. */
+func (instance *resolverContext) scopeVisible() bool {
+    return nil != instance.scopeInstance && false == instance.scopeSuspended
 }
 
 func (instance *resolverContext) markScopeEntryConsumed(entryKey string) {
@@ -106,7 +115,7 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
     }
     defer instance.popKey()
 
-    if nil != instance.scopeInstance {
+    if true == instance.scopeVisible() {
         value, exists, lookupInstanceByNameErr := instance.scopeInstance.lookupInstanceByName(serviceName)
         if nil != lookupInstanceByNameErr {
             return nil, lookupInstanceByNameErr
@@ -189,7 +198,7 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
 /* lookupByName is the creation guard's lookup for a named service: an instance this request scope already holds — an installed override, or one the scope itself built — comes before the process-wide one, and reading it is recorded, because whatever is being assembled around it is scope-bound too. A scope that closed underneath the resolution reports nothing here; the store is where that failure is raised. */
 func (instance *resolverContext) lookupByName(serviceName string, nodeKey string) createWithGuardLookupFunc {
     return func() (any, bool) {
-        if nil != instance.scopeInstance {
+        if true == instance.scopeVisible() {
             scopeValue, scopeExists, lookupErr := instance.scopeInstance.lookupInstanceByName(serviceName)
             if nil == lookupErr && true == scopeExists {
                 instance.markScopeEntryConsumed(nodeKey)
@@ -207,7 +216,7 @@ func (instance *resolverContext) lookupByName(serviceName string, nodeKey string
 /* lookupByType is lookupByName's counterpart for a type-keyed resolution. */
 func (instance *resolverContext) lookupByType(canonicalTargetType reflect.Type, nodeKey string) createWithGuardLookupFunc {
     return func() (any, bool) {
-        if nil != instance.scopeInstance {
+        if true == instance.scopeVisible() {
             scopeValue, scopeExists, lookupErr := instance.scopeInstance.lookupInstanceByType(canonicalTargetType)
             if nil == lookupErr && true == scopeExists {
                 instance.markScopeEntryConsumed(nodeKey)
@@ -276,7 +285,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
     }
     defer instance.popKey()
 
-    if nil != instance.scopeInstance {
+    if true == instance.scopeVisible() {
         value, exists, lookupInstanceByTypeErr := instance.scopeInstance.lookupInstanceByType(canonicalTargetType)
         if nil != lookupInstanceByTypeErr {
             return nil, lookupInstanceByTypeErr

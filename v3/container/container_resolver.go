@@ -189,7 +189,13 @@ func (instance *container) serviceWithCreationGuardLocked(
             )
         }()
 
+        /* the provider builds a service the CONTAINER owns, so it resolves what it needs from the container alone: a process-lifetime singleton assembled out of one request's values would hold that request for the life of the process, and closing it with the request would take it away from every other one. The scope is restored immediately after, because the resolution that continues above this frame is still the caller's. */
+        outerScopeSuspended := resolver.scopeSuspended
+        resolver.scopeSuspended = true
+
         createdValue, err, debugInfo = create(resolver)
+
+        resolver.scopeSuspended = outerScopeSuspended
         if true == internal.IsNilInterface(createdValue) {
             /* a nil value handed back together with an error is the provider saying why it could not build the service — "service is not registered" is the everyday one — and that reason is the failure worth naming. Overwriting it here would put a symptom at the top and bury the cause one level down, so the generic report is kept for the genuinely silent (nil, nil) return, where nothing else says anything at all. */
             if nil != err {

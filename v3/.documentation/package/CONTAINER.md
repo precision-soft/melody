@@ -168,6 +168,7 @@ func example() {
 
 ## Footguns & caveats
 
+- A request scope layers **over** the container, not underneath it. A provider registered on the container builds from the container alone: the service it produces belongs to the whole process, so assembling it out of one request's substitutes would hold that request forever and let that request's end take the service away from every other one. Only the service a caller actually asks the scope for is looked up through the scope, which is what layering means. A container provider that asks for something only a scope carries — a request context — is told the service does not exist, at the point the wiring mistake was made; one that asks for the logger receives the container's own, which is the logger a process-lifetime service should hold.
 - Providers must be functions compatible with [`Provider[T]`](../../container/contract/provider.go). A provider is called at most once per container instance (per service), and the result is cached.
 - Typed resolution by type is delegated to the underlying name registration when the type maps to a single service name, ensuring that resolving by name and by type returns the same instance (see [`container/resolver_context.go`](../../container/resolver_context.go)).
 - Circular dependency detection is scoped to a single resolver context (see [`Resolver`](../../container/contract/resolver.go) and the resolver context stack logic in [`container/container_resolver.go`](../../container/container_resolver.go)).
