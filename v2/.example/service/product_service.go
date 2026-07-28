@@ -3,13 +3,13 @@ package service
 import (
     "context"
     "fmt"
-    "time"
 
     "github.com/precision-soft/melody/v2/.example/entity"
     "github.com/precision-soft/melody/v2/.example/event"
     "github.com/precision-soft/melody/v2/.example/repository"
     "github.com/precision-soft/melody/v2/cache"
     melodycachecontract "github.com/precision-soft/melody/v2/cache/contract"
+    melodyclockcontract "github.com/precision-soft/melody/v2/clock/contract"
     "github.com/precision-soft/melody/v2/container"
     melodycontainercontract "github.com/precision-soft/melody/v2/container/contract"
     melodyeventcontract "github.com/precision-soft/melody/v2/event/contract"
@@ -26,6 +26,7 @@ func NewProductService(
     currencyService *CurrencyService,
     cacheInstance melodycachecontract.Cache,
     eventDispatcher melodyeventcontract.EventDispatcher,
+    clockInstance melodyclockcontract.Clock,
 ) *ProductService {
     return &ProductService{
         productRepository: productRepository,
@@ -33,15 +34,18 @@ func NewProductService(
         currencyService:   currencyService,
         cache:             cacheInstance,
         eventDispatcher:   eventDispatcher,
+        clock:             clockInstance,
     }
 }
 
+/* ProductService stamps every write with the injected clock rather than the wall, which is what makes the stamp assertable: a frozen clock lets a test state the exact instant a product carries, which cannot be written against time.Now. */
 type ProductService struct {
     productRepository repository.ProductRepository
     categoryService   *CategoryService
     currencyService   *CurrencyService
     cache             melodycachecontract.Cache
     eventDispatcher   melodyeventcontract.EventDispatcher
+    clock             melodyclockcontract.Clock
 }
 
 func (instance *ProductService) List() ([]*entity.Product, error) {
@@ -50,7 +54,7 @@ func (instance *ProductService) List() ([]*entity.Product, error) {
         CacheKeyProductList,
         0,
         func(ctx context.Context) (any, error) {
-            return instance.productRepository.All(), nil
+            return instance.productRepository.All(ctx)
         },
         nil,
     )
@@ -74,7 +78,11 @@ func (instance *ProductService) FindById(id string) (*entity.Product, bool, erro
         cacheKey,
         0,
         func(ctx context.Context) (any, error) {
-            product, found := instance.productRepository.FindById(id)
+            product, found, findErr := instance.productRepository.FindById(ctx, id)
+            if nil != findErr {
+                return nil, findErr
+            }
+
             if false == found {
                 return nil, nil
             }
@@ -109,7 +117,7 @@ func (instance *ProductService) Create(
     currencyId string,
     stock int64,
 ) (*entity.Product, error) {
-    now := time.Now()
+    now := instance.clock.Now()
     product := entity.NewProduct(
         productId,
         name,
@@ -122,7 +130,7 @@ func (instance *ProductService) Create(
         now,
     )
 
-    createErr := instance.productRepository.Create(product)
+    createErr := instance.productRepository.Create(runtimeInstance.Context(), product)
     if nil != createErr {
         return nil, createErr
     }
@@ -150,7 +158,13 @@ func (instance *ProductService) Update(
     currencyId string,
     stock int64,
 ) (*entity.Product, bool, error) {
-    product, found := instance.productRepository.FindById(id)
+    ctx := runtimeInstance.Context()
+
+    product, found, findErr := instance.productRepository.FindById(ctx, id)
+    if nil != findErr {
+        return nil, false, findErr
+    }
+
     if false == found {
         return nil, false, nil
     }
@@ -161,9 +175,9 @@ func (instance *ProductService) Update(
     product.Price = price
     product.CurrencyId = currencyId
     product.Stock = stock
-    product.UpdatedAt = time.Now()
+    product.UpdatedAt = instance.clock.Now()
 
-    updated, updateErr := instance.productRepository.Update(product)
+    updated, updateErr := instance.productRepository.Update(ctx, product)
     if nil != updateErr {
         return nil, false, updateErr
     }
@@ -189,7 +203,7 @@ func (instance *ProductService) DeleteById(
     runtimeInstance melodyruntimecontract.Runtime,
     productId string,
 ) (bool, error) {
-    deleted, deleteErr := instance.productRepository.DeleteById(productId)
+    deleted, deleteErr := instance.productRepository.DeleteById(runtimeInstance.Context(), productId)
     if nil != deleteErr {
         return false, deleteErr
     }

@@ -20,6 +20,7 @@ func (instance *Module) RegisterServices(kernelInstance melodykernelcontract.Ker
 
     instance.registerRedisServices(registrar)
     instance.registerDatabaseServices(registrar)
+    instance.registerCatalogJournalService(registrar)
     instance.registerCatalogReportService(registrar)
 
     registrar.RegisterService(
@@ -29,24 +30,27 @@ func (instance *Module) RegisterServices(kernelInstance melodykernelcontract.Ker
         },
     )
 
+    /* the nomenclature is held wherever the environment can hold it: in the database when one was configured, and in memory otherwise. The repositories are told which by the name of the database service, and an empty name is how this module says there is none. */
+    databaseServiceName := instance.databaseServiceName()
+
     registrar.RegisterService(
         repository.ServiceCategoryRepository,
-        repository.CategoryRepositoryProvider(),
+        repository.CategoryRepositoryProvider(databaseServiceName),
     )
 
     registrar.RegisterService(
         repository.ServiceCurrencyRepository,
-        repository.CurrencyRepositoryProvider(),
+        repository.CurrencyRepositoryProvider(databaseServiceName),
     )
 
     registrar.RegisterService(
         repository.ServiceProductRepository,
-        repository.ProductRepositoryProvider(),
+        repository.ProductRepositoryProvider(databaseServiceName),
     )
 
     registrar.RegisterService(
         repository.ServiceUserRepository,
-        repository.UserRepositoryProvider(),
+        repository.UserRepositoryProvider(databaseServiceName),
     )
 
     registrar.RegisterService(
@@ -90,6 +94,7 @@ func (instance *Module) RegisterServices(kernelInstance melodykernelcontract.Ker
             currencyService := service.MustGetCurrencyService(resolver)
             cacheInstance := melodycache.CacheMustFromResolver(resolver)
             eventDispatcher := melodyevent.EventDispatcherMustFromResolver(resolver)
+            clockInstance := melodyclock.ClockMustFromResolver(resolver)
 
             return service.NewProductService(
                 productRepository,
@@ -97,6 +102,7 @@ func (instance *Module) RegisterServices(kernelInstance melodykernelcontract.Ker
                 currencyService,
                 cacheInstance,
                 eventDispatcher,
+                clockInstance,
             ), nil
         },
     )
@@ -104,7 +110,28 @@ func (instance *Module) RegisterServices(kernelInstance melodykernelcontract.Ker
 
 var _ melodyapplicationcontract.ServiceModule = (*Module)(nil)
 
-/* registerCatalogReportService wires the report against whatever the environment gave the example: the redis backend when one was built, and the note repository when a database was configured. Both are optional, and the service degrades to what it can actually reach rather than being absent. */
+/* registerCatalogJournalService wires the journal against whatever the environment gave the example. Without a database there is nowhere to keep a record of the changes, and the service is registered all the same with nothing behind it: the writes still succeed, and the report shows a journal of zero rather than the application refusing to change anything. */
+func (instance *Module) registerCatalogJournalService(registrar melodyapplicationcontract.ServiceRegistrar) {
+    hasDatabase := nil != instance.databaseRegistry
+
+    registrar.RegisterService(
+        service.ServiceCatalogJournalService,
+        func(resolver melodycontainercontract.Resolver) (*service.CatalogJournalService, error) {
+            clockInstance := melodyclock.ClockMustFromResolver(resolver)
+
+            if false == hasDatabase {
+                return service.NewCatalogJournalService(nil, clockInstance), nil
+            }
+
+            return service.NewCatalogJournalService(
+                repository.MustGetCatalogJournalRepository(resolver),
+                clockInstance,
+            ), nil
+        },
+    )
+}
+
+/* registerCatalogReportService wires the report against whatever the environment gave the example: the redis backend when one was built, and the journal when a database was configured. Both are optional, and the service degrades to what it can actually reach rather than being absent. */
 func (instance *Module) registerCatalogReportService(registrar melodyapplicationcontract.ServiceRegistrar) {
     cacheBackend := instance.redisCacheBackend
     hasDatabase := nil != instance.databaseRegistry
@@ -113,6 +140,7 @@ func (instance *Module) registerCatalogReportService(registrar melodyapplication
         service.ServiceCatalogReportService,
         func(resolver melodycontainercontract.Resolver) (*service.CatalogReportService, error) {
             clockInstance := melodyclock.ClockMustFromResolver(resolver)
+            productRepository := repository.MustGetProductRepository(resolver)
 
             var backend service.CatalogReportBackend
             if nil != cacheBackend {
@@ -120,13 +148,14 @@ func (instance *Module) registerCatalogReportService(registrar melodyapplication
             }
 
             if false == hasDatabase {
-                return service.NewCatalogReportService(clockInstance, backend, nil), nil
+                return service.NewCatalogReportService(clockInstance, backend, productRepository, nil), nil
             }
 
             return service.NewCatalogReportService(
                 clockInstance,
                 backend,
-                repository.MustGetCatalogNoteRepository(resolver),
+                productRepository,
+                repository.MustGetCatalogJournalRepository(resolver),
             ), nil
         },
     )

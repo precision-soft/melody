@@ -12,7 +12,8 @@ func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.
     return []melodyclicontract.Command{
         cli.NewAppInfoCommand(),
         cli.NewProductListCommand(),
-        cli.NewCatalogNoteCommand(),
+        cli.NewCatalogJournalCommand(),
+        cli.NewCatalogReportRefreshCommand(),
         melodycron.NewGenerateCommand(newCronConfiguration(kernelInstance)),
     }
 }

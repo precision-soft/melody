@@ -20,7 +20,10 @@ func ApiReadAllHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         currencyRepository := repository.MustGetCurrencyRepository(runtimeInstance.Container())
 
-        currencies := currencyRepository.All()
+        currencies, allErr := currencyRepository.All(runtimeInstance.Context())
+        if nil != allErr {
+            return nil, allErr
+        }
 
         payload := MapCurrencies(currencies)
 

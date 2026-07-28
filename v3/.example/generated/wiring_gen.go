@@ -3,14 +3,16 @@
 package generated
 
 import (
+    persistence "github.com/precision-soft/melody/v3/.example/persistence"
     reporting "github.com/precision-soft/melody/v3/.example/reporting"
     repository "github.com/precision-soft/melody/v3/.example/repository"
     service "github.com/precision-soft/melody/v3/.example/service"
-    contract "github.com/precision-soft/melody/v3/cache/contract"
+    contract2 "github.com/precision-soft/melody/v3/cache/contract"
+    contract "github.com/precision-soft/melody/v3/clock/contract"
     melodyconfig "github.com/precision-soft/melody/v3/config"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
-    contract2 "github.com/precision-soft/melody/v3/event/contract"
+    contract3 "github.com/precision-soft/melody/v3/event/contract"
     http "github.com/precision-soft/melody/v3/http"
 )
 
@@ -18,9 +20,35 @@ import (
 func RegisterGeneratedServices(registrar containercontract.Registrar) {
     melodycontainer.MustRegister(
         registrar,
+        repository.ServiceCatalogJournalRepository,
+        func(resolver containercontract.Resolver) (repository.CatalogJournalRepository, error) {
+            var zeroValue repository.CatalogJournalRepository
+
+            storage, storageErr := melodycontainer.FromResolverByType[*persistence.CatalogStorage](resolver)
+            if nil != storageErr {
+                return zeroValue, storageErr
+            }
+
+            return repository.NewCatalogJournalRepository(
+                storage,
+            )
+        },
+    )
+
+    melodycontainer.MustRegister(
+        registrar,
         repository.ServiceCategoryRepository,
         func(resolver containercontract.Resolver) (repository.CategoryRepository, error) {
-            return repository.NewInMemoryCategoryRepository(), nil
+            var zeroValue repository.CategoryRepository
+
+            storage, storageErr := melodycontainer.FromResolverByType[*persistence.CatalogStorage](resolver)
+            if nil != storageErr {
+                return zeroValue, storageErr
+            }
+
+            return repository.NewCategoryRepository(
+                storage,
+            )
         },
     )
 
@@ -28,7 +56,16 @@ func RegisterGeneratedServices(registrar containercontract.Registrar) {
         registrar,
         repository.ServiceCurrencyRepository,
         func(resolver containercontract.Resolver) (repository.CurrencyRepository, error) {
-            return repository.NewInMemoryCurrencyRepository(), nil
+            var zeroValue repository.CurrencyRepository
+
+            storage, storageErr := melodycontainer.FromResolverByType[*persistence.CatalogStorage](resolver)
+            if nil != storageErr {
+                return zeroValue, storageErr
+            }
+
+            return repository.NewCurrencyRepository(
+                storage,
+            )
         },
     )
 
@@ -36,7 +73,16 @@ func RegisterGeneratedServices(registrar containercontract.Registrar) {
         registrar,
         repository.ServiceProductRepository,
         func(resolver containercontract.Resolver) (repository.ProductRepository, error) {
-            return repository.NewInMemoryProductRepository(), nil
+            var zeroValue repository.ProductRepository
+
+            storage, storageErr := melodycontainer.FromResolverByType[*persistence.CatalogStorage](resolver)
+            if nil != storageErr {
+                return zeroValue, storageErr
+            }
+
+            return repository.NewProductRepository(
+                storage,
+            )
         },
     )
 
@@ -44,7 +90,36 @@ func RegisterGeneratedServices(registrar containercontract.Registrar) {
         registrar,
         repository.ServiceUserRepository,
         func(resolver containercontract.Resolver) (repository.UserRepository, error) {
-            return repository.NewInMemoryUserRepository(), nil
+            var zeroValue repository.UserRepository
+
+            storage, storageErr := melodycontainer.FromResolverByType[*persistence.CatalogStorage](resolver)
+            if nil != storageErr {
+                return zeroValue, storageErr
+            }
+
+            return repository.NewUserRepository(
+                storage,
+            )
+        },
+    )
+
+    melodycontainer.MustRegisterType(
+        registrar,
+        func(resolver containercontract.Resolver) (*service.CatalogJournalService, error) {
+            journalRepository, journalRepositoryErr := melodycontainer.FromResolverByType[repository.CatalogJournalRepository](resolver)
+            if nil != journalRepositoryErr {
+                return nil, journalRepositoryErr
+            }
+
+            clockInstance, clockInstanceErr := melodycontainer.FromResolverByType[contract.Clock](resolver)
+            if nil != clockInstanceErr {
+                return nil, clockInstanceErr
+            }
+
+            return service.NewCatalogJournalService(
+                journalRepository,
+                clockInstance,
+            ), nil
         },
     )
 
@@ -57,12 +132,12 @@ func RegisterGeneratedServices(registrar containercontract.Registrar) {
                 return nil, categoryRepositoryErr
             }
 
-            cacheInstance, cacheInstanceErr := melodycontainer.FromResolverByType[contract.Cache](resolver)
+            cacheInstance, cacheInstanceErr := melodycontainer.FromResolverByType[contract2.Cache](resolver)
             if nil != cacheInstanceErr {
                 return nil, cacheInstanceErr
             }
 
-            eventDispatcher, eventDispatcherErr := melodycontainer.FromResolverByType[contract2.EventDispatcher](resolver)
+            eventDispatcher, eventDispatcherErr := melodycontainer.FromResolverByType[contract3.EventDispatcher](resolver)
             if nil != eventDispatcherErr {
                 return nil, eventDispatcherErr
             }
@@ -84,12 +159,12 @@ func RegisterGeneratedServices(registrar containercontract.Registrar) {
                 return nil, currencyRepositoryErr
             }
 
-            cacheInstance, cacheInstanceErr := melodycontainer.FromResolverByType[contract.Cache](resolver)
+            cacheInstance, cacheInstanceErr := melodycontainer.FromResolverByType[contract2.Cache](resolver)
             if nil != cacheInstanceErr {
                 return nil, cacheInstanceErr
             }
 
-            eventDispatcher, eventDispatcherErr := melodycontainer.FromResolverByType[contract2.EventDispatcher](resolver)
+            eventDispatcher, eventDispatcherErr := melodycontainer.FromResolverByType[contract3.EventDispatcher](resolver)
             if nil != eventDispatcherErr {
                 return nil, eventDispatcherErr
             }
@@ -121,14 +196,19 @@ func RegisterGeneratedServices(registrar containercontract.Registrar) {
                 return nil, currencyServiceErr
             }
 
-            cacheInstance, cacheInstanceErr := melodycontainer.FromResolverByType[contract.Cache](resolver)
+            cacheInstance, cacheInstanceErr := melodycontainer.FromResolverByType[contract2.Cache](resolver)
             if nil != cacheInstanceErr {
                 return nil, cacheInstanceErr
             }
 
-            eventDispatcher, eventDispatcherErr := melodycontainer.FromResolverByType[contract2.EventDispatcher](resolver)
+            eventDispatcher, eventDispatcherErr := melodycontainer.FromResolverByType[contract3.EventDispatcher](resolver)
             if nil != eventDispatcherErr {
                 return nil, eventDispatcherErr
+            }
+
+            clockInstance, clockInstanceErr := melodycontainer.FromResolverByType[contract.Clock](resolver)
+            if nil != clockInstanceErr {
+                return nil, clockInstanceErr
             }
 
             return service.NewProductService(
@@ -137,6 +217,7 @@ func RegisterGeneratedServices(registrar containercontract.Registrar) {
                 currencyService,
                 cacheInstance,
                 eventDispatcher,
+                clockInstance,
             ), nil
         },
     )
@@ -150,12 +231,12 @@ func RegisterGeneratedServices(registrar containercontract.Registrar) {
                 return nil, userRepositoryErr
             }
 
-            cacheInstance, cacheInstanceErr := melodycontainer.FromResolverByType[contract.Cache](resolver)
+            cacheInstance, cacheInstanceErr := melodycontainer.FromResolverByType[contract2.Cache](resolver)
             if nil != cacheInstanceErr {
                 return nil, cacheInstanceErr
             }
 
-            eventDispatcher, eventDispatcherErr := melodycontainer.FromResolverByType[contract2.EventDispatcher](resolver)
+            eventDispatcher, eventDispatcherErr := melodycontainer.FromResolverByType[contract3.EventDispatcher](resolver)
             if nil != eventDispatcherErr {
                 return nil, eventDispatcherErr
             }

@@ -45,7 +45,7 @@ func (instance *UserService) List() ([]*entity.User, error) {
         CacheKeyUserList,
         0,
         func(ctx context.Context) (any, error) {
-            return instance.userRepository.All()
+            return instance.userRepository.All(ctx)
         },
         nil,
     )
@@ -69,7 +69,11 @@ func (instance *UserService) FindById(id string) (*entity.User, bool, error) {
         cacheKey,
         0,
         func(ctx context.Context) (any, error) {
-            user, found := instance.userRepository.FindById(id)
+            user, found, findErr := instance.userRepository.FindById(ctx, id)
+            if nil != findErr {
+                return nil, findErr
+            }
+
             if false == found {
                 return nil, nil
             }
@@ -107,7 +111,11 @@ func (instance *UserService) FindByUsername(username string) (*entity.User, bool
         cacheKey,
         0,
         func(ctx context.Context) (any, error) {
-            user, found := instance.userRepository.FindByUsername(normalizedUsername)
+            user, found, findErr := instance.userRepository.FindByUsername(ctx, normalizedUsername)
+            if nil != findErr {
+                return nil, findErr
+            }
+
             if false == found {
                 return nil, nil
             }
@@ -141,7 +149,7 @@ func (instance *UserService) Create(
 ) (*entity.User, error) {
     user := entity.NewUser(userId, username, passwordSha256Hex, roles)
 
-    createErr := instance.userRepository.Create(user)
+    createErr := instance.userRepository.Create(runtimeInstance.Context(), user)
     if nil != createErr {
         return nil, createErr
     }
@@ -166,7 +174,13 @@ func (instance *UserService) Update(
     passwordSha256Hex string,
     roles []string,
 ) (*entity.User, bool, error) {
-    user, found := instance.userRepository.FindById(userId)
+    ctx := runtimeInstance.Context()
+
+    user, found, findErr := instance.userRepository.FindById(ctx, userId)
+    if nil != findErr {
+        return nil, false, findErr
+    }
+
     if false == found {
         return nil, false, nil
     }
@@ -175,7 +189,7 @@ func (instance *UserService) Update(
     user.Password = passwordSha256Hex
     user.Roles = roles
 
-    updated, updateErr := instance.userRepository.Update(user)
+    updated, updateErr := instance.userRepository.Update(ctx, user)
     if nil != updateErr {
         return nil, false, updateErr
     }
@@ -200,12 +214,18 @@ func (instance *UserService) DeleteById(
     runtimeInstance melodyruntimecontract.Runtime,
     userId string,
 ) (bool, error) {
-    user, found := instance.userRepository.FindById(userId)
+    ctx := runtimeInstance.Context()
+
+    user, found, findErr := instance.userRepository.FindById(ctx, userId)
+    if nil != findErr {
+        return false, findErr
+    }
+
     if false == found {
         return false, nil
     }
 
-    deleted, deleteErr := instance.userRepository.DeleteById(userId)
+    deleted, deleteErr := instance.userRepository.DeleteById(ctx, userId)
     if nil != deleteErr {
         return false, deleteErr
     }

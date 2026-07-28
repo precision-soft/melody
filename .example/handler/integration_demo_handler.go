@@ -7,115 +7,24 @@ import (
     "github.com/precision-soft/melody/.example/presenter"
     "github.com/precision-soft/melody/.example/repository"
     "github.com/precision-soft/melody/.example/service"
-    melodyclock "github.com/precision-soft/melody/clock"
     melodyhttpcontract "github.com/precision-soft/melody/http/contract"
-    melodyrueidiscache "github.com/precision-soft/melody/integrations/rueidis/cache"
     melodyruntimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
-type cacheDemoPayload struct {
-    Key   string `json:"key"`
-    Wrote string `json:"wrote"`
-    Read  string `json:"read"`
-    Hit   bool   `json:"hit"`
-}
+const catalogReportEntryLimit = 10
 
-type databaseDemoPayload struct {
+type catalogJournalEntryPayload struct {
     Id         int64  `json:"id"`
-    Note       string `json:"note"`
+    Actor      string `json:"actor"`
+    Action     string `json:"action"`
+    Subject    string `json:"subject"`
+    SubjectId  string `json:"subjectId"`
     RecordedAt string `json:"recordedAt"`
-    Total      int    `json:"total"`
 }
 
-type rateLimitDemoPayload struct {
-    Status string `json:"status"`
-}
+/* ReportDemoHandler renders the clock-stamped reading of the catalogue, served from the redis cache once it is warm, together with the most recent changes the journal recorded.
 
-/* CacheDemoHandler writes a clock-stamped payload through the redis backend and reads it straight back, which is the smallest round trip that proves the connection is live rather than merely configured. The backend is handed in rather than resolved by name, because the configuration package that names it is the one that wires these routes. */
-func CacheDemoHandler(backend *melodyrueidiscache.BackendService) melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        clockInstance := melodyclock.ClockMustFromResolver(runtimeInstance.Container())
-
-        key := "demo.stamp"
-        wrote := clockInstance.Now().UTC().Format(time.RFC3339Nano)
-
-        setErr := backend.Set(key, []byte(wrote), time.Minute)
-        if nil != setErr {
-            return nil, setErr
-        }
-
-        payload, found, getErr := backend.Get(key)
-        if nil != getErr {
-            return nil, getErr
-        }
-
-        return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, cacheDemoPayload{
-            Key:   key,
-            Wrote: wrote,
-            Read:  string(payload),
-            Hit:   found,
-        }), nil
-    }
-}
-
-/* DatabaseDemoHandler creates the demo table when it is absent, appends a clock-stamped note, reads it back by the identifier the insert assigned, and reports how many notes the table holds. The schema is created here rather than by a migration because the example carries no migration runner and the demo owns the one table it uses. */
-func DatabaseDemoHandler() melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        noteRepository := repository.MustGetCatalogNoteRepository(runtimeInstance.Container())
-        clockInstance := melodyclock.ClockMustFromResolver(runtimeInstance.Container())
-
-        ctx := runtimeInstance.Context()
-
-        ensureSchemaErr := noteRepository.EnsureSchema(ctx)
-        if nil != ensureSchemaErr {
-            return nil, ensureSchemaErr
-        }
-
-        recordedAt := clockInstance.Now().UTC().Truncate(time.Second)
-
-        appended, appendErr := noteRepository.Append(ctx, "catalogue read", recordedAt)
-        if nil != appendErr {
-            return nil, appendErr
-        }
-
-        stored, found, findErr := noteRepository.FindById(ctx, appended.Id)
-        if nil != findErr {
-            return nil, findErr
-        }
-
-        if false == found {
-            return presenter.ApiError(
-                runtimeInstance,
-                request,
-                nethttp.StatusInternalServerError,
-                "the note was written but could not be read back",
-            ), nil
-        }
-
-        total, countErr := noteRepository.Count(ctx)
-        if nil != countErr {
-            return nil, countErr
-        }
-
-        return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, databaseDemoPayload{
-            Id:         stored.Id,
-            Note:       stored.Note,
-            RecordedAt: stored.RecordedAt.UTC().Format(time.RFC3339),
-            Total:      total,
-        }), nil
-    }
-}
-
-/* RateLimitDemoHandler answers whatever the rate-limit middleware in front of it let through. */
-func RateLimitDemoHandler() melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, rateLimitDemoPayload{
-            Status: "allowed",
-        }), nil
-    }
-}
-
-/* ReportDemoHandler renders the clock-stamped catalogue report, which is served from the redis cache once it is warm. */
+The counts come from the cached reading and the entries are read live: the numbers are what the report is for and are worth remembering for a while, while the list of who changed what is short, cheap and only useful when it is current. Without a database there is no journal and the list is simply empty. */
 func ReportDemoHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         reportService := service.MustGetCatalogReportService(runtimeInstance.Container())
@@ -125,10 +34,48 @@ func ReportDemoHandler() melodyhttpcontract.Handler {
             return nil, reportErr
         }
 
+        entries, entriesErr := latestJournalEntries(runtimeInstance)
+        if nil != entriesErr {
+            return nil, entriesErr
+        }
+
         return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, map[string]any{
             "recordedAt": report.RecordedAt.UTC().Format(time.RFC3339),
             "payload":    report.Payload,
             "fromCache":  report.FromCache,
+            "journal":    entries,
         }), nil
     }
+}
+
+func latestJournalEntries(runtimeInstance melodyruntimecontract.Runtime) ([]catalogJournalEntryPayload, error) {
+    payload := make([]catalogJournalEntryPayload, 0, catalogReportEntryLimit)
+
+    if false == runtimeInstance.Container().Has(repository.ServiceCatalogJournalRepository) {
+        return payload, nil
+    }
+
+    journalRepository := repository.MustGetCatalogJournalRepository(runtimeInstance.Container())
+
+    entries, latestErr := journalRepository.Latest(runtimeInstance.Context(), catalogReportEntryLimit)
+    if nil != latestErr {
+        return nil, latestErr
+    }
+
+    for _, entry := range entries {
+        if nil == entry {
+            continue
+        }
+
+        payload = append(payload, catalogJournalEntryPayload{
+            Id:         entry.Id,
+            Actor:      entry.Actor,
+            Action:     entry.Action,
+            Subject:    entry.Subject,
+            SubjectId:  entry.SubjectId,
+            RecordedAt: entry.RecordedAt.UTC().Format(time.RFC3339),
+        })
+    }
+
+    return payload, nil
 }

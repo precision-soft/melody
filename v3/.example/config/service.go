@@ -3,6 +3,7 @@ package config
 import (
     "github.com/precision-soft/melody/v3/.example/cache"
     "github.com/precision-soft/melody/v3/.example/generated"
+    "github.com/precision-soft/melody/v3/.example/persistence"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodycache "github.com/precision-soft/melody/v3/cache"
     melodycachecontract "github.com/precision-soft/melody/v3/cache/contract"
@@ -18,6 +19,16 @@ import (
 )
 
 func (instance *Module) RegisterServices(registrar melodyapplicationcontract.ServiceRegistrar) {
+    /* the storage handle is registered whether or not there is a connection behind it, because the generated wiring fills the repository constructors by resolving their arguments from the container by type: a handle that were absent without a database would take the whole nomenclature with it. */
+    database := instance.database
+
+    registrar.RegisterService(
+        persistence.ServiceCatalogStorage,
+        func(resolver melodycontainercontract.Resolver) (*persistence.CatalogStorage, error) {
+            return persistence.NewCatalogStorage(database), nil
+        },
+    )
+
     registrar.RegisterService(
         melodycache.ServiceCacheSerializer,
         func(resolver melodycontainercontract.Resolver) (melodycachecontract.Serializer, error) {

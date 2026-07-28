@@ -19,7 +19,10 @@ func ApiReadAllHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         categoryRepository := repository.MustGetCategoryRepository(runtimeInstance.Container())
 
-        categories := categoryRepository.All()
+        categories, allErr := categoryRepository.All(runtimeInstance.Context())
+        if nil != allErr {
+            return nil, allErr
+        }
 
         payload := MapCategories(categories)
 

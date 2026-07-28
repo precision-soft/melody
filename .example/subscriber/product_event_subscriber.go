@@ -4,6 +4,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/.example/event"
+    "github.com/precision-soft/melody/.example/repository"
     "github.com/precision-soft/melody/.example/service"
     melodycache "github.com/precision-soft/melody/cache"
     melodyevent "github.com/precision-soft/melody/event"
@@ -58,7 +59,12 @@ func (instance *ProductEventSubscriber) onProductCreated() melodyeventcontract.E
             return productListCacheDeleteErr
         }
 
-        return nil
+        return recordCatalogChange(
+            runtimeInstance,
+            repository.CatalogJournalActionCreated,
+            service.CatalogJournalSubjectProduct,
+            payloadInstance.Product().Id,
+        )
     }
 }
 
@@ -102,7 +108,12 @@ func (instance *ProductEventSubscriber) onProductUpdated() melodyeventcontract.E
             },
         )
 
-        return nil
+        return recordCatalogChange(
+            runtimeInstance,
+            repository.CatalogJournalActionUpdated,
+            service.CatalogJournalSubjectProduct,
+            payloadInstance.Product().Id,
+        )
     }
 }
 
@@ -131,7 +142,12 @@ func (instance *ProductEventSubscriber) onProductDeleted() melodyeventcontract.E
             return productListCacheDeleteErr
         }
 
-        return nil
+        return recordCatalogChange(
+            runtimeInstance,
+            repository.CatalogJournalActionDeleted,
+            service.CatalogJournalSubjectProduct,
+            payloadInstance.ProductId(),
+        )
     }
 }
 

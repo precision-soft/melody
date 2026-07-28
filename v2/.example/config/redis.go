@@ -4,6 +4,9 @@ import (
     "time"
 
     melodyapplicationcontract "github.com/precision-soft/melody/v2/application/contract"
+    melodycache "github.com/precision-soft/melody/v2/cache"
+    melodycachecontract "github.com/precision-soft/melody/v2/cache/contract"
+    melodycontainer "github.com/precision-soft/melody/v2/container"
     melodycontainercontract "github.com/precision-soft/melody/v2/container/contract"
     melodyexception "github.com/precision-soft/melody/v2/exception"
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v2"
@@ -17,17 +20,18 @@ const (
     ServiceExampleRedisCache      = "service.example.redis.cache"
     ServiceExampleRedisConnection = "service.example.redis.connection"
 
-    /* the demo keys carry a prefix of their own. The three example applications share one redis in development, and the rate-limit counter in particular is asserted on exactly by the end-to-end harness, so a prefix shared between majors would have one application spend another's budget. */
-    redisCacheKeyPrefix     = "melody-example-app:demo:"
-    redisRateLimitKeyPrefix = "melody-example-app:rate_limit:"
+    /* every key this application writes carries its major in the prefix. The three example applications share one redis in development, the cache holds gob-encoded entities whose wire format is keyed on the fully qualified type name — which carries the major — and the rate-limit counter is asserted on exactly by the end-to-end harness. A prefix shared between majors would have one application read entries it cannot decode and spend another's budget. */
+    redisCacheKeyPrefix     = "melody-example-v2:cache:"
+    redisRateLimitKeyPrefix = "melody-example-v2:rate_limit:"
 
-    redisRateLimitAllowance = 5
+    /* the allowance covers a person editing the nomenclature and stops a script: a burst of catalogue writes from one address is refused until the window rolls over. */
+    redisRateLimitAllowance = 30
     redisRateLimitWindow    = time.Minute
 )
 
 /* buildRedis opens the client while the modules are wired, because the rate-limit middleware is handed a live limiter at the moment a route is declared and refuses a nil one.
 
-An unreachable endpoint is a warning rather than a boot failure. The shipped .env points at the docker-compose service names, which do not resolve outside that network, so panicking here would make `go run .` on a laptop — and every command-line invocation in a machine without the stack — die at boot over a demo. The routes are simply not registered, and the end-to-end harness turns the soft failure back into a hard one where it knows redis is up. */
+An unreachable endpoint is a warning rather than a boot failure. The shipped .env points at the docker-compose service names, which do not resolve outside that network, so panicking here would make `go run .` on a laptop — and every command-line invocation on a machine without the stack — die at boot. The nomenclature simply runs uncached and unthrottled, and the end-to-end harness turns the soft failure back into a hard one where it knows redis is up. */
 func (instance *Module) buildRedis(kernelInstance melodykernelcontract.Kernel) {
     address := parameterValue(kernelInstance, ParameterRedisAddress)
     if "" == address {
@@ -43,7 +47,7 @@ func (instance *Module) buildRedis(kernelInstance melodykernelcontract.Kernel) {
     client, openErr := provider.Open(newConfigurationResolver(kernelInstance))
     if nil != openErr {
         melodylogging.EmergencyLogger().Warning(
-            "the example could not reach redis, so its cache and rate-limit demos are not registered",
+            "the example could not reach redis, so the nomenclature runs uncached and its writes are not throttled",
             melodyexception.LogContext(openErr),
         )
 
@@ -105,7 +109,6 @@ func (instance *Module) registerRedisServices(registrar melodyapplicationcontrac
         },
     )
 
-    /* the backend is published under the example's own name rather than as the framework's cache backend. The application caches domain entities through a gob serializer, and gob keys its wire format on the fully qualified type name — which carries the major — so pointing the shared cache at one redis would have the three example applications write entries none of the others can decode. The demo below stores raw bytes, which cross majors safely. */
     registrar.RegisterService(
         ServiceExampleRedisCache,
         func(resolver melodycontainercontract.Resolver) (*melodyrueidiscache.BackendService, error) {
@@ -116,6 +119,16 @@ func (instance *Module) registerRedisServices(registrar melodyapplicationcontrac
             }
 
             return cacheBackend, nil
+        },
+    )
+
+    /* the same backend also becomes the framework's, so the nomenclature itself is cached in redis rather than only inside this process — which is what lets the catalogue survive a restart warm, and what lets the end-to-end harness read the listing key out of band instead of taking the application's word for it.
+
+    The application caches domain entities through a gob serializer, and gob keys its wire format on the fully qualified type name, which carries the major. Three example applications sharing one redis would therefore write entries none of the others can decode — the per-major key prefix above is what keeps them apart, and it is the reason this registration is safe. */
+    registrar.RegisterService(
+        melodycache.ServiceCacheBackend,
+        func(resolver melodycontainercontract.Resolver) (melodycachecontract.Backend, error) {
+            return melodycontainer.FromResolver[*melodyrueidiscache.BackendService](resolver, ServiceExampleRedisCache)
         },
     )
 }

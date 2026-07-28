@@ -2,6 +2,7 @@ package subscriber
 
 import (
     "github.com/precision-soft/melody/v2/.example/event"
+    "github.com/precision-soft/melody/v2/.example/repository"
     "github.com/precision-soft/melody/v2/.example/service"
     melodycache "github.com/precision-soft/melody/v2/cache"
     melodyevent "github.com/precision-soft/melody/v2/event"
@@ -52,7 +53,12 @@ func (instance *CurrencyEventSubscriber) onCurrencyCreated() melodyeventcontract
             return listDeleteErr
         }
 
-        return nil
+        return recordCatalogChange(
+            runtimeInstance,
+            repository.CatalogJournalActionCreated,
+            service.CatalogJournalSubjectCurrency,
+            payloadInstance.Currency().Id,
+        )
     }
 }
 
@@ -79,7 +85,12 @@ func (instance *CurrencyEventSubscriber) onCurrencyUpdated() melodyeventcontract
             return listDeleteErr
         }
 
-        return nil
+        return recordCatalogChange(
+            runtimeInstance,
+            repository.CatalogJournalActionUpdated,
+            service.CatalogJournalSubjectCurrency,
+            payloadInstance.Currency().Id,
+        )
     }
 }
 
@@ -106,7 +117,12 @@ func (instance *CurrencyEventSubscriber) onCurrencyDeleted() melodyeventcontract
             return listDeleteErr
         }
 
-        return nil
+        return recordCatalogChange(
+            runtimeInstance,
+            repository.CatalogJournalActionDeleted,
+            service.CatalogJournalSubjectCurrency,
+            payloadInstance.CurrencyId(),
+        )
     }
 }
 

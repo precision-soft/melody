@@ -15,15 +15,6 @@ const (
 
     IntegrationPrefix = "/integration"
 
-    IntegrationCacheName    = "example.integration.cache"
-    IntegrationCachePattern = IntegrationPrefix + "/cache/"
-
-    IntegrationDatabaseName    = "example.integration.database"
-    IntegrationDatabasePattern = IntegrationPrefix + "/database/"
-
-    IntegrationRateLimitName    = "example.integration.ratelimit"
-    IntegrationRateLimitPattern = IntegrationPrefix + "/ratelimit/"
-
     IntegrationReportName    = "example.integration.report"
     IntegrationReportPattern = IntegrationPrefix + "/report/"
 

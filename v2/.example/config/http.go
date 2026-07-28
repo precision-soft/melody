@@ -35,53 +35,37 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     router.HandleNamed(route.ProductsListPageName, "GET", route.ProductsListPagePattern, handlerproduct.ListPageHandler())
     router.HandleNamed(route.ProductsCreatePageName, "GET", route.ProductsCreatePagePattern, handlerproduct.CreatePageHandler())
     router.HandleNamed(route.ProductsUpdatePageName, "GET", route.ProductsUpdatePagePattern, handlerproduct.UpdatePageHandler())
-    router.HandleNamed(route.ProductsApiCreateName, "POST", route.ProductsApiCreatePattern, handlerproduct.ApiCreateHandler())
+    router.HandleNamed(route.ProductsApiCreateName, "POST", route.ProductsApiCreatePattern, instance.throttledWrite(handlerproduct.ApiCreateHandler()))
     router.HandleNamed(route.ProductsApiReadAllName, "GET", route.ProductsApiReadAllPattern, handlerproduct.ApiReadAllHandler())
     router.HandleNamed(route.ProductsApiReadName, "GET", route.ProductsApiReadPattern, handlerproduct.ApiReadHandler())
-    router.HandleNamed(route.ProductsApiUpdateName, "PUT", route.ProductsApiUpdatePattern, handlerproduct.ApiUpdateHandler())
-    router.HandleNamed(route.ProductsApiDeleteName, "DELETE", route.ProductsApiDeletePattern, handlerproduct.ApiDeleteHandler())
+    router.HandleNamed(route.ProductsApiUpdateName, "PUT", route.ProductsApiUpdatePattern, instance.throttledWrite(handlerproduct.ApiUpdateHandler()))
+    router.HandleNamed(route.ProductsApiDeleteName, "DELETE", route.ProductsApiDeletePattern, instance.throttledWrite(handlerproduct.ApiDeleteHandler()))
 
     router.HandleNamed(route.UsersListPageName, "GET", route.UsersListPagePattern, handleruser.ListPageHandler())
     router.HandleNamed(route.UsersCreatePageName, "GET", route.UsersCreatePagePattern, handleruser.CreatePageHandler())
     router.HandleNamed(route.UsersUpdatePageName, "GET", route.UsersUpdatePagePattern, handleruser.UpdatePageHandler())
-    router.HandleNamed(route.UsersApiCreateName, "POST", route.UsersApiCreatePattern, handleruser.ApiCreateHandler())
+    router.HandleNamed(route.UsersApiCreateName, "POST", route.UsersApiCreatePattern, instance.throttledWrite(handleruser.ApiCreateHandler()))
     router.HandleNamed(route.UsersApiReadAllName, "GET", route.UsersApiReadAllPattern, handleruser.ApiReadAllHandler())
     router.HandleNamed(route.UsersApiReadName, "GET", route.UsersApiReadPattern, handleruser.ApiReadHandler())
-    router.HandleNamed(route.UsersApiUpdateName, "PUT", route.UsersApiUpdatePattern, handleruser.ApiUpdateHandler())
-    router.HandleNamed(route.UsersApiDeleteName, "DELETE", route.UsersApiDeletePattern, handleruser.ApiDeleteHandler())
+    router.HandleNamed(route.UsersApiUpdateName, "PUT", route.UsersApiUpdatePattern, instance.throttledWrite(handleruser.ApiUpdateHandler()))
+    router.HandleNamed(route.UsersApiDeleteName, "DELETE", route.UsersApiDeletePattern, instance.throttledWrite(handleruser.ApiDeleteHandler()))
 }
 
-/* registerIntegrationRoutes declares only what the environment actually gave the example. A demo route whose backend was never wired would answer 500 to every request and say nothing about why, so an unconfigured integration simply has no route. */
+/* throttledWrite puts an endpoint that changes the nomenclature behind the shared per-address budget. The reads are left alone deliberately: a catalogue is meant to be browsed, and it is the writes that a runaway script turns into damage.
+
+Without redis there is no limiter and the handler is returned untouched, which is the same rule the rest of the example follows — an integration the environment did not give it is absent rather than broken. */
+func (instance *Module) throttledWrite(next melodyhttpcontract.Handler) melodyhttpcontract.Handler {
+    if nil == instance.redisRateLimiter {
+        return next
+    }
+
+    rateLimitConfig := melodyhttpmiddleware.NewRateLimitConfig(instance.redisRateLimiter, nil, nil)
+
+    return melodyhttpmiddleware.RateLimitMiddleware(rateLimitConfig)(next)
+}
+
+/* registerIntegrationRoutes declares only what the environment actually gave the example. A route whose backend was never wired would answer 500 to every request and say nothing about why, so an unconfigured integration simply has no route. */
 func (instance *Module) registerIntegrationRoutes(router melodyhttpcontract.Router) {
-    if nil != instance.redisCacheBackend {
-        router.HandleNamed(
-            route.IntegrationCacheName,
-            "GET",
-            route.IntegrationCachePattern,
-            handler.CacheDemoHandler(instance.redisCacheBackend),
-        )
-    }
-
-    if nil != instance.redisRateLimiter {
-        rateLimitConfig := melodyhttpmiddleware.NewRateLimitConfig(instance.redisRateLimiter, nil, nil)
-
-        router.HandleNamed(
-            route.IntegrationRateLimitName,
-            "GET",
-            route.IntegrationRateLimitPattern,
-            melodyhttpmiddleware.RateLimitMiddleware(rateLimitConfig)(handler.RateLimitDemoHandler()),
-        )
-    }
-
-    if nil != instance.databaseRegistry {
-        router.HandleNamed(
-            route.IntegrationDatabaseName,
-            "GET",
-            route.IntegrationDatabasePattern,
-            handler.DatabaseDemoHandler(),
-        )
-    }
-
     router.HandleNamed(
         route.IntegrationReportName,
         "GET",

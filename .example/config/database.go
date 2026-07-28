@@ -52,6 +52,15 @@ func (instance *Module) buildDatabase(kernelInstance melodykernelcontract.Kernel
     instance.databaseRegistry = registry
 }
 
+/* databaseServiceName names the connection when the environment gave the example one, and answers with the empty string when it did not. The repositories read that answer to decide which of their two implementations they are, so the decision is made once, here, by the code that knows whether the dial was even attempted. */
+func (instance *Module) databaseServiceName() string {
+    if nil == instance.databaseRegistry {
+        return ""
+    }
+
+    return ServiceExampleDatabase
+}
+
 func (instance *Module) registerDatabaseServices(registrar melodyapplicationcontract.ServiceRegistrar) {
     if nil == instance.databaseRegistry {
         return
@@ -75,7 +84,7 @@ func (instance *Module) registerDatabaseServices(registrar melodyapplicationcont
     )
 
     registrar.RegisterService(
-        repository.ServiceCatalogNoteRepository,
-        repository.CatalogNoteRepositoryProvider(ServiceExampleDatabase),
+        repository.ServiceCatalogJournalRepository,
+        repository.CatalogJournalRepositoryProvider(ServiceExampleDatabase),
     )
 }

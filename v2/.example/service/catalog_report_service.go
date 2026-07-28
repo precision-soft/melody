@@ -5,6 +5,7 @@ import (
     "strconv"
     "time"
 
+    "github.com/precision-soft/melody/v2/.example/entity"
     melodyclockcontract "github.com/precision-soft/melody/v2/clock/contract"
     melodycontainer "github.com/precision-soft/melody/v2/container"
     melodycontainercontract "github.com/precision-soft/melody/v2/container/contract"
@@ -35,27 +36,33 @@ type CatalogReport struct {
 
 The clock is injected rather than read from the wall, which is what makes the stamp assertable: a frozen clock lets a test state the exact instant a report carries and the exact instant a cached one still carries, neither of which can be written against time.Now. */
 type CatalogReportService struct {
-    clock          melodyclockcontract.Clock
-    backend        CatalogReportBackend
-    noteRepository catalogNoteSource
+    clock             melodyclockcontract.Clock
+    backend           CatalogReportBackend
+    productRepository catalogSizeSource
+    journalRepository catalogJournalSource
 }
 
-/* catalogNoteSource is what the report needs from the note repository. It carries EnsureSchema beside Count because the report must not depend on another route having run first: the demo table is created by whichever path reaches it, and a report that assumed the table already existed failed with a missing-table error on a fresh database. */
-type catalogNoteSource interface {
-    EnsureSchema(ctx context.Context) error
+/* catalogSizeSource is what the report needs from the product repository: how large the nomenclature currently is. */
+type catalogSizeSource interface {
+    All(ctx context.Context) ([]*entity.Product, error)
+}
 
+/* catalogJournalSource is what the report needs from the journal: how many changes it has recorded. The journal creates its own table when it is built, so the report can ask for the count without first making sure there is somewhere to count. */
+type catalogJournalSource interface {
     Count(ctx context.Context) (int, error)
 }
 
 func NewCatalogReportService(
     clockInstance melodyclockcontract.Clock,
     backend CatalogReportBackend,
-    noteRepository catalogNoteSource,
+    productRepository catalogSizeSource,
+    journalRepository catalogJournalSource,
 ) *CatalogReportService {
     return &CatalogReportService{
-        clock:          clockInstance,
-        backend:        backend,
-        noteRepository: noteRepository,
+        clock:             clockInstance,
+        backend:           backend,
+        productRepository: productRepository,
+        journalRepository: journalRepository,
     }
 }
 
@@ -78,22 +85,39 @@ func (instance *CatalogReportService) Report(ctx context.Context) (*CatalogRepor
         }
     }
 
-    noteCount := 0
-    if nil != instance.noteRepository {
-        ensureSchemaErr := instance.noteRepository.EnsureSchema(ctx)
-        if nil != ensureSchemaErr {
-            return nil, ensureSchemaErr
+    return instance.recompute(ctx, recordedAt)
+}
+
+/* Refresh takes a new reading and leaves it in the cache whatever was there before, which is what the scheduled command calls: a report nobody asked for in the last window is the one that would otherwise be computed inside a request. */
+func (instance *CatalogReportService) Refresh(ctx context.Context) (*CatalogReport, error) {
+    return instance.recompute(ctx, instance.clock.Now())
+}
+
+func (instance *CatalogReportService) recompute(ctx context.Context, recordedAt time.Time) (*CatalogReport, error) {
+    productCount := 0
+    if nil != instance.productRepository {
+        products, allErr := instance.productRepository.All(ctx)
+        if nil != allErr {
+            return nil, allErr
         }
 
-        count, countErr := instance.noteRepository.Count(ctx)
+        productCount = len(products)
+    }
+
+    /* without a database there is no journal, and the report says so with a count of zero rather than by being absent: the reading is about the catalogue, and the catalogue is there either way */
+    journalCount := 0
+    if nil != instance.journalRepository {
+        count, countErr := instance.journalRepository.Count(ctx)
         if nil != countErr {
             return nil, countErr
         }
 
-        noteCount = count
+        journalCount = count
     }
 
-    payload := "notes=" + strconv.Itoa(noteCount) + " recorded_at=" + recordedAt.UTC().Format(time.RFC3339)
+    payload := "products=" + strconv.Itoa(productCount) +
+        " journal=" + strconv.Itoa(journalCount) +
+        " recorded_at=" + recordedAt.UTC().Format(time.RFC3339)
 
     if nil != instance.backend {
         setErr := instance.backend.Set(catalogReportCacheKey, []byte(payload), catalogReportCacheTtl)
