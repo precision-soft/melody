@@ -5,16 +5,30 @@ import (
     "fmt"
     "io"
     "net/http"
+    "net/http/cookiejar"
     "strings"
     "time"
 )
 
-/* exampleRateLimitBudget mirrors the limit the example wires on /ratelimit/demo (5 per minute). */
-const exampleRateLimitBudget = 5
+/* exampleRateLimitBudget mirrors the write allowance the example wires on the nomenclature's write endpoints
+(config/redis.go, catalogWriteAllowance). */
+const exampleRateLimitBudget = 30
 
-/* exampleRateLimitPrefix mirrors the key prefix the example gives its redis rate limiter, so the harness can
-clear the counters of a previous run rather than inherit a spent budget inside the same fixed window. */
-const exampleRateLimitPrefix = "melody-example:rate_limit:"
+/* exampleRateLimitPrefix mirrors the key prefix the supervised v3 example gives its redis rate limiter, so the
+harness can clear the counters of a previous run rather than inherit a spent budget inside the same fixed
+window. It carries the major for the same reason the application does: three applications share one redis. */
+const exampleRateLimitPrefix = "melody-example-v3:rate_limit:"
+
+/* the throttled endpoint is a real one — creating a product — so the body below is deliberately invalid: the
+rate-limit middleware runs before the handler, so a refused write still spends the allowance and the catalogue
+is left exactly as it was. */
+const (
+    exampleThrottledWriteRoute = "/products/api/create/"
+    exampleThrottledWriteBody  = `{"name":""}`
+
+    exampleHttpEditorUsername = "editor"
+    exampleHttpEditorPassword = "editor"
+)
 
 /* runExampleHttpCheck drives the running .example application over real HTTP — the only place the whole
 chain is exercised together: nginx sets X-Forwarded-For, the forwarded-client-ip resolver decides which hop
@@ -26,11 +40,16 @@ Two properties matter and neither can be proven in-process:
   - straight to the application from an UNTRUSTED peer (loopback is outside the example's trusted proxy
     list) a spoofed X-Forwarded-For is ignored, so an attacker cannot mint a fresh budget per fake address.
 
+The budget sits on what changes the nomenclature, so the section signs in first: the firewall answers an
+anonymous write with 401 before the limiter ever sees it, and a section that never reached the limiter would
+report a budget it had not measured.
+
 The section runs when EXAMPLE_BASE_URL is set and needs REDIS_ADDRESS to clear the counters first. */
 func runExampleHttpCheck(baseUrl string, loadBalancerUrl string, redisAddress string) {
     resetExampleRateLimitCounters("example http", redisAddress, exampleRateLimitPrefix)
 
-    client := &http.Client{Timeout: 5 * time.Second}
+    client := newExampleHttpClient()
+    signInExampleHttpEditor(client, baseUrl, "")
 
     /* a spoofed forwarded address from an untrusted peer must not mint a fresh budget: every call below is
        counted against the loopback peer address, so the budget is spent once and stays spent */
@@ -38,13 +57,13 @@ func runExampleHttpCheck(baseUrl string, loadBalancerUrl string, redisAddress st
     for attempt := 1; attempt <= exampleRateLimitBudget+1; attempt++ {
         spoofed := fmt.Sprintf("203.0.113.%d", attempt)
 
-        status := requestRateLimitDemo(client, baseUrl, "", spoofed)
+        status := requestThrottledWrite(client, baseUrl, "", spoofed)
         if http.StatusTooManyRequests == status {
             spentAt = attempt
             break
         }
-        if http.StatusOK != status {
-            fail("example http: direct call %d returned %d, wanted 200", attempt, status)
+        if http.StatusUnauthorized == status || http.StatusForbidden == status {
+            fail("example http: direct call %d returned %d — the section reached the firewall, not the limiter", attempt, status)
         }
     }
 
@@ -59,10 +78,16 @@ func runExampleHttpCheck(baseUrl string, loadBalancerUrl string, redisAddress st
     pass("example rate limit ignored a spoofed X-Forwarded-For from an untrusted peer (budget spent once)")
 
     /* the limiter keeps denying while the window stands */
-    if http.StatusTooManyRequests != requestRateLimitDemo(client, baseUrl, "", "198.51.100.7") {
+    if http.StatusTooManyRequests != requestThrottledWrite(client, baseUrl, "", "198.51.100.7") {
         fail("example http: a new spoofed address was admitted after the budget was spent")
     }
     pass("example rate limit stayed closed for a new spoofed address inside the window")
+
+    /* the budget is on what changes the catalogue, so browsing it must still answer */
+    if http.StatusOK != requestExampleListing(client, baseUrl, "") {
+        fail("example http: the product listing was refused while the write budget was spent — the limit reached the reads")
+    }
+    pass("example rate limit left the reads alone while the writes were refused")
 
     runExampleLoadBalancerCheck(client, loadBalancerUrl, redisAddress)
 }
@@ -83,15 +108,19 @@ func runExampleLoadBalancerCheck(client *http.Client, loadBalancerUrl string, re
 
     resetExampleRateLimitCounters("example http", redisAddress, exampleRateLimitPrefix)
 
+    /* the cookie jar keys sessions by the host of the url, so the session established against the direct
+       address is not sent to the load balancer: this half signs in through the load balancer itself */
+    signInExampleHttpEditor(client, loadBalancerUrl, exampleHostHeader)
+
     balancerSpentAt := 0
     for attempt := 1; attempt <= exampleRateLimitBudget+1; attempt++ {
-        status := requestRateLimitDemo(client, loadBalancerUrl, exampleHostHeader, "")
+        status := requestThrottledWrite(client, loadBalancerUrl, exampleHostHeader, "")
         if http.StatusTooManyRequests == status {
             balancerSpentAt = attempt
             break
         }
-        if http.StatusOK != status {
-            fail("example http: load balancer call %d returned %d, wanted 200", attempt, status)
+        if http.StatusUnauthorized == status || http.StatusForbidden == status {
+            fail("example http: load balancer call %d returned %d — the section reached the firewall, not the limiter", attempt, status)
         }
     }
 
@@ -108,11 +137,78 @@ func runExampleLoadBalancerCheck(client *http.Client, loadBalancerUrl string, re
 /* exampleHostHeader is the virtual host the load balancer serves the example under. */
 const exampleHostHeader = "example.melody.localhost.precision-soft.com"
 
-func requestRateLimitDemo(client *http.Client, baseUrl string, hostHeader string, forwardedFor string) int {
-    request, requestErr := http.NewRequest("GET", strings.TrimRight(baseUrl, "/")+"/ratelimit/demo", nil)
+/* newExampleHttpClient keeps a cookie jar so the session the sign-in establishes travels on every following
+call, exactly as a browser would send it. Redirects are not followed: a redirect answer to a write would
+otherwise be read as a success. */
+func newExampleHttpClient() *http.Client {
+    jar, jarErr := cookiejar.New(nil)
+    if nil != jarErr {
+        fail("example http: open a cookie jar: %v", jarErr)
+    }
+
+    return &http.Client{
+        Timeout: 5 * time.Second,
+        Jar:     jar,
+        CheckRedirect: func(request *http.Request, previous []*http.Request) error {
+            return http.ErrUseLastResponse
+        },
+    }
+}
+
+func signInExampleHttpEditor(client *http.Client, baseUrl string, hostHeader string) {
+    body := "username=" + exampleHttpEditorUsername + "&password=" + exampleHttpEditorPassword
+
+    request, requestErr := http.NewRequest("POST", strings.TrimRight(baseUrl, "/")+"/login/", strings.NewReader(body))
+    if nil != requestErr {
+        fail("example http: build the sign-in request: %v", requestErr)
+    }
+
+    request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+    request.Header.Set("Accept", "application/json")
+    if "" != hostHeader {
+        request.Host = hostHeader
+    }
+
+    response, responseErr := client.Do(request)
+    if nil != responseErr {
+        fail("example http: sign in: %v", responseErr)
+    }
+    defer response.Body.Close()
+
+    _, _ = io.Copy(io.Discard, response.Body)
+
+    if http.StatusOK != response.StatusCode {
+        fail(
+            "example http: the seeded editor could not sign in (%d), so the throttled write cannot be reached",
+            response.StatusCode,
+        )
+    }
+}
+
+func requestThrottledWrite(client *http.Client, baseUrl string, hostHeader string, forwardedFor string) int {
+    return requestExample(client, "POST", baseUrl, exampleThrottledWriteRoute, hostHeader, forwardedFor, exampleThrottledWriteBody)
+}
+
+func requestExampleListing(client *http.Client, baseUrl string, hostHeader string) int {
+    return requestExample(client, "GET", baseUrl, "/products/api/read/", hostHeader, "", "")
+}
+
+func requestExample(client *http.Client, method string, baseUrl string, path string, hostHeader string, forwardedFor string, body string) int {
+    var reader io.Reader
+    if "" != body {
+        reader = strings.NewReader(body)
+    }
+
+    request, requestErr := http.NewRequest(method, strings.TrimRight(baseUrl, "/")+path, reader)
     if nil != requestErr {
         fail("example http: build request: %v", requestErr)
     }
+
+    if "" != body {
+        request.Header.Set("Content-Type", "application/json")
+    }
+
+    request.Header.Set("Accept", "application/json")
 
     if "" != hostHeader {
         request.Host = hostHeader

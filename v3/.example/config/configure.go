@@ -97,7 +97,7 @@ func Configure(app *melodyapplication.Application) {
 
         app.RegisterModule(melodyrueidiscache.NewModule(melodyrueidiscache.ModuleConfig{
             Client: moduleInstance.redisClient,
-            Prefix: "melody-example:",
+            Prefix: redisCacheKeyPrefix,
         }))
     }
 }

@@ -30,6 +30,7 @@ Sections:
   - OBJECT STORAGE PUT     (localstack) — the declared-size contract: a short declaration is refused before the bucket is touched, so the object already at the key survives
   - MAIL                   (mailpit)  — smtp transport sends a whole session under the per-step deadline; mailpit confirms receipt
   - EXAMPLE OVER HTTP      (example)  — forwarded-client-ip trust boundary and the rate limit over real HTTP
+  - THREE HOSTS            (example)  — the load balancer's three vhosts each reach their own major, told apart by which catalogue table the write lands in
   - OPENAPI SERVED         (example)  — the document the SERVING process builds: the booted routes, a typed response's component schema, every $ref resolving
   - TRANSLATION            (example)  — both catalogues, all three ICU plural branches, the locale fallback chain, and the token firewall's own json entry point
   - TOKEN AUTHENTICATION   (example)  — a token minted by the application's own auth:token command; refusals for no header, a foreign key, a flipped signature and alg:none
@@ -46,7 +47,7 @@ Sections:
 
 The eleven example-over-http sections all drive the ONE application the dev container supervises on
 EXAMPLE_BASE_URL, so they share a fixture and observe two rules stated in examplehttp.go beside the calls: no
-section other than EXAMPLE OVER HTTP may call /ratelimit/demo (it asserts an exact exhaustion point), and nothing
+section other than EXAMPLE OVER HTTP may write to the nomenclature (it asserts an exact exhaustion point of the write budget), and nothing
 may touch /outbox/* (a stack.sh check asserts its sent-count delta). METRICS runs last of the group because its
 assertions are exact request-count deltas.
 
@@ -175,6 +176,15 @@ func main() {
             infrastructureSections++
             section("EXAMPLE OVER HTTP (live example application)")
             runExampleHttpCheck(baseUrl, os.Getenv("EXAMPLE_LOAD_BALANCER_URL"), redisAddress)
+            sections++
+        }
+
+        if "" == os.Getenv("EXAMPLE_LOAD_BALANCER_URL") {
+            fmt.Println("\nSKIPPED: THREE HOSTS needs EXAMPLE_LOAD_BALANCER_URL to reach the vhosts")
+        } else {
+            infrastructureSections++
+            section("THREE HOSTS (live load balancer)")
+            runThreeHostsCheck(os.Getenv("EXAMPLE_LOAD_BALANCER_URL"), os.Getenv("MYSQL_DSN"), redisAddress)
             sections++
         }
 

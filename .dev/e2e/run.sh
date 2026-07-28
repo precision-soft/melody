@@ -35,7 +35,7 @@
 # joins the redis backplane as a second replica) and METRICS, which runs LAST because it asserts exact
 # request-count deltas and any later request would move them.
 #
-# Because all eleven share one application, no new section may call /ratelimit/demo (EXAMPLE OVER HTTP asserts the
+# Because all eleven share one application, no new section may write to the nomenclature (EXAMPLE OVER HTTP asserts the
 # exact call at which the budget is exhausted), none may log in or carry a cookie jar, and none may touch
 # /outbox/* (a stack.sh check asserts its sent-count delta). The rule is repeated in .dev/e2e/examplehttp.go,
 # beside the calls it governs.

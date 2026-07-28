@@ -17,6 +17,7 @@ import (
 func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.Kernel) []melodyclicontract.Command {
     commands := []melodyclicontract.Command{
         cli.NewAppInfoCommand(),
+        cli.NewCatalogReportRefreshCommand(),
         cli.NewProductListCommand(),
         cli.NewMessageBusDemoCommand(
             instance.messageBusDispatch,

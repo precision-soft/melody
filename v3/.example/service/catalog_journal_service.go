@@ -29,6 +29,7 @@ type CatalogJournalService struct {
     clock             melodyclockcontract.Clock
 }
 
+//melody:service ServiceCatalogJournalService
 func NewCatalogJournalService(
     journalRepository repository.CatalogJournalRepository,
     clockInstance melodyclockcontract.Clock,

@@ -56,6 +56,9 @@ type Module struct {
 
     redisClient rueidis.Client
 
+    /* catalogWriteThrottle is nil when the environment gave the example no redis: there is then no shared counter, and the nomenclature's writes go through unthrottled rather than being refused. */
+    catalogWriteThrottle melodyhttpcontract.Middleware
+
     storageClient *minio.Client
     storageBucket string
     storage       *melodyawss3.Storage

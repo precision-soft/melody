@@ -32,11 +32,57 @@ services:
         ports:
             - "${DEV_HTTP_HOST_PORT:-8180}:8080"
 
+    # the v1 and v2 example applications, supervised the same way the v3 one is. They are the same image
+    # with a different example directory: the entrypoint takes MELODY_DEV_EXAMPLE_DIR, so nothing about it
+    # is per-major. No host port is published — they are reached through the load balancer by hostname,
+    # which keeps the host port map (.dev/docker/.env.local, per developer) out of this entirely.
+    dev-v1:
+        build:
+            context: ${RELATIVE_PATH_TO_ROOT}
+            dockerfile: ${DOCKER_PATH}/Dockerfile
+            args:
+                DOCKER_PATH: ${DOCKER_PATH}
+                WORKDIR: ${CONTAINER_ROOT_PATH}
+                CONFIG_PATH: ${DOCKER_PATH}
+                ROOT_PATH: ${CONTAINER_ROOT_PATH}
+        restart: 'no'
+        environment:
+            MELODY_DEV_REFLEX_ENABLED: ${MELODY_DEV_V1_REFLEX_ENABLED:-1}
+            MELODY_DEV_EXAMPLE_DIR: /app/.example
+            MELODY_DEV_RUN_COMMAND: ${MELODY_DEV_RUN_COMMAND:-go run .}
+        volumes:
+            - ${RELATIVE_PATH_TO_ROOT}:${CONTAINER_ROOT_PATH}
+            - go-mod-cache:/go/pkg/mod
+            - go-build-cache:/go/cache
+            - ${RELATIVE_PATH_TO_ROOT}/.dev-data/bash/.bash_history:/home/.bash_history
+
+    dev-v2:
+        build:
+            context: ${RELATIVE_PATH_TO_ROOT}
+            dockerfile: ${DOCKER_PATH}/Dockerfile
+            args:
+                DOCKER_PATH: ${DOCKER_PATH}
+                WORKDIR: ${CONTAINER_ROOT_PATH}
+                CONFIG_PATH: ${DOCKER_PATH}
+                ROOT_PATH: ${CONTAINER_ROOT_PATH}
+        restart: 'no'
+        environment:
+            MELODY_DEV_REFLEX_ENABLED: ${MELODY_DEV_V2_REFLEX_ENABLED:-1}
+            MELODY_DEV_EXAMPLE_DIR: /app/v2/.example
+            MELODY_DEV_RUN_COMMAND: ${MELODY_DEV_RUN_COMMAND:-go run .}
+        volumes:
+            - ${RELATIVE_PATH_TO_ROOT}:${CONTAINER_ROOT_PATH}
+            - go-mod-cache:/go/pkg/mod
+            - go-build-cache:/go/cache
+            - ${RELATIVE_PATH_TO_ROOT}/.dev-data/bash/.bash_history:/home/.bash_history
+
     load-balancer:
         image: nginx:1.27-alpine
         restart: 'no'
         depends_on:
             - dev
+            - dev-v1
+            - dev-v2
         volumes:
             - ${RELATIVE_PATH_TO_ROOT}/${DOCKER_PATH}/load-balancer/vhost.conf:/etc/nginx/conf.d/default.conf:ro
         ports:

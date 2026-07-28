@@ -103,8 +103,9 @@ func RegisterGeneratedServices(registrar containercontract.Registrar) {
         },
     )
 
-    melodycontainer.MustRegisterType(
+    melodycontainer.MustRegister(
         registrar,
+        service.ServiceCatalogJournalService,
         func(resolver containercontract.Resolver) (*service.CatalogJournalService, error) {
             journalRepository, journalRepositoryErr := melodycontainer.FromResolverByType[repository.CatalogJournalRepository](resolver)
             if nil != journalRepositoryErr {
@@ -264,6 +265,21 @@ func RegisterGeneratedServices(registrar containercontract.Registrar) {
                 return nil, productServiceErr
             }
 
+            journalRepository, journalRepositoryErr := melodycontainer.FromResolverByType[repository.CatalogJournalRepository](resolver)
+            if nil != journalRepositoryErr {
+                return nil, journalRepositoryErr
+            }
+
+            cacheInstance, cacheInstanceErr := melodycontainer.FromResolverByType[contract2.Cache](resolver)
+            if nil != cacheInstanceErr {
+                return nil, cacheInstanceErr
+            }
+
+            clockInstance, clockInstanceErr := melodycontainer.FromResolverByType[contract.Clock](resolver)
+            if nil != clockInstanceErr {
+                return nil, clockInstanceErr
+            }
+
             catalogTitle := configuration.MustGet("app.catalog_title").MustString()
 
             maxItemsPerPage, maxItemsPerPageErr := configuration.MustGet("app.max_items_per_page").Int()
@@ -279,6 +295,9 @@ func RegisterGeneratedServices(registrar containercontract.Registrar) {
             return reporting.NewCatalogReportService(
                 formatter,
                 productService,
+                journalRepository,
+                cacheInstance,
+                clockInstance,
                 catalogTitle,
                 maxItemsPerPage,
                 refreshInterval,

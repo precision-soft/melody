@@ -15,7 +15,7 @@ EXAMPLE_BASE_URL (:8080). That application is a shared fixture, so the constrain
 through this client, and they are stated HERE — beside the calls — rather than in a section a later reader may
 never open:
 
-  - /ratelimit/demo is off limits. EXAMPLE OVER HTTP (http.go) clears the example's redis counters and then
+  - the nomenclature's write endpoints are off limits. EXAMPLE OVER HTTP (http.go) clears the example's redis counters and then
     asserts the EXACT call at which the budget is exhausted; one extra request from anywhere else moves that
     point and turns an unrelated section red for a reason nothing in its own output explains;
   - /outbox/* is off limits. stack.sh's OUTBOX FACTORIES check asserts its sent count GREW because of its own
