@@ -151,7 +151,7 @@ run_live_go_suites() {
 RACE_SUITE_SPECIFICATION_STRING_LIST=(
     ". ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/... ./validation/... ./session/... ./http/... ./internal/..."
     "v2 ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/... ./validation/... ./session/... ./http/... ./internal/..."
-    "v3 ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/... ./mailer/... ./lock/... ./messagebus/... ./validation/... ./openapi/... ./session/... ./http/... ./internal/..."
+    "v3 ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/... ./mailer/... ./lock/... ./messagebus/... ./validation/... ./openapi/... ./session/... ./security/... ./http/... ./internal/..."
     "integrations/cron ./..."
     "integrations/cron/v2 ./..."
     "integrations/cron/v3 ./..."

@@ -13,6 +13,7 @@ import (
     handlerinternalauth "github.com/precision-soft/melody/v3/.example/handler/internalauth"
     handleroutbox "github.com/precision-soft/melody/v3/.example/handler/outbox"
     handlerproduct "github.com/precision-soft/melody/v3/.example/handler/product"
+    "github.com/precision-soft/melody/v3/.example/handler/accesstoken"
     handlersecure "github.com/precision-soft/melody/v3/.example/handler/secure"
     handlerstorage "github.com/precision-soft/melody/v3/.example/handler/storage"
     handlertwofactor "github.com/precision-soft/melody/v3/.example/handler/twofactor"
@@ -53,9 +54,12 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     router.HandleNamed("example.encrypt.roundtrip", "GET", "/encrypt/roundtrip", handler.EncryptRoundTripHandler(instance.cipher))
 
-    if nil != instance.redisClient {
-        router.HandleNamed("example.redis.token.revocation", "GET", "/redis/token/revocation", handler.RedisTokenRevocationHandler())
+    router.HandleNamed(route.AccessTokenIssueName, "POST", route.AccessTokenIssuePattern, accesstoken.IssueHandler())
+    router.HandleNamed(route.AccessTokenRevokeDeviceName, "POST", route.AccessTokenRevokeDevicePattern, accesstoken.RevokeDeviceHandler())
+    router.HandleNamed(route.AccessTokenRevokeUserName, "POST", route.AccessTokenRevokeUserPattern, accesstoken.RevokeUserHandler())
+    router.HandleNamed(route.DeviceIdentityName, "GET", route.DeviceIdentityPattern, handlersecure.MeHandler())
 
+    if nil != instance.redisClient {
         instance.buildCatalogWriteThrottle()
     }
 

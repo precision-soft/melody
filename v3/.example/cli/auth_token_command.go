@@ -1,6 +1,7 @@
 package cli
 
 import (
+    examplesecurity "github.com/precision-soft/melody/v3/.example/security"
     "crypto/hmac"
     "crypto/sha256"
     "encoding/base64"
@@ -40,6 +41,10 @@ func (instance *AuthTokenCommand) Flags() []melodyclicontract.Flag {
             Name:  "role",
             Usage: "role embedded in the token (repeat for multiple)",
         },
+        &melodyclicontract.StringFlag{
+            Name:  "device",
+            Usage: "device the token is issued to; a revocation can then end this device without ending the others",
+        },
         &melodyclicontract.IntFlag{
             Name:  "ttl",
             Usage: "token lifetime in seconds; defaults to 3600",
@@ -72,6 +77,10 @@ func (instance *AuthTokenCommand) Run(
         "roles": roles,
         "iat":   now.Unix(),
         "exp":   now.Add(time.Duration(ttl) * time.Second).Unix(),
+    }
+
+    if device := commandContext.String("device"); "" != device {
+        claims[examplesecurity.DeviceClaim] = device
     }
 
     fmt.Println(signHs256(instance.secret, claims))

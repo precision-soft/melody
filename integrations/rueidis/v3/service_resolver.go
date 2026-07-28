@@ -1,6 +1,8 @@
 package rueidis
 
 import (
+    melodyclock "github.com/precision-soft/melody/v3/clock"
+    clockcontract "github.com/precision-soft/melody/v3/clock/contract"
     "github.com/precision-soft/melody/v3/container"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     melodylock "github.com/precision-soft/melody/v3/lock"
@@ -48,7 +50,15 @@ func RegisterTokenStoreService(registrar ServiceRegistrar, client rueidis.Client
     registrar.RegisterService(
         ServiceTokenStore,
         func(resolver containercontract.Resolver) (securitycontract.RevocableTokenStore, error) {
-            return NewTokenStore(client, options...), nil
+            resolvedOptions := make([]TokenStoreOption, 0, len(options)+1)
+
+            if clockInstance, clockErr := container.FromResolver[clockcontract.Clock](resolver, melodyclock.ServiceClock); nil == clockErr {
+                resolvedOptions = append(resolvedOptions, WithTokenStoreClock(clockInstance))
+            }
+
+            resolvedOptions = append(resolvedOptions, options...)
+
+            return NewTokenStore(client, resolvedOptions...), nil
         },
     )
 }
@@ -59,4 +69,8 @@ func TokenStoreMustFromResolver(resolver containercontract.Resolver) securitycon
 
 func TokenStoreMustFromContainer(serviceContainer containercontract.Container) securitycontract.RevocableTokenStore {
     return container.MustFromResolver[securitycontract.RevocableTokenStore](serviceContainer, ServiceTokenStore)
+}
+
+func EpochRevocableTokenStoreMustFromResolver(resolver containercontract.Resolver) securitycontract.EpochRevocableTokenStore {
+    return container.MustFromResolver[securitycontract.EpochRevocableTokenStore](resolver, ServiceTokenStore)
 }

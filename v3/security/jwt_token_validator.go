@@ -10,6 +10,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/internal"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
@@ -22,6 +23,23 @@ const (
 )
 
 func NewJwtTokenValidator(config JwtConfig) *JwtTokenValidator {
+    return newJwtTokenValidator(config, nil)
+}
+
+func NewJwtTokenValidatorWithRevocationEpoch(
+    config JwtConfig,
+    epochStore securitycontract.RevocationEpochStore,
+) *JwtTokenValidator {
+    if true == internal.IsNilInterface(epochStore) {
+        exception.Panic(exception.NewError("jwt revocation epoch store is nil", nil, nil))
+    }
+
+    config.RejectFutureIssuedAt = true
+
+    return newJwtTokenValidator(config, epochStore)
+}
+
+func newJwtTokenValidator(config JwtConfig, epochStore securitycontract.RevocationEpochStore) *JwtTokenValidator {
     if 0 == len(config.Secret) {
         exception.Panic(exception.NewError("jwt secret is empty", nil, nil))
     }
@@ -41,19 +59,23 @@ func NewJwtTokenValidator(config JwtConfig) *JwtTokenValidator {
         subjectClaim:         subjectClaim,
         rolesClaim:           rolesClaim,
         scopeClaim:           config.ScopeClaim,
+        deviceClaim:          config.DeviceClaim,
         leeway:               config.Leeway,
         allowWithoutExpiry:   config.AllowWithoutExpiry,
         rejectFutureIssuedAt: config.RejectFutureIssuedAt,
         audience:             config.Audience,
         issuer:               config.Issuer,
+        epochStore:           epochStore,
     }
 }
 
 type JwtConfig struct {
-    Secret               []byte
-    SubjectClaim         string
-    RolesClaim           string
-    ScopeClaim           string
+    Secret       []byte
+    SubjectClaim string
+    RolesClaim   string
+    ScopeClaim   string
+    DeviceClaim string
+
     Leeway               time.Duration
     AllowWithoutExpiry   bool
     RejectFutureIssuedAt bool
@@ -66,11 +88,13 @@ type JwtTokenValidator struct {
     subjectClaim         string
     rolesClaim           string
     scopeClaim           string
+    deviceClaim          string
     leeway               time.Duration
     allowWithoutExpiry   bool
     rejectFutureIssuedAt bool
     audience             string
     issuer               string
+    epochStore           securitycontract.RevocationEpochStore
 }
 
 func (instance *JwtTokenValidator) Validate(
@@ -122,7 +146,7 @@ func (instance *JwtTokenValidator) Validate(
         return securitycontract.Claims{}, exception.NewError("jwt payload is not valid json", nil, unmarshalErr)
     }
 
-    expiryErr := instance.verifyTimeClaims(rawClaims, time.Now())
+    issuedAt, expiryErr := instance.verifyTimeClaims(rawClaims, time.Now())
     if nil != expiryErr {
         return securitycontract.Claims{}, expiryErr
     }
@@ -140,13 +164,54 @@ func (instance *JwtTokenValidator) Validate(
     claims := securitycontract.Claims{
         UserIdentifier: subject,
         Roles:          stringSliceClaim(rawClaims, instance.rolesClaim),
+        IssuedAt:       issuedAt,
     }
 
     if "" != instance.scopeClaim {
         claims.Scope = mapClaim(rawClaims, instance.scopeClaim)
     }
 
+    if "" != instance.deviceClaim {
+        claims.DeviceIdentifier = stringClaim(rawClaims, instance.deviceClaim)
+    }
+
+    if revocationErr := instance.verifyRevocationEpoch(runtimeInstance, claims); nil != revocationErr {
+        return securitycontract.Claims{}, revocationErr
+    }
+
     return claims, nil
+}
+
+func (instance *JwtTokenValidator) verifyRevocationEpoch(
+    runtimeInstance runtimecontract.Runtime,
+    claims securitycontract.Claims,
+) error {
+    if nil == instance.epochStore {
+        return nil
+    }
+
+    if true == claims.IssuedAt.IsZero() {
+        return exception.NewError("jwt has no iat claim and a revocation epoch is configured", nil, nil)
+    }
+
+    epoch, epochErr := instance.epochStore.RevocationEpoch(runtimeInstance, claims.UserIdentifier, claims.DeviceIdentifier)
+    if nil != epochErr {
+        return exception.NewError(
+            "jwt revocation epoch is unavailable",
+            map[string]any{"user": claims.UserIdentifier},
+            epochErr,
+        )
+    }
+
+    if true == epoch.IsZero() {
+        return nil
+    }
+
+    if false == claims.IssuedAt.After(epoch) {
+        return exception.NewError("jwt was issued before the revocation epoch", nil, nil)
+    }
+
+    return nil
 }
 
 func mapClaim(rawClaims map[string]any, name string) map[string]any {
@@ -163,48 +228,52 @@ func mapClaim(rawClaims map[string]any, name string) map[string]any {
     return mapValue
 }
 
-func (instance *JwtTokenValidator) verifyTimeClaims(rawClaims map[string]any, now time.Time) error {
+func (instance *JwtTokenValidator) verifyTimeClaims(rawClaims map[string]any, now time.Time) (time.Time, error) {
     expiry, hasExpiry, expiryValid := numericClaim(rawClaims, "exp", false)
     if true == hasExpiry && false == expiryValid {
-        return exception.NewError("jwt exp claim is malformed", nil, nil)
+        return time.Time{}, exception.NewError("jwt exp claim is malformed", nil, nil)
     }
 
     if false == hasExpiry && false == instance.allowWithoutExpiry {
-        return exception.NewError("jwt is missing the required exp claim", nil, nil)
+        return time.Time{}, exception.NewError("jwt is missing the required exp claim", nil, nil)
     }
 
     if true == expiryValid {
         deadline := time.Unix(expiry, 0).Add(instance.leeway)
         if true == now.After(deadline) {
-            return exception.NewError("jwt is expired", nil, nil)
+            return time.Time{}, exception.NewError("jwt is expired", nil, nil)
         }
     }
 
     notBefore, hasNotBefore, notBeforeValid := numericClaim(rawClaims, "nbf", true)
     if true == hasNotBefore && false == notBeforeValid {
-        return exception.NewError("jwt nbf claim is malformed", nil, nil)
+        return time.Time{}, exception.NewError("jwt nbf claim is malformed", nil, nil)
     }
 
     if true == notBeforeValid {
         activation := time.Unix(notBefore, 0).Add(-instance.leeway)
         if true == now.Before(activation) {
-            return exception.NewError("jwt is not yet valid", nil, nil)
+            return time.Time{}, exception.NewError("jwt is not yet valid", nil, nil)
         }
     }
 
     issuedAt, hasIssuedAt, issuedAtValid := numericClaim(rawClaims, "iat", true)
     if true == hasIssuedAt && false == issuedAtValid {
-        return exception.NewError("jwt iat claim is malformed", nil, nil)
+        return time.Time{}, exception.NewError("jwt iat claim is malformed", nil, nil)
     }
 
-    if true == issuedAtValid && true == instance.rejectFutureIssuedAt {
+    if false == issuedAtValid {
+        return time.Time{}, nil
+    }
+
+    if true == instance.rejectFutureIssuedAt {
         issued := time.Unix(issuedAt, 0).Add(-instance.leeway)
         if true == now.Before(issued) {
-            return exception.NewError("jwt is issued in the future", nil, nil)
+            return time.Time{}, exception.NewError("jwt is issued in the future", nil, nil)
         }
     }
 
-    return nil
+    return time.Unix(issuedAt, 0).UTC(), nil
 }
 
 func (instance *JwtTokenValidator) verifyRegisteredClaims(rawClaims map[string]any) error {

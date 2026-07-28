@@ -93,6 +93,9 @@ func Configure(app *melodyapplication.Application) {
         app.RegisterModule(melodyrueidis.NewModule(melodyrueidis.ModuleConfig{
             Client:       moduleInstance.redisClient,
             AsTokenStore: true,
+            TokenStoreOptions: []melodyrueidis.TokenStoreOption{
+                melodyrueidis.WithTokenStorePrefix(redisTokenStoreKeyPrefix),
+            },
         }))
 
         app.RegisterModule(melodyrueidiscache.NewModule(melodyrueidiscache.ModuleConfig{

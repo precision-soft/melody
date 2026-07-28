@@ -18,6 +18,18 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Opaque tokens: a stored token with no issue instant is refused once its user is revoked
+
+**What changed.** A revocation is no longer an enumeration. [`security/contract.RevocationEpochStore`](../security/contract/token_store.go) publishes a boundary per user, and per device of a user, and [`Lookup`](../security/in_memory_token_store.go) refuses a token issued before the boundary that governs it. This closes the window [`DeleteByUser`](../../integrations/rueidis/v3/token_store.go) could never close: it walks an index with `SSCAN`, which does not promise to return a member added while the walk is in progress, so a token issued during a revocation survived it. The comparison needs an issue instant, so [`security/contract.Claims`](../security/contract/token_validator.go) carries `IssuedAt`, stamped by the store on every write.
+
+Nothing breaks at compile time. The new methods live on their own interface, composed into `EpochRevocableTokenStore` rather than added to `RevocableTokenStore`, so an out-of-tree token store still satisfies the interface it was written against — it simply cannot publish boundaries, and a caller that needs one is told so by `EpochRevocableTokenStoreMustFromResolver` at the moment the service is asked for.
+
+**Symptom.** A token stored by an earlier release carries no issue instant. The zero instant precedes every boundary, so the first time `RevokeBefore` is called for a user, that user's pre-upgrade tokens stop resolving — including ones an operator did not mean to end. Users nobody revokes are unaffected: with no boundary there is nothing to compare against and the token resolves exactly as before.
+
+**Remedy.** None is needed in the ordinary case, and the behaviour is the safe direction: the tokens that stop resolving belong to an account somebody deliberately revoked. If an upgrade must not end any pre-upgrade session, do not call `RevokeBefore` until the longest token lifetime has passed since the deploy; every token written after it carries an instant and is compared normally.
+
+Two consequences worth knowing before wiring it up. A token whose issue was in flight across a revocation is refused — the instant is stamped before the write reaches the store, so a token stamped just before the boundary and written just after it is treated as predating it. That is over-strict rather than under-strict, and deliberate. And the instants come from application clocks: an issuer whose clock runs ahead of the revoker's mints tokens that survive a revocation issued within the skew, which `WithRevocationEpochRetention` absorbs but does not remove.
+
 ### Compile-level: `container/contract.ScopeManager` and `container/contract.Scope` gained `RegisterScoped`
 
 **What changed.** A scope is now a registrar of its own. [`container/contract.ScopeManager`](../container/contract/scope.go) declares `RegisterScoped(serviceName string, provider any, options ...RegisterOption) error` and `MustRegisterScoped(...)`, which declare a service whose lifetime is one scope — one http request, one command run — built lazily on the first resolution through a scope and closed when that scope closes. [`container/contract.Scope`](../container/contract/scope.go) declares the same two verbs through [`ScopedRegistrar`](../container/contract/scoped_registrar.go), for adding a service to one live scope.

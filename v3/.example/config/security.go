@@ -28,7 +28,6 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         melodysecurity.NewAccessControlRegexRule("^/platform/check", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/messagebus/dispatch", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/encrypt/roundtrip", melodysecuritycontract.AttributePublicAccess),
-        melodysecurity.NewAccessControlRegexRule("^/redis/token/revocation", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/twofactor", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/outbox", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/storage", melodysecuritycontract.AttributePublicAccess),
@@ -37,6 +36,9 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         melodysecurity.NewAccessControlRule(route.CategoriesPrefix, entity.RoleUser),
         melodysecurity.NewAccessControlRule(route.CurrenciesPrefix, entity.RoleUser),
         melodysecurity.NewAccessControlRule(route.UsersPrefix, entity.RoleAdmin),
+        melodysecurity.NewAccessControlRule(route.AccessTokenRevokeUserPattern, entity.RoleAdmin),
+        melodysecurity.NewAccessControlRule(route.AccessTokenPrefix, entity.RoleEditor),
+        melodysecurity.NewAccessControlRule(route.DevicePrefix, entity.RoleUser),
         melodysecurity.NewAccessControlRule(route.SecurePrefix, entity.RoleUser),
         melodysecurity.NewAccessControlRule(route.InternalPrefix, internalCallerRole),
 
@@ -95,6 +97,16 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
             Users:         instance.impersonatedUsers,
             RoleHierarchy: roleHierarchy,
         }),
+        melodysecurityconfig.NewFirewallOverrideConfiguration().
+            WithEntryPoint(melodysecurity.NewJsonEntryPoint()).
+            WithAccessDeniedHandler(melodysecurity.NewJsonAccessDeniedHandler()),
+    )
+
+    builder.AddStatelessFirewall(
+        "deviceToken",
+        melodysecurity.NewPathPrefixMatcher(route.DevicePrefix),
+        []melodysecuritycontract.Rule{},
+        melodysecurity.NewBearerTokenSource(instance.opaqueTokenValidator),
         melodysecurityconfig.NewFirewallOverrideConfiguration().
             WithEntryPoint(melodysecurity.NewJsonEntryPoint()).
             WithAccessDeniedHandler(melodysecurity.NewJsonAccessDeniedHandler()),

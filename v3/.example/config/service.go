@@ -1,6 +1,7 @@
 package config
 
 import (
+    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
     "github.com/precision-soft/melody/v3/.example/cache"
     "github.com/precision-soft/melody/v3/.example/generated"
     "github.com/precision-soft/melody/v3/.example/persistence"
@@ -16,6 +17,7 @@ import (
     melodymessagebus "github.com/precision-soft/melody/v3/messagebus"
     melodymessagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
     melodyopenapi "github.com/precision-soft/melody/v3/openapi"
+    melodysecuritycontract "github.com/precision-soft/melody/v3/security/contract"
     melodytranslation "github.com/precision-soft/melody/v3/translation"
     melodytranslationcontract "github.com/precision-soft/melody/v3/translation/contract"
 )
@@ -40,6 +42,17 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
             return serverSentEventHub, nil
         },
     )
+
+    if nil == instance.redisClient {
+        opaqueTokenStore := instance.opaqueTokenStore
+
+        registrar.RegisterService(
+            melodyrueidis.ServiceTokenStore,
+            func(resolver melodycontainercontract.Resolver) (melodysecuritycontract.RevocableTokenStore, error) {
+                return opaqueTokenStore, nil
+            },
+        )
+    }
 
     registrar.RegisterService(
         melodycache.ServiceCacheSerializer,

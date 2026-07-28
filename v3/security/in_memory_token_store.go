@@ -25,6 +25,7 @@ func NewInMemoryTokenStoreWithClock(clockInstance clockcontract.Clock) *InMemory
         clock:          clockInstance,
         entriesByToken: make(map[string]tokenEntry),
         tokensByUser:   make(map[string]map[string]struct{}),
+        epochsByUser:   make(map[string]map[string]time.Time),
     }
 }
 
@@ -33,6 +34,21 @@ type InMemoryTokenStore struct {
     mutex          sync.RWMutex
     entriesByToken map[string]tokenEntry
     tokensByUser   map[string]map[string]struct{}
+    epochsByUser map[string]map[string]time.Time
+}
+
+const (
+    revocationUserField = "user"
+
+    revocationDeviceFieldPrefix = "device:"
+)
+
+func revocationField(deviceIdentifier string) string {
+    if "" == deviceIdentifier {
+        return revocationUserField
+    }
+
+    return revocationDeviceFieldPrefix + deviceIdentifier
 }
 
 type tokenEntry struct {
@@ -98,13 +114,17 @@ func (instance *InMemoryTokenStore) PurgeExpired() int {
         }
     }
 
+    for userIdentifier := range instance.epochsByUser {
+        if _, holdsTokens := instance.tokensByUser[userIdentifier]; false == holdsTokens {
+            delete(instance.epochsByUser, userIdentifier)
+        }
+    }
+
     return purged
 }
 
 func cloneClaims(claims securitycontract.Claims) securitycontract.Claims {
-    cloned := securitycontract.Claims{
-        UserIdentifier: claims.UserIdentifier,
-    }
+    cloned := claims
 
     if nil != claims.Roles {
         cloned.Roles = append([]string{}, claims.Roles...)
@@ -172,10 +192,83 @@ func (instance *InMemoryTokenStore) Lookup(
         return securitycontract.Claims{}, false, nil
     }
 
+    if true == instance.isRevokedLocked(entry.claims) {
+        return securitycontract.Claims{}, false, nil
+    }
+
     return cloneClaims(entry.claims), true, nil
 }
 
+func (instance *InMemoryTokenStore) RevokeBefore(userIdentifier string, deviceIdentifier string, instant time.Time) {
+    if "" == userIdentifier {
+        exception.Panic(exception.NewError("token store revocation needs a user identifier", nil, nil))
+    }
+
+    if true == instant.IsZero() {
+        exception.Panic(exception.NewError(
+            "token store revocation instant is zero",
+            map[string]any{"user": userIdentifier},
+            nil,
+        ))
+    }
+
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    boundaries, exists := instance.epochsByUser[userIdentifier]
+    if false == exists {
+        boundaries = make(map[string]time.Time)
+        instance.epochsByUser[userIdentifier] = boundaries
+    }
+
+    field := revocationField(deviceIdentifier)
+    if published, found := boundaries[field]; true == found && false == instant.After(published) {
+        return
+    }
+
+    boundaries[field] = instant
+}
+
+func (instance *InMemoryTokenStore) RevocationEpoch(
+    _ runtimecontract.Runtime,
+    userIdentifier string,
+    deviceIdentifier string,
+) (time.Time, error) {
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
+
+    return instance.revocationEpochLocked(userIdentifier, deviceIdentifier), nil
+}
+
+func (instance *InMemoryTokenStore) revocationEpochLocked(userIdentifier string, deviceIdentifier string) time.Time {
+    boundaries, exists := instance.epochsByUser[userIdentifier]
+    if false == exists {
+        return time.Time{}
+    }
+
+    effective := boundaries[revocationUserField]
+
+    if "" != deviceIdentifier {
+        if device, found := boundaries[revocationDeviceFieldPrefix+deviceIdentifier]; true == found && true == device.After(effective) {
+            effective = device
+        }
+    }
+
+    return effective
+}
+
+func (instance *InMemoryTokenStore) isRevokedLocked(claims securitycontract.Claims) bool {
+    epoch := instance.revocationEpochLocked(claims.UserIdentifier, claims.DeviceIdentifier)
+    if true == epoch.IsZero() {
+        return false
+    }
+
+    return false == claims.IssuedAt.After(epoch)
+}
+
 func (instance *InMemoryTokenStore) put(tokenString string, claims securitycontract.Claims, expiresAt time.Time) {
+    claims.IssuedAt = instance.clock.Now()
+
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -210,3 +303,4 @@ func (instance *InMemoryTokenStore) unindexLocked(userIdentifier string, tokenSt
 }
 
 var _ securitycontract.RevocableTokenStore = (*InMemoryTokenStore)(nil)
+var _ securitycontract.EpochRevocableTokenStore = (*InMemoryTokenStore)(nil)

@@ -13,7 +13,7 @@
 #                                                  # the rate limit counters straight in redis, and SERVER-SENT EVENTS,
 #                                                  # whose cross-replica half needs the backplane)
 #   MINIO_ENDPOINT= .dev/e2e/run.sh                # skip the object storage section
-#   EXAMPLE_BASE_URL= .dev/e2e/run.sh              # skip ALL twelve sections that drive the supervised example
+#   EXAMPLE_BASE_URL= .dev/e2e/run.sh              # skip ALL thirteen sections that drive the supervised example
 #   MYSQL_DSN= .dev/e2e/run.sh                     # keep MYSQL AND AUDIT but skip the out-of-band re-read of the
 #                                                  # ciphertext, and leave the two-factor enrollment row behind
 #                                                  # (both are announced, never silent)
@@ -25,7 +25,9 @@
 # OVER HTTP calls it over the loopback on purpose: 127.0.0.1 sits outside the example's trusted proxy list, which
 # is what proves a spoofed X-Forwarded-For cannot mint a fresh rate limit budget.
 #
-# Eleven further sections drive that same supervised application: OPENAPI SERVED (the document the serving process
+# Twelve further sections drive that same supervised application: OPAQUE TOKEN REVOCATION (a revocation refuses a
+#   token while its entry is still in redis, and an entry written after the revocation but stamped before it is
+#   refused too — the case an index walk could never cover), OPENAPI SERVED (the document the serving process
 # builds), TRANSLATION (catalogues, ICU plurals, the fallback chain and the token firewall's json entry point),
 # SCOPED SERVICE (the request-scoped journal trail: the entry a write leaves is proof the event listener and
 # the flush middleware held one instance, and its request id is proof no instance was carried between requests),

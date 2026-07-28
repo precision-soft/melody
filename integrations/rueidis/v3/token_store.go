@@ -3,9 +3,12 @@ package rueidis
 import (
     "context"
     "encoding/json"
+    "math"
     "strconv"
     "time"
 
+    melodyclock "github.com/precision-soft/melody/v3/clock"
+    clockcontract "github.com/precision-soft/melody/v3/clock/contract"
     "github.com/precision-soft/melody/v3/exception"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
@@ -16,6 +19,17 @@ const (
     defaultTokenStorePrefix    = "melody:token"
     defaultTokenStoreScanCount = 256
 )
+
+const defaultRevocationEpochRetentionMilliseconds = int64(7 * 24 * 60 * 60 * 1000)
+
+const (
+    revocationUserField = "user"
+
+    revocationDeviceFieldPrefix = "device:"
+)
+
+var revocationEpochLowerBound = time.Unix(0, 0)
+var revocationEpochUpperBound = time.Unix(0, math.MaxInt64)
 
 /* tokenIndexExpiryGraceMilliseconds is how much longer a user's index set lives than the longest-lived token in it.
 
@@ -118,16 +132,66 @@ end
 return pruned
 `)
 
+var tokenLookupScript = rueidis.NewLuaScript(`
+local payload = redis.call("get", KEYS[1])
+if not payload then
+    return {}
+end
+local userEpoch, deviceEpoch = "", ""
+local decoded = nil
+local ok, result = pcall(cjson.decode, payload)
+if ok and type(result) == "table" then
+    decoded = result
+end
+if decoded then
+    local user = decoded["UserIdentifier"]
+    if type(user) == "string" and user ~= "" then
+        local epochKey = ARGV[1] .. user
+        userEpoch = redis.call("hget", epochKey, ARGV[2]) or ""
+        local device = decoded["DeviceIdentifier"]
+        if type(device) == "string" and device ~= "" then
+            deviceEpoch = redis.call("hget", epochKey, ARGV[3] .. device) or ""
+        end
+    end
+end
+return {payload, userEpoch, deviceEpoch}
+`)
+var tokenRevokeEpochScript = rueidis.NewLuaScript(`
+local previousTtl = redis.call("pttl", KEYS[1])
+local existing = redis.call("hget", KEYS[1], ARGV[1])
+if existing == false or #ARGV[2] > #existing or (#ARGV[2] == #existing and ARGV[2] > existing) then
+    redis.call("hset", KEYS[1], ARGV[1], ARGV[2])
+end
+if previousTtl == -1 then
+    return 1
+end
+local indexTtl = redis.call("pttl", KEYS[2])
+if indexTtl == -1 then
+    redis.call("persist", KEYS[1])
+    return 1
+end
+local wantedTtl = tonumber(ARGV[3])
+if indexTtl > wantedTtl then
+    wantedTtl = indexTtl
+end
+if previousTtl == -2 or previousTtl < wantedTtl then
+    redis.call("pexpire", KEYS[1], wantedTtl)
+end
+return 1
+`)
+
 func NewTokenStore(client rueidis.Client, options ...TokenStoreOption) *RedisTokenStore {
     if nil == client {
         exception.Panic(exception.NewError("redis token store client is nil", nil, nil))
     }
 
     store := &RedisTokenStore{
-        client:    client,
-        ctx:       context.Background(),
-        prefix:    defaultTokenStorePrefix,
-        scanCount: defaultTokenStoreScanCount,
+        client:                     client,
+        ctx:                        context.Background(),
+        prefix:                     defaultTokenStorePrefix,
+        scanCount:                  defaultTokenStoreScanCount,
+        clock:                      melodyclock.NewSystemClock(),
+        epochRetentionMilliseconds: defaultRevocationEpochRetentionMilliseconds,
     }
 
     for _, option := range options {
@@ -144,6 +208,14 @@ func NewTokenStore(client rueidis.Client, options ...TokenStoreOption) *RedisTok
 
     if nil == store.ctx {
         store.ctx = context.Background()
+    }
+
+    if nil == store.clock {
+        store.clock = melodyclock.NewSystemClock()
+    }
+
+    if 0 >= store.epochRetentionMilliseconds {
+        store.epochRetentionMilliseconds = defaultRevocationEpochRetentionMilliseconds
     }
 
     return store
@@ -173,11 +245,33 @@ func WithTokenStoreContext(ctx context.Context) TokenStoreOption {
     }
 }
 
+func WithTokenStoreClock(clockInstance clockcontract.Clock) TokenStoreOption {
+    return func(store *RedisTokenStore) {
+        if nil == clockInstance {
+            return
+        }
+
+        store.clock = clockInstance
+    }
+}
+
+func WithRevocationEpochRetention(retention time.Duration) TokenStoreOption {
+    return func(store *RedisTokenStore) {
+        if 0 >= retention {
+            return
+        }
+
+        store.epochRetentionMilliseconds = floorPositiveMilliseconds(retention)
+    }
+}
+
 type RedisTokenStore struct {
-    client    rueidis.Client
-    ctx       context.Context
-    prefix    string
-    scanCount int
+    client                     rueidis.Client
+    ctx                        context.Context
+    prefix                     string
+    scanCount                  int
+    clock                      clockcontract.Clock
+    epochRetentionMilliseconds int64
 }
 
 func (instance *RedisTokenStore) Put(tokenString string, claims securitycontract.Claims) {
@@ -200,11 +294,7 @@ func (instance *RedisTokenStore) Delete(tokenString string) {
     }
 }
 
-/* DeleteByUser revokes every live token a user holds, walking that user's index set in bounded batches.
-
-The walk is an SSCAN cursor rather than one read of the whole set, and each batch is settled by its own short script, so the time any single script holds the server is a function of the batch size and not of how many tokens the user has accumulated. SSCAN treats its count as a hint and may hand back more than that, so what it returns is sliced down to the batch size before any of it is executed — the bound has to be the one this side enforces.
-
-Removing members while scanning is what SSCAN tolerates: an element present for the whole iteration is returned at least once, and one that is removed may or may not be returned again. Both re-visits and stale members are settled idempotently — the token is already gone, so the member is simply dropped. What a bounded walk gives up against a single atomic script is a token issued to this user after the walk passed the bucket it lands in; that token survives the revocation, exactly as one issued a millisecond after the call returns would. */
+/* DeleteByUser reclaims what a revocation made unusable; it is not the revocation itself. SSCAN may miss a member added while the walk runs, so a token issued during the call survives it — RevokeBefore is what ends a user's sessions. */
 func (instance *RedisTokenStore) DeleteByUser(userIdentifier string) int {
     indexKey := instance.userKey(userIdentifier)
 
@@ -336,17 +426,24 @@ func (instance *RedisTokenStore) Lookup(
     runtimeInstance runtimecontract.Runtime,
     tokenString string,
 ) (securitycontract.Claims, bool, error) {
-    payload, lookupErr := instance.client.Do(
+    values, lookupErr := tokenLookupScript.Exec(
         runtimeInstance.Context(),
-        instance.client.B().Get().Key(instance.tokenKey(tokenString)).Build(),
-    ).ToString()
+        instance.client,
+        []string{instance.tokenKey(tokenString)},
+        []string{instance.epochKeyPrefix(), revocationUserField, revocationDeviceFieldPrefix},
+    ).ToArray()
 
     if nil != lookupErr {
-        if true == rueidis.IsRedisNil(lookupErr) {
-            return securitycontract.Claims{}, false, nil
-        }
-
         return securitycontract.Claims{}, false, exception.NewError("redis token store lookup failed", nil, lookupErr)
+    }
+
+    if 0 == len(values) {
+        return securitycontract.Claims{}, false, nil
+    }
+
+    payload, payloadErr := values[0].ToString()
+    if nil != payloadErr {
+        return securitycontract.Claims{}, false, exception.NewError("redis token store lookup returned no payload", nil, payloadErr)
     }
 
     claims := securitycontract.Claims{}
@@ -354,10 +451,154 @@ func (instance *RedisTokenStore) Lookup(
         return securitycontract.Claims{}, false, exception.NewError("redis token store could not decode claims", nil, unmarshalErr)
     }
 
+    revoked, revokedErr := tokenIsRevoked(claims.IssuedAt, epochValueAt(values, 1), epochValueAt(values, 2))
+    if nil != revokedErr {
+        return securitycontract.Claims{}, false, revokedErr
+    }
+
+    if true == revoked {
+        return securitycontract.Claims{}, false, nil
+    }
+
     return claims, true, nil
 }
 
+func (instance *RedisTokenStore) RevokeBefore(userIdentifier string, deviceIdentifier string, instant time.Time) {
+    if "" == userIdentifier {
+        exception.Panic(exception.NewError("redis token store revocation needs a user identifier", nil, nil))
+    }
+
+    if true == instant.IsZero() || true == instant.Before(revocationEpochLowerBound) || true == instant.After(revocationEpochUpperBound) {
+        exception.Panic(exception.NewError(
+            "redis token store revocation instant is not representable",
+            map[string]any{"user": userIdentifier, "instant": instant.String()},
+            nil,
+        ))
+    }
+
+    result := tokenRevokeEpochScript.Exec(
+        instance.ctx,
+        instance.client,
+        []string{instance.epochKey(userIdentifier), instance.userKey(userIdentifier)},
+        []string{
+            revocationField(deviceIdentifier),
+            strconv.FormatInt(instant.UnixNano(), 10),
+            strconv.FormatInt(instance.epochRetentionMilliseconds, 10),
+        },
+    )
+    if resultErr := result.Error(); nil != resultErr {
+        exception.Panic(exception.NewError("redis token store revoke failed", map[string]any{"user": userIdentifier}, resultErr))
+    }
+}
+
+func (instance *RedisTokenStore) RevocationEpoch(
+    runtimeInstance runtimecontract.Runtime,
+    userIdentifier string,
+    deviceIdentifier string,
+) (time.Time, error) {
+    fields := []string{revocationUserField}
+    if "" != deviceIdentifier {
+        fields = append(fields, revocationDeviceFieldPrefix+deviceIdentifier)
+    }
+
+    values, readErr := instance.client.Do(
+        runtimeInstance.Context(),
+        instance.client.B().Hmget().Key(instance.epochKey(userIdentifier)).Field(fields...).Build(),
+    ).ToArray()
+
+    if nil != readErr {
+        if true == rueidis.IsRedisNil(readErr) {
+            return time.Time{}, nil
+        }
+
+        return time.Time{}, exception.NewError(
+            "redis token store revocation epoch read failed",
+            map[string]any{"user": userIdentifier},
+            readErr,
+        )
+    }
+
+    latest := int64(0)
+    for index := range values {
+        parsed, parseErr := parseRevocationEpoch(epochValueAt(values, index))
+        if nil != parseErr {
+            return time.Time{}, parseErr
+        }
+
+        if latest < parsed {
+            latest = parsed
+        }
+    }
+
+    if 0 == latest {
+        return time.Time{}, nil
+    }
+
+    return time.Unix(0, latest), nil
+}
+
+func revocationField(deviceIdentifier string) string {
+    if "" == deviceIdentifier {
+        return revocationUserField
+    }
+
+    return revocationDeviceFieldPrefix + deviceIdentifier
+}
+
+func epochValueAt(values []rueidis.RedisMessage, index int) string {
+    if index >= len(values) {
+        return ""
+    }
+
+    value, valueErr := values[index].ToString()
+    if nil != valueErr {
+        return ""
+    }
+
+    return value
+}
+
+func parseRevocationEpoch(value string) (int64, error) {
+    if "" == value {
+        return 0, nil
+    }
+
+    parsed, parseErr := strconv.ParseInt(value, 10, 64)
+    if nil != parseErr {
+        return 0, exception.NewError(
+            "redis token store could not decode a revocation epoch",
+            map[string]any{"epoch": value},
+            parseErr,
+        )
+    }
+
+    return parsed, nil
+}
+
+func tokenIsRevoked(issuedAt time.Time, epochValues ...string) (bool, error) {
+    latest := int64(0)
+
+    for _, epochValue := range epochValues {
+        parsed, parseErr := parseRevocationEpoch(epochValue)
+        if nil != parseErr {
+            return true, parseErr
+        }
+
+        if latest < parsed {
+            latest = parsed
+        }
+    }
+
+    if 0 == latest {
+        return false, nil
+    }
+
+    return false == issuedAt.After(time.Unix(0, latest)), nil
+}
+
 func (instance *RedisTokenStore) put(tokenString string, claims securitycontract.Claims, ttl time.Duration) {
+    claims.IssuedAt = instance.clock.Now()
+
     payload, marshalErr := json.Marshal(claims)
     if nil != marshalErr {
         exception.Panic(exception.NewError("redis token store could not encode claims", map[string]any{"user": claims.UserIdentifier}, marshalErr))
@@ -399,4 +640,13 @@ func (instance *RedisTokenStore) userKeyPrefix() string {
     return instance.keyspace() + ":user:"
 }
 
+func (instance *RedisTokenStore) epochKey(userIdentifier string) string {
+    return instance.keyspace() + ":epoch:" + userIdentifier
+}
+
+func (instance *RedisTokenStore) epochKeyPrefix() string {
+    return instance.keyspace() + ":epoch:"
+}
+
 var _ securitycontract.RevocableTokenStore = (*RedisTokenStore)(nil)
+var _ securitycontract.EpochRevocableTokenStore = (*RedisTokenStore)(nil)
