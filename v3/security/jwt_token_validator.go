@@ -60,6 +60,7 @@ func newJwtTokenValidator(config JwtConfig, epochStore securitycontract.Revocati
         rolesClaim:           rolesClaim,
         scopeClaim:           config.ScopeClaim,
         deviceClaim:          config.DeviceClaim,
+        revocationEpochSkew:  config.RevocationEpochSkew,
         leeway:               config.Leeway,
         allowWithoutExpiry:   config.AllowWithoutExpiry,
         rejectFutureIssuedAt: config.RejectFutureIssuedAt,
@@ -76,6 +77,8 @@ type JwtConfig struct {
     ScopeClaim   string
     DeviceClaim string
 
+    RevocationEpochSkew time.Duration
+
     Leeway               time.Duration
     AllowWithoutExpiry   bool
     RejectFutureIssuedAt bool
@@ -89,6 +92,7 @@ type JwtTokenValidator struct {
     rolesClaim           string
     scopeClaim           string
     deviceClaim          string
+    revocationEpochSkew  time.Duration
     leeway               time.Duration
     allowWithoutExpiry   bool
     rejectFutureIssuedAt bool
@@ -207,7 +211,7 @@ func (instance *JwtTokenValidator) verifyRevocationEpoch(
         return nil
     }
 
-    if false == claims.IssuedAt.After(epoch) {
+    if false == claims.IssuedAt.After(epoch.Add(instance.revocationEpochSkew)) {
         return exception.NewError("jwt was issued before the revocation epoch", nil, nil)
     }
 

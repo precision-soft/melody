@@ -865,3 +865,98 @@ func TestRedisTokenStore_PurgeExpiredDoesNotWalkTheEpochKeys(t *testing.T) {
         t.Fatalf("the purge removed a boundary it should never have walked")
     }
 }
+
+func TestRedisTokenStore_ClockSkewBoundRefusesATokenStampedByAnAheadNode(t *testing.T) {
+    client := newTokenStoreClient(t)
+    runtimeInstance := newTokenStoreRuntime()
+
+    realTime := time.Unix(1_800_000_000, 0)
+    issuingNodeClock := melodyclock.NewFrozenClock(realTime.Add(30 * time.Second))
+    revokingNodeClock := melodyclock.NewFrozenClock(realTime)
+
+    issuingNode := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:skew"), WithTokenStoreClock(issuingNodeClock))
+    unbounded := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:skew"), WithTokenStoreClock(revokingNodeClock))
+    bounded := NewTokenStore(
+        client,
+        WithTokenStorePrefix("melody:token:test:skew"),
+        WithTokenStoreClock(revokingNodeClock),
+        WithTokenStoreMaximumClockSkew(10*time.Second),
+    )
+
+    defer issuingNode.DeleteByUser("compromised")
+    defer client.Do(context.Background(), client.B().Del().Key(issuingNode.epochKey("compromised")).Build())
+
+    issuingNode.Put("attacker-token", securitycontract.Claims{UserIdentifier: "compromised", Roles: []string{"ROLE_USER"}})
+
+    revokingNodeClock.Advance(5 * time.Second)
+    unbounded.RevokeBefore("compromised", "", revokingNodeClock.Now())
+
+    if _, found, _ := unbounded.Lookup(runtimeInstance, "attacker-token"); false == found {
+        t.Fatalf("the unbounded store refused the token, so this scenario no longer reproduces the skew window and the bounded half below proves nothing")
+    }
+
+    if _, found, lookupErr := bounded.Lookup(runtimeInstance, "attacker-token"); true == found || nil != lookupErr {
+        t.Fatalf("a token issued before the revocation survived it although the skew bound covers the gap: found=%v err=%v", found, lookupErr)
+    }
+}
+
+func TestRedisTokenStore_ClockSkewBoundHonoursATokenIssuedBeyondTheBound(t *testing.T) {
+    client := newTokenStoreClient(t)
+    runtimeInstance := newTokenStoreRuntime()
+
+    realTime := time.Unix(1_800_000_000, 0)
+    nodeClock := melodyclock.NewFrozenClock(realTime)
+
+    store := NewTokenStore(
+        client,
+        WithTokenStorePrefix("melody:token:test:skewcontrol"),
+        WithTokenStoreClock(nodeClock),
+        WithTokenStoreMaximumClockSkew(10*time.Second),
+    )
+
+    defer store.DeleteByUser("owen")
+    defer client.Do(context.Background(), client.B().Del().Key(store.epochKey("owen")).Build())
+
+    store.RevokeBefore("owen", "", nodeClock.Now())
+
+    nodeClock.Advance(30 * time.Second)
+    store.Put("fresh-token", securitycontract.Claims{UserIdentifier: "owen"})
+
+    if _, found, lookupErr := store.Lookup(runtimeInstance, "fresh-token"); false == found || nil != lookupErr {
+        t.Fatalf("a token issued well beyond the skew bound after the revocation was refused: found=%v err=%v", found, lookupErr)
+    }
+}
+
+func TestRedisTokenStore_ClockSkewBoundWidensTheBoundaryItself(t *testing.T) {
+    client := newTokenStoreClient(t)
+    runtimeInstance := newTokenStoreRuntime()
+
+    realTime := time.Unix(1_800_000_000, 0)
+    issuingNodeClock := melodyclock.NewFrozenClock(realTime.Add(8 * time.Second))
+    revokingNodeClock := melodyclock.NewFrozenClock(realTime)
+
+    issuingNode := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:skewwiden"), WithTokenStoreClock(issuingNodeClock))
+    unbounded := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:skewwiden"), WithTokenStoreClock(revokingNodeClock))
+    bounded := NewTokenStore(
+        client,
+        WithTokenStorePrefix("melody:token:test:skewwiden"),
+        WithTokenStoreClock(revokingNodeClock),
+        WithTokenStoreMaximumClockSkew(10*time.Second),
+    )
+
+    defer issuingNode.DeleteByUser("compromised")
+    defer client.Do(context.Background(), client.B().Del().Key(issuingNode.epochKey("compromised")).Build())
+
+    issuingNode.Put("attacker-token", securitycontract.Claims{UserIdentifier: "compromised", Roles: []string{"ROLE_USER"}})
+
+    revokingNodeClock.Advance(5 * time.Second)
+    unbounded.RevokeBefore("compromised", "", revokingNodeClock.Now())
+
+    if _, found, _ := unbounded.Lookup(runtimeInstance, "attacker-token"); false == found {
+        t.Fatalf("the unbounded store refused the token, so the bounded half below cannot show the boundary being widened")
+    }
+
+    if _, found, _ := bounded.Lookup(runtimeInstance, "attacker-token"); true == found {
+        t.Fatalf("the stamp sits inside the verifying node's own tolerance, so only widening the boundary can refuse it — and it was honoured")
+    }
+}

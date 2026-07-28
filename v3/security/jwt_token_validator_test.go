@@ -564,3 +564,70 @@ func TestJwtTokenValidator_WithRevocationEpochForcesFutureIssuedAtToBeRejected(t
 
     t.Fatalf("the plain constructor must keep the configuration's answer, or forcing it in the epoch constructor proves nothing")
 }
+
+func TestJwtTokenValidator_SecondGranularIssuedAtNeedsTheSkewAllowanceToBeRefused(t *testing.T) {
+    secret := []byte("secret")
+
+    issuance := time.Now().Add(-time.Minute).Truncate(time.Second)
+    boundary := issuance.Add(500 * time.Millisecond)
+
+    store := &revocationEpochStoreStub{}
+    store.RevokeBefore("alice", "", boundary)
+
+    token := signJwtHs256(secret, map[string]any{
+        "sub": "alice",
+        "iat": issuance.Add(time.Second).Unix(),
+        "exp": time.Now().Add(time.Hour).Unix(),
+    })
+
+    unbounded := NewJwtTokenValidatorWithRevocationEpoch(JwtConfig{Secret: secret}, store)
+    if _, err := unbounded.Validate(testRuntime(), token); nil != err {
+        t.Fatalf("the second-granular window is already closed without an allowance, so the bounded half below proves nothing: %v", err)
+    }
+
+    bounded := NewJwtTokenValidatorWithRevocationEpoch(
+        JwtConfig{Secret: secret, RevocationEpochSkew: time.Second},
+        store,
+    )
+    if _, err := bounded.Validate(testRuntime(), token); nil == err {
+        t.Fatalf("a token whose whole-second iat rounds past the boundary survived it although the allowance covers the second")
+    }
+}
+
+func TestJwtTokenValidator_RevocationEpochSkewCoversAnAheadIssuer(t *testing.T) {
+    secret := []byte("secret")
+
+    boundary := time.Now().Add(-5 * time.Minute)
+
+    store := &revocationEpochStoreStub{}
+    store.RevokeBefore("alice", "", boundary)
+
+    aheadIssuance := boundary.Add(20 * time.Second)
+    token := signJwtHs256(secret, map[string]any{
+        "sub": "alice",
+        "iat": aheadIssuance.Unix(),
+        "exp": time.Now().Add(time.Hour).Unix(),
+    })
+
+    unbounded := NewJwtTokenValidatorWithRevocationEpoch(JwtConfig{Secret: secret}, store)
+    if _, err := unbounded.Validate(testRuntime(), token); nil != err {
+        t.Fatalf("without a skew allowance the ahead-stamped token was already refused, so the bounded half below proves nothing: %v", err)
+    }
+
+    bounded := NewJwtTokenValidatorWithRevocationEpoch(
+        JwtConfig{Secret: secret, RevocationEpochSkew: 30 * time.Second},
+        store,
+    )
+    if _, err := bounded.Validate(testRuntime(), token); nil == err {
+        t.Fatalf("a token stamped by a node running ahead survived a revocation the skew allowance covers")
+    }
+
+    beyond := signJwtHs256(secret, map[string]any{
+        "sub": "alice",
+        "iat": boundary.Add(90 * time.Second).Unix(),
+        "exp": time.Now().Add(time.Hour).Unix(),
+    })
+    if _, err := bounded.Validate(testRuntime(), beyond); nil != err {
+        t.Fatalf("a token issued well beyond the skew allowance was refused: %v", err)
+    }
+}

@@ -255,6 +255,16 @@ func WithTokenStoreClock(clockInstance clockcontract.Clock) TokenStoreOption {
     }
 }
 
+func WithTokenStoreMaximumClockSkew(skew time.Duration) TokenStoreOption {
+    return func(store *RedisTokenStore) {
+        if 0 > skew {
+            return
+        }
+
+        store.maximumClockSkew = skew
+    }
+}
+
 func WithRevocationEpochRetention(retention time.Duration) TokenStoreOption {
     return func(store *RedisTokenStore) {
         if 0 >= retention {
@@ -272,6 +282,7 @@ type RedisTokenStore struct {
     scanCount                  int
     clock                      clockcontract.Clock
     epochRetentionMilliseconds int64
+    maximumClockSkew           time.Duration
 }
 
 func (instance *RedisTokenStore) Put(tokenString string, claims securitycontract.Claims) {
@@ -451,7 +462,7 @@ func (instance *RedisTokenStore) Lookup(
         return securitycontract.Claims{}, false, exception.NewError("redis token store could not decode claims", nil, unmarshalErr)
     }
 
-    revoked, revokedErr := tokenIsRevoked(claims.IssuedAt, epochValueAt(values, 1), epochValueAt(values, 2))
+    revoked, revokedErr := instance.tokenIsRevoked(claims.IssuedAt, epochValueAt(values, 1), epochValueAt(values, 2))
     if nil != revokedErr {
         return securitycontract.Claims{}, false, revokedErr
     }
@@ -575,7 +586,11 @@ func parseRevocationEpoch(value string) (int64, error) {
     return parsed, nil
 }
 
-func tokenIsRevoked(issuedAt time.Time, epochValues ...string) (bool, error) {
+func (instance *RedisTokenStore) tokenIsRevoked(issuedAt time.Time, epochValues ...string) (bool, error) {
+    if 0 < instance.maximumClockSkew && true == issuedAt.After(instance.clock.Now().Add(instance.maximumClockSkew)) {
+        return true, nil
+    }
+
     latest := int64(0)
 
     for _, epochValue := range epochValues {
@@ -593,7 +608,7 @@ func tokenIsRevoked(issuedAt time.Time, epochValues ...string) (bool, error) {
         return false, nil
     }
 
-    return false == issuedAt.After(time.Unix(0, latest)), nil
+    return false == issuedAt.After(time.Unix(0, latest).Add(instance.maximumClockSkew)), nil
 }
 
 func (instance *RedisTokenStore) put(tokenString string, claims securitycontract.Claims, ttl time.Duration) {
