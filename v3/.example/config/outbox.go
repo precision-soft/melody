@@ -15,9 +15,9 @@ import (
     bun "github.com/uptrace/bun"
 )
 
-const outboxDemoType = "outbox_demo"
+const outboxNoticeType = "outbox_notice"
 
-/* the outbox demo wires the transactional-outbox relay through the module's factory shape (see
+/* the outbox wiring hangs the transactional-outbox relay off the module's factory shape (see
 configure.go): a message enqueued in the same transaction as a business write (atomicity is the whole
 point) is later drained to the message transport by the relay, with a stable id so a consumer can
 deduplicate the at-least-once delivery. The factories below are registered as the service providers, so
@@ -33,7 +33,7 @@ func (instance *Module) outboxStoreFactory(resolver melodycontainercontract.Reso
         return nil, resolveErr
     }
 
-    store := outbox.NewStore(database, &outboxDemoCodec{})
+    store := outbox.NewStore(database, &outboxNoticeCodec{})
     if schemaErr := store.EnsureSchema(context.Background()); nil != schemaErr {
         return nil, schemaErr
     }
@@ -58,7 +58,7 @@ func (instance *Module) outboxRelayFactory(resolver melodycontainercontract.Reso
     return outbox.NewRelay(outbox.RelayConfig{
         Repository: store,
         Transport:  transport,
-        Codec:      &outboxDemoCodec{},
+        Codec:      &outboxNoticeCodec{},
         BatchSize:  50,
     }), nil
 }
@@ -77,43 +77,43 @@ func (instance *Module) buildOutboxTransport() (melodymessagebuscontract.Transpo
     }
 
     registry := amqp.NewMessageRegistry()
-    amqp.RegisterMessage[message.OutboxDemo](registry, outboxDemoType)
+    amqp.RegisterMessage[message.OutboxNotice](registry, outboxNoticeType)
 
     return amqp.NewTransport(amqp.TransportConfig{
         Connection: connection,
         Dialer:     provider.Dialer(dsn),
-        Queue:      "outbox_demo",
+        Queue:      "outbox_notice",
         Registry:   registry,
         DeadLetter: true,
     }), nil
 }
 
-/* outboxDemoCodec serializes the demo message to and from the outbox row payload. */
-type outboxDemoCodec struct{}
+/* outboxNoticeCodec serializes the notice to and from the outbox row payload. */
+type outboxNoticeCodec struct{}
 
-func (instance *outboxDemoCodec) Encode(messageInstance any) (string, []byte, error) {
-    demo, isDemo := messageInstance.(message.OutboxDemo)
-    if false == isDemo {
-        return "", nil, exception.NewError("outbox demo codec: unexpected message type", nil, nil)
+func (instance *outboxNoticeCodec) Encode(messageInstance any) (string, []byte, error) {
+    notice, isNotice := messageInstance.(message.OutboxNotice)
+    if false == isNotice {
+        return "", nil, exception.NewError("outbox notice codec: unexpected message type", nil, nil)
     }
 
-    payload, marshalErr := json.Marshal(demo)
+    payload, marshalErr := json.Marshal(notice)
     if nil != marshalErr {
         return "", nil, marshalErr
     }
 
-    return outboxDemoType, payload, nil
+    return outboxNoticeType, payload, nil
 }
 
-func (instance *outboxDemoCodec) Decode(typeName string, payload []byte) (any, error) {
-    if outboxDemoType != typeName {
-        return nil, exception.NewError("outbox demo codec: unknown type", map[string]any{"type": typeName}, nil)
+func (instance *outboxNoticeCodec) Decode(typeName string, payload []byte) (any, error) {
+    if outboxNoticeType != typeName {
+        return nil, exception.NewError("outbox notice codec: unknown type", map[string]any{"type": typeName}, nil)
     }
 
-    var demo message.OutboxDemo
-    if unmarshalErr := json.Unmarshal(payload, &demo); nil != unmarshalErr {
+    var notice message.OutboxNotice
+    if unmarshalErr := json.Unmarshal(payload, &notice); nil != unmarshalErr {
         return nil, unmarshalErr
     }
 
-    return demo, nil
+    return notice, nil
 }

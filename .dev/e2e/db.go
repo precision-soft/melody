@@ -1,6 +1,7 @@
 package main
 
 import (
+    "context"
     "database/sql"
     "net"
 
@@ -62,4 +63,108 @@ func splitMysqlAddress(address string) (string, string) {
     }
 
     return host, port
+}
+
+/* the tables the v3 .example application owns. They are named here, once, because more than one section reads
+or cleans them and a second spelling of a table name is a section that quietly asserts nothing. */
+const (
+    exampleV3ProductTable = "melody_example_v3_product"
+    exampleV3UserTable    = "melody_example_v3_user"
+    exampleV3JournalTable = "melody_example_v3_catalog_journal"
+    exampleV3AuditTable   = "melody_example_v3_audit"
+)
+
+/* removeExampleV3ProductProbes removes probe products AND everything the application recorded about them.
+
+Removing only the products is not enough, and the reason is not tidiness. The example hands out the next free
+identifier, so a deleted prod-6 is handed out again to the next probe — and a later section that reads "the trail
+of prod-6" would then find the previous occupant's entries and assert against a history that is not its own. A
+probe's records have to leave with it or the identifier carries them into the next run. */
+func removeExampleV3ProductProbes(label string, database *bun.DB, names []string) {
+    if false == exampleTableExists(label, database, exampleV3ProductTable) {
+        return
+    }
+
+    productIds := make([]string, 0, len(names))
+
+    selectErr := database.
+        NewSelect().
+        ColumnExpr("id").
+        Table(exampleV3ProductTable).
+        Where("name IN (?)", bun.In(names)).
+        Scan(context.Background(), &productIds)
+    if nil != selectErr {
+        fail("%s: look up the probe products for removal: %v", label, selectErr)
+    }
+
+    for _, productId := range productIds {
+        removeExampleV3ProductRecords(label, database, productId)
+    }
+
+    _, productDeleteErr := database.
+        NewDelete().
+        Table(exampleV3ProductTable).
+        Where("name IN (?)", bun.In(names)).
+        Exec(context.Background())
+    if nil != productDeleteErr {
+        fail("%s: remove the probe products: %v", label, productDeleteErr)
+    }
+}
+
+/* removeExampleV3ProductRecords removes the journal entries and the audit trail one product left behind. */
+func removeExampleV3ProductRecords(label string, database *bun.DB, productId string) {
+    if false == exampleTableExists(label, database, exampleV3JournalTable) {
+        return
+    }
+
+    _, journalDeleteErr := database.
+        NewDelete().
+        Table(exampleV3JournalTable).
+        Where("subject = ?", "product").
+        Where("subject_id = ?", productId).
+        Exec(context.Background())
+    if nil != journalDeleteErr {
+        fail("%s: remove the journal entries of %s: %v", label, productId, journalDeleteErr)
+    }
+
+    removeExampleV3AuditTrail(label, database, "product", productId)
+}
+
+func removeExampleV3AuditTrail(label string, database *bun.DB, entity string, entityId string) {
+    if false == exampleTableExists(label, database, exampleV3AuditTable) {
+        return
+    }
+
+    _, deleteErr := database.
+        NewDelete().
+        Table(exampleV3AuditTable).
+        Where("entity = ?", entity).
+        Where("entity_id = ?", entityId).
+        Exec(context.Background())
+    if nil != deleteErr {
+        fail("%s: remove the trail of %s %s: %v", label, entity, entityId, deleteErr)
+    }
+}
+
+/* exampleTableExists answers whether a table is there yet.
+
+The example applications create their tables on the path that first reaches them, so on a database that has just
+been created — which is what `./dc up:all` gives after a volume is recreated — a major nobody has sent a request
+to yet has none. A section that cleans up before it starts must not fail on that: a table that does not exist
+holds no leftovers from a previous run, which is exactly the state the cleanup is trying to reach. */
+func exampleTableExists(label string, database *bun.DB, tableName string) bool {
+    count := 0
+
+    scanErr := database.
+        NewSelect().
+        ColumnExpr("COUNT(*)").
+        TableExpr("information_schema.tables").
+        Where("table_schema = DATABASE()").
+        Where("table_name = ?", tableName).
+        Scan(context.Background(), &count)
+    if nil != scanErr {
+        fail("%s: ask whether %s exists: %v", label, tableName, scanErr)
+    }
+
+    return 0 < count
 }

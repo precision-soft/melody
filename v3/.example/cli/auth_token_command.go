@@ -27,7 +27,7 @@ func (instance *AuthTokenCommand) Name() string {
 }
 
 func (instance *AuthTokenCommand) Description() string {
-    return "mints a demo HS256 JWT for the token-protected secure api"
+    return "mints an HS256 JWT for the token-protected secure api"
 }
 
 func (instance *AuthTokenCommand) Flags() []melodyclicontract.Flag {
@@ -53,7 +53,7 @@ func (instance *AuthTokenCommand) Run(
 ) error {
     user := commandContext.String("user")
     if "" == user {
-        user = "demo-user"
+        user = "example-user"
     }
 
     roles := commandContext.StringSlice("role")

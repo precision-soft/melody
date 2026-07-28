@@ -148,39 +148,99 @@ const ServiceRequestReportTrail = "service.example.reporting.request_trail"
 /* the trail belongs to one request: it is built from the request context the kernel installs into every
 scope, and a service that holds one request's identity must not be a process singleton. The directive is what
 says so, and the generator emits it into the scoped registration function rather than the container one. It
-takes a container singleton beside the request context on purpose — a scoped service may read both levels. */
+takes container singletons beside the request context on purpose — a scoped service may read both levels. */
 //melody:scoped
 //melody:service ServiceRequestReportTrail
 func NewRequestReportTrail(
     requestContext *melodyhttp.RequestContext,
     formatter *ReportFormatter,
+    journalRepository repository.CatalogJournalRepository,
+    clockInstance melodyclockcontract.Clock,
 ) (*RequestReportTrail, error) {
     return &RequestReportTrail{
-        requestContext: requestContext,
-        formatter:      formatter,
-        entries:        make([]string, 0, 4),
+        requestContext:    requestContext,
+        formatter:         formatter,
+        journalRepository: journalRepository,
+        clock:             clockInstance,
+        entries:           make([]*repository.CatalogJournalEntry, 0, 4),
     }, nil
 }
 
-/* RequestReportTrail records what one request did. Two handlers in the same request share one trail; two
-requests never do. */
+/* RequestReportTrail is where one request's changes to the nomenclature are collected before they are
+written.
+
+It is what makes the scope-owned registration mean something rather than demonstrate itself. The event
+listeners record into it while the request is being served, and the flush middleware writes what it holds once
+the handler chain has returned; both reach it through the scope, and if those two resolutions ever yielded
+different objects the middleware would flush an empty trail and nothing would be journalled at all. The
+journal row existing is therefore the proof that a scope holds one instance of what it owns — a claim no
+single response can make about itself.
+
+Collecting first also buys the journal something real: every entry carries the request that caused it, and a
+request that changed several records costs one round trip instead of one per change. */
 type RequestReportTrail struct {
-    requestContext *melodyhttp.RequestContext
-    formatter      *ReportFormatter
-    entries        []string
+    requestContext    *melodyhttp.RequestContext
+    formatter         *ReportFormatter
+    journalRepository repository.CatalogJournalRepository
+    clock             melodyclockcontract.Clock
+    entries           []*repository.CatalogJournalEntry
 }
 
 func (instance *RequestReportTrail) RequestId() string {
     return instance.requestContext.RequestId()
 }
 
-func (instance *RequestReportTrail) Record(entry string) {
-    instance.entries = append(instance.entries, entry)
+/* Record adds one change to what this request will write. Nothing reaches the journal until Flush. */
+func (instance *RequestReportTrail) Record(actor string, action string, subject string, subjectId string) {
+    instance.entries = append(instance.entries, &repository.CatalogJournalEntry{
+        RequestId:  instance.requestContext.RequestId(),
+        Actor:      actor,
+        Action:     action,
+        Subject:    subject,
+        SubjectId:  subjectId,
+        RecordedAt: instance.clock.Now().UTC(),
+    })
 }
 
+/* Flush writes what the request accumulated and empties the trail.
+
+The trail is emptied only once the write has succeeded, so a failed flush leaves the entries staged for Close
+to try again rather than dropping the record of a change that did happen. That is safe to retry because a
+batch is written in one statement and fails as a whole: a failure means no row was written, so the second
+attempt cannot duplicate the first.
+
+Calling Flush on an empty trail touches nothing, so a request that read rather than wrote pays no query — and
+a second call after a successful one is a no-op rather than a duplicate. */
+func (instance *RequestReportTrail) Flush(ctx context.Context) error {
+    if 0 == len(instance.entries) {
+        return nil
+    }
+
+    appendErr := instance.journalRepository.AppendBatch(ctx, instance.entries)
+    if nil != appendErr {
+        return appendErr
+    }
+
+    instance.entries = make([]*repository.CatalogJournalEntry, 0, 4)
+
+    return nil
+}
+
+/* Close is the scope's own last word on the trail. The flush middleware is what normally empties it, before
+the response is written and while the caller can still be told the write failed; this runs when that never
+happened — a panic on the way out of the handler chain — and is the difference between losing the record of a
+change and keeping it. */
+func (instance *RequestReportTrail) Close() error {
+    return instance.Flush(context.Background())
+}
+
+/* Entries reports what this request has recorded so far, as the report renders it. */
 func (instance *RequestReportTrail) Entries() []string {
-    copied := make([]string, len(instance.entries))
-    copy(copied, instance.entries)
+    copied := make([]string, 0, len(instance.entries))
+
+    for _, entry := range instance.entries {
+        copied = append(copied, entry.Action+" "+entry.Subject+" "+entry.SubjectId)
+    }
 
     return copied
 }

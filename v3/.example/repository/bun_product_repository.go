@@ -8,7 +8,9 @@ import (
     "strings"
     "time"
 
+    melodyaudit "github.com/precision-soft/melody/integrations/bunorm/v3/audit"
     "github.com/precision-soft/melody/v3/.example/entity"
+    "github.com/precision-soft/melody/v3/.example/persistence"
     "github.com/uptrace/bun"
 )
 
@@ -55,12 +57,24 @@ func (instance *productRow) toEntity() *entity.Product {
     )
 }
 
-func newBunProductRepository(database *bun.DB) *bunProductRepository {
-    return &bunProductRepository{database: database}
+func newBunProductRepository(storage *persistence.CatalogStorage) *bunProductRepository {
+    return &bunProductRepository{database: storage.Database(), tracker: storage.Tracker()}
 }
 
+/* bunProductRepository keeps the catalogue in the database and its history beside it. Every write goes through the audit tracker, which performs the write and records the field-level change in one transaction: an entry that failed to persist rolls the change back with it, so the catalogue never holds a version of a row the trail cannot account for. */
 type bunProductRepository struct {
     database *bun.DB
+    tracker  *melodyaudit.Tracker
+}
+
+/* auditContext names whoever is behind the write for the trail. The actor is put on the context by the service layer, which is the last place that still knows which request it is serving; a write with nobody on the context is a scheduled or console one, and the trail says so rather than leaving the column empty. */
+func auditContext(ctx context.Context) context.Context {
+    actor := persistence.ActorFromContext(ctx)
+    if "" == actor {
+        actor = CatalogJournalActorSystem
+    }
+
+    return melodyaudit.WithActor(ctx, actor)
 }
 
 /* EnsureSchema creates the table when it is absent and writes the opening catalogue into it when it is empty. The example carries no migration runner, so the repository owns the one table it reads. The seeding insert ignores duplicate keys because several example applications may reach an empty table at the same time, and losing that race is not a failure. */
@@ -187,12 +201,7 @@ func (instance *bunProductRepository) Create(ctx context.Context, product *entit
         product.UpdatedAt = now
     }
 
-    _, insertErr := instance.database.
-        NewInsert().
-        Model(newProductRow(product)).
-        Exec(ctx)
-
-    return insertErr
+    return instance.tracker.Insert(auditContext(ctx), persistence.AuditEntityProduct, product.Id, newProductRow(product))
 }
 
 func (instance *bunProductRepository) Update(ctx context.Context, product *entity.Product) (bool, error) {
@@ -223,16 +232,13 @@ func (instance *bunProductRepository) Update(ctx context.Context, product *entit
         product.UpdatedAt = time.Now()
     }
 
-    result, updateErr := instance.database.
-        NewUpdate().
-        Model(newProductRow(product)).
-        WherePK().
-        Exec(ctx)
+    /* the row is known to be there — it was just read — so the tracker's own load of the before-image cannot come up empty; what it adds is that the recorded before-image is the row as the DATABASE held it rather than whatever the caller passed */
+    updateErr := instance.tracker.Update(auditContext(ctx), persistence.AuditEntityProduct, id, newProductRow(product))
     if nil != updateErr {
         return false, updateErr
     }
 
-    return affectedAtLeastOneRow(result), nil
+    return true, nil
 }
 
 func (instance *bunProductRepository) DeleteById(ctx context.Context, id string) (bool, error) {
@@ -241,16 +247,27 @@ func (instance *bunProductRepository) DeleteById(ctx context.Context, id string)
         return false, fmt.Errorf("id is required")
     }
 
-    result, deleteErr := instance.database.
-        NewDelete().
-        Model((*productRow)(nil)).
-        Where("id = ?", normalizedId).
-        Exec(ctx)
+    /* the tracker deletes by primary key and treats a row that was not there as nothing to do, so whether there was one is asked first: the caller's answer distinguishes a delete that happened from a request for a product that does not exist, and a silent no-op cannot tell them apart */
+    _, found, findErr := instance.findRowById(ctx, normalizedId)
+    if nil != findErr {
+        return false, findErr
+    }
+
+    if false == found {
+        return false, nil
+    }
+
+    deleteErr := instance.tracker.Delete(
+        auditContext(ctx),
+        persistence.AuditEntityProduct,
+        normalizedId,
+        &productRow{Id: normalizedId},
+    )
     if nil != deleteErr {
         return false, deleteErr
     }
 
-    return affectedAtLeastOneRow(result), nil
+    return true, nil
 }
 
 func (instance *bunProductRepository) identifierList(ctx context.Context) ([]string, error) {

@@ -36,6 +36,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- example: the catalogue reading is served at `/catalog/report/` under the name `example.catalog.report`. The `/integration` prefix it sat under was named for a group of routes that no longer exists — the three that only demonstrated a backend went when the integrations were wired into the nomenclature itself — so a prefix was left standing over a single route that has nothing to do with it. `ReportDemoHandler` is `CatalogReportHandler`, named for what it renders
+- example: the welcome text on the static index says what the application is — a product nomenclature of products, categories, currencies and users — instead of calling itself a small demo, and the api token shipped in `.env` is named for the example rather than for a demonstration. The word had outlived what it described: the application it names has been a working nomenclature since the integrations were wired to it
+
+
 - logging: `LogOnRecover` only logs. It terminated the process when the recovered value carried an exit code, skipping every remaining deferred call, which is the one place in the framework where a library helper could end a program that had not asked to end. `LogOnRecoverAndExit` is the honestly named helper for that, and the two call sites that want it use it
 - config: `Resolve()` reports an error once the application is serving. Resolution rewrites the parameter store, and by then every service holds values copied out of it, so a later pass cannot reconfigure anything that is running — it only rewrites the store under readers that expect it settled. Building a configuration by hand and resolving it before serving is unaffected
 - config: a positive session ttl below one second fails the boot. Such a value does not describe a short session but a broken one: the file-backed store purges a lapsed entry on the same write that stores it, so a lifetime near the cost of that write returns success having persisted nothing, and one second is the finest unit an HTTP date can express in any case. Zero keeps its meaning of no expiry

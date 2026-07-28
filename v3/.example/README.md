@@ -18,7 +18,7 @@ Conceptually, the example models a minimal admin-style catalog application:
 
 ---
 
-## Demo credentials
+## Seeded credentials
 
 For convenience, the example ships with a few predefined users:
 
@@ -156,10 +156,10 @@ go run . melody:cron:run             # run the scheduler loop until interrupted
 
 The runner dispatches each scheduled command with its declared flags, so declared defaults are honored on a scheduled tick exactly as under the cli entry point: `product:list` declares `--limit` with a default of `5` and prints the value it read (`product list: limit=5`), whether invoked directly or by the runner.
 
-`example:grant:demo` shows that an application command may declare its own `--role` flag: the runtime's `--role`/`--mode` are recognized only before the command name, so the command receives its flag intact. It also holds the example's user service through a `container.Lazy` handle built at command-registration time — the service is resolved at the command's first run, not during the boot phase:
+`example:grant:role` shows that an application command may declare its own `--role` flag: the runtime's `--role`/`--mode` are recognized only before the command name, so the command receives its flag intact. It also holds the example's user service through a `container.Lazy` handle built at command-registration time — the service is resolved at the command's first run, not during the boot phase:
 
 ```bash
-go run . example:grant:demo --role admin --user ada    # the command's own --role
+go run . example:grant:role --role admin --user ada    # the command's own --role
 go run . --role worker app:info                        # the runtime process role
 ```
 
@@ -169,23 +169,23 @@ go run . --role worker app:info                        # the runtime process rol
 
 The example wires **every v3 platform integration**. Each backend that needs external infrastructure is **gated on an environment variable**: when the variable is unset the application boots with an in-process fallback (remove the integration lines from [`.env`](./.env) and the example runs with zero infrastructure), and when it is set the matching integration is activated and resolved through the same core service constant, so the rest of the app is unchanged. The committed `.env` sets these variables to the dev compose service endpoints so `./dc up:all` wires everything out of the box.
 
-| Integration                                                                                                                                      | Activated by                                 | Falls back to            | Demo endpoint                                    |
+| Integration                                                                                                                                      | Activated by                                 | Falls back to            | Reached at                                       |
 |--------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------|--------------------------|--------------------------------------------------|
 | [`opentelemetry`](../../integrations/opentelemetry/v3/) — Prometheus metrics middleware                                                          | always on                                    | —                        | `GET /metrics`                                   |
 | [`websocket`](../../integrations/websocket/v3/) — WebSocket bound to the SSE hub                                                                 | always on                                    | —                        | `GET /ws` (and `GET /events/stream` for SSE)     |
-| `encrypt` ([`bunorm/v3/encrypt`](../../integrations/bunorm/v3/encrypt/)) — AES-256-GCM cipher                                                    | always on                                    | —                        | `GET /encrypt/demo`                              |
-| [`amqp`](../../integrations/amqp/v3/) — durable message-bus transport                                                                            | `AMQP_DSN`                                   | in-memory transport      | `POST /messagebus/demo`                          |
-| [`awss3`](../../integrations/awss3/v3/) — S3 object storage (`storage.ServiceStorage`)                                                           | `S3_ENDPOINT`                                | local filesystem storage | `GET /platform/demo`                             |
-| [`rueidis`](../../integrations/rueidis/v3/) — Redis cache backend, distributed lock (`lock.ServiceLocker`), revocable token store, SSE backplane | `REDIS_ADDRESS`                              | in-memory cache/lock     | `GET /cache/demo`, `GET /redis/token/demo`       |
-| [`bunorm/mysql`](../../integrations/bunorm/mysql/v3/) — MySQL `GET_LOCK` distributed lock                                                        | `MYSQL_HOST` (when `REDIS_ADDRESS` is unset) | in-memory lock           | `GET /platform/demo`                             |
-| [`bunorm`](../../integrations/bunorm/v3/) — bun ORM `*bun.DB`, transparent column encryption, field-level audit trail                            | `MYSQL_HOST`                                 | —                        | `GET /database/demo`, `GET /database/audit/demo` |
+| `encrypt` ([`bunorm/v3/encrypt`](../../integrations/bunorm/v3/encrypt/)) — AES-256-GCM cipher                                                    | always on                                    | —                        | `GET /encrypt/roundtrip`                              |
+| [`amqp`](../../integrations/amqp/v3/) — durable message-bus transport                                                                            | `AMQP_DSN`                                   | in-memory transport      | `POST /messagebus/dispatch`                          |
+| [`awss3`](../../integrations/awss3/v3/) — S3 object storage (`storage.ServiceStorage`)                                                           | `S3_ENDPOINT`                                | local filesystem storage | `GET /platform/check`                             |
+| [`rueidis`](../../integrations/rueidis/v3/) — Redis cache backend, distributed lock (`lock.ServiceLocker`), revocable token store, SSE backplane | `REDIS_ADDRESS`                              | in-memory cache/lock     | `GET /redis/token/revocation`       |
+| [`bunorm/mysql`](../../integrations/bunorm/mysql/v3/) — MySQL `GET_LOCK` distributed lock                                                        | `MYSQL_HOST` (when `REDIS_ADDRESS` is unset) | in-memory lock           | `GET /platform/check`                             |
+| [`bunorm`](../../integrations/bunorm/v3/) — bun ORM `*bun.DB`, transparent column encryption, field-level audit trail                            | `MYSQL_HOST`                                 | —                        | every catalogue write: audited and journalled    |
 
-The lock service follows a single priority: Redis if configured, otherwise MySQL, otherwise in-memory. `GET /database/demo` writes an `encrypt.EncryptedString` column and reads it back — the response shows the decrypted value next to the raw ciphertext stored in MySQL (`<ENC>…`), demonstrating transparent encryption-at-rest.
+The lock service follows a single priority: Redis if configured, otherwise MySQL, otherwise in-memory. Transparent encryption-at-rest is not shown through a route of its own: the two-factor enrollment table stores the shared secret and the recovery codes as `encrypt.EncryptedString` columns, so `POST /twofactor/enroll` writes ciphertext MySQL holds and `POST /twofactor/verify` reads it back to recompute a code. `GET /encrypt/roundtrip` reports the ciphertext beside the value that came back, which is the half a stored column cannot show.
 
 Several wirings deliberately defer their resolution to first use instead of the composition root:
 
-- `example:exclusive:demo` is wrapped in `lock.NewExclusiveCommand` over `lock.NewLazyLocker`, which resolves the registered locker at the first `CreateLock` — with a distributed locker configured (Redis or MySQL), run it from two shells at once and exactly one executes while the other exits zero. Under the in-memory fallback the exclusivity is per-process, so two separate shells both execute.
-- The transactional-outbox module ([`config/outbox.go`](./config/outbox.go)) is registered in the `StoreFactory`/`RelayFactory` shape: the store (which ensures the `melody_outbox` schema) and the relay (which opens the transport) are built from the container at first use, and the module contributes the `melody:outbox:relay` command over the same lazily-resolved relay. Demo endpoints: `POST /outbox/enqueue`, `POST /outbox/relay`, `GET /outbox/status`.
+- `example:exclusive:tick` is wrapped in `lock.NewExclusiveCommand` over `lock.NewLazyLocker`, which resolves the registered locker at the first `CreateLock` — with a distributed locker configured (Redis or MySQL), run it from two shells at once and exactly one executes while the other exits zero. Under the in-memory fallback the exclusivity is per-process, so two separate shells both execute.
+- The transactional-outbox module ([`config/outbox.go`](./config/outbox.go)) is registered in the `StoreFactory`/`RelayFactory` shape: the store (which ensures the `melody_outbox` schema) and the relay (which opens the transport) are built from the container at first use, and the module contributes the `melody:outbox:relay` command over the same lazily-resolved relay. Endpoints: `POST /outbox/enqueue`, `POST /outbox/relay`, `GET /outbox/status`.
 - The encrypt module resolves the shared `*bun.DB` through a `DatabaseFactory` evaluated at the first `melody:encrypt:database` run, so http- and worker-mode processes register the command without touching the database.
 
 ### Running fully against containers
@@ -204,10 +204,10 @@ This brings up the backing services **and** the example itself: the `dev` contai
 Notes:
 
 - **`--build` rebuilds the dev image** — use it after changing dependencies or the container [`entrypoint.sh`](../../.dev/docker/entrypoint.sh). For day-to-day Go/HTML/asset edits `./dc up:all` (without `--build`) is enough; reflex hot-reloads them.
-- **Always `up:all`, not plain `up`.** The backends live on the compose `all` profile, so `./dc up` / `./dc up:minimal` start only the dev container and load balancer — the example would then have no Redis/MySQL to reach. Use `./dc up:all` whenever you want the integration demos.
+- **Always `up:all`, not plain `up`.** The backends live on the compose `all` profile, so `./dc up` / `./dc up:minimal` start only the dev container and load balancer — the example would then have no Redis/MySQL to reach. Use `./dc up:all` whenever you want the live integrations.
 - **Cold-start is self-healing.** If a backend is not ready yet — or you start it afterwards — the MySQL/Redis providers retry the initial connection with backoff and the entrypoint supervisor restarts the process, so the app comes up on its own without a manual restart.
 
-The demo endpoints listed above then work against the mapped host port, e.g. `curl localhost:8180/database/demo`, `curl localhost:8180/cache/demo`.
+The endpoints listed above then work against the mapped host port, e.g. `curl localhost:8180/platform/check`, `curl localhost:8180/encrypt/roundtrip`.
 
 #### Running the binary directly against mapped ports
 
@@ -296,7 +296,7 @@ They are controlled independently via build tags.
 
 Depending on how you build the binary, you must ship different artifacts.
 
-### A) Fully embedded “black-box” binary (recommended for demos)
+### A) Fully embedded “black-box” binary (recommended for a self-contained handout)
 
 Build:
 

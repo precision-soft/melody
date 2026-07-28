@@ -9,37 +9,37 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-func NewMessageBusDemoCommand(
+func NewMessageBusDispatchCommand(
     dispatchBus melodymessagebuscontract.Bus,
     consumeBus melodymessagebuscontract.Bus,
     transport melodymessagebuscontract.Transport,
-) *MessageBusDemoCommand {
-    return &MessageBusDemoCommand{
+) *MessageBusDispatchCommand {
+    return &MessageBusDispatchCommand{
         dispatchBus: dispatchBus,
         consumeBus:  consumeBus,
         transport:   transport,
     }
 }
 
-type MessageBusDemoCommand struct {
+type MessageBusDispatchCommand struct {
     dispatchBus melodymessagebuscontract.Bus
     consumeBus  melodymessagebuscontract.Bus
     transport   melodymessagebuscontract.Transport
 }
 
-func (instance *MessageBusDemoCommand) Name() string {
-    return "messagebus:demo"
+func (instance *MessageBusDispatchCommand) Name() string {
+    return "messagebus:dispatch"
 }
 
-func (instance *MessageBusDemoCommand) Description() string {
+func (instance *MessageBusDispatchCommand) Description() string {
     return "dispatches messages to the async transport and consumes them in-process"
 }
 
-func (instance *MessageBusDemoCommand) Flags() []melodyclicontract.Flag {
+func (instance *MessageBusDispatchCommand) Flags() []melodyclicontract.Flag {
     return []melodyclicontract.Flag{}
 }
 
-func (instance *MessageBusDemoCommand) Run(
+func (instance *MessageBusDispatchCommand) Run(
     runtimeInstance melodyruntimecontract.Runtime,
     commandContext *melodyclicontract.CommandContext,
 ) error {
@@ -85,4 +85,4 @@ func (instance *MessageBusDemoCommand) Run(
     return nil
 }
 
-var _ melodyclicontract.Command = (*MessageBusDemoCommand)(nil)
+var _ melodyclicontract.Command = (*MessageBusDispatchCommand)(nil)

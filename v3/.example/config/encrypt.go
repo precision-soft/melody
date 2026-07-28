@@ -7,13 +7,13 @@ import (
     bun "github.com/uptrace/bun"
 )
 
-const encryptDemoKeyId = "example-2026"
+const encryptCompartmentKeyId = "example-2026"
 
 func (instance *Module) buildEncrypt() {
     keyProvider := melodyencrypt.NewStaticKeyProvider(
-        encryptDemoKeyId,
+        encryptCompartmentKeyId,
         map[string][]byte{
-            encryptDemoKeyId: []byte("melody-example-demo-key-32-bytes"),
+            encryptCompartmentKeyId: []byte("melody-example-cipher-key-32byte"),
         },
     )
 

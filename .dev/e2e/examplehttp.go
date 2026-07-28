@@ -15,9 +15,12 @@ EXAMPLE_BASE_URL (:8080). That application is a shared fixture, so the constrain
 through this client, and they are stated HERE — beside the calls — rather than in a section a later reader may
 never open:
 
-  - the nomenclature's write endpoints are off limits. EXAMPLE OVER HTTP (http.go) clears the example's redis counters and then
-    asserts the EXACT call at which the budget is exhausted; one extra request from anywhere else moves that
-    point and turns an unrelated section red for a reason nothing in its own output explains;
+  - the nomenclature's write endpoints are off limits BEFORE EXAMPLE OVER HTTP (http.go): it clears the
+    example's redis counters and then asserts the EXACT call at which the budget is exhausted, so one extra
+    request from anywhere else moves that point and turns an unrelated section red for a reason nothing in its
+    own output explains. A section that runs AFTER it and needs to write — SCOPED SERVICE and THREE HOSTS both
+    do, because what they assert is where a write LANDS — must call resetExampleRateLimitCounters first, so it
+    starts from a budget of its own rather than from whatever is left of one;
   - /outbox/* is off limits. stack.sh's OUTBOX FACTORIES check asserts its sent count GREW because of its own
     enqueue; a row relayed from here would satisfy that assertion without the check having caused it;
   - nothing here logs in, and this client deliberately carries NO cookie jar. A session cookie picked up by a

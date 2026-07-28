@@ -7,12 +7,12 @@ import (
 )
 
 const (
-    demoJwtSecret   = "melody-example-demo-secret-change-me"
-    demoOpaqueToken = "melody-example-opaque-token"
+    exampleJwtSecret   = "melody-example-signing-secret-change-me"
+    exampleOpaqueToken = "melody-example-opaque-token"
 )
 
 func (instance *Module) buildTokenAuth() {
-    instance.jwtSecret = []byte(demoJwtSecret)
+    instance.jwtSecret = []byte(exampleJwtSecret)
     instance.tokenValidator = melodysecurity.NewJwtTokenValidator(
         melodysecurity.JwtConfig{
             Secret:     instance.jwtSecret,
@@ -21,7 +21,7 @@ func (instance *Module) buildTokenAuth() {
     )
 
     opaqueStore := melodysecurity.NewInMemoryTokenStore()
-    opaqueStore.Put(demoOpaqueToken, melodysecuritycontract.Claims{
+    opaqueStore.Put(exampleOpaqueToken, melodysecuritycontract.Claims{
         UserIdentifier: "api-user",
         Roles:          []string{entity.RoleUser},
     })

@@ -7,7 +7,9 @@ import (
     "fmt"
     "strings"
 
+    melodyaudit "github.com/precision-soft/melody/integrations/bunorm/v3/audit"
     "github.com/precision-soft/melody/v3/.example/entity"
+    "github.com/precision-soft/melody/v3/.example/persistence"
     "github.com/uptrace/bun"
 )
 
@@ -17,7 +19,8 @@ type userRow struct {
 
     Id       string `bun:"id,pk"`
     Username string `bun:"username,notnull"`
-    Password string `bun:"password,notnull"`
+    /* the trail records THAT the password changed and never what it changed to or from: a history of credentials is the one thing an audit trail must not become, and a reader of the trail has no business the plaintext would serve */
+    Password string `bun:"password,notnull" audit:"redact"`
     Roles    string `bun:"roles,notnull"`
 }
 
@@ -45,12 +48,14 @@ func (instance *userRow) toEntity() *entity.User {
     return entity.NewUser(instance.Id, instance.Username, instance.Password, roles)
 }
 
-func newBunUserRepository(database *bun.DB) *bunUserRepository {
-    return &bunUserRepository{database: database}
+func newBunUserRepository(storage *persistence.CatalogStorage) *bunUserRepository {
+    return &bunUserRepository{database: storage.Database(), tracker: storage.Tracker()}
 }
 
+/* bunUserRepository keeps the directory in the database and its history beside it. Every write goes through the audit tracker, so who was granted which role, and when, is answerable after the fact — and the password column is recorded as changed without its value ever entering the trail. */
 type bunUserRepository struct {
     database *bun.DB
+    tracker  *melodyaudit.Tracker
 }
 
 /* EnsureSchema creates the table when it is absent and writes the opening directory into it when it is empty. The seeding insert ignores duplicate keys because several example applications may reach an empty table at the same time, and losing that race is not a failure. */
@@ -194,12 +199,7 @@ func (instance *bunUserRepository) Create(ctx context.Context, user *entity.User
         user.Id = nextUserId(identifierList)
     }
 
-    _, insertErr := instance.database.
-        NewInsert().
-        Model(newUserRow(user)).
-        Exec(ctx)
-
-    return insertErr
+    return instance.tracker.Insert(auditContext(ctx), persistence.AuditEntityUser, user.Id, newUserRow(user))
 }
 
 func (instance *bunUserRepository) Update(ctx context.Context, user *entity.User) (bool, error) {
@@ -231,16 +231,12 @@ func (instance *bunUserRepository) Update(ctx context.Context, user *entity.User
         return false, fmt.Errorf("username already exists")
     }
 
-    result, updateErr := instance.database.
-        NewUpdate().
-        Model(newUserRow(user)).
-        WherePK().
-        Exec(ctx)
+    updateErr := instance.tracker.Update(auditContext(ctx), persistence.AuditEntityUser, id, newUserRow(user))
     if nil != updateErr {
         return false, updateErr
     }
 
-    return affectedAtLeastOneRow(result), nil
+    return true, nil
 }
 
 func (instance *bunUserRepository) DeleteById(ctx context.Context, id string) (bool, error) {
@@ -249,16 +245,27 @@ func (instance *bunUserRepository) DeleteById(ctx context.Context, id string) (b
         return false, fmt.Errorf("id is required")
     }
 
-    result, deleteErr := instance.database.
-        NewDelete().
-        Model((*userRow)(nil)).
-        Where("id = ?", trimmedId).
-        Exec(ctx)
+    /* the account is opted into a captured before-image, so the tracker loads and locks the row before removing it and the trail keeps which roles it held; an account that is not there is not an error, it is an answer the caller asked for */
+    _, found, findErr := instance.findRowById(ctx, trimmedId)
+    if nil != findErr {
+        return false, findErr
+    }
+
+    if false == found {
+        return false, nil
+    }
+
+    deleteErr := instance.tracker.Delete(
+        auditContext(ctx),
+        persistence.AuditEntityUser,
+        trimmedId,
+        &userRow{Id: trimmedId},
+    )
     if nil != deleteErr {
         return false, deleteErr
     }
 
-    return affectedAtLeastOneRow(result), nil
+    return true, nil
 }
 
 func (instance *bunUserRepository) usernameTakenByAnother(ctx context.Context, username string, excludedId string) (bool, error) {

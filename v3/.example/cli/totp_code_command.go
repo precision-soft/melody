@@ -10,7 +10,7 @@ import (
 )
 
 /* NewTotpCodeCommand prints the current TOTP code for a secret — it stands in for the authenticator app a
-user would hold, so the two-factor verify demo can be driven end-to-end. */
+user would hold, so the two-factor verification can be driven end-to-end. */
 func NewTotpCodeCommand() *TotpCodeCommand {
     return &TotpCodeCommand{}
 }

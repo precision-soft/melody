@@ -14,12 +14,15 @@ import (
     melodystoragecontract "github.com/precision-soft/melody/v3/storage/contract"
 )
 
-func PlatformDemoHandler() melodyhttpcontract.Handler {
+/* PlatformCheckHandler answers whether the platform primitives this application depends on are actually working: it takes the distributed lock, refreshes it, then writes, reads back and removes one object in storage.
+
+It is a readiness probe rather than a liveness one. /health says the process is up; this says the two backends it cannot serve a request without are reachable and behaving, which is the question an operator asks before sending traffic to a new replica. */
+func PlatformCheckHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         storageInstance := melodystorage.StorageMustFromContainer(runtimeInstance.Container())
         locker := melodylock.LockerMustFromContainer(runtimeInstance.Container())
 
-        lockInstance := locker.CreateLock("example.platform.demo", 5*time.Second)
+        lockInstance := locker.CreateLock("example.platform.check", 5*time.Second)
 
         acquired, acquireErr := lockInstance.Acquire(runtimeInstance)
         if nil != acquireErr {
@@ -36,8 +39,8 @@ func PlatformDemoHandler() melodyhttpcontract.Handler {
             return nil, refreshErr
         }
 
-        key := "example/platform-demo.txt"
-        payload := []byte("hello from the platform demo")
+        key := "example/platform-check.txt"
+        payload := []byte("the storage backend accepted a write and returned it")
 
         if putErr := storageInstance.Put(runtimeInstance, key, bytes.NewReader(payload), int64(len(payload)), melodystoragecontract.PutOptions{ContentType: "text/plain"}); nil != putErr {
             return nil, putErr

@@ -26,7 +26,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     router.HandleNamed(route.RoutesName, "GET", route.RoutesPattern, handler.RoutesHandler())
 
-    instance.registerIntegrationRoutes(router)
+    instance.registerCatalogReportRoute(router)
 
     router.HandleNamed(route.CategoriesApiReadAllName, "GET", route.CategoriesApiReadAllPattern, handlercategory.ApiReadAllHandler())
 
@@ -64,13 +64,13 @@ func (instance *Module) throttledWrite(next melodyhttpcontract.Handler) melodyht
     return melodyhttpmiddleware.RateLimitMiddleware(rateLimitConfig)(next)
 }
 
-/* registerIntegrationRoutes declares only what the environment actually gave the example. A route whose backend was never wired would answer 500 to every request and say nothing about why, so an unconfigured integration simply has no route. */
-func (instance *Module) registerIntegrationRoutes(router melodyhttpcontract.Router) {
+/* registerCatalogReportRoute declares the one reading the nomenclature publishes. It needs no backend of its own: with a cache it is served from the reading the scheduled refresh left there, and without one it is computed on the spot. */
+func (instance *Module) registerCatalogReportRoute(router melodyhttpcontract.Router) {
     router.HandleNamed(
-        route.IntegrationReportName,
+        route.CatalogReportName,
         "GET",
-        route.IntegrationReportPattern,
-        handler.ReportDemoHandler(),
+        route.CatalogReportPattern,
+        handler.CatalogReportHandler(),
     )
 }
 

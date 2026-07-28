@@ -131,7 +131,7 @@ func (instance *ProductService) Create(
         now,
     )
 
-    createErr := instance.productRepository.Create(runtimeInstance.Context(), product)
+    createErr := instance.productRepository.Create(WriteContext(runtimeInstance), product)
     if nil != createErr {
         return nil, createErr
     }
@@ -159,7 +159,7 @@ func (instance *ProductService) Update(
     currencyId string,
     stock int64,
 ) (*entity.Product, bool, error) {
-    ctx := runtimeInstance.Context()
+    ctx := WriteContext(runtimeInstance)
 
     product, found, findErr := instance.productRepository.FindById(ctx, id)
     if nil != findErr {
@@ -204,7 +204,7 @@ func (instance *ProductService) DeleteById(
     runtimeInstance melodyruntimecontract.Runtime,
     productId string,
 ) (bool, error) {
-    deleted, deleteErr := instance.productRepository.DeleteById(runtimeInstance.Context(), productId)
+    deleted, deleteErr := instance.productRepository.DeleteById(WriteContext(runtimeInstance), productId)
     if nil != deleteErr {
         return false, deleteErr
     }

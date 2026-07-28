@@ -21,11 +21,14 @@ const (
     CatalogJournalActorSystem = "system"
 )
 
-/* CatalogJournalEntry is one change to the nomenclature: who made it, what they did, and to which record.
+/* CatalogJournalEntry is one change to the nomenclature: who made it, what they did, to which record, and under which request.
+
+RequestId is what ties an entry back to the call that caused it. It is empty for a change made outside a request — a scheduled refresh or a console run has no request to be attributed to, and an identifier invented for one would claim a correlation that cannot be followed anywhere.
 
 It lives here rather than in the entity package on purpose: the domain entities are cached through a gob serializer and carry no storage concerns, so the one type that does carry them stays beside the repository that maps it. */
 type CatalogJournalEntry struct {
     Id         int64
+    RequestId  string
     Actor      string
     Action     string
     Subject    string
@@ -38,6 +41,9 @@ type CatalogJournalRepository interface {
     EnsureSchema(ctx context.Context) error
 
     Append(ctx context.Context, entry *CatalogJournalEntry) (*CatalogJournalEntry, error)
+
+    /* AppendBatch writes everything one request accumulated in a single statement. It is what the request-scoped trail flushes into, so a request that changed several records costs one round trip rather than one per change. An empty batch is not an error and touches nothing. */
+    AppendBatch(ctx context.Context, entryList []*CatalogJournalEntry) error
 
     Latest(ctx context.Context, limit int) ([]*CatalogJournalEntry, error)
 

@@ -28,25 +28,47 @@ func (instance *inMemoryCatalogJournalRepository) EnsureSchema(ctx context.Conte
 }
 
 func (instance *inMemoryCatalogJournalRepository) Append(ctx context.Context, entry *CatalogJournalEntry) (*CatalogJournalEntry, error) {
-    if nil == entry {
-        return nil, fmt.Errorf("journal entry is required")
-    }
-
-    if "" == strings.TrimSpace(entry.Action) {
-        return nil, fmt.Errorf("action is required")
-    }
-
-    if "" == strings.TrimSpace(entry.Subject) {
-        return nil, fmt.Errorf("subject is required")
+    validationErr := validateCatalogJournalEntry(entry)
+    if nil != validationErr {
+        return nil, validationErr
     }
 
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
+    return instance.appendLocked(entry), nil
+}
+
+/* AppendBatch takes the whole batch under one lock, so a request's entries land next to each other rather than interleaved with another request's. Every entry is validated before anything is stored, which is the same order the database-backed journal uses. */
+func (instance *inMemoryCatalogJournalRepository) AppendBatch(ctx context.Context, entryList []*CatalogJournalEntry) error {
+    if 0 == len(entryList) {
+        return nil
+    }
+
+    for _, entry := range entryList {
+        validationErr := validateCatalogJournalEntry(entry)
+        if nil != validationErr {
+            return validationErr
+        }
+    }
+
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    for _, entry := range entryList {
+        instance.appendLocked(entry)
+    }
+
+    return nil
+}
+
+/* appendLocked stores one validated entry. The caller holds the lock. */
+func (instance *inMemoryCatalogJournalRepository) appendLocked(entry *CatalogJournalEntry) *CatalogJournalEntry {
     instance.nextId = instance.nextId + 1
 
     stored := &CatalogJournalEntry{
         Id:         instance.nextId,
+        RequestId:  entry.RequestId,
         Actor:      entry.Actor,
         Action:     entry.Action,
         Subject:    entry.Subject,
@@ -70,7 +92,23 @@ func (instance *inMemoryCatalogJournalRepository) Append(ctx context.Context, en
         instance.entries = instance.entries[len(instance.entries)-inMemoryJournalCapacity:]
     }
 
-    return stored, nil
+    return stored
+}
+
+func validateCatalogJournalEntry(entry *CatalogJournalEntry) error {
+    if nil == entry {
+        return fmt.Errorf("journal entry is required")
+    }
+
+    if "" == strings.TrimSpace(entry.Action) {
+        return fmt.Errorf("action is required")
+    }
+
+    if "" == strings.TrimSpace(entry.Subject) {
+        return fmt.Errorf("subject is required")
+    }
+
+    return nil
 }
 
 func (instance *inMemoryCatalogJournalRepository) Latest(ctx context.Context, limit int) ([]*CatalogJournalEntry, error) {

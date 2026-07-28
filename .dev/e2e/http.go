@@ -28,6 +28,9 @@ const (
 
     exampleHttpEditorUsername = "editor"
     exampleHttpEditorPassword = "editor"
+
+    exampleHttpAdminUsername = "admin"
+    exampleHttpAdminPassword = "admin"
 )
 
 /* runExampleHttpCheck drives the running .example application over real HTTP — the only place the whole
@@ -156,7 +159,17 @@ func newExampleHttpClient() *http.Client {
 }
 
 func signInExampleHttpEditor(client *http.Client, baseUrl string, hostHeader string) {
-    body := "username=" + exampleHttpEditorUsername + "&password=" + exampleHttpEditorPassword
+    signInExampleHttp(client, baseUrl, hostHeader, exampleHttpEditorUsername, exampleHttpEditorPassword)
+}
+
+/* the admin is what a section signs in as when it drives the directory: the user routes are behind ROLE_ADMIN,
+which the editor does not hold. */
+func signInExampleHttpAdmin(client *http.Client, baseUrl string) {
+    signInExampleHttp(client, baseUrl, "", exampleHttpAdminUsername, exampleHttpAdminPassword)
+}
+
+func signInExampleHttp(client *http.Client, baseUrl string, hostHeader string, username string, password string) {
+    body := "username=" + username + "&password=" + password
 
     request, requestErr := http.NewRequest("POST", strings.TrimRight(baseUrl, "/")+"/login/", strings.NewReader(body))
     if nil != requestErr {

@@ -8,22 +8,22 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* ExclusiveDemoCommand simulates a cron-launched job that must run on exactly one instance per tick: config/cli.go wraps it in lock.NewExclusiveCommand over lock.NewLazyLocker, which resolves the registered locker (redis when configured) at the first CreateLock rather than at boot, so launching it from two shells at once runs the body once while the other exits zero with a "skipped" log line. */
-type ExclusiveDemoCommand struct{}
+/* ExclusiveTickCommand simulates a cron-launched job that must run on exactly one instance per tick: config/cli.go wraps it in lock.NewExclusiveCommand over lock.NewLazyLocker, which resolves the registered locker (redis when configured) at the first CreateLock rather than at boot, so launching it from two shells at once runs the body once while the other exits zero with a "skipped" log line. */
+type ExclusiveTickCommand struct{}
 
-func NewExclusiveDemoCommand() *ExclusiveDemoCommand {
-    return &ExclusiveDemoCommand{}
+func NewExclusiveTickCommand() *ExclusiveTickCommand {
+    return &ExclusiveTickCommand{}
 }
 
-func (instance *ExclusiveDemoCommand) Name() string {
-    return "example:exclusive:demo"
+func (instance *ExclusiveTickCommand) Name() string {
+    return "example:exclusive:tick"
 }
 
-func (instance *ExclusiveDemoCommand) Description() string {
-    return "holds the demo lock for --hold and prints the tick; wrapped as an exclusive command over the lazily-resolved locker"
+func (instance *ExclusiveTickCommand) Description() string {
+    return "holds the shared lock for --hold and prints the tick; wrapped as an exclusive command over the lazily-resolved locker"
 }
 
-func (instance *ExclusiveDemoCommand) Flags() []melodyclicontract.Flag {
+func (instance *ExclusiveTickCommand) Flags() []melodyclicontract.Flag {
     return []melodyclicontract.Flag{
         &melodyclicontract.StringFlag{
             Name:  "hold",
@@ -32,7 +32,7 @@ func (instance *ExclusiveDemoCommand) Flags() []melodyclicontract.Flag {
     }
 }
 
-func (instance *ExclusiveDemoCommand) Run(
+func (instance *ExclusiveTickCommand) Run(
     runtimeInstance melodyruntimecontract.Runtime,
     commandContext *melodyclicontract.CommandContext,
 ) error {
@@ -61,4 +61,4 @@ func (instance *ExclusiveDemoCommand) Run(
     return nil
 }
 
-var _ melodyclicontract.Command = (*ExclusiveDemoCommand)(nil)
+var _ melodyclicontract.Command = (*ExclusiveTickCommand)(nil)

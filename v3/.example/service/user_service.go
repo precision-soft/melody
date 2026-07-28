@@ -149,7 +149,7 @@ func (instance *UserService) Create(
 ) (*entity.User, error) {
     user := entity.NewUser(userId, username, passwordSha256Hex, roles)
 
-    createErr := instance.userRepository.Create(runtimeInstance.Context(), user)
+    createErr := instance.userRepository.Create(WriteContext(runtimeInstance), user)
     if nil != createErr {
         return nil, createErr
     }
@@ -174,7 +174,7 @@ func (instance *UserService) Update(
     passwordSha256Hex string,
     roles []string,
 ) (*entity.User, bool, error) {
-    ctx := runtimeInstance.Context()
+    ctx := WriteContext(runtimeInstance)
 
     user, found, findErr := instance.userRepository.FindById(ctx, userId)
     if nil != findErr {
@@ -214,7 +214,7 @@ func (instance *UserService) DeleteById(
     runtimeInstance melodyruntimecontract.Runtime,
     userId string,
 ) (bool, error) {
-    ctx := runtimeInstance.Context()
+    ctx := WriteContext(runtimeInstance)
 
     user, found, findErr := instance.userRepository.FindById(ctx, userId)
     if nil != findErr {

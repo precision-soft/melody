@@ -36,14 +36,19 @@ func MustGetUserRepository(resolver melodycontainercontract.Resolver) UserReposi
 
 /* NewUserRepository hands back the nomenclature the environment can actually support: the database-backed one when a connection was configured, and the in-memory one otherwise. The choice is made here rather than in the configuration because the generated wiring fills this constructor from the container, and the storage handle is what carries the answer.
 
-The table is created and seeded on the way out, so the first caller finds a nomenclature rather than an empty one. */
+The table is created and seeded on the way out, so the first caller finds a nomenclature rather than an empty one. The trail's own tables are created beside it: an audited write is one transaction over both, so a missing trail table would turn every write into a failure rather than into an unaudited success. */
 //melody:service ServiceUserRepository
 func NewUserRepository(storage *persistence.CatalogStorage) (UserRepository, error) {
     if false == storage.IsPersistent() {
         return newInMemoryUserRepository(), nil
     }
 
-    repositoryInstance := newBunUserRepository(storage.Database())
+    ensureAuditSchemaErr := storage.EnsureAuditSchema(context.Background())
+    if nil != ensureAuditSchemaErr {
+        return nil, ensureAuditSchemaErr
+    }
+
+    repositoryInstance := newBunUserRepository(storage)
 
     ensureSchemaErr := repositoryInstance.EnsureSchema(context.Background())
     if nil != ensureSchemaErr {

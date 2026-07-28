@@ -13,7 +13,7 @@ import (
     bun "github.com/uptrace/bun"
 )
 
-/* EnqueueHandler writes a demo message to the outbox inside a transaction — in real use the same
+/* EnqueueHandler writes a notice to the outbox inside a transaction — in real use the same
 transaction also carries the business change, so the message is published if and only if the business
 write commits. It does NOT publish; the relay does that later. The store arrives as a container.Lazy
 handle: the first request resolves the registered store (which ensures the outbox schema), later requests
@@ -22,7 +22,7 @@ func EnqueueHandler(database *bun.DB, store *melodycontainer.LazyService[*outbox
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         reference := queryString(request, "reference")
         if "" == reference {
-            reference = "demo"
+            reference = "unreferenced"
         }
 
         text := queryString(request, "text")
@@ -38,7 +38,7 @@ func EnqueueHandler(database *bun.DB, store *melodycontainer.LazyService[*outbox
         enqueueErr := database.RunInTx(runtimeInstance.Context(), nil, func(ctx context.Context, tx bun.Tx) error {
             /* a real handler performs its business write on tx here; the outbox write shares the same
                transaction so the two commit atomically */
-            return storeInstance.Enqueue(ctx, tx, message.OutboxDemo{Reference: reference, Text: text})
+            return storeInstance.Enqueue(ctx, tx, message.OutboxNotice{Reference: reference, Text: text})
         })
         if nil != enqueueErr {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "could not enqueue the outbox message"), nil

@@ -1,8 +1,10 @@
 package service
 
 import (
+    "context"
     "strings"
 
+    "github.com/precision-soft/melody/v3/.example/persistence"
     "github.com/precision-soft/melody/v3/.example/repository"
     melodyclockcontract "github.com/precision-soft/melody/v3/clock/contract"
     melodycontainer "github.com/precision-soft/melody/v3/container"
@@ -87,4 +89,11 @@ func ActorFromRuntime(runtimeInstance melodyruntimecontract.Runtime) string {
 
 func MustGetCatalogJournalService(resolver melodycontainercontract.Resolver) *CatalogJournalService {
     return melodycontainer.MustFromResolver[*CatalogJournalService](resolver, ServiceCatalogJournalService)
+}
+
+/* WriteContext is the context a change to the nomenclature is made under. It carries who is making it, because a repository is handed a context rather than a runtime and the audit trail still has to name a person.
+
+This is the last layer that knows which request it is serving, so it is where the answer is put on the context. The value travels as a plain string under a key the persistence package owns, which is what keeps the ORM's own actor helper out of the service layer. */
+func WriteContext(runtimeInstance melodyruntimecontract.Runtime) context.Context {
+    return persistence.WithActor(runtimeInstance.Context(), ActorFromRuntime(runtimeInstance))
 }

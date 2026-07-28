@@ -32,12 +32,14 @@ Sections:
   - EXAMPLE OVER HTTP      (example)  — forwarded-client-ip trust boundary and the rate limit over real HTTP
   - THREE HOSTS            (example)  — the load balancer's three vhosts each reach their own major, told apart by which catalogue table the write lands in
   - OPENAPI SERVED         (example)  — the document the SERVING process builds: the booted routes, a typed response's component schema, every $ref resolving
+  - SCOPED SERVICE         (example + mysql) — the request-scoped journal trail: the row a write leaves proves the event listener and the flush middleware held ONE instance, its request id proves none was carried to the next request
+  - CATALOG NOTIFICATION   (example + mysql) — two live sockets on the RUNNING application; one catalogue write and both are told the same thing, so a change reaches every open page rather than one of them
   - TRANSLATION            (example)  — both catalogues, all three ICU plural branches, the locale fallback chain, and the token firewall's own json entry point
   - TOKEN AUTHENTICATION   (example)  — a token minted by the application's own auth:token command; refusals for no header, a foreign key, a flipped signature and alg:none
   - SWITCH-USER IMPERSONATION (example) — both identities under a switch; a caller without the switch role stays itself; an unknown target fails closed
   - HMAC OVER HTTP         (example)  — an internal:sign envelope verified across a real process boundary; refusals for replay, tamper, body and query mismatch
   - TWO-FACTOR             (example)  — enroll and verify with totp:code; refusals for replay, whitespace-normalised replay, an expired code and a user never enrolled
-  - MYSQL AND AUDIT        (example + mysql) — encrypted at rest, re-read out of band through the harness's own connection; the audit trail's exact entries and change set
+  - MYSQL AND AUDIT        (example + mysql) — the second factor's shared secret encrypted at rest, re-read out of band through the harness's own connection; the audit trail of a real catalogue write — exact entries, exact change set, the signed-in actor — and a password change recorded without its value
   - MULTIPART              (example)  — a multipart body reaches the handler unread and byte-identical; the urlencoded twin is drained and restored
   - SERVER-SENT EVENTS     (example + redis) — preamble and headers, in-process and cross-replica delivery, id/retry framing, id sanitisation, origin suppression, topic isolation, malformed payloads
   - METRICS                (example + prometheus) — the counter and the histogram grow by EXACTLY the requests issued, a control route stays put, and a real prometheus scrapes the endpoint
@@ -45,11 +47,12 @@ Sections:
   - EXAMPLE APPLICATION v2 (example)  — the same, for major 2
   - EXAMPLE APPLICATION v3 (example)  — the same, for major 3
 
-The eleven example-over-http sections all drive the ONE application the dev container supervises on
-EXAMPLE_BASE_URL, so they share a fixture and observe two rules stated in examplehttp.go beside the calls: no
-section other than EXAMPLE OVER HTTP may write to the nomenclature (it asserts an exact exhaustion point of the write budget), and nothing
-may touch /outbox/* (a stack.sh check asserts its sent-count delta). METRICS runs last of the group because its
-assertions are exact request-count deltas.
+The twelve example-over-http sections all drive the ONE application the dev container supervises on
+EXAMPLE_BASE_URL, so they share a fixture and observe two rules stated in examplehttp.go beside the calls:
+nothing may write to the nomenclature BEFORE EXAMPLE OVER HTTP (it asserts an exact exhaustion point of the
+write budget, and one extra request from anywhere else moves that point), and a section that runs after it and
+does write must reset the budget first; and nothing may touch /outbox/* (a stack.sh check asserts its
+sent-count delta). METRICS runs last of the group because its assertions are exact request-count deltas.
 
 The per-major EXAMPLE APPLICATION sections build each major's .example into its own workspace, boot it on its own
 port and drive it end to end: a public route, the login flow through a real cookie jar, the protected route before
@@ -59,7 +62,10 @@ shutdown on one SIGINT. MELODY_E2E_MAJORS selects which majors run and defaults 
 Clear-to-skip recipes beyond the backend variables above:
 
     MYSQL_DSN=       — MYSQL AND AUDIT keeps its application-side half and announces that the ciphertext was NOT
-                       re-read out of band; TWO-FACTOR announces the enrollment row it left behind
+                       re-read out of band; TWO-FACTOR announces the enrollment row it left behind; SCOPED
+                       SERVICE and CATALOG NOTIFICATION skip entirely, because everything they assert is read
+                       out of band or leaves a row that must be removed with the records it caused, and an
+                       application-side half would assert nothing the application did not report itself
     PROMETHEUS_URL=  — METRICS keeps its delta assertions and announces that no collector was proven to read the
                        endpoint
     REDIS_ADDRESS=   — additionally skips SERVER-SENT EVENTS entirely (the cross-replica half needs the backplane),
@@ -200,7 +206,11 @@ func main() {
         sections++
 
         section("SCOPED SERVICE (live example application)")
-        runScopedServiceCheck(baseUrl)
+        runScopedServiceCheck(baseUrl, os.Getenv("MYSQL_DSN"), redisAddress)
+        sections++
+
+        section("CATALOG NOTIFICATION (live example application)")
+        runCatalogNotificationCheck(baseUrl, os.Getenv("MYSQL_DSN"), redisAddress)
         sections++
 
         section("TRANSLATION (live example application)")
@@ -228,7 +238,7 @@ func main() {
         releaseExampleMintWorkspace()
 
         section("MYSQL AND AUDIT (live example application)")
-        runMysqlCheck(baseUrl)
+        runMysqlCheck(baseUrl, redisAddress)
         sections++
 
         section("MULTIPART (live example application)")

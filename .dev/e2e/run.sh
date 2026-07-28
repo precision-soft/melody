@@ -13,7 +13,7 @@
 #                                                  # the rate limit counters straight in redis, and SERVER-SENT EVENTS,
 #                                                  # whose cross-replica half needs the backplane)
 #   MINIO_ENDPOINT= .dev/e2e/run.sh                # skip the object storage section
-#   EXAMPLE_BASE_URL= .dev/e2e/run.sh              # skip ALL eleven sections that drive the supervised example
+#   EXAMPLE_BASE_URL= .dev/e2e/run.sh              # skip ALL twelve sections that drive the supervised example
 #   MYSQL_DSN= .dev/e2e/run.sh                     # keep MYSQL AND AUDIT but skip the out-of-band re-read of the
 #                                                  # ciphertext, and leave the two-factor enrollment row behind
 #                                                  # (both are announced, never silent)
@@ -25,20 +25,27 @@
 # OVER HTTP calls it over the loopback on purpose: 127.0.0.1 sits outside the example's trusted proxy list, which
 # is what proves a spoofed X-Forwarded-For cannot mint a fresh rate limit budget.
 #
-# Ten further sections drive that same supervised application: OPENAPI SERVED (the document the serving process
+# Eleven further sections drive that same supervised application: OPENAPI SERVED (the document the serving process
 # builds), TRANSLATION (catalogues, ICU plurals, the fallback chain and the token firewall's json entry point),
-# SCOPED SERVICE (a service declared by a //melody:scoped constructor, proven to be one instance per request
-# and none between requests), TOKEN AUTHENTICATION and SWITCH-USER IMPERSONATION (credentials minted by the application's own auth:token
+# SCOPED SERVICE (the request-scoped journal trail: the entry a write leaves is proof the event listener and
+# the flush middleware held one instance, and its request id is proof no instance was carried between requests),
+# CATALOG NOTIFICATION (two live sockets on the running application; one write and both are told the same thing),
+# TOKEN AUTHENTICATION and SWITCH-USER IMPERSONATION (credentials minted by the application's own auth:token
 # command), HMAC OVER HTTP (an internal:sign envelope verified across a real process boundary), TWO-FACTOR
-# (enroll/verify with totp:code plus four refusals), MYSQL AND AUDIT (encrypted at rest, re-read out of band),
+# (enroll/verify with totp:code plus four refusals), MYSQL AND AUDIT (the second factor's secret encrypted at
+# rest and re-read out of band; the trail of a real catalogue write, and a password change recorded as a change
+# with its value masked),
 # MULTIPART (a multipart body the framework leaves unread and its urlencoded twin), SERVER-SENT EVENTS (the harness
 # joins the redis backplane as a second replica) and METRICS, which runs LAST because it asserts exact
 # request-count deltas and any later request would move them.
 #
-# Because all eleven share one application, no new section may write to the nomenclature (EXAMPLE OVER HTTP asserts the
-# exact call at which the budget is exhausted), none may log in or carry a cookie jar, and none may touch
-# /outbox/* (a stack.sh check asserts its sent-count delta). The rule is repeated in .dev/e2e/examplehttp.go,
-# beside the calls it governs.
+# Because all twelve share one application, no new section may write to the nomenclature BEFORE EXAMPLE OVER
+# HTTP (it asserts the exact call at which the budget is exhausted); a section that runs after it and writes —
+# SCOPED SERVICE, CATALOG NOTIFICATION and MYSQL AND AUDIT all do, because what they assert is what a write
+# leaves behind — must reset the budget first.
+# Sections built on the shared liveExampleClient may not log in or carry a cookie jar; one that must
+# authenticate opens its own jarred client. None may touch /outbox/* (a stack.sh check asserts its sent-count
+# delta). The rule is repeated in .dev/e2e/examplehttp.go, beside the calls it governs.
 #
 # The per-major EXAMPLE APPLICATION sections drive a DIFFERENT application: for each major listed in
 # MELODY_E2E_MAJORS (all three by default) the harness builds that major's .example into its own workspace

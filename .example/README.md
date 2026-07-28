@@ -18,7 +18,7 @@ Conceptually, the example models a minimal admin-style catalog application:
 
 ---
 
-## Demo credentials
+## Seeded credentials
 
 For convenience, the example ships with a few predefined users:
 
@@ -95,19 +95,26 @@ Beside cron, the example wires [`integrations/bunorm`](../integrations/bunorm/) 
 [cache backend](../integrations/rueidis/cache/), and the framework's own [`clock`](../clock/).
 
 Each one is gated on an endpoint parameter, and an unset endpoint leaves the integration unwired: no service,
-no route, nothing dialled. That is what keeps the example bootable with no containers at all — the demo routes
-are simply absent. The endpoints ship in [`.env`](./.env) pointing at the docker-compose service names, and a
-configured-but-unreachable endpoint is a warning rather than a boot failure, so `go run .` works on a laptop.
+nothing dialled, and the nomenclature falls back to what it can reach inside the process. That is what keeps the
+example bootable with no containers at all. The endpoints ship in [`.env`](./.env) pointing at the
+docker-compose service names, and a configured-but-unreachable endpoint is a warning rather than a boot failure,
+so `go run .` works on a laptop.
 
-| route | what it proves |
+None of the integrations has a route of its own. Each one carries a function of the nomenclature instead, so
+what it does is visible in what the application does:
+
+| integration | what carries it |
 |---|---|
-| `GET /integration/report/` | the clock-stamped catalogue report, served from the cache once warm — the one demo that needs no backend |
-| `GET /integration/cache/` | a redis round trip: a clock-stamped value written through the backend and read straight back |
-| `GET /integration/database/` | a mysql round trip: the demo table created if absent, a note appended, read back by its identifier, and the table counted |
-| `GET /integration/ratelimit/` | the redis rate limiter, five requests per minute per client |
+| `bunorm` + mysql provider | products, categories, currencies and users are kept in mysql when one is configured, and in memory when it is not |
+| `rueidis` cache backend | the product listing is served from redis and dropped from it on every write |
+| `rueidis` rate limiter | the nomenclature's write endpoints share a per-address budget; the reads stay open |
+| `clock` | every write is stamped by the injected clock rather than by the wall, in the services and in the timing middleware |
 
-The `catalog:note` command writes a note and prints the latest ones over the same repository, so the database is
-reachable from the command line as well as from a request.
+`GET /catalog/report/` is the one endpoint kept: the clock-stamped catalogue reading, served from the cache
+once the scheduled refresh has warmed it, and computable with no backend at all.
+
+The `catalog:journal` command prints the latest entries of the write journal over the same repository the
+listeners write it through, so the record is reachable from the command line as well as from a request.
 
 Two details are worth reading in the source rather than guessed at:
 
@@ -250,7 +257,7 @@ They are controlled independently via build tags.
 
 Depending on how you build the binary, you must ship different artifacts.
 
-### A) Fully embedded “black-box” binary (recommended for demos)
+### A) Fully embedded “black-box” binary (recommended for a self-contained handout)
 
 Build:
 

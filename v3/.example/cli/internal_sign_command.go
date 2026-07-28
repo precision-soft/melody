@@ -10,7 +10,7 @@ import (
 )
 
 /* NewInternalSignCommand mints the internal-auth (HMAC) header a caller service would send to reach the
-/internal firewall. It signs with the same demo secret the firewall verifies against, so the printed
+/internal firewall. It signs with the same shared secret the firewall verifies against, so the printed
 header authenticates. The signed method/path/body must match the request exactly, so pass the same values
 to curl. */
 func NewInternalSignCommand(signer *melodysecurity.HmacEnvelopeSigner) *InternalSignCommand {
@@ -26,7 +26,7 @@ func (instance *InternalSignCommand) Name() string {
 }
 
 func (instance *InternalSignCommand) Description() string {
-    return "mints an internal-auth (HMAC) header for the /internal firewall demo"
+    return "mints an internal-auth (HMAC) header for the /internal firewall"
 }
 
 func (instance *InternalSignCommand) Flags() []melodyclicontract.Flag {

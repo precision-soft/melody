@@ -18,7 +18,7 @@ const (
 const (
     exampleProductListRoute   = "/products/api/read/"
     exampleProductCreateRoute = "/products/api/create/"
-    exampleCatalogReportRoute = "/integration/report/"
+    exampleCatalogReportRoute = "/catalog/report/"
 
     /* the listing cache key, as the application spells it before its per-major prefix */
     exampleProductListCacheKey = "example-product-list"

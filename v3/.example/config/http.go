@@ -17,7 +17,6 @@ import (
     handlerstorage "github.com/precision-soft/melody/v3/.example/handler/storage"
     handlertwofactor "github.com/precision-soft/melody/v3/.example/handler/twofactor"
     handleruser "github.com/precision-soft/melody/v3/.example/handler/user"
-    handlerwebsocketdemo "github.com/precision-soft/melody/v3/.example/handler/websocketdemo"
     "github.com/precision-soft/melody/v3/.example/route"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodycontainer "github.com/precision-soft/melody/v3/container"
@@ -33,7 +32,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     kernelInstance.HttpKernel().SetNotFoundHandler(handler.NotFoundHandler())
 
-    /* @info the health and openapi routes opt into the frontend route manifest (melody:routes:manifest) as a working demo of the export: exposed + zoned public, so the TypeScript RouteGenerator can build their URLs by name */
+    /* @info the health and openapi routes opt into the frontend route manifest (melody:routes:manifest) as working proof of the export: exposed + zoned public, so the TypeScript RouteGenerator can build their URLs by name */
     router.HandleWithOptions(
         "/health",
         handler.HealthHandler(),
@@ -46,33 +45,18 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
         melodyhttp.NewRouteOptions("example.openapi", []string{"GET"}, "", nil, nil, nil, nil, 0, melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)),
     )
 
-    router.HandleNamed("example.platform.demo", "GET", "/platform/demo", handler.PlatformDemoHandler())
-    router.HandleNamed("example.scoped.trail.demo", "GET", "/scoped/trail/demo", handler.ScopedTrailDemoHandler())
+    router.HandleNamed("example.platform.check", "GET", "/platform/check", handler.PlatformCheckHandler())
 
-    router.HandleNamed("example.messagebus.demo", "POST", "/messagebus/demo", handler.MessageBusDemoHandler())
+    router.HandleNamed("example.messagebus.dispatch", "POST", "/messagebus/dispatch", handler.WelcomeEmailDispatchHandler())
 
     /* @info the example.metrics and example.websocket routes are contributed by the opentelemetry and websocket modules (see configure.go). */
 
-    router.HandleNamed("example.cache.demo", "GET", "/cache/demo", handler.CacheDemoHandler())
-
-    /* @info exposed to the route manifest so the admin nav can link to it by name (data-route="example.websocket.demo"). */
-    router.HandleWithOptions(
-        "/websocket/demo",
-        handlerwebsocketdemo.PageHandler(),
-        melodyhttp.NewRouteOptions("example.websocket.demo", []string{"GET"}, "", nil, nil, nil, nil, 0, melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)),
-    )
-
-    router.HandleNamed("example.encrypt.demo", "GET", "/encrypt/demo", handler.EncryptDemoHandler(instance.cipher))
+    router.HandleNamed("example.encrypt.roundtrip", "GET", "/encrypt/roundtrip", handler.EncryptRoundTripHandler(instance.cipher))
 
     if nil != instance.redisClient {
-        router.HandleNamed("example.redis.token.demo", "GET", "/redis/token/demo", handler.RedisTokenDemoHandler())
+        router.HandleNamed("example.redis.token.revocation", "GET", "/redis/token/revocation", handler.RedisTokenRevocationHandler())
 
         instance.buildCatalogWriteThrottle()
-    }
-
-    if nil != instance.database {
-        router.HandleNamed("example.database.demo", "GET", "/database/demo", handler.DatabaseDemoHandler(instance.database))
-        router.HandleNamed("example.database.audit.demo", "GET", "/database/audit/demo", handler.AuditDemoHandler(instance.database))
     }
 
     router.HandleNamed(route.LoginPageName, "GET", route.LoginPagePattern, handler.LoginPageHandler())
@@ -115,8 +99,8 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     }
 
     if nil != instance.storage {
-        router.HandleNamed("example.storage.put", "POST", "/storage/demo", handlerstorage.PutHandler(instance.storage))
-        router.HandleNamed("example.storage.get", "GET", "/storage/demo", handlerstorage.GetHandler(instance.storage))
+        router.HandleNamed("example.storage.put", "POST", "/storage/object", handlerstorage.PutHandler(instance.storage))
+        router.HandleNamed("example.storage.get", "GET", "/storage/object", handlerstorage.GetHandler(instance.storage))
     }
 
     router.HandleNamed(route.I18nGreetingName, "GET", route.I18nGreetingPattern, handleri18n.GreetingHandler())

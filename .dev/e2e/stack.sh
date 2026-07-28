@@ -7,7 +7,7 @@
 #   .dev/e2e/stack.sh    # every check
 #
 # Checks:
-#   - EXCLUSIVE COMMAND  two concurrent instances of example:exclusive:demo run the body exactly once;
+#   - EXCLUSIVE COMMAND  two concurrent instances of example:exclusive:tick run the body exactly once;
 #                        the loser exits zero so a cron fleet stays green
 #   - PROCESS ROLE       the default role, --role, the .env value, --role winning over it, and the panic
 #                        an unsupported role must raise
@@ -16,12 +16,12 @@
 #                        exits cleanly on --once
 #   - COMMAND ROLE FLAG  a command's own --role after the command name reaches the command instead of
 #                        being consumed as the runtime process role
-#   - LAZY SERVICE       example:grant:demo resolves its user service through the container.Lazy handle at
+#   - LAZY SERVICE       example:grant:role resolves its user service through the container.Lazy handle at
 #                        first run — the lazy-resolution marker and the grant line print from one invocation
 #   - OUTBOX FACTORIES   /outbox/enqueue on the dev-supervised example writes through the lazily-resolved
 #                        store, melody:outbox:relay publishes it from a separate process and /outbox/status
 #                        shows the sent count grow
-#   - MESSAGE BUS        POST /messagebus/demo on the dev-supervised example hands the message to the async
+#   - MESSAGE BUS        POST /messagebus/dispatch on the dev-supervised example hands the message to the async
 #                        transport instead of handling it inline, and melody:messagebus:consume handles it
 #                        from a separate process — exactly one message, on a queue drained first
 #   - ENCRYPT FACTORY    melody:encrypt:database resolves its database through the module factory at the
@@ -46,8 +46,8 @@
 # EVERY check below drives the v3 example, and says so in the banner it prints at the start. That is not an
 # oversight to be generalized later. Some of them exercise a module that exists only in v3: wiring generate,
 # openapi generate, the outbox relay, the encrypt bulk command. The rest reach a framework primitive that v1 and
-# v2 do carry, but through something only the v3 EXAMPLE APPLICATION declares — example:exclusive:demo and
-# example:grant:demo, the command-owned --role flag, the process_role line its app:info prints, the
+# v2 do carry, but through something only the v3 EXAMPLE APPLICATION declares — example:exclusive:tick and
+# example:grant:role, the command-owned --role flag, the process_role line its app:info prints, the
 # product:list --limit flag, the cron configuration the templates render, and the parameter the optional-env-key
 # check reads. Generalizing those would mean changing the v1 and v2 example applications, not this script.
 #
@@ -86,7 +86,7 @@ info "per-major coverage (boot, login/session, traversal, 404, cli, SIGINT) runs
 check_section_start "EXCLUSIVE COMMAND ACROSS TWO INSTANCES" "${TAG_VALIDATE}" "e2e"
 
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "rm -f /tmp/exclusive-first.log /tmp/exclusive-second.log
-    go run . example:exclusive:demo --hold 4s > /tmp/exclusive-first.log 2>&1 &
+    go run . example:exclusive:tick --hold 4s > /tmp/exclusive-first.log 2>&1 &
     FIRST_PID=\$!
     # wait for the holder to be demonstrably inside the command body: a fixed sleep races the go build cache, and a
     # contender that starts after the holder already released proves nothing about mutual exclusion. On a COLD build
@@ -109,7 +109,7 @@ run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "rm -f /tmp/exclusive-first.log
         wait \${FIRST_PID} 2>/dev/null || true
         exit 0
     fi
-    go run . example:exclusive:demo --hold 1s > /tmp/exclusive-second.log 2>&1
+    go run . example:exclusive:tick --hold 1s > /tmp/exclusive-second.log 2>&1
     SECOND_STATUS=\$?
     wait \${FIRST_PID}
     FIRST_STATUS=\$?
@@ -323,7 +323,7 @@ check_section_end "CRON IN-PROCESS RUNNER" "${TAG_VALIDATE}" "e2e"
 
 check_section_start "COMMAND-OWNED ROLE FLAG" "${TAG_VALIDATE}" "e2e"
 
-run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:grant:demo --role admin --user ada 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:grant:role --role admin --user ada 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
 GRANT_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 
 if printf '%s' "${GRANT_OUTPUT_STRING}" | grep -q 'granted role "admin" to user "ada"'; then
@@ -342,7 +342,7 @@ check_section_start "LAZY SERVICE RESOLUTION" "${TAG_VALIDATE}" "e2e"
 
 # one invocation on purpose: the lazy-resolution marker and the grant line must come from the SAME run,
 # proving the handle resolved inside the command body and the command still completed its work afterwards
-run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:grant:demo --role admin --user ada 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:grant:role --role admin --user ada 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
 LAZY_GRANT_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 
 if printf '%s' "${LAZY_GRANT_OUTPUT_STRING}" | grep -q 'user service resolved lazily: user "ada" known=false'; then
@@ -433,7 +433,7 @@ fi
 check_section_start "MESSAGE BUS ASYNC TRANSPORT" "${TAG_VALIDATE}" "e2e"
 
 # The property is that a dispatch does NOT handle its message inline: the example routes WelcomeEmail to the
-# "async" transport (config/messagebus.go), so POST /messagebus/demo on the supervised app must hand the message
+# "async" transport (config/messagebus.go), so POST /messagebus/dispatch on the supervised app must hand the message
 # to rabbitmq and return, and the handler must run only when melody:messagebus:consume pulls it from a SEPARATE
 # process. That is why this check lives here and not in the run.sh harness: the consumer is a second process with
 # its own lifecycle, started, bounded, killed and read for its exit status while the supervised app keeps serving.
@@ -483,7 +483,7 @@ run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "STATUS_BODY=\$(wget -q -O- \"\
     wait \${DRAIN_PID} 2>/dev/null || true
     BEFORE_HANDLED=\$(grep -c 'welcome email sent' var/log/dev.log 2>/dev/null || true)
     echo \"before_handled=\${BEFORE_HANDLED:-0}\"
-    wget -q -O- --post-data='' \"\${EXAMPLE_BASE_URL}/messagebus/demo\" 2>/dev/null || true
+    wget -q -O- --post-data='' \"\${EXAMPLE_BASE_URL}/messagebus/dispatch\" 2>/dev/null || true
     echo ''
     sleep 2
     INLINE_HANDLED=\$(grep -c 'welcome email sent' var/log/dev.log 2>/dev/null || true)
@@ -529,9 +529,9 @@ elif printf '%s' "${MESSAGE_BUS_OUTPUT_STRING}" | grep -q 'consume_timeout=1'; t
 else
 
 if printf '%s' "${MESSAGE_BUS_OUTPUT_STRING}" | grep -q '"status":"dispatched"'; then
-    check_pass "POST /messagebus/demo dispatched the message on the supervised application"
+    check_pass "POST /messagebus/dispatch dispatched the message on the supervised application"
 else
-    check_fail "POST /messagebus/demo did not report \"status\":\"dispatched\""
+    check_fail "POST /messagebus/dispatch did not report \"status\":\"dispatched\""
 fi
 
 MESSAGE_BUS_BEFORE_INTEGER="$(printf '%s' "${MESSAGE_BUS_OUTPUT_STRING}" | grep -o 'before_handled=[0-9]*' | head -1 | cut -d= -f2 || true)"
@@ -575,7 +575,7 @@ check_section_start "ENCRYPT FACTORY COMMAND" "${TAG_VALIDATE}" "e2e"
 # factory-resolved database. The marker count is read before and after — the log file persists across
 # runs, so an old marker would be a vacuous pass. The processed row count in that line is legitimately
 # zero when the table holds no plaintext rows, so it is not asserted
-run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "BEFORE_COUNT=\$(grep -c 'encrypt database migration finished' var/log/dev.log 2>/dev/null || true); go run . melody:encrypt:database --table melody_example_two_factor --primary-key user_identifier --column secret --column recovery_codes --mode encrypt >/tmp/encrypt-database.log 2>&1; echo status=\$?; AFTER_COUNT=\$(grep -c 'encrypt database migration finished' var/log/dev.log 2>/dev/null || true); echo \"migration_finished_before=\${BEFORE_COUNT:-0}\"; echo \"migration_finished_after=\${AFTER_COUNT:-0}\""
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "BEFORE_COUNT=\$(grep -c 'encrypt database migration finished' var/log/dev.log 2>/dev/null || true); go run . melody:encrypt:database --table melody_example_v3_two_factor --primary-key user_identifier --column secret --column recovery_codes --mode encrypt >/tmp/encrypt-database.log 2>&1; echo status=\$?; AFTER_COUNT=\$(grep -c 'encrypt database migration finished' var/log/dev.log 2>/dev/null || true); echo \"migration_finished_before=\${BEFORE_COUNT:-0}\"; echo \"migration_finished_after=\${AFTER_COUNT:-0}\""
 ENCRYPT_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 
 if printf '%s' "${ENCRYPT_OUTPUT_STRING}" | grep -q 'status=0'; then

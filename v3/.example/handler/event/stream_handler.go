@@ -16,7 +16,7 @@ func StreamHandler(hub *melodyhttp.ServerSentEventHub) melodyhttpcontract.Handle
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "streaming is not supported"), nil
         }
 
-        topic := queryStringOr(request, "topic", "demo")
+        topic := queryStringOr(request, "topic", "default")
 
         subscriber := hub.Subscribe(topic, 16)
         defer hub.Unsubscribe(subscriber)

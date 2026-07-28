@@ -44,7 +44,7 @@ type enrollPayload struct {
 
 /* EnrollHandler enrolls a user's TOTP second factor: it generates a secret and single-use recovery codes,
 persists them encrypted, and returns the secret + otpauth URI (the QR payload) and the recovery codes to
-show once. A demo endpoint — a real app returns the secret only during enrollment and behind the user's
+show once. An endpoint kept deliberately simple — a production application returns the secret only during enrollment and behind the user's
 authenticated session. */
 func EnrollHandler(store *store2fa.Store) melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {

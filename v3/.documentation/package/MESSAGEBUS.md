@@ -81,7 +81,7 @@ bus := messagebus.BusMustFromResolver(resolver)
 bus.Dispatch(runtimeInstance, WelcomeEmail{UserId: 1})
 ```
 
-`BusMustFromContainer` is the equivalent from a `Container` (for example `runtimeInstance.Container()` inside a handler). The factory result is cached, so every resolver shares the one configured bus — configure it once, dispatch from many places. The example application wires this end-to-end: the bus is registered in [`.example/config/service.go`](../../.example/config/service.go) and resolved in the [`/messagebus/demo`](../../.example/handler/messagebus_demo_handler.go) HTTP handler. Set `AMQP_DSN` before launching the example to route the bus over RabbitMQ via the [`amqp`](../../../integrations/amqp/v3) integration instead of the in-process transport.
+`BusMustFromContainer` is the equivalent from a `Container` (for example `runtimeInstance.Container()` inside a handler). The factory result is cached, so every resolver shares the one configured bus — configure it once, dispatch from many places. The example application wires this end-to-end: the bus is registered in [`.example/config/service.go`](../../.example/config/service.go) and resolved in the [`/messagebus/dispatch`](../../.example/handler/welcome_email_dispatch_handler.go) HTTP handler. Set `AMQP_DSN` before launching the example to route the bus over RabbitMQ via the [`amqp`](../../../integrations/amqp/v3) integration instead of the in-process transport.
 
 ## Usage
 
@@ -149,7 +149,7 @@ Poison messages (a delivery that can never decode) are nacked without requeue. W
 
 A message that exhausts `RetryPolicy.MaxRetries` is routed to the configured `FailureTransport`. When the failure transport itself rejects it, the message is requeued to its source and retried — by default indefinitely (the no-loss behavior: keep requeuing until the failure transport recovers). Setting `RetryPolicy.MaxDeadLetterAttempts` bounds this: after that many failed dead-letter routings — counted by the [`DeadLetterAttemptStamp`](../../messagebus/stamp.go) carried across requeues — the consumer gives up and nacks without requeue, so a transport-native dead-letter (for example the AMQP DLX) can claim the message instead of it looping forever while both the handler and the failure transport are down.
 
-A runnable end-to-end demonstration lives in the example application: [`messagebus:demo`](../../.example/cli/messagebus_demo_command.go), wired in [`.example/config/messagebus.go`](../../.example/config/messagebus.go).
+A runnable end-to-end demonstration lives in the example application: [`messagebus:dispatch`](../../.example/cli/messagebus_dispatch_command.go), wired in [`.example/config/messagebus.go`](../../.example/config/messagebus.go).
 
 ## Footguns & caveats
 

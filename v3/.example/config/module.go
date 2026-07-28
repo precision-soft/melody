@@ -70,7 +70,6 @@ type Module struct {
 func NewExampleModule(configuration melodyconfigcontract.Configuration) *Module {
     moduleInstance := &Module{configuration: configuration}
     moduleInstance.buildServerSentEvent()
-    moduleInstance.buildWebsocketDemo()
     moduleInstance.buildObservability()
     moduleInstance.buildEncrypt()
     moduleInstance.buildRedis()

@@ -13,7 +13,7 @@ const multipartLabel = "multipart body"
 makes it the right probe: PutHandler reads the RAW request body and answers with its length
 (handler/storage/storage_handler.go), so the number in the response is a direct measurement of what the framework
 left for the handler to read. */
-const multipartRoute = "/storage/demo"
+const multipartRoute = "/storage/object"
 
 /* multipartPutPayload and multipartGetPayload mirror the two handlers' response payloads. */
 type multipartPutPayload struct {

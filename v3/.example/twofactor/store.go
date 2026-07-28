@@ -19,7 +19,7 @@ import (
  * recovery codes encrypted at rest through bunorm's EncryptedString. The recovery
  * codes are stored as an encrypted JSON array. */
 type Enrollment struct {
-    bun.BaseModel `bun:"table:melody_example_two_factor"`
+    bun.BaseModel `bun:"table:melody_example_v3_two_factor"`
 
     UserIdentifier string                        `bun:"user_identifier,pk"`
     Secret         melodyencrypt.EncryptedString `bun:"secret,type:varbinary(512),notnull"`
@@ -35,7 +35,7 @@ type Store struct {
     database *bun.DB
 }
 
-/* EnsureSchema creates the demo table. Production code would express this through the
+/* EnsureSchema creates the enrollment table. Production code would express this through the
  * bunorm migrate package instead of creating the table inline. */
 func (instance *Store) EnsureSchema(ctx context.Context) error {
     _, execErr := instance.database.NewCreateTable().

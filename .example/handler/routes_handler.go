@@ -10,7 +10,7 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
-type routeDemoResponse struct {
+type routeListingResponse struct {
     Name    string `json:"name"`
     Pattern string `json:"pattern"`
     Example string `json:"example"`
@@ -22,7 +22,7 @@ func RoutesHandler() melodyhttpcontract.Handler {
         urlGenerator := melodyhttp.UrlGeneratorMustFromContainer(runtimeInstance.Container())
 
         definitions := routeRegistry.RouteDefinitions()
-        payload := make([]routeDemoResponse, 0, len(definitions))
+        payload := make([]routeListingResponse, 0, len(definitions))
 
         for _, definition := range definitions {
             if nil == definition {
@@ -41,7 +41,7 @@ func RoutesHandler() melodyhttpcontract.Handler {
                 },
             )
 
-            payload = append(payload, routeDemoResponse{
+            payload = append(payload, routeListingResponse{
                 Name:    name,
                 Pattern: definition.Pattern(),
                 Example: examplePath,

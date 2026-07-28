@@ -22,7 +22,7 @@ primary key is the USER IDENTIFIER, which is exactly why the section mints a fre
 identifier succeeds once and then collides with the row the previous run left behind, so the section would go red
 on its second execution for a reason that has nothing to do with the code under test. */
 const (
-    twoFactorTable             = "melody_example_two_factor"
+    twoFactorTable             = "melody_example_v3_two_factor"
     twoFactorPrimaryKeyColumn  = "user_identifier"
     twoFactorCodeHeader        = "X-2FA-Code"
     twoFactorExpiredPeriodBack = 5

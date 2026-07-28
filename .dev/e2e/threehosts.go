@@ -18,7 +18,7 @@ var threeHostCatalog = []struct {
 }{
     {label: "v1", hostName: "v1-example.melody.localhost.precision-soft.com", table: "melody_example_v1_product"},
     {label: "v2", hostName: "v2-example.melody.localhost.precision-soft.com", table: "melody_example_v2_product"},
-    {label: "v3", hostName: "example.melody.localhost.precision-soft.com", table: "melody_example_v3_product"},
+    {label: "v3", hostName: "example.melody.localhost.precision-soft.com", table: exampleV3ProductTable},
 }
 
 /* the probe name carries the host it was written through, because the three majors number their products
@@ -145,7 +145,14 @@ func createThreeHostProbe(client *http.Client, loadBalancerUrl string, hostName 
     return created.Id
 }
 
+/* threeHostProbeExists answers whether the probe landed in one particular major's catalogue. A table that does
+not exist holds nothing — that is the state of a major nobody has written to yet on a freshly created database,
+and it is a correct answer to "is the row here" rather than a reason to fail. */
 func threeHostProbeExists(database *bun.DB, table string, productId string, label string) bool {
+    if false == exampleTableExists("three hosts", database, table) {
+        return false
+    }
+
     count, countErr := database.
         NewSelect().
         Table(table).
@@ -159,7 +166,20 @@ func threeHostProbeExists(database *bun.DB, table string, productId string, labe
     return 0 < count
 }
 
+/* removeThreeHostProbe removes the probe row and, in the v3 catalogue, everything the application recorded
+about it. The v3 write is journalled and audited, and the example hands a freed identifier to the next probe, so
+records left here would turn up in a later section reading "the trail of prod-6" as somebody else's history. */
 func removeThreeHostProbe(database *bun.DB, table string, label string) {
+    if exampleV3ProductTable == table {
+        removeExampleV3ProductProbes("three hosts", database, []string{threeHostProbeName(label)})
+
+        return
+    }
+
+    if false == exampleTableExists("three hosts", database, table) {
+        return
+    }
+
     _, deleteErr := database.
         NewDelete().
         Table(table).

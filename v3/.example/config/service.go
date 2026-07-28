@@ -4,11 +4,13 @@ import (
     "github.com/precision-soft/melody/v3/.example/cache"
     "github.com/precision-soft/melody/v3/.example/generated"
     "github.com/precision-soft/melody/v3/.example/persistence"
+    "github.com/precision-soft/melody/v3/.example/subscriber"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodycache "github.com/precision-soft/melody/v3/cache"
     melodycachecontract "github.com/precision-soft/melody/v3/cache/contract"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
+    melodyhttp "github.com/precision-soft/melody/v3/http"
     melodymailer "github.com/precision-soft/melody/v3/mailer"
     melodymailercontract "github.com/precision-soft/melody/v3/mailer/contract"
     melodymessagebus "github.com/precision-soft/melody/v3/messagebus"
@@ -26,6 +28,16 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
         persistence.ServiceCatalogStorage,
         func(resolver melodycontainercontract.Resolver) (*persistence.CatalogStorage, error) {
             return persistence.NewCatalogStorage(database), nil
+        },
+    )
+
+    /* the hub is registered so the event listeners can reach it. They follow every change to the nomenclature and are where the notification belongs, beside the cache invalidation and the journal entry — but a listener is handed a runtime rather than this module, and the container is what the two have in common. */
+    serverSentEventHub := instance.serverSentEventHub
+
+    registrar.RegisterService(
+        subscriber.ServiceCatalogNotificationHub,
+        func(resolver melodycontainercontract.Resolver) (*melodyhttp.ServerSentEventHub, error) {
+            return serverSentEventHub, nil
         },
     )
 

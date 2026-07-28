@@ -13,10 +13,8 @@ const (
     RoutesName    = "example.routes"
     RoutesPattern = "/routes/"
 
-    IntegrationPrefix = "/integration"
-
-    IntegrationReportName    = "example.integration.report"
-    IntegrationReportPattern = IntegrationPrefix + "/report/"
+    CatalogReportName    = "example.catalog.report"
+    CatalogReportPattern = "/catalog/report/"
 
     ProductsPrefix = "/products"
 
