@@ -23,7 +23,7 @@ const exampleMajorListVariable = "MELODY_E2E_MAJORS"
 
 const exampleMajorListDefault = "1 2 3"
 
-/* the shared credentials the three example applications seed identically (repository/user_repository_impl.go):
+/* the shared credentials the three example applications seed identically (repository/seed.go):
 "user" holds ROLE_USER only, which is what makes the admin route below answer 403 rather than 200. */
 const (
     exampleUsername       = "user"
