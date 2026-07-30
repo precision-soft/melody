@@ -4,6 +4,7 @@ import (
     "encoding/json"
     "errors"
     "io"
+    "math"
     nethttp "net/http"
 
     "github.com/precision-soft/melody/config"
@@ -23,7 +24,13 @@ func (instance *Request) BindJson(target any) error {
 
     maxBytes := maxRequestBodyBytes(instance)
 
-    limitedReader := io.LimitReader(instance.httpRequest.Body, int64(maxBytes)+1)
+    /* one byte beyond the limit is what tells an exactly-at-limit body apart from an oversized one; at the top of the int64 range that extra byte would wrap the reader's allowance negative and every body would read as empty, so the allowance saturates instead */
+    overLimitAllowance := int64(maxBytes)
+    if overLimitAllowance < math.MaxInt64 {
+        overLimitAllowance++
+    }
+
+    limitedReader := io.LimitReader(instance.httpRequest.Body, overLimitAllowance)
     bodyBytes, err := io.ReadAll(limitedReader)
     if nil != err {
         var maxBytesError *nethttp.MaxBytesError

@@ -213,6 +213,18 @@ func (instance *FileServer) Serve(
     if "/" == cleanedPath {
         /* the mount root answers with the configured index file, and keeps answering it for the spellings that fold into the root, because that page is what a browser asks for by visiting the site. The index file is named by configuration and never by the request, so this resolution cannot be aimed at another file. */
         cleanedPath = "/" + instance.config.indexFile
+
+        /* the exclusion list was consulted with the spelling the client sent, and the root resolves to the index file only after that consultation: an exclusion naming the index file must fire for the resolved spelling too, or "/" would serve off the disk the very page the operator handed to the application */
+        if true == hasExcludedPathPrefix(strings.TrimSuffix(instance.config.stripPrefix, "/")+cleanedPath, instance.config.excludedPathList) {
+            logger.Debug(
+                "static serve excluded path",
+                loggingcontract.Context{
+                    "path": requestPath,
+                },
+            )
+
+            return 0, nil, nil, false
+        }
     } else {
         /* the file has to sit at exactly the path that was received. path.Clean folds "..", "//", "/./" and a trailing slash away, and serving the folded target under the received spelling puts the file behind a URL access control never saw: the matchers in front of the application compare the raw path, so a rule on "/internal/" does not fire for "/open/../internal/secret.json". A refusal is the only answer that keeps the two views of the request in agreement — a redirect would still teach the client a spelling that reaches the file while sidestepping the rule. The strip prefix is configuration rather than client input, so the comparison rebuilds the whole path around it: comparing only the remainder would let a doubled slash at the prefix boundary be absorbed by the strip and pass unnoticed. */
         canonicalPath := strings.TrimSuffix(instance.config.stripPrefix, "/") + cleanedPath
@@ -496,6 +508,18 @@ func (instance *FileServer) serveForStreaming(
     if "/" == cleanedPath {
         /* the mount root answers with the configured index file, and keeps answering it for the spellings that fold into the root, because that page is what a browser asks for by visiting the site. The index file is named by configuration and never by the request, so this resolution cannot be aimed at another file. */
         cleanedPath = "/" + instance.config.indexFile
+
+        /* the exclusion list was consulted with the spelling the client sent, and the root resolves to the index file only after that consultation: an exclusion naming the index file must fire for the resolved spelling too, or "/" would serve off the disk the very page the operator handed to the application */
+        if true == hasExcludedPathPrefix(strings.TrimSuffix(instance.config.stripPrefix, "/")+cleanedPath, instance.config.excludedPathList) {
+            logger.Debug(
+                "static serve excluded path",
+                loggingcontract.Context{
+                    "path": requestPath,
+                },
+            )
+
+            return 0, nil, nil, nil, false
+        }
     } else {
         /* the file has to sit at exactly the path that was received. path.Clean folds "..", "//", "/./" and a trailing slash away, and serving the folded target under the received spelling puts the file behind a URL access control never saw: the matchers in front of the application compare the raw path, so a rule on "/internal/" does not fire for "/open/../internal/secret.json". A refusal is the only answer that keeps the two views of the request in agreement — a redirect would still teach the client a spelling that reaches the file while sidestepping the rule. The strip prefix is configuration rather than client input, so the comparison rebuilds the whole path around it: comparing only the remainder would let a doubled slash at the prefix boundary be absorbed by the strip and pass unnoticed. */
         canonicalPath := strings.TrimSuffix(instance.config.stripPrefix, "/") + cleanedPath

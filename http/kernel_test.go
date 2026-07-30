@@ -4,6 +4,8 @@ import (
     "io"
     nethttp "net/http"
     "net/http/httptest"
+    "strings"
+    "sync"
     "sync/atomic"
     "testing"
     "time"
@@ -1348,5 +1350,297 @@ func TestKernel_ResponseListenerMayReplaceTheSynthesizedEmptyResponse(t *testing
 
     if "replaced" != recorder.Body.String() {
         t.Fatalf("expected the listener-replaced body, got %q", recorder.Body.String())
+    }
+}
+
+/* errorContextRecordingLogger captures every Error call with its context, so a test can assert not just
+that something was logged but what the record carries. */
+type errorContextRecordingLogger struct {
+    mutex         sync.Mutex
+    errorMessages []string
+    errorContexts []loggingcontract.Context
+}
+
+func (instance *errorContextRecordingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+}
+
+func (instance *errorContextRecordingLogger) Debug(message string, context loggingcontract.Context) {}
+
+func (instance *errorContextRecordingLogger) Info(message string, context loggingcontract.Context) {}
+
+func (instance *errorContextRecordingLogger) Warning(message string, context loggingcontract.Context) {
+}
+
+func (instance *errorContextRecordingLogger) Error(message string, context loggingcontract.Context) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.errorMessages = append(instance.errorMessages, message)
+    instance.errorContexts = append(instance.errorContexts, context)
+}
+
+func (instance *errorContextRecordingLogger) Emergency(message string, context loggingcontract.Context) {
+}
+
+func (instance *errorContextRecordingLogger) errorContextFor(message string) (loggingcontract.Context, bool) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    for index, loggedMessage := range instance.errorMessages {
+        if message == loggedMessage {
+            return instance.errorContexts[index], true
+        }
+    }
+
+    return nil, false
+}
+
+/* @info the recovery boundary must record the stack of the panic site: the error value alone names the symptom but not the line that raised it, and net/http's own stack print never fires for a panic this recovery absorbs — without the frames a production nil-pointer is unlocatable from the logs */
+
+func TestKernel_PanicRecoveryLogsPanicSiteStack(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/boom",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            panic("handler exploded")
+        },
+    )
+
+    recordingLogger := &errorContextRecordingLogger{}
+
+    serviceContainer := newHttpTestContainer()
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger)
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/boom", nil)
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, request)
+
+    if nethttp.StatusInternalServerError != recorder.Code {
+        t.Fatalf("expected the recovered 500, got %d", recorder.Code)
+    }
+
+    context, logged := recordingLogger.errorContextFor("unhandled http error")
+    if false == logged {
+        t.Fatalf("expected the recovered panic to be logged as an unhandled http error")
+    }
+
+    panicStack, hasStack := context["panicStack"].(string)
+    if false == hasStack || "" == panicStack {
+        t.Fatalf("expected the log record to carry the panic-site stack, got context %v", context)
+    }
+
+    if false == strings.Contains(panicStack, "goroutine") {
+        t.Fatalf("expected a goroutine stack in the panicStack field, got %q", panicStack)
+    }
+}
+
+/* @info the error handler is application code invoked while the failed response's body is still open and held only in a local the recovery defer cannot see: a panic escaping it must not leak that body — the kernel recovers it, logs it with its stack, and serves the default error response with every close still running */
+
+func TestKernel_ErrorHandlerPanicOnHandlerErrorPathClosesBodyAndDelivers500(t *testing.T) {
+    bodyReader := &closeTrackingReader{}
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/fail-with-open-body",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            response := &Response{
+                statusCode: nethttp.StatusOK,
+                headers:    make(nethttp.Header),
+                bodyReader: bodyReader,
+            }
+
+            return response, exception.NewError("handler failed after opening the body", nil, nil)
+        },
+    )
+
+    kernel := NewKernel(router)
+    kernel.SetErrorHandler(
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request, err error) httpcontract.Response {
+            panic("error handler exploded")
+        },
+    )
+
+    handler := kernel.ServeHttp(newHttpTestContainer())
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/fail-with-open-body", nil)
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, request)
+
+    if nethttp.StatusInternalServerError != recorder.Code {
+        t.Fatalf("expected the default 500 despite the error-handler panic, got %d", recorder.Code)
+    }
+
+    if false == bodyReader.closed.Load() {
+        t.Fatalf("expected the failed handler's response body to be closed despite the error-handler panic")
+    }
+}
+
+func TestKernel_ErrorHandlerPanicOnNotFoundPathClosesBodyAndDelivers500(t *testing.T) {
+    bodyReader := &closeTrackingReader{}
+
+    kernel := NewKernel(NewRouter())
+    kernel.SetNotFoundHandler(
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            response := &Response{
+                statusCode: nethttp.StatusNotFound,
+                headers:    make(nethttp.Header),
+                bodyReader: bodyReader,
+            }
+
+            return response, exception.NewError("not found handler failed after opening the body", nil, nil)
+        },
+    )
+    kernel.SetErrorHandler(
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request, err error) httpcontract.Response {
+            panic("error handler exploded")
+        },
+    )
+
+    handler := kernel.ServeHttp(newHttpTestContainer())
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/no-such-route", nil)
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, request)
+
+    if nethttp.StatusInternalServerError != recorder.Code {
+        t.Fatalf("expected the default 500 despite the error-handler panic, got %d", recorder.Code)
+    }
+
+    if false == bodyReader.closed.Load() {
+        t.Fatalf("expected the failed not-found response body to be closed despite the error-handler panic")
+    }
+}
+
+func TestKernel_ErrorHandlerPanicOnRecoveryPathClosesBodyAndDelivers500(t *testing.T) {
+    bodyReader := &closeTrackingReader{}
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/session-write-then-file",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            sessionValue, _ := request.Attributes().Get(RequestAttributeSession)
+            sessionInstance := sessionValue.(sessioncontract.Session)
+            sessionInstance.Set("key", "value")
+
+            response := &Response{
+                statusCode: nethttp.StatusOK,
+                headers:    make(nethttp.Header),
+                bodyReader: bodyReader,
+            }
+
+            return response, nil
+        },
+    )
+
+    kernel := NewKernel(router)
+    kernel.SetErrorHandler(
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request, err error) httpcontract.Response {
+            panic("error handler exploded")
+        },
+    )
+
+    sessionStorage := &panicOnceSessionStorage{}
+    handler := kernel.ServeHttp(newHttpTestContainerWithSessionStorage(sessionStorage))
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/session-write-then-file", nil)
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, request)
+
+    if nethttp.StatusInternalServerError != recorder.Code {
+        t.Fatalf("expected the recovered 500 despite the error-handler panic on the recovery path, got %d", recorder.Code)
+    }
+
+    if false == bodyReader.closed.Load() {
+        t.Fatalf("expected the in-flight response body to be closed despite the error-handler panic on the recovery path")
+    }
+}
+
+/* @info a urlencoded body whose read failed must refuse the request the way the json path refuses the identical condition: dispatching it would hand the handler a syntactically valid request whose form is simply empty, and an oversized submission would be processed as an empty one */
+
+func TestKernel_OversizedUrlencodedFormIsRefusedWith413(t *testing.T) {
+    handlerInvoked := false
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodPost,
+        "/form",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            handlerInvoked = true
+
+            return TextResponse(nethttp.StatusOK, "ok"), nil
+        },
+    )
+
+    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+
+    oversizedForm := "value=" + strings.Repeat("a", 2*1024*1024)
+    request := httptest.NewRequest(nethttp.MethodPost, "/form", strings.NewReader(oversizedForm))
+    request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, request)
+
+    if nethttp.StatusRequestEntityTooLarge != recorder.Code {
+        t.Fatalf("expected an oversized urlencoded form to be refused with 413, got %d", recorder.Code)
+    }
+
+    if true == handlerInvoked {
+        t.Fatalf("expected the handler not to run for an oversized urlencoded form")
+    }
+}
+
+/* brokenBodyReader fails mid-read the way a client aborting an upload does. */
+type brokenBodyReader struct {
+    served bool
+}
+
+func (instance *brokenBodyReader) Read(buffer []byte) (int, error) {
+    if false == instance.served && 0 < len(buffer) {
+        instance.served = true
+        buffer[0] = 'a'
+
+        return 1, nil
+    }
+
+    return 0, exception.NewError("client aborted the upload", nil, nil)
+}
+
+func TestKernel_BrokenUrlencodedBodyIsRefusedWith400(t *testing.T) {
+    handlerInvoked := false
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodPost,
+        "/form",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            handlerInvoked = true
+
+            return TextResponse(nethttp.StatusOK, "ok"), nil
+        },
+    )
+
+    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+
+    request := httptest.NewRequest(nethttp.MethodPost, "/form", &brokenBodyReader{})
+    request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, request)
+
+    if nethttp.StatusBadRequest != recorder.Code {
+        t.Fatalf("expected a broken urlencoded body to be refused with 400, got %d", recorder.Code)
+    }
+
+    if true == handlerInvoked {
+        t.Fatalf("expected the handler not to run for a broken urlencoded body")
     }
 }

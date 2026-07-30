@@ -2,6 +2,7 @@ package middleware
 
 import (
     "fmt"
+    "math"
     nethttp "net/http"
     "net/http/httptest"
     "testing"
@@ -939,5 +940,37 @@ func TestRateLimitWithResolver_NilResolverKeepsTheDirectPeer(t *testing.T) {
     _, secondErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:6666", "203.0.113.8"))
     if nil == secondErr {
         t.Fatalf("a nil resolver must key the direct peer, so both clients share one budget")
+    }
+}
+
+/* @info a window past the midpoint of the duration range must not wrap the idle-prune threshold negative: the cleanup would then delete every bucket and refill a budget the window promised to hold */
+
+func TestFixedWindowLimiter_MaxDurationWindowSurvivesIdlePrune(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewFixedWindowLimiterWithClock(frozenClock, 1, time.Duration(math.MaxInt64))
+
+    if false == limiter.Allow("client") {
+        t.Fatalf("the single budgeted request must be allowed")
+    }
+
+    frozenClock.Advance(limiter.cleanupInterval + time.Second)
+
+    if true == limiter.Allow("client") {
+        t.Fatalf("a never-refilling window must not refill after the idle cleanup")
+    }
+}
+
+func TestSlidingWindowLimiter_MaxDurationWindowSurvivesIdlePrune(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewSlidingWindowLimiterWithClock(frozenClock, 1, time.Duration(math.MaxInt64))
+
+    if false == limiter.Allow("client") {
+        t.Fatalf("the single budgeted request must be allowed")
+    }
+
+    frozenClock.Advance(limiter.cleanupInterval + time.Second)
+
+    if true == limiter.Allow("client") {
+        t.Fatalf("a never-refilling window must not refill after the idle cleanup")
     }
 }

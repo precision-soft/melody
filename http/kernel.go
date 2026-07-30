@@ -1,8 +1,10 @@
 package http
 
 import (
+    "errors"
     "html"
     nethttp "net/http"
+    "runtime/debug"
     "sort"
     "strings"
     "time"
@@ -313,6 +315,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
                 durationMs := time.Since(requestContext.StartedAt()).Milliseconds()
 
+                /* the stack is captured here, inside the recovering defer, where the panic frames are still live; the error value alone names the symptom ("invalid memory address") but not the line that raised it, and net/http's own stack print never fires for a panic this recovery absorbs — every other recovery boundary in the framework records the same key */
                 requestLogger.Error(
                     "unhandled http error",
                     exception.LogContext(
@@ -322,6 +325,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                             "path":       melodyRequest.HttpRequest().URL.Path,
                             "routeName":  routeName,
                             "durationMs": durationMs,
+                            "panicStack": string(debug.Stack()),
                         },
                     ),
                 )
@@ -335,7 +339,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
             if nil == exceptionEvent.Response() {
                 if nil != instance.errorHandler {
-                    customResponse := instance.errorHandler(runtimeInstance, writer, melodyRequest, recoveredErr)
+                    customResponse := instance.invokeErrorHandlerSafely(runtimeInstance, writer, melodyRequest, recoveredErr, requestLogger)
                     if nil != customResponse {
                         exceptionEvent.SetResponse(customResponse)
                     }
@@ -404,6 +408,64 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         }
 
         melodyRequest.Attributes().Set(RequestAttributeSession, sessionInstance)
+
+        /* @important a urlencoded body whose read failed never reached the form parser, so the handler would see a syntactically valid request whose form is simply empty — an oversized submission processed as an empty one, answered 200. Refuse it here the way the json binding path refuses the identical condition: 413 when the size limit stopped the read, 400 for a body the client broke mid-upload. */
+        if nil != melodyRequest.bodyReadErr {
+            requestLogger.Warning(
+                "request body read failed",
+                exception.LogContext(
+                    melodyRequest.bodyReadErr,
+                    exceptioncontract.Context{
+                        "method": request.Method,
+                        "path":   request.URL.Path,
+                    },
+                ),
+            )
+
+            statusCode := nethttp.StatusBadRequest
+            message := "bad request"
+
+            var maxBytesError *nethttp.MaxBytesError
+            if true == errors.As(melodyRequest.bodyReadErr, &maxBytesError) {
+                statusCode = nethttp.StatusRequestEntityTooLarge
+                message = "payload too large"
+            }
+
+            var refusalResponse httpcontract.Response
+            if true == PrefersHtml(melodyRequest) {
+                refusalResponse = HtmlResponse(
+                    statusCode,
+                    "<!doctype html><html><head><meta charset=\"utf-8\"><title>Melody Error</title></head><body><h1>Error</h1><p>"+html.EscapeString(message)+"</p></body></html>",
+                )
+            } else {
+                refusalResponse = JsonErrorResponse(statusCode, message)
+            }
+
+            finalResponse = refusalResponse
+
+            kernelResponseEvent := NewKernelResponseEvent(melodyRequest, finalResponse)
+            _, eventKernelResponseErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelResponse, kernelResponseEvent)
+            instance.logEventDispatchError(requestLogger, "kernel response error", eventKernelResponseErr)
+
+            /* @important close the swapped-out response body so a file-backed body (FileResponse/ServeReader) is not leaked */
+            if nil != finalResponse && finalResponse != kernelResponseEvent.Response() {
+                closeDiscardedResponseBody(finalResponse, requestLogger)
+            }
+
+            finalResponse = kernelResponseEvent.Response()
+            writeResponse(
+                runtimeInstance,
+                melodyRequest,
+                writer,
+                finalResponse,
+                sessionManager,
+                sessionInstance,
+                instance.options.ForwardedHeadersPolicy,
+                instance.options.SessionCookiePolicy,
+            )
+
+            return
+        }
 
         kernelRequestEvent := NewKernelRequestEvent(runtimeInstance, melodyRequest)
         _, eventKernelRequestErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, kernelRequestEvent)
@@ -538,7 +600,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
                         if nil == kernelExceptionEvent.Response() {
                             if nil != instance.errorHandler {
-                                customResponse := instance.errorHandler(runtimeInstance, writer, request, err)
+                                customResponse := instance.invokeErrorHandlerSafely(runtimeInstance, writer, request, err, requestLogger)
                                 if nil != customResponse {
                                     kernelExceptionEvent.SetResponse(customResponse)
                                 }
@@ -648,7 +710,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
             if nil == kernelExceptionEvent.Response() {
                 if nil != instance.errorHandler {
-                    customResponse := instance.errorHandler(runtimeInstance, writer, melodyRequest, finalHandlerErr)
+                    customResponse := instance.invokeErrorHandlerSafely(runtimeInstance, writer, melodyRequest, finalHandlerErr, requestLogger)
                     if nil != customResponse {
                         kernelExceptionEvent.SetResponse(customResponse)
                     }
@@ -710,6 +772,36 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             instance.options.SessionCookiePolicy,
         )
     })
+}
+
+/* invokeErrorHandlerSafely runs the application's error handler under the kernel's own recovery: it is called while the failed response's body is still open and held only by the caller, so a panic escaping it would unwind past every close the kernel performs and leak that body — permanently, for a body that is not an os.File. The panic is logged with the stack of its site and answered by the default error response instead; net/http's abort sentinel is treated the same way, because honoring an abort raised here would leak the same body. */
+func (instance *Kernel) invokeErrorHandlerSafely(
+    runtimeInstance runtimecontract.Runtime,
+    writer nethttp.ResponseWriter,
+    request httpcontract.Request,
+    handlerErr error,
+    requestLogger loggingcontract.Logger,
+) (errorHandlerResponse httpcontract.Response) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            return
+        }
+
+        errorHandlerResponse = nil
+
+        requestLogger.Error(
+            "error handler panicked",
+            exception.LogContext(
+                RecoverToError(recoveredValue),
+                exceptioncontract.Context{
+                    "panicStack": string(debug.Stack()),
+                },
+            ),
+        )
+    }()
+
+    return instance.errorHandler(runtimeInstance, writer, request, handlerErr)
 }
 
 func (instance *Kernel) dispatchEventKernelException(

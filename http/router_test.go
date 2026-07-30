@@ -42,6 +42,13 @@ func newHttpTestContainer() containercontract.Container {
 }
 
 func newHttpTestContainerWithSessionStorage(storage sessioncontract.Storage) containercontract.Container {
+    return newHttpTestContainerWithSessionStorageAndEnvironmentValues(storage, nil)
+}
+
+func newHttpTestContainerWithSessionStorageAndEnvironmentValues(
+    storage sessioncontract.Storage,
+    environmentValues map[string]string,
+) containercontract.Container {
     serviceContainer := container.NewContainer()
 
     serviceContainer.MustRegister(
@@ -54,11 +61,16 @@ func newHttpTestContainerWithSessionStorage(storage sessioncontract.Storage) con
     serviceContainer.MustRegister(
         config.ServiceConfig,
         func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
+            values := map[string]string{
+                config.EnvKey: config.EnvDevelopment,
+            }
+            for key, value := range environmentValues {
+                values[key] = value
+            }
+
             environment, err := config.NewEnvironment(
                 &testEnvironmentSource{
-                    values: map[string]string{
-                        config.EnvKey: config.EnvDevelopment,
-                    },
+                    values: values,
                 },
             )
             if nil != err {

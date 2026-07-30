@@ -45,6 +45,7 @@ func NewRequest(
 
     queryBag := bag.NewParameterBagFromValues(httpRequest.URL.Query())
     postBag := bag.NewParameterBag()
+    var bodyReadErr error
 
     if true == shouldAutoParseForm(httpRequest) {
         /* @important a urlencoded body is drained by ParseForm; buffer it first and restore Body/GetBody
@@ -56,24 +57,36 @@ func NewRequest(
         var rawBody []byte
         bufferedBody := false
         if true == isUrlEncodedForm(httpRequest) {
-            rawBody, bufferedBody = readRequestBodyBytes(httpRequest)
+            rawBody, bufferedBody, bodyReadErr = readRequestBodyBytes(httpRequest)
             if true == bufferedBody {
                 restoreRequestBody(httpRequest, rawBody)
             }
         }
 
-        parseFormErr := httpRequest.ParseForm()
+        /* a body whose read failed is not parsed: the reader is poisoned mid-stream, so ParseForm could only report a second symptom of the same failure — the read error is recorded on the request instead, and the kernel refuses the request before a handler mistakes an oversized or truncated submission for an empty one */
+        if nil == bodyReadErr {
+            parseFormErr := httpRequest.ParseForm()
 
-        if true == bufferedBody {
-            restoreRequestBody(httpRequest, rawBody)
-        }
+            if true == bufferedBody {
+                restoreRequestBody(httpRequest, rawBody)
+            }
 
-        if nil == parseFormErr {
-            postBag = bag.NewParameterBagFromValues(httpRequest.PostForm)
-        } else if nil != runtimeInstance {
-            loggerInstance := logging.LoggerFromRuntime(runtimeInstance)
-            if nil != loggerInstance {
-                loggerInstance.Warning(
+            if nil == parseFormErr {
+                postBag = bag.NewParameterBagFromValues(httpRequest.PostForm)
+            } else if nil != runtimeInstance {
+                loggerInstance := logging.LoggerFromRuntime(runtimeInstance)
+                if nil != loggerInstance {
+                    loggerInstance.Warning(
+                        "failed to parse form data",
+                        map[string]any{
+                            "error":  parseFormErr.Error(),
+                            "method": httpRequest.Method,
+                            "path":   httpRequest.URL.Path,
+                        },
+                    )
+                }
+            } else {
+                logging.NewDefaultLogger().Warning(
                     "failed to parse form data",
                     map[string]any{
                         "error":  parseFormErr.Error(),
@@ -82,15 +95,6 @@ func NewRequest(
                     },
                 )
             }
-        } else {
-            logging.NewDefaultLogger().Warning(
-                "failed to parse form data",
-                map[string]any{
-                    "error":  parseFormErr.Error(),
-                    "method": httpRequest.Method,
-                    "path":   httpRequest.URL.Path,
-                },
-            )
         }
     }
 
@@ -104,6 +108,7 @@ func NewRequest(
         attributes:      attributesBag,
         runtimeInstance: runtimeInstance,
         requestContext:  requestContext,
+        bodyReadErr:     bodyReadErr,
     }
 }
 
@@ -115,6 +120,8 @@ type Request struct {
     attributes      bagcontract.ParameterBag
     runtimeInstance runtimecontract.Runtime
     requestContext  httpcontract.RequestContext
+    /* the error that stopped the urlencoded body from being buffered for form parsing; the kernel refuses the request when it is set, so a handler never sees the failed read as an empty form */
+    bodyReadErr error
 }
 
 func (instance *Request) HttpRequest() *nethttp.Request {
@@ -185,22 +192,23 @@ func isUrlEncodedForm(httpRequest *nethttp.Request) bool {
     return "application/x-www-form-urlencoded" == mediaType
 }
 
-/* readRequestBodyBytes reads the request body fully into memory, reporting whether a body was present. It
-does not restore the body; the caller restores it through restoreRequestBody once (or twice, around a
-draining parse) as needed. */
-func readRequestBodyBytes(httpRequest *nethttp.Request) ([]byte, bool) {
+/* readRequestBodyBytes reads the request body fully into memory, reporting whether a body was present and
+the error that interrupted the read — a MaxBytesReader refusing an oversized body, or a client aborting
+mid-upload. It does not restore the body; the caller restores it through restoreRequestBody once (or twice,
+around a draining parse) as needed. */
+func readRequestBodyBytes(httpRequest *nethttp.Request) ([]byte, bool, error) {
     if nil == httpRequest.Body {
-        return nil, false
+        return nil, false, nil
     }
 
     bodyBytes, readErr := io.ReadAll(httpRequest.Body)
     if nil != readErr {
-        return nil, false
+        return nil, false, readErr
     }
 
     _ = httpRequest.Body.Close()
 
-    return bodyBytes, true
+    return bodyBytes, true, nil
 }
 
 /* restoreRequestBody replaces Body and GetBody with fresh readers over the given bytes, so a consumer that

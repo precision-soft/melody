@@ -2,6 +2,7 @@ package middleware
 
 import (
     "fmt"
+    "math"
     "net"
     nethttp "net/http"
     "sync"
@@ -174,11 +175,22 @@ func (instance *FixedWindowLimiter) pruneAtCeilingLocked(now time.Time) {
 }
 
 func (instance *FixedWindowLimiter) pruneIdleLocked(now time.Time) {
+    idleThreshold := idlePruneThreshold(instance.window)
+
     for key, bucket := range instance.buckets {
-        if instance.window*2 < now.Sub(bucket.lastRefill) {
+        if idleThreshold < now.Sub(bucket.lastRefill) {
             delete(instance.buckets, key)
         }
     }
+}
+
+/* idlePruneThreshold is twice the window, saturating at the top of the duration range: past the midpoint the doubling would wrap negative, every entry would read as idle, and a budget the window promised to hold would refill at each cleanup. */
+func idlePruneThreshold(window time.Duration) time.Duration {
+    if window > math.MaxInt64/2 {
+        return math.MaxInt64
+    }
+
+    return window * 2
 }
 
 var _ httpcontract.RateLimiter = (*FixedWindowLimiter)(nil)
@@ -325,6 +337,8 @@ func (instance *SlidingWindowLimiter) pruneAtCeilingLocked(now time.Time) {
 }
 
 func (instance *SlidingWindowLimiter) pruneIdleLocked(now time.Time) {
+    idleThreshold := idlePruneThreshold(instance.window)
+
     for key, window := range instance.windows {
         if 0 == len(window.requests) {
             delete(instance.windows, key)
@@ -332,7 +346,7 @@ func (instance *SlidingWindowLimiter) pruneIdleLocked(now time.Time) {
         }
 
         lastRequest := window.requests[len(window.requests)-1]
-        if instance.window*2 < now.Sub(lastRequest) {
+        if idleThreshold < now.Sub(lastRequest) {
             delete(instance.windows, key)
         }
     }

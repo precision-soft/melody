@@ -247,7 +247,8 @@ func acceptsGzip(acceptEncoding string) bool {
 
         quality := 1.0
         for _, rawParam := range parts[1:] {
-            param := strings.TrimSpace(rawParam)
+            /* the parameter name is case-insensitive, so a refusal spelled "Q=0" weighs the same as "q=0" */
+            param := strings.ToLower(strings.TrimSpace(rawParam))
             if false == strings.HasPrefix(param, "q=") {
                 continue
             }

@@ -80,13 +80,14 @@ func TestService_OriginAllowed_SchemeQualifiedSubdomainWildcard(t *testing.T) {
     }
 }
 
-func TestService_OriginAllowed_EmptyOriginListDefaultsToWildcard(t *testing.T) {
+/* @info a nil AllowOrigins expresses no preference and receives the permissive default; an EMPTY list is an expressed preference — no origin is allowed — so it denies instead of silently widening to the wildcard the moment an environment-derived list arrives empty */
+func TestService_OriginAllowed_ExplicitlyEmptyOriginListDeniesEveryOrigin(t *testing.T) {
     service := NewService(Config{
         AllowOrigins: []string{},
     })
 
-    if false == service.OriginAllowed("http://example.com") {
-        t.Fatalf("expected defaulted wildcard to allow any origin")
+    if true == service.OriginAllowed("http://example.com") {
+        t.Fatalf("expected an explicitly empty allow list to deny every origin")
     }
 }
 
@@ -193,5 +194,86 @@ func TestService_IsPreflight_RequiresOptionsMethod(t *testing.T) {
 
     if true == service.IsPreflight(testhelper.NewHttpTestRequestFromHttpRequest(request)) {
         t.Fatalf("expected a non-options request not to be a preflight")
+    }
+}
+
+func TestService_NilAllowOriginsKeepsThePermissiveDefault(t *testing.T) {
+    service := NewService(Config{})
+
+    if false == service.OriginAllowed("http://anything.test") {
+        t.Fatalf("expected a nil allow list to keep the permissive wildcard default")
+    }
+}
+
+func TestNewService_PanicsWhenCredentialsWithExplicitlyEmptyOrigins(t *testing.T) {
+    defer func() {
+        if nil == recover() {
+            t.Fatalf("expected panic when AllowCredentials is true with an explicitly empty allow list")
+        }
+    }()
+
+    NewService(Config{
+        AllowOrigins:     []string{},
+        AllowCredentials: true,
+    })
+}
+
+/* @info the port is part of the origin: an allow entry without a port grants only the portless spelling, otherwise any service on another port of an allowed host inherits the grant — with the credentials the restrictive configurations pair with it */
+
+func TestService_SchemelessEntryIsPortSignificant(t *testing.T) {
+    service := NewService(Config{
+        AllowOrigins: []string{"app.example.com"},
+    })
+
+    if false == service.OriginAllowed("https://app.example.com") {
+        t.Fatalf("expected the portless origin to match the portless entry")
+    }
+
+    if true == service.OriginAllowed("https://app.example.com:8443") {
+        t.Fatalf("expected a ported origin not to match the portless entry")
+    }
+}
+
+func TestService_PortedSchemelessEntryMatchesOnlyThatPort(t *testing.T) {
+    service := NewService(Config{
+        AllowOrigins: []string{"app.example.com:8443"},
+    })
+
+    if false == service.OriginAllowed("https://app.example.com:8443") {
+        t.Fatalf("expected the ported origin to match the ported entry")
+    }
+
+    if true == service.OriginAllowed("https://app.example.com") {
+        t.Fatalf("expected the portless origin not to match the ported entry")
+    }
+
+    if true == service.OriginAllowed("https://app.example.com:9000") {
+        t.Fatalf("expected a different port not to match the ported entry")
+    }
+}
+
+func TestService_WildcardEntriesArePortSignificant(t *testing.T) {
+    service := NewService(Config{
+        AllowOrigins: []string{"*.example.com"},
+    })
+
+    if false == service.OriginAllowed("http://api.example.com") {
+        t.Fatalf("expected the portless subdomain to match the wildcard")
+    }
+
+    if true == service.OriginAllowed("http://api.example.com:8080") {
+        t.Fatalf("expected a ported subdomain not to match the portless wildcard")
+    }
+
+    portedService := NewService(Config{
+        AllowOrigins: []string{"https://*.example.com:8443"},
+    })
+
+    if false == portedService.OriginAllowed("https://sub.example.com:8443") {
+        t.Fatalf("expected the ported subdomain to match the ported scheme wildcard")
+    }
+
+    if true == portedService.OriginAllowed("https://sub.example.com") {
+        t.Fatalf("expected the portless subdomain not to match the ported scheme wildcard")
     }
 }

@@ -1514,3 +1514,75 @@ func TestFileServer_AnOrdinaryMissStaysAtDebug(t *testing.T) {
         t.Fatalf("expected the miss to be recorded at debug, got %v", logger.debugMessages)
     }
 }
+
+/* @info the exclusion list is consulted with the spelling the client sent, and the root resolves to the index file only afterwards: an exclusion naming the index file must fire for "/" too, or the one URL the operator handed to the application is answered off the disk by the outermost middleware */
+
+func TestFileServer_RootDoesNotServeAnExcludedIndexFile(t *testing.T) {
+    fs := fstest.MapFS{
+        "index.html": &fstest.MapFile{Data: []byte("index")},
+    }
+
+    config := NewFileServerConfig(
+        ModeEmbedded,
+        "",
+        "index.html",
+        "",
+        false,
+        0,
+        false,
+    )
+    config.SetExcludedPathList([]string{"/index.html"})
+
+    server := NewFileServer(NewOptions(config, "", fs))
+
+    _, _, _, served := server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/"),
+        logging.NewNopLogger(),
+    )
+    if true == served {
+        t.Fatalf("expected the root not to serve an index file the exclusion list names")
+    }
+
+    _, _, _, _, servedStreaming := server.serveForStreaming(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/"),
+        logging.NewNopLogger(),
+    )
+    if true == servedStreaming {
+        t.Fatalf("expected the streaming root not to serve an index file the exclusion list names")
+    }
+}
+
+func TestFileServer_RootStillServesTheIndexFileWhenNotExcluded(t *testing.T) {
+    fs := fstest.MapFS{
+        "index.html": &fstest.MapFile{Data: []byte("index")},
+    }
+
+    config := NewFileServerConfig(
+        ModeEmbedded,
+        "",
+        "index.html",
+        "",
+        false,
+        0,
+        false,
+    )
+    config.SetExcludedPathList([]string{"/admin/"})
+
+    server := NewFileServer(NewOptions(config, "", fs))
+
+    statusCode, _, body, served := server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/"),
+        logging.NewNopLogger(),
+    )
+    if false == served {
+        t.Fatalf("expected the root to keep serving an index file the exclusion list does not name")
+    }
+
+    if http.StatusOK != statusCode {
+        t.Fatalf("expected 200 for the root index, got %d", statusCode)
+    }
+
+    if "index" != string(body) {
+        t.Fatalf("expected the index body, got %q", string(body))
+    }
+}
