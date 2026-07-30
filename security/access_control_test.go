@@ -194,7 +194,7 @@ func TestAccessControlMatch_RegexFirstMatchWinsInDeclarationOrder(t *testing.T) 
 
 func TestAccessControlMatch_FallbackEmptyPrefixIsUsedLast(t *testing.T) {
     accessControl := NewAccessControl(
-        NewAccessControlRule("/login", "PUBLIC_ACCESS"),
+        NewAccessControlRuleWithSegmentPrefix("/login", "PUBLIC_ACCESS"),
         NewAccessControlRule("", "ROLE_USER"),
     )
 
@@ -238,7 +238,7 @@ func TestAccessControlMatch_EmptyPathIsNormalizedToSlash(t *testing.T) {
 
 func TestRules_ReturnsCopy(t *testing.T) {
     accessControl := NewAccessControl(
-        NewAccessControlRule("/login", "PUBLIC_ACCESS"),
+        NewAccessControlRuleWithSegmentPrefix("/login", "PUBLIC_ACCESS"),
         NewAccessControlRule("/products", "ROLE_EDITOR"),
     )
 
@@ -310,16 +310,28 @@ func TestNewAccessControlRule_PublicAccessCombinedWithOtherAttributesPanics(t *t
     _ = NewAccessControlRule("/admin", "PUBLIC_ACCESS", "ROLE_ADMIN")
 }
 
-func TestNewAccessControlRule_LonePublicAccessIsAllowed(t *testing.T) {
+/* @info a raw prefix rule matches across segment boundaries, so PUBLIC_ACCESS on it opens every path that begins with the prefix and shadows a bounded rule that would have denied; the constructor refuses it and a public path is declared through a segment prefix, exact, or regex rule instead */
+func TestNewAccessControlRule_PublicAccessOnRawPrefixIsRefused(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        NewAccessControlRule("/health", "PUBLIC_ACCESS")
+    }, "access control PUBLIC_ACCESS may not be declared on a raw prefix rule; use a segment prefix, exact, or regex rule")
+}
+
+func TestNewAccessControlRule_LonePublicAccessIsAllowedOnBoundedRules(t *testing.T) {
     defer func() {
         if nil != recover() {
-            t.Fatalf("a lone PUBLIC_ACCESS attribute must not panic")
+            t.Fatalf("a lone PUBLIC_ACCESS attribute must not panic on a bounded rule")
         }
     }()
 
-    rule := NewAccessControlRule("/health", "PUBLIC_ACCESS")
-    if 1 != len(rule.attributes) {
-        t.Fatalf("expected exactly one attribute, got %v", rule.attributes)
+    segmentRule := NewAccessControlRuleWithSegmentPrefix("/health", "PUBLIC_ACCESS")
+    exactRule := NewAccessControlExactRule("/health", "PUBLIC_ACCESS")
+    regexRule := NewAccessControlRegexRule("^/health", "PUBLIC_ACCESS")
+
+    for _, rule := range []AccessControlRule{segmentRule, exactRule, regexRule} {
+        if 1 != len(rule.attributes) || "PUBLIC_ACCESS" != rule.attributes[0] {
+            t.Fatalf("expected exactly one PUBLIC_ACCESS attribute, got %v", rule.attributes)
+        }
     }
 }
 

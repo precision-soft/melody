@@ -51,10 +51,14 @@ func SecurityContextFromRuntime(runtimeInstance runtimecontract.Runtime) (*Secur
     securityContext, err := container.FromResolver[*SecurityContext](runtimeInstance.Scope(), securitycontract.ServiceSecurityContext)
 
     if nil != err {
-        logging.LoggerMustFromRuntime(runtimeInstance).Error(
-            "failed to resolve security context",
-            exception.LogContext(err),
-        )
+        /* @important resolve the logger without panicking: this runs from IsGranted, which a handler can call from a goroutine that outlives the request, and the kernel closes the scope on the way out; LoggerMustFromRuntime would turn a closed-scope read into a fatal panic in a goroutine no recover covers */
+        logger := logging.LoggerFromRuntime(runtimeInstance)
+        if nil != logger {
+            logger.Error(
+                "failed to resolve security context",
+                exception.LogContext(err),
+            )
+        }
 
         return nil, false
     }

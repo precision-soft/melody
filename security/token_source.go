@@ -3,6 +3,7 @@ package security
 import (
     "github.com/precision-soft/melody/event"
     "github.com/precision-soft/melody/exception"
+    exceptioncontract "github.com/precision-soft/melody/exception/contract"
     httpcontract "github.com/precision-soft/melody/http/contract"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
     securitycontract "github.com/precision-soft/melody/security/contract"
@@ -62,7 +63,14 @@ func (instance *AuthenticatorTokenSource) Resolve(runtimeInstance runtimecontrac
                 NewLoginFailureEvent(request, err),
             )
             if nil != eventSecurityLoginFailureErr {
-                return nil, eventSecurityLoginFailureErr
+                /* @important keep the authentication error as the cause: it carries the status the client should see (a 401 for bad credentials), which a bare dispatch error would replace with a 500 while hiding the real reason from the log */
+                return nil, exception.NewError(
+                    "security login failure event dispatch failed",
+                    exceptioncontract.Context{
+                        "dispatchError": eventSecurityLoginFailureErr.Error(),
+                    },
+                    err,
+                )
             }
         }
 

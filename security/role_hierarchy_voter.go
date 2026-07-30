@@ -38,12 +38,13 @@ func (instance *RoleHierarchyVoter) Vote(token securitycontract.Token, attribute
         return securitycontract.VoteDenied
     }
 
+    if false == token.IsAuthenticated() {
+        return securitycontract.VoteDenied
+    }
+
     expandedRoles := instance.roleHierarchy.ExpandRoles(token.Roles())
 
     expandedToken := NewAuthenticatedToken(token.UserIdentifier(), expandedRoles)
-    if false == token.IsAuthenticated() {
-        expandedToken = NewAuthenticatedToken("", expandedRoles)
-    }
 
     return instance.delegate.Vote(expandedToken, attribute, subject)
 }

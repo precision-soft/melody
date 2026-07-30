@@ -9,6 +9,11 @@ import (
 
 func Compile(configuration Configuration) (*security.CompiledConfiguration, error) {
     if 0 == len(configuration.firewalls) {
+        /* @important a global access control declared without any firewall still enforces: the resolution listener matches no firewall and sets no context, the access control listener falls back to this global control and denies unauthenticated access, which is the behaviour the runtime is built and tested for. Dropping it here would silently disable every declared global rule. */
+        if nil != configuration.global.accessControl {
+            return security.NewCompiledConfiguration(nil, configuration.global.accessControl), nil
+        }
+
         return nil, nil
     }
 
@@ -97,6 +102,8 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
             effectiveRoleHierarchy = configuration.global.roleHierarchy
             if nil != effectiveRoleHierarchy {
                 roleHierarchySource = security.SourceGlobal
+            } else {
+                roleHierarchySource = security.SourceNone
             }
         }
 
@@ -106,6 +113,8 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
             effectiveDecisionManager = configuration.global.accessDecisionManager
             if nil != effectiveDecisionManager {
                 decisionManagerSource = security.SourceGlobal
+            } else {
+                decisionManagerSource = security.SourceNone
             }
         }
 

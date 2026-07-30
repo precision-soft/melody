@@ -163,10 +163,6 @@ func (instance *Builder) AddStatefulFirewall(
 }
 
 func (instance *Builder) BuildAndCompile() *security.CompiledConfiguration {
-    if 0 == len(instance.firewalls) {
-        return nil
-    }
-
     compiled, err := Compile(
         Configuration{
             global:    instance.global,
@@ -203,7 +199,9 @@ func (instance *Builder) addFirewall(
     )
 
     if "" == string(override.mergeStrategy) {
+        /* @important the zero value of the exported override struct must inherit the global access control the same way NewFirewallOverrideConfiguration does: an override that reaches here unconfigured carries no local access control, and without inheritance the firewall compiles an empty non-nil access control that never falls back to the global policy, opening every route behind the firewall */
         override.mergeStrategy = AccessControlMergeLocalFirst
+        override.inheritGlobalAccessControl = true
     }
 
     instance.firewalls = append(

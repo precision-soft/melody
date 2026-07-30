@@ -33,3 +33,19 @@ func TestRoleHierarchyVoter_ExpandsRolesBeforeVoting(t *testing.T) {
         t.Fatalf("expected granted")
     }
 }
+
+/* @info an unauthenticated token is denied before its roles are expanded: the earlier code rebuilt it with an empty identity but kept the roles, which the delegate reads and never checks, so the neutralisation was a no-op */
+func TestRoleHierarchyVoter_DeniesWhenTokenNotAuthenticated(t *testing.T) {
+    hierarchy := NewRoleHierarchy(
+        map[string][]string{
+            "ROLE_ADMIN": {"ROLE_USER"},
+        },
+    )
+
+    voter := NewRoleHierarchyVoter(hierarchy, NewRoleVoter())
+
+    result := voter.Vote(unauthenticatedRoledToken{roles: []string{"ROLE_ADMIN"}}, "ROLE_USER", nil)
+    if securitycontract.VoteDenied != result {
+        t.Fatalf("expected denied")
+    }
+}

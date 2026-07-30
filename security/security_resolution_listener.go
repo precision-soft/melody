@@ -8,6 +8,7 @@ import (
     "github.com/precision-soft/melody/exception"
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
     "github.com/precision-soft/melody/http"
+    "github.com/precision-soft/melody/internal"
     kernelcontract "github.com/precision-soft/melody/kernel/contract"
     "github.com/precision-soft/melody/logging"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
@@ -56,7 +57,7 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
                         return dispatchErr
                     }
 
-                    requestEvent.SetResponse(exceptionEvent.Response())
+                    requestEvent.SetResponse(exceptionResponseOrFailClosed(exceptionEvent))
                     return nil
                 }
             }
@@ -81,7 +82,7 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
                     return dispatchErr
                 }
 
-                requestEvent.SetResponse(exceptionEvent.Response())
+                requestEvent.SetResponse(exceptionResponseOrFailClosed(exceptionEvent))
                 return nil
             }
 
@@ -112,6 +113,8 @@ func resolveTokenSourceSafely(
     runtimeInstance runtimecontract.Runtime,
     requestEvent *http.KernelRequestEvent,
 ) (token securitycontract.Token, resolveErr error) {
+    tokenSource := firewall.TokenSource()
+
     defer func() {
         recoveredValue := recover()
         if nil == recoveredValue {
@@ -123,11 +126,17 @@ func resolveTokenSourceSafely(
             recoveredErr = err
         }
 
+        /* @important the recovered value may itself be a nil token source panicking on Resolve: read its name only when it is present, or the deferred function panics a second time after recover and the original diagnostic escapes unrecovered */
+        tokenSourceName := ""
+        if false == internal.IsNilInterface(tokenSource) {
+            tokenSourceName = tokenSource.Name()
+        }
+
         resolveErr = exception.NewError(
             "security token source panicked during resolution",
             exceptioncontract.Context{
                 "firewallName":    firewall.Name(),
-                "tokenSourceName": firewall.TokenSource().Name(),
+                "tokenSourceName": tokenSourceName,
                 "panicType":       fmt.Sprintf("%T", recoveredValue),
                 "panicValue":      fmt.Sprintf("%v", recoveredValue),
                 "panicStack":      string(debug.Stack()),
@@ -136,7 +145,7 @@ func resolveTokenSourceSafely(
         )
     }()
 
-    token, resolveErr = firewall.TokenSource().Resolve(runtimeInstance, requestEvent.Request())
+    token, resolveErr = tokenSource.Resolve(runtimeInstance, requestEvent.Request())
 
     return token, resolveErr
 }

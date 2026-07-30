@@ -24,6 +24,10 @@ func (instance *RoleVoter) Vote(token securitycontract.Token, attribute string, 
         return securitycontract.VoteDenied
     }
 
+    if false == token.IsAuthenticated() {
+        return securitycontract.VoteDenied
+    }
+
     for _, role := range token.Roles() {
         if role == attribute {
             return securitycontract.VoteGranted

@@ -317,6 +317,65 @@ func TestSecurityResolutionListener_WhenTokenSourcePanics_SetsSecurityContextWit
     }
 }
 
+/* @info a nil token source panics on Resolve and the recovery handler reads the source name; reading it off the nil source panics a second time after recover and the diagnostic escapes unrecovered, so the recovery must read the name defensively and still fail closed with an anonymous context */
+func TestSecurityResolutionListener_WhenTokenSourceIsNil_RecoversWithoutSecondPanic(t *testing.T) {
+    kernel := newTestKernel()
+    runtimeInstance := newTestRuntime()
+
+    firewall := NewCompiledFirewall(
+        "main",
+        &resolutionListenerTestMatcher{matches: true},
+        "matcher:main",
+        []securitycontract.Rule{},
+        nil,
+        nil,
+        nil,
+        nil,
+        nil,
+        nil,
+        "/admin/login",
+        "/admin/logout",
+        nil,
+        nil,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+    )
+
+    registry := NewFirewallRegistry(
+        NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil),
+    )
+
+    registerTestKernelExceptionListener(kernel)
+    RegisterKernelSecurityResolutionListener(kernel, registry)
+
+    request := newSecurityTestRequest("GET", "/admin", nil, runtimeInstance)
+    requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, request)
+
+    _, err := kernel.EventDispatcher().DispatchName(
+        runtimeInstance,
+        "kernel.request",
+        requestEvent,
+    )
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if nil == requestEvent.Response() {
+        t.Fatalf("expected response to be set on request event")
+    }
+
+    securityContext, exists := SecurityContextFromRuntime(runtimeInstance)
+    if false == exists || nil == securityContext {
+        t.Fatalf("expected security context to be set even when the token source is nil")
+    }
+    if true == securityContext.Token().IsAuthenticated() {
+        t.Fatalf("expected anonymous token when the token source is nil")
+    }
+}
+
 func TestSecurityResolutionListener_WhenTokenSourceReturnsNilToken_SetsAnonymousToken(t *testing.T) {
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()

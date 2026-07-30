@@ -35,14 +35,17 @@ func (instance *accessControlListenerTestEntryPoint) Start(runtimeInstance runti
 }
 
 type accessControlListenerTestAccessDeniedHandler struct {
-    err   error
-    calls int
+    response httpcontract.Response
+    err      error
+    calls    int
 }
 
-func (instance *accessControlListenerTestAccessDeniedHandler) Handle(runtimeInstance any, request httpcontract.Request, decisionErr error) (httpcontract.Response, error) {
+func (instance *accessControlListenerTestAccessDeniedHandler) Handle(runtimeInstance runtimecontract.Runtime, request httpcontract.Request, decisionErr error) (httpcontract.Response, error) {
     instance.calls++
-    return nil, instance.err
+    return instance.response, instance.err
 }
+
+var _ securitycontract.AccessDeniedHandler = (*accessControlListenerTestAccessDeniedHandler)(nil)
 
 func TestMatchAccessControlRule_RegexRuleIsHonoredAndNotShadowedByEarlierRegex(t *testing.T) {
     accessControl := NewAccessControl(
@@ -449,5 +452,168 @@ func TestMatchAccessControlRule_FallbackRuleSelectedOnce(t *testing.T) {
     }
     if "ROLE_ANY" != attributes[0] {
         t.Fatalf("unexpected attribute")
+    }
+}
+
+/* @info an entry point that produces no response must not let the request through: without the fail-closed fall-through the listener writes a nil response the kernel reads as "no decision" and the handler runs for an unauthenticated request */
+func TestAccessControlListener_WhenEntryPointReturnsNoResponse_FailsClosed(t *testing.T) {
+    kernel := newTestKernel()
+    runtimeInstance := newTestRuntime()
+
+    entryPoint := &accessControlListenerTestEntryPoint{response: nil, err: nil}
+
+    firewall := NewCompiledFirewall(
+        "main",
+        nil,
+        "m",
+        nil,
+        nil,
+        NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN")),
+        &accessControlListenerTestAccessDecisionManager{decideAllErr: nil},
+        nil,
+        entryPoint,
+        nil,
+        "/admin/login",
+        "/admin/logout",
+        nil,
+        nil,
+        SourceFirewall,
+        SourceFirewall,
+        SourceFirewall,
+        SourceFirewall,
+        SourceNone,
+    )
+
+    SecurityContextSetOnRuntime(runtimeInstance, NewSecurityContext(firewall, NewAnonymousToken()))
+
+    registry := NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil))
+
+    RegisterKernelAccessControlListener(kernel, registry)
+
+    request := newSecurityTestRequest("GET", "/admin", nil, runtimeInstance)
+    requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, request)
+
+    _, err := kernel.EventDispatcher().DispatchName(runtimeInstance, "kernel.request", requestEvent)
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if 1 != entryPoint.calls {
+        t.Fatalf("expected the entry point to be called once")
+    }
+    if nil == requestEvent.Response() {
+        t.Fatalf("expected a fail-closed response when the entry point produced none")
+    }
+}
+
+/* @info when the kernel.exception dispatch produces no response (no exception listener registered, or propagation stopped) the listener must still write a fail-closed response rather than a nil the kernel serves the handler for */
+func TestAccessControlListener_WhenExceptionProducesNoResponse_FailsClosed(t *testing.T) {
+    kernel := newTestKernel()
+    runtimeInstance := newTestRuntime()
+
+    firewall := NewCompiledFirewall(
+        "main",
+        nil,
+        "m",
+        nil,
+        nil,
+        NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN")),
+        nil,
+        nil,
+        nil,
+        nil,
+        "/admin/login",
+        "/admin/logout",
+        nil,
+        nil,
+        SourceFirewall,
+        SourceNone,
+        SourceFirewall,
+        SourceNone,
+        SourceNone,
+    )
+
+    SecurityContextSetOnRuntime(runtimeInstance, NewSecurityContext(firewall, NewAuthenticatedToken("user", []string{"ROLE_USER"})))
+
+    registry := NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil))
+
+    RegisterKernelAccessControlListener(kernel, registry)
+
+    request := newSecurityTestRequest("GET", "/admin", nil, runtimeInstance)
+    requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, request)
+
+    _, err := kernel.EventDispatcher().DispatchName(runtimeInstance, "kernel.request", requestEvent)
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if nil == requestEvent.Response() {
+        t.Fatalf("expected a fail-closed response when no exception listener produced one")
+    }
+}
+
+/* @info an access denied handler that fails must keep the authorization decision as the cause so the denial status survives the cause chain; replacing it with the handler error turns a 403 into whatever the handler failure maps to */
+func TestAccessControlListener_WhenDeniedHandlerFails_KeepsDecisionAsCause(t *testing.T) {
+    kernel := newTestKernel()
+    runtimeInstance := newTestRuntime()
+
+    decisionSentinel := errors.New("forbidden decision")
+
+    deniedHandler := &accessControlListenerTestAccessDeniedHandler{response: nil, err: errors.New("handler render failed")}
+
+    firewall := NewCompiledFirewall(
+        "main",
+        nil,
+        "m",
+        nil,
+        nil,
+        NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN")),
+        &accessControlListenerTestAccessDecisionManager{decideAllErr: decisionSentinel},
+        nil,
+        nil,
+        deniedHandler,
+        "/admin/login",
+        "/admin/logout",
+        nil,
+        nil,
+        SourceFirewall,
+        SourceFirewall,
+        SourceFirewall,
+        SourceNone,
+        SourceFirewall,
+    )
+
+    SecurityContextSetOnRuntime(runtimeInstance, NewSecurityContext(firewall, NewAuthenticatedToken("user", []string{"ROLE_USER"})))
+
+    registry := NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil))
+
+    var capturedErr error
+    kernel.EventDispatcher().AddListener(
+        "kernel.exception",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            exceptionEvent, ok := eventValue.Payload().(*httpPkg.KernelExceptionEvent)
+            if true == ok && nil != exceptionEvent {
+                capturedErr = exceptionEvent.Err()
+            }
+            return nil
+        },
+        0,
+    )
+
+    RegisterKernelAccessControlListener(kernel, registry)
+
+    request := newSecurityTestRequest("GET", "/admin", nil, runtimeInstance)
+    requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, request)
+
+    _, err := kernel.EventDispatcher().DispatchName(runtimeInstance, "kernel.request", requestEvent)
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if 1 != deniedHandler.calls {
+        t.Fatalf("expected the denied handler to be called once")
+    }
+    if false == errors.Is(capturedErr, decisionSentinel) {
+        t.Fatalf("expected the authorization decision to survive as the cause, got %v", capturedErr)
     }
 }

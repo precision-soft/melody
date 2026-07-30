@@ -42,6 +42,19 @@ func normalizeAccessControlAttributes(attributes []string) []string {
 }
 
 func NewAccessControlRule(pathPrefix string, attributes ...string) AccessControlRule {
+    /* @important a raw prefix rule matches across segment boundaries, so PUBLIC_ACCESS on it opens every path that merely begins with the prefix and, being the longest match, shadows a correctly bounded rule that would have denied. A public path is declared through a segment prefix (AllowAnonymous), an exact rule, or a regex rule, none of which reach past their own boundary. */
+    for _, attribute := range attributes {
+        if securitycontract.AttributePublicAccess == strings.TrimSpace(attribute) {
+            exception.Panic(
+                exception.NewError("access control PUBLIC_ACCESS may not be declared on a raw prefix rule; use a segment prefix, exact, or regex rule", nil, nil),
+            )
+        }
+    }
+
+    return newAccessControlPrefixRule(pathPrefix, attributes)
+}
+
+func newAccessControlPrefixRule(pathPrefix string, attributes []string) AccessControlRule {
     normalizedPrefix := normalizePathPrefix(pathPrefix)
 
     normalizedAttributes := normalizeAccessControlAttributes(attributes)
@@ -67,7 +80,7 @@ func NewAccessControlExactRule(path string, attributes ...string) AccessControlR
         normalizedPath = strings.TrimSuffix(normalizedPath, "/")
     }
 
-    rule := NewAccessControlRule("", attributes...)
+    rule := newAccessControlPrefixRule("", attributes)
     rule.pathPrefix = normalizedPath
     rule.isExact = true
 
@@ -95,7 +108,7 @@ func NewAccessControlRegexRule(pattern string, attributes ...string) AccessContr
         )
     }
 
-    rule := NewAccessControlRule("", attributes...)
+    rule := newAccessControlPrefixRule("", attributes)
     rule.regexPattern = normalizedPattern
     rule.regexCompiled = compiled
     rule.isRegex = true
