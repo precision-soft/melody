@@ -300,3 +300,50 @@ func TestInMemoryStorage_LoadDoesNotDeleteConcurrentlySavedEntry(t *testing.T) {
     }
 }
 
+
+/* @info A closed storage refuses the operation the way FileStorage does. Serving one would be worse than the error: the cleanup goroutine is stopped by then, so an entry saved after Close is reclaimed by nothing except a Load that happens to name it, and the map grows for the rest of the process. The two storages the framework ships have to answer the same way here, or an application that swaps one for the other inherits a different failure. */
+func TestInMemoryStorage_RefusesEveryOperationAfterClose(t *testing.T) {
+    storage := NewInMemoryStorage()
+
+    if err := storage.Close(); nil != err {
+        t.Fatalf("unexpected error closing the storage: %v", err)
+    }
+
+    if _, _, err := storage.Load("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"); nil == err {
+        t.Fatalf("expected Load to refuse a closed storage")
+    }
+
+    if err := storage.Save("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", map[string]any{"k": "v"}, time.Minute); nil == err {
+        t.Fatalf("expected Save to refuse a closed storage")
+    }
+
+    if err := storage.Delete("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"); nil == err {
+        t.Fatalf("expected Delete to refuse a closed storage")
+    }
+
+    if err := storage.Clear(); nil == err {
+        t.Fatalf("expected Clear to refuse a closed storage")
+    }
+}
+
+/* @info The instant an entry expires counts as lapsed, the same boundary FileStorage draws with `now >= ExpiresAt`. A session stored with a one second lifetime is gone exactly one second later in both storages, rather than living one instant longer in this one — an application that moves between the two must not find the boundary moving with it. */
+func TestInMemoryStorage_TreatsTheExpiryInstantItselfAsLapsed(t *testing.T) {
+    storage := NewInMemoryStorage()
+
+    expiration := time.Now()
+
+    storage.mutex.Lock()
+    storage.sessions["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"] = inMemorySessionEntry{
+        data:      map[string]any{"k": "v"},
+        expiresAt: &expiration,
+    }
+    storage.mutex.Unlock()
+
+    if false == isLapsed(&expiration, expiration) {
+        t.Fatalf("expected the expiry instant itself to count as lapsed")
+    }
+
+    if true == isLapsed(&expiration, expiration.Add(-time.Nanosecond)) {
+        t.Fatalf("expected the instant before expiry to still be live")
+    }
+}

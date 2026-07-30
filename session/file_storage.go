@@ -107,11 +107,10 @@ func (instance *FileStorage) Load(sessionId string) (map[string]any, bool, error
     }
 
     if 0 != entry.ExpiresAt && time.Now().UnixNano() >= entry.ExpiresAt {
-        /* the flush is what drops this entry: purgeExpiredLocked runs inside it against the same clock and the same predicate, so naming the session again here would only duplicate the removal */
-        flushErr := instance.flushLocked()
-        if nil != flushErr {
-            return nil, false, flushErr
-        }
+        /* the flush is what drops this entry: purgeExpiredLocked runs inside it against the same clock and the same predicate, so naming the session again here would only duplicate the removal.
+
+        @important its failure is deliberately not returned. The answer to this load — no such session — was settled before the flush was attempted, and the flush is housekeeping no caller asked for; handing back its error instead would make Manager.Session panic, so an expired cookie on a store that cannot be written would answer 500 where a client holding no cookie at all is served a fresh session. The purge has already taken the entry out of the map, so nothing serves it again; only the file still carries it, until the next write that succeeds. */
+        _ = instance.flushLocked()
 
         return nil, false, nil
     }

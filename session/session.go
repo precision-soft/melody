@@ -6,6 +6,7 @@ import (
     "sync"
 
     "github.com/precision-soft/melody/exception"
+    "github.com/precision-soft/melody/internal"
     sessioncontract "github.com/precision-soft/melody/session/contract"
 )
 
@@ -74,16 +75,8 @@ func (instance *Session) Delete(key string) {
     instance.mutex.Unlock()
 }
 
+/* Clear ends the session, and the ending latches: a later Set puts a value back and marks the session modified, but it cannot make the session look live again. Without the latch a logout handler that clears the session and is followed by anything writing to the same object — a middleware or an event listener leaving a farewell message — had the response path take the save branch instead of the delete branch, so the values were overwritten but the pre-logout id stayed alive in the storage and was re-issued to the browser under the same cookie. A caller that wants a usable session after clearing one asks the manager for a new session. */
 func (instance *Session) Clear() {
-    instance.mutex.Lock()
-    instance.values = make(map[string]any)
-    instance.modified = true
-    instance.cleared = true
-    instance.mutex.Unlock()
-}
-
-/* abandon is Clear with a latch: Set lifts the cleared flag, the latch nothing lifts. A session whose id the manager already deleted must never look live again, or the response path would save it back under that id and re-issue it. */
-func (instance *Session) abandon() {
     instance.mutex.Lock()
     instance.values = make(map[string]any)
     instance.modified = true
@@ -92,12 +85,10 @@ func (instance *Session) abandon() {
     instance.mutex.Unlock()
 }
 
+/* All hands out a copy that reaches all the way down, the depth both storages already copy at. A copy of only the top level would hand the caller the very map or slice a nested value holds, so mutating it would change the live session without passing through Set — the session would not be marked modified and the change would never be persisted, while a caller that mutates it after the response path has handed the same value to the storage races the copy the storage makes. */
 func (instance *Session) All() map[string]any {
     instance.mutex.RLock()
-    result := make(map[string]any, len(instance.values))
-    for key, value := range instance.values {
-        result[key] = value
-    }
+    result := internal.CopyAnyMap(instance.values)
     instance.mutex.RUnlock()
 
     return result

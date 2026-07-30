@@ -605,7 +605,7 @@ func (instance *failingSessionStorage) Close() error {
     return nil
 }
 
-func TestKernel_SessionSaveFailureDegradesToResponseWithoutPanic(t *testing.T) {
+func TestKernel_SessionSaveFailureAnswersFiveHundred(t *testing.T) {
     router := NewRouter()
     router.Handle(
         nethttp.MethodGet,
@@ -632,12 +632,12 @@ func TestKernel_SessionSaveFailureDegradesToResponseWithoutPanic(t *testing.T) {
 
     handler.ServeHTTP(recorder, request)
 
-    if nethttp.StatusOK != recorder.Code {
-        t.Fatalf("expected the response to be delivered despite the session-store outage, got %d", recorder.Code)
+    if nethttp.StatusInternalServerError != recorder.Code {
+        t.Fatalf("expected a session-store outage to answer 500 rather than the handler's success, got %d", recorder.Code)
     }
 
-    if "ok" != recorder.Body.String() {
-        t.Fatalf("expected the handler body despite the session-store outage, got %q", recorder.Body.String())
+    if "ok" == recorder.Body.String() {
+        t.Fatalf("expected the handler's success body to be replaced when its session write was lost")
     }
 
     if "" != recorder.Header().Get("Set-Cookie") {
@@ -1642,5 +1642,158 @@ func TestKernel_BrokenUrlencodedBodyIsRefusedWith400(t *testing.T) {
 
     if true == handlerInvoked {
         t.Fatalf("expected the handler not to run for a broken urlencoded body")
+    }
+}
+
+type typedNilReturningSessionManager struct {
+    delegate sessioncontract.Manager
+}
+
+/* Session reports "no such session" the way a careless implementation does: by returning a nil pointer of its own session type, which is not equal to nil once it is carried in the interface. */
+func (instance *typedNilReturningSessionManager) Session(sessionId string) sessioncontract.Session {
+    var typedNil *session.Session
+
+    return typedNil
+}
+
+func (instance *typedNilReturningSessionManager) NewSession() sessioncontract.Session {
+    return instance.delegate.NewSession()
+}
+
+func (instance *typedNilReturningSessionManager) RegenerateSession(sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
+    return instance.delegate.RegenerateSession(sessionInstance)
+}
+
+func (instance *typedNilReturningSessionManager) SaveSession(sessionInstance sessioncontract.Session) error {
+    return instance.delegate.SaveSession(sessionInstance)
+}
+
+func (instance *typedNilReturningSessionManager) DeleteSession(sessionId string) error {
+    return instance.delegate.DeleteSession(sessionId)
+}
+
+func (instance *typedNilReturningSessionManager) Close() error {
+    return instance.delegate.Close()
+}
+
+/* @info The session manager is a replaceable service, so the kernel must test what it hands back with IsNilInterface rather than against nil: a typed nil passes a bare comparison, the kernel skips NewSession and publishes it, and the first handler that touches the session dereferences nil. The request must be served a working session instead. */
+func TestKernel_MintsASessionWhenTheManagerAnswersWithATypedNil(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/session",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            attributeValue, exists := request.Attributes().Get(RequestAttributeSession)
+            if false == exists {
+                return TextResponse(nethttp.StatusInternalServerError, "no session attribute"), nil
+            }
+
+            publishedSession, isSession := attributeValue.(sessioncontract.Session)
+            if false == isSession {
+                return TextResponse(nethttp.StatusInternalServerError, "not a session"), nil
+            }
+
+            /* a typed nil reaches here as a non-nil interface and panics on the first call */
+            publishedSession.Set("touched", "yes")
+
+            return TextResponse(nethttp.StatusOK, publishedSession.Id()), nil
+        },
+    )
+
+    storage := session.NewInMemoryStorage()
+
+    serviceContainer := newHttpTestContainerWithSessionManager(
+        &typedNilReturningSessionManager{
+            delegate: session.NewManager(storage, 30*time.Minute),
+        },
+    )
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/session", nil)
+    request.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})
+
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, request)
+
+    if nethttp.StatusOK != recorder.Code {
+        t.Fatalf("expected the request to be served a usable session, got status %d body %q", recorder.Code, recorder.Body.String())
+    }
+
+    if "" == strings.TrimSpace(recorder.Body.String()) {
+        t.Fatalf("expected the minted session to carry an id")
+    }
+}
+
+type warningRecordingLogger struct {
+    mutex           sync.Mutex
+    warningMessages []string
+}
+
+func (instance *warningRecordingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+}
+
+func (instance *warningRecordingLogger) Debug(message string, context loggingcontract.Context) {}
+
+func (instance *warningRecordingLogger) Info(message string, context loggingcontract.Context) {}
+
+func (instance *warningRecordingLogger) Warning(message string, context loggingcontract.Context) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.warningMessages = append(instance.warningMessages, message)
+}
+
+func (instance *warningRecordingLogger) Error(message string, context loggingcontract.Context) {}
+
+func (instance *warningRecordingLogger) Emergency(message string, context loggingcontract.Context) {
+}
+
+func (instance *warningRecordingLogger) hasWarning(message string) bool {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    for _, loggedMessage := range instance.warningMessages {
+        if message == loggedMessage {
+            return true
+        }
+    }
+
+    return false
+}
+
+/* @info A handler that commits its own response and then rotates the session loses everything the session held: the rotation deletes the previous entry, and the response path refuses to store the replacement because no Set-Cookie can reach the client on a committed response. Refusing the write is right, but it must not be silent — without a line in the log this is indistinguishable from the ordinary case the branch exists for, a first-time visitor on a stream with nothing worth storing. */
+func TestKernel_LogsWhenACommittedResponseDropsARotatedSession(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/stream",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            writer.WriteHeader(nethttp.StatusOK)
+            _, _ = writer.Write([]byte("streamed"))
+
+            if _, err := RegenerateRequestSession(request); nil != err {
+                return nil, err
+            }
+
+            return nil, nil
+        },
+    )
+
+    recordingLogger := &warningRecordingLogger{}
+
+    serviceContainer := newHttpTestContainer()
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger)
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/stream", nil)
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, request)
+
+    if false == recordingLogger.hasWarning("session not persisted: the response was already committed and the request does not name this session") {
+        t.Fatalf("expected the dropped session write to be logged, got warnings %v", recordingLogger.warningMessages)
     }
 }

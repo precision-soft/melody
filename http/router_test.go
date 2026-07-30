@@ -45,8 +45,24 @@ func newHttpTestContainerWithSessionStorage(storage sessioncontract.Storage) con
     return newHttpTestContainerWithSessionStorageAndEnvironmentValues(storage, nil)
 }
 
+func newHttpTestContainerWithSessionManager(
+    sessionManager sessioncontract.Manager,
+) containercontract.Container {
+    return newHttpTestContainerWithSessionManagerAndEnvironmentValues(sessionManager, nil)
+}
+
 func newHttpTestContainerWithSessionStorageAndEnvironmentValues(
     storage sessioncontract.Storage,
+    environmentValues map[string]string,
+) containercontract.Container {
+    return newHttpTestContainerWithSessionManagerAndEnvironmentValues(
+        session.NewManager(storage, 30*time.Minute),
+        environmentValues,
+    )
+}
+
+func newHttpTestContainerWithSessionManagerAndEnvironmentValues(
+    sessionManager sessioncontract.Manager,
     environmentValues map[string]string,
 ) containercontract.Container {
     serviceContainer := container.NewContainer()
@@ -84,7 +100,7 @@ func newHttpTestContainerWithSessionStorageAndEnvironmentValues(
     serviceContainer.MustRegister(
         session.ServiceSessionManager,
         func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
-            return session.NewManager(storage, 30*time.Minute), nil
+            return sessionManager, nil
         },
     )
 

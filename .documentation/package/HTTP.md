@@ -277,6 +277,9 @@ var _ applicationcontract.HttpModule = (*ExampleHttpModule)(nil)
 
 ## Session cookie
 
+A session write the storage could not take answers **500** rather than the response the handler produced. The handler wrote to the session and returned success on the assumption the write would land — a login answering `302 /dashboard` with the identity never stored — and the client cannot otherwise tell the difference from a line in the server log. The session cookie is suppressed either way, so the browser is never pointed at an id nothing persisted. The **delete** path is deliberately different: a failed logout still expires the browser cookie and serves the handler's response, because clearing a cookie can only end a session and never resurrect one. A save refused because another request deleted the session is a third case — the session ending, not a failure — and it expires the cookie and serves the handler's response unchanged. See [`writeResponse`](../../http/router_utility.go) and [`session.ErrSessionDeleted`](../../session/manager.go).
+
+
 The kernel loads a session from the incoming cookie, publishes it on the request as [`RequestAttributeSession`](../../http/request.go), and on the way out saves a modified session and emits its `Set-Cookie`. [`Kernel.SetSessionCookiePolicy`](../../http/contract/kernel.go) shapes that cookie through a [`SessionCookiePolicy`](../../http/contract/kernel.go):
 
 | Field      | Type                                                                       | Default when unset                     |
@@ -313,7 +316,7 @@ if nil != rotateErr {
 rotated.Set(sessionKeyUserId, user.Id())
 ```
 
-Call it **before** writing the authenticated identity, and write that identity to the session it returns. It reports an error rather than panicking when the request carries no session, has no runtime, or the session manager is not registered. [`session.Manager.RegenerateSession`](../../session/manager.go) is the storage-level primitive underneath, for code that holds no request; rotating through it means republishing the result yourself, and the session that went in is latched out of use so that forgetting to logs the client out rather than stranding it on a deleted id. The latch is what makes a rotated-away session unresurrectable: `Session.Set` lifts the cleared flag, nothing lifts the latch. A `Session` implementation from outside this package is only `Clear()`ed, which a later write still undoes.
+Call it **before** writing the authenticated identity, and write that identity to the session it returns. It reports an error rather than panicking when the request carries no session, has no runtime, or the session manager is not registered. [`session.Manager.RegenerateSession`](../../session/manager.go) is the storage-level primitive underneath, for code that holds no request; rotating through it means republishing the result yourself, and the session that went in is latched out of use so that forgetting to logs the client out rather than stranding it on a deleted id. `Session.Clear` is what makes a rotated-away session unresurrectable: clearing latches, so a later write puts a value back and marks the session modified without making it look live again. A `Session` implementation from outside this package is cleared through its own `Clear`, which may or may not latch.
 
 ### Streamed responses
 

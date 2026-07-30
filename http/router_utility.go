@@ -234,7 +234,7 @@ func writeResponse(
 
     sessionInstance = republishedSession(request, sessionInstance)
 
-    if false == sessionAlreadyPersisted && nil != sessionManager && nil != sessionInstance {
+    if false == sessionAlreadyPersisted && false == internal.IsNilInterface(sessionManager) && false == internal.IsNilInterface(sessionInstance) {
         sessionPersistFailed := false
 
         if true == sessionInstance.IsCleared() {
@@ -260,14 +260,48 @@ func writeResponse(
         } else if true == sessionInstance.IsModified() {
             /* a discarded response carries no Set-Cookie, so storing a session the client does not already hold would write a row nothing can ever reference: a first-time visitor on a streamed response (Server-Sent Events commit the headers before the handler runs) would leave one unreachable session behind per reconnect. A session the request already names is stored as before, since it needs no cookie to be reachable — and the clear path above still destroys a session whatever the response does with it. */
             if true == responseIsDiscarded && false == requestNamesSession(request, sessionInstance.Id()) {
+                /* @important say so in the log. Suppressing the write is right — nothing could carry the id to the client — but a handler that rotated the session on a response it had already committed reaches here too, and for it the rotation has destroyed the previous entry while this drops the replacement: everything the session held is gone, from two calls that both reported success. Silence made that indistinguishable from the ordinary case this branch exists for, a first-time visitor on a stream who simply has no session worth storing. */
                 sessionPersistFailed = true
+
+                logger := logging.LoggerFromRuntime(runtimeInstance)
+                if nil != logger {
+                    logger.Warning(
+                        "session not persisted: the response was already committed and the request does not name this session",
+                        loggingcontract.Context{
+                            "sessionId": sessionInstance.Id(),
+                        },
+                    )
+                }
             } else {
                 err := sessionManager.SaveSession(sessionInstance)
-                if nil != err {
-                    /* @important same degradation as the delete path: log once and send the response without the session cookie; the session is intentionally not marked persisted so a later successful write could still commit it */
+                if true == errors.Is(err, session.ErrSessionDeleted) {
+                    /* @important the session ended while this request was running — another request logged it out, or rotated it away. That is not a failure of this request and it is not a storage outage: the write is refused so the deleted session cannot be re-created, the cookie is expired so the client stops presenting an id that no longer exists, and the handler's own response is served unchanged. */
+                    sessionPersistFailed = true
+
+                    logSessionPersistenceError(runtimeInstance, "session was deleted while the request was in flight", err)
+
+                    SetCookie(
+                        response,
+                        &nethttp.Cookie{
+                            Name:     session.SessionCookieName,
+                            Value:    "",
+                            Path:     resolveSessionCookiePath(sessionCookiePolicy),
+                            Domain:   sessionCookiePolicy.Domain,
+                            HttpOnly: true,
+                            SameSite: resolveSessionCookieSameSite(sessionCookiePolicy),
+                            Secure:   resolveSessionCookieSecure(request, forwardedHeadersPolicy, sessionCookiePolicy),
+                            MaxAge:   -1,
+                        },
+                    )
+                } else if nil != err {
+                    /* @important a storage outage on the save path answers 500 rather than the response the handler produced. The handler wrote to the session and returned success on the assumption the write would land — a login answering "welcome" with the identity never stored, or an attempt counter that never grows while the backend is down — and the client cannot tell the difference. The headers are not committed at this point (the branch above holds the case where they are), so the response can still be replaced; the cookie is suppressed either way, so the browser is never pointed at an id nothing persisted. */
                     sessionPersistFailed = true
 
                     logSessionPersistenceError(runtimeInstance, "failed to save session", err)
+
+                    closeDiscardedResponseBody(response, logging.LoggerFromRuntime(runtimeInstance))
+
+                    response = EmptyResponse(nethttp.StatusInternalServerError)
                 } else {
                     cookie := &nethttp.Cookie{
                         Name:     session.SessionCookieName,

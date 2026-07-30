@@ -16,6 +16,7 @@ import (
     "github.com/precision-soft/melody/exception"
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
     httpcontract "github.com/precision-soft/melody/http/contract"
+    "github.com/precision-soft/melody/internal"
     kernelcontract "github.com/precision-soft/melody/kernel/contract"
     "github.com/precision-soft/melody/logging"
     loggingcontract "github.com/precision-soft/melody/logging/contract"
@@ -403,7 +404,8 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         if nil != cookie {
             sessionInstance = sessionManager.Session(cookie.Value)
         }
-        if nil == sessionInstance {
+        /* @important IsNilInterface and not `nil ==`: the manager is a replaceable service, and an implementation that reports "not found" by returning a nil pointer of its own session type hands back an interface that is not equal to nil. A bare comparison would take it for a live session, skip NewSession, and publish it — and every later call on it dereferences nil. The one on the response path does so inside the recovery defer, where recover has already run, so that second panic leaves ServeHttp with no response at all. */
+        if true == internal.IsNilInterface(sessionInstance) {
             sessionInstance = sessionManager.NewSession()
         }
 

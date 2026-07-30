@@ -643,3 +643,46 @@ func TestFileStorage_LoadingAnExpiredSessionRemovesItFromTheFile(t *testing.T) {
         t.Fatalf("expected the live session to survive the purge")
     }
 }
+
+/* @info The answer to a load of a lapsed entry — no such session — is settled before the housekeeping flush is attempted, so that flush failing must not change it. Returning its error instead would make Manager.Session panic, so an expired cookie on a store that cannot be written would answer 500 where a client holding no cookie at all is served a fresh session. */
+func TestFileStorage_LoadOfALapsedEntryAnswersAbsentWhenTheFlushCannotWrite(t *testing.T) {
+    directory := t.TempDir()
+    path := filepath.Join(directory, "sessions.json")
+
+    if err := os.WriteFile(path, []byte("{}\n"), 0644); nil != err {
+        t.Fatalf("unexpected error seeding the storage file: %v", err)
+    }
+
+    readOnlyHandle, err := os.OpenFile(path, os.O_RDONLY, 0644)
+    if nil != err {
+        t.Fatalf("unexpected error opening the storage file: %v", err)
+    }
+    defer readOnlyHandle.Close()
+
+    storage, err := NewFileStorageFromFile(readOnlyHandle)
+    if nil != err {
+        t.Fatalf("unexpected error constructing the storage: %v", err)
+    }
+
+    sessionId := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+    storage.sessionById[sessionId] = fileSessionEntry{
+        Data:      map[string]any{"userId": "u-1"},
+        ExpiresAt: time.Now().Add(-time.Hour).UnixNano(),
+    }
+
+    data, exists, loadErr := storage.Load(sessionId)
+    if nil != loadErr {
+        t.Fatalf("expected a lapsed entry to answer absent rather than surface the housekeeping failure, got %v", loadErr)
+    }
+
+    if true == exists || nil != data {
+        t.Fatalf("expected the lapsed entry to be reported absent")
+    }
+
+    manager := NewManager(storage, time.Minute)
+
+    if nil != manager.Session(sessionId) {
+        t.Fatalf("expected the manager to answer no session instead of panicking")
+    }
+}

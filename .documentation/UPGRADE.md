@@ -18,6 +18,73 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Behavioural: a session write lost to a storage outage answers 500
+
+**What changed.** [`writeResponse`](../http/router_utility.go) replaces the handler's response with `500` when [`SaveSession`](../session/manager.go) fails. It previously logged the failure, suppressed the session cookie and served the handler's response unchanged.
+
+**Symptom.** A request that writes to the session and succeeds now answers `500` while the session backend is unreachable, where it used to answer whatever the handler returned. The delete path is unchanged: a failed logout still expires the browser cookie and serves the handler's response, because clearing a cookie can only end a session and never resurrect one.
+
+**Remedy.** None for a healthy deployment — the new status only appears where a write was already being lost. What it removes is the case that could not be seen from the outside: a login answering `302 /dashboard` with the identity never stored, or a session-backed attempt counter that stops growing exactly while the backend is under the pressure an attack produces. If an endpoint must survive a session-store outage, do not write to the session on it.
+
+### Behavioural: `Session.Clear` latches, and a deleted session cannot be saved again
+
+**What changed.** Two related refusals. [`Session.Clear`](../session/session.go) now latches: a later `Set` puts the value back and marks the session modified, but the session stays cleared, so the response path still deletes it. And [`Manager.DeleteSession`](../session/manager.go) remembers the id for [`TombstoneRetention`](../session/manager.go), so [`SaveSession`](../session/manager.go) refuses a write under an id another request deleted, returning an error whose cause is [`ErrSessionDeleted`](../session/manager.go). The unexported `abandon`, which applied the latch for rotation alone, is gone.
+
+**Symptom.** A handler that clears a session and then writes to the same object no longer keeps the session alive: previously the write lifted the cleared flag and the response path saved the session back under the pre-logout id and re-issued its cookie. And a request holding a session that another request deleted mid-flight now gets an error from `SaveSession` instead of silently re-creating the entry; the response path answers that by expiring the browser cookie and serving the handler's response unchanged.
+
+**Remedy.** A handler that wants a usable session after ending one asks the manager for a new session rather than writing to the cleared one:
+
+```go
+sessionInstance.Clear()
+
+replacement := manager.NewSession()
+replacement.Set(sessionKeyFlash, "you have been signed out")
+
+request.Attributes().Set(melodyhttp.RequestAttributeSession, replacement)
+```
+
+Code that calls `SaveSession` directly should treat `ErrSessionDeleted` as the session having ended rather than as a failure:
+
+```go
+if err := manager.SaveSession(sessionInstance); nil != err {
+    if true == errors.Is(err, session.ErrSessionDeleted) {
+        /* another request signed this session out; nothing to persist */
+        return nil
+    }
+
+    return err
+}
+```
+
+### Behavioural: `Manager.Close` no longer closes the storage it was handed
+
+**What changed.** [`session.NewManager`](../session/manager.go) builds a manager that does not own its storage, so `Close` leaves the storage open. [`session.NewManagerOwningStorage`](../session/manager.go) is the constructor that keeps the previous cascade. This is the rule [`NewFileStorageFromFile`](../session/file_storage.go) already followed for an injected file handle: what you were handed, you do not close.
+
+**Symptom.** An application that built both by hand and relied on `manager.Close()` to close the storage now leaves it open — for [`InMemoryStorage`](../session/in_memory_storage.go) that means its cleanup goroutine keeps running. Nothing changes for the container path, which is where the defect was: the storage is a registered service the container closes itself, so the manager closed it a second time, and a storage wrapping a connection typically reports that second call as a failure — turning a clean shutdown into `failed to close container services`.
+
+**Remedy.** Switch a hand-wired pair to the owning constructor:
+
+```go
+manager := session.NewManagerOwningStorage(storage, ttl)
+```
+
+Do not use it for a storage that is also registered as a service; that brings the double close back. Close such a storage through the container, as before.
+
+### Behavioural: a negative session ttl fails at construction
+
+**What changed.** [`session.NewManager`](../session/manager.go) panics on a negative `ttl`, as the configuration path already did.
+
+**Symptom.** Code that computed a ttl dynamically and could produce a negative value — `time.Until(expiry)` on an instant already past — now fails at construction instead of building a manager. It previously produced sessions with **no expiry at all**, because both storages test `0 < ttl` and treat anything else as "never expires": the value that reads as "already lapsed" produced the immortal session.
+
+**Remedy.** Clamp before constructing, and use zero when no expiry is what you mean:
+
+```go
+ttl := time.Until(expiry)
+if 0 > ttl {
+    ttl = config.MinimumSessionTtl
+}
+```
+
 ### Compile-level: `container/contract.ScopeManager` and `container/contract.Scope` gained `RegisterScoped`
 
 **What changed.** A scope is now a registrar of its own. [`container/contract.ScopeManager`](../container/contract/scope.go) declares `RegisterScoped(serviceName string, provider any, options ...RegisterOption) error` and `MustRegisterScoped(...)`, which declare a service whose lifetime is one scope — one http request, one command run — built lazily on the first resolution through a scope and closed when that scope closes. [`container/contract.Scope`](../container/contract/scope.go) declares the same two verbs through [`ScopedRegistrar`](../container/contract/scoped_registrar.go), for adding a service to one live scope.

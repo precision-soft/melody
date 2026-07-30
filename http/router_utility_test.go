@@ -21,6 +21,7 @@ import (
 type stubSessionManager struct {
     saveCalled   int
     deleteCalled int
+    saveErr      error
 }
 
 func (instance *stubSessionManager) Session(sessionId string) contract.Session { return nil }
@@ -34,7 +35,7 @@ func (instance *stubSessionManager) RegenerateSession(sessionInstance contract.S
 func (instance *stubSessionManager) SaveSession(sessionInstance contract.Session) error {
     instance.saveCalled++
 
-    return nil
+    return instance.saveErr
 }
 
 func (instance *stubSessionManager) DeleteSession(sessionId string) error {
@@ -1073,5 +1074,160 @@ func TestWriteResponse_NilResponsePersistsSessionAndWritesNoContent(t *testing.T
 
     if -1 != cookies[0].MaxAge {
         t.Fatalf("expected the session cookie to be cleared (MaxAge -1), got %d", cookies[0].MaxAge)
+    }
+}
+
+/* @info A typed nil session must not reach the persistence block. The session manager is a replaceable service, and one that reports "not found" by returning a nil pointer of its own session type hands back an interface that is not equal to nil — a `nil !=` test takes it for a live session and IsCleared below dereferences it. This call happens inside the kernel's recovery defer, where recover has already run, so that panic escapes ServeHttp and the client is served nothing at all. */
+func TestWriteResponse_SkipsPersistenceForATypedNilSession(t *testing.T) {
+    netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
+    netRequest.RemoteAddr = "127.0.0.1:1234"
+
+    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+
+    response := EmptyResponse(nethttp.StatusOK)
+    writer := httptest.NewRecorder()
+
+    sessionManager := &stubSessionManager{}
+
+    var typedNilSession *stubSession
+
+    defer func() {
+        if recovered := recover(); nil != recovered {
+            t.Fatalf("expected a typed nil session to be skipped, not dereferenced: %v", recovered)
+        }
+    }()
+
+    writeResponse(
+        nil,
+        melodyRequest,
+        writer,
+        response,
+        sessionManager,
+        typedNilSession,
+        httpcontract.ForwardedHeadersPolicy{},
+        httpcontract.SessionCookiePolicy{Path: "/"},
+    )
+
+    if 0 != sessionManager.saveCalled {
+        t.Fatalf("expected no save for a typed nil session")
+    }
+
+    if 0 != len(writer.Result().Cookies()) {
+        t.Fatalf("expected no session cookie for a typed nil session")
+    }
+}
+
+/* @info The same applies to a typed nil manager: the persistence block must test both with IsNilInterface. */
+func TestWriteResponse_SkipsPersistenceForATypedNilManager(t *testing.T) {
+    netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
+    netRequest.RemoteAddr = "127.0.0.1:1234"
+
+    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+
+    response := EmptyResponse(nethttp.StatusOK)
+    writer := httptest.NewRecorder()
+
+    var typedNilManager *stubSessionManager
+
+    sessionInstance := &stubSession{id: "session-123", isModified: true}
+
+    defer func() {
+        if recovered := recover(); nil != recovered {
+            t.Fatalf("expected a typed nil manager to be skipped, not called: %v", recovered)
+        }
+    }()
+
+    writeResponse(
+        nil,
+        melodyRequest,
+        writer,
+        response,
+        typedNilManager,
+        sessionInstance,
+        httpcontract.ForwardedHeadersPolicy{},
+        httpcontract.SessionCookiePolicy{Path: "/"},
+    )
+
+    if 0 != len(writer.Result().Cookies()) {
+        t.Fatalf("expected no session cookie when there is no manager to persist through")
+    }
+}
+
+/* @info A session deleted while the request was running is not a storage outage and must not be answered as one: the write is refused so the deleted session cannot be re-created, the browser cookie is expired so the client stops presenting an id that no longer exists, and the handler's own response is served unchanged. */
+func TestWriteResponse_ADeletedSessionExpiresTheCookieAndKeepsTheResponse(t *testing.T) {
+    netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
+    netRequest.RemoteAddr = "127.0.0.1:1234"
+
+    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+
+    response := TextResponse(nethttp.StatusOK, "handler body")
+    writer := httptest.NewRecorder()
+
+    sessionManager := &stubSessionManager{
+        saveErr: exception.NewError("session was deleted and cannot be saved again", nil, session.ErrSessionDeleted),
+    }
+    sessionInstance := &stubSession{id: "session-123", isModified: true}
+
+    writeResponse(
+        nil,
+        melodyRequest,
+        writer,
+        response,
+        sessionManager,
+        sessionInstance,
+        httpcontract.ForwardedHeadersPolicy{},
+        httpcontract.SessionCookiePolicy{Path: "/"},
+    )
+
+    httpResponse := writer.Result()
+
+    if nethttp.StatusOK != httpResponse.StatusCode {
+        t.Fatalf("expected the handler's own response to be served, got %d", httpResponse.StatusCode)
+    }
+
+    cookies := httpResponse.Cookies()
+    if 1 != len(cookies) {
+        t.Fatalf("expected the clearing cookie, got %d cookies", len(cookies))
+    }
+
+    if "" != cookies[0].Value || 0 <= cookies[0].MaxAge {
+        t.Fatalf("expected an expiring session cookie, got value %q maxAge %d", cookies[0].Value, cookies[0].MaxAge)
+    }
+}
+
+/* @info A storage outage on the save path answers 500 rather than the response the handler produced: the handler wrote to the session and returned success on the assumption the write would land — a login answering "welcome" with the identity never stored — and the client cannot tell the difference. The cookie is suppressed either way, so the browser is never pointed at an id nothing persisted. */
+func TestWriteResponse_ASaveOutageAnswersFiveHundredWithoutACookie(t *testing.T) {
+    netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
+    netRequest.RemoteAddr = "127.0.0.1:1234"
+
+    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+
+    response := TextResponse(nethttp.StatusOK, "welcome")
+    writer := httptest.NewRecorder()
+
+    sessionManager := &stubSessionManager{
+        saveErr: exception.NewError("storage is unreachable", nil, nil),
+    }
+    sessionInstance := &stubSession{id: "session-123", isModified: true}
+
+    writeResponse(
+        nil,
+        melodyRequest,
+        writer,
+        response,
+        sessionManager,
+        sessionInstance,
+        httpcontract.ForwardedHeadersPolicy{},
+        httpcontract.SessionCookiePolicy{Path: "/"},
+    )
+
+    httpResponse := writer.Result()
+
+    if nethttp.StatusInternalServerError != httpResponse.StatusCode {
+        t.Fatalf("expected a storage outage to answer 500, got %d", httpResponse.StatusCode)
+    }
+
+    if 0 != len(httpResponse.Cookies()) {
+        t.Fatalf("expected no session cookie when nothing was persisted")
     }
 }
