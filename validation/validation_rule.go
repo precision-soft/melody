@@ -1,7 +1,7 @@
 package validation
 
 import (
-    "fmt"
+    "strconv"
     "strings"
     "sync"
 
@@ -309,10 +309,10 @@ func splitByCommaOutsideRegexMeta(valueString string) []string {
     return parts
 }
 
-/* @important parseIntStrict reports a parse failure instead of silently falling back to a default, so a malformed numeric constraint parameter (for example min=notanumber) is rejected at constraint creation rather than degrading to a default bound the caller never asked for. A valid leading integer is still accepted (Sscanf stops at the first non-digit), so a fractional bound such as 99.5 keeps truncating to 99. */
+/* @important parseIntStrict accepts only a string that is an integer in its entirety, so a malformed numeric constraint parameter is rejected at constraint creation rather than silently becoming a different bound: a leading-integer parse would turn lessThan=-0.5 into a bound of 0 — accepting -0.2, which the tag as written refuses — and 1e3 into a bound of 1. */
 func parseIntStrict(valueString string) (int, bool) {
-    var result int
-    if _, err := fmt.Sscanf(valueString, "%d", &result); nil != err {
+    result, err := strconv.Atoi(valueString)
+    if nil != err {
         return 0, false
     }
 
@@ -490,6 +490,17 @@ func parseValidationTagUncached(tag string) ([]validationRule, error) {
         }
 
         rules = append(rules, rule)
+    }
+
+    /* a tag that survives the empty/skip-marker guard upstream but parses to no rule at all (for example a bare comma) is a malformed tag, not a request to validate nothing: accepting it would leave a field that visibly declares validation silently unenforced */
+    if 0 == len(rules) {
+        return nil, exception.NewError(
+            "invalid validation tag syntax",
+            exceptioncontract.Context{
+                "tag": tag,
+            },
+            nil,
+        )
     }
 
     return rules, nil

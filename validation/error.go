@@ -71,7 +71,8 @@ func (instance *ValidationError) ToExceptionError() error {
     }
 
     if nil != instance.context {
-        context["context"] = instance.context
+        /* the copying getter, not the field: the constructor copies on the way in and Context copies on the way out precisely to keep this map private, and handing the live map to the exception would let any consumer mutate the validation error through it */
+        context["context"] = instance.Context()
     }
 
     return exception.NewError(

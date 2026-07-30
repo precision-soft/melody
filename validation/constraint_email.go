@@ -29,7 +29,8 @@ func (instance *Email) Validate(value any, field string) validationcontract.Vali
 
     stringValue, isString := resolved.(string)
     if false == isString {
-        return nil
+        /* @important fail closed on a type the format can never hold: an email rule on a non-string field silently enforced nothing, while the numeric constraints refuse the types they cannot interpret */
+        return NewValidationError(field, "value must be a string", ConstraintEmailErrorInvalidEmail, nil)
     }
 
     if "" == stringValue {

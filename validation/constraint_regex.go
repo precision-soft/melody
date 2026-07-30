@@ -42,7 +42,8 @@ func (instance *Regex) Validate(value any, field string) validationcontract.Vali
 
     stringValue, isString := resolved.(string)
     if false == isString {
-        return nil
+        /* @important fail closed on a type the pattern can never run against: a regex declared on a []byte or interface field silently enforced nothing, while the numeric constraints refuse the types they cannot interpret */
+        return NewValidationError(field, "value must be a string", ConstraintRegexErrorMismatch, nil)
     }
 
     if "" == stringValue {
@@ -73,21 +74,33 @@ func (instance *Regex) Error() error {
 }
 
 func (instance *Regex) WithParams(params map[string]string) (validationcontract.Constraint, error) {
-    if patternString, exists := params["pattern"]; true == exists {
-        return NewRegex(patternString), nil
+    patternString, exists := params["pattern"]
+    if false == exists {
+        patternString, exists = params["value"]
     }
 
-    if patternString, exists := params["value"]; true == exists {
-        return NewRegex(patternString), nil
+    if false == exists {
+        return nil, exception.NewError(
+            "regex constraint requires a pattern or value parameter",
+            exceptioncontract.Context{
+                "params": params,
+            },
+            nil,
+        )
     }
 
-    return nil, exception.NewError(
-        "regex constraint requires a pattern or value parameter",
-        exceptioncontract.Context{
-            "params": params,
-        },
-        nil,
-    )
+    /* @important the empty pattern compiles to a regular expression that matches every string, so a tag such as regex= would silently enforce nothing; a pattern that is genuinely meant to match everything can say so explicitly */
+    if "" == patternString {
+        return nil, exception.NewError(
+            "regex constraint requires a non-empty pattern",
+            exceptioncontract.Context{
+                "params": params,
+            },
+            nil,
+        )
+    }
+
+    return NewRegex(patternString), nil
 }
 
 var _ validationcontract.Constraint = (*Regex)(nil)

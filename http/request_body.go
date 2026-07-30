@@ -38,7 +38,8 @@ func (instance *Request) BindJson(target any) error {
             return exception.NewHttpException(nethttp.StatusRequestEntityTooLarge, "payload too large")
         }
 
-        return exception.NewHttpException(nethttp.StatusBadRequest, "bad request")
+        /* the cause distinguishes, in the log, a body that stopped arriving from one that never parsed — the response stays the same */
+        return exception.NewHttpExceptionWithCause(nethttp.StatusBadRequest, "bad request", err)
     }
 
     if 0 == len(bodyBytes) {
@@ -51,7 +52,8 @@ func (instance *Request) BindJson(target any) error {
 
     err = json.Unmarshal(bodyBytes, target)
     if nil != err {
-        return exception.NewHttpException(400, "invalid json")
+        /* the cause carries the decoder's own diagnosis — offending offset, field, type — which the flat message denied the log */
+        return exception.NewHttpExceptionWithCause(400, "invalid json", err)
     }
 
     return nil

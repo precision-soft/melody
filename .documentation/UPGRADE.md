@@ -18,6 +18,30 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Validation: a parameterized rule needs its parameters, whole and non-negative
+
+**What changed.** Three related refusals in how rule parameters are read. A parameterized rule named without parameters (`regex`, `regex()`, `max()`, `lessThan`) fails closed instead of validating with the registered singleton — the bare `regex` validated with the match-everything `.*` default, the bare `lessThan` meant "less than 0". A numeric bound must be an integer in its entirety: the parse previously accepted a valid leading integer and dropped the rest, so `lessThan=-0.5` became a bound of 0 and accepted values the tag as written refuses. And [`Regex.WithParams`](../validation/constraint_regex.go) refuses an empty pattern, while [`MinLength`/`MaxLength`](../validation/constraint_min_length.go) refuse a negative bound.
+
+**Symptom.** A tag of any of these shapes now reports `invalidRuleSyntax` on every value it reaches, where it previously enforced a configuration nobody wrote — or nothing at all. The refusal reason is in the error context under `cause`.
+
+**Remedy.** Write the parameter the rule needs: `regex(pattern=^[a-z]+$)`, `max=100`, `lessThan=0`. A pattern genuinely meant to match everything says so explicitly.
+
+### Validation: the string-form constraints operate on strings
+
+**What changed.** `regex`, `email`, `alpha`, `alphanumeric` and `numeric` refuse a value that is not a string instead of silently passing it, and `min`, `max` and `notBlank` no longer measure the fmt rendering of a non-string — all three refuse the type. A nil pointer and the empty string still pass the five format constraints, so optional-field composition is unchanged.
+
+**Symptom.** A string-form rule on a non-string field — `regex` on `[]byte`, `max=10` on an `int`, `notBlank` on a `bool` — now rejects every value with `value must be a string`. It previously either passed everything (the format five, and `notBlank` on `false`/`0`/empty collections) or measured the Go rendering (an empty slice passed `min=1` as the two runes of `[]`).
+
+**Remedy.** Move the rule to a string field, or use the constraint built for the type: `greaterThan`/`lessThan` for numeric ranges, `notEmpty` for collections. A rule that must inspect a non-string type is a custom [`contract.Constraint`](../validation/contract/constraint.go).
+
+### Behavioural: the 400 body of a failed `BindJsonAndValidate` carries the per-field errors
+
+**What changed.** The kernel exception listener includes the `errors` context key of an [`HttpException`](../exception/http_exception.go) in the JSON body — that key only, in every mode. [`BindJsonAndValidate`](../http/request_body.go) attaches the validation errors under it, so the client receives an `errors` array with `field`, `message`, `code` and `context` per violation, where it previously received only `{"error":"validation failed"}`.
+
+**Symptom.** Clients of endpoints using `BindJsonAndValidate` see a new `errors` field in 400 responses. An application that itself attaches an `errors` context key to an `HttpException` now has that value rendered to the client.
+
+**Remedy.** None for a client that ignores unknown fields. An application that stored private data under an `errors` context key renames the key; every other context key stays private as before.
+
 ### Behavioural: a session write lost to a storage outage answers 500
 
 **What changed.** [`writeResponse`](../http/router_utility.go) replaces the handler's response with `500` when [`SaveSession`](../session/manager.go) fails. It previously logged the failure, suppressed the session cookie and served the handler's response unchanged.

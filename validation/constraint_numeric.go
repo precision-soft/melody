@@ -29,7 +29,8 @@ func (instance *Numeric) Validate(value any, field string) validationcontract.Va
 
     stringValue, isString := resolved.(string)
     if false == isString {
-        return nil
+        /* @important fail closed on a type the character rule can never hold: numeric validates the digits of a string, so a non-string field silently enforced nothing — a number typed as int wants greaterThan/lessThan instead */
+        return NewValidationError(field, "value must be a string", ConstraintNumericErrorNotNumeric, nil)
     }
 
     if "" == stringValue {

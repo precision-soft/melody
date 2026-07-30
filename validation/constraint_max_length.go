@@ -28,7 +28,12 @@ func (instance *MaxLength) Validate(value any, field string) validationcontract.
         return nil
     }
 
-    stringValue := fmt.Sprintf("%v", resolved)
+    stringValue, isString := resolved.(string)
+    if false == isString {
+        /* @important a length constraint measures a string, not a Go rendering: fmt-formatting the value measured the digits of a number, the brackets of a slice and the layout of a struct — an empty slice passed max=1 while the payload it stood for did not */
+        return NewValidationError(field, "value must be a string", ConstraintMaxLengthErrorTooLong, nil)
+    }
+
     length := utf8.RuneCountInString(stringValue)
     if length > instance.max {
         return NewValidationError(
@@ -65,6 +70,17 @@ func (instance *MaxLength) WithParams(params map[string]string) (validationcontr
     if false == ok {
         return nil, exception.NewError(
             "invalid max length parameter",
+            exceptioncontract.Context{
+                "value": valueString,
+            },
+            nil,
+        )
+    }
+
+    /* a length is never negative, so a negative bound can only be a typo — and it would reject every value with a message naming an impossible limit */
+    if 0 > parsed {
+        return nil, exception.NewError(
+            "max length parameter must not be negative",
             exceptioncontract.Context{
                 "value": valueString,
             },

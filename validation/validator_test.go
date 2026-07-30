@@ -268,9 +268,17 @@ func TestValidator_MalformedNumericParameterFailsClosed(t *testing.T) {
         }
     }
 
-    /* a valid leading integer (3.9 -> 3) is still accepted, so the field is enforced rather than rejected as malformed */
-    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithFractionalMaxLength{Name: "abc"}))
-    requireValidationErrors(t, validatorInstance.Validate(payloadWithFractionalMaxLength{Name: "abcd"}))
+    /* a fractional bound is refused whole, not truncated: 3.9 read as 3 silently enforced a bound the tag does not declare, and on lessThan a truncated negative bound accepted values the tag as written refuses */
+    fractionalErrors := requireValidationErrors(t, validatorInstance.Validate(payloadWithFractionalMaxLength{Name: "abc"}))
+
+    fractionalError, ok := fractionalErrors[0].(*ValidationError)
+    if false == ok {
+        t.Fatalf("expected *ValidationError, got %T", fractionalErrors[0])
+    }
+
+    if ErrorInvalidRuleSyntax != fractionalError.Code() {
+        t.Fatalf("expected a fractional bound to fail closed with code %q, got %q", ErrorInvalidRuleSyntax, fractionalError.Code())
+    }
 }
 
 type payloadWithGreaterThanUnknownParam struct {
@@ -898,12 +906,22 @@ type payloadWithValueLessGreaterThan struct {
     Count int `json:"count" validate:"greaterThan"`
 }
 
-/* @info a value-less greaterThan runs with the constraint's registered default and enforces > 0 */
-func TestValidator_ValueLessGreaterThanEnforcesThePositiveDefault(t *testing.T) {
+/* @info a value-less parameterized rule fails closed on every value: the registered singleton is a template for WithParams, and falling back to it enforced a configuration the tag never declared — a bare lessThan meant "less than 0" */
+func TestValidator_ValueLessParameterizedRuleFailsClosed(t *testing.T) {
     validatorInstance := NewValidator()
 
-    requireValidationErrors(t, validatorInstance.Validate(payloadWithValueLessGreaterThan{Count: 0}))
-    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithValueLessGreaterThan{Count: 1}))
+    for _, count := range []int{0, 1} {
+        validationErrors := requireValidationErrors(t, validatorInstance.Validate(payloadWithValueLessGreaterThan{Count: count}))
+
+        validationError, ok := validationErrors[0].(*ValidationError)
+        if false == ok {
+            t.Fatalf("expected *ValidationError, got %T", validationErrors[0])
+        }
+
+        if ErrorInvalidRuleSyntax != validationError.Code() {
+            t.Fatalf("expected a value-less parameterized rule to fail closed with code %q, got %q", ErrorInvalidRuleSyntax, validationError.Code())
+        }
+    }
 }
 
 type deepValidationNode struct {
@@ -1056,7 +1074,7 @@ func TestValidator_ValidatesConcurrentlyWithMemoizedConstraints(t *testing.T) {
                     return
                 }
 
-                constraint, ok := validatorInstance.createConstraintWithParams("concurrentCounting", map[string]string{"mode": "strict"})
+                constraint, ok, _ := validatorInstance.createConstraintWithParams("concurrentCounting", map[string]string{"mode": "strict"})
                 if false == ok {
                     t.Errorf("expected the parameterized constraint to resolve")
 
@@ -1761,5 +1779,151 @@ func TestPromotedValidationMarshalerOrigin_APointerEmbedWithAPointerReceiverCode
     validationErrors := requireValidationErrors(t, validatorInstance.Validate(pointerReceiverCodecHostPayload{}))
     if "name: this field is required" != validationErrors.Error() {
         t.Fatalf("expected the sibling constraint to be enforced, got %q", validationErrors.Error())
+    }
+}
+
+type sharedPointerItem struct {
+    Name string `json:"name" validate:"notBlank"`
+}
+
+type sharedPointerBatch struct {
+    Primary   *sharedPointerItem `json:"primary"`
+    Secondary *sharedPointerItem `json:"secondary"`
+}
+
+/* @info the visited set is path-scoped: a shared, non-cyclic pointer is walked under every path that reaches it, so the same invalid value reported under primary is reported under secondary too — a whole-call set validated it once and silently skipped the second subtree */
+func TestValidator_SharedPointerIsValidatedUnderEveryPath(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    shared := &sharedPointerItem{Name: ""}
+
+    validationErrors := requireValidationErrors(t, validatorInstance.Validate(sharedPointerBatch{Primary: shared, Secondary: shared}))
+
+    if 2 != len(validationErrors) {
+        t.Fatalf("expected the shared pointer to be validated under both paths, got %d errors: %v", len(validationErrors), validationErrors)
+    }
+
+    fields := map[string]bool{}
+    for _, validationError := range validationErrors {
+        fields[validationError.Field()] = true
+    }
+
+    if false == fields["primary.name"] || false == fields["secondary.name"] {
+        t.Fatalf("expected errors under both primary.name and secondary.name, got %v", fields)
+    }
+}
+
+type typedNilErrorConstraint struct{}
+
+func (instance *typedNilErrorConstraint) Validate(value any, field string) validationcontract.ValidationError {
+    var typedNil *ValidationError
+
+    return typedNil
+}
+
+type typedNilErrorPayload struct {
+    Value string `json:"value" validate:"typedNilError"`
+}
+
+/* @info a custom constraint written with a concrete error variable returns a typed nil on its success path; a plain nil comparison saw a non-nil interface and dereferenced it, panicking inside Validate on the request path */
+func TestValidator_TypedNilConstraintErrorIsSuccess(t *testing.T) {
+    validatorInstance := NewValidator()
+    validatorInstance.RegisterConstraint("typedNilError", &typedNilErrorConstraint{})
+
+    requireNoValidationErrors(t, validatorInstance.Validate(typedNilErrorPayload{Value: "anything"}))
+}
+
+/* @info the registry is append-only today, so the missing-name read is unreachable through Validate; the guard keeps a future removal path from handing constraint.Validate a nil interface, and this pins it at the only level it is observable */
+func TestValidator_CreateConstraintWithParamsRefusesUnregisteredName(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    constraint, ok, refusalCause := validatorInstance.createConstraintWithParams("neverRegistered", nil)
+
+    if nil != constraint || true == ok {
+        t.Fatalf("expected an unregistered name to fail closed, got constraint=%v ok=%v", constraint, ok)
+    }
+
+    if "" == refusalCause {
+        t.Fatalf("expected a refusal cause for an unregistered name")
+    }
+}
+
+type refusalCausePayload struct {
+    Name string `json:"name" validate:"min(value=abc)"`
+}
+
+/* @info the constraint's own refusal reason travels into the error context: without it a rejected parameter value, a malformed tag and a constraint that takes no parameters all collapsed into one generic code with no way to tell them apart */
+func TestValidator_ParameterRefusalCauseReachesTheErrorContext(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    validationErrors := requireValidationErrors(t, validatorInstance.Validate(refusalCausePayload{Name: "anything"}))
+
+    validationError, ok := validationErrors[0].(*ValidationError)
+    if false == ok {
+        t.Fatalf("expected *ValidationError, got %T", validationErrors[0])
+    }
+
+    cause, exists := validationError.Context()["cause"].(string)
+    if false == exists || false == strings.Contains(cause, "invalid min length parameter") {
+        t.Fatalf("expected the WithParams refusal reason in the error context, got %v", validationError.Context())
+    }
+}
+
+var settlementProbeCalls atomic.Int64
+var settlementProbeFirstEntered = make(chan struct{})
+var settlementProbeFirstRelease = make(chan struct{})
+
+type settlementProbeCodec struct {
+    time.Time
+    Label string `json:"label" validate:"notBlank"`
+}
+
+func (instance *settlementProbeCodec) UnmarshalJSON(data []byte) error {
+    call := settlementProbeCalls.Add(1)
+
+    if 1 == call {
+        close(settlementProbeFirstEntered)
+        <-settlementProbeFirstRelease
+
+        return exception.NewError("refusing the empty object", nil, nil)
+    }
+
+    return nil
+}
+
+/* @info the codec memo settles on ONE verdict per type: the probe runs application code whose answer is not guaranteed stable, and with a plain Store the goroutine finishing LAST froze its verdict — here the first probe is held open, computes the opposite answer, and must still adopt the verdict the second probe already published */
+func TestValidator_TimeCodecVerdictSettlesOnTheFirstStored(t *testing.T) {
+    structType := reflect.TypeOf(settlementProbeCodec{})
+
+    /* the memo is process-global, so a repeated run (-count) finds the verdict already settled and the probe choreography must not replay over closed channels */
+    if cached, exists := validationTimeCodecCache.Load(structType); true == exists {
+        if true == cached.(bool) {
+            t.Fatalf("expected the settled verdict to remain the first stored one")
+        }
+
+        return
+    }
+
+    firstVerdict := make(chan bool)
+
+    go func() {
+        firstVerdict <- promotesValidationTimeCodec(structType)
+    }()
+
+    <-settlementProbeFirstEntered
+
+    secondVerdict := promotesValidationTimeCodec(structType)
+    if true == secondVerdict {
+        t.Fatalf("expected the unblocked probe to conclude the type accepts an object body")
+    }
+
+    close(settlementProbeFirstRelease)
+
+    if true == <-firstVerdict {
+        t.Fatalf("expected the held-open probe to adopt the already-published verdict instead of overwriting it")
+    }
+
+    if cached, exists := validationTimeCodecCache.Load(structType); false == exists || true == cached.(bool) {
+        t.Fatalf("expected the cached verdict to stay the first stored one, got %v (exists=%v)", cached, exists)
     }
 }

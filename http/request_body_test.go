@@ -95,3 +95,43 @@ func TestRequest_BindJsonMaxIntBodyLimitStillBinds(t *testing.T) {
         t.Fatalf("expected the body to be bound, got %v", target)
     }
 }
+
+/* @info the decoder's own diagnosis — offending offset, field, type — travels as the exception cause: the flat message denied the log any way to distinguish a malformed body from a type mismatch on a specific field */
+func TestRequest_BindJsonInvalidJsonCarriesTheDecoderCause(t *testing.T) {
+    var bindErr error
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodPost,
+        "/bind",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            concreteRequest := request.(*Request)
+
+            var target map[string]any
+            bindErr = concreteRequest.BindJson(&target)
+
+            return TextResponse(nethttp.StatusOK, "ok"), nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainer()
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    request := httptest.NewRequest(nethttp.MethodPost, "/bind", strings.NewReader("{not json"))
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, request)
+
+    if nil == bindErr {
+        t.Fatalf("expected BindJson to refuse malformed json")
+    }
+
+    httpException, ok := bindErr.(*exception.HttpException)
+    if false == ok {
+        t.Fatalf("expected an *exception.HttpException, got %T", bindErr)
+    }
+
+    if nil == httpException.CauseErr() {
+        t.Fatalf("expected the json decoder's error as the exception cause")
+    }
+}

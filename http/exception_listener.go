@@ -115,6 +115,13 @@ func RegisterKernelExceptionListener(eventDispatcher eventcontract.EventDispatch
                     "time":  time.Now().Format(time.RFC3339),
                 }
 
+                /* the errors context key is the public half of an http exception's context: BindJsonAndValidate attaches the per-field validation errors under it, and without this the detail the validator computed reached neither the client nor, structured, anything else */
+                if contextHttpException := exception.AsHttpException(exceptionEvent.Err()); nil != contextHttpException {
+                    if errorsValue, exists := contextHttpException.Context()["errors"]; true == exists {
+                        payload["errors"] = errorsValue
+                    }
+                }
+
                 if true == debugMode {
                     var melodyError *exception.Error
                     ok = errors.As(exceptionEvent.Err(), &melodyError)

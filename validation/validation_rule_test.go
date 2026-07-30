@@ -249,3 +249,34 @@ func TestParseValidationTag_MemoizesTheSyntaxError(t *testing.T) {
         t.Fatalf("expected the syntax error to be memoized, got %v and %v", firstErr, secondErr)
     }
 }
+
+/* @info a bound is an integer in its entirety or it is refused: a leading-integer parse turned lessThan=-0.5 into a bound of 0 — accepting -0.2, which the tag as written refuses — and 1e3 into a bound of 1 */
+func TestParseIntStrict_RefusesTrailingGarbage(t *testing.T) {
+    for _, valueString := range []string{"99.5", "-0.5", "1e3", "5abc", "0x10", "1_000", "", " 5"} {
+        if _, ok := parseIntStrict(valueString); true == ok {
+            t.Fatalf("expected %q to be refused", valueString)
+        }
+    }
+
+    for _, valueString := range []string{"5", "-5", "+5", "0"} {
+        parsed, ok := parseIntStrict(valueString)
+        if false == ok {
+            t.Fatalf("expected %q to parse", valueString)
+        }
+
+        if 0 != parsed && 5 != parsed && -5 != parsed {
+            t.Fatalf("unexpected parse of %q: %d", valueString, parsed)
+        }
+    }
+}
+
+/* @info a tag that survives the empty/skip-marker guard but parses to no rule at all is malformed, not a request to validate nothing: accepting it left a field that visibly declares validation silently unenforced */
+func TestParseValidationTag_RefusesATagWithZeroRules(t *testing.T) {
+    for _, tag := range []string{",", " , ", ",,"} {
+        rules, err := parseValidationTag(tag)
+
+        if nil == err {
+            t.Fatalf("expected tag %q to be refused, got rules %v", tag, rules)
+        }
+    }
+}

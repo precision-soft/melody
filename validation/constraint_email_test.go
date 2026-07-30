@@ -33,3 +33,14 @@ func TestEmail_PointerToStringValidPasses(t *testing.T) {
         t.Fatalf("expected valid *string email to pass, got: %s", validationError.Error())
     }
 }
+
+/* @info an email format can never hold in a non-string; the skip silently unenforced the rule */
+func TestEmail_NonStringIsRejected(t *testing.T) {
+    constraint := &Email{}
+
+    validationError := constraint.Validate(12345, "field")
+
+    if nil == validationError {
+        t.Fatalf("fail-open: non-string passed the email constraint")
+    }
+}

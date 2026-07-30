@@ -320,3 +320,79 @@ func readResponseBody(t *testing.T, response httpcontract.Response) string {
 
     return string(data)
 }
+
+/* @info the errors context key is the public half of an http exception's context: BindJsonAndValidate attaches the per-field validation errors under it, and without this the client of a failed validation received only the flat message */
+func TestExceptionListener_ErrorsContextReachesTheJsonBody(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := event.NewEventDispatcher(clockInstance)
+    runtimeInstance := newTestRuntime()
+
+    RegisterKernelExceptionListener(dispatcher, false)
+
+    httpErr := exception.BadRequest("validation failed")
+    httpErr.SetContext(map[string]any{
+        "errors": []map[string]any{
+            {"field": "name", "message": "this field is required", "code": "isBlank"},
+        },
+    })
+
+    request := httptest.NewRequest("POST", "/test", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, httpErr)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    response := exceptionEvent.Response()
+    if nil == response {
+        t.Fatalf("expected response to be set")
+    }
+
+    body := readResponseBody(t, response)
+
+    if false == strings.Contains(body, "\"errors\"") || false == strings.Contains(body, "isBlank") {
+        t.Fatalf("expected the errors context in the json body, got %s", body)
+    }
+
+    if false == strings.Contains(body, "validation failed") {
+        t.Fatalf("expected the flat message to remain, got %s", body)
+    }
+}
+
+/* @info an http exception without the errors key keeps today's body: the exposure is opt-in per context key, not a blanket context dump */
+func TestExceptionListener_ContextWithoutErrorsKeyStaysPrivate(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := event.NewEventDispatcher(clockInstance)
+    runtimeInstance := newTestRuntime()
+
+    RegisterKernelExceptionListener(dispatcher, false)
+
+    httpErr := exception.BadRequest("bad request")
+    httpErr.SetContext(map[string]any{
+        "internalDetail": "must not leak",
+    })
+
+    request := httptest.NewRequest("POST", "/test", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, httpErr)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    response := exceptionEvent.Response()
+    if nil == response {
+        t.Fatalf("expected response to be set")
+    }
+
+    body := readResponseBody(t, response)
+
+    if true == strings.Contains(body, "must not leak") {
+        t.Fatalf("expected non-errors context to stay out of the body, got %s", body)
+    }
+}
