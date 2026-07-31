@@ -15,6 +15,7 @@ func DefaultTransportConfig() *TransportConfig {
     }
 }
 
+/* TransportConfig overrides the transport melody builds for a client. Every field reads a non-positive value as "not set" and falls back to the default beside it, so the meanings net/http gives to zero — MaxIdleConns zero for an unbounded pool, IdleConnTimeout or ResponseHeaderTimeout zero for no deadline — and the meaning net.Dialer gives to a negative KeepAlive cannot be reached through this type. A deployment that needs one of them asks for a duration large enough to be the same thing in practice. */
 type TransportConfig struct {
     DialTimeout time.Duration
     KeepAlive   time.Duration

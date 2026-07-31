@@ -7,13 +7,14 @@ import (
 )
 
 type RequestOptions struct {
-    headers              map[string]string
-    query                map[string]string
-    body                 any
-    contentType          string
-    timeout              time.Duration
-    authorization        httpclientcontract.AuthorizationOptions
-    maxResponseBodyBytes int
+    headers                      map[string]string
+    query                        map[string]string
+    body                         any
+    contentType                  string
+    timeout                      time.Duration
+    authorization                httpclientcontract.AuthorizationOptions
+    maxResponseBodyBytes         int
+    explicitMaxResponseBodyBytes bool
 }
 
 func NewRequestOptions() *RequestOptions {
@@ -55,6 +56,12 @@ func (instance *RequestOptions) MaxResponseBodyBytes() int {
 
 func (instance *RequestOptions) SetMaxResponseBodyBytes(maxResponseBodyBytes int) {
     instance.maxResponseBodyBytes = maxResponseBodyBytes
+    instance.explicitMaxResponseBodyBytes = true
+}
+
+/* hasExplicitMaxResponseBodyBytes reports whether the caller named a cap rather than inheriting the default. The streaming path reads it because the default is sized for a body held whole in memory, which is exactly what a stream is not; a cap the caller asked for is honored there too. */
+func (instance *RequestOptions) hasExplicitMaxResponseBodyBytes() bool {
+    return instance.explicitMaxResponseBodyBytes
 }
 
 func (instance *RequestOptions) SetHeader(key string, value string) {

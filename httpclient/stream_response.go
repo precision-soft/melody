@@ -5,6 +5,7 @@ import (
     nethttp "net/http"
     "sync"
 
+    "github.com/precision-soft/melody/exception"
     httpclientcontract "github.com/precision-soft/melody/httpclient/contract"
 )
 
@@ -31,9 +32,14 @@ func (instance *StreamResponse) Headers() nethttp.Header {
     return instance.headers
 }
 
+/* Body hands back the live body. After Close it answers with a reader that fails on the first read instead of a nil one: the whole point of Close on a stream is that another goroutine — a watchdog bounding a stream nothing else can end — may call it while the consumer is deciding to read, and a consumer written the ordinary way, io.Copy(destination, streamResponse.Body()), would dereference that nil and take the process down. */
 func (instance *StreamResponse) Body() io.ReadCloser {
     instance.bodyMutex.Lock()
     defer instance.bodyMutex.Unlock()
+
+    if nil == instance.body {
+        return closedStreamBody{}
+    }
 
     return instance.body
 }
@@ -50,5 +56,18 @@ func (instance *StreamResponse) Close() error {
 
     return body.Close()
 }
+
+/* closedStreamBody is the reader a closed — or never-opened — stream answers with. Its Close succeeds, so a consumer's deferred close stays correct. */
+type closedStreamBody struct{}
+
+func (instance closedStreamBody) Read([]byte) (int, error) {
+    return 0, exception.NewError("the stream response is closed", nil, nil)
+}
+
+func (instance closedStreamBody) Close() error {
+    return nil
+}
+
+var _ io.ReadCloser = closedStreamBody{}
 
 var _ httpclientcontract.StreamResponse = (*StreamResponse)(nil)

@@ -18,6 +18,54 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Httpclient: a client with a base url refuses an absolute url that leaves its origin
+
+**What changed.** `HttpClient` applied its base url only to a relative target; an absolute one bypassed it silently and travelled with the headers and the authorization the client was configured with. A client built with a base url now refuses an absolute url whose scheme, host or effective port differ from that base url. A client built without a base url — `NewDefaultHttpClient`, or `NewHttpClientConfig("", …)` — is unchanged and reaches any host.
+
+**Symptom.** A call passing an absolute url to a client configured with a base url fails with `the absolute url leaves the origin of the configured base url`, naming both origins.
+
+**Remedy.** Pass the path and let the base url supply the origin, or build a second client — one without a base url — for the calls that go elsewhere. A client that carries credentials should not be the one that talks to arbitrary hosts.
+
+### Httpclient: a basic credential with an empty username is sent instead of dropped
+
+**What changed.** `WithBasicAuth` attached the credential only when the username was non-empty, so `WithBasicAuth("", key)` sent an unauthenticated request with no error. The credential now travels whenever it was asked for, empty halves included. A bearer token still wins over a basic credential when both are set.
+
+**Symptom.** A request that previously went out with no `Authorization` header now carries `Basic` with an empty user. An endpoint that answered anonymously will now see an authenticated caller.
+
+**Remedy.** None if the credential was meant to be sent — that is the fix. A caller that deliberately relied on the credential being dropped stops setting it.
+
+### Httpclient: an empty request target names the base resource rather than its trailing slash
+
+**What changed.** The join between the base url and the target appended a slash unconditionally, so a client based at `https://host/v1` could not request `/v1`. An empty target now names the base resource with nothing appended; an explicit `"/"` still names the trailing slash. The base url remains a prefix — `https://host/v1` plus `/users` is `https://host/v1/users` — deliberately unlike the RFC 3986 reference resolution Symfony and Guzzle implement.
+
+**Symptom.** A call passing `""` as the target now requests the base url without a trailing slash.
+
+**Remedy.** Pass `"/"` where the trailing slash was wanted.
+
+### Httpclient: a nil request option, and a nil client configuration, are refused where the mistake is made
+
+**What changed.** A nil `RequestOption` in the variadic list was invoked and panicked with a nil function call on the request path; it is now refused with an error naming its position. `NewHttpClient(nil)` dereferenced its argument; it now panics naming the argument, as the sibling constructors of this framework do.
+
+**Symptom.** An option built by a condition whose other branch yields nothing now produces `nil request option` instead of a panic. A nil configuration fails at the construction line with `http client configuration is nil`.
+
+**Remedy.** Leave the option out rather than passing nil, and use `NewDefaultHttpClient` where the defaults were what was wanted.
+
+### Httpclient: the response body cap is checked before the request is sent, and applies to streams the caller capped
+
+**What changed.** A non-positive `WithMaxResponseBodyBytes` was reported only after the exchange had happened, so the request — and its side effect — had already reached the server. It is now refused before anything is dialled. On the streaming path the option was ignored entirely; a cap the caller names is now enforced there too, while a stream with no cap named stays unbounded, because the default is sized for a body held whole in memory.
+
+**Symptom.** A caller passing a computed cap that reached zero now gets `invalid max response body bytes` without the request having been sent. A streaming caller who set a cap now sees `response body exceeded max size` at the cap instead of receiving the whole body.
+
+**Remedy.** None where the cap was meant to hold. A streaming caller that set a cap without wanting one stops setting it.
+
+### Httpclient: a negative per-request timeout bounds a stream instead of unbounding it
+
+**What changed.** `RequestStream` treated only zero as "no explicit timeout" and passed a negative duration through to a client with no deadline at all. A non-positive duration now falls back to the client's configured timeout on both paths.
+
+**Symptom.** A stream started with a negative `WithTimeout` — the shape produced by computing what is left of a deadline that has already passed — is now cut at the client timeout instead of running indefinitely.
+
+**Remedy.** Check the remaining budget before the call, and pass no timeout where an unbounded stream is what is wanted.
+
 ### Exception: `NewExitError` and the http exception constructors refuse a value the process boundary betrays
 
 **What changed.** `NewExitError` panics on an exit code outside `[1, 255]`: `os.Exit` hands the code to the operating system, which keeps its low 8 bits, so 256 reported success from a dying process, a negative read as 255, and 0 contradicted the error the constructor requires. `NewHttpException` and `NewHttpExceptionWithCause` panic on a status code outside `[100, 599]`: `net/http`'s `WriteHeader` panics below 100 and above 999 deep in the response path, and a status the writer clamps to 200 served an exception as success.
