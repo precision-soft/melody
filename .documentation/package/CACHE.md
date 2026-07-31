@@ -62,7 +62,7 @@ func main() {
 The arguments mean:
 
 - `maxItems`  
-  Maximum number of cache entries retained. A non-positive value disables the size limit.
+  Maximum number of cache entries retained. Zero disables the size limit; a negative value panics at construction, so a bound computed wrong cannot silently disarm eviction.
 
 - `cleanupInterval`  
   How often the backend scans and removes expired entries. A non-positive value defaults to `time.Minute`.
@@ -87,7 +87,7 @@ The warning is raised on the **http serving path only**. A command builds its ma
 Arming the bounds means two separate things:
 
 - the **item ceiling** is the `maxItems` constructor argument, so it is chosen by registering the backend yourself, before boot;
-- the **expiry** is the ttl carried by each write — `Set`, `SetMultiple` and [`Remember`](../../cache/remember.go) all take one, and a non-positive ttl stores an entry that never lapses. The constructor's second argument, which the message above calls `ttl`, is the *sweep interval*: how often lapsed entries are collected, defaulting to `time.Minute` when non-positive, not a lifetime applied to anything.
+- the **expiry** is the ttl carried by each write — `Set`, `SetMultiple` and [`Remember`](../../cache/remember.go) all take one. A ttl of zero stores an entry that never lapses; a negative ttl is refused with an error, because a ttl computed from an already-passed deadline means "as good as expired", not "eternal". The constructor's second argument, `cleanupInterval`, is the *sweep interval*: how often lapsed entries are collected, defaulting to `time.Minute` when non-positive, not a lifetime applied to anything.
 
 The [Usage](#usage) example below does exactly that: it registers `cache.NewInMemoryBackend(10000, 10*time.Second, clockInstance)` under `cache.ServiceCacheBackend` before boot, through [`Application.RegisterService`](../../application/application_container.go).
 
@@ -218,13 +218,19 @@ func loadUserProfile(
 
 ## Footguns & caveats
 
-- `Manager.Get` returns `exists == false` when deserialization fails (and returns the deserialization error). See [`cache/manager.go`](../../cache/manager.go).
+- `Manager.Get` returns `exists == false` when deserialization fails, and the error is a typed [`DeserializationError`](../../cache/deserialization_error.go) naming the key. `Remember` treats that type as a miss: the callback recomputes and overwrites the corrupt payload, so the key heals; every other error keeps meaning the cache itself failed. A `Cache` implementation of your own inherits the self-healing by wrapping its deserialization failures with `cache.NewDeserializationError`.
+- `Manager.Many` leaves a corrupt entry out of the result the way an absent key is, and returns the good values **beside** a `DeserializationError` naming the corrupt keys in requested order — check the error even when the map is non-empty.
+- `NewManager` builds a manager that does **not** own its backend: `Close` leaves the backend open, which is what the container path needs — both are registered services and the container closes each one itself. `NewManagerOwningBackend` keeps the cascade for the caller that builds both by hand.
+- A closed `InMemoryBackend` refuses every operation with `cache backend is closed`; `Close` stays idempotent. The empty key is refused on every operation, matching the `rueidis` backend.
+- `Remember` coalesces concurrent callers per **cache instance, key and cancelability** — the instance is told apart by its pointer. Two managers over one backend are two coalescing units, and a value-kind `Cache` implementation gets no coalescing at all (every caller runs its own callback); implement `Cache` on a pointer receiver to coalesce.
+- The zero-value `&RememberOption{}` reads as `NewDefaultRememberOption()` — stampede protection on, unbounded wait. A deliberate protection-off option is built through the constructor. A `waitTimeout` of zero means "no waiting": a result already memoized by the in-flight call is returned, anything still computing answers with the timeout error.
+- A `Remember` leader whose waiters have all timed out keeps running detached: its final error is written into an in-flight record nothing reads anymore, and a **non-cancelable** callback that never returns pins its single-flight entry (and every future waiter of that key) for the life of the process. Give long callbacks their own deadlines, or opt into `WithCancelable(true)` so an abandoned flight is canceled and replaced.
 - The default backend melody wires when the application registers none carries **no item ceiling**, so a key written without a ttl is kept until the process exits and nothing evicts it under memory pressure; the http path warns about it once at boot. See [The default backend is unbounded, and boot says so](#the-default-backend-is-unbounded-and-boot-says-so).
 - `Manager.Increment` and `Manager.Decrement` are backend-native, so a distributed backend keeps them atomic and the count is stored as decimal text rather than through the serializer. Read such a key with [`Manager.GetCounter`](../../cache/manager.go), never with `Get`, and do not mix `Set` onto the same key. See [`cache/manager.go`](../../cache/manager.go).
 - `Remember` uses a single-flight mechanism when stampede protection is enabled (default). See [`cache/remember.go`](../../cache/remember.go).
 - `Remember` groups in-flight calls by cache instance, key, and cancelability (cancelable callers are isolated from non-cancelable callers). See [`cache/remember.go`](../../cache/remember.go).
 - A cancelable in-flight call whose waiters have all timed out is abandoned: a caller that joins afterwards does not inherit the cancellation error — it starts a fresh computation. See [`cache/remember.go`](../../cache/remember.go).
-- [`InMemoryBackend`](../../cache/in_memory.go) owns a cleanup goroutine whose lifetime ends when [`Close`](../../cache/in_memory.go) is called; callers must `Close` the backend (or the composing `Manager`) to stop it — there is no finalizer fallback.
+- [`InMemoryBackend`](../../cache/in_memory.go) owns a cleanup goroutine whose lifetime ends when [`Close`](../../cache/in_memory.go) is called; callers must `Close` the backend — or a `Manager` built with `NewManagerOwningBackend` over it — to stop it; there is no finalizer fallback, and a manager built with `NewManager` does not do it for you.
 
 ## Userland API
 
@@ -264,12 +270,15 @@ type Cache interface {
 - **cache.InMemoryBackend** ([`cache/in_memory.go`](../../cache/in_memory.go))
 - **cache.JsonSerializer** ([`cache/json_serializer.go`](../../cache/json_serializer.go))
 - **cache.RememberOption** ([`cache/remember.go`](../../cache/remember.go))
-- **cache.Item** ([`cache/item.go`](../../cache/item.go)) — the backend-level entry exposed via `cachecontract.Backend.Get`. Carries key, payload, creation/expiration timestamps, last-access time, and hit count.
+- **cache.DeserializationError** ([`cache/deserialization_error.go`](../../cache/deserialization_error.go)) — the typed error a read answers when the payload does not deserialize; `Remember` treats it as a miss.
+- **cache.Item** ([`cache/item.go`](../../cache/item.go)) — the entry representation `InMemoryBackend` keeps internally. Carries key, payload, creation/expiration timestamps, last-access time, and hit count; `cachecontract.Backend.Get` itself returns the raw payload bytes, not an `Item`.
 
 ### Constructors
 
-- `cache.NewManager(backend, serializer) *cache.Manager` ([`cache/manager.go`](../../cache/manager.go))
+- `cache.NewManager(backend, serializer) *cache.Manager` ([`cache/manager.go`](../../cache/manager.go)) — the manager does not own the backend; the container path wants this one.
+- `cache.NewManagerOwningBackend(backend, serializer) *cache.Manager` ([`cache/manager.go`](../../cache/manager.go)) — Close cascades into the backend, for the caller that builds both by hand.
 - `cache.NewInMemoryBackend(maxItems, cleanupInterval, clockInstance) *cache.InMemoryBackend` ([`cache/in_memory.go`](../../cache/in_memory.go))
+- `cache.NewDeserializationError(keys, causeErr) *cache.DeserializationError` ([`cache/deserialization_error.go`](../../cache/deserialization_error.go))
 - `cache.NewJsonSerializer() cachecontract.Serializer` ([`cache/json_serializer.go`](../../cache/json_serializer.go))
 - `cache.NewDefaultRememberOption() *cache.RememberOption` ([`cache/remember.go`](../../cache/remember.go))
 - `cache.NewItem(key string, payload []byte, createdAt time.Time, expiresAt *time.Time) *cache.Item` ([`cache/item.go`](../../cache/item.go))
@@ -289,3 +298,7 @@ type Cache interface {
 #### Cache-aside
 
 - `cache.Remember(cacheInstance, key, ttl, callback, option) (any, error)` ([`cache/remember.go`](../../cache/remember.go))
+
+#### Errors
+
+- `cache.IsDeserializationError(err) bool` ([`cache/deserialization_error.go`](../../cache/deserialization_error.go))

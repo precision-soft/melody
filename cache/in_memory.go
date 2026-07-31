@@ -25,6 +25,7 @@ type lruEntry struct {
     listElement *list.Element
 }
 
+/* NewInMemoryBackend builds the framework's in-memory cache backend and starts its cleanup goroutine, which only Close stops — an instance abandoned without Close keeps the goroutine, its ticker and the whole entry map alive for the rest of the process; there is no finalizer fallback. maxItems bounds the entry count: zero disables the bound and a negative value panics, so a bound computed wrong cannot silently disarm eviction. cleanupInterval is how often the sweep collects lapsed entries, defaulting to a minute when non-positive; it is not a lifetime applied to anything. */
 func NewInMemoryBackend(
     maxItems int,
     cleanupInterval time.Duration,
@@ -33,6 +34,18 @@ func NewInMemoryBackend(
     interval := cleanupInterval
     if 0 >= interval {
         interval = time.Minute
+    }
+
+    if 0 > maxItems {
+        exception.Panic(
+            exception.NewError(
+                "cache max items is negative",
+                exceptioncontract.Context{
+                    "maxItems": maxItems,
+                },
+                nil,
+            ),
+        )
     }
 
     if true == internal.IsNilInterface(clockInstance) {
@@ -69,13 +82,60 @@ type InMemoryBackend struct {
     stopCleanup         chan struct{}
     cleanupDone         chan struct{}
     stopCleanupOnce     sync.Once
+    closed              bool
     clock               clockcontract.Clock
 }
 
+/* @important a closed backend refuses every operation. Serving one would be worse than the error: the cleanup goroutine is stopped by then, so an entry saved after Close is never reclaimed by anything but a read that happens to name it — the map grows for the rest of the process while Close has already reported the backend gone. */
+func closedBackendError() error {
+    return exception.NewError(
+        "cache backend is closed",
+        nil,
+        nil,
+    )
+}
+
+func emptyKeyError() error {
+    return exception.NewError(
+        "cache key is empty",
+        nil,
+        nil,
+    )
+}
+
+func negativeTtlError(ttl time.Duration) error {
+    return exception.NewError(
+        "cache ttl is negative",
+        exceptioncontract.Context{
+            "ttl": ttl.String(),
+        },
+        nil,
+    )
+}
+
+func refuseEmptyKeyList(keys []string) error {
+    for _, key := range keys {
+        if "" == key {
+            return emptyKeyError()
+        }
+    }
+
+    return nil
+}
+
 func (instance *InMemoryBackend) Get(key string) ([]byte, bool, error) {
+    if "" == key {
+        return nil, false, emptyKeyError()
+    }
+
     now := instance.clock.Now()
 
     instance.mutex.RLock()
+    if true == instance.closed {
+        instance.mutex.RUnlock()
+        return nil, false, closedBackendError()
+    }
+
     entry, exists := instance.entries[key]
     if false == exists || nil == entry || nil == entry.item {
         instance.mutex.RUnlock()
@@ -106,9 +166,18 @@ func (instance *InMemoryBackend) Get(key string) ([]byte, bool, error) {
 }
 
 func (instance *InMemoryBackend) Has(key string) (bool, error) {
+    if "" == key {
+        return false, emptyKeyError()
+    }
+
     now := instance.clock.Now()
 
     instance.mutex.RLock()
+    if true == instance.closed {
+        instance.mutex.RUnlock()
+        return false, closedBackendError()
+    }
+
     entry, exists := instance.entries[key]
     if false == exists || nil == entry || nil == entry.item {
         instance.mutex.RUnlock()
@@ -129,10 +198,22 @@ func (instance *InMemoryBackend) Set(
     payload []byte,
     ttl time.Duration,
 ) error {
+    if "" == key {
+        return emptyKeyError()
+    }
+
+    if 0 > ttl {
+        return negativeTtlError(ttl)
+    }
+
     now := instance.clock.Now()
 
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
+
+    if true == instance.closed {
+        return closedBackendError()
+    }
 
     instance.saveLocked(
         key,
@@ -145,8 +226,16 @@ func (instance *InMemoryBackend) Set(
 }
 
 func (instance *InMemoryBackend) Delete(key string) error {
+    if "" == key {
+        return emptyKeyError()
+    }
+
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
+
+    if true == instance.closed {
+        return closedBackendError()
+    }
 
     instance.deleteLocked(key)
 
@@ -157,6 +246,10 @@ func (instance *InMemoryBackend) Clear() error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
+    if true == instance.closed {
+        return closedBackendError()
+    }
+
     instance.entries = make(map[string]*lruEntry)
     instance.lruList = list.New()
 
@@ -164,6 +257,10 @@ func (instance *InMemoryBackend) Clear() error {
 }
 
 func (instance *InMemoryBackend) Many(keys []string) (map[string][]byte, error) {
+    if refuseErr := refuseEmptyKeyList(keys); nil != refuseErr {
+        return nil, refuseErr
+    }
+
     now := instance.clock.Now()
 
     result := make(map[string][]byte, len(keys))
@@ -174,6 +271,11 @@ func (instance *InMemoryBackend) Many(keys []string) (map[string][]byte, error) 
     hits := make([]hit, 0, len(keys))
 
     instance.mutex.RLock()
+    if true == instance.closed {
+        instance.mutex.RUnlock()
+        return nil, closedBackendError()
+    }
+
     for _, key := range keys {
         entry, exists := instance.entries[key]
         if false == exists || nil == entry || nil == entry.item {
@@ -219,10 +321,24 @@ func (instance *InMemoryBackend) Many(keys []string) (map[string][]byte, error) 
 }
 
 func (instance *InMemoryBackend) SetMultiple(items map[string][]byte, ttl time.Duration) error {
+    for key := range items {
+        if "" == key {
+            return emptyKeyError()
+        }
+    }
+
+    if 0 > ttl {
+        return negativeTtlError(ttl)
+    }
+
     now := instance.clock.Now()
 
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
+
+    if true == instance.closed {
+        return closedBackendError()
+    }
 
     for key, payload := range items {
         instance.saveLocked(
@@ -237,8 +353,16 @@ func (instance *InMemoryBackend) SetMultiple(items map[string][]byte, ttl time.D
 }
 
 func (instance *InMemoryBackend) DeleteMultiple(keys []string) error {
+    if refuseErr := refuseEmptyKeyList(keys); nil != refuseErr {
+        return refuseErr
+    }
+
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
+
+    if true == instance.closed {
+        return closedBackendError()
+    }
 
     for _, key := range keys {
         instance.deleteLocked(key)
@@ -266,6 +390,10 @@ func (instance *InMemoryBackend) Decrement(key string, delta int64) (int64, erro
 }
 
 func (instance *InMemoryBackend) Close() error {
+    instance.mutex.Lock()
+    instance.closed = true
+    instance.mutex.Unlock()
+
     instance.stopCleanupLoop()
 
     <-instance.cleanupDone
@@ -285,34 +413,41 @@ func (instance *InMemoryBackend) incrementValue(
     key string,
     delta int64,
 ) (int64, error) {
+    if "" == key {
+        return 0, emptyKeyError()
+    }
+
     now := instance.clock.Now()
 
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
+    if true == instance.closed {
+        return 0, closedBackendError()
+    }
+
     entry, exists := instance.getEntryLocked(key, now)
 
     var currentValue int64 = 0
 
+    /* an existing payload is parsed in its entirety: an empty or blank one is refused the same way a textual one is, instead of being silently adopted as a zero counter and overwritten — a present value that is not a number is the caller mixing keys, and the redis reference answers it with an error too */
     if true == exists && nil != entry && nil != entry.item {
         payload := entry.item.Payload()
         trimmedValue := strings.TrimSpace(string(payload))
 
-        if "" != trimmedValue {
-            parsedValue, parseIntErr := strconv.ParseInt(trimmedValue, 10, 64)
-            if nil != parseIntErr {
-                return 0, exception.NewError(
-                    "cache value is not a valid int64",
-                    exceptioncontract.Context{
-                        "key":   key,
-                        "value": trimmedValue,
-                    },
-                    parseIntErr,
-                )
-            }
-
-            currentValue = parsedValue
+        parsedValue, parseIntErr := strconv.ParseInt(trimmedValue, 10, 64)
+        if nil != parseIntErr {
+            return 0, exception.NewError(
+                "cache value is not a valid int64",
+                exceptioncontract.Context{
+                    "key":   key,
+                    "value": trimmedValue,
+                },
+                parseIntErr,
+            )
         }
+
+        currentValue = parsedValue
     }
 
     newValue, addInt64WithOverflowCheckErr := instance.addInt64WithOverflowCheck(currentValue, delta)

@@ -79,7 +79,7 @@ jobs:
                 run: |
                     set -euo pipefail
                     for major_directory in . v2 v3; do
-                        (cd "${major_directory}" && go test -race -count=1 ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/... ./validation/... ./session/... ./http/... ./internal/...)
+                        (cd "${major_directory}" && go test -race -count=1 ./cache/... ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/... ./validation/... ./session/... ./http/... ./internal/...)
                     done
                     (cd v3 && go test -race -count=1 ./mailer/... ./lock/... ./messagebus/... ./openapi/... ./security/...)
                     for cron_directory in integrations/cron integrations/cron/v2 integrations/cron/v3; do

@@ -92,7 +92,14 @@ func (instance *rememberInFlightCall) IsCanceled() bool {
 }
 
 func (instance *rememberInFlightCall) Wait(waitTimeout time.Duration, key string) (any, error) {
+    /* a zero timeout means no waiting, not no answer: a result that is already memoized is taken without blocking, and only a flight still in the air answers with the timeout */
     if 0 == waitTimeout {
+        select {
+        case <-instance.done:
+            return instance.result, instance.err
+        default:
+        }
+
         return nil, exception.NewError(
             "cache remember callback timed out",
             map[string]any{

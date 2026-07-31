@@ -9,6 +9,7 @@ import (
 
     cachecontract "github.com/precision-soft/melody/cache/contract"
     "github.com/precision-soft/melody/exception"
+    "github.com/precision-soft/melody/internal"
 )
 
 func NewDefaultRememberOption() *RememberOption {
@@ -59,18 +60,26 @@ func Remember(
     callback func(ctx context.Context) (any, error),
     option *RememberOption,
 ) (any, error) {
-    if nil == cacheInstance {
+    /* the guard reads through the interface: a typed-nil Cache is a non-nil interface that would pass a plain comparison and panic on the first method call, on the request path, in place of the error this refusal promises */
+    if true == internal.IsNilInterface(cacheInstance) {
         return nil, exception.NewError("cache instance is nil", nil, nil)
     }
 
+    /* the zero-value option is constructible from outside the package and would silently disarm the stampede protection it never asked to configure; it reads as the constructor defaults instead. A deliberate protection-off option built through the constructor carries waitTimeout -1 and stays what it says. */
     effectiveOption := option
-    if nil == effectiveOption {
+    if nil == effectiveOption || (RememberOption{}) == *effectiveOption {
         effectiveOption = NewDefaultRememberOption()
     }
 
     value, exists, getErr := cacheInstance.Get(key)
+    getErr = normalizeThirdPartyError(getErr)
     if nil != getErr {
-        return nil, getErr
+        /* a payload the serializer cannot decode is a miss, not a failure: the callback recomputes and its Set overwrites the corrupt payload, so the key heals instead of staying poisoned until the entry lapses — which a ttl of zero postpones forever. Every other error keeps meaning the cache itself failed. */
+        if false == IsDeserializationError(getErr) {
+            return nil, getErr
+        }
+
+        exists = false
     }
     if true == exists {
         return value, nil
@@ -85,11 +94,19 @@ func Remember(
         )
     }
 
-    singleFlightKey := buildRememberSingleFlightKey(
+    singleFlightKey, identifiable := rememberSingleFlightKey(
         cacheInstance,
         key,
         effectiveOption.IsCancelable(),
     )
+    if false == identifiable {
+        return rememberWithoutStampedeProtection(
+            cacheInstance,
+            key,
+            ttl,
+            callback,
+        )
+    }
 
     return rememberWithStampedeProtection(
         cacheInstance,
@@ -167,6 +184,7 @@ func executeRememberInFlightLeader(
         shard.mutex.Unlock()
     }()
 
+    /* the callback's own panics are already recovered inside executeRememberCallbackSafely, so what this recover catches is the cache side — a Get or Set that panicked — and the fabricated error says so, instead of sending the diagnosis after a callback that never misbehaved */
     defer func() {
         recoveredValue := recover()
         if nil == recoveredValue {
@@ -176,7 +194,7 @@ func executeRememberInFlightLeader(
         call.Complete(
             nil,
             exception.NewError(
-                "cache remember callback panicked",
+                "cache remember cache access panicked",
                 map[string]any{
                     "key":   key,
                     "panic": fmt.Sprintf("%v", recoveredValue),
@@ -187,9 +205,15 @@ func executeRememberInFlightLeader(
     }()
 
     existingValue, existingExists, existingGetErr := cacheInstance.Get(key)
+    existingGetErr = normalizeThirdPartyError(existingGetErr)
     if nil != existingGetErr {
-        call.Complete(nil, existingGetErr)
-        return
+        if false == IsDeserializationError(existingGetErr) {
+            call.Complete(nil, existingGetErr)
+            return
+        }
+
+        existingExists = false
+        existingGetErr = nil
     }
     if true == existingExists {
         call.Complete(existingValue, nil)
@@ -206,7 +230,7 @@ func executeRememberInFlightLeader(
         return
     }
 
-    setErr := cacheInstance.Set(key, computedValue, ttl)
+    setErr := normalizeThirdPartyError(cacheInstance.Set(key, computedValue, ttl))
     if nil != setErr {
         call.Complete(nil, setErr)
         return
@@ -230,7 +254,7 @@ func rememberWithoutStampedeProtection(
         return nil, callbackErr
     }
 
-    setErr := cacheInstance.Set(key, value, ttl)
+    setErr := normalizeThirdPartyError(cacheInstance.Set(key, value, ttl))
     if nil != setErr {
         return nil, setErr
     }
@@ -238,30 +262,25 @@ func rememberWithoutStampedeProtection(
     return value, nil
 }
 
-func buildRememberSingleFlightKey(cacheInstance cachecontract.Cache, key string, isCancelable bool) string {
+/* rememberSingleFlightKey names the unit callers coalesce under: one cache instance, one key, one cancelability. The instance is told apart by its pointer, so only pointer-kind implementations coalesce — a value-kind Cache has no address to tell two instances apart, and one shared flight would hand a caller the value computed for somebody else's cache, so a value-kind instance gets no coalescing at all, which costs the stampede optimization and never the answer. Two managers over one backend are two units on purpose: the unit is what Remember was handed, not what stands behind it. */
+func rememberSingleFlightKey(cacheInstance cachecontract.Cache, key string, isCancelable bool) (string, bool) {
     cancelableSuffix := "cancelable:false"
     if true == isCancelable {
         cancelableSuffix = "cancelable:true"
     }
 
-    if nil == cacheInstance {
-        return "nil:" + key + ":" + cancelableSuffix
-    }
-
-    typeName := reflect.TypeOf(cacheInstance).String()
     value := reflect.ValueOf(cacheInstance)
-
-    if reflect.Pointer == value.Kind() {
-        return fmt.Sprintf(
-            "%s:%d:%s:%s",
-            typeName,
-            value.Pointer(),
-            key,
-            cancelableSuffix,
-        )
+    if reflect.Pointer != value.Kind() {
+        return "", false
     }
 
-    return typeName + ":value:" + key + ":" + cancelableSuffix
+    return fmt.Sprintf(
+        "%s:%d:%s:%s",
+        reflect.TypeOf(cacheInstance).String(),
+        value.Pointer(),
+        key,
+        cancelableSuffix,
+    ), true
 }
 
 func buildRememberInFlightShardList() []rememberInFlightShard {
@@ -311,7 +330,9 @@ func executeRememberCallbackSafely(
         result = nil
     }()
 
+    /* a typed-nil error from the callback reads as the success it means: boxed into a non-nil interface it would be memoized as the flight's failure, handed to every waiter, and would panic the first one that renders it */
     value, computeErr := callback(contextInstance)
+    computeErr = normalizeThirdPartyError(computeErr)
     if nil != computeErr {
         return nil, computeErr
     }

@@ -44,3 +44,24 @@ func TestRememberInFlightCall_RemoveWaiterDoesNotPoisonAConcurrentJoiner(t *test
         t.Fatalf("healthy joiner was poisoned by the departing waiter's cancel")
     }
 }
+
+/* @info a zero timeout means no waiting, not no answer: a result already memoized is taken without blocking, and only a flight still in the air answers with the timeout */
+func TestRememberInFlightCall_WaitZeroTakesACompletedResult(t *testing.T) {
+    completedCall := newRememberInFlightCall(false)
+    completedCall.Complete("ready", nil)
+
+    value, waitErr := completedCall.Wait(0, "k")
+    if nil != waitErr {
+        t.Fatalf("expected the completed result without waiting, got: %v", waitErr)
+    }
+    if "ready" != value.(string) {
+        t.Fatalf("unexpected value: %v", value)
+    }
+
+    pendingCall := newRememberInFlightCall(false)
+
+    _, pendingErr := pendingCall.Wait(0, "k")
+    if nil == pendingErr {
+        t.Fatalf("expected the pending flight to answer with the timeout")
+    }
+}
