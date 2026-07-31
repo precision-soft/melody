@@ -19,7 +19,7 @@ func (instance *testAdapterSubscriber) SubscribedEvents() map[string][]eventcont
 
 func TestEventDispatcherAdapter_StopPropagationIsMirroredToOriginalEvent(t *testing.T) {
     dispatcher, clockInstance := testNewEventDispatcher()
-    adapter := NewEventDispatcherAdapter(dispatcher, clockInstance)
+    adapter := NewEventDispatcherAdapter(dispatcher)
     _ = adapter.AddListener(
         "e",
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -48,8 +48,8 @@ func TestEventDispatcherAdapter_StopPropagationIsMirroredToOriginalEvent(t *test
 }
 
 func TestEventDispatcherAdapter_AddSubscriber_PanicsOnInvalidDefinitions(t *testing.T) {
-    dispatcher, clockInstance := testNewEventDispatcher()
-    adapter := NewEventDispatcherAdapter(dispatcher, clockInstance)
+    dispatcher, _ := testNewEventDispatcher()
+    adapter := NewEventDispatcherAdapter(dispatcher)
 
     testhelper.AssertPanicsWithError(t, func() {
         adapter.AddSubscriber(nil)
@@ -103,8 +103,8 @@ func TestEventDispatcherAdapter_AddSubscriber_PanicsOnInvalidDefinitions(t *test
 }
 
 func TestEventDispatcherAdapter_Dispatch_ReturnsErrorOnNilEvent(t *testing.T) {
-    dispatcher, clockInstance := testNewEventDispatcher()
-    adapter := NewEventDispatcherAdapter(dispatcher, clockInstance)
+    dispatcher, _ := testNewEventDispatcher()
+    adapter := NewEventDispatcherAdapter(dispatcher)
 
     testhelper.AssertPanicsWithError(
         t,
@@ -116,8 +116,8 @@ func TestEventDispatcherAdapter_Dispatch_ReturnsErrorOnNilEvent(t *testing.T) {
 }
 
 func TestEventDispatcherAdapter_DispatchName_ReturnsErrorOnEmptyName(t *testing.T) {
-    dispatcher, clockInstance := testNewEventDispatcher()
-    adapter := NewEventDispatcherAdapter(dispatcher, clockInstance)
+    dispatcher, _ := testNewEventDispatcher()
+    adapter := NewEventDispatcherAdapter(dispatcher)
 
     testhelper.AssertPanicsWithError(
         t,
@@ -129,8 +129,8 @@ func TestEventDispatcherAdapter_DispatchName_ReturnsErrorOnEmptyName(t *testing.
 }
 
 func TestEventDispatcherAdapter_RemoveListener_RemovesListener(t *testing.T) {
-    dispatcher, clockInstance := testNewEventDispatcher()
-    adapter := NewEventDispatcherAdapter(dispatcher, clockInstance)
+    dispatcher, _ := testNewEventDispatcher()
+    adapter := NewEventDispatcherAdapter(dispatcher)
 
     invoked := 0
 
@@ -162,8 +162,8 @@ func TestEventDispatcherAdapter_RemoveListener_RemovesListener(t *testing.T) {
 }
 
 func TestEventDispatcherAdapter_RemoveSubscriber_RemovesAllSubscriberListeners(t *testing.T) {
-    dispatcher, clockInstance := testNewEventDispatcher()
-    adapter := NewEventDispatcherAdapter(dispatcher, clockInstance)
+    dispatcher, _ := testNewEventDispatcher()
+    adapter := NewEventDispatcherAdapter(dispatcher)
 
     invoked := 0
 
@@ -206,8 +206,8 @@ func TestEventDispatcherAdapter_RemoveSubscriber_RemovesAllSubscriberListeners(t
 }
 
 func TestEventDispatcherAdapter_RegisteredEventsIsSafeForConcurrentReaders(t *testing.T) {
-    dispatcher, clockInstance := testNewEventDispatcher()
-    adapter := NewEventDispatcherAdapter(dispatcher, clockInstance)
+    dispatcher, _ := testNewEventDispatcher()
+    adapter := NewEventDispatcherAdapter(dispatcher)
 
     listener := func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
         return nil
@@ -269,8 +269,8 @@ func (instance *secondZeroSizeAdapterSubscriber) SubscribedEvents() map[string][
 }
 
 func TestEventDispatcherAdapter_RemoveSubscriber_DistinctZeroSizeSubscribersKeepTheirOwnListeners(t *testing.T) {
-    dispatcher, clockInstance := testNewEventDispatcher()
-    adapter := NewEventDispatcherAdapter(dispatcher, clockInstance)
+    dispatcher, _ := testNewEventDispatcher()
+    adapter := NewEventDispatcherAdapter(dispatcher)
 
     first := &firstZeroSizeAdapterSubscriber{}
     second := &secondZeroSizeAdapterSubscriber{}
@@ -292,4 +292,132 @@ func TestEventDispatcherAdapter_RemoveSubscriber_DistinctZeroSizeSubscribersKeep
     if false == testHasRegisteredEventWithListeners(registeredEvents, "zero.size.adapter.second") {
         t.Fatalf("expected the other zero size subscriber to keep its listener")
     }
+}
+
+/* @info the bookkeeping is scrubbed whether or not the wrapped dispatcher still held the listener: returning early on false left the adapter's own record of a listener that no longer exists, reported by RegisteredEvents forever and removable by nothing, since every retry took the same early return */
+func TestEventDispatcherAdapter_RemoveListener_ScrubsItsRecordForAListenerTheWrappedDispatcherNoLongerHolds(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+    adapter := NewEventDispatcherAdapter(dispatcher)
+
+    registration := adapter.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            return nil
+        },
+        0,
+    )
+
+    if false == dispatcher.RemoveListener(registration) {
+        t.Fatalf("expected the wrapped dispatcher to remove the listener")
+    }
+
+    if true == adapter.RemoveListener(registration) {
+        t.Fatalf("expected the adapter to report that the wrapped dispatcher held nothing")
+    }
+
+    if 0 != len(adapter.RegisteredEvents()) {
+        t.Fatalf("the adapter must not keep reporting a listener that no longer exists")
+    }
+}
+
+/* @info callers probe for RequiredListenerRegistrar to learn whether the fail-closed guarantee is available, and the adapter satisfies that probe on its own behalf: swallowing the mark answered the probe yes and left the guarantee unarmed */
+func TestEventDispatcherAdapter_MarkListenerRequired_RefusesADispatcherThatCannotMarkRequiredListeners(t *testing.T) {
+    adapter := NewEventDispatcherAdapter(&testPlainEventDispatcher{})
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            adapter.MarkListenerRequired(
+                eventcontract.ListenerRegistration{
+                    EventName:  "e",
+                    ListenerId: 1,
+                },
+            )
+        },
+        "the wrapped event dispatcher cannot mark required listeners",
+    )
+}
+
+/* @info the same refusal for the opt-out, which is just as silently absorbed */
+func TestEventDispatcherAdapter_MarkListenerMaySkipRequiredListeners_RefusesADispatcherThatCannotMarkRequiredListeners(t *testing.T) {
+    adapter := NewEventDispatcherAdapter(&testPlainEventDispatcher{})
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            adapter.MarkListenerMaySkipRequiredListeners(
+                eventcontract.ListenerRegistration{
+                    EventName:  "e",
+                    ListenerId: 1,
+                },
+            )
+        },
+        "the wrapped event dispatcher cannot mark required listeners",
+    )
+}
+
+/* @info the marks reach the adapter's own inspection too, so wrapping a dispatcher does not hide whether the guarantee is armed */
+func TestEventDispatcherAdapter_RegisteredEvents_ReportsTheRequiredListenerMarks(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+    adapter := NewEventDispatcherAdapter(dispatcher)
+
+    registration := adapter.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            return nil
+        },
+        0,
+    )
+    adapter.MarkListenerRequired(registration)
+
+    registeredEvents := adapter.RegisteredEvents()
+    if 1 != len(registeredEvents) || 1 != len(registeredEvents[0].Listeners) {
+        t.Fatalf("expected one registered listener")
+    }
+
+    if false == registeredEvents[0].Listeners[0].Required {
+        t.Fatalf("expected the required mark to be reported")
+    }
+}
+
+/* @info a typed nil dispatcher passed the plain guard and dereferenced on the first use, blaming the dispatch instead of the wiring */
+func TestNewEventDispatcherAdapter_RefusesATypedNilDispatcher(t *testing.T) {
+    var dispatcher *EventDispatcher
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            _ = NewEventDispatcherAdapter(dispatcher)
+        },
+        "event dispatcher may not be nil",
+    )
+}
+
+type testPlainEventDispatcher struct {
+}
+
+func (instance *testPlainEventDispatcher) AddListener(eventName string, listener eventcontract.EventListener, priority int) eventcontract.ListenerRegistration {
+    return eventcontract.ListenerRegistration{
+        EventName:  eventName,
+        ListenerId: 1,
+    }
+}
+
+func (instance *testPlainEventDispatcher) RemoveListener(registration eventcontract.ListenerRegistration) bool {
+    return false
+}
+
+func (instance *testPlainEventDispatcher) AddSubscriber(subscriber eventcontract.EventSubscriber) {
+}
+
+func (instance *testPlainEventDispatcher) RemoveSubscriber(subscriber eventcontract.EventSubscriber) int {
+    return 0
+}
+
+func (instance *testPlainEventDispatcher) Dispatch(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) (eventcontract.Event, error) {
+    return eventValue, nil
+}
+
+func (instance *testPlainEventDispatcher) DispatchName(runtimeInstance runtimecontract.Runtime, eventName string, payload any) (eventcontract.Event, error) {
+    return nil, nil
 }

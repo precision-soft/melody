@@ -18,6 +18,38 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Event: a skipped required listener refuses the response the stopping listener produced
+
+**What changed.** A `kernel.request` or `kernel.controller` dispatch that stopped propagation before a listener marked required had run now fails the request closed even when the stopping listener set a response; the response it produced is closed rather than written. The refusal is carried by `event.RequiredListenerSkippedError`, which the kernel type-asserts on the returned error itself rather than through its cause chain. A listener that stops propagation with nothing required behind it still answers the request unchanged.
+
+**Symptom.** A listener registered above `security.KernelAccessControlListenerPriority` (20) that stops propagation and serves its own response — an http cache, a maintenance page, a short-circuiting redirect — now returns `500` instead of that response. Before this change the response was served with access control never consulted.
+
+**Remedy.** Register the listener *below* the access-control listener so it runs after authorization, which is almost always what such a listener means. A listener that genuinely must short-circuit past authorization opts out explicitly with `MarkListenerMaySkipRequiredListeners` on its registration.
+
+### Event: a stopping listener that also fails, and an event that arrives stopped
+
+**What changed.** A listener that stops propagation *and* returns an error is now weighed against the required listeners behind it before its own failure is returned, so the skipped required listener is what the dispatch reports. An event whose propagation was already stopped when it reached `Dispatch` now runs no listener at all; it previously ran exactly the first one and then named that listener as the one that stopped propagation.
+
+**Symptom.** A dispatch of the event object a previous dispatch returned runs nothing instead of one listener. A stopping-and-failing listener produces a skipped-required-listener error rather than its own.
+
+**Remedy.** Build a fresh event per dispatch — `DispatchName` does this for you. Nothing else is required.
+
+### Event: subscribers are registered once, validated whole, and never empty
+
+**What changed.** `AddSubscriber` refuses a subscriber whose identity is already registered, refuses a subscriber declaring no subscribed events, refuses an event name mapped to an empty list, and validates every subscribed event before registering any listener. `MarkListenerRequired` and `MarkListenerMaySkipRequiredListeners` refuse a registration the dispatcher does not hold.
+
+**Symptom.** Registering two instances of the same field-less subscriber type panics at boot — they share one address and therefore one identity, so removing either used to remove both. A subscriber built from configuration that produced no events panics instead of registering nothing silently. A stale or foreign `ListenerRegistration` handed to a mark panics instead of leaving the guarantee unarmed.
+
+**Remedy.** Register each subscriber once. A type that genuinely needs two live instances must carry a field so the two can be told apart. Pass marks the registration that `AddListener` returned, from the same dispatcher.
+
+### Event: `NewEventDispatcherAdapter` takes the dispatcher alone
+
+**What changed.** The clock argument is gone: it was validated at construction and never read, and the documentation described the one-argument signature already. The adapter also panics when asked to mark a required listener over a wrapped dispatcher that does not implement `RequiredListenerRegistrar`, instead of absorbing the mark.
+
+**Symptom.** A call to `NewEventDispatcherAdapter(dispatcher, clock)` no longer compiles. `contract.RegisteredListener` gained `Required` and `MaySkipRequiredListeners`, so an out-of-tree composite literal written without field names no longer compiles either.
+
+**Remedy.** Drop the second argument. Write `RegisteredListener` literals with field names. Wrap a dispatcher that supports required listeners, or do not mark them.
+
 ### Cli: a duplicated flag name and a mismatched table row fail fast
 
 **What changed.** `output.MergeFlags` panics on a flag name declared twice — the parser resolves a name to the first declaration, so a command-specific flag reusing a standard name was silently inert. `TableBlockBuilder.AddRow` panics on a row whose cell count disagrees with the block's declared columns — a surplus cell silently never rendered; the single-token separator row stays admitted.

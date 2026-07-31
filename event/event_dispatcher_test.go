@@ -9,6 +9,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/clock"
+    clockcontract "github.com/precision-soft/melody/clock/contract"
     "github.com/precision-soft/melody/container"
     containercontract "github.com/precision-soft/melody/container/contract"
     eventcontract "github.com/precision-soft/melody/event/contract"
@@ -759,4 +760,574 @@ func TestEventDispatcher_RemoveSubscriber_DistinctZeroSizeSubscribersKeepTheirOw
     if false == testHasRegisteredEventWithListeners(registeredEvents, "zero.size.second") {
         t.Fatalf("expected the other zero size subscriber to keep its listener")
     }
+}
+
+/* @info a listener that stops propagation and fails in the same call skipped the required listeners behind it just as decisively as one that only stopped, but its own failure was returned first and the required scan never ran: the caller learned that a listener had failed and never that access control had been skipped */
+func TestEventDispatcher_StoppingListenerThatAlsoFails_StillReportsTheSkippedRequiredListener(t *testing.T) {
+    dispatcher, clockInstance := testNewEventDispatcher()
+
+    requiredRan := false
+
+    _ = dispatcher.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            eventValue.StopPropagation()
+
+            return errors.New("the listener's own failure")
+        },
+        100,
+    )
+    requiredRegistration := dispatcher.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            requiredRan = true
+
+            return nil
+        },
+        0,
+    )
+    dispatcher.MarkListenerRequired(requiredRegistration)
+
+    runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
+
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+
+    if true == requiredRan {
+        t.Fatalf("the required listener must not have run")
+    }
+
+    if _, ok := err.(*RequiredListenerSkippedError); false == ok {
+        t.Fatalf("expected a RequiredListenerSkippedError, got: %T (%v)", err, err)
+    }
+}
+
+/* @info the stopping listener's own failure is what a dispatch reports when nothing required was skipped: the required scan must not turn every stopping failure into a skipped-listener report */
+func TestEventDispatcher_StoppingListenerThatAlsoFails_ReportsItsOwnFailureWhenNothingRequiredWasSkipped(t *testing.T) {
+    dispatcher, clockInstance := testNewEventDispatcher()
+
+    _ = dispatcher.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            eventValue.StopPropagation()
+
+            return errors.New("the listener's own failure")
+        },
+        100,
+    )
+    _ = dispatcher.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            return nil
+        },
+        0,
+    )
+
+    runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
+
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    if nil == err {
+        t.Fatalf("expected the listener's own failure")
+    }
+
+    if _, ok := err.(*RequiredListenerSkippedError); true == ok {
+        t.Fatalf("expected the listener's own failure, not a skipped-required-listener report")
+    }
+}
+
+/* @info the propagation test opens the iteration rather than closing it: an event that arrived already stopped — the object a previous dispatch returned — ran the first listener anyway and then had that listener named as the one that stopped it */
+func TestEventDispatcher_EventThatArrivedStopped_RunsNoListener(t *testing.T) {
+    dispatcher, clockInstance := testNewEventDispatcher()
+
+    firstRan := false
+
+    _ = dispatcher.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            firstRan = true
+
+            return nil
+        },
+        100,
+    )
+
+    runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
+
+    eventValue := NewEvent("e", nil, clockInstance)
+    eventValue.StopPropagation()
+
+    _, err := dispatcher.Dispatch(runtimeInstance, eventValue)
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if true == firstRan {
+        t.Fatalf("an event that arrived stopped must run no listener")
+    }
+}
+
+/* @info the required listeners of an event that arrived stopped are skipped by nobody in particular, and the dispatch owes the same refusal it owes a stopping listener */
+func TestEventDispatcher_EventThatArrivedStopped_ReportsTheSkippedRequiredListener(t *testing.T) {
+    dispatcher, clockInstance := testNewEventDispatcher()
+
+    requiredRegistration := dispatcher.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            return nil
+        },
+        0,
+    )
+    dispatcher.MarkListenerRequired(requiredRegistration)
+
+    runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
+
+    eventValue := NewEvent("e", nil, clockInstance)
+    eventValue.StopPropagation()
+
+    _, err := dispatcher.Dispatch(runtimeInstance, eventValue)
+
+    if _, ok := err.(*RequiredListenerSkippedError); false == ok {
+        t.Fatalf("expected a RequiredListenerSkippedError, got: %T (%v)", err, err)
+    }
+}
+
+/* @info a typed nil handed back by a listener is a non-nil interface around a nil value: read as a failure it aborted the dispatch, skipped every listener behind it and failed the request closed for a listener that reported success */
+func TestEventDispatcher_TypedNilListenerError_ReadsAsTheSuccessItMeans(t *testing.T) {
+    dispatcher, clockInstance := testNewEventDispatcher()
+
+    secondRan := false
+
+    _ = dispatcher.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            var typedNilErr *testTypedNilError
+
+            return typedNilErr
+        },
+        100,
+    )
+    _ = dispatcher.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            secondRan = true
+
+            return nil
+        },
+        0,
+    )
+
+    runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
+
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if false == secondRan {
+        t.Fatalf("expected the dispatch to continue past a listener that reported success")
+    }
+}
+
+type testTypedNilError struct {
+}
+
+func (instance *testTypedNilError) Error() string {
+    return "typed nil"
+}
+
+/* @info the failure travels unlogged and unmarked: the record written by the dispatcher carried the listener's identity but never the error, and marking the wrapper as logged suppressed the caller's own record — the one that renders the cause chain — so the reason a request failed closed existed in no log at all */
+func TestEventDispatcher_ListenerError_TravelsUnmarkedWithItsCause(t *testing.T) {
+    dispatcher, clockInstance := testNewEventDispatcher()
+
+    listenerErr := errors.New("the database is down")
+
+    _ = dispatcher.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            return listenerErr
+        },
+        0,
+    )
+
+    runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
+
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    if nil == err {
+        t.Fatalf("expected the listener failure")
+    }
+
+    exceptionErr, ok := err.(*exception.Error)
+    if false == ok {
+        t.Fatalf("expected an exception error, got: %T", err)
+    }
+
+    if true == exceptionErr.AlreadyLogged() {
+        t.Fatalf("the listener failure must reach the caller's logging unmarked")
+    }
+
+    if false == errors.Is(err, listenerErr) {
+        t.Fatalf("the listener's own error must survive as the cause")
+    }
+}
+
+/* @info a mark that lands nowhere left the fail-closed guarantee unarmed while reporting that it had been applied, and the caller had no way to tell */
+func TestEventDispatcher_MarkListenerRequired_RefusesAnUnknownRegistration(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+
+    registration := dispatcher.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            return nil
+        },
+        0,
+    )
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            dispatcher.MarkListenerRequired(
+                eventcontract.ListenerRegistration{
+                    EventName:  registration.EventName,
+                    ListenerId: registration.ListenerId + 1,
+                },
+            )
+        },
+        "event listener registration is not registered",
+    )
+}
+
+/* @info the marks a listener carries reach inspection: an unarmed fail-closed guarantee used to look exactly like an armed one */
+func TestEventDispatcher_RegisteredEvents_ReportsTheRequiredListenerMarks(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+
+    requiredRegistration := dispatcher.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            return nil
+        },
+        0,
+    )
+    dispatcher.MarkListenerRequired(requiredRegistration)
+
+    registeredEvents := dispatcher.RegisteredEvents()
+    if 1 != len(registeredEvents) {
+        t.Fatalf("expected 1 registered event, got: %d", len(registeredEvents))
+    }
+
+    if 1 != len(registeredEvents[0].Listeners) {
+        t.Fatalf("expected 1 registered listener, got: %d", len(registeredEvents[0].Listeners))
+    }
+
+    if false == registeredEvents[0].Listeners[0].Required {
+        t.Fatalf("expected the required mark to be reported")
+    }
+
+    if true == registeredEvents[0].Listeners[0].MaySkipRequiredListeners {
+        t.Fatalf("expected the may-skip mark to be absent")
+    }
+}
+
+/* @info a subscriber that carries no fields occupies no memory and every zero-size allocation answers one address, so two instances of one such type were one identity here: a later RemoveSubscriber for either instance took both instances' listeners down and reported a plausible count for it */
+func TestEventDispatcher_AddSubscriber_RefusesASecondRegistrationOfTheSameIdentity(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+
+    dispatcher.AddSubscriber(&firstZeroSizeSubscriber{})
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            dispatcher.AddSubscriber(&firstZeroSizeSubscriber{})
+        },
+        "event subscriber is already registered",
+    )
+}
+
+/* @info every subscribed event is validated before a single listener is registered: validating while registering left a subscriber whose second event was malformed half-installed, with the listeners of the first one live and firing under a subscriber the caller was told had been refused */
+func TestEventDispatcher_AddSubscriber_RegistersNothingWhenALaterEventIsMalformed(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+
+    subscriber := &testSubscriber{
+        events: map[string][]eventcontract.SubscribedEvent{
+            "a.event": {
+                NewSubscribedEvent(
+                    func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                        return nil
+                    },
+                    0,
+                ),
+            },
+            "b.event": nil,
+        },
+    }
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            dispatcher.AddSubscriber(subscriber)
+        },
+        "subscribed event list may not be nil",
+    )
+
+    if 0 != len(dispatcher.RegisteredEvents()) {
+        t.Fatalf("a refused subscriber must leave no listener registered")
+    }
+}
+
+/* @info an event name mapped to no subscribed events registers nothing while reporting success, which is how a subscriber assembled from configuration ends up silently inert */
+func TestEventDispatcher_AddSubscriber_RefusesAnEmptySubscribedEventList(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+
+    subscriber := &testSubscriber{
+        events: map[string][]eventcontract.SubscribedEvent{
+            "a.event": {},
+        },
+    }
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            dispatcher.AddSubscriber(subscriber)
+        },
+        "subscribed event list may not be empty",
+    )
+}
+
+/* @info a subscriber declaring no events at all is the same silence one step further out */
+func TestEventDispatcher_AddSubscriber_RefusesASubscriberWithNoSubscribedEvents(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+
+    subscriber := &testSubscriber{
+        events: map[string][]eventcontract.SubscribedEvent{},
+    }
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            dispatcher.AddSubscriber(subscriber)
+        },
+        "event subscriber declares no subscribed events",
+    )
+}
+
+/* @info the typed nil passes a plain comparison and the identity guard that names the mistake sat behind the SubscribedEvents call, so the caller received a bare nil dereference raised inside its own subscriber instead of the framework error */
+func TestEventDispatcher_AddSubscriber_RefusesATypedNilSubscriber(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+
+    var subscriber *testSubscriber
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            dispatcher.AddSubscriber(subscriber)
+        },
+        "event subscriber may not be nil",
+    )
+}
+
+/* @info the same hole on the removal side, where the precise message was already reachable */
+func TestEventDispatcher_RemoveSubscriber_RefusesATypedNilSubscriber(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+
+    var subscriber *testSubscriber
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            dispatcher.RemoveSubscriber(subscriber)
+        },
+        "event subscriber may not be nil",
+    )
+}
+
+/* @info a typed nil event passed the plain guard and dereferenced on Name(); the recovery that would have described it then dereferenced the same value while building its context, so a second panic replaced the diagnostic and the caller was left with a bare memory address */
+func TestEventDispatcher_Dispatch_RefusesATypedNilEvent(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+
+    runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
+
+    var eventValue *Event
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            _, _ = dispatcher.Dispatch(runtimeInstance, eventValue)
+        },
+        "event may not be nil",
+    )
+}
+
+/* @info the typed nil clock passed the constructor guard and the failure surfaced only at the first dispatch, from inside the event constructor, without the wiring site that caused it */
+func TestNewEventDispatcher_RefusesATypedNilClock(t *testing.T) {
+    var clockInstance *testTypedNilClock
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            _ = NewEventDispatcher(clockInstance)
+        },
+        "clock may not be nil",
+    )
+}
+
+type testTypedNilClock struct {
+}
+
+func (instance *testTypedNilClock) Now() time.Time {
+    return time.Time{}
+}
+
+func (instance *testTypedNilClock) NewTicker(interval time.Duration) clockcontract.Ticker {
+    return nil
+}
+
+/* @info an exit carries its code on the wrapper, and folding it into an ordinary listener error left a deliberate exit as a request failure with the code gone */
+func TestEventDispatcher_ListenerExit_TravelsToTheProcessBoundary(t *testing.T) {
+    dispatcher, clockInstance := testNewEventDispatcher()
+
+    _ = dispatcher.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            exception.Exit(
+                exception.NewExitError(
+                    7,
+                    exception.NewError("the command is done", nil, nil),
+                ),
+            )
+
+            return nil
+        },
+        0,
+    )
+
+    runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
+
+    recoveredValue := func() (recoveredValue any) {
+        defer func() {
+            recoveredValue = recover()
+        }()
+
+        _, _ = dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+
+        return nil
+    }()
+
+    exitErr, ok := recoveredValue.(*exception.ExitError)
+    if false == ok {
+        t.Fatalf("expected the exit to reach the process boundary, got: %T (%v)", recoveredValue, recoveredValue)
+    }
+
+    if 7 != exitErr.ExitCode() {
+        t.Fatalf("expected exit code 7, got: %d", exitErr.ExitCode())
+    }
+}
+
+/* @info a panic value that reports itself already logged was written by whoever raised it, and logging it again here reported one failure as two */
+func TestEventDispatcher_ListenerPanic_IsNotLoggedTwiceWhenTheValueReportsItselfLogged(t *testing.T) {
+    dispatcher, clockInstance := testNewEventDispatcher()
+
+    _ = dispatcher.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            panicErr := exception.NewError("already reported by its author", nil, nil)
+            _ = exception.MarkLogged(panicErr)
+
+            exception.Panic(panicErr)
+
+            return nil
+        },
+        0,
+    )
+
+    logger := &testRecordingLogger{}
+    runtimeInstance := testRuntimeWithLogger(t, logger)
+
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    if nil == err {
+        t.Fatalf("expected the panic to travel as an error")
+    }
+
+    if 0 != len(logger.errorRecords) {
+        t.Fatalf("expected no second record, got: %v", logger.errorRecords)
+    }
+}
+
+/* @info a panic nobody reported is still the dispatcher's to log, with the panic value, its type and the stack */
+func TestEventDispatcher_ListenerPanic_IsLoggedWhenNobodyReportedIt(t *testing.T) {
+    dispatcher, clockInstance := testNewEventDispatcher()
+
+    _ = dispatcher.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            panic("nobody reported this")
+        },
+        0,
+    )
+
+    logger := &testRecordingLogger{}
+    runtimeInstance := testRuntimeWithLogger(t, logger)
+
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    if nil == err {
+        t.Fatalf("expected the panic to travel as an error")
+    }
+
+    if 1 != len(logger.errorRecords) {
+        t.Fatalf("expected exactly one record, got: %d", len(logger.errorRecords))
+    }
+}
+
+func testRuntimeWithLogger(t *testing.T, logger loggingcontract.Logger) runtimecontract.Runtime {
+    serviceContainer := container.NewContainer()
+    scope := serviceContainer.NewScope()
+
+    err := serviceContainer.Register(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return logger, nil
+        },
+    )
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    return runtime.New(context.Background(), scope, serviceContainer)
+}
+
+type testRecordingLogger struct {
+    errorRecords []string
+}
+
+func (instance *testRecordingLogger) Emergency(message string, context loggingcontract.Context) {
+}
+
+func (instance *testRecordingLogger) Alert(message string, context loggingcontract.Context) {
+}
+
+func (instance *testRecordingLogger) Critical(message string, context loggingcontract.Context) {
+}
+
+func (instance *testRecordingLogger) Error(message string, context loggingcontract.Context) {
+    instance.errorRecords = append(instance.errorRecords, message)
+}
+
+func (instance *testRecordingLogger) Warning(message string, context loggingcontract.Context) {
+}
+
+func (instance *testRecordingLogger) Notice(message string, context loggingcontract.Context) {
+}
+
+func (instance *testRecordingLogger) Info(message string, context loggingcontract.Context) {
+}
+
+func (instance *testRecordingLogger) Debug(message string, context loggingcontract.Context) {
+}
+
+func (instance *testRecordingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+}
+
+func (instance *testRecordingLogger) Close() error {
+    return nil
+}
+
+func (instance *testRecordingLogger) Closed() bool {
+    return false
 }

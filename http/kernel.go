@@ -473,13 +473,18 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         _, eventKernelRequestErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, kernelRequestEvent)
         instance.logEventDispatchError(requestLogger, "kernel request error", eventKernelRequestErr)
 
-        /* @important fail closed when the kernel.request dispatch aborted with an error and no listener produced a response: the dispatcher stops at the first failing listener, so listeners behind it (e.g. the access-control listener) never ran; proceeding to the handler would treat a partially-processed request as authorized */
-        if nil != eventKernelRequestErr && nil == kernelRequestEvent.Response() {
+        /* @important fail closed when the kernel.request dispatch aborted with an error and no listener produced a response: the dispatcher stops at the first failing listener, so listeners behind it (e.g. the access-control listener) never ran; proceeding to the handler would treat a partially-processed request as authorized. A dispatch that skipped a listener marked required refuses the response as well: a listener stopping propagation is entitled to answer the request, but not to answer it with access control never consulted — the response it produced is dropped for the error page. The error is judged on itself rather than through its cause chain, so an application event dispatched by a listener that skips a required listener of its own stays an ordinary listener failure. */
+        _, requiredListenerSkipped := eventKernelRequestErr.(*event.RequiredListenerSkippedError)
+
+        if nil != eventKernelRequestErr && (true == requiredListenerSkipped || nil == kernelRequestEvent.Response()) {
             statusCode := nethttp.StatusInternalServerError
             message := "internal server error"
             if true == debugMode {
                 message = eventKernelRequestErr.Error()
             }
+
+            /* the response the stopping listener produced is replaced below and reaches no writer, so a file-backed body would be leaked */
+            closeDiscardedResponseBody(kernelRequestEvent.Response(), requestLogger)
 
             if true == PrefersHtml(melodyRequest) {
                 kernelRequestEvent.SetResponse(HtmlResponse(
@@ -644,13 +649,17 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         _, eventKernelControllerErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelController, kernelControllerEvent)
         instance.logEventDispatchError(requestLogger, "kernel controller error", eventKernelControllerErr)
 
-        /* @important fail closed when the kernel.controller dispatch aborted with an error and no listener produced a response, mirroring the kernel.request path: the dispatcher stops at the first failing listener, so a required listener behind it (marked through RequiredListenerRegistrar) never ran; proceeding to the handler would treat a partially-processed request as authorized */
-        if nil != eventKernelControllerErr && nil == kernelControllerEvent.Response() {
+        /* @important fail closed when the kernel.controller dispatch aborted with an error and no listener produced a response, mirroring the kernel.request path: the dispatcher stops at the first failing listener, so a required listener behind it (marked through RequiredListenerRegistrar) never ran; proceeding to the handler would treat a partially-processed request as authorized. A dispatch that skipped a required listener refuses the response too, for the reason the kernel.request path gives. */
+        _, controllerRequiredListenerSkipped := eventKernelControllerErr.(*event.RequiredListenerSkippedError)
+
+        if nil != eventKernelControllerErr && (true == controllerRequiredListenerSkipped || nil == kernelControllerEvent.Response()) {
             statusCode := nethttp.StatusInternalServerError
             message := "internal server error"
             if true == debugMode {
                 message = eventKernelControllerErr.Error()
             }
+
+            closeDiscardedResponseBody(kernelControllerEvent.Response(), requestLogger)
 
             if true == PrefersHtml(melodyRequest) {
                 kernelControllerEvent.SetResponse(HtmlResponse(

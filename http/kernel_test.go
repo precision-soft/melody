@@ -1797,3 +1797,125 @@ func TestKernel_LogsWhenACommittedResponseDropsARotatedSession(t *testing.T) {
         t.Fatalf("expected the dropped session write to be logged, got warnings %v", recordingLogger.warningMessages)
     }
 }
+
+/* @info a listener that stops propagation is entitled to answer the request, but not to answer it with a listener marked required never consulted: the fail-closed branch tested for the absence of a response, so a cache listener that stopped propagation ahead of access control had its cached page served to whoever asked */
+func TestKernel_FailsClosedWhenARequiredListenerWasSkippedEvenThoughAResponseWasProduced(t *testing.T) {
+    handlerRan := false
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/hello",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            handlerRan = true
+
+            return TextResponse(nethttp.StatusOK, "handler"), nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainer()
+
+    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+
+    dispatcher.AddListener(
+        kernelcontract.EventKernelRequest,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            requestEvent, ok := eventValue.Payload().(*KernelRequestEvent)
+            if false == ok {
+                return nil
+            }
+
+            requestEvent.SetResponse(TextResponse(nethttp.StatusOK, "from the cache"))
+            eventValue.StopPropagation()
+
+            return nil
+        },
+        100,
+    )
+
+    requiredRan := false
+    requiredRegistration := dispatcher.AddListener(
+        kernelcontract.EventKernelRequest,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            requiredRan = true
+
+            return nil
+        },
+        20,
+    )
+
+    registrar, ok := dispatcher.(eventcontract.RequiredListenerRegistrar)
+    if false == ok {
+        t.Fatalf("expected the dispatcher to support required listeners")
+    }
+    registrar.MarkListenerRequired(requiredRegistration)
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/hello", nil)
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, request)
+
+    if true == requiredRan {
+        t.Fatalf("the required listener must not have run")
+    }
+
+    if true == handlerRan {
+        t.Fatalf("the handler must not have run")
+    }
+
+    if nethttp.StatusInternalServerError != recorder.Code {
+        t.Fatalf("expected the request to fail closed with %d, got %d", nethttp.StatusInternalServerError, recorder.Code)
+    }
+
+    if true == strings.Contains(recorder.Body.String(), "from the cache") {
+        t.Fatalf("the response produced by the stopping listener must not be served")
+    }
+}
+
+/* @info a stopping listener that skipped nothing required keeps answering the request: the refusal must not cost every short-circuiting listener its response */
+func TestKernel_ServesTheResponseOfAStoppingListenerWhenNothingRequiredWasSkipped(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/hello",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(nethttp.StatusOK, "handler"), nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainer()
+
+    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher.AddListener(
+        kernelcontract.EventKernelRequest,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            requestEvent, ok := eventValue.Payload().(*KernelRequestEvent)
+            if false == ok {
+                return nil
+            }
+
+            requestEvent.SetResponse(TextResponse(nethttp.StatusOK, "from the cache"))
+            eventValue.StopPropagation()
+
+            return nil
+        },
+        100,
+    )
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/hello", nil)
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, request)
+
+    if nethttp.StatusOK != recorder.Code {
+        t.Fatalf("expected %d, got %d", nethttp.StatusOK, recorder.Code)
+    }
+
+    if "from the cache" != recorder.Body.String() {
+        t.Fatalf("expected the stopping listener's response, got %q", recorder.Body.String())
+    }
+}

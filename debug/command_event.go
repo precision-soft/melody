@@ -175,7 +175,7 @@ func (instance *EventCommand) Run(
         if true == option.Verbose {
             verboseBlock := builder.AddBlock(
                 "LISTENERS",
-                []string{"event", "priority", "source", "owner", "listener"},
+                []string{"event", "priority", "required", "source", "owner", "listener"},
             )
 
             /* the listener detail follows the same window as the event block above, otherwise --limit lists three events and every listener in the application */
@@ -244,6 +244,7 @@ func (instance *EventCommand) Run(
                     verboseBlock.AddRow(
                         eventCell,
                         fmt.Sprintf("%d", listener.Priority),
+                        renderRequiredListenerMark(listener),
                         listener.Source,
                         listener.Owner,
                         listener.ListenerName,
@@ -267,6 +268,23 @@ func (instance *EventCommand) Run(
     envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
 
     return output.Render(commandContext.Writer, envelope, option)
+}
+
+/* renderRequiredListenerMark answers what a listener's required-listener marks mean for the dispatch: whether it is protected from being skipped, or is allowed to skip the ones that are. Without the column an unarmed fail-closed guarantee looks exactly like an armed one. */
+func renderRequiredListenerMark(listener eventcontract.RegisteredListener) string {
+    if true == listener.Required {
+        if true == listener.MaySkipRequiredListeners {
+            return "yes (may skip)"
+        }
+
+        return "yes"
+    }
+
+    if true == listener.MaySkipRequiredListeners {
+        return "may skip"
+    }
+
+    return "no"
 }
 
 type eventListItem struct {

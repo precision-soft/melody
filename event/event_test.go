@@ -96,3 +96,26 @@ func TestEvent_Constructors_PanicOnNilEvent(t *testing.T) {
         NewEventFromEvent((*Event)(nil))
     }, "event value may not be nil")
 }
+
+/* @info the stop is part of what the event says about itself, and a copy that dropped it told a listener the propagation was live when it had already been stopped */
+func TestNewEventFromEvent_CarriesTheStoppedPropagation(t *testing.T) {
+    original := NewEventWithTimestamp("e", nil, time.Unix(123, 0))
+    original.StopPropagation()
+
+    copied := NewEventFromEvent(original)
+
+    if false == copied.IsPropagationStopped() {
+        t.Fatalf("expected the copy to carry the stopped propagation")
+    }
+}
+
+/* @info an event that was never stopped must not be copied into one that claims it was */
+func TestNewEventFromEvent_KeepsALivePropagationLive(t *testing.T) {
+    original := NewEventWithTimestamp("e", nil, time.Unix(123, 0))
+
+    copied := NewEventFromEvent(original)
+
+    if true == copied.IsPropagationStopped() {
+        t.Fatalf("expected the copy to keep the propagation live")
+    }
+}

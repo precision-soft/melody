@@ -7,32 +7,24 @@ import (
     "sort"
     "sync"
 
-    clockcontract "github.com/precision-soft/melody/clock/contract"
     eventcontract "github.com/precision-soft/melody/event/contract"
     "github.com/precision-soft/melody/exception"
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
+    "github.com/precision-soft/melody/internal"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
 func NewEventDispatcherAdapter(
     eventDispatcher eventcontract.EventDispatcher,
-    clock clockcontract.Clock,
 ) *EventDispatcherAdapter {
-    if nil == eventDispatcher {
+    if true == internal.IsNilInterface(eventDispatcher) {
         exception.Panic(
             exception.NewError("event dispatcher may not be nil", nil, nil),
         )
     }
 
-    if nil == clock {
-        exception.Panic(
-            exception.NewError("clock may not be nil", nil, nil),
-        )
-    }
-
     return &EventDispatcherAdapter{
         eventDispatcher:         eventDispatcher,
-        clock:                   clock,
         listenerRegistrations:   make(map[string][]adapterListenerRegistration),
         subscriberRegistrations: make(map[subscriberIdentity][]eventcontract.ListenerRegistration),
     }
@@ -41,7 +33,6 @@ func NewEventDispatcherAdapter(
 type EventDispatcherAdapter struct {
     mutex                   sync.RWMutex
     eventDispatcher         eventcontract.EventDispatcher
-    clock                   clockcontract.Clock
     listenerRegistrations   map[string][]adapterListenerRegistration
     subscriberRegistrations map[subscriberIdentity][]eventcontract.ListenerRegistration
     nextRegistrationIndex   uint64
@@ -77,10 +68,8 @@ func (instance *EventDispatcherAdapter) AddListener(eventName string, listener e
 
 func (instance *EventDispatcherAdapter) RemoveListener(registration eventcontract.ListenerRegistration) bool {
     removed := instance.eventDispatcher.RemoveListener(registration)
-    if false == removed {
-        return false
-    }
 
+    /* @important the bookkeeping is scrubbed whether or not the wrapped dispatcher still held the listener. Returning early on false left the adapter's own record of a listener that no longer exists — reported by RegisteredEvents forever and removable by nothing, since every retry takes the same early return */
     instance.mutex.Lock()
     listenerList, exists := instance.listenerRegistrations[registration.EventName]
     if true == exists {
@@ -119,128 +108,56 @@ func (instance *EventDispatcherAdapter) RemoveListener(registration eventcontrac
     }
     instance.mutex.Unlock()
 
-    return true
+    return removed
 }
 
 func (instance *EventDispatcherAdapter) AddSubscriber(subscriber eventcontract.EventSubscriber) {
-    if nil == subscriber {
-        exception.Panic(
-            exception.NewError("event subscriber may not be nil", nil, nil),
-        )
-    }
+    subscriberIdentityValue, subscriberType := requireEventSubscriberIdentity(
+        subscriber,
+        "add a subscriber",
+    )
 
-    subscribedEvents := subscriber.SubscribedEvents()
-    if nil == subscribedEvents {
-        exception.Panic(
-            exception.NewError("subscribed events may not be nil", nil, nil),
-        )
-    }
+    plannedList := planSubscriberRegistrations(subscriber)
 
-    subscriberIdentityValue := eventSubscriberIdentity(subscriber)
-    if 0 == subscriberIdentityValue.pointer {
+    instance.mutex.Lock()
+    _, alreadyRegistered := instance.subscriberRegistrations[subscriberIdentityValue]
+    instance.mutex.Unlock()
+
+    if true == alreadyRegistered {
         exception.Panic(
             exception.NewError(
-                "event subscriber pointer is required to add a subscriber",
+                "event subscriber is already registered",
                 exceptioncontract.Context{
-                    "subscriberType": reflect.TypeOf(subscriber).String(),
+                    "subscriberType": subscriberType,
                 },
                 nil,
             ),
         )
     }
 
-    eventNameList := make([]string, 0, len(subscribedEvents))
-    for eventName := range subscribedEvents {
-        if "" == eventName {
-            exception.Panic(
-                exception.NewError("event name may not be empty", nil, nil),
-            )
-        }
+    for _, planned := range plannedList {
+        registration := instance.addListenerRegistration(
+            planned.eventName,
+            planned.listener,
+            planned.priority,
+            eventcontract.RegisteredListenerSourceSubscriber,
+            subscriberType,
+        )
 
-        eventNameList = append(eventNameList, eventName)
-    }
-
-    sort.Strings(eventNameList)
-
-    subscriberType := reflect.TypeOf(subscriber).String()
-
-    for _, eventName := range eventNameList {
-        subscribedEventList := subscribedEvents[eventName]
-        if nil == subscribedEventList {
-            exception.Panic(
-                exception.NewError(
-                    "subscribed event list may not be nil",
-                    exceptioncontract.Context{"eventName": eventName},
-                    nil,
-                ),
-            )
-        }
-
-        for index, subscribedEvent := range subscribedEventList {
-            if nil == subscribedEvent {
-                exception.Panic(
-                    exception.NewError(
-                        "subscribed event may not be nil",
-                        exceptioncontract.Context{
-                            "eventName": eventName,
-                            "index":     index,
-                        },
-                        nil,
-                    ),
-                )
-            }
-
-            listener := subscribedEvent.Listener()
-            if nil == listener {
-                exception.Panic(
-                    exception.NewError(
-                        "subscribed event listener is required",
-                        exceptioncontract.Context{
-                            "eventName": eventName,
-                            "index":     index,
-                        },
-                        nil,
-                    ),
-                )
-            }
-
-            registration := instance.addListenerRegistration(
-                eventName,
-                listener,
-                subscribedEvent.Priority(),
-                eventcontract.RegisteredListenerSourceSubscriber,
-                subscriberType,
-            )
-
-            instance.mutex.Lock()
-            instance.subscriberRegistrations[subscriberIdentityValue] = append(
-                instance.subscriberRegistrations[subscriberIdentityValue],
-                registration,
-            )
-            instance.mutex.Unlock()
-        }
+        instance.mutex.Lock()
+        instance.subscriberRegistrations[subscriberIdentityValue] = append(
+            instance.subscriberRegistrations[subscriberIdentityValue],
+            registration,
+        )
+        instance.mutex.Unlock()
     }
 }
 
 func (instance *EventDispatcherAdapter) RemoveSubscriber(subscriber eventcontract.EventSubscriber) int {
-    if nil == subscriber {
-        exception.Panic(
-            exception.NewError("event subscriber may not be nil", nil, nil),
-        )
-    }
-
-    subscriberIdentityValue := eventSubscriberIdentity(subscriber)
-    if 0 == subscriberIdentityValue.pointer {
-        exception.Panic(
-            exception.NewError(
-                "event subscriber pointer is required to remove a subscriber",
-                exceptioncontract.Context{
-                    "subscriberType": reflect.TypeOf(subscriber).String(),
-                },
-                nil,
-            ),
-        )
-    }
+    subscriberIdentityValue, _ := requireEventSubscriberIdentity(
+        subscriber,
+        "remove a subscriber",
+    )
 
     instance.mutex.Lock()
     registrationList := instance.subscriberRegistrations[subscriberIdentityValue]
@@ -265,24 +182,62 @@ func (instance *EventDispatcherAdapter) DispatchName(runtimeInstance runtimecont
     return instance.eventDispatcher.DispatchName(runtimeInstance, eventName, payload)
 }
 
-/* MarkListenerRequired forwards to the wrapped dispatcher when it supports required-listener registration; a no-op otherwise, so the adapter stays usable over a dispatcher that does not implement it. */
+/* MarkListenerRequired forwards to the wrapped dispatcher and records the mark for inspection. A wrapped dispatcher that cannot mark required listeners is refused rather than absorbed: callers probe for RequiredListenerRegistrar precisely to learn whether the guarantee is available, and the adapter satisfies that probe on its own behalf, so swallowing the mark here would answer the probe yes and leave the fail-closed guarantee unarmed. */
 func (instance *EventDispatcherAdapter) MarkListenerRequired(registration eventcontract.ListenerRegistration) {
-    registrar, ok := instance.eventDispatcher.(eventcontract.RequiredListenerRegistrar)
-    if false == ok {
-        return
-    }
+    instance.requireRegistrar().MarkListenerRequired(registration)
 
-    registrar.MarkListenerRequired(registration)
+    instance.markListenerRegistration(
+        registration,
+        func(entry *adapterListenerRegistration) {
+            entry.required = true
+        },
+    )
 }
 
-/* MarkListenerMaySkipRequiredListeners forwards to the wrapped dispatcher when it supports required-listener registration; a no-op otherwise. */
+/* MarkListenerMaySkipRequiredListeners forwards to the wrapped dispatcher and records the mark for inspection, refusing a wrapped dispatcher that cannot mark required listeners for the reason MarkListenerRequired gives. */
 func (instance *EventDispatcherAdapter) MarkListenerMaySkipRequiredListeners(registration eventcontract.ListenerRegistration) {
+    instance.requireRegistrar().MarkListenerMaySkipRequiredListeners(registration)
+
+    instance.markListenerRegistration(
+        registration,
+        func(entry *adapterListenerRegistration) {
+            entry.maySkipRequiredListeners = true
+        },
+    )
+}
+
+func (instance *EventDispatcherAdapter) requireRegistrar() eventcontract.RequiredListenerRegistrar {
     registrar, ok := instance.eventDispatcher.(eventcontract.RequiredListenerRegistrar)
     if false == ok {
-        return
+        exception.Panic(
+            exception.NewError(
+                "the wrapped event dispatcher cannot mark required listeners",
+                exceptioncontract.Context{
+                    "eventDispatcherType": internal.StringifyType(instance.eventDispatcher),
+                },
+                nil,
+            ),
+        )
     }
 
-    registrar.MarkListenerMaySkipRequiredListeners(registration)
+    return registrar
+}
+
+func (instance *EventDispatcherAdapter) markListenerRegistration(
+    registration eventcontract.ListenerRegistration,
+    apply func(entry *adapterListenerRegistration),
+) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    entries := instance.listenerRegistrations[registration.EventName]
+    for index := range entries {
+        if entries[index].registration.ListenerId == registration.ListenerId {
+            apply(&entries[index])
+
+            return
+        }
+    }
 }
 
 func (instance *EventDispatcherAdapter) RegisteredEvents() []eventcontract.RegisteredEvent {
@@ -329,11 +284,13 @@ func (instance *EventDispatcherAdapter) RegisteredEvents() []eventcontract.Regis
             registeredListenerList = append(
                 registeredListenerList,
                 eventcontract.RegisteredListener{
-                    Priority:     entry.priority,
-                    Source:       entry.source,
-                    Owner:        entry.owner,
-                    ListenerId:   listenerId,
-                    ListenerName: listenerName,
+                    Priority:                 entry.priority,
+                    Source:                   entry.source,
+                    Owner:                    entry.owner,
+                    ListenerId:               listenerId,
+                    ListenerName:             listenerName,
+                    Required:                 entry.required,
+                    MaySkipRequiredListeners: entry.maySkipRequiredListeners,
                 },
             )
         }
@@ -371,18 +328,17 @@ func (instance *EventDispatcherAdapter) addListenerRegistration(
         return listenerErr
     }
 
-    instance.mutex.Lock()
-    instance.nextRegistrationIndex++
-    registrationIndex := instance.nextRegistrationIndex
-    instance.mutex.Unlock()
-
     registration := instance.eventDispatcher.AddListener(
         eventName,
         wrappedListener,
         priority,
     )
 
+    /* @important the ordering index is taken after the wrapped dispatcher issued its listener id, not before. Taken first, two concurrent registrations could receive the two counters in opposite orders, and since dispatch breaks ties between equal priorities by listener id while RegisteredEvents breaks them by this index, the inspector would report an execution order the dispatch never uses — permanently. */
     instance.mutex.Lock()
+    instance.nextRegistrationIndex++
+    registrationIndex := instance.nextRegistrationIndex
+
     instance.listenerRegistrations[eventName] = append(
         instance.listenerRegistrations[eventName],
         adapterListenerRegistration{
@@ -400,12 +356,14 @@ func (instance *EventDispatcherAdapter) addListenerRegistration(
 }
 
 type adapterListenerRegistration struct {
-    registration           eventcontract.ListenerRegistration
-    priority               int
-    source                 string
-    owner                  string
-    listenerProgramCounter uintptr
-    registrationIndex      uint64
+    registration             eventcontract.ListenerRegistration
+    priority                 int
+    source                   string
+    owner                    string
+    listenerProgramCounter   uintptr
+    registrationIndex        uint64
+    required                 bool
+    maySkipRequiredListeners bool
 }
 
 var _ eventcontract.EventDispatcher = (*EventDispatcherAdapter)(nil)
