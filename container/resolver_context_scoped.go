@@ -74,7 +74,7 @@ func (instance *resolverContext) scopedServiceByName(
             },
             create: scopedProviderCreateFunc(provider),
             store: instanceStore{
-                keep: func(value any) error {
+                keep: func(value any) (any, bool, error) {
                     return scopeInstance.storeCreatedInstance(serviceName, canonicalType, value)
                 },
             },
@@ -116,7 +116,7 @@ func (instance *resolverContext) scopedServiceByType(
             },
             create: scopedProviderCreateFunc(provider),
             store: instanceStore{
-                keep: func(value any) error {
+                keep: func(value any) (any, bool, error) {
                     return scopeInstance.storeCreatedInstance("", canonicalType, value)
                 },
             },

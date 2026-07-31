@@ -280,3 +280,73 @@ func TestResolution_SameStringTypesFromDifferentPackagesDoNotAlias(t *testing.T)
         t.Fatalf("expected the container with same-string types to close cleanly, got %v", closeErr)
     }
 }
+
+type melodyErrorResolver struct {
+    err *exception.Error
+}
+
+func (instance *melodyErrorResolver) Get(serviceName string) (any, error) {
+    return nil, instance.err
+}
+
+func (instance *melodyErrorResolver) MustGet(serviceName string) any {
+    exception.Panic(instance.err)
+
+    return nil
+}
+
+func (instance *melodyErrorResolver) GetByType(targetType reflect.Type) (any, error) {
+    return nil, instance.err
+}
+
+func (instance *melodyErrorResolver) MustGetByType(targetType reflect.Type) any {
+    exception.Panic(instance.err)
+
+    return nil
+}
+
+func (instance *melodyErrorResolver) Has(serviceName string) bool {
+    return false
+}
+
+func (instance *melodyErrorResolver) HasType(targetType reflect.Type) bool {
+    return false
+}
+
+/* @info a melody error passes back through FromResolver whole, with the service name added to its context in place. The old rebuild produced a lookalike that had shed the already-logged mark, the log level and every wrapper above the found error — a refusal already logged at its source was logged again at the kernel boundary. */
+func TestFromResolver_MelodyErrorPassesThroughWithServiceName(t *testing.T) {
+    originalErr := exception.NewError(
+        "the original refusal",
+        map[string]any{"detail": "kept"},
+        errors.New("the root cause"),
+    )
+    originalErr.MarkAsLogged()
+
+    resolver := &melodyErrorResolver{err: originalErr}
+
+    _, fromResolverErr := FromResolver[*resolverTestService](resolver, "service.original")
+    if nil == fromResolverErr {
+        t.Fatalf("expected the resolution error to propagate")
+    }
+
+    var typedError *exception.Error
+    if false == errors.As(fromResolverErr, &typedError) {
+        t.Fatalf("expected a melody error, got %T", fromResolverErr)
+    }
+
+    if false == typedError.AlreadyLogged() {
+        t.Fatalf("expected the already-logged mark to survive the pass-through")
+    }
+
+    if "the original refusal" != typedError.Message() {
+        t.Fatalf("unexpected error message: %s", typedError.Message())
+    }
+
+    if "service.original" != typedError.Context()["serviceName"] {
+        t.Fatalf("expected the service name to be added to the original error's context")
+    }
+
+    if "kept" != typedError.Context()["detail"] {
+        t.Fatalf("expected the original context to survive")
+    }
+}

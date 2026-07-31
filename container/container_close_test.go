@@ -1,7 +1,9 @@
 package container
 
 import (
+    "errors"
     "reflect"
+    "strings"
     "sync"
     "testing"
     "time"
@@ -957,5 +959,188 @@ func TestContainer_Close_ResolverMediatedZeroSizeAliasClosesOnce(t *testing.T) {
 
     if 1 != sameTypeZeroSizeCloseCount {
         t.Fatalf("expected the shared instance to be closed exactly once, got %d", sameTypeZeroSizeCloseCount)
+    }
+}
+
+type failingCloseService struct{}
+
+func (instance *failingCloseService) Close() error {
+    return errors.New("refusing to close")
+}
+
+type replacedBuiltProbe struct {
+    label    string
+    recorder *closeOrderRecorder
+}
+
+func (instance *replacedBuiltProbe) Close() error {
+    instance.recorder.record(instance.label)
+
+    return nil
+}
+
+/* @info an override replacing an instance the container built evicts it from the only maps the close sweep reads: it used to leak forever, with both the resolution and the override reporting success. The evicted value waits in the graveyard and the teardown closes it — once — alongside the override that took its place. */
+func TestContainer_Close_ReplacedBuiltInstanceIsClosed(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    registerErr := serviceContainer.Register(
+        "app.replaced.built",
+        func(resolver containercontract.Resolver) (*replacedBuiltProbe, error) {
+            return &replacedBuiltProbe{label: "built", recorder: recorder}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get("app.replaced.built"); nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+
+    overrideErr := serviceContainer.OverrideProtectedInstance(
+        "app.replaced.built",
+        &replacedBuiltProbe{label: "override", recorder: recorder},
+    )
+    if nil != overrideErr {
+        t.Fatalf("unexpected override error: %v", overrideErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    builtCloses := 0
+    overrideCloses := 0
+    for _, label := range closeSequence {
+        if "built" == label {
+            builtCloses = builtCloses + 1
+        }
+        if "override" == label {
+            overrideCloses = overrideCloses + 1
+        }
+    }
+
+    if 1 != builtCloses {
+        t.Fatalf("expected the replaced built instance to be closed exactly once, got %v", closeSequence)
+    }
+
+    if 1 != overrideCloses {
+        t.Fatalf("expected the final override to be closed exactly once, got %v", closeSequence)
+    }
+}
+
+/* @info an override evicting an EARLIER override closes nothing: an installed override belongs to whoever installed it, and only what the container itself built enters the graveyard. */
+func TestContainer_Close_ReplacedOverrideIsNotClosed(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    registerErr := serviceContainer.Register(
+        "app.replaced.override",
+        func(resolver containercontract.Resolver) (*replacedBuiltProbe, error) {
+            return &replacedBuiltProbe{label: "built", recorder: recorder}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    firstOverrideErr := serviceContainer.OverrideProtectedInstance(
+        "app.replaced.override",
+        &replacedBuiltProbe{label: "first-override", recorder: recorder},
+    )
+    if nil != firstOverrideErr {
+        t.Fatalf("unexpected override error: %v", firstOverrideErr)
+    }
+
+    secondOverrideErr := serviceContainer.OverrideProtectedInstance(
+        "app.replaced.override",
+        &replacedBuiltProbe{label: "second-override", recorder: recorder},
+    )
+    if nil != secondOverrideErr {
+        t.Fatalf("unexpected override error: %v", secondOverrideErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    for _, label := range closeSequence {
+        if "first-override" == label {
+            t.Fatalf("expected the evicted override to stay its installer's, got %v", closeSequence)
+        }
+    }
+}
+
+/* @info a close that both fails and cycles used to keep the failures and drop the cycle's node list — the operator saw WHICH services failed but not which ones cycled. The nodes ride inside the failure text now. */
+func TestContainer_Close_CycleFailureNamesTheNodes(t *testing.T) {
+    serviceContainer := NewContainer().(*container)
+
+    registerFirstErr := serviceContainer.Register(
+        "app.cycle.first",
+        func(resolver containercontract.Resolver) (*failingCloseService, error) {
+            return &failingCloseService{}, nil
+        },
+    )
+    if nil != registerFirstErr {
+        t.Fatalf("unexpected register error: %v", registerFirstErr)
+    }
+
+    registerSecondErr := serviceContainer.Register(
+        "app.cycle.second",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{recorder: &closeOrderRecorder{mutex: &sync.Mutex{}, closeSequence: &[]string{}}}, nil
+        },
+    )
+    if nil != registerSecondErr {
+        t.Fatalf("unexpected register error: %v", registerSecondErr)
+    }
+
+    if _, getErr := serviceContainer.Get("app.cycle.first"); nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+    if _, getErr := serviceContainer.Get("app.cycle.second"); nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+
+    serviceContainer.mutex.Lock()
+    serviceContainer.registerDependencyLocked("service:app.cycle.first", "service:app.cycle.second")
+    serviceContainer.registerDependencyLocked("service:app.cycle.second", "service:app.cycle.first")
+    serviceContainer.mutex.Unlock()
+
+    closeErr := serviceContainer.Close()
+    if nil == closeErr {
+        t.Fatalf("expected the failing close to be reported")
+    }
+
+    var typedError *exception.Error
+    if false == errors.As(closeErr, &typedError) {
+        t.Fatalf("expected a melody error, got %T", closeErr)
+    }
+
+    failures, hasFailures := typedError.Context()["failures"].(map[string]string)
+    if false == hasFailures {
+        t.Fatalf("expected the failures map in the close error context")
+    }
+
+    cycleText, hasCycle := failures["container.dependencyCycle"]
+    if false == hasCycle {
+        t.Fatalf("expected the dependency cycle to be recorded among the failures")
+    }
+
+    if false == strings.Contains(cycleText, "app.cycle.first") || false == strings.Contains(cycleText, "app.cycle.second") {
+        t.Fatalf("expected the cycle failure to name its nodes, got %q", cycleText)
     }
 }

@@ -650,3 +650,171 @@ func TestScope_AContainerProviderCannotReachAScopeOnlyEntry(t *testing.T) {
         t.Fatal("a container provider reached a scope-only entry: it would hold one request for the life of the process")
     }
 }
+
+/* @info a scoped service resolved BY TYPE is filed under its name AND its type, and the dependency edge targets the name node while the resolution stack carried the type node. Without the alias collapse the type node carried no edges, sorted ahead of every "scope:service:" key, and closed the shared instance in the first heap wave — the transaction underneath a repository still holding it. */
+func TestScopeClose_TypeAliasClosesAfterDependent(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    recorder := &scopedCloseRecorder{}
+
+    registerTransactionErr := serviceContainer.RegisterScoped(
+        "app.alias.transaction",
+        func(resolver containercontract.Resolver) (*recordingScopedService, error) {
+            return &recordingScopedService{name: "transaction", recorder: recorder}, nil
+        },
+    )
+    if nil != registerTransactionErr {
+        t.Fatalf("unexpected register error: %v", registerTransactionErr)
+    }
+
+    registerRepositoryErr := serviceContainer.RegisterScoped(
+        "app.alias.repository",
+        func(resolver containercontract.Resolver) (*aliasRepositoryService, error) {
+            _, getErr := resolver.GetByType(reflect.TypeOf((*recordingScopedService)(nil)))
+            if nil != getErr {
+                return nil, getErr
+            }
+
+            return &aliasRepositoryService{recorder: recorder}, nil
+        },
+    )
+    if nil != registerRepositoryErr {
+        t.Fatalf("unexpected register error: %v", registerRepositoryErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+
+    if _, getErr := scopeInstance.Get("app.alias.repository"); nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+
+    if closeErr := scopeInstance.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    recorded := recorder.recorded()
+    if 2 != len(recorded) {
+        t.Fatalf("expected exactly two closes, got %v", recorded)
+    }
+
+    if "repository" != recorded[0] || "transaction" != recorded[1] {
+        t.Fatalf("expected the repository to close before the transaction it holds, got %v", recorded)
+    }
+}
+
+type aliasRepositoryService struct {
+    recorder *scopedCloseRecorder
+}
+
+func (instance *aliasRepositoryService) Close() error {
+    instance.recorder.record("repository")
+
+    return nil
+}
+
+type dualFiledValueService struct {
+    closeCount *int32
+    padding    []string
+}
+
+func (instance dualFiledValueService) Close() error {
+    atomic.AddInt32(instance.closeCount, 1)
+
+    return nil
+}
+
+/* @info a VALUE-typed scoped service with an uncomparable field, filed under name and type, defeats both identity marks — no pointer, no equality — and used to be closed once per node. The alias link recorded at filing time is what tells the teardown the two nodes are one filing. */
+func TestScopeClose_DualFiledUncomparableValue_ClosedOnce(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    closeCount := int32(0)
+
+    registerErr := serviceContainer.RegisterScoped(
+        "app.alias.value",
+        func(resolver containercontract.Resolver) (dualFiledValueService, error) {
+            return dualFiledValueService{
+                closeCount: &closeCount,
+                padding:    []string{"uncomparable"},
+            }, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+
+    if _, getErr := scopeInstance.GetByType(reflect.TypeOf(dualFiledValueService{})); nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+
+    if closeErr := scopeInstance.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != atomic.LoadInt32(&closeCount) {
+        t.Fatalf("expected exactly one close for the dual-filed value, got %d", atomic.LoadInt32(&closeCount))
+    }
+}
+
+/* @info a ClosedWithScope override replacing a created instance evicts it from the maps the teardown reads, but the evicted value is still the scope's to close — it waits in the graveyard and closes with the scope, exactly once. Before the graveyard it simply leaked, with both calls reporting success. */
+func TestScopeClose_EvictedCreatedInstanceClosedAtTeardown(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    recorder := &scopedCloseRecorder{}
+
+    registerErr := serviceContainer.RegisterScoped(
+        "app.evicted.service",
+        func(resolver containercontract.Resolver) (*recordingScopedService, error) {
+            return &recordingScopedService{name: "created", recorder: recorder}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+
+    if _, getErr := scopeInstance.Get("app.evicted.service"); nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+
+    overridingScope, hasOptions := scopeInstance.(containercontract.OverrideServiceWithOptions)
+    if false == hasOptions {
+        t.Fatalf("expected the scope to implement OverrideServiceWithOptions")
+    }
+
+    overrideErr := overridingScope.OverrideProtectedInstanceWithOptions(
+        "app.evicted.service",
+        &recordingScopedService{name: "override", recorder: recorder},
+        ClosedWithScope(),
+    )
+    if nil != overrideErr {
+        t.Fatalf("unexpected override error: %v", overrideErr)
+    }
+
+    if closeErr := scopeInstance.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    recorded := recorder.recorded()
+
+    createdCloses := 0
+    overrideCloses := 0
+    for _, name := range recorded {
+        if "created" == name {
+            createdCloses = createdCloses + 1
+        }
+        if "override" == name {
+            overrideCloses = overrideCloses + 1
+        }
+    }
+
+    if 1 != createdCloses {
+        t.Fatalf("expected the evicted created instance to be closed exactly once, got %v", recorded)
+    }
+
+    if 1 != overrideCloses {
+        t.Fatalf("expected the ClosedWithScope override to be closed exactly once, got %v", recorded)
+    }
+}

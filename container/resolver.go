@@ -17,15 +17,11 @@ func FromResolver[T any](resolver containercontract.Resolver, serviceName string
         var melodyErr *exception.Error
         isMelodyErr := errors.As(getErr, &melodyErr)
 
+        /* @important the original error goes back out whole, with the service name added to its context in place: rebuilding it from Message/Context/CauseErr produced a lookalike that had shed its log level, its already-logged mark, its capture stack and every wrapper above the found error — so a Warning-level refusal escalated to Error at the kernel boundary and a logged error logged twice. The error is single-threaded per request, which is what makes the in-place context write safe. */
         if true == isMelodyErr && nil != melodyErr {
-            context := melodyErr.Context()
-            context["serviceName"] = serviceName
+            melodyErr.SetContextValue("serviceName", serviceName)
 
-            return zero, exception.NewError(
-                melodyErr.Message(),
-                context,
-                melodyErr.CauseErr(),
-            )
+            return zero, getErr
         }
 
         return zero, exception.NewError(

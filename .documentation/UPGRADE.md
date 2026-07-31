@@ -18,6 +18,46 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Container: the protected `service.` namespace refuses scoped registration
+
+**What changed.** [`RegisterScoped`](../container/container_scoped_registrar.go) — on the container and on a live scope — refuses a `service.`-prefixed name, with or without `Replacing()`. The override path has always refused to substitute a protected name; the scoped registration performed the same substitution inside every scope and was accepted.
+
+**Symptom.** A boot that registered a scoped service under a `service.` name now fails at that registration line; `MustRegisterScoped` panics there.
+
+**Remedy.** Register the substitute under an application-owned name, or install it per scope through `OverrideProtectedInstance`, which is the API that owns deliberate substitution of protected services.
+
+### Container: a closed container refuses registrations and overrides
+
+**What changed.** [`Register`](../container/container.go) and `OverrideInstance`/`OverrideProtectedInstance` on a closed container return the container-is-closed error, the way `RegisterScoped` always has. The read paths are untouched: already-built instances keep being served during shutdown.
+
+**Symptom.** Shutdown-adjacent code that registered or overrode after `Close()` — and silently produced a service nothing would build, or a value nothing would close — now receives an error; the `Must*` forms panic.
+
+**Remedy.** Order the shutdown so writes precede `Close()`; a write that can legitimately race the shutdown checks the returned error.
+
+### Container: an override fits the registered type, wins its race, and frees what it replaces
+
+**What changed.** Three related override rules. A value not assignable to every type its name is registered under is refused before anything is written, so `GetByType` keeps its contract. An override installed while the service's provider was running wins the slot: the racing resolution yields the override and the value it built is closed, where the creation used to clobber the name entry while the type entry kept the override — the two maps then disagreeing forever. And an override replacing an instance the container itself built no longer leaks it: the replaced instance is closed by the container's teardown, once; an override evicted by a later override still belongs to its installer. The scope-side `ClosedWithScope` eviction closes the evicted created instance with the scope in the same way.
+
+**Symptom.** `OverrideInstance("db", wrongTypedValue)` now errors instead of poisoning type-keyed resolution; a mock installed mid-creation is what every caller sees, including the racing one; a Closeable the container built and an override displaced is closed at shutdown instead of never.
+
+**Remedy.** Override with a value of a compatible type — a substitute implementing the registered interface is unchanged. Code that relied on the replaced instance staying open past its eviction holds its own reference and manages its own close.
+
+### Container: `Has` answers under the suspension `Get` enforces
+
+**What changed.** [`resolverContext.Has`/`HasType`](../container/resolver_context.go) consult the scope only when the resolution may read it. Inside a container-owned provider — where `Get` of a scope-only entry is refused — `Has` of the same entry answered true and now answers false.
+
+**Symptom.** A container provider gating an optional dependency on `Has("scope-only-name")` takes the absent branch, where it previously took the present branch and then panicked in `MustGet` — or wired a process-lifetime service against one request's contents.
+
+**Remedy.** None for the Has-then-Get idiom, which now agrees with itself. A container service that genuinely needs request data takes it as a method argument.
+
+### Container: two boot-line refusals — the typed-nil provider and the colliding type identity
+
+**What changed.** A typed-nil provider function (`var f containercontract.Provider[T]` handed in uninitialized) is refused at registration instead of panicking on its first resolution. And a type registration whose identity key another, different type already claimed — possible only for pointer-to-unnamed-composite types such as `*[]alpha.Bus` vs `*[]beta.Bus` from two same-short-named packages — is refused at the boot line that declares it, instead of the two types sharing a creation-guard key and reporting a legitimate resolution as a circular dependency.
+
+**Symptom.** A boot that previously reported success and failed at runtime now fails at the registration line, naming the service — and for the collision, both types and the shared key.
+
+**Remedy.** Initialize the provider variable; for the collision, name one of the composite types (a named slice type carries its package path) or register it by name only with `WithoutTypeRegistration()`.
+
 ### Validation: a parameterized rule needs its parameters, whole and non-negative
 
 **What changed.** Three related refusals in how rule parameters are read. A parameterized rule named without parameters (`regex`, `regex()`, `max()`, `lessThan`) fails closed instead of validating with the registered singleton — the bare `regex` validated with the match-everything `.*` default, the bare `lessThan` meant "less than 0". A numeric bound must be an integer in its entirety: the parse previously accepted a valid leading integer and dropped the rest, so `lessThan=-0.5` became a bound of 0 and accepted values the tag as written refuses. And [`Regex.WithParams`](../validation/constraint_regex.go) refuses an empty pattern, while [`MinLength`/`MaxLength`](../validation/constraint_min_length.go) refuse a negative bound.

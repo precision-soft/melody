@@ -23,6 +23,7 @@ func newScope(containerInstance *container, plan *scopePlan) containercontract.S
         typeInstances:        make(map[reflect.Type]any),
         createdInstances:     make(map[string]any),
         createdTypeInstances: make(map[reflect.Type]any),
+        createdAliasNodeKeys: make(map[string]string),
 
         ownProviders:                   make(map[string]providerAny),
         ownTypeProviders:               make(map[reflect.Type]providerAny),
@@ -48,6 +49,10 @@ type scope struct {
     /* the services built through this scope are kept apart from the overrides installed into it: an override belongs to whoever installed it and outlives the scope, while a service created from one holds that request's substitutes and must not survive it. Keeping them in their own maps is what lets the scope be emptied of the second kind without touching the first. */
     createdInstances     map[string]any
     createdTypeInstances map[reflect.Type]any
+    /* @important one created instance filed under its name AND its type is two teardown nodes for one value, and a dependency edge recorded against either must constrain both. The link from the type node to the name node is written at the moment of the dual filing — the only place that knows the two are one — and the teardown collapses along it before it orders anything. Without the collapse the type alias carries no edges, sorts ahead of every "scope:service:" key, and closes the shared instance in the first heap wave, underneath its still-open dependents. */
+    createdAliasNodeKeys map[string]string
+    /* a created instance evicted by a ClosedWithScope override left the maps the teardown reads, but it is still the scope's to close; it waits here and the teardown closes it after the ordered walk, under the same identity marks that keep any still-filed alias of it from being closed twice. */
+    evictedCreatedInstances []any
     /* registrations made on this scope itself, layered over the plan. They are the rare case: the declared plan is where a scoped service normally comes from. */
     ownProviders                   map[string]providerAny
     ownTypeProviders               map[reflect.Type]providerAny
@@ -359,13 +364,6 @@ func (instance *scope) OverrideProtectedInstanceWithOptions(
         )
     }
 
-    instance.instances[serviceName] = value
-
-    /* an override declared as closed with the scope is filed into the created maps as well, which is the whole of the mechanism: the teardown already walks exactly those, so nothing about closing has to learn about overrides. */
-    if true == overrideOption.ClosedWithScope {
-        instance.createdInstances[serviceName] = value
-    }
-
     valueType := reflect.TypeOf(value)
     if nil == valueType {
         return exception.NewError(
@@ -389,10 +387,26 @@ func (instance *scope) OverrideProtectedInstanceWithOptions(
         )
     }
 
+    instance.instances[serviceName] = value
+
+    /* an override declared as closed with the scope is filed into the created maps as well, which is the whole of the mechanism: the teardown already walks exactly those, so nothing about closing has to learn about overrides. A created instance the filing evicts is moved to the graveyard the teardown also walks — it left the created maps, but it is the scope's to close, not the overrider's. */
+    if true == overrideOption.ClosedWithScope {
+        if evictedValue, evicted := instance.createdInstances[serviceName]; true == evicted {
+            instance.evictedCreatedInstances = append(instance.evictedCreatedInstances, evictedValue)
+        }
+
+        instance.createdInstances[serviceName] = value
+    }
+
     instance.typeInstances[canonicalType] = value
 
     if true == overrideOption.ClosedWithScope {
+        if evictedValue, evicted := instance.createdTypeInstances[canonicalType]; true == evicted {
+            instance.evictedCreatedInstances = append(instance.evictedCreatedInstances, evictedValue)
+        }
+
         instance.createdTypeInstances[canonicalType] = value
+        instance.createdAliasNodeKeys[scopedTypeNodeKey(typeIdentityKey(canonicalType))] = scopedNameNodeKey(serviceName)
     }
 
     return nil
@@ -437,26 +451,32 @@ func (instance *scope) Close() error {
 
     createdInstances := instance.createdInstances
     createdTypeInstances := instance.createdTypeInstances
+    createdAliasNodeKeys := instance.createdAliasNodeKeys
+    evictedCreatedInstances := instance.evictedCreatedInstances
 
     instance.instances = nil
     instance.typeInstances = nil
     instance.createdInstances = nil
     instance.createdTypeInstances = nil
+    instance.createdAliasNodeKeys = nil
+    instance.evictedCreatedInstances = nil
     instance.container.Store(nil)
 
     /* the lock is released before anything is closed, and the scope is already marked closed above: a Close() that reaches back into the scope then reads a closed scope instead of deadlocking on a mutex its own caller holds, which is the ordering the container's own teardown uses */
     instance.mutex.Unlock()
 
-    return closeCreatedScopeInstances(createdInstances, createdTypeInstances, dependencyGraph)
+    return closeCreatedScopeInstances(createdInstances, createdTypeInstances, createdAliasNodeKeys, dependencyGraph, evictedCreatedInstances)
 }
 
-/* closeCreatedScopeInstances closes each service the scope built, once. The same instance is filed under its name and under its type whenever both were known, so the aliases are collapsed the way the container's teardown collapses them — by pointer identity, or by value for a comparable non-pointer — before Close is called. A panicking or failing Close is recorded and the loop carries on, because a request scope closes on the way out of a handler and one bad service must not keep the rest of that request's services alive.
+/* closeCreatedScopeInstances closes each service the scope built, once. One instance filed under its name and its type is first collapsed onto the name node along the alias links recorded at filing time, with the edges of both nodes merged onto the survivor, so a dependency edge recorded against either alias constrains the one close that happens; whatever identity the links do not cover is still caught by the pointer/value marks at close time. A panicking or failing Close is recorded and the loop carries on, because a request scope closes on the way out of a handler and one bad service must not keep the rest of that request's services alive.
 
-The order is the scope's own dependency graph, dependents before their dependencies: a scoped repository holding a scoped transaction is the ordinary case now that a scope owns registrations, and closing the two by name would be a coin flip. Nodes the graph says nothing about, and nodes left over by a cycle, fall back to the sorted node key descending — stable, and the order this walk used before there was a graph at all. */
+The order is the scope's own dependency graph, dependents before their dependencies: a scoped repository holding a scoped transaction is the ordinary case now that a scope owns registrations, and closing the two by name would be a coin flip. Nodes the graph says nothing about, and nodes left over by a cycle, fall back to the sorted node key descending — stable, and the order this walk used before there was a graph at all. The evicted instances close after the ordered walk, under the same marks. */
 func closeCreatedScopeInstances(
     createdInstances map[string]any,
     createdTypeInstances map[reflect.Type]any,
+    createdAliasNodeKeys map[string]string,
     dependencyGraph map[string]map[string]struct{},
+    evictedCreatedInstances []any,
 ) error {
     type closer interface {
         Close() error
@@ -477,19 +497,67 @@ func closeCreatedScopeInstances(
         valueOfNodeKey[nodeKey] = value
     }
 
-    closeOrder, cycleNodeKeys := teardownCloseOrder(nodeKeys, dependencyGraph)
+    /* @important the type alias collapses onto its name node only while BOTH still hold the same filing: an eviction may have replaced one of the two, and collapsing across it would close the survivor under the wrong node and skip the evicted value's alias mark */
+    representativeOf := make(map[string]string, len(nodeKeys))
+    for _, nodeKey := range nodeKeys {
+        representativeOf[nodeKey] = nodeKey
+    }
+
+    for typeNodeKey, nameNodeKey := range createdAliasNodeKeys {
+        typeValue, typeExists := valueOfNodeKey[typeNodeKey]
+        nameValue, nameExists := valueOfNodeKey[nameNodeKey]
+        if false == typeExists || false == nameExists {
+            continue
+        }
+
+        if false == sameServiceValue(typeValue, nameValue) {
+            continue
+        }
+
+        representativeOf[typeNodeKey] = nameNodeKey
+    }
+
+    canonicalNodeKeys := make([]string, 0, len(nodeKeys))
+    for _, nodeKey := range nodeKeys {
+        if nodeKey == representativeOf[nodeKey] {
+            canonicalNodeKeys = append(canonicalNodeKeys, nodeKey)
+        }
+    }
+
+    canonicalEdges := make(map[string]map[string]struct{}, len(canonicalNodeKeys))
+    for dependentKey, dependencySet := range dependencyGraph {
+        canonicalDependent, dependentExists := representativeOf[dependentKey]
+        if false == dependentExists {
+            continue
+        }
+
+        for dependencyKey := range dependencySet {
+            canonicalDependency, dependencyExists := representativeOf[dependencyKey]
+            if false == dependencyExists {
+                continue
+            }
+
+            dependencies, exists := canonicalEdges[canonicalDependent]
+            if false == exists {
+                dependencies = make(map[string]struct{})
+                canonicalEdges[canonicalDependent] = dependencies
+            }
+
+            dependencies[canonicalDependency] = struct{}{}
+        }
+    }
+
+    closeOrder, cycleNodeKeys := teardownCloseOrder(canonicalNodeKeys, canonicalEdges)
 
     closedPointers := make(map[pointerIdentity]struct{})
     closedValues := make(map[any]struct{})
     failures := make(map[string]string)
 
     if 0 < len(cycleNodeKeys) {
-        failures["scope.dependencyCycle"] = "dependency cycle detected"
+        failures["scope.dependencyCycle"] = "dependency cycle detected: " + strings.Join(cycleNodeKeys, ", ")
     }
 
-    for _, nodeKey := range closeOrder {
-        value := valueOfNodeKey[nodeKey]
-
+    closeCandidateValue := func(nodeKey string, value any) {
         pointerKey, hasPointer := pointerKeyOf(value)
         if true == hasPointer && true == isZeroSizePointerIdentity(pointerKey) {
             hasPointer = false
@@ -499,13 +567,13 @@ func closeCreatedScopeInstances(
 
         if true == hasPointer {
             if _, alreadyClosed := closedPointers[pointerKey]; true == alreadyClosed {
-                continue
+                return
             }
 
             closedPointers[pointerKey] = struct{}{}
         } else if true == comparableValue {
             if _, alreadyClosed := closedValues[value]; true == alreadyClosed {
-                continue
+                return
             }
 
             closedValues[value] = struct{}{}
@@ -513,13 +581,21 @@ func closeCreatedScopeInstances(
 
         closeable, isCloseable := value.(closer)
         if false == isCloseable {
-            continue
+            return
         }
 
         closeErr := closeServiceValue(closeable)
         if nil != closeErr {
             failures[nodeKey] = errorText(closeErr)
         }
+    }
+
+    for _, nodeKey := range closeOrder {
+        closeCandidateValue(nodeKey, valueOfNodeKey[nodeKey])
+    }
+
+    for _, evictedValue := range evictedCreatedInstances {
+        closeCandidateValue("scope.evictedInstance", evictedValue)
     }
 
     if 0 == len(failures) {
@@ -533,6 +609,26 @@ func closeCreatedScopeInstances(
         },
         nil,
     )
+}
+
+/* sameServiceValue reports whether the two filings hold one instance, deciding it the way the close marks do: pointer identity first, plain equality for comparable non-pointers, and — for the values neither can judge — the fact that the alias link was written by the dual filing itself, which is what the caller falls back on. */
+func sameServiceValue(leftValue any, rightValue any) bool {
+    leftPointer, leftHasPointer := pointerKeyOf(leftValue)
+    rightPointer, rightHasPointer := pointerKeyOf(rightValue)
+
+    if leftHasPointer != rightHasPointer {
+        return false
+    }
+
+    if true == leftHasPointer {
+        return leftPointer == rightPointer
+    }
+
+    if true == isComparableValue(leftValue) && true == isComparableValue(rightValue) {
+        return leftValue == rightValue
+    }
+
+    return true
 }
 
 func (instance *scope) lookupInstanceByName(serviceName string) (any, bool, error) {
@@ -595,17 +691,17 @@ func (instance *scope) lookupInstanceByType(canonicalType reflect.Type) (any, bo
     return value, exists, nil
 }
 
-/* storeCreatedInstance keeps a service the resolver built out of this scope's entries. It belongs to the request the scope stands for: the value holds the per-request logger, the request context or whatever else was overridden, and the root container would hand that same instance — carrying one request's identity — to every request for the rest of the process. It is filed under the name, the type, or both, exactly as the root container would have filed it, and it is gone when the scope closes. */
+/* storeCreatedInstance keeps a service the resolver built out of this scope's entries. It belongs to the request the scope stands for: the value holds the per-request logger, the request context or whatever else was overridden, and the root container would hand that same instance — carrying one request's identity — to every request for the rest of the process. It is filed under the name, the type, or both, exactly as the root container would have filed it, and it is gone when the scope closes. An override installed while the provider ran occupies the slot already and wins — the value it beat is handed back for the guard to close. A dual filing records its type→name alias link, which is what the teardown collapses along. */
 func (instance *scope) storeCreatedInstance(
     serviceName string,
     canonicalType reflect.Type,
     value any,
-) error {
+) (any, bool, error) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
     if nil == instance.container.Load() {
-        return exception.NewError(
+        return nil, false, exception.NewError(
             "scope is closed",
             map[string]any{
                 "serviceName": serviceName,
@@ -615,14 +711,29 @@ func (instance *scope) storeCreatedInstance(
     }
 
     if "" != serviceName {
+        if existingValue, exists := instance.instances[serviceName]; true == exists {
+            return existingValue, true, nil
+        }
+
         instance.createdInstances[serviceName] = value
+
+        if nil != canonicalType {
+            instance.createdTypeInstances[canonicalType] = value
+            instance.createdAliasNodeKeys[scopedTypeNodeKey(typeIdentityKey(canonicalType))] = scopedNameNodeKey(serviceName)
+        }
+
+        return value, false, nil
     }
 
     if nil != canonicalType {
+        if existingValue, exists := instance.typeInstances[canonicalType]; true == exists {
+            return existingValue, true, nil
+        }
+
         instance.createdTypeInstances[canonicalType] = value
     }
 
-    return nil
+    return value, false, nil
 }
 
 var _ containercontract.Scope = (*scope)(nil)

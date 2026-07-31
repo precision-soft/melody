@@ -555,3 +555,60 @@ func TestScope_ScopedServicesAreClosedDependentsBeforeDependencies(t *testing.T)
         t.Fatalf("expected the dependent to be closed before its dependency, got %v", recorded)
     }
 }
+
+/* @info a scoped dependency the handler resolved FIRST is already in the scope when the dependent's provider asks for it, and the early answer used to skip the dependency edge: the graph guarantee held only for whichever resolution came first, and the close order fell back to the name lottery. The names are chosen so the fallback would close the dependency first. */
+func TestScopedResolution_ExistingInstanceRecordsDependencyEdge(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    recorder := &scopedCloseRecorder{}
+
+    registerDependencyErr := serviceContainer.RegisterScoped(
+        "app.zzz.dependency",
+        func(resolver containercontract.Resolver) (*recordingScopedService, error) {
+            return &recordingScopedService{name: "dependency", recorder: recorder}, nil
+        },
+        WithoutTypeRegistration(),
+    )
+    if nil != registerDependencyErr {
+        t.Fatalf("unexpected register error: %v", registerDependencyErr)
+    }
+
+    registerDependentErr := serviceContainer.RegisterScoped(
+        "app.aaa.dependent",
+        func(resolver containercontract.Resolver) (*recordingScopedService, error) {
+            _, getErr := resolver.Get("app.zzz.dependency")
+            if nil != getErr {
+                return nil, getErr
+            }
+
+            return &recordingScopedService{name: "dependent", recorder: recorder}, nil
+        },
+        WithoutTypeRegistration(),
+    )
+    if nil != registerDependentErr {
+        t.Fatalf("unexpected register error: %v", registerDependentErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+
+    if _, getErr := scopeInstance.Get("app.zzz.dependency"); nil != getErr {
+        t.Fatalf("unexpected direct dependency resolution error: %v", getErr)
+    }
+
+    if _, getErr := scopeInstance.Get("app.aaa.dependent"); nil != getErr {
+        t.Fatalf("unexpected dependent resolution error: %v", getErr)
+    }
+
+    if closeErr := scopeInstance.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    recorded := recorder.recorded()
+    if 2 != len(recorded) {
+        t.Fatalf("expected exactly two closes, got %v", recorded)
+    }
+
+    if "dependent" != recorded[0] || "dependency" != recorded[1] {
+        t.Fatalf("expected the dependent to be closed before its already-created dependency, got %v", recorded)
+    }
+}

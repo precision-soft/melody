@@ -2,6 +2,7 @@ package container
 
 import (
     "reflect"
+    "strings"
 
     containercontract "github.com/precision-soft/melody/container/contract"
     "github.com/precision-soft/melody/exception"
@@ -26,6 +27,17 @@ func (instance *scope) RegisterScoped(
     if nil == provider {
         return exception.NewError(
             "the provider is required to register a scoped service",
+            map[string]any{
+                "serviceName": serviceName,
+            },
+            nil,
+        )
+    }
+
+    /* @important mirror the container-level scoped registrar: the "service." namespace is protected from substitution, and a registration on a live scope is the same substitution one request wide. */
+    if true == strings.HasPrefix(serviceName, "service.") {
+        return exception.NewError(
+            "service is protected and cannot be registered as a scoped service",
             map[string]any{
                 "serviceName": serviceName,
             },

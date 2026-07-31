@@ -5,6 +5,7 @@ import (
     "testing"
 
     containercontract "github.com/precision-soft/melody/container/contract"
+    "github.com/precision-soft/melody/exception"
 )
 
 type closedGuardCloser struct {
@@ -204,9 +205,7 @@ func TestServiceWithCreationGuard_RestoresScopeVisibilityAfterAPanickingProvider
             create: func(handedResolver containercontract.Resolver) (any, error, *providerDebugInfo) {
                 panic("the provider gives up")
             },
-            store: containerInstanceStore(func(storedValue any) {
-                serviceContainer.instances["app.panicking"] = storedValue
-            }),
+            store:         containerNameStore(serviceContainer, "app.panicking", nil),
             suspendsScope: true,
         },
         resolver,
@@ -223,6 +222,330 @@ func TestServiceWithCreationGuard_RestoresScopeVisibilityAfterAPanickingProvider
 
     if false == resolver.scopeVisible() {
         t.Fatalf("expected the resolution to see its scope again after the panic")
+    }
+}
+
+type scopeCloseRaceService struct {
+    mutex  sync.Mutex
+    closed bool
+}
+
+func (instance *scopeCloseRaceService) Close() error {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.closed = true
+
+    return nil
+}
+
+func (instance *scopeCloseRaceService) wasClosed() bool {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return instance.closed
+}
+
+/* @info a scoped service finishing after its scope closed is refused by the store, and the refused value is closed best-effort — the scope-side twin of the container-close race. Before the guard, the freshly built value was dropped unclosed: an error for the caller, a silent leak for the resource. */
+func TestCreationGuard_ScopeClosedDuringCreation_ClosesBuiltValue(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    providerEntered := make(chan struct{})
+    scopeClosed := make(chan struct{})
+    builtService := &scopeCloseRaceService{}
+
+    registerErr := serviceContainer.RegisterScoped(
+        "app.scope.close.race",
+        func(resolver containercontract.Resolver) (*scopeCloseRaceService, error) {
+            close(providerEntered)
+            <-scopeClosed
+
+            return builtService, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+
+    resolutionDone := make(chan error, 1)
+    go func() {
+        _, getErr := scopeInstance.Get("app.scope.close.race")
+        resolutionDone <- getErr
+    }()
+
+    <-providerEntered
+
+    closeErr := scopeInstance.Close()
+    if nil != closeErr {
+        t.Fatalf("unexpected scope close error: %v", closeErr)
+    }
+
+    close(scopeClosed)
+
+    getErr := <-resolutionDone
+    if nil == getErr {
+        t.Fatalf("expected the resolution to fail on the closed scope")
+    }
+
+    if false == builtService.wasClosed() {
+        t.Fatalf("expected the value built during the scope close to be closed best-effort")
+    }
+}
+
+type typedNilPanicError struct {
+    detail string
+}
+
+func (instance *typedNilPanicError) Error() string {
+    return instance.detail
+}
+
+/* @info a provider panicking with a TYPED-NIL error passes the recovery's error assertion as a non-nil interface whose Error() dereferences a nil receiver. The recovery runs with the container mutex unlocked, so a second panic there used to escape as a fatal unlock-of-unlocked-mutex through the caller's deferred Unlock, with every waiter parked forever. The typed nil is normalized away, the resolution fails cleanly, and the error stays loggable. */
+func TestCreationGuard_TypedNilPanicValue_FailsWithoutSecondPanic(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "app.typed.nil.panic",
+        func(resolver containercontract.Resolver) (*testService, error) {
+            var typedNil *typedNilPanicError
+            panic(typedNil)
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    _, getErr := serviceContainer.Get("app.typed.nil.panic")
+    if nil == getErr {
+        t.Fatalf("expected the panicking provider to fail the resolution")
+    }
+
+    logContext := exception.LogContext(getErr)
+    if nil == logContext {
+        t.Fatalf("expected the panic error to be loggable")
+    }
+
+    _, secondGetErr := serviceContainer.Get("app.typed.nil.panic")
+    if nil == secondGetErr {
+        t.Fatalf("expected the retried resolution to fail as well")
+    }
+}
+
+type panickingPanicValueError struct{}
+
+func (instance *panickingPanicValueError) Error() string {
+    panic("the error message gives up")
+}
+
+/* @info a provider panicking with an error whose Error() itself panics used to blow up the recovery handler while it rendered the context — the same unlocked-mutex escape as the typed nil, from a live receiver. The rendering is contained on its own: the report loses that context and nothing else. */
+func TestCreationGuard_PanickingErrorMessage_FailsWithoutSecondPanic(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "app.panicking.message",
+        func(resolver containercontract.Resolver) (*testService, error) {
+            panic(&panickingPanicValueError{})
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    _, getErr := serviceContainer.Get("app.panicking.message")
+    if nil == getErr {
+        t.Fatalf("expected the panicking provider to fail the resolution")
+    }
+}
+
+/* @info the owner of a finished creation drops its waiters' wait-graph edges under the lock that wakes them. A woken waiter clears its own edge only after re-acquiring the mutex, and until then the stale edge read as a circular dependency to any resolution the owner ran next — a spurious refusal between two resolutions that shared nothing but the lock they queued on. The assertion runs while the guard's caller still holds the mutex, so the waiter provably has not cleaned up after itself yet. */
+func TestCreationGuard_OwnerClearsWaiterEdgesOnCompletion(t *testing.T) {
+    serviceContainer := NewContainer().(*container)
+
+    providerGate := make(chan struct{})
+    ownerResolver := newResolverContext(serviceContainer)
+    waiterResolver := newResolverContext(serviceContainer)
+
+    creationForResolver := func(resolver *resolverContext) guardedCreation {
+        return guardedCreation{
+            requestedKey: "service:app.waiter.edges",
+            creatingKey:  "app.waiter.edges",
+            getCreatingState: func() (*creationState, bool) {
+                state, exists := serviceContainer.creatingByName["app.waiter.edges"]
+
+                return state, exists
+            },
+            setCreatingState: func(state *creationState) {
+                serviceContainer.creatingByName["app.waiter.edges"] = state
+            },
+            clearCreatingState: func() {
+                delete(serviceContainer.creatingByName, "app.waiter.edges")
+            },
+            lookup: func() (any, bool) {
+                value, exists := serviceContainer.instances["app.waiter.edges"]
+
+                return value, exists
+            },
+            create: func(handedResolver containercontract.Resolver) (any, error, *providerDebugInfo) {
+                <-providerGate
+
+                return &testService{Value: "built"}, nil, nil
+            },
+            store:         containerNameStore(serviceContainer, "app.waiter.edges", nil),
+            suspendsScope: true,
+        }
+    }
+
+    ownerDone := make(chan error, 1)
+    go func() {
+        serviceContainer.mutex.Lock()
+        _, guardErr := serviceContainer.serviceWithCreationGuardLocked(creationForResolver(ownerResolver), ownerResolver)
+
+        staleEdgeRemains := false
+        if children, exists := serviceContainer.resolverWaitGraph[waiterResolver.contextId]; true == exists {
+            _, staleEdgeRemains = children[ownerResolver.contextId]
+        }
+
+        serviceContainer.mutex.Unlock()
+
+        if true == staleEdgeRemains {
+            ownerDone <- exception.NewError("stale waiter edge survived the owner's completion", nil, nil)
+
+            return
+        }
+
+        ownerDone <- guardErr
+    }()
+
+    for {
+        serviceContainer.mutex.RLock()
+        _, creating := serviceContainer.creatingByName["app.waiter.edges"]
+        serviceContainer.mutex.RUnlock()
+
+        if true == creating {
+            break
+        }
+    }
+
+    waiterDone := make(chan error, 1)
+    go func() {
+        serviceContainer.mutex.Lock()
+        _, guardErr := serviceContainer.serviceWithCreationGuardLocked(creationForResolver(waiterResolver), waiterResolver)
+        serviceContainer.mutex.Unlock()
+
+        waiterDone <- guardErr
+    }()
+
+    for {
+        serviceContainer.mutex.RLock()
+        edgeRegistered := false
+        if children, exists := serviceContainer.resolverWaitGraph[waiterResolver.contextId]; true == exists {
+            _, edgeRegistered = children[ownerResolver.contextId]
+        }
+        serviceContainer.mutex.RUnlock()
+
+        if true == edgeRegistered {
+            break
+        }
+    }
+
+    close(providerGate)
+
+    if ownerErr := <-ownerDone; nil != ownerErr {
+        t.Fatalf("owner resolution failed: %v", ownerErr)
+    }
+
+    if waiterErr := <-waiterDone; nil != waiterErr {
+        t.Fatalf("waiter resolution failed: %v", waiterErr)
+    }
+}
+
+type overrideRaceBuiltService struct {
+    mutex  sync.Mutex
+    closed bool
+}
+
+func (instance *overrideRaceBuiltService) Close() error {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.closed = true
+
+    return nil
+}
+
+func (instance *overrideRaceBuiltService) wasClosed() bool {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return instance.closed
+}
+
+/* @info an override installed while the provider ran already occupies the slot and wins: an override answers before anything is built, and the creation blindly overwriting it revoked an installation its caller was told succeeded — while the type-keyed map kept the override, so name and type answered differently forever after. The built value that lost the race is closed. */
+func TestCreationGuard_OverrideInstalledDuringCreationWins(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    providerEntered := make(chan struct{})
+    overrideInstalled := make(chan struct{})
+    builtService := &overrideRaceBuiltService{}
+    overrideService := &overrideRaceBuiltService{}
+
+    registerErr := serviceContainer.Register(
+        "app.override.race",
+        func(resolver containercontract.Resolver) (*overrideRaceBuiltService, error) {
+            close(providerEntered)
+            <-overrideInstalled
+
+            return builtService, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    resolutionDone := make(chan any, 1)
+    resolutionFailed := make(chan error, 1)
+    go func() {
+        value, getErr := serviceContainer.Get("app.override.race")
+        if nil != getErr {
+            resolutionFailed <- getErr
+
+            return
+        }
+
+        resolutionDone <- value
+    }()
+
+    <-providerEntered
+
+    overrideErr := serviceContainer.OverrideProtectedInstance("app.override.race", overrideService)
+    if nil != overrideErr {
+        t.Fatalf("unexpected override error: %v", overrideErr)
+    }
+
+    close(overrideInstalled)
+
+    select {
+    case getErr := <-resolutionFailed:
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    case value := <-resolutionDone:
+        if overrideService != value {
+            t.Fatalf("expected the racing resolution to yield the installed override")
+        }
+    }
+
+    if false == builtService.wasClosed() {
+        t.Fatalf("expected the value that lost the override race to be closed")
+    }
+
+    laterValue, laterErr := serviceContainer.Get("app.override.race")
+    if nil != laterErr {
+        t.Fatalf("unexpected later resolution error: %v", laterErr)
+    }
+
+    if overrideService != laterValue {
+        t.Fatalf("expected later resolutions to keep yielding the override")
     }
 }
 

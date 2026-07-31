@@ -336,3 +336,29 @@ func TestNewScope_SharesTheSamePlanPointer(t *testing.T) {
         t.Fatalf("expected both scopes to hold the same plan pointer rather than a copy each")
     }
 }
+
+/* @info the override path refuses to substitute a protected "service." name, and a scoped registration with Replacing() used to perform exactly that substitution inside every scope — where the kernel resolves through. The protected namespace holds at both lifetimes, with or without Replacing. */
+func TestRegisterScoped_ProtectedNameRefused(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    plainErr := serviceContainer.RegisterScoped(
+        "service.protected.probe",
+        func(resolver containercontract.Resolver) (*scopedRegistrarProbe, error) {
+            return &scopedRegistrarProbe{value: "scoped"}, nil
+        },
+    )
+    if nil == plainErr {
+        t.Fatalf("expected the protected name to be refused for a scoped registration")
+    }
+
+    replacingErr := serviceContainer.RegisterScoped(
+        "service.protected.probe",
+        func(resolver containercontract.Resolver) (*scopedRegistrarProbe, error) {
+            return &scopedRegistrarProbe{value: "scoped"}, nil
+        },
+        Replacing(),
+    )
+    if nil == replacingErr {
+        t.Fatalf("expected the protected name to be refused even with Replacing declared")
+    }
+}

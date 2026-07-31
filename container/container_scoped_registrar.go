@@ -2,6 +2,7 @@ package container
 
 import (
     "reflect"
+    "strings"
 
     containercontract "github.com/precision-soft/melody/container/contract"
     "github.com/precision-soft/melody/exception"
@@ -40,6 +41,17 @@ func (instance *container) RegisterScoped(
     if nil == provider {
         return exception.NewError(
             "the provider is required to register a scoped service",
+            map[string]any{
+                "serviceName": serviceName,
+            },
+            nil,
+        )
+    }
+
+    /* @important the override path refuses to substitute a protected "service." name, and a scoped registration of the same name — with Replacing() — would perform exactly that substitution inside every scope, where the kernel resolves through. The protected namespace is the framework's, at both lifetimes. */
+    if true == strings.HasPrefix(serviceName, "service.") {
+        return exception.NewError(
+            "service is protected and cannot be registered as a scoped service",
             map[string]any{
                 "serviceName": serviceName,
             },
@@ -159,6 +171,10 @@ func (instance *container) registerScopedType(
         }
 
         return nil
+    }
+
+    if identityCollisionErr := instance.recordTypeIdentityKeyLocked(serviceName, canonicalType); nil != identityCollisionErr {
+        return identityCollisionErr
     }
 
     /* the cross-level check does not care whether the registration is strict: strictness decides whether a second name may share a type at the SAME lifetime, while a type answering with a singleton outside a scope and with a per-request service inside one is the ambiguity itself, whichever way it was declared. */

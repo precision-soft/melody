@@ -148,3 +148,56 @@ func TestResolverContext_GetByTypeSnapshotsTypeProviderUnderTheLock(t *testing.T
     atomic.StoreInt32(&stop, 1)
     waitGroup.Wait()
 }
+
+type suspensionHasProbe struct {
+    value string
+}
+
+/* @info Has answers under the suspension Get enforces. A container-owned provider asking about a scope-only name used to hear "yes" from the very entries its Get refuses — the Has-then-MustGet idiom panicked, and a process-lifetime service could shape its wiring on one request's substitutes. */
+func TestResolverContext_HasHonorsScopeSuspension(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerScopedErr := serviceContainer.RegisterScoped(
+        "app.scoped.only",
+        func(resolver containercontract.Resolver) (*suspensionHasProbe, error) {
+            return &suspensionHasProbe{value: "scoped"}, nil
+        },
+    )
+    if nil != registerScopedErr {
+        t.Fatalf("unexpected scoped register error: %v", registerScopedErr)
+    }
+
+    hasDuringSuspension := true
+    hasTypeDuringSuspension := true
+
+    registerErr := serviceContainer.Register(
+        "app.container.owned",
+        func(resolver containercontract.Resolver) (*resolverRaceProbeFirst, error) {
+            hasDuringSuspension = resolver.Has("app.scoped.only")
+            hasTypeDuringSuspension = resolver.HasType(reflect.TypeOf((*suspensionHasProbe)(nil)))
+
+            return &resolverRaceProbeFirst{}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+
+    if _, getErr := scopeInstance.Get("app.container.owned"); nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+
+    if true == hasDuringSuspension {
+        t.Fatalf("expected Has to refuse the scope-only name while the scope is suspended")
+    }
+
+    if true == hasTypeDuringSuspension {
+        t.Fatalf("expected HasType to refuse the scope-only type while the scope is suspended")
+    }
+
+    if false == scopeInstance.Has("app.scoped.only") {
+        t.Fatalf("expected the unsuspended scope to keep answering for its own name")
+    }
+}

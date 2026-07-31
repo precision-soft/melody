@@ -53,13 +53,44 @@ func (instance *resolverContext) scopeVisible() bool {
     return nil != instance.scopeInstance && false == instance.scopeSuspended
 }
 
-/* containerInstanceStore keeps a finished service in the container's own maps. It is the store of every container-owned creation: the value is a process-lifetime singleton and the container is the only thing that outlives every scope. */
-func containerInstanceStore(storeInContainer func(value any)) instanceStore {
+/* containerNameStore keeps a finished service under its name in the container's own maps, and under the canonical type as well when the resolution was type-keyed. It runs under the container mutex. An override that was installed while the provider ran already occupies the name — it answers before anything is built — so the built value is handed back to the guard as the loser, and the name is marked container-built otherwise, which is what tells a later override that the value it evicts is the container's to close. */
+func containerNameStore(
+    containerInstance *container,
+    serviceName string,
+    canonicalTargetType reflect.Type,
+) instanceStore {
     return instanceStore{
-        keep: func(value any) error {
-            storeInContainer(value)
+        keep: func(value any) (any, bool, error) {
+            if existingValue, exists := containerInstance.instances[serviceName]; true == exists {
+                return existingValue, true, nil
+            }
 
-            return nil
+            containerInstance.instances[serviceName] = value
+            containerInstance.builtServiceNames[serviceName] = struct{}{}
+
+            if nil != canonicalTargetType {
+                containerInstance.typeInstances[canonicalTargetType] = value
+            }
+
+            return value, false, nil
+        },
+    }
+}
+
+/* containerTypeStore is containerNameStore's counterpart for a type-keyed registration with no name to file under. */
+func containerTypeStore(
+    containerInstance *container,
+    canonicalTargetType reflect.Type,
+) instanceStore {
+    return instanceStore{
+        keep: func(value any) (any, bool, error) {
+            if existingValue, exists := containerInstance.typeInstances[canonicalTargetType]; true == exists {
+                return existingValue, true, nil
+            }
+
+            containerInstance.typeInstances[canonicalTargetType] = value
+
+            return value, false, nil
         },
     }
 }
@@ -106,6 +137,13 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
 
         /* an installed override answers before anything is built, which is what keeps overriding a mechanism of its own rather than a competitor of registration */
         if true == exists {
+            /* @important the edge is recorded even though nothing is built: a scoped dependent resolving a scoped service the scope ALREADY holds depends on it exactly as hard as the resolution that built it, and without the edge the teardown falls back to closing the two in name order — the graph guarantee would hold only for whichever resolution happened to come first. */
+            if "" != parentKey && true == isScopedNodeKey(parentKey) && true == isScopedNodeKey(nodeKey) {
+                instance.containerInstance.mutex.Lock()
+                registerScopedDependencyLocked(instance.scopeInstance, parentKey, nodeKey)
+                instance.containerInstance.mutex.Unlock()
+            }
+
             return value, nil
         }
 
@@ -180,9 +218,7 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
                     providerFunctionString: providerFunctionString,
                 }
             },
-            store: containerInstanceStore(func(value any) {
-                instance.containerInstance.instances[serviceName] = value
-            }),
+            store:         containerNameStore(instance.containerInstance, serviceName, nil),
             suspendsScope: true,
         },
         instance,
@@ -298,6 +334,13 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
         }
 
         if true == exists {
+            /* @important mirror Get: an already-held scoped instance is depended on as hard as one built by this resolution */
+            if "" != parentKey && true == isScopedNodeKey(parentKey) && true == isScopedNodeKey(nodeKey) {
+                instance.containerInstance.mutex.Lock()
+                registerScopedDependencyLocked(instance.scopeInstance, parentKey, nodeKey)
+                instance.containerInstance.mutex.Unlock()
+            }
+
             return value, nil
         }
 
@@ -439,10 +482,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
                         providerFunctionString: providerFunctionString,
                     }
                 },
-                store: containerInstanceStore(func(resolvedValue any) {
-                    instance.containerInstance.instances[serviceName] = resolvedValue
-                    instance.containerInstance.typeInstances[canonicalTargetType] = resolvedValue
-                }),
+                store:         containerNameStore(instance.containerInstance, serviceName, canonicalTargetType),
                 suspendsScope: true,
             },
             instance,
@@ -496,9 +536,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
                     providerFunctionString: providerFunctionString,
                 }
             },
-            store: containerInstanceStore(func(value any) {
-                instance.containerInstance.typeInstances[canonicalTargetType] = value
-            }),
+            store:         containerTypeStore(instance.containerInstance, canonicalTargetType),
             suspendsScope: true,
         },
         instance,
@@ -527,8 +565,9 @@ func (instance *resolverContext) MustGetByType(targetType reflect.Type) any {
     return value
 }
 
+/* @important Has answers under the same suspension Get enforces: a container-owned provider asking about a scope-only name used to hear "yes" from the very entries its Get would refuse, and an existence check that disagrees with the resolution it gates turns into a wiring decision made on one request's substitutes — or a Has-then-MustGet panic. */
 func (instance *resolverContext) Has(serviceName string) bool {
-    if nil != instance.scopeInstance {
+    if true == instance.scopeVisible() {
         return instance.scopeInstance.Has(serviceName)
     }
 
@@ -536,7 +575,7 @@ func (instance *resolverContext) Has(serviceName string) bool {
 }
 
 func (instance *resolverContext) HasType(targetType reflect.Type) bool {
-    if nil != instance.scopeInstance {
+    if true == instance.scopeVisible() {
         return instance.scopeInstance.HasType(targetType)
     }
 

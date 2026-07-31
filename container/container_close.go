@@ -249,7 +249,7 @@ func (instance *container) closeInternal() error {
 
     dependencyCycleDetected := 0 < len(remaining)
 
-    candidates := make([]closeCandidate, 0, len(closeOrder))
+    candidates := make([]closeCandidate, 0, len(closeOrder)+len(instance.replacedBuiltInstances))
 
     for _, nodeKey := range closeOrder {
         value, exists := valueOfNodeKey[nodeKey]
@@ -262,6 +262,17 @@ func (instance *container) closeInternal() error {
             closeCandidate{
                 nodeKey: nodeKey,
                 value:   value,
+            },
+        )
+    }
+
+    /* the container-built instances an override evicted from the maps close after the ordered walk: they carry no edges anymore, and the identity marks below keep an instance a provider handed to several names from closing twice. */
+    for _, replacedValue := range instance.replacedBuiltInstances {
+        candidates = append(
+            candidates,
+            closeCandidate{
+                nodeKey: "container.replacedInstance",
+                value:   replacedValue,
             },
         )
     }
@@ -325,7 +336,8 @@ func (instance *container) closeInternal() error {
                 nil,
             )
         } else {
-            failures["container.dependencyCycle"] = "dependency cycle detected"
+            /* @important the node list survives alongside the failures: with it dropped, the one close that both failed and cycled reported WHICH services failed but not which ones cycled, and the operator got half the diagnosis */
+            failures["container.dependencyCycle"] = "dependency cycle detected: " + strings.Join(remaining, ", ")
         }
     }
 

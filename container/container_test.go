@@ -8,6 +8,8 @@ import (
     "testing"
 
     containercontract "github.com/precision-soft/melody/container/contract"
+    collisionalpha "github.com/precision-soft/melody/container/internal/collisionalpha/contract"
+    collisionbeta "github.com/precision-soft/melody/container/internal/collisionbeta/contract"
     "github.com/precision-soft/melody/exception"
 )
 
@@ -337,5 +339,95 @@ func TestHasType_AnswersForTheValueTypeOfAScopeOverride(t *testing.T) {
 
     if false == scopeInstance.HasType(reflect.TypeOf(hasTypeProbe{})) {
         t.Fatalf("expected the scope to answer for the value type of an installed override")
+    }
+}
+
+/* @info a closed container used to accept registrations and overrides silently: the registration named a service no resolution would ever build, and the override landed in a map the teardown had already swept — served by later lookups, closed by nobody. Both refuse now, the way the scoped registrar always has. */
+func TestContainer_RegisterAndOverrideRefusedAfterClose(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "app.pre.close",
+        func(resolver containercontract.Resolver) (*testService, error) {
+            return &testService{Value: "alive"}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    /* @important the late registration opts out of the type registration: the pre-close service holds the same type, and the strict duplicate-type refusal would otherwise refuse this registration for a reason that is not the closed container — the guard under test has to be the only thing standing */
+    lateRegisterErr := serviceContainer.Register(
+        "app.post.close",
+        func(resolver containercontract.Resolver) (*testService, error) {
+            return &testService{Value: "late"}, nil
+        },
+        WithoutTypeRegistration(),
+    )
+    if nil == lateRegisterErr {
+        t.Fatalf("expected the registration on a closed container to be refused")
+    }
+
+    lateOverrideErr := serviceContainer.OverrideProtectedInstance("app.pre.close", &testService{Value: "late"})
+    if nil == lateOverrideErr {
+        t.Fatalf("expected the override on a closed container to be refused")
+    }
+}
+
+/* @info the override propagates to every type its name is registered under, and a type-keyed resolution hands out whatever sits there without a re-check — the provider contract's call-time guard never sees overrides. A value the registered type cannot hold used to ride that hole straight through GetByType, poisoning the type cache with it. */
+func TestContainer_OverrideTypeIncompatibleValueRefused(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "app.typed.override",
+        func(resolver containercontract.Resolver) (*testService, error) {
+            return &testService{Value: "real"}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    overrideErr := serviceContainer.OverrideInstance("app.typed.override", "a plain string")
+    if nil == overrideErr {
+        t.Fatalf("expected the type-incompatible override to be refused")
+    }
+
+    value, getErr := serviceContainer.GetByType(reflect.TypeOf((*testService)(nil)))
+    if nil != getErr {
+        t.Fatalf("unexpected get by type error: %v", getErr)
+    }
+
+    if _, isTyped := value.(*testService); false == isTyped {
+        t.Fatalf("expected GetByType to keep answering with the registered type, got %T", value)
+    }
+}
+
+/* @info the identity key of a pointer-to-unnamed-composite type drops its package path, so two such types from same-short-named packages share one key — one creation-guard entry and one close node for two distinct types, which read as false cycles at resolution and merged nodes at teardown. The second type is refused at the boot line that declares it. */
+func TestContainer_RegisterTypeIdentityKeyCollisionRefused(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    firstRegisterErr := serviceContainer.Register(
+        "app.collision.alpha",
+        func(resolver containercontract.Resolver) (*struct{ Bus collisionalpha.Bus }, error) {
+            return &struct{ Bus collisionalpha.Bus }{}, nil
+        },
+    )
+    if nil != firstRegisterErr {
+        t.Fatalf("unexpected register error: %v", firstRegisterErr)
+    }
+
+    secondRegisterErr := serviceContainer.Register(
+        "app.collision.beta",
+        func(resolver containercontract.Resolver) (*struct{ Bus collisionbeta.Bus }, error) {
+            return &struct{ Bus collisionbeta.Bus }{}, nil
+        },
+    )
+    if nil == secondRegisterErr {
+        t.Fatalf("expected the colliding identity key to be refused")
     }
 }
