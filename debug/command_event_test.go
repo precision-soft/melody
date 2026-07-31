@@ -3,6 +3,7 @@ package debug
 import (
     "encoding/json"
     "fmt"
+    "strings"
     "testing"
 
     "github.com/precision-soft/melody/clock"
@@ -364,5 +365,131 @@ func TestEventCommand_ReversesTheVerboseListenerBlockWithTheEvents(t *testing.T)
     _, isWindowedEventListed := listedEventName["event.09"]
     if false == isWindowedEventListed {
         t.Fatalf("expected the listener block to follow the descending window, got %v", listedEventName)
+    }
+}
+
+/* debugTestSubscriber owns listeners on two events, so the distinct-subscriber total can be told apart from the per-event sum */
+type debugTestSubscriber struct {
+}
+
+func (instance *debugTestSubscriber) SubscribedEvents() map[string][]eventcontract.SubscribedEvent {
+    listener := func(
+        runtimeInstance runtimecontract.Runtime,
+        eventInstance eventcontract.Event,
+    ) error {
+        return nil
+    }
+
+    return map[string][]eventcontract.SubscribedEvent{
+        "event.alpha": {event.NewSubscribedEvent(listener, 0)},
+        "event.beta":  {event.NewSubscribedEvent(listener, 0)},
+    }
+}
+
+/* @info the summary total counts distinct subscribers across the dispatcher: summing the per-event counts reported one subscriber on two events as two subscribers */
+func TestEventCommand_CountsASubscriberOnceAcrossEvents(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher.AddSubscriber(&debugTestSubscriber{})
+
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(
+        event.ServiceEventDispatcher,
+        func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {
+            return dispatcher, nil
+        },
+    )
+
+    rendered, runErr := runDebugCommand(
+        &EventCommand{},
+        newTestRuntime(serviceContainer),
+        []string{},
+    )
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    if false == strings.Contains(rendered, "SUBSCRIBERS: 1 total") {
+        t.Fatalf("expected one distinct subscriber, got %q", rendered)
+    }
+}
+
+/* @info the listener detail — including the required and may-skip marks — must be reachable in the machine format: it existed only in the table, so a json consumer could never learn whether the fail-closed guarantee is armed */
+func TestEventCommand_CarriesTheListenerDetailInTheVerboseJsonFormat(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+
+    registration := dispatcher.AddListener(
+        "event.guarded",
+        func(
+            runtimeInstance runtimecontract.Runtime,
+            eventInstance eventcontract.Event,
+        ) error {
+            return nil
+        },
+        7,
+    )
+    dispatcher.MarkListenerRequired(registration)
+
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(
+        event.ServiceEventDispatcher,
+        func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {
+            return dispatcher, nil
+        },
+    )
+
+    rendered, runErr := runDebugCommand(
+        &EventCommand{},
+        newTestRuntime(serviceContainer),
+        []string{"--format=json", "--verbose"},
+    )
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    decoded := struct {
+        Data struct {
+            Events struct {
+                Total int `json:"total"`
+            } `json:"events"`
+            Listeners []struct {
+                EventName string `json:"eventName"`
+                Priority  int    `json:"priority"`
+                Required  bool   `json:"required"`
+            } `json:"listeners"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal([]byte(rendered), &decoded); nil != decodeErr {
+        t.Fatalf("failed to decode the rendered envelope: %v, rendered %q", decodeErr, rendered)
+    }
+
+    if 1 != decoded.Data.Events.Total {
+        t.Fatalf("expected one event, got %d", decoded.Data.Events.Total)
+    }
+
+    if 1 != len(decoded.Data.Listeners) {
+        t.Fatalf("expected one listener entry, got %v", decoded.Data.Listeners)
+    }
+
+    listenerEntry := decoded.Data.Listeners[0]
+    if "event.guarded" != listenerEntry.EventName || 7 != listenerEntry.Priority || true != listenerEntry.Required {
+        t.Fatalf("unexpected listener entry %+v", listenerEntry)
+    }
+}
+
+/* @info without --verbose the json document keeps its previous list shape */
+func TestEventCommand_KeepsThePlainJsonShapeWithoutVerbose(t *testing.T) {
+    rendered, runErr := runDebugCommand(
+        &EventCommand{},
+        newEventTestRuntime(2),
+        []string{"--format=json"},
+    )
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    envelope := decodeEventCommandEnvelope(t, rendered)
+
+    if 2 != envelope.Data.Total {
+        t.Fatalf("expected the list payload at the data root, got %q", rendered)
     }
 }

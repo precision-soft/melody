@@ -3,9 +3,11 @@ package debug
 import (
     "encoding/json"
     "fmt"
+    "strings"
     "testing"
 
     "github.com/precision-soft/melody/container"
+    "github.com/precision-soft/melody/exception"
     httpcontract "github.com/precision-soft/melody/http/contract"
 )
 
@@ -278,5 +280,43 @@ func TestMiddlewareCommand_WalksEveryItemExactlyOnceWhenPagingDescending(t *test
         if 1 != count {
             t.Fatalf("middleware %d was returned %d times while paging descending", value, count)
         }
+    }
+}
+
+/* @info the provider itself is guarded, not only the values it returns: a nil handed to the constructor surfaced as a bare nil-function call far from the wiring mistake */
+func TestNewMiddlewareCommand_NilProvider_Panics(t *testing.T) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected a panic for a nil provider")
+        }
+
+        recoveredError, ok := recoveredValue.(*exception.Error)
+        if false == ok || nil == recoveredError {
+            t.Fatalf("expected the panic to carry an *exception.Error, got %v", recoveredValue)
+        }
+
+        if "middleware command created with nil middleware provider" != recoveredError.Message() {
+            t.Fatalf("unexpected message %q", recoveredError.Message())
+        }
+    }()
+
+    NewMiddlewareCommand(nil)
+}
+
+/* @info the zero-value command is constructible outside the constructor; the refusal must reach the report as a named error instead of a nil-function call reaching the recover */
+func TestMiddlewareCommand_ZeroValueProvider_ReturnsANamedError(t *testing.T) {
+    _, runErr := runDebugCommand(
+        &MiddlewareCommand{},
+        newTestRuntime(container.NewContainer()),
+        []string{"--format=json"},
+    )
+
+    if nil == runErr {
+        t.Fatalf("expected an error for a nil provider")
+    }
+
+    if false == strings.Contains(runErr.Error(), "middleware provider is nil") {
+        t.Fatalf("expected the named refusal, got %v", runErr)
     }
 }

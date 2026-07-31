@@ -307,3 +307,233 @@ func TestLogContext_WithExtra_MergesExtraIntoContext(t *testing.T) {
         t.Fatalf("expected extra context to be merged")
     }
 }
+
+/* @info a typed-nil error passes every nil comparison while any method call on it dereferences the nil receiver; the utilities must treat it as the nil it means instead of dying on the line that logs it */
+
+func TestLogContext_TypedNilError_ReturnsNil(t *testing.T) {
+    typedNil := (*Error)(nil)
+
+    if nil != LogContext(typedNil) {
+        t.Fatalf("expected nil context for a typed-nil error")
+    }
+}
+
+func TestLogContext_TypedNilErrorWithExtra_ReturnsMergedExtras(t *testing.T) {
+    typedNil := (*HttpException)(nil)
+
+    context := LogContext(
+        typedNil,
+        map[string]any{"first": 1},
+        map[string]any{"second": 2},
+    )
+
+    if 1 != context["first"] || 2 != context["second"] {
+        t.Fatalf("expected both extras merged, got %v", context)
+    }
+}
+
+/* nilProviderWrapper unwraps to a typed-nil provider, the shape errors.As matches and then hands over as a nil receiver */
+type nilProviderWrapper struct {
+}
+
+func (instance *nilProviderWrapper) Error() string {
+    return "wrapper"
+}
+
+func (instance *nilProviderWrapper) Unwrap() error {
+    return (*HttpException)(nil)
+}
+
+func TestLogContext_TypedNilProviderInChain_DoesNotPanic(t *testing.T) {
+    context := LogContext(&nilProviderWrapper{})
+
+    if "wrapper" != context["error"] {
+        t.Fatalf("expected the error key, got %v", context)
+    }
+
+    if _, hasCause := context["cause"]; true == hasCause {
+        t.Fatalf("expected no cause for a typed-nil link, got %v", context)
+    }
+}
+
+/* @info the variadic extras were silently truncated to the first map */
+func TestLogContext_MergesEveryExtraInOrder(t *testing.T) {
+    context := LogContext(
+        errors.New("boom"),
+        map[string]any{"first": 1, "shared": "first"},
+        map[string]any{"second": 2, "shared": "second"},
+    )
+
+    if 1 != context["first"] || 2 != context["second"] {
+        t.Fatalf("expected both extras merged, got %v", context)
+    }
+
+    if "second" != context["shared"] {
+        t.Fatalf("expected the later extra to win, got %v", context["shared"])
+    }
+}
+
+/* @info the cause walk is anchored on the top error's own wrap link: anchored on the nearest deep *Error it skipped every link above that error and dropped its own context from the record whenever it was not the top */
+func TestLogContext_HttpExceptionWrappingError_KeepsTheInnerErrorAndItsContext(t *testing.T) {
+    rootErr := errors.New("root")
+    innerErr := NewError(
+        "inner",
+        map[string]any{"userId": 5},
+        rootErr,
+    )
+    topErr := NewHttpExceptionWithCause(500, "boom", innerErr)
+
+    context := LogContext(topErr)
+
+    if "inner" != context["cause"] {
+        t.Fatalf("expected the wrapped error as the cause, got %v", context["cause"])
+    }
+
+    causeChain, ok := context["causeChain"].([]string)
+    if false == ok || 2 != len(causeChain) || "inner" != causeChain[0] || "root" != causeChain[1] {
+        t.Fatalf("expected the chain to start at the wrapped error, got %v", context["causeChain"])
+    }
+
+    causeContextChain, ok := context["causeContextChain"].([]map[string]any)
+    if false == ok || 2 != len(causeContextChain) {
+        t.Fatalf("expected one chain entry per link, got %v", context["causeContextChain"])
+    }
+
+    if 5 != causeContextChain[0]["userId"] {
+        t.Fatalf("expected the wrapped error's own context in the chain, got %v", causeContextChain[0])
+    }
+}
+
+func TestFromError_TypedNil_ReturnsNil(t *testing.T) {
+    typedNilError := (*Error)(nil)
+
+    if nil != FromError(typedNilError) {
+        t.Fatalf("expected nil for a typed-nil *Error")
+    }
+
+    /* the http exception variant is the one that used to panic: the assertion to *Error fails, so the walk reached err.Error() through the nil receiver */
+    typedNilHttpException := (*HttpException)(nil)
+
+    if nil != FromError(typedNilHttpException) {
+        t.Fatalf("expected nil for a typed-nil *HttpException")
+    }
+}
+
+func TestFromError_TypedNilProviderInChain_DoesNotPanic(t *testing.T) {
+    ex := FromError(&nilProviderWrapper{})
+
+    if nil == ex {
+        t.Fatalf("expected a wrapped error")
+    }
+
+    if "wrapper" != ex.Message() {
+        t.Fatalf("unexpected message %q", ex.Message())
+    }
+}
+
+func TestFromErrorWithLevel_TypedNil_ReturnsNil(t *testing.T) {
+    typedNil := (*HttpException)(nil)
+
+    if nil != FromErrorWithLevel(typedNil, loggingcontract.LevelWarning) {
+        t.Fatalf("expected nil for a typed-nil error")
+    }
+}
+
+func TestFromErrorWithLevelAndContext_TypedNil_ReturnsNil(t *testing.T) {
+    typedNil := (*Error)(nil)
+
+    if nil != FromErrorWithLevelAndContext(typedNil, loggingcontract.LevelWarning, nil) {
+        t.Fatalf("expected nil for a typed-nil error")
+    }
+}
+
+func TestMarkLogged_TypedNil_ReturnsItUnchangedWithoutPanicking(t *testing.T) {
+    typedNil := (*Error)(nil)
+
+    result := MarkLogged(typedNil)
+
+    resultError, ok := result.(*Error)
+    if false == ok || nil != resultError {
+        t.Fatalf("expected the typed nil back, got %v", result)
+    }
+}
+
+/* @info the mark is written at the depth the reader searches: logging.LogError finds the nearest *Error through errors.As, so a mark that stopped at a plain wrapper was a silent no-op and the one failure produced two records */
+func TestMarkLogged_MarksThroughAPlainWrapper(t *testing.T) {
+    innerErr := NewError("inner", nil, nil)
+    wrappedErr := fmt.Errorf("outer: %w", innerErr)
+
+    result := MarkLogged(wrappedErr)
+
+    if wrappedErr != result {
+        t.Fatalf("expected the same error back")
+    }
+
+    if false == innerErr.AlreadyLogged() {
+        t.Fatalf("expected the wrapped error to carry the mark")
+    }
+}
+
+func TestBuildCauseChain_TypedNil_ReturnsNil(t *testing.T) {
+    typedNil := (*Error)(nil)
+
+    if nil != BuildCauseChain(typedNil, 8) {
+        t.Fatalf("expected nil for a typed-nil error")
+    }
+}
+
+func TestBuildCauseChain_TypedNilLink_EndsTheChain(t *testing.T) {
+    topErr := NewError("top", nil, (*Error)(nil))
+
+    chain := BuildCauseChain(topErr, 8)
+
+    if 1 != len(chain) || "top" != chain[0] {
+        t.Fatalf("expected the chain to end at the typed-nil link, got %v", chain)
+    }
+}
+
+func TestBuildCauseContextChain_TypedNil_ReturnsNil(t *testing.T) {
+    typedNil := (*HttpException)(nil)
+
+    if nil != BuildCauseContextChain(typedNil, 8) {
+        t.Fatalf("expected nil for a typed-nil error")
+    }
+}
+
+func TestBuildCauseContextChain_TypedNilLink_EndsTheChain(t *testing.T) {
+    withContext := NewError(
+        "top",
+        map[string]any{"key": "value"},
+        (*Error)(nil),
+    )
+
+    chain := BuildCauseContextChain(withContext, 8)
+
+    if 1 != len(chain) || "value" != chain[0]["key"] {
+        t.Fatalf("expected one entry ending at the typed-nil link, got %v", chain)
+    }
+}
+
+/* @info the immediate-node assertion is on ContextProvider, so an HttpException in the chain contributes its context instead of a silent nil */
+func TestBuildCauseContextChain_HttpExceptionLink_ContributesItsContext(t *testing.T) {
+    httpException := NewHttpException(404, "missing")
+    httpException.SetContextValue("resource", "order")
+
+    chain := BuildCauseContextChain(httpException, 8)
+
+    if 1 != len(chain) || "order" != chain[0]["resource"] {
+        t.Fatalf("expected the http exception context in the chain, got %v", chain)
+    }
+}
+
+/* @info the entry guard is the one that stops the chain walk itself: errors.As calls Unwrap on a non-matching node, and a typed-nil node whose Unwrap dereferences the receiver panics inside the walk before the post-search guard can matter */
+func TestMarkLogged_TypedNilWithUnwrap_DoesNotWalkTheChain(t *testing.T) {
+    typedNil := (*ExitError)(nil)
+
+    result := MarkLogged(typedNil)
+
+    resultExit, ok := result.(*ExitError)
+    if false == ok || nil != resultExit {
+        t.Fatalf("expected the typed nil back, got %v", result)
+    }
+}

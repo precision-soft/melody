@@ -85,7 +85,9 @@ func (instance *EventCommand) Run(
 
     listenerTotal := 0
     fromSubscriberTotal := 0
-    subscriberOwnerTotal := 0
+
+    /* the summary total counts distinct subscribers across the whole dispatcher: summing the per-event distinct counts reported one subscriber listening on three events as three subscribers, a number nothing in the process matches */
+    subscriberOwnerGlobalSet := make(map[string]struct{})
 
     for _, registeredEvent := range registeredEvents {
         listenerTotal = listenerTotal + len(registeredEvent.Listeners)
@@ -103,6 +105,7 @@ func (instance *EventCommand) Run(
 
                 if "-" != listener.Owner && "" != listener.Owner {
                     subscriberOwnerSet[listener.Owner] = struct{}{}
+                    subscriberOwnerGlobalSet[listener.Owner] = struct{}{}
                 }
             }
         }
@@ -110,7 +113,6 @@ func (instance *EventCommand) Run(
         subscriberOwnerCount := len(subscriberOwnerSet)
 
         fromSubscriberTotal = fromSubscriberTotal + fromSubscriberCount
-        subscriberOwnerTotal = subscriberOwnerTotal + subscriberOwnerCount
 
         items = append(
             items,
@@ -144,7 +146,7 @@ func (instance *EventCommand) Run(
             total,
             listenerTotal,
             fromSubscriberTotal,
-            subscriberOwnerTotal,
+            len(subscriberOwnerGlobalSet),
         )
 
         if len(items) != total {
@@ -178,62 +180,10 @@ func (instance *EventCommand) Run(
                 []string{"event", "priority", "required", "source", "owner", "listener"},
             )
 
-            /* the listener detail follows the same window as the event block above, otherwise --limit lists three events and every listener in the application */
-            selectedEventNames := make(map[string]struct{}, len(items))
-            for _, item := range items {
-                selectedEventNames[item.EventName] = struct{}{}
-            }
-
-            sortedRegisteredEvents := make([]eventcontract.RegisteredEvent, 0, len(selectedEventNames))
-            for _, registeredEvent := range registeredEvents {
-                _, isSelected := selectedEventNames[registeredEvent.EventName]
-                if false == isSelected {
-                    continue
-                }
-
-                sortedRegisteredEvents = append(sortedRegisteredEvents, registeredEvent)
-            }
-
-            sort.Slice(
-                sortedRegisteredEvents,
-                func(leftIndex int, rightIndex int) bool {
-                    return sortedRegisteredEvents[leftIndex].EventName < sortedRegisteredEvents[rightIndex].EventName
-                },
-            )
-
-            for _, registeredEvent := range sortedRegisteredEvents {
+            for _, registeredEvent := range selectSortedRegisteredEvents(registeredEvents, items) {
                 verboseBlock.AddRow(output.TableRowSeparatorToken)
 
-                sortedListeners := make([]eventcontract.RegisteredListener, 0, len(registeredEvent.Listeners))
-                for _, listener := range registeredEvent.Listeners {
-                    sortedListeners = append(sortedListeners, listener)
-                }
-
-                sort.Slice(
-                    sortedListeners,
-                    func(leftIndex int, rightIndex int) bool {
-                        leftListener := sortedListeners[leftIndex]
-                        rightListener := sortedListeners[rightIndex]
-
-                        if leftListener.Priority != rightListener.Priority {
-                            return leftListener.Priority > rightListener.Priority
-                        }
-
-                        if leftListener.Source != rightListener.Source {
-                            return leftListener.Source < rightListener.Source
-                        }
-
-                        if leftListener.Owner != rightListener.Owner {
-                            return leftListener.Owner < rightListener.Owner
-                        }
-
-                        if leftListener.ListenerId != rightListener.ListenerId {
-                            return leftListener.ListenerId < rightListener.ListenerId
-                        }
-
-                        return leftListener.ListenerName < rightListener.ListenerName
-                    },
-                )
+                sortedListeners := sortRegisteredListeners(registeredEvent.Listeners)
 
                 for index, listener := range sortedListeners {
                     eventCell := ""
@@ -257,17 +207,119 @@ func (instance *EventCommand) Run(
 
         envelope.Table = builder.Build()
     } else {
-        envelope.Data = output.NewListPayload(
+        eventsPayload := output.NewListPayload(
             items,
             total,
             option.Limit,
             option.Offset,
         )
+
+        if true == option.Verbose {
+            /* the listener detail — including the required and may-skip marks that say whether the fail-closed guarantee is armed — existed only in the table format, so a machine consumer of the json document could never learn it at any verbosity */
+            envelope.Data = eventListVerbosePayload{
+                Events:    eventsPayload,
+                Listeners: collectListenerListItems(registeredEvents, items),
+            }
+        } else {
+            envelope.Data = eventsPayload
+        }
     }
 
     envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
 
     return output.Render(commandContext.Writer, envelope, option)
+}
+
+/* selectSortedRegisteredEvents keeps the listener detail on the same window as the event listing, otherwise --limit lists three events and every listener in the application, and orders it by event name the way the listing is ordered. */
+func selectSortedRegisteredEvents(
+    registeredEvents []eventcontract.RegisteredEvent,
+    items []eventListItem,
+) []eventcontract.RegisteredEvent {
+    selectedEventNames := make(map[string]struct{}, len(items))
+    for _, item := range items {
+        selectedEventNames[item.EventName] = struct{}{}
+    }
+
+    sortedRegisteredEvents := make([]eventcontract.RegisteredEvent, 0, len(selectedEventNames))
+    for _, registeredEvent := range registeredEvents {
+        _, isSelected := selectedEventNames[registeredEvent.EventName]
+        if false == isSelected {
+            continue
+        }
+
+        sortedRegisteredEvents = append(sortedRegisteredEvents, registeredEvent)
+    }
+
+    sort.Slice(
+        sortedRegisteredEvents,
+        func(leftIndex int, rightIndex int) bool {
+            return sortedRegisteredEvents[leftIndex].EventName < sortedRegisteredEvents[rightIndex].EventName
+        },
+    )
+
+    return sortedRegisteredEvents
+}
+
+func sortRegisteredListeners(listeners []eventcontract.RegisteredListener) []eventcontract.RegisteredListener {
+    sortedListeners := make([]eventcontract.RegisteredListener, 0, len(listeners))
+    for _, listener := range listeners {
+        sortedListeners = append(sortedListeners, listener)
+    }
+
+    sort.Slice(
+        sortedListeners,
+        func(leftIndex int, rightIndex int) bool {
+            leftListener := sortedListeners[leftIndex]
+            rightListener := sortedListeners[rightIndex]
+
+            if leftListener.Priority != rightListener.Priority {
+                return leftListener.Priority > rightListener.Priority
+            }
+
+            if leftListener.Source != rightListener.Source {
+                return leftListener.Source < rightListener.Source
+            }
+
+            if leftListener.Owner != rightListener.Owner {
+                return leftListener.Owner < rightListener.Owner
+            }
+
+            if leftListener.ListenerId != rightListener.ListenerId {
+                return leftListener.ListenerId < rightListener.ListenerId
+            }
+
+            return leftListener.ListenerName < rightListener.ListenerName
+        },
+    )
+
+    return sortedListeners
+}
+
+/* collectListenerListItems flattens the windowed listener detail for the json document, in the order the table prints it. */
+func collectListenerListItems(
+    registeredEvents []eventcontract.RegisteredEvent,
+    items []eventListItem,
+) []eventListenerListItem {
+    listenerItems := make([]eventListenerListItem, 0, len(items))
+
+    for _, registeredEvent := range selectSortedRegisteredEvents(registeredEvents, items) {
+        for _, listener := range sortRegisteredListeners(registeredEvent.Listeners) {
+            listenerItems = append(
+                listenerItems,
+                eventListenerListItem{
+                    EventName:                registeredEvent.EventName,
+                    Priority:                 listener.Priority,
+                    Required:                 listener.Required,
+                    MaySkipRequiredListeners: listener.MaySkipRequiredListeners,
+                    Source:                   listener.Source,
+                    Owner:                    listener.Owner,
+                    ListenerName:             listener.ListenerName,
+                },
+            )
+        }
+    }
+
+    return listenerItems
 }
 
 /* renderRequiredListenerMark answers what a listener's required-listener marks mean for the dispatch: whether it is protected from being skipped, or is allowed to skip the ones that are. Without the column an unarmed fail-closed guarantee looks exactly like an armed one. */
@@ -293,6 +345,21 @@ type eventListItem struct {
     FromSubscriberCount  int    `json:"fromSubscriberCount"`
     SubscriberOwnerCount int    `json:"subscriberOwnerCount"`
     Priorities           string `json:"priorities"`
+}
+
+type eventListenerListItem struct {
+    EventName                string `json:"eventName"`
+    Priority                 int    `json:"priority"`
+    Required                 bool   `json:"required"`
+    MaySkipRequiredListeners bool   `json:"maySkipRequiredListeners"`
+    Source                   string `json:"source"`
+    Owner                    string `json:"owner"`
+    ListenerName             string `json:"listenerName"`
+}
+
+type eventListVerbosePayload struct {
+    Events    output.ListPayload[eventListItem] `json:"events"`
+    Listeners []eventListenerListItem           `json:"listeners"`
 }
 
 var _ clicontract.Command = (*EventCommand)(nil)

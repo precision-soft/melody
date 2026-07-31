@@ -359,3 +359,19 @@ func TestParameterCommand_KeepsRedactingASecretInsideTheWindow(t *testing.T) {
         t.Fatalf("expected the descending window to contain the secret parameter, got %q", rendered)
     }
 }
+
+/* @info a nil value carries nothing: fmt renders it as a non-empty placeholder, which the mask then reported as a value being present — the opposite of the one answer the column exists to give */
+func TestRedactedParameterValue_ReportsANilSecretAsEmpty(t *testing.T) {
+    if redactedEmptyPlaceholder != redactedParameterValue(nil, true) {
+        t.Fatalf("expected the empty placeholder for a nil secret")
+    }
+
+    typedNil := (*string)(nil)
+    if redactedEmptyPlaceholder != redactedParameterValue(typedNil, true) {
+        t.Fatalf("expected the empty placeholder for a typed-nil secret")
+    }
+
+    if redactedValuePlaceholder != redactedParameterValue("credential", true) {
+        t.Fatalf("expected the mask for a present secret")
+    }
+}

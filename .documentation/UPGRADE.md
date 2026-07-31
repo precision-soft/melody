@@ -18,6 +18,46 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Exception: `NewExitError` and the http exception constructors refuse a value the process boundary betrays
+
+**What changed.** `NewExitError` panics on an exit code outside `[1, 255]`: `os.Exit` hands the code to the operating system, which keeps its low 8 bits, so 256 reported success from a dying process, a negative read as 255, and 0 contradicted the error the constructor requires. `NewHttpException` and `NewHttpExceptionWithCause` panic on a status code outside `[100, 599]`: `net/http`'s `WriteHeader` panics below 100 and above 999 deep in the response path, and a status the writer clamps to 200 served an exception as success.
+
+**Symptom.** A call constructing an exit error with a computed code that leaves `[1, 255]`, or an http exception with a status that leaves `[100, 599]`, panics at construction instead of failing later — or never visibly.
+
+**Remedy.** Clamp or validate the computed value before constructing. The codes inside the ranges behave exactly as before.
+
+### Exception: `ValidationFailed` carries its detail under the key the response path serves
+
+**What changed.** `ValidationFailed` stores the validation detail under the `errors` context key — the one the kernel exception listener copies into the json error payload — instead of `validationErrors`, a key nothing on the response path reads.
+
+**Symptom.** A caller that read the exception's context under `validationErrors` finds it under `errors` now. A client of an endpoint using `ValidationFailed` starts receiving the detail in the 422 payload, where before it received only the message.
+
+**Remedy.** Read the context under `errors`. Nothing else is required; the status stays 422.
+
+### Exception: `MarkLogged` marks at the depth the reader searches
+
+**What changed.** `MarkLogged` finds the nearest markable error through the chain, matching `logging.LogError`, which reads the mark back the same way. The mark used to be written on the top value alone, so marking a wrapped error was a silent no-op and the one failure produced two records. `LogContext` also anchors the cause chain on the error's own wrap link rather than on the nearest deep `*exception.Error`, so a wrapping http exception no longer swallows the wrapped error's context from the log record, and every extra context map passed to it is merged in order rather than only the first.
+
+**Symptom.** Log records gain detail: a wrapped-then-marked error stops being logged twice, and the record of an `HttpException` wrapping an `*Error` now carries that error's message and context in `cause`/`causeChain`/`causeContextChain`.
+
+**Remedy.** None; tooling that parses log records should expect the richer shape.
+
+### Debug: `debug:events --format=json --verbose` carries the listener detail
+
+**What changed.** Under `--verbose`, the json document's `data` becomes `{"events": <previous list payload>, "listeners": [...]}`, exposing per-listener priority, source, owner and the required / may-skip marks that were previously table-only. Without `--verbose` the shape is unchanged.
+
+**Symptom.** A json consumer that passed `--verbose` and read `data.items` finds the list under `data.events.items` now.
+
+**Remedy.** Drop `--verbose` for the old shape, or read `data.events` and gain `data.listeners`.
+
+### Debug: `NewMiddlewareCommand` refuses a nil provider
+
+**What changed.** `NewMiddlewareCommand(nil)` panics at construction; a zero-value `MiddlewareCommand` run without a provider returns a named error through the report instead of a nil-function call.
+
+**Symptom.** Wiring that handed a nil provider panics at registration time instead of when the command runs.
+
+**Remedy.** Pass a provider; return an empty slice from it when there is nothing to list.
+
 ### Event: a skipped required listener refuses the response the stopping listener produced
 
 **What changed.** A `kernel.request` or `kernel.controller` dispatch that stopped propagation before a listener marked required had run now fails the request closed even when the stopping listener set a response; the response it produced is closed rather than written. The refusal is carried by `event.RequiredListenerSkippedError`, which the kernel type-asserts on the returned error itself rather than through its cause chain. A listener that stops propagation with nothing required behind it still answers the request unchanged.

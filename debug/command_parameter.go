@@ -9,6 +9,7 @@ import (
     clicontract "github.com/precision-soft/melody/cli/contract"
     "github.com/precision-soft/melody/cli/output"
     "github.com/precision-soft/melody/config"
+    "github.com/precision-soft/melody/internal"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
@@ -217,6 +218,11 @@ func redactedParameterValue(value any, isSecret bool) string {
 
     if false == isSecret {
         return formattedValue
+    }
+
+    /* a nil value carries nothing: fmt renders it as a non-empty placeholder, which the mask then reported as a value being present — the opposite of the one answer the column exists to give */
+    if true == internal.IsNilInterface(value) {
+        return redactedEmptyPlaceholder
     }
 
     if "" == formattedValue {

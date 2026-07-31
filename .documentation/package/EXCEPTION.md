@@ -104,7 +104,12 @@ func readFile(path string) []byte {
 
 - `exception.Panic` is the framework-standard fail-fast mechanism; it intentionally does not attempt to recover.
 - Context keys should use camelCase (for example, `"serviceName"`, `"httpStatusCode"`), consistent with framework conventions.
-- `MarkLogged` enables suppressing duplicate logs when errors cross layers.
+- `MarkLogged` enables suppressing duplicate logs when errors cross layers. It marks the nearest markable error in the chain — the same depth at which `logging.LogError` reads the mark back — so marking a wrapped error is not a no-op.
+- Every utility treats a typed nil — a non-nil `error` interface holding a nil concrete pointer — as the nil it means: `LogContext`, `FromError` and its variants, `MarkLogged` and both cause-chain builders neither panic on one nor hand one onward.
+- The value ranges are enforced at construction: `NewExitError` refuses an exit code outside `[1, 255]` (`os.Exit` keeps only the low 8 bits, so 256 reports success from a dying process), and `NewHttpException`/`NewHttpExceptionWithCause` refuse a status code outside `[100, 599]` (`net/http`'s `WriteHeader` panics outside `[100, 999]`, and a clamped status serves an exception as success). Both refusals are panics.
+- `ValidationFailed` stores its detail under the `errors` context key, the one the kernel exception listener copies into the json error payload, with status 422.
+- The log record built by `LogContext` takes `cause`/`causeChain`/`causeContextChain` from the top error's own wrap link, one entry per link; any link implementing `ContextProvider` contributes its context. Every extra context map passed to it is merged in order, later entries winning.
+- Both exception types guard their context map and already-logged mark internally, because a memoized failure (a container creation error, a container close error) is reachable from several request goroutines at once. Error handling otherwise stays single-threaded per request by design.
 
 ## Userland API
 

@@ -9,6 +9,7 @@ import (
 
     clicontract "github.com/precision-soft/melody/cli/contract"
     "github.com/precision-soft/melody/cli/output"
+    "github.com/precision-soft/melody/exception"
     httpcontract "github.com/precision-soft/melody/http/contract"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
@@ -16,6 +17,13 @@ import (
 type MiddlewareProvider func() []httpcontract.Middleware
 
 func NewMiddlewareCommand(middlewareProvider MiddlewareProvider) *MiddlewareCommand {
+    /* every value the provider returns is guarded below, but the provider itself was not: a nil handed here surfaced as a bare nil-function call in Run, far from the wiring mistake that produced it */
+    if nil == middlewareProvider {
+        exception.Panic(
+            exception.NewError("middleware command created with nil middleware provider", nil, nil),
+        )
+    }
+
     return &MiddlewareCommand{
         middlewareProvider: middlewareProvider,
     }
@@ -57,6 +65,11 @@ func (instance *MiddlewareCommand) Run(
     )
 
     envelope := output.NewEnvelope(meta)
+
+    /* the zero-value command is constructible outside the constructor that refuses a nil provider; a named refusal reaches the report where a nil-function call reached the recover */
+    if nil == instance.middlewareProvider {
+        return exception.NewError("middleware provider is nil", nil, nil)
+    }
 
     middlewares := instance.middlewareProvider()
 

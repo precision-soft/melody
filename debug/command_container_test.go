@@ -12,6 +12,7 @@ import (
     "time"
     "unicode/utf8"
 
+    "github.com/precision-soft/melody/cli/output"
     "github.com/precision-soft/melody/container"
     containercontract "github.com/precision-soft/melody/container/contract"
     "github.com/precision-soft/melody/exception"
@@ -63,7 +64,13 @@ func TestResolveErrorContextJson_RedactsStackOnMarshalFailure(t *testing.T) {
 
     resolveErr := exception.NewError("boom", contextValue, nil)
 
-    result := resolveErrorContextJson(resolveErr, 0)
+    result := resolveErrorContextJson(
+        resolveErr,
+        output.Option{
+            Format:         output.FormatTable,
+            VerbosityLevel: 0,
+        },
+    )
 
     if true == strings.Contains(result, "SECRET_STACK_TRACE") {
         t.Fatalf("stack value leaked into the fallback output: %q", result)
@@ -307,6 +314,13 @@ func TestMain(mainInstance *testing.M) {
     os.Exit(mainInstance.Run())
 }
 
+func fullVerbosityTableOption() output.Option {
+    return output.Option{
+        Format:         output.FormatTable,
+        VerbosityLevel: 3,
+    }
+}
+
 /* newCyclicErrorContext builds the context a producer creates by parking a reference to the context inside itself. The self-reference is stored as a plain map[string]any because that is what the walk descends into; the named contract type is converted at the top of resolveErrorContextJson. */
 func newCyclicErrorContext() exceptioncontract.Context {
     payload := map[string]any{
@@ -332,10 +346,16 @@ func newCyclicSliceErrorContext() exceptioncontract.Context {
 func runErrorContextProbe(probeName string) {
     switch probeName {
     case "cyclicMapContext":
-        resolveErrorContextJson(exception.NewError("boom", newCyclicErrorContext(), nil), 3)
+        resolveErrorContextJson(exception.NewError("boom", newCyclicErrorContext(), nil), fullVerbosityTableOption())
 
     case "cyclicSliceContext":
-        resolveErrorContextJson(exception.NewError("boom", newCyclicSliceErrorContext(), nil), 3)
+        resolveErrorContextJson(exception.NewError("boom", newCyclicSliceErrorContext(), nil), fullVerbosityTableOption())
+
+    case "cyclicNamedMapContext":
+        resolveErrorContextJson(exception.NewError("boom", newCyclicNamedMapErrorContext(), nil), fullVerbosityTableOption())
+
+    case "cyclicNamedSliceContext":
+        resolveErrorContextJson(exception.NewError("boom", newCyclicNamedSliceErrorContext(), nil), fullVerbosityTableOption())
 
     default:
         os.Exit(97)
@@ -386,7 +406,7 @@ func TestResolveErrorContextJson_SelfReferentialSliceContextTerminates(t *testin
 
 /* @info the guarded rendering must still be usable: the surviving keys are printed and the point where the loop closed is named, rather than the whole context being dropped */
 func TestResolveErrorContextJson_RendersTheCycleAsAMarker(t *testing.T) {
-    result := resolveErrorContextJson(exception.NewError("boom", newCyclicErrorContext(), nil), 3)
+    result := resolveErrorContextJson(exception.NewError("boom", newCyclicErrorContext(), nil), fullVerbosityTableOption())
 
     /* the rendered context is JSON, where encoding/json escapes the marker's angle brackets, so the marker is looked for in the form the encoder actually writes */
     encodedMarker, markerErr := json.Marshal(errorContextCycleMarker)
@@ -488,5 +508,224 @@ func TestSanitizeErrorContextValue_LeavesAnOrdinaryContextIntact(t *testing.T) {
 
     if "refused" != attempt["error"] {
         t.Fatalf("an ordinary context did not survive the walk: %v", sanitized)
+    }
+}
+
+/* newCyclicNamedMapErrorContext parks the self-reference inside a value typed as the framework's own defined context type, the shape that used to slip past the tracked walk entirely: the cycle survived into json.Marshal, whose cycle error routed it to the fmt fallback that has no cycle detection at all */
+func newCyclicNamedMapErrorContext() exceptioncontract.Context {
+    inner := exceptioncontract.Context{
+        "serviceName": "broken.service",
+    }
+    inner["self"] = inner
+
+    return exceptioncontract.Context{
+        "payload": inner,
+    }
+}
+
+/* @info a cycle carried by a nested defined-type map must terminate exactly like one carried by a plain map: pre-guard it was a fatal stack overflow inside the fmt fallback, which no recover reaches */
+func TestResolveErrorContextJson_SelfReferentialNamedMapContextTerminates(t *testing.T) {
+    assertErrorContextProbeExitsCleanly(t, "cyclicNamedMapContext", 30*time.Second)
+}
+
+func TestResolveErrorContextJson_RendersTheNamedMapCycleAsAMarker(t *testing.T) {
+    result := resolveErrorContextJson(exception.NewError("boom", newCyclicNamedMapErrorContext(), nil), fullVerbosityTableOption())
+
+    encodedMarker, markerErr := json.Marshal(errorContextCycleMarker)
+    if nil != markerErr {
+        t.Fatalf("could not encode the cycle marker: %v", markerErr)
+    }
+
+    if false == strings.Contains(result, string(encodedMarker)) {
+        t.Fatalf("expected the closed loop to be rendered as %s, got %q", encodedMarker, result)
+    }
+    if false == strings.Contains(result, "broken.service") {
+        t.Fatalf("expected the keys around the loop to survive the guard, got %q", result)
+    }
+}
+
+/* @info the redaction must reach inside a nested defined-type map before the fmt fallback prints it: the assertion on the plain map type failed for the named type, so a marshal failure printed the nested stack in the clear */
+func TestResolveErrorContextJson_RedactsInsideANamedNestedMapOnMarshalFailure(t *testing.T) {
+    contextValue := exceptioncontract.Context{
+        "detail": exceptioncontract.Context{
+            "stack": "SECRET_NESTED_STACK",
+        },
+        "channel": make(chan int), /* not JSON marshalable, so it forces the fmt fallback */
+    }
+
+    result := resolveErrorContextJson(
+        exception.NewError("boom", contextValue, nil),
+        output.Option{
+            Format:         output.FormatTable,
+            VerbosityLevel: 0,
+        },
+    )
+
+    if true == strings.Contains(result, "SECRET_NESTED_STACK") {
+        t.Fatalf("nested stack value leaked into the fallback output: %q", result)
+    }
+}
+
+/* @info the table-cell truncation must not reach the json document: a machine consumer received a cut, unparseable fragment with no sign anything was dropped */
+func TestResolveErrorContextJson_DoesNotTruncateTheJsonFormat(t *testing.T) {
+    longValue := strings.Repeat("a", 500)
+    resolveErr := exception.NewError(
+        "boom",
+        exceptioncontract.Context{
+            "detail": longValue,
+        },
+        nil,
+    )
+
+    jsonResult := resolveErrorContextJson(
+        resolveErr,
+        output.Option{
+            Format:         output.FormatJson,
+            VerbosityLevel: 0,
+        },
+    )
+
+    decoded := map[string]any{}
+    if decodeErr := json.Unmarshal([]byte(jsonResult), &decoded); nil != decodeErr {
+        t.Fatalf("expected the json format to stay parseable, got %v for %q", decodeErr, jsonResult)
+    }
+    if longValue != decoded["detail"] {
+        t.Fatalf("expected the full value in the json format")
+    }
+
+    tableResult := resolveErrorContextJson(
+        resolveErr,
+        output.Option{
+            Format:         output.FormatTable,
+            VerbosityLevel: 0,
+        },
+    )
+    if false == strings.HasSuffix(tableResult, "...") {
+        t.Fatalf("expected the table format to stay truncated, got %q", tableResult)
+    }
+}
+
+/* @info the report names why the build failed, not only that it did: the message of a melody error is its message alone, and the causes below it used to reach neither the table nor the json */
+func TestContainerCommand_ReportsTheCauseChainOfAFailedBuild(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(
+        "broken.service.name",
+        func(resolver containercontract.Resolver) (*brokenService, error) {
+            return nil, exception.NewError(
+                "service build failed",
+                nil,
+                errors.New("connection refused"),
+            )
+        },
+    )
+
+    runtimeInstance := newTestRuntime(serviceContainer)
+
+    rendered, _ := runDebugCommand(
+        &ContainerCommand{},
+        runtimeInstance,
+        []string{"--format=json", "broken.service.name"},
+    )
+
+    decoded := struct {
+        Data struct {
+            ErrorCauseChain []string `json:"errorCauseChain"`
+        } `json:"data"`
+        Error struct {
+            Cause struct {
+                Details map[string]any `json:"details"`
+            } `json:"cause"`
+        } `json:"error"`
+    }{}
+    if decodeErr := json.Unmarshal([]byte(rendered), &decoded); nil != decodeErr {
+        t.Fatalf("failed to decode the rendered envelope: %v, rendered %q", decodeErr, rendered)
+    }
+
+    if 1 != len(decoded.Data.ErrorCauseChain) || "connection refused" != decoded.Data.ErrorCauseChain[0] {
+        t.Fatalf("expected the cause chain in the details, got %v", decoded.Data.ErrorCauseChain)
+    }
+
+    if nil == decoded.Error.Cause.Details["causeChain"] {
+        t.Fatalf("expected the cause chain on the envelope error, got %v", decoded.Error.Cause.Details)
+    }
+
+    tableRendered, _ := runDebugCommand(
+        &ContainerCommand{},
+        newTestRuntime(serviceContainer),
+        []string{"broken.service.name"},
+    )
+
+    if false == strings.Contains(tableRendered, "caused by") || false == strings.Contains(tableRendered, "connection refused") {
+        t.Fatalf("expected the cause line in the table, got %q", tableRendered)
+    }
+
+    /* the list view limits error lines by verbosity, so the cause line needs the raised level the operator would use to read a failure */
+    listTableRendered, _ := runDebugCommand(
+        &ContainerCommand{},
+        newTestRuntime(serviceContainer),
+        []string{"--verbosity=2"},
+    )
+
+    if false == strings.Contains(listTableRendered, "caused by: connection refused") {
+        t.Fatalf("expected the cause line in the list table, got %q", listTableRendered)
+    }
+}
+
+/* @info the context is read through the ContextProvider contract: an HttpException in the resolution chain used to contribute nothing */
+func TestResolveErrorContextJson_ReadsAnHttpExceptionContext(t *testing.T) {
+    httpException := exception.NewHttpException(503, "backend down")
+    httpException.SetContextValue("backend", "redis")
+
+    result := resolveErrorContextJson(httpException, fullVerbosityTableOption())
+
+    if false == strings.Contains(result, "redis") {
+        t.Fatalf("expected the http exception context, got %q", result)
+    }
+}
+
+/* @info the shown count precedes the ok/error split so the split reads as scoped to it: only the windowed services are resolved */
+func TestContainerCommand_ScopesTheSummarySplitToTheShownWindow(t *testing.T) {
+    rendered, runErr := runDebugCommand(
+        &ContainerCommand{},
+        newContainerListTestRuntime(10),
+        []string{"--limit=2"},
+    )
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    if false == strings.Contains(rendered, "SERVICES: 10 total | 2 shown | 2 ok | 0 error") {
+        t.Fatalf("expected the shown count before the split, got %q", rendered)
+    }
+}
+
+/* namedAnyList is the slice twin of the named-map bypass: a defined type with underlying []any */
+type namedAnyList []any
+
+func newCyclicNamedSliceErrorContext() exceptioncontract.Context {
+    payload := make(namedAnyList, 2)
+    payload[0] = "first"
+    payload[1] = payload
+
+    return exceptioncontract.Context{
+        "payload": payload,
+    }
+}
+
+/* @info the same defined-type bypass closed through a slice element rather than a map key */
+func TestResolveErrorContextJson_SelfReferentialNamedSliceContextTerminates(t *testing.T) {
+    assertErrorContextProbeExitsCleanly(t, "cyclicNamedSliceContext", 30*time.Second)
+}
+
+func TestResolveErrorContextJson_RendersTheNamedSliceCycleAsAMarker(t *testing.T) {
+    result := resolveErrorContextJson(exception.NewError("boom", newCyclicNamedSliceErrorContext(), nil), fullVerbosityTableOption())
+
+    encodedMarker, markerErr := json.Marshal(errorContextCycleMarker)
+    if nil != markerErr {
+        t.Fatalf("could not encode the cycle marker: %v", markerErr)
+    }
+
+    if false == strings.Contains(result, string(encodedMarker)) {
+        t.Fatalf("expected the closed loop to be rendered as %s, got %q", encodedMarker, result)
     }
 }

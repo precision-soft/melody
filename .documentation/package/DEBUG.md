@@ -18,7 +18,13 @@ The commands are intended for diagnostics and local debugging (container service
     - parameters (`debug:parameters`)
     - version metadata (`debug:version`)
 
-`debug:parameters` reports a `secret` column: a parameter declared as holding a credential (see [CONFIG](CONFIG.md#secret-parameters)) renders its value as `********` — or `(empty)` when it carries none — with the length withheld, while an ordinary parameter prints in the clear.
+`debug:parameters` reports a `secret` column: a parameter declared as holding a credential (see [CONFIG](CONFIG.md#secret-parameters)) renders its value as `********` — or `(empty)` when it carries none, including a nil value — with the length withheld, while an ordinary parameter prints in the clear.
+
+`debug:container` reports why a failing service failed, not only that it did: the causes below the resolution error render as `caused by` lines in the table views, as `errorCauseChain` in the json items, and on the envelope error's cause details. The error context is read through the `ContextProvider` contract, so an `HttpException` or a userland context-bearing error contributes its context too. The rendered context is redacted by key name — keys containing `trace` or `stack` are dropped, case-insensitively — which is a diagnostic-noise filter, deliberately not a credential filter: an error context has no secret declaration the way parameters do, so keeping credentials out of error contexts is the producer's responsibility. The context json is truncated to the table-cell width only in the table format; the json document always carries it whole.
+
+`debug:events --format=json --verbose` carries the per-listener detail — priority, source, owner and the required / may-skip marks — under `data.listeners`, beside the event list under `data.events`; without `--verbose` the json `data` stays the plain list payload. The table summary's `SUBSCRIBERS` total counts distinct subscribers across the whole dispatcher, while the per-event column counts them per event.
+
+The `debug:container` list summary orders its segments `total | shown | ok | error` when a window is applied: only the windowed services are resolved, so the ok/error split answers the shown rows, not the total.
 
 ## Flags and output
 
@@ -43,7 +49,7 @@ Three behaviours apply to every command on this page:
 
 ### Constructors and helpers
 
-- [`NewMiddlewareCommand(middlewareProvider MiddlewareProvider) *MiddlewareCommand`](../../debug/command_middleware.go)
+- [`NewMiddlewareCommand(middlewareProvider MiddlewareProvider) *MiddlewareCommand`](../../debug/command_middleware.go) — panics on a nil provider; return an empty slice from the provider when there is nothing to list
 - [`MiddlewareProvider`](../../debug/command_middleware.go)
 
 ## Usage
