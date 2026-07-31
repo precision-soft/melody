@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- the provider implements `bunorm.MigrationProvider`: `OpenForMigration` opens the same database with the read and write deadlines lifted and the connect timeout kept — a down database must still fail fast — over a pool of the two connections a sequential migration run needs, with no mid-run connection recycling, because a lifetime rotation under a running statement is the same mid-statement cut by another name. This is what lets a migration whose DDL legitimately runs past the request-sized 30s deadlines finish instead of dying with `invalid connection` at step N of M
+
 ### Fixed
 
 - `provider.go` — transient-error detection recognises a connection abort through explicit markers for both spellings its platforms give it (`software caused connection abort` and `established connection was aborted`), aligning with the pgsql provider

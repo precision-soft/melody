@@ -18,7 +18,9 @@ type ManagerRegistry struct {
     lock              sync.Mutex
     managers          map[string]*Manager
     pendingOpenByName map[string]*managerOpen
-    closed            bool
+    /* the migration databases live beside the request pools, never inside them: a migration connection lifts the driver deadlines, and handing it to request traffic would trade one failure mode for another */
+    migrationDatabases map[string]*bun.DB
+    closed             bool
 }
 
 /*
@@ -80,7 +82,75 @@ func NewManagerRegistry(logger loggingcontract.Logger, providerDefinitions ...Pr
         defaultProviderDefinitionName: defaultProviderDefinitionName,
         managers:                      make(map[string]*Manager),
         pendingOpenByName:             make(map[string]*managerOpen),
+        migrationDatabases:            make(map[string]*bun.DB),
     }, nil
+}
+
+/* MigrationDatabase answers the connection the migration commands should run on: a dedicated one with the driver deadlines lifted when the provider implements MigrationProvider — reported through the second return — and the ordinary pooled connection otherwise. A request pool carries read and write deadlines sized for requests, and a DDL statement that legitimately runs past them is cut mid-statement with "invalid connection", outside any transaction MySQL would roll back; the dedicated connection exists so a long migration finishes instead. An empty name selects the default definition. The dedicated database is opened once per name, cached, and closed by Close. */
+func (instance *ManagerRegistry) MigrationDatabase(name string) (*bun.DB, bool, error) {
+    if "" == name {
+        name = instance.defaultProviderDefinitionName
+    }
+
+    instance.lock.Lock()
+
+    if true == instance.closed {
+        instance.lock.Unlock()
+
+        return nil, false, ErrManagerRegistryClosed
+    }
+
+    if database, exists := instance.migrationDatabases[name]; true == exists {
+        instance.lock.Unlock()
+
+        return database, true, nil
+    }
+
+    providerDefinition, exists := instance.providerDefinitionByName[name]
+    if false == exists {
+        instance.lock.Unlock()
+
+        return nil, false, ErrProviderDefinitionNotFound
+    }
+
+    migrationProvider, isMigrationProvider := providerDefinition.Provider.(MigrationProvider)
+    if false == isMigrationProvider {
+        instance.lock.Unlock()
+
+        manager, managerErr := instance.Manager(name)
+        if nil != managerErr {
+            return nil, false, managerErr
+        }
+
+        return manager.Database(), false, nil
+    }
+
+    /* the dial runs outside the registry-wide lock for the same reason Manager's does: a down database must not serialize cache hits or a concurrent Close. Migrations run from a sequential cli command, so no coalescing machinery is warranted — a concurrent duplicate open is resolved below by closing the loser. */
+    instance.lock.Unlock()
+
+    database, openErr := migrationProvider.OpenForMigration(providerDefinition.Params, instance.logger)
+    if nil != openErr {
+        return nil, false, openErr
+    }
+
+    instance.lock.Lock()
+    defer instance.lock.Unlock()
+
+    if true == instance.closed {
+        _ = database.Close()
+
+        return nil, false, ErrManagerRegistryClosed
+    }
+
+    if existingDatabase, exists := instance.migrationDatabases[name]; true == exists {
+        _ = database.Close()
+
+        return existingDatabase, true, nil
+    }
+
+    instance.migrationDatabases[name] = database
+
+    return database, true, nil
 }
 
 func (instance *ManagerRegistry) DefaultManager() (*Manager, error) {
@@ -259,6 +329,17 @@ func (instance *ManagerRegistry) Close() error {
         managerCloseErr := manager.Close()
         if nil == closeErr && nil != managerCloseErr {
             closeErr = managerCloseErr
+        }
+    }
+
+    for _, migrationDatabase := range instance.migrationDatabases {
+        if nil == migrationDatabase {
+            continue
+        }
+
+        migrationDatabaseCloseErr := migrationDatabase.Close()
+        if nil == closeErr && nil != migrationDatabaseCloseErr {
+            closeErr = migrationDatabaseCloseErr
         }
     }
 

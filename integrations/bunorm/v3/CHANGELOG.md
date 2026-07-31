@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `MigrationProvider` is the optional capability of opening a connection tuned for migrations, and `ManagerRegistry.MigrationDatabase` answers it: the pool a provider opens for request traffic carries driver-level read and write deadlines sized for requests, and a legitimate DDL statement that runs past them — an ALTER TABLE adding constraints on a large table — is cut mid-statement with `invalid connection`, outside any transaction MySQL would roll back. A provider that implements the capability opens the same database with those deadlines lifted; the registry opens it once per definition, caches it beside the request pool — never inside it — and closes it on Close. A provider without the capability keeps the old behaviour: the ordinary pooled connection, reported as not dedicated
+
 ### Fixed
 
 - encrypt: the capacity check covers a rotation to a longer key id, which grows every stored value and could truncate a column that fitted before. The required width is measured from the longest stored value with its own key id removed, because a column mid-rotation holds several of them and a flat difference against the provider's current key reads as zero exactly when the rotation has already begun. Plaintext left in the column is measured under the key the rotation will seal it with

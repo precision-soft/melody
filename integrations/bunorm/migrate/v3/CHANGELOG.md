@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- the migration commands run on the dedicated migration connection when the provider offers one (`bunorm.MigrationProvider`), falling back to the ordinary pool otherwise; the resolved database label says `(dedicated migration connection)` so the run reports which connection carried it. A long migration — an ALTER TABLE adding cascade foreign keys on a large table — used to be cut by the request pool's 30s driver deadlines with `invalid connection` mid-sequence, where MySQL DDL leaves partially applied steps behind
+
 ### Fixed
 
 - the migration lock is released on a context detached from the command's own, so interrupting a running migration no longer leaves the lock row behind and refusing every later migration until someone runs the unlock command by hand. The cancelled context made the delete fail before it reached the database, and the failure was discarded; it is now reported
