@@ -84,3 +84,69 @@ func TestRender_ReturnsNilForAnEnvelopeCarryingOnlyWarnings(t *testing.T) {
         t.Fatalf("a warning must not fail the command, got %v", renderErr)
     }
 }
+
+/* @info the error is returned unmarked so the exit path writes it to the application log: the rendered report lives only on the output streams, and a run that failed used to be invisible to anything reading the log file */
+func TestRender_ReturnsTheEnvelopeFailureUnmarked(t *testing.T) {
+    envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
+    envelope.SetError("cmd.failed", "the command failed", nil, nil)
+
+    renderErr := Render(&bytes.Buffer{}, envelope, DefaultOption())
+    if nil == renderErr {
+        t.Fatalf("expected the exit-coded error")
+    }
+
+    var exitError *exception.ExitError
+    if false == errors.As(renderErr, &exitError) {
+        t.Fatalf("expected an ExitError, got %v", renderErr)
+    }
+    if 1 != exitError.ExitCode() {
+        t.Fatalf("expected exit code 1, got %d", exitError.ExitCode())
+    }
+    if true == exitError.ErrorValue().AlreadyLogged() {
+        t.Fatalf("expected the envelope failure to travel unmarked so the exit path logs it")
+    }
+}
+
+type failingRenderWriter struct {
+}
+
+func (instance *failingRenderWriter) Write(payload []byte) (int, error) {
+    return 0, errors.New("disk full")
+}
+
+/* @info the envelope's own failure must survive a printing that did not: the print error alone replaced the reason the command failed with the reason the report could not be written, and the failure the envelope carried existed nowhere else */
+func TestRender_KeepsTheEnvelopeFailureWhenThePrintingFails(t *testing.T) {
+    envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
+    envelope.SetError("cmd.failed", "the business failure", nil, nil)
+
+    renderErr := Render(&failingRenderWriter{}, envelope, DefaultOption())
+    if nil == renderErr {
+        t.Fatalf("expected an error")
+    }
+
+    var exitError *exception.ExitError
+    if false == errors.As(renderErr, &exitError) {
+        t.Fatalf("expected the envelope failure to survive as the exit-coded cause, got %v", renderErr)
+    }
+    if "the business failure" != exitError.ErrorValue().Message() {
+        t.Fatalf("expected the business failure in the chain, got %q", exitError.ErrorValue().Message())
+    }
+    if false == strings.Contains(renderErr.Error(), "failed to print") {
+        t.Fatalf("expected the print failure named on the outer error, got %q", renderErr.Error())
+    }
+}
+
+/* @info a printing failure without an envelope failure keeps its own report: there is nothing else to preserve */
+func TestRender_ReturnsThePrintFailureAloneWhenTheEnvelopeCarriesNoError(t *testing.T) {
+    envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
+
+    renderErr := Render(&failingRenderWriter{}, envelope, Option{Format: FormatJson})
+    if nil == renderErr {
+        t.Fatalf("expected the print failure")
+    }
+
+    var exitError *exception.ExitError
+    if true == errors.As(renderErr, &exitError) {
+        t.Fatalf("expected no exit-coded wrapper without an envelope failure, got %v", renderErr)
+    }
+}

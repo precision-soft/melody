@@ -59,6 +59,10 @@ func NormalizeOption(option Option) Option {
         normalized.NoColor = true
     }
 
+    if 0 > normalized.VerbosityLevel {
+        normalized.VerbosityLevel = 0
+    }
+
     if 0 > normalized.Limit {
         normalized.Limit = 0
     }

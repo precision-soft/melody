@@ -515,3 +515,202 @@ func TestRegister_ActionReportsTheShutdownFailuresWhenTheCommandItselfSucceeds(t
         t.Fatalf("expected the shutdown aggregate, got %q", runErr.Error())
     }
 }
+
+/* @info the finish banner reads commandErr, and a panic in the command leaves the linear path that assigns it: the unwinding used to run the banner defer over a nil commandErr and print [finished] [success] for a command that died. The panic is re-raised unchanged so the recover handler that owns the process boundary still sees it. */
+func TestRegister_ActionPrintsTheFailedBannerAndRepanicsWhenTheCommandPanics(t *testing.T) {
+    runtimeInstance := newTestRuntime()
+
+    rootCommand := NewCommandContext("app", "desc")
+
+    buffer := &bytes.Buffer{}
+
+    panicValue := errors.New("command exploded")
+
+    command := &testCommand{
+        nameValue:        "explode",
+        descriptionValue: "explode command",
+        flagsValue:       output.DebugFlags(),
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            panic(panicValue)
+        },
+    }
+
+    Register(rootCommand, command, runtimeInstance)
+
+    registered := rootCommand.Commands[0]
+    registered.Writer = buffer
+
+    recovered := func() (recoveredValue any) {
+        defer func() {
+            recoveredValue = recover()
+        }()
+
+        _ = registered.Action(context.Background(), registered)
+
+        return nil
+    }()
+
+    if panicValue != recovered {
+        t.Fatalf("expected the original panic value to be re-raised, got %v", recovered)
+    }
+
+    written := buffer.String()
+    if false == strings.Contains(written, "[failed]") {
+        t.Fatalf("expected the finish banner to report [failed], got %q", written)
+    }
+    if true == strings.Contains(written, "[success]") {
+        t.Fatalf("expected no [success] banner for a panicked command, got %q", written)
+    }
+}
+
+/* @info the closes are deliberately left to the outer layers on the panic path: closing the container here would hand the recover handler that resolves the exit logger a closed container, downgrading the fatal record to the emergency fallback */
+func TestRegister_ActionLeavesTheContainerOpenOnThePanicPath(t *testing.T) {
+    runtimeInstance := newTestRuntime()
+
+    rootCommand := NewCommandContext("app", "desc")
+
+    command := &testCommand{
+        nameValue:        "explode",
+        descriptionValue: "explode command",
+        flagsValue:       output.DebugFlags(),
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            panic("boom")
+        },
+    }
+
+    Register(rootCommand, command, runtimeInstance)
+
+    registered := rootCommand.Commands[0]
+    registered.Writer = &bytes.Buffer{}
+
+    func() {
+        defer func() {
+            _ = recover()
+        }()
+
+        _ = registered.Action(context.Background(), registered)
+    }()
+
+    closedChecker, isChecker := runtimeInstance.Container().(interface{ IsClosed() bool })
+    if false == isChecker {
+        t.Fatalf("expected the container to expose IsClosed")
+    }
+    if true == closedChecker.IsClosed() {
+        t.Fatalf("expected the container to stay open on the panic path")
+    }
+}
+
+type typedNilErrorCommandFailure struct {
+    message string
+}
+
+func (instance *typedNilErrorCommandFailure) Error() string {
+    return instance.message
+}
+
+/* @info a command that returns its error through a concrete typed pointer hands over a non-nil interface around a nil value: read as a failure it reached Error() on a nil receiver on the printing line and killed the request with a masked panic in place of the success it meant */
+func TestRegister_ActionReadsATypedNilCommandErrorAsSuccess(t *testing.T) {
+    runtimeInstance := newTestRuntime()
+
+    rootCommand := NewCommandContext("app", "desc")
+
+    buffer := &bytes.Buffer{}
+
+    command := &testCommand{
+        nameValue:        "typed-nil",
+        descriptionValue: "typed nil command",
+        flagsValue:       output.DebugFlags(),
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            var failure *typedNilErrorCommandFailure
+
+            return failure
+        },
+    }
+
+    Register(rootCommand, command, runtimeInstance)
+
+    registered := rootCommand.Commands[0]
+    registered.Writer = buffer
+
+    actionErr := registered.Action(context.Background(), registered)
+    if nil != actionErr {
+        t.Fatalf("expected the typed-nil error to read as success, got %v", actionErr)
+    }
+
+    written := buffer.String()
+    if false == strings.Contains(written, "[success]") {
+        t.Fatalf("expected the [success] banner, got %q", written)
+    }
+}
+
+type failingCloseService struct {
+}
+
+func (instance *failingCloseService) Close() error {
+    return errors.New("the backend connection refused to close")
+}
+
+/* @info asking before closing mirrors the application teardown: a repeated Close answers the first teardown's memoized error, so a command that already closed the container itself — and folded the failure into its own result — would have that one failure presented again as a fresh shutdown incident */
+func TestRegister_ActionDoesNotReportTheCloseFailureOfAContainerTheCommandAlreadyClosed(t *testing.T) {
+    runtimeInstance := newTestRuntime()
+
+    container.MustRegister(
+        runtimeInstance.Container(),
+        "test.failing-close",
+        func(resolver containercontract.Resolver) (*failingCloseService, error) {
+            return &failingCloseService{}, nil
+        },
+    )
+
+    rootCommand := NewCommandContext("app", "desc")
+
+    buffer := &bytes.Buffer{}
+
+    command := &testCommand{
+        nameValue:        "self-close",
+        descriptionValue: "self close command",
+        flagsValue:       output.DebugFlags(),
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            _ = runtimeInstance.Container().MustGet("test.failing-close")
+
+            /* the command takes the teardown failure into its own hands: the close error is its to fold into the result */
+            closeErr := runtimeInstance.Container().Close()
+            if nil == closeErr {
+                t.Fatalf("expected the container close to fail through the registered service")
+            }
+
+            return nil
+        },
+    }
+
+    Register(rootCommand, command, runtimeInstance)
+
+    registered := rootCommand.Commands[0]
+    registered.Writer = buffer
+
+    actionErr := registered.Action(context.Background(), registered)
+    if nil != actionErr {
+        t.Fatalf("expected no shutdown failure for a container the command closed itself, got %v", actionErr)
+    }
+}
+
+/* @info the flag promises the absence of ansi sequences, and the banner is written to the same stream the command's own output goes to: a --no-color run redirected into a file used to carry escape codes around an output that honoured the flag */
+func TestRegister_ActionPrintsThePlainBannerUnderNoColor(t *testing.T) {
+    written := runRegisteredCommand(t, []string{"--no-color"})
+
+    if true == strings.Contains(written, "\x1b[") || true == strings.Contains(written, "\033[") {
+        t.Fatalf("expected no ansi sequences under --no-color, got %q", written)
+    }
+    if false == strings.Contains(written, "[started]") || false == strings.Contains(written, "[finished]") {
+        t.Fatalf("expected the plain banner text, got %q", written)
+    }
+}
+
+/* @info the colored banner is the default: the no-color branch must not take the ansi sequences away from the run that never asked for that */
+func TestRegister_ActionKeepsTheColoredBannerByDefault(t *testing.T) {
+    written := runRegisteredCommand(t, nil)
+
+    if false == strings.Contains(written, "\x1b[42m") {
+        t.Fatalf("expected the ansi background in the default banner, got %q", written)
+    }
+}

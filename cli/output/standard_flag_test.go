@@ -150,3 +150,56 @@ func TestDebugFlags_DefaultQuietToFalse(t *testing.T) {
 
     t.Fatalf("expected a quiet flag among the debug flags")
 }
+
+/* @info a negative value is refused at parsing, naming the flag: the option normalization clamps a negative to zero, and zero means unlimited for the limit and "from the start" for the offset — an argument asking for less than nothing silently delivered everything */
+func TestStandardFlags_RefuseNegativeIntegerValues(t *testing.T) {
+    for _, flagName := range []string{FlagNameVerbosity, FlagNameLimit, FlagNameOffset, FlagNameTableMaxWidth} {
+        validator := findIntFlagValidator(t, flagName)
+
+        validationErr := validator(-1)
+        if nil == validationErr {
+            t.Fatalf("expected %q to refuse a negative value", flagName)
+        }
+        if false == strings.Contains(validationErr.Error(), flagName) {
+            t.Fatalf("expected the refusal to name the flag %q, got %q", flagName, validationErr.Error())
+        }
+    }
+}
+
+func TestStandardFlags_AcceptZeroAndPositiveIntegerValues(t *testing.T) {
+    for _, flagName := range []string{FlagNameVerbosity, FlagNameLimit, FlagNameOffset, FlagNameTableMaxWidth} {
+        validator := findIntFlagValidator(t, flagName)
+
+        if nil != validator(0) {
+            t.Fatalf("expected %q to accept zero", flagName)
+        }
+        if nil != validator(7) {
+            t.Fatalf("expected %q to accept a positive value", flagName)
+        }
+    }
+}
+
+func findIntFlagValidator(t *testing.T, flagName string) func(value int) error {
+    t.Helper()
+
+    for _, flag := range StandardFlags() {
+        intFlag, isIntFlag := flag.(*clicontract.IntFlag)
+        if false == isIntFlag {
+            continue
+        }
+
+        if flagName != intFlag.Name {
+            continue
+        }
+
+        if nil == intFlag.Validator {
+            t.Fatalf("expected %q to carry a validator", flagName)
+        }
+
+        return intFlag.Validator
+    }
+
+    t.Fatalf("expected the standard flags to carry %q", flagName)
+
+    return nil
+}

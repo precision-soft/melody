@@ -45,6 +45,7 @@ The [`cli`](../../cli) package provides core primitives for Melody's command-lin
 - [`cli.AnsiYellow`](../../cli/style.go)
 - [`cli.AnsiRed`](../../cli/style.go)
 - [`cli.AnsiBackgroundGreen`](../../cli/style.go)
+- [`cli.AnsiBackgroundRed`](../../cli/style.go)
 - [`cli.AnsiWhite`](../../cli/style.go)
 - [`cli.AnsiEraseLine`](../../cli/style.go)
 

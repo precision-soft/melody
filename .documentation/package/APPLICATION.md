@@ -257,6 +257,8 @@ Boot fails fast where serving would be the widening: an **http** process whose `
 
 On the way out, the record that explains a dying process is written **before** the teardown, through a logger that still writes: the exit handler refuses a container logger the teardown already closed and falls back to the emergency logger. A teardown failure that `Run`'s own close discovers turns into exit 1, symmetric with the cli path, which folds close failures into the command's result.
 
+A panic **during boot** exits fail-fast, without a container teardown: `Boot`'s own recover handler logs the record and exits, and by design does not attempt `Close` on a container that may be half built. Connections modules opened before the failing boot line — database pools, redis clients — are reclaimed by the process exit, not by their `Close`. A deployment whose backends require an orderly disconnect should treat a boot failure accordingly.
+
 ### Middleware helpers
 
 - [`(*HttpMiddleware).Use(middlewares...)`](../../application/http_middleware.go)

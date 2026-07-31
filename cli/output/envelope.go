@@ -2,6 +2,7 @@ package output
 
 import "time"
 
+/* Envelope is not safe for concurrent use: a command that gathers warnings from parallel work funnels them through one goroutine rather than calling AddWarning from several. */
 type Envelope struct {
     Meta     Meta       `json:"meta"`
     Data     any        `json:"data"`

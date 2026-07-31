@@ -34,11 +34,33 @@ type TablePrinter struct {
     tableMaxWidth int
 }
 
+/* errorTrackingWriter remembers the first write failure and swallows the rest: the table is printed through dozens of small writes, and threading every result through the row and cell helpers would bury the layout code. A report truncated by a full disk used to end with a success banner and exit zero; the remembered failure is what lets Print refuse instead. */
+type errorTrackingWriter struct {
+    writer   io.Writer
+    firstErr error
+}
+
+func (instance *errorTrackingWriter) Write(payload []byte) (int, error) {
+    if nil != instance.firstErr {
+        return len(payload), nil
+    }
+
+    _, writeErr := instance.writer.Write(payload)
+    if nil != writeErr {
+        instance.firstErr = writeErr
+    }
+
+    return len(payload), nil
+}
+
 func (instance *TablePrinter) Print(
     writer io.Writer,
     envelope Envelope,
     option Option,
 ) error {
+    tracking := &errorTrackingWriter{writer: writer}
+    writer = tracking
+
     if false == option.Quiet {
         _, _ = fmt.Fprintf(writer, "COMMAND: %s\n", envelope.Meta.Command)
         _, _ = fmt.Fprintf(
@@ -60,28 +82,27 @@ func (instance *TablePrinter) Print(
         _, _ = fmt.Fprintln(writer)
     }
 
-    if nil == envelope.Table {
-        return nil
-    }
-
-    for _, line := range envelope.Table.SummaryLines {
-        _, _ = fmt.Fprintln(writer, line)
-    }
-    if 0 != len(envelope.Table.SummaryLines) {
-        _, _ = fmt.Fprintln(writer)
-    }
-
-    for _, block := range envelope.Table.Blocks {
-        if "" != block.Title {
-            _, _ = fmt.Fprintln(writer, block.Title)
+    if nil != envelope.Table {
+        for _, line := range envelope.Table.SummaryLines {
+            _, _ = fmt.Fprintln(writer, line)
+        }
+        if 0 != len(envelope.Table.SummaryLines) {
+            _, _ = fmt.Fprintln(writer)
         }
 
-        instance.printTableBlock(writer, block)
+        for _, block := range envelope.Table.Blocks {
+            if "" != block.Title {
+                _, _ = fmt.Fprintln(writer, block.Title)
+            }
 
-        _, _ = fmt.Fprintln(writer)
+            instance.printTableBlock(writer, block)
+
+            _, _ = fmt.Fprintln(writer)
+        }
     }
 
-    if 0 != len(envelope.Warnings) && false == option.Quiet {
+    /* the warnings are printed under quiet as well: quiet suppresses the decorative headers, and a warning is the one thing a command said beside its result — swallowed by a default, it never reached anyone rendering the default table. Only the warning details stay behind the verbose flag. */
+    if 0 != len(envelope.Warnings) {
         _, _ = fmt.Fprintln(writer, "WARNINGS:")
         for _, warning := range envelope.Warnings {
             _, _ = fmt.Fprintf(writer, "- %s\n", warning.Message)
@@ -100,7 +121,43 @@ func (instance *TablePrinter) Print(
         }
     }
 
-    return nil
+    /* the error is rendered whole, and regardless of quiet: this printer is the only presentation the default format has, and an envelope failure that renders nowhere leaves the red one-line echo as the entire report — the code, the details and the cause existed only here */
+    if nil != envelope.Error {
+        _, _ = fmt.Fprintf(writer, "ERROR: %s\n", envelope.Error.Message)
+
+        if "" != envelope.Error.Code {
+            _, _ = fmt.Fprintf(writer, "  code: %s\n", envelope.Error.Code)
+        }
+
+        instance.printSortedDetails(writer, envelope.Error.Details, "  ")
+
+        if nil != envelope.Error.Cause {
+            _, _ = fmt.Fprintf(writer, "  cause: %s\n", envelope.Error.Cause.Message)
+            instance.printSortedDetails(writer, envelope.Error.Cause.Details, "    ")
+        }
+    }
+
+    return tracking.firstErr
+}
+
+func (instance *TablePrinter) printSortedDetails(writer io.Writer, details map[string]any, indent string) {
+    if 0 == len(details) {
+        return
+    }
+
+    keys := make([]string, 0, len(details))
+    for key := range details {
+        if "" == key {
+            continue
+        }
+
+        keys = append(keys, key)
+    }
+    sort.Strings(keys)
+
+    for _, key := range keys {
+        _, _ = fmt.Fprintf(writer, "%s%s: %v\n", indent, key, details[key])
+    }
 }
 
 func (instance *TablePrinter) printTableBlock(writer io.Writer, block TableBlock) {

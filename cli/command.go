@@ -12,6 +12,7 @@ import (
     clicontract "github.com/precision-soft/melody/cli/contract"
     "github.com/precision-soft/melody/cli/output"
     "github.com/precision-soft/melody/exception"
+    "github.com/precision-soft/melody/internal"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
@@ -90,7 +91,7 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
                     writer = io.Discard
                 }
 
-                /* in json mode the command writes one machine-readable document to this same stream, so the banner would make it unparseable from the first byte; nothing is lost because output.Meta already carries the command, arguments, start time and duration, and Envelope.Error carries the final status */
+                /* in json mode the command writes one machine-readable document to this same stream, so the banner would make it unparseable from the first byte; nothing is lost because output.Meta already carries the command, arguments, start time and duration. The final status is the exit code, not the document: the scope and container are closed after the document was written, so a shutdown failure discovered there can no longer enter it. */
                 resolvedOption := output.NormalizeOption(
                     output.ParseOptionFromCommand(commandContext),
                 )
@@ -101,7 +102,15 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
 
                 startedAt := time.Now()
                 const logFiller = "======================================"
+
+                /* the flag promises the absence of ansi sequences, and the banner is written to the same stream the command's own output goes to: a --no-color run redirected into a file must not carry escape codes around an output that honoured the flag */
+                noColor := resolvedOption.NoColor
+
                 printGreenFullLine := func(writer io.Writer) {
+                    if true == noColor {
+                        return
+                    }
+
                     _, _ = fmt.Fprintf(
                         writer,
                         "%s%s%s\n",
@@ -112,6 +121,12 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
                 }
 
                 printGreenStatusLine := func(writer io.Writer, text string) {
+                    if true == noColor {
+                        _, _ = fmt.Fprintf(writer, "%s\n", text)
+
+                        return
+                    }
+
                     _, _ = fmt.Fprintf(
                         writer,
                         "%s%s\r%s%s%s\n",
@@ -124,6 +139,12 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
                 }
 
                 printRedStatusLine := func(writer io.Writer, text string) {
+                    if true == noColor {
+                        _, _ = fmt.Fprintf(writer, "%s\n", text)
+
+                        return
+                    }
+
                     _, _ = fmt.Fprintf(
                         writer,
                         "%s%s\r%s%s%s\n",
@@ -162,7 +183,10 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
 
                     statusText := "[success]"
                     if nil != commandErr {
-                        statusText = fmt.Sprintf("%s[failed]%s", AnsiRed, AnsiWhite)
+                        statusText = "[failed]"
+                        if false == noColor {
+                            statusText = fmt.Sprintf("%s[failed]%s", AnsiRed, AnsiWhite)
+                        }
                     }
 
                     printGreenStatusLine(
@@ -181,17 +205,44 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
                     printGreenFullLine(writer)
                 }()
 
-                runErr := copied.Run(runtimeInstance, commandContext)
+                /* the finish banner reads commandErr, and a panic in the command leaves the linear path that assigns it: without this the unwinding ran the banner defer over a nil commandErr and printed [finished] [success] for a command that died. The panic itself is re-raised unchanged — an *exception.ExitError keeps its exit code — and the closes are deliberately NOT performed here on this path: the scope is closed by the caller's defer and the container by the recover handler that owns the exit, after it resolved the logger; closing the container here would hand that handler a closed logger and downgrade the fatal record to the emergency fallback. */
+                defer func() {
+                    recoveredValue := recover()
+                    if nil == recoveredValue {
+                        return
+                    }
+
+                    commandErr = exception.NewError(
+                        "cli command panicked",
+                        map[string]any{
+                            "commandName": normalizedCommandName,
+                        },
+                        nil,
+                    )
+
+                    panic(recoveredValue)
+                }()
+
+                /* a command that returns its error through a concrete typed pointer hands over a non-nil interface around a nil value: read as a failure it reaches Error() on a nil receiver on the printing line below. The same normalization guards the two Close results, which cross the substitutable runtime contract. */
+                runErr := normalizeCliError(copied.Run(runtimeInstance, commandContext))
 
                 closeErrorByName := map[string]error{}
 
-                scopeCloseErr := runtimeInstance.Scope().Close()
+                scopeCloseErr := normalizeCliError(runtimeInstance.Scope().Close())
                 if nil != scopeCloseErr {
                     closeErrorByName["scope"] = scopeCloseErr
                 }
 
-                containerCloseErr := runtimeInstance.Container().Close()
-                if nil != containerCloseErr {
+                /* asking before closing mirrors the application teardown: a repeated Close answers the first teardown's memoized error, so a command that already closed the container itself would have its one failure presented again as a fresh shutdown incident */
+                containerInstance := runtimeInstance.Container()
+
+                containerAlreadyClosed := false
+                if closedChecker, isChecker := containerInstance.(interface{ IsClosed() bool }); true == isChecker {
+                    containerAlreadyClosed = closedChecker.IsClosed()
+                }
+
+                containerCloseErr := normalizeCliError(containerInstance.Close())
+                if nil != containerCloseErr && false == containerAlreadyClosed {
                     closeErrorByName["container"] = containerCloseErr
                 }
 
@@ -206,6 +257,15 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
             },
         },
     )
+}
+
+/* normalizeCliError reads the error through the interface: a command or a substituted runtime declared with a concrete error type hands back a typed nil boxed into a non-nil interface, which would be treated as the failure it is not — and would panic the first line that renders it. */
+func normalizeCliError(err error) error {
+    if true == internal.IsNilInterface(err) {
+        return nil
+    }
+
+    return err
 }
 
 func aggregateCliErrors(runErr error, closeErrorByName map[string]error) error {

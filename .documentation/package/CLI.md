@@ -45,6 +45,7 @@ The [`cli`](../../cli) package provides core primitives for Melody's command-lin
 - [`cli.AnsiYellow`](../../cli/style.go)
 - [`cli.AnsiRed`](../../cli/style.go)
 - [`cli.AnsiBackgroundGreen`](../../cli/style.go)
+- [`cli.AnsiBackgroundRed`](../../cli/style.go)
 - [`cli.AnsiWhite`](../../cli/style.go)
 - [`cli.AnsiEraseLine`](../../cli/style.go)
 
@@ -54,7 +55,7 @@ This subpackage provides shared helpers that commands can use for consistent out
 
 - Flag names (string constants):
     - [`FlagNameFormat`, `FlagNameNoColor`, `FlagNameVerbose`, `FlagNameVerbosity`, `FlagNameQuiet`, `FlagNameOrder`, `FlagNameLimit`, `FlagNameOffset`, `FlagNameTableMaxWidth`](../../cli/output/flag.go)
-    - [`output.MergeFlags(flagSets ...[]clicontract.Flag) []clicontract.Flag`](../../cli/output/flag.go)
+    - [`output.MergeFlags(standard []clicontract.Flag, commandSpecific []clicontract.Flag) []clicontract.Flag`](../../cli/output/flag.go) — concatenates the two sets and **panics on a duplicated flag name**: the parser resolves a name to the first declaration, so a command-specific flag reusing a standard name would be silently inert. Do not reuse the `FlagName*` names.
 
 - Output format and ordering:
     - [`type Format`](../../cli/output/format.go) with constants [`FormatTable`, `FormatJson`](../../cli/output/format.go)
@@ -69,7 +70,7 @@ This subpackage provides shared helpers that commands can use for consistent out
 
 - Printing and rendering:
     - [`output.Printer`](../../cli/output/printer.go)
-    - [`output.Render(...)`](../../cli/output/renderer.go) — prints the envelope and then returns an **exit-coded error** when the envelope carries an error, so a failing command leaves the process with a non-zero status and a shell gate such as `app debug:container app.missing || exit 1` holds. That error is pre-marked as logged, since the rendered envelope already carries the full report; a printing failure is still returned as a plain error.
+    - [`output.Render(...)`](../../cli/output/renderer.go) — prints the envelope and then returns an **exit-coded error** when the envelope carries an error, so a failing command leaves the process with a non-zero status and a shell gate such as `app debug:container app.missing || exit 1` holds. The error travels **unmarked**, so the exit path also writes it to the application log — the rendered report lives only on the output streams. A printing failure is returned with the envelope's own failure preserved as its cause, never in its place.
     - [`output.SelectPrinter(option output.Option) output.Printer`](../../cli/output/printer_selector.go)
 
 - List payloads:
@@ -111,10 +112,14 @@ This subpackage provides shared helpers that commands can use for consistent out
 
 Note the flag is spelled `--table-width`, though its constant is `FlagNameTableMaxWidth`.
 
-Two behaviours are worth knowing before wiring a command against these, alongside the exit-code rule noted on `output.Render` above:
+The four integer flags refuse a negative value at parsing, naming the flag — a negative used to be clamped to zero, and zero means unlimited for the limit and "from the start" for the offset, so an argument asking for less than nothing silently delivered everything. The clamp in `NormalizeOption` stays as the defensive floor for an `Option` assembled in code.
+
+Four behaviours are worth knowing before wiring a command against these, alongside the exit-code rule noted on `output.Render` above:
 
 * **`--format=json` emits the envelope document and nothing else.** [`JsonPrinter`](../../cli/output/json_printer.go) encodes the `Envelope` as indented JSON and writes no headers, banners or trailing prose, so the output pipes straight into `jq`. Selecting it also **implies `--no-color`**: [`NormalizeOption`](../../cli/output/option_parser.go) forces `NoColor` on for the json format, because a single machine-readable document must not carry ANSI escapes — passing `--no-color=false` alongside `--format=json` does not put them back.
 * **`--format` and `--order` reject an unrecognised value.** Both carry a flag `Validator`, so argument parsing fails with `unsupported output format "…", expected "table" or "json"` (respectively `unsupported sort order "…", expected "asc" or "desc"`) instead of quietly using the default. [`NormalizeOption`](../../cli/output/option_parser.go) *does* coerce an unsupported value to the default, but that is a defensive floor for an `Option` assembled in code, not the path a command-line argument takes.
+* **`--quiet` suppresses the headers, never the warnings or the error.** The table printer renders the `WARNINGS` block and the envelope error (message, code, details, cause) under quiet as well — they are what the command said beside its result; only the warning *details* stay behind `--verbose`. The json document has always carried both.
+* **The `-v`/`-vv`/`-vvv` normalization rewrites tokens, not grammar.** Every standalone argv token of that exact shape becomes `--verbosity=N`, before the parser knows whether the token was meant as the *value* of the preceding flag — `some:cmd --pattern -vv` hands `--pattern` the rewritten token. Write such a value in the attached form (`--pattern=-vv`) or after the `--` terminator, which stops the normalization.
 
 ## Usage
 
@@ -193,4 +198,7 @@ func main() {
 
 - `cli.Register(...)` fails fast via the [`exception`](../../exception) package if the root command context, command, or runtime instance is nil.
 - Command names are normalized using `strings.TrimSpace(...)`. Empty names and duplicates are rejected.
-- Registered command execution will close `runtimeInstance.Scope()` and `runtimeInstance.Container()` after `Run(...)` and may return aggregated shutdown errors.
+- Registered command execution will close `runtimeInstance.Scope()` and `runtimeInstance.Container()` after `Run(...)` and may return aggregated shutdown errors. On a panic the closes stay with the outer layers — the recover handler that owns the exit needs the container open to write the fatal record — and the finish banner reports `[failed]` before the panic is re-raised unchanged.
+- A table row must match its block: `AddRow(...)` panics on a row whose cell count disagrees with the block's declared columns; the single-token separator row (`TableRowSeparatorToken`) is the one exception.
+- The table builder and the envelope are not safe for concurrent use: a command assembling its table or warnings from parallel work funnels them through one goroutine.
+- The banners honour `--no-color`: they print as plain text, and under `--format=json` they are suppressed entirely so the document stays parseable.

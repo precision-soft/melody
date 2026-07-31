@@ -321,6 +321,7 @@ func suggestCliCommand(
 
         _ = output.Render(os.Stderr, envelope, option)
 
+        /* returned unmarked so the exit path writes it to the application log: the rendered table lives only on stderr, and a run refused here used to be invisible to anything reading the log file */
         commandNotFoundErr := exception.NewError(
             "cli command not found",
             exceptioncontract.Context{
@@ -328,7 +329,6 @@ func suggestCliCommand(
             },
             nil,
         )
-        _ = exception.MarkLogged(commandNotFoundErr)
 
         return exception.NewExitError(2, commandNotFoundErr)
     }
@@ -391,6 +391,7 @@ func suggestCliCommand(
 
     _ = output.Render(os.Stderr, envelope, option)
 
+    /* returned unmarked so the exit path writes it to the application log: the rendered table lives only on stderr, and a run refused here used to be invisible to anything reading the log file */
     matchesFoundErr := exception.NewError(
         "cli command not found, matches found",
         exceptioncontract.Context{
@@ -401,48 +402,19 @@ func suggestCliCommand(
         nil,
     )
 
-    _ = exception.MarkLogged(matchesFoundErr)
-
     return exception.NewExitError(2, matchesFoundErr)
 }
 
+/* printCliCommandNotFoundHeader writes plain text: the suggestion table below it is rendered under NoColor, and a header carrying ansi sequences around a colorless table would contradict the very option it was rendered with */
 func printCliCommandNotFoundHeader(writer io.Writer, commandName string, startedAt time.Time) {
     const logFiller = "======================================"
 
-    printGreenFullLine := func(writer io.Writer) {
-        _, _ = fmt.Fprintf(
-            writer,
-            "%s%s%s\n",
-            cli.AnsiBackgroundGreen,
-            cli.AnsiEraseLine,
-            cli.AnsiReset,
-        )
-    }
-
-    printGreenStatusLine := func(writer io.Writer, text string) {
-        _, _ = fmt.Fprintf(
-            writer,
-            "%s%s\r%s%s%s\n",
-            cli.AnsiBackgroundGreen,
-            cli.AnsiEraseLine,
-            cli.AnsiWhite,
-            text,
-            cli.AnsiReset,
-        )
-    }
-
-    printGreenFullLine(writer)
-
-    printGreenStatusLine(
+    _, _ = fmt.Fprintf(
         writer,
-        fmt.Sprintf(
-            "%s [command not found] [%s] [%s] %s",
-            logFiller,
-            commandName,
-            startedAt.Format(time.DateTime),
-            logFiller,
-        ),
+        "%s [command not found] [%s] [%s] %s\n",
+        logFiller,
+        commandName,
+        startedAt.Format(time.DateTime),
+        logFiller,
     )
-
-    printGreenFullLine(writer)
 }

@@ -228,3 +228,49 @@ func (instance *paddedNameProbeCommand) Run(
 ) error {
     return instance.inner.Run(runtimeInstance, commandContext)
 }
+
+/* @info the suggestion refusal travels unmarked so the exit path writes it to the application log: the rendered table lives only on stderr, and a run refused here used to be invisible to anything reading the log file */
+func TestSuggestCliCommand_ReturnsTheRefusalUnmarked(t *testing.T) {
+    /* the input is a substring of the available name, so this refusal travels through the matches-found branch, not the zero-match one */
+    suggestErr := suggestCliCommand(
+        []string{"app", "product"},
+        []commandSuggestion{
+            {Name: "example:product", Description: "lists the products"},
+        },
+    )
+    if nil == suggestErr {
+        t.Fatalf("expected the suggestion refusal")
+    }
+
+    var exitError *exception.ExitError
+    if false == errors.As(suggestErr, &exitError) {
+        t.Fatalf("expected an ExitError, got %v", suggestErr)
+    }
+    if 2 != exitError.ExitCode() {
+        t.Fatalf("expected exit code 2, got %d", exitError.ExitCode())
+    }
+    if true == exitError.ErrorValue().AlreadyLogged() {
+        t.Fatalf("expected the refusal to travel unmarked so the exit path logs it")
+    }
+}
+
+/* @info the zero-match refusal is the same contract: unmarked, exit-coded, the full command list rendered on stderr */
+func TestSuggestCliCommand_ReturnsTheZeroMatchRefusalUnmarked(t *testing.T) {
+    suggestErr := suggestCliCommand(
+        []string{"app", "nosuchthing"},
+        []commandSuggestion{
+            {Name: "example:product", Description: "lists the products"},
+        },
+    )
+    if nil == suggestErr {
+        t.Fatalf("expected the refusal")
+    }
+
+    var exitError *exception.ExitError
+    if false == errors.As(suggestErr, &exitError) {
+        t.Fatalf("expected an ExitError, got %v", suggestErr)
+    }
+    if true == exitError.ErrorValue().AlreadyLogged() {
+        t.Fatalf("expected the refusal to travel unmarked")
+    }
+}

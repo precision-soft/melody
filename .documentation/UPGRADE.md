@@ -18,6 +18,38 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Cli: a duplicated flag name and a mismatched table row fail fast
+
+**What changed.** `output.MergeFlags` panics on a flag name declared twice — the parser resolves a name to the first declaration, so a command-specific flag reusing a standard name was silently inert. `TableBlockBuilder.AddRow` panics on a row whose cell count disagrees with the block's declared columns — a surplus cell silently never rendered; the single-token separator row stays admitted.
+
+**Symptom.** A command whose flags redeclare a standard name, or whose table rows disagree with their block's columns, panics at registration or at the row instead of silently misbehaving.
+
+**Remedy.** Rename the colliding flag (the standard names are the `FlagName*` constants), or make the row's cell count match the columns.
+
+### Cli: negative values for the standard integer flags are refused
+
+**What changed.** `--verbosity`, `--limit`, `--offset` and `--table-width` carry validators refusing a negative value, the way `--format` and `--order` refuse an unsupported one. A negative was clamped to zero, and zero means unlimited for the limit — an argument asking for less than nothing silently delivered everything.
+
+**Symptom.** `--limit=-5` fails at argument parsing, naming the flag, instead of listing everything with exit 0.
+
+**Remedy.** Pass a non-negative value; `0` keeps meaning unlimited/default.
+
+### Cli: the table format stops hiding warnings and errors, and printing failures fail the command
+
+**What changed.** Three output changes in the table format. The `WARNINGS` block renders under `--quiet` too — with `StandardFlags` defaulting quiet to true, an application command's warning was invisible at every verbosity; the warning details stay behind `--verbose`. The envelope error now renders whole (message, code, details, cause) — it previously rendered nowhere in the table format. And the first write failure is returned instead of discarded, so a report truncated by a full disk no longer ends in a success banner and exit zero.
+
+**Symptom.** Quiet table runs may print new `WARNINGS:`/`ERROR:` lines; a run whose output stream fails now exits non-zero.
+
+**Remedy.** None for correct runs; output parsers that assumed quiet suppressed warnings read the json format instead, which has always carried both.
+
+### Cli: a failed run reaches the application log
+
+**What changed.** The exit-coded errors built from a rendered envelope and from the command-suggestion refusal travel unmarked, so the exit path logs them through the application logger before the teardown. They were pre-marked as logged while the rendered report lived only on stdout/stderr — a failed run was invisible to anything reading the log file.
+
+**Symptom.** The log file gains one record per failed command run and per mistyped command name. Exit codes are unchanged.
+
+**Remedy.** None; log-volume alerts keyed on error records may need the new entries accounted for.
+
 ### Http/Bag: request values are delivered, and a repeated key read as one string is refused
 
 **What changed.** The request bags keep the single and the repeated key apart by type: a query or form key that appeared once is stored as the string it is, a genuinely repeated key (`?a=1&a=2`) stays a string slice. `Request.Input` and the lax accessors (`bag.String`, `bag.StringOrDefault`, `bag.HasNonEmptyString`) deliver the single value they used to silently lose — every value was stored as a slice and the lax accessor answered the empty string for it, so `Input("term")` on `?term=melody` returned `""` with nothing said. Reading a repeated key as one string now panics, naming the key and pointing to `bag.StringSlice`/`bag.StringAt` — never an empty-string guess, never the first element silently hiding the rest.
