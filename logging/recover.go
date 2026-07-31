@@ -82,34 +82,66 @@ func LogOnRecoverAndExit(
     recovered any,
     exitCode int,
 ) {
+    LogOnRecoverAndExitAfter(logger, recovered, exitCode, nil)
+}
+
+/* LogOnRecoverAndExitAfter logs the recovered value like LogOnRecoverAndExit and runs beforeExit between the logging and the process exit. The hook exists for the owner of the process boundary: a teardown deferred below this helper would never run, because os.Exit skips it, and a teardown run before it closes the very logger the final record must be written through — the hook is the one place that is both after the record and before the exit. */
+func LogOnRecoverAndExitAfter(
+    logger loggingcontract.Logger,
+    recovered any,
+    exitCode int,
+    beforeExit func(),
+) {
     if nil == recovered {
         return
     }
 
-    exitError, ok := recovered.(*exception.ExitError)
-    if true == ok {
-        err := exitError.ErrorValue()
+    err, resolvedExitCode, needsLogging := resolveRecoveredExit(recovered, exitCode)
 
-        if true == err.AlreadyLogged() {
-            echoExitToStderr(err, exitError.ExitCode())
-
-            os.Exit(exitError.ExitCode())
-        }
-
+    if true == needsLogging {
         LogError(logger, err)
         err.MarkAsLogged()
-
-        echoExitToStderr(err, exitError.ExitCode())
-
-        os.Exit(exitError.ExitCode())
     }
 
-    if err, ok := recovered.(*exception.Error); true == ok {
-        if true == err.AlreadyLogged() {
-            /* @important the earlier logging may have gone to a file logger, leaving stdout/stderr silent: without this echo a fatal exit (e.g. an http bind failure logged by runHttp) terminates the process with no visible trace in a container whose logs are the standard streams */
-            echoExitToStderr(err, exitCode)
+    if nil != beforeExit {
+        beforeExit()
+    }
 
-            os.Exit(exitCode)
+    /* @important the earlier logging may have gone to a file logger, leaving stdout/stderr silent: without this echo a fatal exit (e.g. an http bind failure logged by runHttp) terminates the process with no visible trace in a container whose logs are the standard streams */
+    echoExitToStderr(err, resolvedExitCode)
+
+    os.Exit(resolvedExitCode)
+}
+
+/* resolveRecoveredExit normalizes a recovered value into the error the exit reports, the exit code the process takes, and whether that error still needs logging. An ExitError carries its own code; one holding no error value — the zero value is constructible outside the constructor that refuses nil — is given an error naming the anomaly instead of dereferencing nil inside the one handler that must not panic. An error already logged is not logged again. */
+func resolveRecoveredExit(
+    recovered any,
+    exitCode int,
+) (*exception.Error, int, bool) {
+    exitError, isExitError := recovered.(*exception.ExitError)
+    if true == isExitError {
+        err := exitError.ErrorValue()
+
+        if nil == err {
+            err = exception.NewError(
+                "exit requested with no error value",
+                nil,
+                nil,
+            )
+
+            return err, exitError.ExitCode(), true
+        }
+
+        if true == err.AlreadyLogged() {
+            return err, exitError.ExitCode(), false
+        }
+
+        return err, exitError.ExitCode(), true
+    }
+
+    if err, isError := recovered.(*exception.Error); true == isError {
+        if true == err.AlreadyLogged() {
+            return err, exitCode, false
         }
     }
 
@@ -136,12 +168,7 @@ func LogOnRecoverAndExit(
         )
     }
 
-    LogError(logger, err)
-    err.MarkAsLogged()
-
-    echoExitToStderr(err, exitCode)
-
-    os.Exit(exitCode)
+    return err, exitCode, true
 }
 
 /* @important echoExitToStderr writes one final line to stderr before a fatal exit so the failure is visible even when the configured logger writes elsewhere (for example the example apps' file logger): a non-zero exit must never be completely silent on the standard streams */

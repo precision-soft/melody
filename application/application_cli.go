@@ -49,7 +49,8 @@ func (instance *Application) RegisterCliCommand(command clicontract.Command) {
         )
     }
 
-    commandName := command.Name()
+    /* the name is judged trimmed because that is the name the command is dispatched under: the cli registration trims before registering, so a padded name accepted raw here would pass this gate and then either collide at every dispatch — two names differing only in padding — or register under a spelling no argv can produce, with the suggestion table blocking every invocation of a command that exists. */
+    commandName := strings.TrimSpace(command.Name())
     if "" == commandName {
         exception.Panic(
             exception.NewError(
@@ -63,7 +64,7 @@ func (instance *Application) RegisterCliCommand(command clicontract.Command) {
     }
 
     for _, existingCommand := range instance.cliCommands {
-        if commandName == existingCommand.Name() {
+        if commandName == strings.TrimSpace(existingCommand.Name()) {
             /* recorded for the aggregated boot report instead of panicking one at a time; the first registration wins until the guaranteed panic ends the boot */
             instance.recordBootCollision(bootCollisionKindCliCommand, commandName)
             return
@@ -133,7 +134,8 @@ func (instance *Application) runCli(ctx context.Context) error {
         availableCommands = append(
             availableCommands,
             commandSuggestion{
-                Name:        command.Name(),
+                /* trimmed to the dispatched spelling: the suggestion gate compares the trimmed input against this list, and a raw padded name here would fail the exact match and block a command that exists */
+                Name:        strings.TrimSpace(command.Name()),
                 Description: command.Description(),
             },
         )

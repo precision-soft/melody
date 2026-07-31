@@ -224,3 +224,26 @@ func TestRuntime_ScopeCloseReturnsErrorOnGet(t *testing.T) {
         _ = runtimeInstance.Scope().MustGet("x")
     }, "failed to get service from scope")
 }
+
+/* nilableScope embeds the interface so a nil pointer of this type is a typed nil that still satisfies containercontract.Scope */
+type nilableScope struct {
+    containercontract.Scope
+}
+
+/* nilableContainer embeds the interface so a nil pointer of this type is a typed nil that still satisfies containercontract.Container */
+type nilableContainer struct {
+    containercontract.Container
+}
+
+/* @info the guards read through the interface: a typed nil used to pass the plain nil comparison, so every later resolution panicked on the request path instead of the construction failing where it can be named */
+func TestNew_RefusesTypedNilScopeAndContainer(t *testing.T) {
+    serviceContainer := container.NewContainer()
+
+    testhelper.AssertPanicsWithError(t, func() {
+        New(context.Background(), (*nilableScope)(nil), serviceContainer)
+    }, "scope may not be nil on runtime")
+
+    testhelper.AssertPanicsWithError(t, func() {
+        New(context.Background(), serviceContainer.NewScope(), (*nilableContainer)(nil))
+    }, "container may not be nil on runtime")
+}

@@ -103,3 +103,31 @@ func TestWorkingDirectoryHasEnvironmentFile_TreatsUnprovableStatErrorAsPresent(t
         t.Fatalf("expected true when the stat error cannot prove absence")
     }
 }
+
+/* @info the go run detection must not swallow an installation path that merely contains a segment starting with go-build: misclassification silently redirects all configuration discovery from the executable's directory to the working directory. */
+func TestIsGoRunExecutableDirectory_MatchesOnlyTheToolsTemporaryDirectories(t *testing.T) {
+    matching := []string{
+        "/tmp/go-build2932477933/b001/exe",
+        "/var/folders/x1/T/go-build1/b001/exe",
+        "/tmp/go-build/b001/exe",
+    }
+
+    for _, directory := range matching {
+        if false == isGoRunExecutableDirectory(directory) {
+            t.Fatalf("expected %q to be recognized as a go run build directory", directory)
+        }
+    }
+
+    nonMatching := []string{
+        "/opt/go-builder/bin",
+        "/srv/go-build-artifacts/app",
+        "/data/go-builds/bin",
+        "/usr/local/bin",
+    }
+
+    for _, directory := range nonMatching {
+        if true == isGoRunExecutableDirectory(directory) {
+            t.Fatalf("expected %q not to be classified as a go run build directory", directory)
+        }
+    }
+}

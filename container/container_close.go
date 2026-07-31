@@ -12,6 +12,14 @@ import (
     "github.com/precision-soft/melody/internal"
 )
 
+/* IsClosed reports whether a Close already began tearing the container down. Because a repeated Close returns the first teardown's memoized error, a caller that closes defensively cannot tell a failure it just caused from one somebody else already discovered and reported; asking before closing is what keeps one failure from being presented as two incidents. */
+func (instance *container) IsClosed() bool {
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
+
+    return instance.isClosed
+}
+
 /* Close tears the container down exactly once. A concurrent or repeated call blocks until the first teardown finishes and returns the same error, so a second caller never reports a premature success while services are still being closed. */
 func (instance *container) Close() error {
     instance.closeOnce.Do(func() {

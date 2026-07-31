@@ -2,6 +2,7 @@ package application
 
 import (
     "context"
+    "errors"
     nethttp "net/http"
     "strings"
     "sync"
@@ -9,6 +10,7 @@ import (
 
     "github.com/precision-soft/melody/config"
     containercontract "github.com/precision-soft/melody/container/contract"
+    "github.com/precision-soft/melody/exception"
     httpcontract "github.com/precision-soft/melody/http/contract"
     "github.com/precision-soft/melody/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/kernel/contract"
@@ -325,5 +327,60 @@ func TestRunHttp_StaysSilentWhenTheApplicationRegisteredItsSessionStorage(t *tes
     warnings := logger.warningsContaining(unboundedSessionWarningFragment)
     if 0 != len(warnings) {
         t.Fatalf("expected no session warning when the application supplied the storage, got %v", warnings)
+    }
+}
+
+/* @info a failure runHttp already wrote to the log is marked logged, or the process-boundary handler renders the same failure a second time */
+func TestMarkHttpRunErrorLogged_WrapsAndMarks(t *testing.T) {
+    original := errors.New("bind refused")
+
+    marked := markHttpRunErrorLogged(original)
+
+    exceptionErr, isExceptionErr := marked.(*exception.Error)
+    if false == isExceptionErr {
+        t.Fatalf("expected an exception error, got %T", marked)
+    }
+
+    if false == exceptionErr.AlreadyLogged() {
+        t.Fatalf("expected the wrapped failure to be marked logged")
+    }
+
+    if false == errors.Is(marked, original) {
+        t.Fatalf("expected the original failure to stay reachable in the chain")
+    }
+}
+
+/* @info when the listen fails in the same instant the context is cancelled, the select's branch choice is arbitrary; the shutdown branch used to discard the real failure and a process that never served a byte reported a clean shutdown. The error is deposited before the wait begins, so whichever branch the select takes must surface it. */
+func TestAwaitHttpServerEnd_ReportsAServeErrorWhicheverBranchWins(t *testing.T) {
+    serveErr := errors.New("listen tcp: bind refused by the probe")
+
+    for iteration := 0; iteration < 20; iteration++ {
+        errorChannel := make(chan error, 1)
+        errorChannel <- serveErr
+
+        cancelledContext, cancel := context.WithCancel(context.Background())
+        cancel()
+
+        endErr := awaitHttpServerEnd(cancelledContext, &nethttp.Server{}, errorChannel, &warningRecordingLogger{})
+        if nil == endErr {
+            t.Fatalf("expected the serve error to be reported instead of a clean shutdown (iteration %d)", iteration)
+        }
+
+        if false == errors.Is(endErr, serveErr) {
+            t.Fatalf("expected the serve error in the chain, got: %v", endErr)
+        }
+    }
+}
+
+func TestAwaitHttpServerEnd_TreatsServerClosedAsACleanShutdown(t *testing.T) {
+    errorChannel := make(chan error, 1)
+    errorChannel <- nethttp.ErrServerClosed
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    endErr := awaitHttpServerEnd(cancelledContext, &nethttp.Server{}, errorChannel, &warningRecordingLogger{})
+    if nil != endErr {
+        t.Fatalf("expected a clean shutdown for the server's own closed signal, got: %v", endErr)
     }
 }

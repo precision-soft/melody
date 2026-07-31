@@ -111,7 +111,7 @@ func computeProjectDirectory() (string, error) {
 
     executableDirectory := filepath.Dir(executablePath)
 
-    if true == strings.Contains(executableDirectory, string(filepath.Separator)+"go-build") {
+    if true == isGoRunExecutableDirectory(executableDirectory) {
         workingDirectory, getwdErr := os.Getwd()
         if nil != getwdErr {
             return "",
@@ -171,6 +171,31 @@ func computeProjectDirectory() (string, error) {
     }
 
     return absoluteExecutableDirectory, nil
+}
+
+/* isGoRunExecutableDirectory recognizes the temporary directories the go tool builds into: a path segment named go-build followed by nothing but digits (go-build2932477933). A bare substring match would also classify an installation path that merely contains a segment starting with go-build — /opt/go-builder/bin — as a go run build, silently redirecting all configuration discovery from the executable's directory to the working directory. */
+func isGoRunExecutableDirectory(executableDirectory string) bool {
+    for _, segment := range strings.Split(executableDirectory, string(filepath.Separator)) {
+        if false == strings.HasPrefix(segment, "go-build") {
+            continue
+        }
+
+        suffix := segment[len("go-build"):]
+
+        isNumericSuffix := true
+        for _, character := range suffix {
+            if character < '0' || character > '9' {
+                isNumericSuffix = false
+                break
+            }
+        }
+
+        if true == isNumericSuffix {
+            return true
+        }
+    }
+
+    return false
 }
 
 /* workingDirectoryHasEnvironmentFile reports whether the directory holds any environment file the source would load — .env, .env.local, or the development-environment pair that applies when no .env names another environment. A project configured solely through .env.dev boots fine without a .env, so ignoring that shape would emit a missing-.env hint that misattributes a plain unresolved key, or walk away from a working directory that is in fact the project root. A directory named like an environment file is not one. A stat error other than not-exist cannot prove the file absent, so it counts as present: both callers act on absence, and acting is the wrong move while the file may in fact be there. */

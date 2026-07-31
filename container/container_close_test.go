@@ -1144,3 +1144,25 @@ func TestContainer_Close_CycleFailureNamesTheNodes(t *testing.T) {
         t.Fatalf("expected the cycle failure to name its nodes, got %q", cycleText)
     }
 }
+
+/* @info IsClosed is asked before a defensive Close: the memoized close error makes a repeated Close indistinguishable from the discovering one, and the asker must not re-report a failure somebody else already carried away. */
+func TestContainerIsClosed_FlipsExactlyAtClose(t *testing.T) {
+    containerInstance := NewContainer()
+
+    closedChecker, isChecker := interface{}(containerInstance).(interface{ IsClosed() bool })
+    if false == isChecker {
+        t.Fatalf("expected the container to report closedness")
+    }
+
+    if true == closedChecker.IsClosed() {
+        t.Fatalf("expected a fresh container to report not closed")
+    }
+
+    if closeErr := containerInstance.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if false == closedChecker.IsClosed() {
+        t.Fatalf("expected a closed container to report closed")
+    }
+}

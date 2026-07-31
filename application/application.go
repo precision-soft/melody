@@ -75,6 +75,8 @@ func (instance *Application) Boot() kernelcontract.Kernel {
         )
     }
 
+    instance.refuseHttpBootWithoutEnvironment()
+
     instance.ensureRuntimeDirectories()
 
     instance.bootModulesPostConfigurationResolve()
@@ -204,9 +206,17 @@ func (instance *Application) Run(ctx context.Context) {
     /* boot is the last moment a parameter can still change anything: from here the wiring is done and the process is serving requests or executing a command, both against services that already read what they needed. Telling the configuration so is what turns a late Resolve into an error instead of a silent rewrite under those readers. */
     markConfigurationServing(instance.configuration)
 
-    defer instance.logOnRecoverAndExit()
+    /* one handler owns both the teardown and the exit, because neither of two separate defers can be ordered correctly: the exit helper ends in os.Exit, so a Close deferred below it would never run, and a Close deferred above it runs first and closes the very logger the final record is written through — a file-backed logger dropped every later write and the record of the dying error survived only as a one-line stderr echo. The record is therefore written first, through a logger the teardown has not touched, and the teardown runs between the record and the exit. */
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            instance.closeAndExitOnFailure()
 
-    defer instance.Close()
+            return
+        }
+
+        logging.LogOnRecoverAndExitAfter(instance.resolveExitLogger(), recoveredValue, 1, instance.Close)
+    }()
 
     if config.ModeCli == instance.runtimeFlags.Mode() {
         stripRuntimeFlagsFromOsArgs()
@@ -254,6 +264,20 @@ func (instance *Application) RegisterConfiguration(name string, configuration an
         )
     }
 
+    /* the registry is consumed in exactly one place in this major, under exactly one name: the logging configuration. Any other name is unreadable by construction — no accessor exists through which a module could get it back — so accepting it would store a configuration the operator believes is active while nothing can ever consult it; a misspelling of the one supported name is the ordinary way that happens. */
+    if loggingcontract.LoggingConfigurationName != name {
+        exception.Panic(
+            exception.NewError(
+                "unknown configuration name: nothing in this major consumes it",
+                exceptioncontract.Context{
+                    "configurationName": name,
+                    "supportedNames":    []string{loggingcontract.LoggingConfigurationName},
+                },
+                nil,
+            ),
+        )
+    }
+
     _, exists := instance.moduleConfigurations[name]
     if true == exists {
         /* recorded for the aggregated boot report instead of panicking one at a time; the first registration wins until the guaranteed panic ends the boot */
@@ -297,16 +321,74 @@ func (instance *Application) logOnRecoverAndExit() {
         return
     }
 
+    logging.LogOnRecoverAndExit(instance.resolveExitLogger(), recoveredValue, 1)
+}
+
+/* resolveExitLogger picks the logger the final fatal record is written through: the configured container logger while it still writes, the emergency logger otherwise. The container keeps serving built instances after Close, so liveness has to be asked of the logger itself — a file-backed logger a teardown already closed silently drops every write, and preferring it would lose the one record that explains the exit. The kernel guard covers an Application assembled without NewApplication: the one handler that must not panic answers with the emergency logger instead of dereferencing nil. */
+func (instance *Application) resolveExitLogger() loggingcontract.Logger {
     logger := logging.EmergencyLogger()
 
-    serviceContainer := instance.kernel.ServiceContainer()
-
-    containerLogger, loggerErr := logging.LoggerFromContainer(serviceContainer)
-    if nil == loggerErr && nil != containerLogger {
-        logger = containerLogger
+    if nil == instance.kernel {
+        return logger
     }
 
-    logging.LogOnRecoverAndExit(logger, recoveredValue, 1)
+    containerLogger, loggerErr := logging.LoggerFromContainer(instance.kernel.ServiceContainer())
+    if nil != loggerErr || nil == containerLogger {
+        return logger
+    }
+
+    closedChecker, isChecker := containerLogger.(interface{ Closed() bool })
+    if true == isChecker && true == closedChecker.Closed() {
+        return logger
+    }
+
+    return containerLogger
+}
+
+/* applicationExit terminates the process when the teardown of a normally-returning Run reports a failure; tests replace it to observe the exit code without stopping the test binary, the way signalContextExit is replaced */
+var applicationExit = os.Exit
+
+/* closeAndExitOnFailure is Run's non-panic return: a teardown failure this call itself discovered turns into a non-zero exit, so a supervisor sees a shutdown that lost something — a failed flush, a close that errored — instead of recording a clean exit 0 whose only trace was one stderr line. A close somebody else already performed reported its failure through its own channel and keeps its own exit code. */
+func (instance *Application) closeAndExitOnFailure() {
+    closeErr := instance.close()
+    if nil == closeErr {
+        return
+    }
+
+    applicationExit(1)
+}
+
+/* refuseHttpBootWithoutEnvironment fails the boot of an http process whose .env artifacts contributed no keys at all. Every built-in parameter has a development default — environment dev, debug tooling, debug commands, debug log level — so a production binary run from a directory without its .env files would otherwise serve on all of them, announced by nothing louder than one warning; refusing is the same direction the empty CORS allow list took, because booting the wrong environment is the widening. A cli process stays permissive: development commands legitimately run without any environment file, and a command takes its configuration with it when it exits. */
+func (instance *Application) refuseHttpBootWithoutEnvironment() {
+    if config.ModeHttp != instance.runtimeFlags.Mode() {
+        return
+    }
+
+    counter, isCounter := instance.configuration.(environmentKeyCounter)
+    if false == isCounter {
+        return
+    }
+
+    if 0 < counter.EnvironmentKeyCount() {
+        return
+    }
+
+    projectDirectory := instance.configuration.Kernel().ProjectDir()
+
+    exception.Panic(
+        exception.NewError(
+            "no environment keys were loaded from the .env artifacts and the process is booting in http mode; refusing to serve on development defaults"+missingEnvironmentFileHint(projectDirectory),
+            exceptioncontract.Context{
+                "projectDirectory": projectDirectory,
+            },
+            nil,
+        ),
+    )
+}
+
+/* environmentKeyCounter is the part of a configuration that can say how many keys the .env artifacts contributed. Asked for rather than demanded, the way servingMarker is: only the http boot refusal reads it, and a configuration double that does not carry it simply keeps the permissive behavior. */
+type environmentKeyCounter interface {
+    EnvironmentKeyCount() int
 }
 
 /* servingMarker is the part of a configuration that can be told the wiring phase is over. It is asked for rather than demanded: only the application emits the signal, so requiring every configcontract.Configuration — every test double included — to carry the method would cost more than it buys. */

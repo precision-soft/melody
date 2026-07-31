@@ -5,6 +5,7 @@ import (
     "bytes"
     "encoding/json"
     "errors"
+    "os"
     "strings"
     "sync"
     "testing"
@@ -440,5 +441,49 @@ func TestJsonLogger_WritesAreDroppedAfterClose(t *testing.T) {
 
     if false == strings.Contains(writer.lines[0], "before") {
         t.Fatalf("unexpected written line: %s", writer.lines[0])
+    }
+}
+
+/* @info Closed is what the process-boundary exit handler asks before trusting this logger with the final record: a file-backed logger closed by a teardown silently drops every write. */
+func TestJsonLogger_ClosedReportsOnlyAReallyClosedWriter(t *testing.T) {
+    file, createErr := os.CreateTemp(t.TempDir(), "melody-json-logger-*.log")
+    if nil != createErr {
+        t.Fatalf("unexpected temp file error: %v", createErr)
+    }
+
+    fileLogger := NewJsonLogger(file, loggingcontract.LevelInfo)
+
+    closedChecker, isChecker := fileLogger.(interface{ Closed() bool })
+    if false == isChecker {
+        t.Fatalf("expected the json logger to report closedness")
+    }
+
+    if true == closedChecker.Closed() {
+        t.Fatalf("expected an open logger to report not closed")
+    }
+
+    closer, isCloser := fileLogger.(interface{ Close() error })
+    if false == isCloser {
+        t.Fatalf("expected the json logger to be closable")
+    }
+
+    if closeErr := closer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if false == closedChecker.Closed() {
+        t.Fatalf("expected a closed file-backed logger to report closed")
+    }
+
+    consoleLogger := NewJsonLogger(os.Stderr, loggingcontract.LevelInfo)
+
+    consoleCloser := consoleLogger.(interface{ Close() error })
+    if closeErr := consoleCloser.Close(); nil != closeErr {
+        t.Fatalf("unexpected console close error: %v", closeErr)
+    }
+
+    consoleChecker := consoleLogger.(interface{ Closed() bool })
+    if true == consoleChecker.Closed() {
+        t.Fatalf("expected the console logger to stay open and report not closed")
     }
 }

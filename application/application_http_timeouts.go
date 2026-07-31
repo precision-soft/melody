@@ -5,22 +5,7 @@ import (
     "time"
 )
 
-type HttpTimeoutConfiguration interface {
-    GetReadTimeout() time.Duration
-
-    GetReadHeaderTimeout() time.Duration
-
-    GetWriteTimeout() time.Duration
-
-    GetIdleTimeout() time.Duration
-
-    GetMaxHeaderBytes() int
-}
-
-type HttpShutdownConfiguration interface {
-    GetShutdownTimeout() time.Duration
-}
-
+/* the server limits are fixed in this major: nothing implements an override and nothing can inject one — the configuration the application consults is always the one it built itself. The values bound every request the server admits; a slow client is cut instead of holding a connection open forever. */
 const (
     defaultHttpReadTimeout       = 15 * time.Second
     defaultHttpReadHeaderTimeout = 5 * time.Second
@@ -30,35 +15,14 @@ const (
     defaultHttpShutdownTimeout   = 5 * time.Second
 )
 
-func applyHttpServerTimeouts(httpServer *nethttp.Server, configuration any) {
+func applyHttpServerTimeouts(httpServer *nethttp.Server) {
     httpServer.ReadTimeout = defaultHttpReadTimeout
     httpServer.ReadHeaderTimeout = defaultHttpReadHeaderTimeout
     httpServer.WriteTimeout = defaultHttpWriteTimeout
     httpServer.IdleTimeout = defaultHttpIdleTimeout
     httpServer.MaxHeaderBytes = defaultHttpMaxHeaderBytes
-
-    overrides, ok := configuration.(HttpTimeoutConfiguration)
-    if false == ok {
-        return
-    }
-
-    httpServer.ReadTimeout = overrides.GetReadTimeout()
-    httpServer.ReadHeaderTimeout = overrides.GetReadHeaderTimeout()
-    httpServer.WriteTimeout = overrides.GetWriteTimeout()
-    httpServer.IdleTimeout = overrides.GetIdleTimeout()
-    httpServer.MaxHeaderBytes = overrides.GetMaxHeaderBytes()
 }
 
-func resolveHttpShutdownTimeout(configuration any) time.Duration {
-    overrides, ok := configuration.(HttpShutdownConfiguration)
-    if false == ok {
-        return defaultHttpShutdownTimeout
-    }
-
-    timeout := overrides.GetShutdownTimeout()
-    if 0 >= timeout {
-        return defaultHttpShutdownTimeout
-    }
-
-    return timeout
+func resolveHttpShutdownTimeout() time.Duration {
+    return defaultHttpShutdownTimeout
 }

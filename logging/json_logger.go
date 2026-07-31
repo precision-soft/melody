@@ -136,6 +136,14 @@ func (instance *jsonLogger) Close() error {
     return closer.Close()
 }
 
+/* Closed reports whether Close really closed the underlying writer, after which every Log call is silently dropped. A console logger never closes its stream and never reports true. The report lets whoever owns a final record — the process-boundary exit handler — refuse a logger that would swallow it and fall back to one that still writes. */
+func (instance *jsonLogger) Closed() bool {
+    instance.writeMutex.Lock()
+    defer instance.writeMutex.Unlock()
+
+    return instance.closed
+}
+
 var _ loggingcontract.Logger = (*jsonLogger)(nil)
 
 func normalizeJsonContext(input map[string]any) map[string]any {

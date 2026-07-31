@@ -241,7 +241,7 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 
 ### Registration APIs
 
-- [`(*Application).RegisterConfiguration(name, configuration)`](../../application/application.go)
+- [`(*Application).RegisterConfiguration(name, configuration)`](../../application/application.go) — accepts exactly one name in this major, `loggingcontract.LoggingConfigurationName`; any other name panics at registration, because nothing can ever consume it
 - [`(*Application).RegisterParameter(name, value)`](../../application/application.go)
 - [`(*Application).RegisterService(name, factory)`](../../application/application_container.go)
 - [`(*Application).RegisterModule(module)`](../../application/application_module.go)
@@ -249,7 +249,13 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 - [`(*Application).RegisterCliCommand(command)`](../../application/application_cli.go)
 - [`(*Application).RegisterHttpRoute(method, pattern, handler)`](../../application/application_http.go)
 - [`(*Application).RegisterHttpMiddlewares(middlewares...)`](../../application/application_http.go)
-- [`(*Application).RegisterHttpMiddlewareFactories(factories...)`](../../application/application_http.go)
+- [`(*Application).RegisterHttpMiddlewareFactories(factories...)`](../../application/application_http.go) — a factory that yields nil (or a typed nil) fails the pipeline build, naming the definition; a factory that wants to disable itself conditionally returns a pass-through middleware instead
+
+### Boot refusals and the process exit
+
+Boot fails fast where serving would be the widening: an **http** process whose `.env` artifacts contributed **no keys at all** refuses to boot rather than serve on development defaults (a cli process stays permissive — a command takes its configuration with it when it exits). The http server limits are fixed defaults in this major — read 15s, read-header 5s, write 30s, idle 60s, max header 1 MiB, shutdown 5s — with no override surface.
+
+On the way out, the record that explains a dying process is written **before** the teardown, through a logger that still writes: the exit handler refuses a container logger the teardown already closed and falls back to the emergency logger. A teardown failure that `Run`'s own close discovers turns into exit 1, symmetric with the cli path, which folds close failures into the command's result.
 
 ### Middleware helpers
 

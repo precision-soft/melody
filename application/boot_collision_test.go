@@ -8,6 +8,7 @@ import (
     "github.com/precision-soft/melody/config"
     "github.com/precision-soft/melody/container"
     containercontract "github.com/precision-soft/melody/container/contract"
+    loggingcontract "github.com/precision-soft/melody/logging/contract"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
@@ -159,8 +160,9 @@ func TestBootCollision_DuplicateParameterIsRecorded(t *testing.T) {
 func TestBootCollision_DuplicateConfigurationIsRecorded(t *testing.T) {
     application := newCollisionTestApplication(t)
 
-    application.RegisterConfiguration("module.test", "first")
-    application.RegisterConfiguration("module.test", "second")
+    /* @info the registry accepts exactly one name in this major, so the duplicate path is exercised on it */
+    application.RegisterConfiguration(loggingcontract.LoggingConfigurationName, "first")
+    application.RegisterConfiguration(loggingcontract.LoggingConfigurationName, "second")
 
     if 1 != len(application.bootCollisions) {
         t.Fatalf("expected one recorded collision, got %d", len(application.bootCollisions))
@@ -170,7 +172,7 @@ func TestBootCollision_DuplicateConfigurationIsRecorded(t *testing.T) {
         t.Fatalf("unexpected collision kind: %s", application.bootCollisions[0].kind)
     }
 
-    if "first" != application.moduleConfigurations["module.test"] {
+    if "first" != application.moduleConfigurations[loggingcontract.LoggingConfigurationName] {
         t.Fatalf("expected the first configuration registration to win")
     }
 }
@@ -201,8 +203,8 @@ func TestBootCollision_PanicReportsEveryCollisionAtOnce(t *testing.T) {
     application.RegisterService("service.test.value", stringProvider("second"))
     application.RegisterParameter("app.test.parameter", "first")
     application.RegisterParameter("app.test.parameter", "second")
-    application.RegisterConfiguration("module.test", "first")
-    application.RegisterConfiguration("module.test", "second")
+    application.RegisterConfiguration(loggingcontract.LoggingConfigurationName, "first")
+    application.RegisterConfiguration(loggingcontract.LoggingConfigurationName, "second")
     application.RegisterCliCommand(&namedTestCommand{name: "app:work"})
     application.RegisterCliCommand(&namedTestCommand{name: "app:work"})
 

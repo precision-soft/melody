@@ -230,3 +230,91 @@ func TestEchoExitToStderr_StaysSilentForZeroExit(t *testing.T) {
         t.Fatalf("expected no stderr echo for a zero exit code, got %q", string(output))
     }
 }
+
+/* @info resolveRecoveredExit is the pure half of LogOnRecoverAndExit: everything below proves the normalization without taking the process exit. */
+
+func TestResolveRecoveredExit_ZeroValueExitErrorDoesNotPanicTheExitHandler(t *testing.T) {
+    err, exitCode, needsLogging := resolveRecoveredExit(&exception.ExitError{}, 1)
+
+    if nil == err {
+        t.Fatalf("expected a substitute error for an exit error carrying no error value")
+    }
+
+    if false == strings.Contains(err.Error(), "exit requested with no error value") {
+        t.Fatalf("expected the substitute error to name the anomaly, got %q", err.Error())
+    }
+
+    if 0 != exitCode {
+        t.Fatalf("expected the zero value's own exit code to be honored, got %d", exitCode)
+    }
+
+    if false == needsLogging {
+        t.Fatalf("expected the anomaly to be logged")
+    }
+}
+
+func TestResolveRecoveredExit_ExitErrorKeepsItsCodeAndLogsOnce(t *testing.T) {
+    carried := exception.NewError("carried", nil, nil)
+
+    err, exitCode, needsLogging := resolveRecoveredExit(exception.NewExitError(7, carried), 1)
+
+    if carried != err {
+        t.Fatalf("expected the carried error back")
+    }
+
+    if 7 != exitCode {
+        t.Fatalf("expected the exit error's own code, got %d", exitCode)
+    }
+
+    if false == needsLogging {
+        t.Fatalf("expected an unlogged exit error to need logging")
+    }
+
+    carried.MarkAsLogged()
+
+    _, _, needsLoggingAgain := resolveRecoveredExit(exception.NewExitError(7, carried), 1)
+    if true == needsLoggingAgain {
+        t.Fatalf("expected an already-logged exit error not to be logged again")
+    }
+}
+
+func TestResolveRecoveredExit_AlreadyLoggedErrorIsNotLoggedAgain(t *testing.T) {
+    loggedErr := exception.NewError("already reported", nil, nil)
+    loggedErr.MarkAsLogged()
+
+    err, exitCode, needsLogging := resolveRecoveredExit(loggedErr, 3)
+
+    if loggedErr != err {
+        t.Fatalf("expected the same error back")
+    }
+
+    if 3 != exitCode {
+        t.Fatalf("expected the caller's exit code, got %d", exitCode)
+    }
+
+    if true == needsLogging {
+        t.Fatalf("expected no second logging")
+    }
+}
+
+func TestResolveRecoveredExit_UnloggedErrorNeedsLogging(t *testing.T) {
+    plainErr := exception.NewError("fresh", nil, nil)
+
+    err, exitCode, needsLogging := resolveRecoveredExit(plainErr, 4)
+
+    if plainErr != err || 4 != exitCode || false == needsLogging {
+        t.Fatalf("expected the fresh error back with the caller's code and a pending log")
+    }
+}
+
+func TestResolveRecoveredExit_WrapsAForeignErrorAndAPlainValue(t *testing.T) {
+    foreignErr, _, foreignNeedsLogging := resolveRecoveredExit(io.ErrUnexpectedEOF, 5)
+    if nil == foreignErr || false == strings.Contains(foreignErr.Error(), io.ErrUnexpectedEOF.Error()) || false == foreignNeedsLogging {
+        t.Fatalf("expected the foreign error to be wrapped and logged, got %v", foreignErr)
+    }
+
+    valueErr, _, valueNeedsLogging := resolveRecoveredExit("boom", 5)
+    if nil == valueErr || false == strings.Contains(valueErr.Error(), "panic") || false == valueNeedsLogging {
+        t.Fatalf("expected the plain value to become a panic error, got %v", valueErr)
+    }
+}

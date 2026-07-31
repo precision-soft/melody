@@ -3,43 +3,14 @@ package application
 import (
     nethttp "net/http"
     "testing"
-    "time"
 )
 
-type timeoutOverridingConfig struct {
-    readTimeout       time.Duration
-    readHeaderTimeout time.Duration
-    writeTimeout      time.Duration
-    idleTimeout       time.Duration
-    maxHeaderBytes    int
-}
-
-func (instance *timeoutOverridingConfig) GetReadTimeout() time.Duration {
-    return instance.readTimeout
-}
-
-func (instance *timeoutOverridingConfig) GetReadHeaderTimeout() time.Duration {
-    return instance.readHeaderTimeout
-}
-
-func (instance *timeoutOverridingConfig) GetWriteTimeout() time.Duration {
-    return instance.writeTimeout
-}
-
-func (instance *timeoutOverridingConfig) GetIdleTimeout() time.Duration {
-    return instance.idleTimeout
-}
-
-func (instance *timeoutOverridingConfig) GetMaxHeaderBytes() int {
-    return instance.maxHeaderBytes
-}
-
-type timeoutNonImplementingConfig struct{}
+/* @info the override interfaces were removed: nothing implemented them and nothing could inject an implementation, so the server limits are fixed defaults in this major */
 
 func TestApplyHttpServerTimeoutsDefaults(t *testing.T) {
     server := &nethttp.Server{}
 
-    applyHttpServerTimeouts(server, &timeoutNonImplementingConfig{})
+    applyHttpServerTimeouts(server)
 
     if defaultHttpReadTimeout != server.ReadTimeout {
         t.Fatalf("expected default ReadTimeout %v, got %v", defaultHttpReadTimeout, server.ReadTimeout)
@@ -58,58 +29,8 @@ func TestApplyHttpServerTimeoutsDefaults(t *testing.T) {
     }
 }
 
-func TestApplyHttpServerTimeoutsOverrides(t *testing.T) {
-    overrides := &timeoutOverridingConfig{
-        readTimeout:       1 * time.Second,
-        readHeaderTimeout: 2 * time.Second,
-        writeTimeout:      3 * time.Second,
-        idleTimeout:       4 * time.Second,
-        maxHeaderBytes:    1234,
-    }
-
-    server := &nethttp.Server{}
-
-    applyHttpServerTimeouts(server, overrides)
-
-    if server.ReadTimeout != overrides.readTimeout {
-        t.Fatalf("expected override ReadTimeout %v, got %v", overrides.readTimeout, server.ReadTimeout)
-    }
-    if server.ReadHeaderTimeout != overrides.readHeaderTimeout {
-        t.Fatalf("expected override ReadHeaderTimeout %v, got %v", overrides.readHeaderTimeout, server.ReadHeaderTimeout)
-    }
-    if server.WriteTimeout != overrides.writeTimeout {
-        t.Fatalf("expected override WriteTimeout %v, got %v", overrides.writeTimeout, server.WriteTimeout)
-    }
-    if server.IdleTimeout != overrides.idleTimeout {
-        t.Fatalf("expected override IdleTimeout %v, got %v", overrides.idleTimeout, server.IdleTimeout)
-    }
-    if server.MaxHeaderBytes != overrides.maxHeaderBytes {
-        t.Fatalf("expected override MaxHeaderBytes %v, got %v", overrides.maxHeaderBytes, server.MaxHeaderBytes)
-    }
-}
-
-type shutdownOverridingConfig struct {
-    shutdownTimeout time.Duration
-}
-
-func (instance *shutdownOverridingConfig) GetShutdownTimeout() time.Duration {
-    return instance.shutdownTimeout
-}
-
-func TestResolveHttpShutdownTimeoutDefaultsWhenNotImplemented(t *testing.T) {
-    if defaultHttpShutdownTimeout != resolveHttpShutdownTimeout(&timeoutNonImplementingConfig{}) {
-        t.Fatalf("expected the default shutdown timeout for a non-implementing configuration")
-    }
-}
-
-func TestResolveHttpShutdownTimeoutOverride(t *testing.T) {
-    if 12*time.Second != resolveHttpShutdownTimeout(&shutdownOverridingConfig{shutdownTimeout: 12 * time.Second}) {
-        t.Fatalf("expected the overridden shutdown timeout")
-    }
-}
-
-func TestResolveHttpShutdownTimeoutZeroFallsBackToDefault(t *testing.T) {
-    if defaultHttpShutdownTimeout != resolveHttpShutdownTimeout(&shutdownOverridingConfig{shutdownTimeout: 0}) {
-        t.Fatalf("expected a zero override to fall back to the default shutdown timeout")
+func TestResolveHttpShutdownTimeoutIsTheDefault(t *testing.T) {
+    if defaultHttpShutdownTimeout != resolveHttpShutdownTimeout() {
+        t.Fatalf("expected the default shutdown timeout")
     }
 }

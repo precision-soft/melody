@@ -86,7 +86,7 @@ func (instance *Application) runHttp(
         Handler: httpHandler,
     }
 
-    applyHttpServerTimeouts(httpServer, configuration)
+    applyHttpServerTimeouts(httpServer)
 
     logger := logging.LoggerMustFromContainer(instance.kernel.ServiceContainer())
 
@@ -106,19 +106,40 @@ func (instance *Application) runHttp(
         errorChannel <- listenAndServeErr
     }()
 
+    return awaitHttpServerEnd(ctx, httpServer, errorChannel, logger)
+}
+
+/* awaitHttpServerEnd waits for whichever ends the serving first: the cancelled context or the server's own failure. The serve error is read even on the shutdown branch — when the listen fails in the same instant the context is cancelled, the select's choice of branch is arbitrary, and taking the shutdown branch used to discard the real failure, so a process that never served a byte reported a clean shutdown. Shutdown closes the listeners before it returns, so the serve goroutine has already been released and the receive is bounded. */
+func awaitHttpServerEnd(
+    ctx context.Context,
+    httpServer *nethttp.Server,
+    errorChannel chan error,
+    logger loggingcontract.Logger,
+) error {
     select {
     case <-ctx.Done():
-        shutdownContext, cancel := context.WithTimeout(context.Background(), resolveHttpShutdownTimeout(configuration))
+        shutdownContext, cancel := context.WithTimeout(context.Background(), resolveHttpShutdownTimeout())
         defer cancel()
 
         shutdownErr := httpServer.Shutdown(shutdownContext)
+
+        serveErr := <-errorChannel
+        if nil != serveErr && false == errors.Is(serveErr, nethttp.ErrServerClosed) {
+            logger.Error(
+                "http server error",
+                exception.LogContext(serveErr),
+            )
+
+            return markHttpRunErrorLogged(serveErr)
+        }
+
         if nil != shutdownErr {
             logger.Error(
                 "http server shutdown error",
                 exception.LogContext(shutdownErr),
             )
 
-            return shutdownErr
+            return markHttpRunErrorLogged(shutdownErr)
         }
 
         return nil
@@ -130,11 +151,20 @@ func (instance *Application) runHttp(
                 exception.LogContext(err),
             )
 
-            return err
+            return markHttpRunErrorLogged(err)
         }
 
         return nil
     }
+}
+
+/* markHttpRunErrorLogged wraps a failure runHttp already wrote to the log and marks it so: the caller turns it into the process-ending panic, and without the mark the exit handler would render the same failure a second time. */
+func markHttpRunErrorLogged(err error) error {
+    wrappedErr := exception.FromError(err)
+
+    _ = exception.MarkLogged(wrappedErr)
+
+    return wrappedErr
 }
 
 /* warnOnUnboundedDefaultCacheBackend reports, once at boot, that the cache melody wired by default carries no item ceiling. Whether an entry ever leaves the map is then decided entirely by the caller: a key cached with a positive ttl is reclaimed by the sweep, and one cached without stays for as long as the process lives, with nothing to evict it under memory pressure. The constructor's second argument sets how often that sweep runs, not how long an entry lives. The warning is raised from the http path alone on purpose: a command runs and exits, taking its map with it, so there is genuinely nothing to warn a cli invocation about, and a warning it cannot act on would only teach it to ignore the ones it can. */

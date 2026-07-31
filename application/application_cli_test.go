@@ -151,3 +151,80 @@ func TestRunCli_DoesNotWarnAboutTheUnboundedDefaultCacheBackend(t *testing.T) {
         t.Fatalf("expected no cache warning on a cli run, got %v", warnings)
     }
 }
+
+/* @info three normalization points must agree on a command's name — the boot registration, the cli library's trimmed registration, and the suggestion gate's trimmed input. A padded name judged raw at boot registered under a spelling no argv can produce: the suggestion table blocked every invocation of a command that exists. */
+func TestRegisterCliCommand_JudgesTheNameTrimmed(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+
+    applicationInstance.RegisterCliCommand(&namedTestCommand{name: "app:padded"})
+    applicationInstance.RegisterCliCommand(&namedTestCommand{name: "app:padded "})
+
+    if 1 != len(applicationInstance.bootCollisions) {
+        t.Fatalf("expected the padded duplicate to be recorded as a collision, got %d", len(applicationInstance.bootCollisions))
+    }
+
+    /* the reversed order exercises the other side of the comparison: the already-registered name is the padded one */
+    reversedApplication := newCollisionTestApplication(t)
+
+    reversedApplication.RegisterCliCommand(&namedTestCommand{name: "app:reversed "})
+    reversedApplication.RegisterCliCommand(&namedTestCommand{name: "app:reversed"})
+
+    if 1 != len(reversedApplication.bootCollisions) {
+        t.Fatalf("expected the reversed padded duplicate to be recorded as a collision, got %d", len(reversedApplication.bootCollisions))
+    }
+
+    testhelper.AssertPanicsWithError(t, func() {
+        applicationInstance.RegisterCliCommand(&namedTestCommand{name: "   "})
+    }, "cli command name may not be empty")
+}
+
+/* @info the whole path: a command whose Name carries padding must still be reachable from argv — the suggestion gate compares the trimmed input against the trimmed name and the cli library dispatches the trimmed registration. */
+func TestRunCli_DispatchesACommandWhoseNameCarriesPadding(t *testing.T) {
+    applicationInstance := NewApplication(
+        testhelper.NewEmbeddedEnvFs(),
+        testhelper.NewEmbeddedStaticFs(),
+    )
+
+    probe := &servingProbeApplicationCommand{}
+    paddedProbe := &paddedNameProbeCommand{inner: probe}
+    applicationInstance.RegisterCliCommand(paddedProbe)
+
+    applicationInstance.Boot()
+
+    originalArguments := os.Args
+    os.Args = []string{"probe", "probe:serving"}
+    defer func() { os.Args = originalArguments }()
+
+    runErr := applicationInstance.runCli(context.Background())
+    if nil != runErr {
+        t.Fatalf("expected the padded command to be dispatchable, got: %v", runErr)
+    }
+
+    if false == probe.ran {
+        t.Fatalf("expected the padded command to have run")
+    }
+}
+
+/* paddedNameProbeCommand wraps a command and pads its name, the shape the trimming exists for */
+type paddedNameProbeCommand struct {
+    inner clicontract.Command
+}
+
+func (instance *paddedNameProbeCommand) Name() string {
+    return " " + instance.inner.Name() + " "
+}
+
+func (instance *paddedNameProbeCommand) Description() string {
+    return instance.inner.Description()
+}
+
+func (instance *paddedNameProbeCommand) Flags() []clicontract.Flag {
+    return instance.inner.Flags()
+}
+
+func (instance *paddedNameProbeCommand) Run(
+    runtimeInstance runtimecontract.Runtime,
+    commandContext *clicontract.CommandContext,
+) error {
+    return instance.inner.Run(runtimeInstance, commandContext)
+}

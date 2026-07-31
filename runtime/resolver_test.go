@@ -104,3 +104,70 @@ func TestMustFromRuntime_PanicsWhenMissingEverywhere(t *testing.T) {
         _ = MustFromRuntime[string](runtimeInstance, "missing")
     }, "service is not registered")
 }
+
+/* typedNilScopeRuntime yields a typed-nil scope beside a healthy container, the shape a custom Runtime implementation can legally produce */
+type typedNilScopeRuntime struct {
+    container containercontract.Container
+}
+
+func (instance *typedNilScopeRuntime) Context() context.Context {
+    return context.Background()
+}
+
+func (instance *typedNilScopeRuntime) Scope() containercontract.Scope {
+    return (*nilableScope)(nil)
+}
+
+func (instance *typedNilScopeRuntime) Container() containercontract.Container {
+    return instance.container
+}
+
+/* @info a typed-nil scope used to be preferred over the healthy container and the promised may-not-be-nil error became a panic inside the resolution on the request path */
+func TestFromRuntime_FallsBackToTheContainerPastATypedNilScope(t *testing.T) {
+    serviceContainer := container.NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "service.typed.nil.probe",
+        func(resolver containercontract.Resolver) (string, error) {
+            return "container", nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("register error: %v", registerErr)
+    }
+
+    resolved, resolveErr := FromRuntime[string](&typedNilScopeRuntime{container: serviceContainer}, "service.typed.nil.probe")
+    if nil != resolveErr {
+        t.Fatalf("expected the container fallback to resolve, got: %v", resolveErr)
+    }
+
+    if "container" != resolved {
+        t.Fatalf("expected the container's value, got %q", resolved)
+    }
+}
+
+/* typedNilRuntime is a typed-nil Runtime implementation: the guard must read through the interface */
+type typedNilRuntime struct{}
+
+func (instance *typedNilRuntime) Context() context.Context {
+    return context.Background()
+}
+
+func (instance *typedNilRuntime) Scope() containercontract.Scope {
+    return nil
+}
+
+func (instance *typedNilRuntime) Container() containercontract.Container {
+    return nil
+}
+
+func TestFromRuntime_RefusesATypedNilRuntime(t *testing.T) {
+    _, resolveErr := FromRuntime[string]((*typedNilRuntime)(nil), "service.test")
+    if nil == resolveErr {
+        t.Fatalf("expected the typed-nil runtime to be refused with an error")
+    }
+
+    testhelper.AssertPanicsWithError(t, func() {
+        MustFromRuntime[string]((*typedNilRuntime)(nil), "service.test")
+    }, "runtime may not be nil")
+}

@@ -3,13 +3,19 @@ package application
 import (
     "context"
     "os"
+    "os/exec"
+    "path/filepath"
     "strings"
     "testing"
 
     clicontract "github.com/precision-soft/melody/cli/contract"
     "github.com/precision-soft/melody/config"
+    "github.com/precision-soft/melody/container"
+    containercontract "github.com/precision-soft/melody/container/contract"
     "github.com/precision-soft/melody/exception"
     "github.com/precision-soft/melody/internal/testhelper"
+    "github.com/precision-soft/melody/logging"
+    loggingcontract "github.com/precision-soft/melody/logging/contract"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
@@ -75,5 +81,291 @@ func TestRun_MarksTheConfigurationServingBeforeItDispatches(t *testing.T) {
 
     if false == strings.Contains(probe.resolveErr.Error(), "begun serving") {
         t.Fatalf("expected the refusal to name the serving phase, got %q", probe.resolveErr.Error())
+    }
+}
+
+/* failingCloser is a container service whose Close always fails, so the test controls which call discovers the teardown failure */
+type failingCloser struct{}
+
+func (instance *failingCloser) Close() error {
+    return exception.NewError("the probe service refuses to close", nil, nil)
+}
+
+func newFailingCloseApplication(t *testing.T) *Application {
+    t.Helper()
+
+    applicationInstance := newCollisionTestApplication(t)
+
+    applicationInstance.RegisterService(
+        "service.test.failing.closer",
+        func(resolver containercontract.Resolver) (*failingCloser, error) {
+            return &failingCloser{}, nil
+        },
+    )
+
+    /* resolving builds the instance, so the teardown has something whose Close fails */
+    container.MustFromResolver[*failingCloser](applicationInstance.kernel.ServiceContainer(), "service.test.failing.closer")
+
+    return applicationInstance
+}
+
+/* @info the container memoizes its close error, so a repeated Close re-receives a failure somebody else already discovered and folded into their own report; close must only report the failure it was first to see. */
+func TestClose_DoesNotRereportAFailureSomebodyElseDiscovered(t *testing.T) {
+    applicationInstance := newFailingCloseApplication(t)
+
+    firstCloseErr := applicationInstance.kernel.ServiceContainer().Close()
+    if nil == firstCloseErr {
+        t.Fatalf("expected the discovering close to report the failure")
+    }
+
+    if closeErr := applicationInstance.close(); nil != closeErr {
+        t.Fatalf("expected the repeated close not to re-report the memoized failure, got: %v", closeErr)
+    }
+}
+
+func TestClose_ReportsTheFailureItDiscoveredItself(t *testing.T) {
+    applicationInstance := newFailingCloseApplication(t)
+
+    closeErr := applicationInstance.close()
+    if nil == closeErr {
+        t.Fatalf("expected the discovering close to report the teardown failure")
+    }
+
+    if false == strings.Contains(closeErr.Error(), "failed to close container services") {
+        t.Fatalf("expected the container teardown failure, got: %v", closeErr)
+    }
+}
+
+/* @info a teardown failure on the non-panic return of Run turns into a non-zero exit, symmetric with the cli path that folds close failures into the command result; exit 0 on a failed flush told the supervisor a clean story. */
+func TestCloseAndExitOnFailure_ExitsNonZeroOnATeardownFailureItDiscovered(t *testing.T) {
+    exitedWith := -1
+    originalExit := applicationExit
+    applicationExit = func(code int) { exitedWith = code }
+    defer func() { applicationExit = originalExit }()
+
+    applicationInstance := newFailingCloseApplication(t)
+
+    applicationInstance.closeAndExitOnFailure()
+
+    if 1 != exitedWith {
+        t.Fatalf("expected exit code 1 on a discovered teardown failure, got %d", exitedWith)
+    }
+}
+
+func TestCloseAndExitOnFailure_StaysSilentOnACleanTeardown(t *testing.T) {
+    exitedWith := -1
+    originalExit := applicationExit
+    applicationExit = func(code int) { exitedWith = code }
+    defer func() { applicationExit = originalExit }()
+
+    applicationInstance := newCollisionTestApplication(t)
+
+    applicationInstance.closeAndExitOnFailure()
+
+    if -1 != exitedWith {
+        t.Fatalf("expected no exit on a clean teardown, got code %d", exitedWith)
+    }
+}
+
+/* @info the exit logger must refuse a container logger the teardown already closed: a closed file-backed logger silently drops every write, and preferring it loses the one record that explains the exit. */
+func TestResolveExitLogger_PrefersTheContainerLoggerWhileItWrites(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+
+    logFile, createErr := os.CreateTemp(t.TempDir(), "melody-exit-logger-*.log")
+    if nil != createErr {
+        t.Fatalf("unexpected temp file error: %v", createErr)
+    }
+
+    fileLogger := logging.NewJsonLogger(logFile, loggingcontract.LevelInfo)
+
+    applicationInstance.RegisterService(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return fileLogger, nil
+        },
+    )
+
+    if fileLogger != applicationInstance.resolveExitLogger() {
+        t.Fatalf("expected the live container logger to carry the final record")
+    }
+}
+
+func TestResolveExitLogger_FallsBackWhenTheContainerLoggerIsClosed(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+
+    logFile, createErr := os.CreateTemp(t.TempDir(), "melody-exit-logger-*.log")
+    if nil != createErr {
+        t.Fatalf("unexpected temp file error: %v", createErr)
+    }
+
+    fileLogger := logging.NewJsonLogger(logFile, loggingcontract.LevelInfo)
+
+    applicationInstance.RegisterService(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return fileLogger, nil
+        },
+    )
+
+    if fileLogger != applicationInstance.resolveExitLogger() {
+        t.Fatalf("the container logger must be preferred before the teardown, or the fallback assertion below is vacuous")
+    }
+
+    if closeErr := applicationInstance.kernel.ServiceContainer().Close(); nil != closeErr {
+        t.Fatalf("unexpected container close error: %v", closeErr)
+    }
+
+    if fileLogger == applicationInstance.resolveExitLogger() {
+        t.Fatalf("expected the closed container logger to be refused for the final record")
+    }
+}
+
+/* @info the recover handler is the one place that must not panic: an Application assembled without NewApplication has a nil kernel, and the handler answers with the emergency logger instead of dereferencing it. */
+func TestResolveExitLogger_SurvivesANilKernel(t *testing.T) {
+    applicationInstance := &Application{}
+
+    if nil == applicationInstance.resolveExitLogger() {
+        t.Fatalf("expected the emergency logger for a nil kernel")
+    }
+}
+
+func newEnvironmentRefusalApplication(t *testing.T, mode string, environmentValues map[string]string) *Application {
+    t.Helper()
+
+    environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: environmentValues})
+    if nil != environmentErr {
+        t.Fatalf("unexpected environment error: %v", environmentErr)
+    }
+
+    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+    if nil != configurationErr {
+        t.Fatalf("unexpected configuration error: %v", configurationErr)
+    }
+
+    return &Application{
+        configuration:        configuration,
+        runtimeFlags:         NewRuntimeFlags(mode),
+        kernel:               newTestKernel(),
+        moduleConfigurations: make(map[string]any),
+    }
+}
+
+/* @info every built-in parameter has a development default, so an http process whose .env artifacts contributed nothing would serve as dev with debug tooling, announced by one warning; the refusal is the same direction the empty CORS allow list took. */
+func TestRefuseHttpBootWithoutEnvironment_RefusesAnHttpBootOnZeroKeys(t *testing.T) {
+    applicationInstance := newEnvironmentRefusalApplication(t, config.ModeHttp, map[string]string{})
+
+    testhelper.AssertPanicsWithError(t, func() {
+        applicationInstance.refuseHttpBootWithoutEnvironment()
+    }, "no environment keys were loaded")
+}
+
+func TestRefuseHttpBootWithoutEnvironment_AcceptsAnHttpBootWithAnyKey(t *testing.T) {
+    applicationInstance := newEnvironmentRefusalApplication(t, config.ModeHttp, map[string]string{config.EnvKey: "dev"})
+
+    applicationInstance.refuseHttpBootWithoutEnvironment()
+}
+
+func TestRefuseHttpBootWithoutEnvironment_LeavesTheCliPermissive(t *testing.T) {
+    applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{})
+
+    applicationInstance.refuseHttpBootWithoutEnvironment()
+}
+
+/* @info the configuration registry accepts exactly one name in this major; any other name is unreadable by construction, so storing it would tell the operator a configuration is active while nothing can ever consult it. */
+func TestRegisterConfiguration_RefusesANameNothingConsumes(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+
+    testhelper.AssertPanicsWithError(t, func() {
+        applicationInstance.RegisterConfiguration("Logging", "misspelled")
+    }, "unknown configuration name")
+}
+
+/* the marker tells a re-executed test binary that it is the child that must take the fatal exit rather than the parent that watches it; its value is the project directory whose log file the parent reads back */
+const runPanicPathProbeMarker = "MELODY_TEST_RUN_PANIC_PATH_PROBE"
+
+type panickingProbeApplicationCommand struct{}
+
+func (instance *panickingProbeApplicationCommand) Name() string {
+    return "probe:panic"
+}
+
+func (instance *panickingProbeApplicationCommand) Description() string {
+    return "panics to drive the process-boundary handler"
+}
+
+func (instance *panickingProbeApplicationCommand) Flags() []clicontract.Flag {
+    return []clicontract.Flag{}
+}
+
+func (instance *panickingProbeApplicationCommand) Run(
+    runtimeInstance runtimecontract.Runtime,
+    commandContext *clicontract.CommandContext,
+) error {
+    exception.Panic(exception.NewError("the probe command exploded", nil, nil))
+
+    return nil
+}
+
+/* @info the one proof that the fatal record survives the teardown ordering: the record must land in the configured file logger BEFORE Close runs, because the teardown closes that logger and a closed file logger silently drops every write. The child re-execution is required — the handler ends in os.Exit — and the mutant that restores the old defer order (teardown first) leaves the log file without the record. */
+func TestRun_PanicPathWritesTheFatalRecordThroughTheLiveLoggerBeforeTeardown(t *testing.T) {
+    projectDirectory := os.Getenv(runPanicPathProbeMarker)
+
+    if "" != projectDirectory {
+        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{}})
+        if nil != environmentErr {
+            os.Exit(91)
+        }
+
+        configuration, configurationErr := config.NewConfiguration(environment, projectDirectory)
+        if nil != configurationErr {
+            os.Exit(92)
+        }
+
+        applicationInstance := &Application{
+            configuration:        configuration,
+            runtimeFlags:         NewRuntimeFlags(config.ModeCli),
+            kernel:               newTestKernel(),
+            cliCommands:          make([]clicontract.Command, 0),
+            moduleConfigurations: make(map[string]any),
+        }
+
+        applicationInstance.RegisterCliCommand(&panickingProbeApplicationCommand{})
+
+        os.Args = []string{"probe", "probe:panic"}
+
+        applicationInstance.Run(context.Background())
+
+        os.Exit(93)
+    }
+
+    childProjectDirectory := t.TempDir()
+
+    child := exec.Command(os.Args[0], "-test.run=TestRun_PanicPathWritesTheFatalRecordThroughTheLiveLoggerBeforeTeardown$")
+    child.Env = append(os.Environ(), runPanicPathProbeMarker+"="+childProjectDirectory)
+
+    output, runErr := child.CombinedOutput()
+
+    exitError, isExitError := runErr.(*exec.ExitError)
+    if false == isExitError {
+        t.Fatalf("expected the child to exit non-zero, got err %v with output: %s", runErr, string(output))
+    }
+
+    if 1 != exitError.ExitCode() {
+        t.Fatalf("expected exit code 1, got %d with output: %s", exitError.ExitCode(), string(output))
+    }
+
+    logPath := filepath.Join(childProjectDirectory, "var", "log", config.EnvDevelopment+".log")
+
+    logContent, readErr := os.ReadFile(logPath)
+    if nil != readErr {
+        t.Fatalf("expected the configured log file to exist at %s: %v; child output: %s", logPath, readErr, string(output))
+    }
+
+    if false == strings.Contains(string(logContent), "the probe command exploded") {
+        t.Fatalf("expected the fatal record in the configured log file, got: %s; child output: %s", string(logContent), string(output))
+    }
+
+    if false == strings.Contains(string(output), "the probe command exploded") {
+        t.Fatalf("expected the stderr echo to name the failure, got: %s", string(output))
     }
 }

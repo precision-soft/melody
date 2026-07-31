@@ -6,7 +6,9 @@ import (
     applicationcontract "github.com/precision-soft/melody/application/contract"
     configcontract "github.com/precision-soft/melody/config/contract"
     "github.com/precision-soft/melody/exception"
+    exceptioncontract "github.com/precision-soft/melody/exception/contract"
     httpcontract "github.com/precision-soft/melody/http/contract"
+    "github.com/precision-soft/melody/internal"
     "github.com/precision-soft/melody/http/middleware"
     middlewarepipeline "github.com/precision-soft/melody/http/middleware/pipeline"
     "github.com/precision-soft/melody/http/static"
@@ -65,7 +67,7 @@ func (instance *HttpMiddleware) UseWithPriority(priority int, middlewares ...htt
     for _, currentMiddleware := range middlewares {
         middlewareInstance := currentMiddleware
 
-        if nil == middlewareInstance {
+        if true == internal.IsNilInterface(middlewareInstance) {
             exception.Panic(exception.NewError("middleware is nil in use with priority", nil, nil))
         }
 
@@ -120,7 +122,19 @@ func (instance *HttpMiddleware) UseFactoriesWithPriority(priority int, factories
                 []string{MiddlewareGroupHttp},
                 make([]string, 0),
                 func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
-                    return factoryInstance(kernelInstance), nil
+                    /* a factory that yields nil is refused at the build instead of being dropped from the chain: the pipeline skips a nil middleware without recording it anywhere, so the operator who registered a rate limiter here would run every request without it and be told nothing. The typed-nil yield is the same absence one assertion later — it would join the chain and panic per request. */
+                    middlewareInstance := factoryInstance(kernelInstance)
+                    if true == internal.IsNilInterface(middlewareInstance) {
+                        return nil, exception.NewError(
+                            "middleware factory returned nil",
+                            exceptioncontract.Context{
+                                "middlewareName": name,
+                            },
+                            nil,
+                        )
+                    }
+
+                    return middlewareInstance, nil
                 },
                 false,
                 true,

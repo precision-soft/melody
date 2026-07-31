@@ -18,6 +18,54 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Application: an http boot with no environment keys refuses to serve
+
+**What changed.** [`Boot`](../application/application.go) fails an http-mode process whose `.env` artifacts contributed no keys at all. Every built-in parameter has a development default, so such a process served as `dev` — debug log level, the http profiler, the debug commands — with one warning as the only signal. A cli process stays permissive.
+
+**Symptom.** A deployment whose binary runs from a directory without its `.env` files — the ordinary cause of zero loaded keys — fails at boot with the message naming the searched directory and the remedy, instead of serving on development defaults.
+
+**Remedy.** Put the `.env` artifacts beside the binary (or in the working directory under `go run`), or build with `-tags melody_env_embedded` to embed them. A deployment that genuinely wants defaults-only http serving writes one key — for instance an explicit `MELODY_ENV=dev` — and by doing so says so.
+
+### Application: a middleware factory that yields nil fails the pipeline build
+
+**What changed.** The factory wrapper in [`UseFactoriesWithPriority`](../application/http_middleware.go) refuses a nil or typed-nil middleware when the pipeline is built, naming the definition. The pipeline used to skip a nil middleware silently, without even an inactive-report entry.
+
+**Symptom.** An http boot whose registered factory returns nil — a guard clause written as `return nil`, a lookup that failed — now panics at the pipeline build instead of serving every request without that middleware.
+
+**Remedy.** A factory that conditionally disables its middleware returns a pass-through middleware instead of nil, or the registration itself is made conditional.
+
+### Http: an exact dispatch-duplicate route is refused
+
+**What changed.** [`registerRoute`](../http/route_registry.go) refuses a route identical to a registered one in everything the matcher discriminates on: pattern, methods, host, schemes, locales, requirements and priority. The name and the defaults stay out — neither participates in matching. Both unnamed routes used to be stored, with the first registered silently shadowing the later one at dispatch.
+
+**Symptom.** A boot registering `GET /health` twice — a module and the application each contributing one — panics at the second registration line instead of silently serving whichever came first.
+
+**Remedy.** Remove one of the two, or make them distinguishable: different methods, hosts, requirements, or an explicit priority if the shadowing was intended — a priority split is accepted and the higher one wins at dispatch.
+
+### Application: a teardown failure on Run's normal return exits non-zero
+
+**What changed.** [`Run`](../application/application.go) exits 1 when the teardown it performed itself reports a failure — a service whose `Close` errored during an http shutdown. The cli path already fails the process for the same condition, through the command result.
+
+**Symptom.** A SIGTERM shutdown whose container close fails — a failed flush, a close that errored — is recorded by the supervisor as exit 1 with the Emergency log line, instead of exit 0 with the same line.
+
+**Remedy.** None for a healthy application. A deployment that treats shutdown-close failures as ignorable handles the non-zero exit in its supervisor policy — restart policies keyed on "always" are unaffected.
+
+### Application: the http timeout override interfaces are removed
+
+**What changed.** `HttpTimeoutConfiguration` and `HttpShutdownConfiguration` are deleted from the application package. Nothing implemented them and nothing could: the configuration the application consults is always the one it builds itself, so the overrides were unreachable through any api. The server limits are the fixed defaults — read 15s, read-header 5s, write 30s, idle 60s, max header 1 MiB, shutdown 5s.
+
+**Symptom.** Code referencing either interface — an implementation written in the hope it would be picked up, a type assertion — no longer compiles.
+
+**Remedy.** Delete the dead implementation; it never took effect, so behavior is unchanged. A deployment that needs different limits runs its own `net/http.Server` around `Boot()`'s kernel.
+
+### Application: `RegisterConfiguration` accepts only the logging configuration name
+
+**What changed.** [`RegisterConfiguration`](../application/application.go) refuses any name other than `logging`. The registry is consumed in exactly one place in this major and no accessor exists for any other name, so every other registration was inert by construction — most dangerously the near-miss spelling that left the logger silently on defaults.
+
+**Symptom.** A boot registering a configuration under any other name panics at the registration line, naming the one supported name.
+
+**Remedy.** Spell the logging configuration name through `loggingcontract.LoggingConfigurationName`; delete registrations under other names — they never did anything.
+
 ### Container: the protected `service.` namespace refuses scoped registration
 
 **What changed.** [`RegisterScoped`](../container/container_scoped_registrar.go) — on the container and on a live scope — refuses a `service.`-prefixed name, with or without `Replacing()`. The override path has always refused to substitute a protected name; the scoped registration performed the same substitution inside every scope and was accepted.

@@ -285,6 +285,11 @@ func (instance *Configuration) applyDefaults(projectDirectory string) error {
     return nil
 }
 
+/* EnvironmentKeyCount reports how many keys the .env artifacts contributed. Zero almost always means the files were not found rather than deliberately empty (the warning in applyEnvironmentOverrides names the same condition); the count is exposed so the application can refuse to serve http on nothing but development defaults instead of merely warning. */
+func (instance *Configuration) EnvironmentKeyCount() int {
+    return len(instance.environment.All())
+}
+
 func (instance *Configuration) applyEnvironmentOverrides() error {
     registerEnvironmentParametersErr := instance.registerEnvironmentParameters()
     if nil != registerEnvironmentParametersErr {

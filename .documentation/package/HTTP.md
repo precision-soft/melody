@@ -127,7 +127,7 @@ router.HandleWithOptions(
 router.HandleNamed("product.show", nethttp.MethodGet, "/products/:id?", showProductHandler)
 ```
 
-Two routes may also share one **pattern** under two different names. Only names are checked for collisions — a duplicate name panics at registration with `route name already exists` ([`registerRoute`](../../http/route_registry.go)) — so a duplicated pattern is accepted silently, the earlier registration serves every request, and the later one is unreachable while [`UrlGenerator`](../../http/url_generator.go) still resolves its name and mints its path. Links generated for the second route run the first route's handler.
+Two routes may share one **pattern** as long as the matcher can tell them apart. Collisions are checked twice at registration ([`registerRoute`](../../http/route_registry.go)): a duplicate name panics with `route name already exists`, and a route identical to a registered one in everything the matcher discriminates on — pattern, methods, host, schemes, locales, requirements and priority — panics with `route already registered`, because the later one could never be dispatched and would be shadowed silently. The name and the defaults are not part of that identity: neither participates in matching, so two differently named but otherwise identical routes are still refused. Routes sharing a pattern under different methods, hosts, requirements or priorities are legitimately distinct and stay accepted; at equal specificity the higher priority wins and, at equal priority, the first registered.
 
 ### Locale-restricted routes
 
