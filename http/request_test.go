@@ -36,16 +36,17 @@ func TestNewRequest_ValidHttpRequest(t *testing.T) {
         t.Fatalf("expected query param 'foo' to exist")
     }
 
+    /* @info a key that appeared once is stored as the string it really is; only a repeated key stays a string slice */
     fooRaw, fooExists := queryBag.Get("foo")
     if false == fooExists {
         t.Fatalf("expected query param 'foo' to exist in bag")
     }
-    fooValues, ok := fooRaw.([]string)
-    if false == ok || 0 == len(fooValues) {
-        t.Fatalf("expected query param 'foo' to be []string with values")
+    fooValue, ok := fooRaw.(string)
+    if false == ok {
+        t.Fatalf("expected single-occurrence query param 'foo' to be stored as a string, got: %T", fooRaw)
     }
-    if "bar" != fooValues[0] {
-        t.Fatalf("expected query param 'foo' to be 'bar', got: %s", fooValues[0])
+    if "bar" != fooValue {
+        t.Fatalf("expected query param 'foo' to be 'bar', got: %s", fooValue)
     }
 }
 
@@ -357,5 +358,55 @@ func TestNewRequest_ParseFormError_NilRuntime_NoPanic(t *testing.T) {
 
     if nil == request {
         t.Fatalf("expected non-nil request even when form parsing fails with nil runtime")
+    }
+}
+
+/* @info Input delivers the query and post values it silently lost: the request bags stored every value as a list and the lax string accessor answered ("", true) for a list, so a provided parameter read as an empty field */
+func TestRequest_Input_DeliversQueryAndPostValues(t *testing.T) {
+    queryRequest := httptest.NewRequest("GET", "/search?term=melody", nil)
+    request := NewRequest(queryRequest, nil, nil, nil)
+
+    if "melody" != request.Input("term") {
+        t.Fatalf("expected the query value, got %q", request.Input("term"))
+    }
+
+    formBody := strings.NewReader("field=abc")
+    postRequest := httptest.NewRequest("POST", "/submit", formBody)
+    postRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+    postingRequest := NewRequest(postRequest, nil, nil, nil)
+
+    if "abc" != postingRequest.Input("field") {
+        t.Fatalf("expected the post value, got %q", postingRequest.Input("field"))
+    }
+}
+
+/* @info a repeated key is a genuine array and reading it as one string is refused loudly: answering with the empty string lost the value, answering with one element hid the rest; StringSlice reads it whole */
+func TestRequest_Input_RefusesARepeatedKey(t *testing.T) {
+    repeatedRequest := httptest.NewRequest("GET", "/search?a=1&a=2", nil)
+    request := NewRequest(repeatedRequest, nil, nil, nil)
+
+    defer func() {
+        if recoveredValue := recover(); nil == recoveredValue {
+            t.Fatalf("expected the repeated key read as a single string to be refused")
+        }
+    }()
+
+    _ = request.Input("a")
+}
+
+/* @info a form that does not parse is refused the way a body that does not read is: a warning that let the request continue handed the handler an empty form for a real submission */
+func TestNewRequest_UnparsableFormIsRecordedForRefusal(t *testing.T) {
+    formBody := strings.NewReader("a=%zz&csrf=token")
+    postRequest := httptest.NewRequest("POST", "/submit", formBody)
+    postRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+    request := NewRequest(postRequest, nil, nil, nil)
+
+    if nil == request.bodyReadErr {
+        t.Fatalf("expected the unparsable form to be recorded for the kernel's refusal")
+    }
+
+    if true == request.Post().Has("csrf") {
+        t.Fatalf("expected no half-parsed form to reach the handler")
     }
 }

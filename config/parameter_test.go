@@ -1,11 +1,14 @@
 package config
 
 import (
+    "errors"
     "fmt"
     "strings"
     "sync"
     "testing"
     "time"
+
+    "github.com/precision-soft/melody/exception"
 )
 
 func TestParameter_Duration_ParsesStringAndNativeValues(t *testing.T) {
@@ -188,4 +191,36 @@ func TestParameter_ValueDoesNotRaceResolve(t *testing.T) {
     }()
 
     waitGroup.Wait()
+}
+
+/* @info a secret parameter's conversion failure withholds the cause: the strconv text quotes the value it refused, which is the right diagnostic for a pool size and the wrong log line for a credential; an ordinary parameter keeps the full cause */
+func TestParameter_SecretConversionWithholdsTheValue(t *testing.T) {
+    secretParameter := NewParameter("APP_TOKEN", "sk_live_51H", "sk_live_51H", false)
+    secretParameter.isSecret.Store(true)
+
+    _, intErr := secretParameter.Int()
+    if nil == intErr {
+        t.Fatalf("expected the conversion to fail")
+    }
+    if true == strings.Contains(intErr.Error(), "sk_live_51H") {
+        t.Fatalf("expected the secret value to stay out of the error text")
+    }
+
+    var exceptionErr *exception.Error
+    if false == errors.As(intErr, &exceptionErr) {
+        t.Fatalf("expected an exception error")
+    }
+    if nil != exceptionErr.CauseErr() {
+        t.Fatalf("expected the quoting cause to be withheld for a secret")
+    }
+
+    ordinaryParameter := NewParameter("APP_POOL", "1O0", "1O0", false)
+
+    _, ordinaryErr := ordinaryParameter.Int()
+    if nil == ordinaryErr {
+        t.Fatalf("expected the conversion to fail")
+    }
+    if false == errors.As(ordinaryErr, &exceptionErr) || nil == exceptionErr.CauseErr() {
+        t.Fatalf("expected the ordinary parameter to keep its diagnostic cause")
+    }
 }

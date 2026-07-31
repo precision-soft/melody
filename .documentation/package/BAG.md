@@ -115,8 +115,10 @@ func readRequestParameters(
 
 - `String` returns `""` for non-string stored types; use `StringStrict` to detect type mismatches.
 - `StringSlice` and `StringSliceStrict` accept both `[]string` and `string` (single value), returning a slice in both cases.
+- `String` (and everything built on it: `StringOrDefault`, `HasNonEmptyString`) refuses a `[]string` **loudly, with a panic naming the key**: answering the empty string silently lost the value, answering one element silently hid the rest. A slice is read with `StringSlice` or `StringAt`. The request bags built by `NewParameterBagFromValues` keep the two apart by type — a key that appeared once is stored as its string, only a genuinely repeated key stays a slice — so the panic fires only where a scalar read genuinely meets an array.
 - A key present with a `nil` value reports as **unset** from `String`, `StringSlice`, `Int`, `Bool`, `Float64` and `Duration`, so `Has` and those accessors disagree for that state: `Has` reports the key, the accessor reports absence. The strict variants (`StringStrict`, `StringSliceStrict`) still report it as present with a zero value.
-- `ParameterBag.All()` returns a copy of the internal map.
+- `ParameterBag.All()` returns a copy of the internal map, deep for the shapes the bag's own writers produce (`[]string`, `map[string]string`); other value types come back as stored.
+- `bag.AppendString` appends inside one critical section when handed the concrete `*ParameterBag`; over a foreign implementation of the contract it falls back to Get and Set, whose window between two locks can lose a concurrent append.
 
 ## Userland API
 

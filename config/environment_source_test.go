@@ -1,12 +1,14 @@
 package config
 
 import (
+    "fmt"
     "os"
     "path/filepath"
     "strings"
     "testing"
 
     configcontract "github.com/precision-soft/melody/config/contract"
+    "github.com/precision-soft/melody/exception"
 )
 
 func TestEnvironmentContractIsUsed(t *testing.T) {
@@ -28,8 +30,18 @@ func TestPreprocessDotEnvContent_KeepsMultilineQuotedValues(t *testing.T) {
     if false == strings.Contains(processed, "last\"") {
         t.Fatalf("the quoted value lost its tail: %q", processed)
     }
-    if true == strings.Contains(processed, "trailing comment") {
-        t.Fatalf("a real trailing comment must still be stripped: %q", processed)
+
+    /* the trailing comment stays in the produced line on purpose: godotenv performs its own countback on it, and cutting here as well would cut twice */
+    source := writeDotEnvFiles(t, map[string]string{
+        ".env": "OTHER=plain # trailing comment\n",
+    })
+
+    values, loadErr := source.Load()
+    if nil != loadErr {
+        t.Fatalf("load error: %v", loadErr)
+    }
+    if "plain" != values["OTHER"] {
+        t.Fatalf("expected godotenv's countback to strip the real trailing comment, got %q", values["OTHER"])
     }
 }
 
@@ -112,15 +124,113 @@ func TestPreprocessDotEnvContent_InlineHashWithoutLeadingSpaceIsKept(t *testing.
     }
 }
 
+/* @info the preprocessor no longer cuts the trailing comment itself: godotenv performs its own countback on the produced line, and two cuts in a row read "hello # world # x" as "hello" where godotenv reads "hello # world"; only the whole-line comment is dropped here */
 func TestPreprocessDotEnvContent_WhitespacePrecededHashIsComment(t *testing.T) {
     processed, err := preprocessDotEnvContent("KEY=value # trailing comment\n# full line comment\nOTHER=1")
     if nil != err {
         t.Fatalf("unexpected error: %s", err.Error())
     }
 
-    expected := "KEY=value\nOTHER=1"
+    expected := "KEY=value # trailing comment\nOTHER=1"
     if expected != processed {
         t.Fatalf("expected %q, got %q", expected, processed)
+    }
+
+    source := writeDotEnvFiles(t, map[string]string{
+        ".env": "KEY=value # trailing comment\n",
+    })
+
+    values, loadErr := source.Load()
+    if nil != loadErr {
+        t.Fatalf("load error: %v", loadErr)
+    }
+    if "value" != values["KEY"] {
+        t.Fatalf("expected godotenv's own countback to cut the trailing comment, got %q", values["KEY"])
+    }
+}
+
+/* @info the value ends at the LAST whitespace-preceded hash, godotenv's own reading: the first-hash cut silently changed "hello # world # x" into "hello" for every file that had always been read the other way */
+func TestLoad_CommentCutMatchesGodotenv(t *testing.T) {
+    source := writeDotEnvFiles(t, map[string]string{
+        ".env": "GREETING=hello # world # x\n",
+    })
+
+    values, loadErr := source.Load()
+    if nil != loadErr {
+        t.Fatalf("load error: %v", loadErr)
+    }
+    if "hello # world" != values["GREETING"] {
+        t.Fatalf("expected the godotenv reading of the doubled hash, got %q", values["GREETING"])
+    }
+}
+
+/* @info the line is walked byte by byte: a .env saved as Latin-1 had its quoted password silently re-encoded through U+FFFD, and the credential sent to the database differed from the one in the file */
+func TestLoad_PreservesNonUtf8BytesInQuotedValues(t *testing.T) {
+    source := writeDotEnvFiles(t, map[string]string{
+        ".env": "DB_PASSWORD='caf\xe9'\n",
+    })
+
+    values, loadErr := source.Load()
+    if nil != loadErr {
+        t.Fatalf("load error: %v", loadErr)
+    }
+    if "caf\xe9" != values["DB_PASSWORD"] {
+        t.Fatalf("expected the Latin-1 byte preserved exactly, got %q", values["DB_PASSWORD"])
+    }
+}
+
+/* @info a braced reference whose name breaks the key grammar is refused, naming the enclosing key and never the content: nobody types ${...} into a password by accident, and ${DB-PASS} used to survive literally inside the dsn with no signal */
+func TestLoad_RefusesMalformedBracedReference(t *testing.T) {
+    source := writeDotEnvFiles(t, map[string]string{
+        ".env": "DSN=mysql://root:${DB-PASS}@db/app\n",
+    })
+
+    _, loadErr := source.Load()
+    if nil == loadErr {
+        t.Fatalf("expected the malformed braced reference to be refused")
+    }
+    if false == strings.Contains(loadErr.Error(), "malformed reference in env file value") {
+        t.Fatalf("expected the malformed reference report, got: %v", loadErr)
+    }
+    if true == strings.Contains(loadErr.Error(), "DB-PASS") {
+        t.Fatalf("expected the braced content to stay out of the error")
+    }
+}
+
+/* @info the parse failure travels without the file content: godotenv quotes the whole remaining tail of the file — the neighborhood where the credentials live, marker bytes included — and the sanitized description keeps the shape while the path names the file to open */
+func TestLoad_ParseFailureCarriesNoFileContent(t *testing.T) {
+    source := writeDotEnvFiles(t, map[string]string{
+        ".env": "BROKEN$KEY=x\nDB_PASSWORD=hunter2\n",
+    })
+
+    _, loadErr := source.Load()
+    if nil == loadErr {
+        t.Fatalf("expected the malformed variable name to fail the parse")
+    }
+
+    /* the leak traveled through the cause chain the logger renders, never through Error() alone — so the assertion renders exactly what the logger renders */
+    renderedLogContext := fmt.Sprintf("%v", exception.LogContext(loadErr, nil))
+    if true == strings.Contains(renderedLogContext, "hunter2") {
+        t.Fatalf("expected the neighboring credential to stay out of the rendered log context: %s", renderedLogContext)
+    }
+    if true == strings.Contains(renderedLogContext, "\x00") {
+        t.Fatalf("expected the marker bytes to stay out of the rendered log context")
+    }
+}
+
+/* @info a reference in MELODY_ENV can only see .env and .env.local — the value picks which .env.<name> files load next — and the refusal says so instead of calling "undefined" a key the operator can see defined in .env.prod */
+func TestLoad_EnvironmentNameWindowIsNamed(t *testing.T) {
+    source := writeDotEnvFiles(t, map[string]string{
+        ".env":      "MELODY_ENV=$PICKED_ENV\n",
+        ".env.prod": "PICKED_ENV=prod\n",
+    })
+
+    _, loadErr := source.Load()
+    if nil == loadErr {
+        t.Fatalf("expected the out-of-window reference to be refused")
+    }
+    if false == strings.Contains(loadErr.Error(), ".env and .env.local") {
+        t.Fatalf("expected the window to be named, got: %v", loadErr)
     }
 }
 

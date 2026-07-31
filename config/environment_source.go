@@ -21,10 +21,6 @@ const (
     dollarLiteralMarker   = "\x00melodyDotEnvLiteralDollar\x00"
 )
 
-var (
-    dollarReferenceMarkerRunes = []rune(dollarReferenceMarker)
-    dollarLiteralMarkerRunes   = []rune(dollarLiteralMarker)
-)
 
 func NewEnvironmentSource(
     fileSystem fs.FS,
@@ -88,7 +84,12 @@ func (instance *EnvironmentSource) loadDotEnvFiles(values map[string]string) (st
         make(map[string]bool, 1),
     )
     if nil != expandErr {
-        return "", expandErr
+        /* a reference in MELODY_ENV can only see .env and .env.local — the value picks which .env.<name> files load next, so those are not read yet — and without saying so, a key defined right there in .env.prod is reported "undefined" to an operator who can see it defined */
+        return "", exception.NewError(
+            "could not resolve the MELODY_ENV value against .env and .env.local; the environment name selects the .env.<name> files, so a reference in it can only read keys those two files define",
+            nil,
+            expandErr,
+        )
     }
 
     environmentName := strings.TrimSpace(environmentValue)
@@ -118,31 +119,6 @@ func (instance *EnvironmentSource) loadDotEnvEnvironmentFiles(
     }
 
     return nil
-}
-
-func (instance *EnvironmentSource) loadRequiredDotEnvFile(values map[string]string, pathValue string) error {
-    _, err := fs.Stat(instance.fileSystem, pathValue)
-    if nil != err {
-        if true == errors.Is(err, fs.ErrNotExist) {
-            return exception.NewError(
-                "env file is required but was not found",
-                exceptioncontract.Context{
-                    "path": pathValue,
-                },
-                err,
-            )
-        }
-
-        return exception.NewError(
-            "failed to stat env file",
-            exceptioncontract.Context{
-                "path": pathValue,
-            },
-            err,
-        )
-    }
-
-    return instance.loadExistingDotEnvFile(values, pathValue)
 }
 
 func (instance *EnvironmentSource) loadOptionalDotEnvFile(values map[string]string, pathValue string) error {
@@ -189,12 +165,14 @@ func (instance *EnvironmentSource) loadExistingDotEnvFile(values map[string]stri
 
     parsed, parseErr := godotenv.Parse(strings.NewReader(preprocessed))
     if nil != parseErr {
+        /* @important the parser's own error is not carried as the cause: godotenv quotes the file content it choked on — the whole remaining tail for a malformed variable name, the first line of an unterminated quoted value — which is exactly the neighborhood where the credentials live, marker bytes included. Only a content-free description of the failure travels; the path names the file to open. */
         return exception.NewError(
             "failed to parse env file",
             exceptioncontract.Context{
-                "path": pathValue,
+                "path":         pathValue,
+                "parseFailure": sanitizeDotEnvParseFailure(parseErr),
             },
-            parseErr,
+            nil,
         )
     }
 
@@ -208,6 +186,21 @@ func (instance *EnvironmentSource) loadExistingDotEnvFile(values map[string]stri
     }
 
     return nil
+}
+
+/* sanitizeDotEnvParseFailure keeps the failure's shape and drops the file content it quotes. */
+func sanitizeDotEnvParseFailure(parseErr error) string {
+    message := parseErr.Error()
+
+    if index := strings.Index(message, " near "); 0 <= index {
+        return message[:index]
+    }
+
+    if true == strings.HasPrefix(message, "unterminated quoted value") {
+        return "unterminated quoted value"
+    }
+
+    return "env file content did not parse"
 }
 
 /* expandDotEnvReferences resolves the ${KEY} and $KEY references of every loaded .env artifact at once, over the merged set. The parser resolves them per file, which is what makes the four-file layout misfire so quietly: .env holds the credential, .env.local assembles the connection string that reads it, and the reference — invisible to the file it sits in — becomes the empty string, so the application boots against "postgres://:@db/app" with nothing logged. Here a reference that names no key fails the boot, the same rule %env(KEY)% already follows. A dollar the file escaped with a backslash is data and is written out as a plain dollar. */
@@ -288,8 +281,19 @@ func expandDotEnvValue(
 
         fragment := remaining[referenceOffset+len(dollarReferenceMarker):]
 
-        referencedKey, consumedLength := parseDotEnvReference(fragment)
+        referencedKey, consumedLength, malformedBracedReference := parseDotEnvReference(fragment)
         if 0 == consumedLength {
+            /* @important the braced content is not reported: it may hold arbitrary pasted text — a credential typed where the key belongs — and naming the enclosing key is enough to find it */
+            if true == malformedBracedReference {
+                return "", exception.NewError(
+                    "malformed reference in env file value; ${...} must name a key of upper case letters, digits and underscores, and a literal dollar is written as \\$",
+                    exceptioncontract.Context{
+                        "key": key,
+                    },
+                    nil,
+                )
+            }
+
             /* nothing name-shaped follows, so the dollar was data — a lone one at the end of a value, or one in front of a character no key may start with */
             builder.WriteByte('$')
 
@@ -347,10 +351,10 @@ func expandDotEnvValue(
     return value, nil
 }
 
-/* parseDotEnvReference reads the key name a reference marker opens, in either the braced or the bare form, and reports how much of the fragment it consumed. Zero means the marker opened no reference and the dollar it stood for is data. */
-func parseDotEnvReference(fragment string) (string, int) {
+/* parseDotEnvReference reads the key name a reference marker opens, in either the braced or the bare form, and reports how much of the fragment it consumed. Zero consumed means the marker opened no reference and the dollar it stood for is data — except for a BRACED form whose closing brace arrived over a name outside the key grammar: nobody types "${...}" into a password by accident, so that one raises the malformed flag and is refused instead of surviving as literal text, exactly the policy the closed-but-misspelled %env(...)% already has. An unclosed brace stays data, like the bare dollar it is. */
+func parseDotEnvReference(fragment string) (string, int, bool) {
     if 0 == len(fragment) {
-        return "", 0
+        return "", 0, false
     }
 
     if '{' == fragment[0] {
@@ -360,15 +364,15 @@ func parseDotEnvReference(fragment string) (string, int) {
         }
 
         if end >= len(fragment) {
-            return "", 0
+            return "", 0, false
         }
 
         name := fragment[1:end]
         if false == isDotEnvKeyName(name) {
-            return "", 0
+            return "", 0, true
         }
 
-        return name, end + 1
+        return name, end + 1, false
     }
 
     end := 0
@@ -378,10 +382,10 @@ func parseDotEnvReference(fragment string) (string, int) {
 
     name := fragment[:end]
     if false == isDotEnvKeyName(name) {
-        return "", 0
+        return "", 0, false
     }
 
-    return name, end
+    return name, end, false
 }
 
 func isDotEnvKeyName(name string) bool {
@@ -427,22 +431,24 @@ func preprocessDotEnvContent(content string) (string, error) {
 
     /* the quote state spans lines: godotenv accepts a quoted value that runs over several of them, and a scanner that forgot it was inside quotes would read a '#' in the value as a comment and drop a blank line out of the middle of it */
     inQuotes := false
-    var quoteChar rune = 0
+    var quoteChar byte = 0
 
     for scanner.Scan() {
         line := scanner.Text()
 
-        /* the produced line is collected as runes rather than into a builder because the dollar handling below has to take the preceding backslash back out again once it turns out to have been escaping the dollar */
-        output := make([]rune, 0, len(line))
+        /* @important the line is walked byte by byte, never through runes: every character the walk decides on is ASCII, and a rune round-trip re-encoded whatever was not valid UTF-8 — a .env saved as Latin-1 had its password silently rewritten, while godotenv alone passes a quoted value through untouched. The produced line is collected into a slice because the dollar handling below has to take the preceding backslash back out again once it turns out to have been escaping the dollar. */
+        output := make([]byte, 0, len(line))
 
         openedInQuotes := inQuotes
-        var previousChar rune = 0
+        var previousChar byte = 0
 
-        /* godotenv opens a quoted value only when the quote is the first non-space rune of the value portion, after the key separator (its hasQuotePrefix); a quote anywhere else in an unquoted value is literal data and must not flip the cross-line quote state. A line that continues a value opened on an earlier line is entirely inside that value already. */
+        /* godotenv opens a quoted value only when the quote is the first non-space byte of the value portion, after the key separator (its hasQuotePrefix); a quote anywhere else in an unquoted value is literal data and must not flip the cross-line quote state. A line that continues a value opened on an earlier line is entirely inside that value already. */
         sawSeparator := openedInQuotes
         valueStarted := openedInQuotes
 
-        for _, character := range line {
+        for index := 0; index < len(line); index = index + 1 {
+            character := line[index]
+
             if '"' == character || '\'' == character {
                 if true == inQuotes {
                     /* godotenv skips a quote preceded by a backslash, so an escaped quote inside the value does not terminate it */
@@ -462,8 +468,9 @@ func preprocessDotEnvContent(content string) (string, error) {
             }
 
             if false == inQuotes {
-                if '#' == character {
-                    if 0 == previousChar || true == unicode.IsSpace(previousChar) {
+                /* a comment that opens before any separator comments the whole line out; a '#' after the separator stays in the produced line, and godotenv's own countback decides where the value ends — cutting here as well would cut TWICE, and cutting at the first one read "hello # world # x" as "hello" where godotenv reads "hello # world" */
+                if '#' == character && false == sawSeparator {
+                    if 0 == previousChar || true == isDotEnvSpaceByte(previousChar) {
                         break
                     }
                 }
@@ -472,7 +479,7 @@ func preprocessDotEnvContent(content string) (string, error) {
                     if '=' == character || ':' == character {
                         sawSeparator = true
                     }
-                } else if false == valueStarted && false == unicode.IsSpace(character) {
+                } else if false == valueStarted && false == isDotEnvSpaceByte(character) {
                     valueStarted = true
                 }
             }
@@ -484,9 +491,9 @@ func preprocessDotEnvContent(content string) (string, error) {
                 if false == singleQuotedValue {
                     if '\\' == previousChar && 0 < len(output) {
                         output = output[:len(output)-1]
-                        output = append(output, dollarLiteralMarkerRunes...)
+                        output = append(output, dollarLiteralMarker...)
                     } else {
-                        output = append(output, dollarReferenceMarkerRunes...)
+                        output = append(output, dollarReferenceMarker...)
                     }
 
                     previousChar = character
@@ -521,6 +528,10 @@ func preprocessDotEnvContent(content string) (string, error) {
     }
 
     return strings.Join(lines, "\n"), nil
+}
+
+func isDotEnvSpaceByte(character byte) bool {
+    return ' ' == character || '\t' == character || '\v' == character || '\f' == character || '\r' == character
 }
 
 var _ configcontract.EnvironmentSource = (*EnvironmentSource)(nil)

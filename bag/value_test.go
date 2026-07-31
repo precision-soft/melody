@@ -1,6 +1,7 @@
 package bag
 
 import (
+    "net/url"
     "testing"
 )
 
@@ -203,5 +204,38 @@ func TestValue_PresentNilReportsUnsetAcrossAllAccessors(t *testing.T) {
 
     if value, exists := String(parameterBag, "key"); false == exists || "value" != value {
         t.Fatalf("expected a set value to be reported, got %q exists=%v", value, exists)
+    }
+}
+
+/* @info a string slice read as one string is refused loudly, never guessed at: answering with the empty string silently lost the value, answering with one element silently hid the rest; the slice is read with StringSlice or StringAt */
+func TestString_PanicsOnAStringSlice(t *testing.T) {
+    parameterBag := NewParameterBag()
+    parameterBag.Set("repeated", []string{"1", "2"})
+
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected the string slice to be refused with a panic")
+        }
+    }()
+
+    _, _ = String(parameterBag, "repeated")
+}
+
+/* @info the single occurrence stored as its string flows through every lax accessor: the value that used to vanish into ("", true) is delivered, and the guard built on HasNonEmptyString stops lying */
+func TestString_DeliversTheSingleOccurrence(t *testing.T) {
+    parameterBag := NewParameterBagFromValues(url.Values{"term": {"melody"}})
+
+    value, exists := String(parameterBag, "term")
+    if false == exists || "melody" != value {
+        t.Fatalf("expected the single occurrence back, got exists=%v value=%q", exists, value)
+    }
+
+    if "melody" != StringOrDefault(parameterBag, "term", "fallback") {
+        t.Fatalf("expected StringOrDefault to deliver the value, not the fallback")
+    }
+
+    if false == HasNonEmptyString(parameterBag, "term") {
+        t.Fatalf("expected HasNonEmptyString to see the provided value")
     }
 }

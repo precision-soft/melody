@@ -90,12 +90,15 @@ type Configuration struct {
     /* set once the boot-time Resolve has run, so a parameter registered afterwards is resolved on registration instead of keeping its raw template */
     resolved bool
 
-    /* @important atomic rather than covered by the mutex: Resolve reads it before it takes the write lock, and MarkServing is called from the goroutine that starts the application while requests may already be reading parameters */
+    /* @important written and read under the configuration write lock so the refusal in Resolve is airtight — a MarkServing racing a Resolve either waits for the rewrite to finish (still pre-serving) or lands first and the rewrite is refused; the atomic wrapper keeps any future lock-free reader honest rather than carrying the synchronization itself */
     serving atomic.Bool
 }
 
 /* MarkServing records that the wiring phase is over and the application has started running. From that point Resolve is refused: services built during boot hold the values they read, so re-resolving reconfigures nothing and only rewrites the parameter store under readers that expect it settled. Registering a parameter still works — it resolves itself on registration — which is what keeps a late module functioning. */
 func (instance *Configuration) MarkServing() {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
     instance.serving.Store(true)
 }
 
@@ -171,9 +174,22 @@ func (instance *Configuration) RegisterRuntimeSecret(name string, value any) {
 }
 
 func (instance *Configuration) registerRuntimeParameter(name string, value any, isSecret bool) {
-    if "" == name {
+    if "" == strings.TrimSpace(name) {
         exception.Panic(
             exception.NewError("cannot register parameters with empty names", nil, nil),
+        )
+    }
+
+    /* a name judged raw would let "  pool.size " register a parameter no lookup ever names: Get is an exact map lookup, so the padded spelling is unreachable through every accessor that types the name as written */
+    if name != strings.TrimSpace(name) {
+        exception.Panic(
+            exception.NewError(
+                "cannot register parameters with surrounding whitespace in the name",
+                exceptioncontract.Context{
+                    "parameterName": name,
+                },
+                nil,
+            ),
         )
     }
 
@@ -207,11 +223,10 @@ func (instance *Configuration) registerRuntimeParameter(name string, value any, 
     }
 
     parameter := NewParameter("", value, value, false)
+    parameter.name = name
     parameter.isSecret.Store(isSecret)
 
-    instance.parameters[name] = parameter
-
-    /* the boot resolution has already run, so this parameter would otherwise keep its raw template — a %env(...)% reaching the consuming service verbatim. Resolve it now against the parameters boot left in place; a pre-resolve registration is left raw for the boot pass to resolve in one batch. */
+    /* the boot resolution has already run, so this parameter would otherwise keep its raw template — a %env(...)% reaching the consuming service verbatim. Resolve it now against the parameters boot left in place, and only then publish: resolving after the map write left a failed registration half-made, with the raw template served to every reader that outlived the recovered panic and the name burnt for any corrected retry. A pre-resolve registration is left raw for the boot pass to resolve in one batch. */
     if true == instance.resolved {
         stringValue, isString := value.(string)
         if true == isString {
@@ -236,6 +251,8 @@ func (instance *Configuration) registerRuntimeParameter(name string, value any, 
             parameter.storeValue(resolvedValue)
         }
     }
+
+    instance.parameters[name] = parameter
 }
 
 /* MarkSecret marks an already registered parameter as holding a credential. The parameters melody registers automatically from the .env artifacts are the ones most likely to hold one, and they exist before any module runs, so marking them is separate from declaring them.
@@ -252,7 +269,44 @@ func (instance *Configuration) MarkSecret(name string) bool {
 
     parameter.isSecret.Store(true)
 
+    /* the marking travels to every parameter whose template reads this one, exactly as it does when the marking precedes the resolution: without this, a MarkSecret arriving after the boot resolve redacted the key but left the dsn assembled from it printing in full, and the late marking reported success while covering half of what the early one covers. The scan reads the raw templates, so it reaches the same direct readers the resolution-time propagation reaches. */
+    instance.propagateSecretMarkLocked(name)
+
     return true
+}
+
+/* propagateSecretMarkLocked marks every parameter whose raw template directly reads the named one — through %env(NAME)%, through the default processor's fallback, or through a %NAME% reference. A match inside doubled-percent escaped text over-marks, which errs toward redacting more, never less. Chained derivations (a template reading a template that reads the secret) are marked when their own direct source is marked; the transitive closure in one call is a v3 extension. */
+func (instance *Configuration) propagateSecretMarkLocked(markedName string) {
+    for _, parameter := range instance.parameters {
+        if true == parameter.isSecret.Load() {
+            continue
+        }
+
+        templateValue, isString := parameter.environmentValue.(string)
+        if false == isString {
+            continue
+        }
+
+        if true == templateReadsName(templateValue, markedName) {
+            parameter.isSecret.Store(true)
+        }
+    }
+}
+
+func templateReadsName(template string, name string) bool {
+    for _, submatches := range envPlaceholderPattern.FindAllStringSubmatch(template, -1) {
+        if name == submatches[3] || name == submatches[2] {
+            return true
+        }
+    }
+
+    for _, submatches := range parameterPlaceholderPattern.FindAllStringSubmatch(template, -1) {
+        if name == submatches[1] {
+            return true
+        }
+    }
+
+    return false
 }
 
 func (instance *Configuration) Names() []string {

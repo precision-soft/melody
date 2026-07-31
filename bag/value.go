@@ -4,6 +4,8 @@ import (
     "strings"
 
     bagcontract "github.com/precision-soft/melody/bag/contract"
+    "github.com/precision-soft/melody/exception"
+    exceptioncontract "github.com/precision-soft/melody/exception/contract"
     "github.com/precision-soft/melody/internal"
 )
 
@@ -21,6 +23,19 @@ func String(parameterBag bagcontract.ParameterBag, name string) (string, bool) {
     stringValue, isString := value.(string)
     if true == isString {
         return stringValue, true
+    }
+
+    /* @important a string slice read as one string is refused loudly, never guessed at: the request bags keep the single and the repeated key apart by type, so what lands here is a genuine array, and answering with the empty string silently lost the value while answering with one element silently hid the rest. The slice is read with StringSlice or StringAt. */
+    if _, isSlice := value.([]string); true == isSlice {
+        exception.Panic(
+            exception.NewError(
+                "parameter holds a string slice and cannot be read as one string; read it with StringSlice or StringAt",
+                exceptioncontract.Context{
+                    "parameterName": name,
+                },
+                nil,
+            ),
+        )
     }
 
     return "", true

@@ -10,7 +10,6 @@ import (
     bagcontract "github.com/precision-soft/melody/bag/contract"
     "github.com/precision-soft/melody/exception"
     httpcontract "github.com/precision-soft/melody/http/contract"
-    "github.com/precision-soft/melody/logging"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
@@ -73,26 +72,15 @@ func NewRequest(
 
             if nil == parseFormErr {
                 postBag = bag.NewParameterBagFromValues(httpRequest.PostForm)
-            } else if nil != runtimeInstance {
-                loggerInstance := logging.LoggerFromRuntime(runtimeInstance)
-                if nil != loggerInstance {
-                    loggerInstance.Warning(
-                        "failed to parse form data",
-                        map[string]any{
-                            "error":  parseFormErr.Error(),
-                            "method": httpRequest.Method,
-                            "path":   httpRequest.URL.Path,
-                        },
-                    )
-                }
             } else {
-                logging.NewDefaultLogger().Warning(
+                /* a form that does not parse is recorded the way a body that does not read is, and the kernel refuses the request for both: a warning that let the request continue handed the handler an empty form for a real submission — "field missing" answered about a field the client sent */
+                bodyReadErr = exception.NewError(
                     "failed to parse form data",
                     map[string]any{
-                        "error":  parseFormErr.Error(),
                         "method": httpRequest.Method,
                         "path":   httpRequest.URL.Path,
                     },
+                    parseFormErr,
                 )
             }
         }

@@ -694,3 +694,125 @@ func TestConfiguration_RegisterRuntimeStillResolvesOnceServing(t *testing.T) {
         t.Fatalf("expected the late parameter to resolve on registration, got %q", configuration.MustGet("app.late").MustString())
     }
 }
+
+/* @info the candidate runs to the real ")%" closer: a ")" that closes nothing does not end the search, so %env(A))% is reported as the malformed placeholder it is instead of surviving as literal text */
+func TestResolveTemplate_EnvPlaceholderWithInnerParenthesisIsRefused(t *testing.T) {
+    configuration := &Configuration{
+        environment: &Environment{values: map[string]string{"A": "x"}},
+        parameters:  ParameterMap{},
+    }
+
+    _, resolveErr := configuration.resolveTemplate(
+        "%env(A))%",
+        "app.a",
+        make(map[string]bool),
+        make(map[string]bool),
+    )
+    if nil == resolveErr {
+        t.Fatalf("expected the placeholder with the inner parenthesis to be refused")
+    }
+    if false == strings.Contains(resolveErr.Error(), "malformed environment placeholder") {
+        t.Fatalf("expected the malformed placeholder report, got: %v", resolveErr)
+    }
+}
+
+/* @info a %env( that never closes is an error, not data: the forgotten closing percent left postgres://user:%env(DB_PASS)@db connecting with the literal placeholder as its password, and nothing said so */
+func TestResolveTemplate_UnterminatedEnvPlaceholderIsRefused(t *testing.T) {
+    configuration := &Configuration{
+        environment: &Environment{values: map[string]string{"DB_PASS": "secret"}},
+        parameters:  ParameterMap{},
+    }
+
+    _, resolveErr := configuration.resolveTemplate(
+        "postgres://user:%env(DB_PASS)@db/app",
+        "database.url",
+        make(map[string]bool),
+        make(map[string]bool),
+    )
+    if nil == resolveErr {
+        t.Fatalf("expected the unterminated placeholder to be refused")
+    }
+    if false == strings.Contains(resolveErr.Error(), "unterminated environment placeholder") {
+        t.Fatalf("expected the unterminated placeholder report, got: %v", resolveErr)
+    }
+}
+
+/* @info a name-shaped run a percent opened and nothing closed is a reference with a typo: %app-name% used to survive as literal text while the contract already demands a literal percent be doubled */
+func TestResolveTemplate_UnclosedParameterReferenceIsRefused(t *testing.T) {
+    configuration := &Configuration{
+        environment: &Environment{values: map[string]string{}},
+        parameters: ParameterMap{
+            "app.name": NewParameter("", "melody", "melody", false),
+        },
+    }
+
+    _, resolveErr := configuration.resolveTemplate(
+        "service-%app-name%",
+        "app.banner",
+        make(map[string]bool),
+        make(map[string]bool),
+    )
+    if nil == resolveErr {
+        t.Fatalf("expected the unclosed reference to be refused")
+    }
+    if false == strings.Contains(resolveErr.Error(), "malformed parameter reference") {
+        t.Fatalf("expected the malformed reference report, got: %v", resolveErr)
+    }
+}
+
+/* @info a percent in front of a character no name may start with stays data: the refusal of unclosed references must not reach genuine literals */
+func TestResolveTemplate_PercentBeforeNonNameCharacterStaysData(t *testing.T) {
+    configuration := &Configuration{
+        environment: &Environment{values: map[string]string{}},
+        parameters:  ParameterMap{},
+    }
+
+    value, resolveErr := configuration.resolveTemplate(
+        "growth of 50% overall",
+        "app.note",
+        make(map[string]bool),
+        make(map[string]bool),
+    )
+    if nil != resolveErr {
+        t.Fatalf("expected the literal percent to survive, got: %v", resolveErr)
+    }
+    if "growth of 50% overall" != value {
+        t.Fatalf("unexpected value: %q", value)
+    }
+}
+
+/* @info a referenced parameter whose environment value is not a string is reported by type alone: a signing key registered as bytes is exactly what a template would reference, and the raw value must not reach the logs */
+func TestResolveTemplate_NonStringReferenceErrorOmitsTheValue(t *testing.T) {
+    secretBytes := "0123456789abcdef"
+
+    configuration := &Configuration{
+        environment: &Environment{values: map[string]string{}},
+        parameters: ParameterMap{
+            "app.signing_key": NewParameter("", []byte(secretBytes), []byte(secretBytes), false),
+        },
+    }
+
+    _, resolveErr := configuration.resolveTemplate(
+        "key=%app.signing_key%",
+        "app.assembled",
+        make(map[string]bool),
+        make(map[string]bool),
+    )
+    if nil == resolveErr {
+        t.Fatalf("expected the non-string reference to be refused")
+    }
+
+    var exceptionErr *exception.Error
+    if false == errors.As(resolveErr, &exceptionErr) {
+        t.Fatalf("expected an exception error, got: %v", resolveErr)
+    }
+    if _, valuePresent := exceptionErr.Context()["environmentValue"]; true == valuePresent {
+        t.Fatalf("expected the raw value to stay out of the error context")
+    }
+    if "[]uint8" != exceptionErr.Context()["environmentValueType"] {
+        t.Fatalf("expected the type to identify the value, got: %v", exceptionErr.Context()["environmentValueType"])
+    }
+    if true == strings.Contains(fmt.Sprintf("%v", exceptionErr.Context()), secretBytes) {
+        t.Fatalf("expected the secret bytes to stay out of the rendered context")
+    }
+}

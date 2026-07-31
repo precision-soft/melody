@@ -27,12 +27,35 @@ func NewParameter(environmentKey string, environmentValue any, value any, isDefa
 type Parameter struct {
     environmentKey   string
     environmentValue any
+    /* the registration name, for the parameters that have no environment key: a runtime parameter identified in an error only by its empty environmentKey was anonymous — "cannot convert" named nothing an operator could find */
+    name string
     /* @important valueMutex guards value on its own, because the configuration lock does not reach the readers: a service handed the *Parameter reads it through the accessors below without ever touching the configuration, while Resolve rewrites every parameter under the configuration write lock. Two different locks around the same field are no lock at all, so the write side goes through storeValue and every read through loadValue. */
     valueMutex sync.RWMutex
     value      any
     isDefault  bool
     /* @important atomic because MarkSecret may mark a parameter under the configuration lock while a consumer that already holds the pointer asks IsSecret without it */
     isSecret atomic.Bool
+}
+
+func (instance *Parameter) diagnosticContext() map[string]any {
+    context := map[string]any{
+        "environmentKey": instance.environmentKey,
+    }
+
+    if "" != instance.name {
+        context["parameterName"] = instance.name
+    }
+
+    return context
+}
+
+/* conversionCause hands the parse failure through for an ordinary parameter and withholds it for a secret one: the underlying strconv and parse errors quote the value they refused — exactly the right diagnostic for a mistyped pool size, and exactly the wrong log line for a credential that failed a conversion it was never meant for. */
+func (instance *Parameter) conversionCause(causeErr error) error {
+    if true == instance.isSecret.Load() {
+        return nil
+    }
+
+    return causeErr
 }
 
 func (instance *Parameter) loadValue() any {
@@ -90,10 +113,7 @@ func (instance *Parameter) MustString() string {
     exception.Panic(
         exception.NewError(
             "cannot convert parameter value to string",
-            map[string]any{
-                "environmentKey": instance.environmentKey,
-                "valueType":      fmt.Sprintf("%T", value),
-            },
+            mustStringContext(instance, value),
             nil,
         ),
     )
@@ -115,10 +135,8 @@ func (instance *Parameter) Bool() (bool, error) {
         if nil != boolFromStringErr {
             return false, exception.NewError(
                 "cannot convert parameter value to bool",
-                map[string]any{
-                    "environmentKey": instance.environmentKey,
-                },
-                boolFromStringErr,
+                instance.diagnosticContext(),
+                instance.conversionCause(boolFromStringErr),
             )
         }
 
@@ -127,9 +145,7 @@ func (instance *Parameter) Bool() (bool, error) {
 
     return false, exception.NewError(
         "cannot convert parameter value to bool",
-        map[string]any{
-            "environmentKey": instance.environmentKey,
-        },
+        instance.diagnosticContext(),
         nil,
     )
 }
@@ -148,10 +164,8 @@ func (instance *Parameter) Int() (int, error) {
         if nil != atoiErr {
             return 0, exception.NewError(
                 "cannot convert parameter value to int",
-                map[string]any{
-                    "environmentKey": instance.environmentKey,
-                },
-                atoiErr,
+                instance.diagnosticContext(),
+                instance.conversionCause(atoiErr),
             )
         }
 
@@ -160,9 +174,7 @@ func (instance *Parameter) Int() (int, error) {
 
     return 0, exception.NewError(
         "cannot convert parameter value to int",
-        map[string]any{
-            "environmentKey": instance.environmentKey,
-        },
+        instance.diagnosticContext(),
         nil,
     )
 }
@@ -172,10 +184,8 @@ func (instance *Parameter) Float() (float64, error) {
     if nil != floatErr || false == isSet {
         return 0, exception.NewError(
             "cannot convert parameter value to float",
-            map[string]any{
-                "environmentKey": instance.environmentKey,
-            },
-            floatErr,
+            instance.diagnosticContext(),
+            instance.conversionCause(floatErr),
         )
     }
 
@@ -187,14 +197,19 @@ func (instance *Parameter) Duration() (time.Duration, error) {
     if nil != durationErr || false == isSet {
         return 0, exception.NewError(
             "cannot convert parameter value to duration",
-            map[string]any{
-                "environmentKey": instance.environmentKey,
-            },
-            durationErr,
+            instance.diagnosticContext(),
+            instance.conversionCause(durationErr),
         )
     }
 
     return durationValue, nil
+}
+
+func mustStringContext(instance *Parameter, value any) map[string]any {
+    context := instance.diagnosticContext()
+    context["valueType"] = fmt.Sprintf("%T", value)
+
+    return context
 }
 
 var _ configcontract.Parameter = (*Parameter)(nil)

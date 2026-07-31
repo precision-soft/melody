@@ -18,6 +18,70 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Http/Bag: request values are delivered, and a repeated key read as one string is refused
+
+**What changed.** The request bags keep the single and the repeated key apart by type: a query or form key that appeared once is stored as the string it is, a genuinely repeated key (`?a=1&a=2`) stays a string slice. `Request.Input` and the lax accessors (`bag.String`, `bag.StringOrDefault`, `bag.HasNonEmptyString`) deliver the single value they used to silently lose — every value was stored as a slice and the lax accessor answered the empty string for it, so `Input("term")` on `?term=melody` returned `""` with nothing said. Reading a repeated key as one string now panics, naming the key and pointing to `bag.StringSlice`/`bag.StringAt` — never an empty-string guess, never the first element silently hiding the rest.
+
+**Symptom.** Handlers reading `Input`/`StringOrDefault` start receiving the values clients always sent. A request that repeats a key read as a single string answers 500 through the kernel's recovery instead of an empty field.
+
+**Remedy.** None for the ordinary handler — this is the behaviour everyone assumed. Code that genuinely reads multi-value keys uses `bag.StringSlice` (the `all()` analogue), or `bag.StringStrict` for an explicit error.
+
+### Http: a form that does not parse is refused
+
+**What changed.** A `ParseForm` failure (an invalid percent escape, a malformed urlencoded body) is recorded on the request the way a failed body read is, and the kernel refuses the request — 400 — before the handler runs. It used to log one warning and continue with an empty form, so a real submission was processed as "field missing".
+
+**Symptom.** Malformed form submissions answer 400 instead of whatever the handler made of an empty form.
+
+**Remedy.** None; clients sending valid forms are unaffected.
+
+### Config: the template grammar refuses what silently survived
+
+**What changed.** Three constructs that survived as literal text now fail the boot with a named error: an `%env(...)%` whose closing `)%` is malformed or missing (`%env(A))%`, `postgres://user:%env(DB_PASS)@db` with the forgotten percent), a `%name` reference a percent opened and nothing closed (`%app-name%`), and — in `.env` values — a braced `${...}` reference whose name breaks the key grammar (`${DB-PASS}`). Each used to keep its literal spelling in the resolved value, so the application connected with `%env(DB_PASS)` as its password and nothing said so. A literal percent is written doubled (`pa%%ss`), a literal dollar as `\$` — both already documented; the bare-dollar grammar (`pa$sword`, `$1.50`) is untouched.
+
+**Symptom.** A boot that used to come up with placeholder text in a value now fails at the line naming the parameter (content is redacted where it may hold a credential).
+
+**Remedy.** Fix the placeholder, or escape the literal percent/dollar as documented.
+
+### Config: `.env` reading matches godotenv where it silently diverged
+
+**What changed.** Two divergences from godotenv's own reading are gone. The trailing-comment cut now happens once, by godotenv's countback — the value ends at the LAST whitespace-preceded `#` — where the preprocessor's own first-`#` cut read `GREETING=hello # world # x` as `hello` instead of godotenv's `hello # world`. And the preprocessor walks bytes instead of runes, so a `.env` saved in a non-UTF-8 encoding keeps its bytes exactly — a Latin-1 password was silently re-encoded through U+FFFD and the credential sent to the database differed from the one in the file.
+
+**Symptom.** Values with multiple hash marks or non-UTF-8 bytes read as godotenv alone would read them.
+
+**Remedy.** None for UTF-8 files with single comments — the overwhelming case is byte-identical.
+
+### Config: credentials stay out of failure logs
+
+**What changed.** Three paths that carried values into the rendered log are sealed. A godotenv parse failure quoted the remaining tail of the `.env` file — the neighborhood where the credentials live, marker bytes included — into the cause chain; the error now carries a content-free description plus the file path. The typed accessors (`Int`, `Bool`, `Float`, `Duration`) withhold the value-quoting cause for a parameter marked secret, keeping it for ordinary parameters whose mistyped pool size deserves the diagnostic. And a template referencing a non-string parameter reports the type, never the raw value.
+
+**Symptom.** Boot failures on broken `.env` files and secret conversions log what failed and where, without the values.
+
+**Remedy.** None.
+
+### Config: late secret markings propagate, registrations are atomic, names are judged trimmed
+
+**What changed.** `MarkSecret` after the boot resolution now travels to every parameter whose template directly reads the marked key — the late marking used to redact the key while the dsn assembled from it printed in full. `RegisterRuntime`/`RegisterRuntimeSecret` resolve the value BEFORE publishing it, so a registration whose template fails leaves nothing behind — it used to leave the raw template served to every reader that outlived the recovered panic, with the name burnt for the corrected retry. And a name is judged trimmed: whitespace-only is refused as empty, a padded name is refused outright instead of registering a parameter no exact-match lookup ever names.
+
+**Symptom.** `debug:parameters` redacts derived values after a late `MarkSecret`; a failed late registration can be retried; padded names fail at the registration line.
+
+**Remedy.** None for correct code.
+
+### Config: `IntWithDefault` answers the default only for absence
+
+**What changed.** A parameter that exists but does not parse panics instead of silently becoming the default — `MELODY_APP_POOL_SIZE=1O0` ran with the default while the operator believed the configured value was live. A nil (or typed-nil) parameter still answers the default.
+
+**Symptom.** A mistyped numeric parameter fails the boot naming the parameter, instead of running in disguise.
+
+**Remedy.** Fix the value, or remove it to genuinely choose the default.
+
+### Bag: `All` copies deep, `AppendString` is atomic
+
+**What changed.** `ParameterBag.All` copies the shapes the bag's own writers produce (`[]string`, `map[string]string`), so mutating the returned map no longer writes into the bag behind its lock. `bag.AppendString` appends through a new critical-section method on the concrete bag — the contract-level read-modify-write lost one of two concurrent appends with no error and nothing the race detector could see; the fallback for foreign `ParameterBag` implementations keeps the old two-step behaviour.
+
+**Symptom.** None for single-threaded use; concurrent appenders stop losing values.
+
+**Remedy.** None. Code that relied on `All` aliasing live state reads the bag directly.
+
 ### Cache: the manager no longer closes a backend it was handed
 
 **What changed.** [`NewManager`](../cache/manager.go) builds a manager that does not own its backend: `Close` leaves the backend open, because on the container path both are registered services and the container closes each one itself — the cascade closed the backend twice, which a backend wrapping a connection typically reports as a failure on the second call. `NewManagerOwningBackend` keeps the cascade for the caller that builds both by hand.

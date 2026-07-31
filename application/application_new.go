@@ -47,8 +47,9 @@ func NewApplication(
 
     configuration, newConfigurationErr := config.NewConfiguration(environment, projectDirectory)
     if nil != newConfigurationErr {
+        /* the wrap names construction, not resolution: NewConfiguration also fails on validation and on building the cli, kernel and http views, and a top-level "could not resolve" sent the diagnosis to the placeholders for an http port that was simply out of range — while the genuine resolve failure already carries that exact message from resolvePlaceholders, so repeating it here doubled it */
         exception.Panic(
-            exception.NewError("could not resolve the config parameters", nil, newConfigurationErr),
+            exception.NewError("could not initialize the configuration", nil, newConfigurationErr),
         )
     }
 

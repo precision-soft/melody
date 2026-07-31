@@ -1,10 +1,14 @@
 package config
 
 import (
+    "errors"
     "fmt"
     "path/filepath"
+    "strings"
     "sync"
     "testing"
+
+    "github.com/precision-soft/melody/exception"
 )
 
 func TestConfigurationDefaultsAndTemplateResolution(t *testing.T) {
@@ -439,5 +443,134 @@ func TestRegisterRuntime_LeavesAnOrdinaryParameterUnmarked(t *testing.T) {
 
     if true == configuration.Get("app.api_url").IsSecret() {
         t.Fatalf("expected an ordinary parameter to stay unmarked")
+    }
+}
+
+/* @info a MarkSecret arriving after the boot resolve travels to the parameters whose templates read the key, exactly as the early marking does: without the retroactive scan the key was redacted while the dsn assembled from it printed in full */
+func TestMarkSecret_PropagatesRetroactivelyToDirectReaders(t *testing.T) {
+    environment := &Environment{values: map[string]string{
+        "DB_PASSWORD": "hunter2",
+    }}
+
+    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    if nil != err {
+        t.Fatalf("configuration error: %v", err)
+    }
+
+    configuration.RegisterRuntime("database.dsn", "postgres://app:%env(DB_PASSWORD)%@db/app")
+
+    if resolveErr := configuration.Resolve(); nil != resolveErr {
+        t.Fatalf("resolve error: %v", resolveErr)
+    }
+
+    if true == configuration.MustGet("database.dsn").IsSecret() {
+        t.Fatalf("expected the dsn to start unmarked")
+    }
+
+    if false == configuration.MarkSecret("DB_PASSWORD") {
+        t.Fatalf("expected the marking to land")
+    }
+
+    if false == configuration.MustGet("DB_PASSWORD").IsSecret() {
+        t.Fatalf("expected the key itself to be marked")
+    }
+
+    if false == configuration.MustGet("database.dsn").IsSecret() {
+        t.Fatalf("expected the late marking to travel to the parameter assembled from the key")
+    }
+}
+
+/* @info a runtime registration that fails to resolve leaves nothing behind: publishing before resolving served the raw template to every reader that outlived the recovered panic and burnt the name for the corrected retry */
+func TestRegisterRuntime_FailedResolutionLeavesNoHalfMadeParameter(t *testing.T) {
+    environment := &Environment{values: map[string]string{}}
+
+    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    if nil != err {
+        t.Fatalf("configuration error: %v", err)
+    }
+
+    if resolveErr := configuration.Resolve(); nil != resolveErr {
+        t.Fatalf("resolve error: %v", resolveErr)
+    }
+
+    func() {
+        defer func() {
+            if recoveredValue := recover(); nil == recoveredValue {
+                t.Fatalf("expected the unresolvable registration to panic")
+            }
+        }()
+
+        configuration.RegisterRuntime("mail.dsn", "%env(UNDEFINED_MAIL_DSN)%")
+    }()
+
+    if nil != configuration.Get("mail.dsn") {
+        t.Fatalf("expected the failed registration to leave no parameter behind")
+    }
+
+    configuration.RegisterRuntime("mail.dsn", "smtp://mail.internal")
+    if "smtp://mail.internal" != configuration.MustGet("mail.dsn").String() {
+        t.Fatalf("expected the corrected retry to register cleanly")
+    }
+}
+
+/* @info a name is judged trimmed: the padded spelling would register a parameter no exact-match lookup ever names, and the whitespace-only name passed the empty guard as a phantom */
+func TestRegisterRuntime_RefusesWhitespaceNames(t *testing.T) {
+    environment := &Environment{values: map[string]string{}}
+
+    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    if nil != err {
+        t.Fatalf("configuration error: %v", err)
+    }
+
+    func() {
+        defer func() {
+            recoveredValue := recover()
+            if nil == recoveredValue {
+                t.Fatalf("expected the whitespace-only name to be refused")
+            }
+
+            /* the whitespace-only name is refused AS EMPTY, through the guard that names the real problem — the padding guard would also refuse it, with a message that sends the operator hunting for stray spaces around a name that does not exist at all */
+            recoveredErr, isError := recoveredValue.(error)
+            if false == isError || false == strings.Contains(recoveredErr.Error(), "empty names") {
+                t.Fatalf("expected the empty-name refusal for a whitespace-only name, got: %v", recoveredValue)
+            }
+        }()
+
+        configuration.RegisterRuntime("   ", "value")
+    }()
+
+    func() {
+        defer func() {
+            if recoveredValue := recover(); nil == recoveredValue {
+                t.Fatalf("expected the padded name to be refused")
+            }
+        }()
+
+        configuration.RegisterRuntime(" mail.dsn ", "value")
+    }()
+}
+
+/* @info a runtime parameter is named in its conversion errors: identified only by its empty environmentKey it was anonymous, and "cannot convert" named nothing an operator could find */
+func TestRuntimeParameter_ConversionErrorNamesTheParameter(t *testing.T) {
+    environment := &Environment{values: map[string]string{}}
+
+    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    if nil != err {
+        t.Fatalf("configuration error: %v", err)
+    }
+
+    configuration.RegisterRuntime("app.pool_size", "not-a-number")
+
+    _, intErr := configuration.MustGet("app.pool_size").Int()
+    if nil == intErr {
+        t.Fatalf("expected the conversion to fail")
+    }
+
+    var exceptionErr *exception.Error
+    if false == errors.As(intErr, &exceptionErr) {
+        t.Fatalf("expected an exception error, got: %v", intErr)
+    }
+    if "app.pool_size" != exceptionErr.Context()["parameterName"] {
+        t.Fatalf("expected the parameter name in the error context, got: %v", exceptionErr.Context())
     }
 }

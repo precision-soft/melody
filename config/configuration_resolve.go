@@ -1,13 +1,18 @@
 package config
 
 import (
+    "fmt"
     "strings"
 
     "github.com/precision-soft/melody/exception"
 )
 
 func (instance *Configuration) Resolve() error {
-    /* once the application serves, a re-resolution can no longer reconfigure it: every service that needed a parameter copied the value out of it while it was being built, and none of them ever looks again. What it still does is rewrite the whole store underneath readers that are entitled to treat it as settled — so it is refused rather than half-honoured. The documented manual construction resolves before it serves and is untouched. */
+    /* Resolve iterates and mutates the shared parameter map, so it holds the write lock the runtime accessors read under; the body reaches parameters only through the lock-free getInternalParameter, never a locking accessor, so the lock is not re-entered. Each parameter's value is written through storeValue, since a consumer holding the pointer reads it through the parameter's own lock and never through this one. */
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    /* once the application serves, a re-resolution can no longer reconfigure it: every service that needed a parameter copied the value out of it while it was being built, and none of them ever looks again. What it still does is rewrite the whole store underneath readers that are entitled to treat it as settled — so it is refused rather than half-honoured, and the refusal reads the flag under the same write lock the rewrite would hold, so a MarkServing racing this call cannot slip between the check and the rewrite. The documented manual construction resolves before it serves and is untouched. */
     if true == instance.serving.Load() {
         return exception.NewError(
             "cannot resolve the configuration once the application has begun serving; parameters must be registered and resolved during boot",
@@ -15,10 +20,6 @@ func (instance *Configuration) Resolve() error {
             nil,
         )
     }
-
-    /* Resolve iterates and mutates the shared parameter map, so it holds the write lock the runtime accessors read under; the body reaches parameters only through the lock-free getInternalParameter, never a locking accessor, so the lock is not re-entered. Each parameter's value is written through storeValue, since a consumer holding the pointer reads it through the parameter's own lock and never through this one. */
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
 
     for name, parameter := range instance.parameters {
         if KernelProjectDir == name {
@@ -142,8 +143,20 @@ func (instance *Configuration) scanTemplate(
             continue
         }
 
-        parameterKey, consumedLength := parseParameterPlaceholder(value[index:])
+        parameterKey, consumedLength, referenceOpened := parseParameterPlaceholder(value[index:])
         if 0 == consumedLength {
+            /* a name-shaped run that a percent opened but nothing closed is a reference with a typo, not data: the contract already demands a literal percent be doubled, so refusing here is what keeps %app-name% from surviving as literal text. A percent in front of a character no name may start with stays data. */
+            if true == referenceOpened {
+                return "", exception.NewError(
+                    "malformed parameter reference in template; a reference closes with a percent (%name%) and a literal percent is written doubled (a password written as pa%%ss%%word resolves to pa%ss%word)",
+                    map[string]any{
+                        "parameter": currentKey,
+                        "reference": "%" + parameterKey,
+                    },
+                    nil,
+                )
+            }
+
             builder.WriteByte('%')
             index = index + 1
 
@@ -174,13 +187,34 @@ func (instance *Configuration) resolveEnvironmentPlaceholder(
     resolvingParameters map[string]bool,
     resolvingEnvironmentKeys map[string]bool,
 ) (string, int, error) {
-    /* the candidate ends at the first ")%" that no percent interrupts: a percent before the closer means a different placeholder's closer is being looked at, and reaching for it would turn a literal "%env(" into a malformed-placeholder boot failure carrying raw template text — while a closer inside the run keeps a misspelled-but-closed placeholder (%env(FOO-BAR)%) reported instead of silently surviving as text */
+    /* the candidate ends at the first ")%" that no percent interrupts: a percent before the closer means a different placeholder's closer is being looked at, and reaching for it would turn a literal "%env(" into a malformed-placeholder boot failure carrying raw template text. A ")" that ")%"-closes nothing does not end the search — "%env(A))%" runs to the real closer and is reported as the malformed placeholder it is — and a "%env(" that never closes at all is an error too, because a placeholder that silently survived as literal text is exactly what this reporting exists to catch. */
     innerEnd := len("%env(")
-    for innerEnd < len(fragment) && '%' != fragment[innerEnd] && ')' != fragment[innerEnd] {
+    for innerEnd < len(fragment) && '%' != fragment[innerEnd] {
+        if ')' == fragment[innerEnd] && innerEnd+1 < len(fragment) && '%' == fragment[innerEnd+1] {
+            break
+        }
+
         innerEnd = innerEnd + 1
     }
 
-    if innerEnd+1 >= len(fragment) || ')' != fragment[innerEnd] || '%' != fragment[innerEnd+1] {
+    if innerEnd >= len(fragment) {
+        /* @important only a span spelled in key-grammar characters is carried into the error context: the fragment may hold arbitrary pasted text — a credential typed where the key belongs — and that must not reach the logs */
+        reportedPlaceholder := "%env(<redacted>"
+        if true == isKeyGrammarText(fragment[len("%env("):]) {
+            reportedPlaceholder = fragment
+        }
+
+        return "", 0, exception.NewError(
+            "unterminated environment placeholder in template; %env( opens a placeholder that must close with )%, and a literal percent is written doubled (%%)",
+            map[string]any{
+                "parameter":   currentKey,
+                "placeholder": reportedPlaceholder,
+            },
+            nil,
+        )
+    }
+
+    if '%' == fragment[innerEnd] {
         return "", 0, nil
     }
 
@@ -277,7 +311,7 @@ func (instance *Configuration) resolveEnvironmentPlaceholder(
     return resolvedFallback, len(candidate), nil
 }
 
-/* resolveParameterReference resolves one referenced parameter and splices its fully resolved value in as data. During boot the referenced parameter's own value is stored along the way — post-boot the store is skipped, since a consumer holding the pointer reads value without a lock and the re-resolution is deterministic anyway. A secret marking on it travels to the reader — a dsn assembled from a declared password is the common case — so redaction covers the assembled value beside the credential itself. */
+/* resolveParameterReference resolves one referenced parameter and splices its fully resolved value in as data. During boot the referenced parameter's own value is stored along the way — post-boot the store is skipped: a consumer reads the value through the parameter's own valueMutex, the re-resolution is deterministic, so rewriting a value the boot already settled would change nothing and only churn the lock under readers. A secret marking on it travels to the reader — a dsn assembled from a declared password is the common case — so redaction covers the assembled value beside the credential itself. */
 func (instance *Configuration) resolveParameterReference(
     parameterKey string,
     currentKey string,
@@ -299,11 +333,12 @@ func (instance *Configuration) resolveParameterReference(
 
     environmentValueString, ok := referencedParameter.environmentValue.(string)
     if false == ok {
+        /* @important do not embed the raw value here either: a non-string parameter is not guaranteed non-secret — a signing key registered as bytes is exactly what a template would reference — so only its type identifies it */
         return "", exception.NewError(
             "parameter environment value must be string for template resolution",
             map[string]any{
-                "parameterKey":     parameterKey,
-                "environmentValue": referencedParameter.environmentValue,
+                "parameterKey":         parameterKey,
+                "environmentValueType": fmt.Sprintf("%T", referencedParameter.environmentValue),
             },
             nil,
         )
@@ -338,14 +373,14 @@ func (instance *Configuration) resolveParameterReference(
     return resolvedReferencedValue, nil
 }
 
-/* parseParameterPlaceholder reads a %name% reference at the start of the fragment and reports the name and the consumed length, or zero when the fragment opens no reference — a name may be a single character, since the default processor's fallback accepts one. */
-func parseParameterPlaceholder(fragment string) (string, int) {
+/* parseParameterPlaceholder reads a %name% reference at the start of the fragment and reports the name and the consumed length — a name may be a single character, since the default processor's fallback accepts one. Zero consumed with the opened flag raised means a name-shaped run began and nothing closed it; zero consumed without it means the percent opened no reference at all and is data. */
+func parseParameterPlaceholder(fragment string) (string, int, bool) {
     if 2 > len(fragment) {
-        return "", 0
+        return "", 0, false
     }
 
     if false == isParameterNameStartCharacter(fragment[1]) {
-        return "", 0
+        return "", 0, false
     }
 
     end := 2
@@ -354,10 +389,10 @@ func parseParameterPlaceholder(fragment string) (string, int) {
     }
 
     if end >= len(fragment) || '%' != fragment[end] {
-        return "", 0
+        return fragment[1:end], 0, true
     }
 
-    return fragment[1:end], end + 1
+    return fragment[1:end], end + 1, false
 }
 
 func isParameterNameStartCharacter(character byte) bool {

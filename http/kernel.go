@@ -411,10 +411,10 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
         melodyRequest.Attributes().Set(RequestAttributeSession, sessionInstance)
 
-        /* @important a urlencoded body whose read failed never reached the form parser, so the handler would see a syntactically valid request whose form is simply empty — an oversized submission processed as an empty one, answered 200. Refuse it here the way the json binding path refuses the identical condition: 413 when the size limit stopped the read, 400 for a body the client broke mid-upload. */
+        /* @important a urlencoded body whose read OR parse failed never populated the form, so the handler would see a syntactically valid request whose form is simply empty — an oversized or malformed submission processed as an empty one, answered 200. Refuse it here the way the json binding path refuses the identical condition: 413 when the size limit stopped the read, 400 for a body the client broke. */
         if nil != melodyRequest.bodyReadErr {
             requestLogger.Warning(
-                "request body read failed",
+                "request body was refused before the handler",
                 exception.LogContext(
                     melodyRequest.bodyReadErr,
                     exceptioncontract.Context{
