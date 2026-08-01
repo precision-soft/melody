@@ -974,3 +974,126 @@ func TestSlidingWindowLimiter_MaxDurationWindowSurvivesIdlePrune(t *testing.T) {
         t.Fatalf("a never-refilling window must not refill after the idle cleanup")
     }
 }
+
+/* @info SimpleRateLimit is one of the three helpers an application actually calls, and no test entered it. Its documented semantics are the direct peer — the resolver cannot be set afterwards because the helper builds its config internally — so two clients behind one proxy sharing a budget is the correct behaviour here, and the sentence that says so needs a test that fails if the helper starts reading a forwarded header. */
+
+func TestSimpleRateLimit_ChargesTheDirectPeer(t *testing.T) {
+    handler := SimpleRateLimit(1)(allowingNext())
+
+    _, firstErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
+    if nil != firstErr {
+        t.Fatalf("the first request must pass, got: %v", firstErr)
+    }
+
+    _, secondErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:6666", "203.0.113.8"))
+    if nil == secondErr {
+        t.Fatalf("without a resolver both clients key the direct peer and share one budget")
+    }
+}
+
+/* @info a budget the helper hands out has to be a budget: the refusal is the 429 the framework spells as TooManyRequests, not a bare error a handler might mistake for a store failure. */
+
+func TestSimpleRateLimit_RefusesWithTooManyRequests(t *testing.T) {
+    handler := SimpleRateLimit(1)(allowingNext())
+
+    peer := func() httpcontract.Request {
+        request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
+        request.RemoteAddr = "203.0.113.9:5555"
+
+        return testhelper.NewHttpTestRequestFromHttpRequest(request)
+    }
+
+    if _, firstErr := handler(nil, httptest.NewRecorder(), peer()); nil != firstErr {
+        t.Fatalf("the first request must pass, got: %v", firstErr)
+    }
+
+    _, secondErr := handler(nil, httptest.NewRecorder(), peer())
+    if nil == secondErr {
+        t.Fatalf("the second request must exhaust the budget")
+    }
+
+    httpException, isHttpException := secondErr.(*exception.HttpException)
+    if false == isHttpException {
+        t.Fatalf("expected the refusal to be an http exception, got: %T", secondErr)
+    }
+
+    if nethttp.StatusTooManyRequests != httpException.StatusCode() {
+        t.Fatalf("expected 429, got: %d", httpException.StatusCode())
+    }
+}
+
+/* @info UserRateLimit keys on the identity rather than the address, which is the whole point of it: one user must carry one budget across every address they arrive from, and two users sharing an address must not share one. Neither direction had a test on the helper itself. */
+
+func TestUserRateLimit_KeysOnTheIdentityRatherThanTheAddress(t *testing.T) {
+    identity := "alice"
+    getUserId := func(request httpcontract.Request) string { return identity }
+
+    handler := UserRateLimit(1, getUserId)(allowingNext())
+
+    _, firstErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", ""))
+    if nil != firstErr {
+        t.Fatalf("the first request must pass, got: %v", firstErr)
+    }
+
+    _, sameUserErr := handler(nil, httptest.NewRecorder(), forwardedRequest("198.51.100.4:9999", ""))
+    if nil == sameUserErr {
+        t.Fatalf("the same identity arriving from another address must carry the same budget")
+    }
+
+    identity = "bob"
+
+    _, otherUserErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", ""))
+    if nil != otherUserErr {
+        t.Fatalf("a different identity on the same address must have its own budget, got: %v", otherUserErr)
+    }
+}
+
+/* @info a request carrying no identity falls back to the address. Without the fallback every anonymous request would key on one empty identity and share a single budget — the first unauthenticated client to arrive would spend it for everyone, which turns the limiter into a denial of service against the traffic it is most needed for. */
+
+func TestUserRateLimit_FallsBackToTheAddressWhenAnonymous(t *testing.T) {
+    anonymous := func(request httpcontract.Request) string { return "" }
+
+    handler := UserRateLimit(1, anonymous)(allowingNext())
+
+    _, firstErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", ""))
+    if nil != firstErr {
+        t.Fatalf("the first anonymous request must pass, got: %v", firstErr)
+    }
+
+    _, otherAddressErr := handler(nil, httptest.NewRecorder(), forwardedRequest("198.51.100.4:9999", ""))
+    if nil != otherAddressErr {
+        t.Fatalf("another anonymous client must have its own budget rather than share one empty key, got: %v", otherAddressErr)
+    }
+
+    _, sameAddressErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:6666", ""))
+    if nil == sameAddressErr {
+        t.Fatalf("the same anonymous address must exhaust its own budget")
+    }
+}
+
+/* @info the resolver accessor is what makes SetClientIpResolver verifiable from outside; it had no test at all, so a setter that stored nowhere would have read as working through every path that only exercises the default. */
+
+func TestRateLimitConfig_ClientIpResolverAccessorReportsWhatWasSet(t *testing.T) {
+    config := NewRateLimitConfig(NewFixedWindowLimiter(1, time.Minute), nil, nil)
+
+    if nil != config.ClientIpResolver() {
+        t.Fatalf("expected no resolver on a freshly built configuration")
+    }
+
+    config.SetClientIpResolver(func(request httpcontract.Request) string { return "203.0.113.1" })
+
+    resolver := config.ClientIpResolver()
+    if nil == resolver {
+        t.Fatalf("expected the accessor to report the resolver that was set")
+    }
+
+    if "203.0.113.1" != resolver(nil) {
+        t.Fatalf("expected the accessor to report the very resolver that was set")
+    }
+
+    config.SetClientIpResolver(nil)
+
+    if nil != config.ClientIpResolver() {
+        t.Fatalf("expected the accessor to report the resolver being cleared")
+    }
+}

@@ -713,3 +713,99 @@ func TestRouter_AllowHeaderRespectsMethodPolicy(t *testing.T) {
         t.Fatalf("Allow must still advertise the real GET method, got %q", restrictedAllow)
     }
 }
+
+/* @info the controller registrations are the reflection-based front door — an application declares a controller whose arguments the container fills — and neither of the two on Router had been entered. A registration that dropped the method would answer every verb, and one that dropped the name would leave the route unreachable to the url generator with nothing to say so. */
+
+func TestRouter_HandleControllerRegistersTheControllerUnderItsMethod(t *testing.T) {
+    router := NewRouter()
+
+    router.HandleController(
+        nethttp.MethodGet,
+        "/articles",
+        func(request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(nethttp.StatusOK, "from the controller"), nil
+        },
+    )
+
+    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+
+    recorder := httptest.NewRecorder()
+    handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/articles", nil))
+
+    if nethttp.StatusOK != recorder.Code {
+        t.Fatalf("expected the controller to answer, got: %d", recorder.Code)
+    }
+
+    if "from the controller" != recorder.Body.String() {
+        t.Fatalf("unexpected body: %q", recorder.Body.String())
+    }
+
+    otherMethodRecorder := httptest.NewRecorder()
+    handler.ServeHTTP(otherMethodRecorder, httptest.NewRequest(nethttp.MethodPost, "/articles", nil))
+
+    if nethttp.StatusOK == otherMethodRecorder.Code {
+        t.Fatalf("expected the controller to be bound to its method alone")
+    }
+}
+
+func TestRouter_HandleNamedControllerRegistersTheNameTheGeneratorResolves(t *testing.T) {
+    router := NewRouter()
+
+    router.HandleNamedController(
+        "article.show",
+        nethttp.MethodGet,
+        "/articles/:id",
+        func(request httpcontract.Request) (httpcontract.Response, error) {
+            identifier, _ := request.Param("id")
+
+            return TextResponse(nethttp.StatusOK, identifier), nil
+        },
+    )
+
+    definition, found := router.RouteDefinition("article.show")
+    if false == found {
+        t.Fatalf("expected the named controller route to be registered under its name")
+    }
+
+    if "/articles/:id" != definition.Pattern() {
+        t.Fatalf("unexpected pattern: %q", definition.Pattern())
+    }
+
+    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+
+    recorder := httptest.NewRecorder()
+    handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/articles/42", nil))
+
+    if "42" != recorder.Body.String() {
+        t.Fatalf("expected the route parameter to reach the controller, got: %q", recorder.Body.String())
+    }
+}
+
+/* @info a controller that is not a function is refused where it is declared rather than at the first request that reaches the route: a boot that accepted it would fail on the request path, inside the kernel's recovery, as a 500 naming nothing about the wiring. */
+
+func TestRouter_HandleControllerRefusesSomethingThatIsNotAFunction(t *testing.T) {
+    defer func() {
+        if nil == recover() {
+            t.Fatalf("expected a non-function controller to be refused at registration")
+        }
+    }()
+
+    NewRouter().HandleController(nethttp.MethodGet, "/articles", "not a function")
+}
+
+/* @info RouteRegistry() is what an application uses to reach the listing through the router it holds; it has to be the very registry the router registers into, otherwise a listing reports an empty routing table for a running application. */
+
+func TestRouter_RouteRegistryIsTheOneItRegistersInto(t *testing.T) {
+    routeRegistry := NewRouteRegistry()
+    router := NewRouterWithRouteRegistry(routeRegistry)
+
+    router.HandleNamed("article.show", nethttp.MethodGet, "/articles", routeRegistryTestHandler())
+
+    if routeRegistry != router.RouteRegistry() {
+        t.Fatalf("expected the router to report the registry it was built with")
+    }
+
+    if 1 != len(router.RouteRegistry().RouteDefinitions()) {
+        t.Fatalf("expected the registration to be visible through the reported registry")
+    }
+}

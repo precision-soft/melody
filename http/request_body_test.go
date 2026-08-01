@@ -1,16 +1,20 @@
 package http
 
 import (
+    "encoding/json"
     nethttp "net/http"
     "net/http/httptest"
     "strings"
     "testing"
 
     "github.com/precision-soft/melody/config"
+    containercontract "github.com/precision-soft/melody/container/contract"
+    "github.com/precision-soft/melody/event"
     "github.com/precision-soft/melody/exception"
     httpcontract "github.com/precision-soft/melody/http/contract"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
     "github.com/precision-soft/melody/session"
+    "github.com/precision-soft/melody/validation"
 )
 
 /* @info an oversized JSON body must surface as 413, not 400, when the kernel MaxBytesReader caps the read before the BindJson LimitReader does */
@@ -133,5 +137,198 @@ func TestRequest_BindJsonInvalidJsonCarriesTheDecoderCause(t *testing.T) {
 
     if nil == httpException.CauseErr() {
         t.Fatalf("expected the json decoder's error as the exception cause")
+    }
+}
+
+type bindAndValidateSubject struct {
+    Email string `json:"email" validate:"notBlank,email"`
+    Name  string `json:"name" validate:"notBlank,min=3"`
+}
+
+/* the exception listener is what turns an HttpException a handler returned into the status and body a client receives; an application registers it at boot, so a test asserting the response rather than the error value has to register it too. */
+func newHttpTestContainerWithValidator() containercontract.Container {
+    serviceContainer := newHttpTestContainer()
+
+    serviceContainer.MustRegister(
+        validation.ServiceValidator,
+        func(resolver containercontract.Resolver) (*validation.Validator, error) {
+            return validation.NewValidator(), nil
+        },
+    )
+
+    RegisterKernelExceptionListener(event.EventDispatcherMustFromContainer(serviceContainer), false)
+
+    return serviceContainer
+}
+
+/* bindAndValidateOutcome drives one request through the kernel and reports what BindJsonAndValidate answered inside the handler, where the body is still open — reading it after ServeHttp returned would test a closed body rather than the binding. */
+func bindAndValidateOutcome(body string) (error, int, string) {
+    var bindErr error
+
+    router := NewRouter()
+
+    router.Handle(
+        nethttp.MethodPost,
+        "/articles",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            subject := bindAndValidateSubject{}
+
+            bindErr = request.(*Request).BindJsonAndValidate(&subject)
+            if nil != bindErr {
+                return nil, bindErr
+            }
+
+            return TextResponse(nethttp.StatusOK, "ok"), nil
+        },
+    )
+
+    handler := NewKernel(router).ServeHttp(newHttpTestContainerWithValidator())
+
+    recorder := httptest.NewRecorder()
+    handler.ServeHTTP(
+        recorder,
+        httptest.NewRequest(nethttp.MethodPost, "/articles", strings.NewReader(body)),
+    )
+
+    return bindErr, recorder.Code, recorder.Body.String()
+}
+
+/* @info BindJsonAndValidate is the binding an application calls on a write endpoint and it had never been entered by a test, while the changelog documents that the per-field detail of a failed validation now reaches the client under the "errors" key. The contract was written and nothing executed it. */
+
+func TestRequest_BindJsonAndValidateBindsAValidBody(t *testing.T) {
+    var bound bindAndValidateSubject
+
+    router := NewRouter()
+
+    router.Handle(
+        nethttp.MethodPost,
+        "/articles",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            if bindErr := request.(*Request).BindJsonAndValidate(&bound); nil != bindErr {
+                return nil, bindErr
+            }
+
+            return TextResponse(nethttp.StatusOK, "ok"), nil
+        },
+    )
+
+    handler := NewKernel(router).ServeHttp(newHttpTestContainerWithValidator())
+
+    recorder := httptest.NewRecorder()
+    handler.ServeHTTP(
+        recorder,
+        httptest.NewRequest(nethttp.MethodPost, "/articles", strings.NewReader(`{"email":"writer@example.com","name":"melody"}`)),
+    )
+
+    if nethttp.StatusOK != recorder.Code {
+        t.Fatalf("expected a valid body to bind, got: %d — %s", recorder.Code, recorder.Body.String())
+    }
+
+    if "writer@example.com" != bound.Email || "melody" != bound.Name {
+        t.Fatalf("expected the body to reach the target, got: %+v", bound)
+    }
+}
+
+/* @info a body that fails validation answers 400 carrying every field, message and code the validator computed. The listener used to throw all of it away, so the client of a failed submission learned only that something was wrong and which field was never said. */
+
+func TestRequest_BindJsonAndValidateAnswers400WithThePerFieldDetail(t *testing.T) {
+    _, statusCode, body := bindAndValidateOutcome(`{"email":"not-an-email","name":"x"}`)
+
+    if nethttp.StatusBadRequest != statusCode {
+        t.Fatalf("expected a failed validation to answer 400, got: %d", statusCode)
+    }
+
+    decoded := map[string]any{}
+    if unmarshalErr := json.Unmarshal([]byte(body), &decoded); nil != unmarshalErr {
+        t.Fatalf("expected a json body, got: %s", body)
+    }
+
+    rawErrors, present := decoded["errors"]
+    if false == present {
+        t.Fatalf("expected the per-field detail under the errors key, got: %s", body)
+    }
+
+    reportedErrors, isList := rawErrors.([]any)
+    if false == isList {
+        t.Fatalf("expected the errors key to carry a list, got: %T", rawErrors)
+    }
+
+    if 0 == len(reportedErrors) {
+        t.Fatalf("expected at least one violation to be reported")
+    }
+
+    firstViolation, isObject := reportedErrors[0].(map[string]any)
+    if false == isObject {
+        t.Fatalf("expected each violation to be an object, got: %T", reportedErrors[0])
+    }
+
+    for _, key := range []string{"field", "message", "code"} {
+        if _, keyPresent := firstViolation[key]; false == keyPresent {
+            t.Fatalf("expected each violation to carry %q, got: %v", key, firstViolation)
+        }
+    }
+}
+
+/* @info the violations reach the exception context under the errors key with their own type intact — which is what lets the listener render that key alone and keep the rest of an exception's context out of a client-facing body. */
+
+func TestRequest_BindJsonAndValidateCarriesTheErrorsContextKey(t *testing.T) {
+    bindErr, _, _ := bindAndValidateOutcome(`{"email":"not-an-email","name":"x"}`)
+
+    if nil == bindErr {
+        t.Fatalf("expected an invalid body to be refused")
+    }
+
+    httpException, isHttpException := bindErr.(*exception.HttpException)
+    if false == isHttpException {
+        t.Fatalf("expected an http exception, got: %T", bindErr)
+    }
+
+    if nethttp.StatusBadRequest != httpException.StatusCode() {
+        t.Fatalf("expected 400, got: %d", httpException.StatusCode())
+    }
+
+    rawErrors, present := httpException.Context()["errors"]
+    if false == present {
+        t.Fatalf("expected the violations under the errors context key, got: %v", httpException.Context())
+    }
+
+    violations, isValidationErrors := rawErrors.(validation.ValidationErrors)
+    if false == isValidationErrors {
+        t.Fatalf("expected the violations to keep their type, got: %T", rawErrors)
+    }
+
+    if false == violations.HasErrors() {
+        t.Fatalf("expected the reported violations not to be empty")
+    }
+}
+
+/* @info a binding failure is returned before the validator is consulted: an unparseable body is a 400 about the body, not about the fields, and validating a target nothing was written into would report every required field as missing — a diagnosis pointing away from the actual mistake. */
+
+func TestRequest_BindJsonAndValidateReturnsTheBindingFailureBeforeValidating(t *testing.T) {
+    bindErr, statusCode, _ := bindAndValidateOutcome(`{"email":`)
+
+    if nil == bindErr {
+        t.Fatalf("expected an unparseable body to be refused")
+    }
+
+    if nethttp.StatusBadRequest != statusCode {
+        t.Fatalf("expected 400, got: %d", statusCode)
+    }
+
+    httpException, isHttpException := bindErr.(*exception.HttpException)
+    if false == isHttpException {
+        t.Fatalf("expected an http exception, got: %T", bindErr)
+    }
+
+    if false == strings.HasPrefix(httpException.Error(), "invalid json") {
+        t.Fatalf("expected the binding failure rather than a validation one, got: %q", httpException.Error())
+    }
+
+    if true == strings.Contains(httpException.Error(), "validation failed") {
+        t.Fatalf("expected the validator not to have been consulted, got: %q", httpException.Error())
+    }
+
+    if _, present := httpException.Context()["errors"]; true == present {
+        t.Fatalf("expected no validation violations on a body that never parsed")
     }
 }

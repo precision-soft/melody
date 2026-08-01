@@ -2,6 +2,7 @@ package http
 
 import (
     "io"
+    nethttp "net/http"
     "net/http/httptest"
     "strings"
     "testing"
@@ -408,5 +409,89 @@ func TestNewRequest_UnparsableFormIsRecordedForRefusal(t *testing.T) {
 
     if true == request.Post().Has("csrf") {
         t.Fatalf("expected no half-parsed form to reach the handler")
+    }
+}
+
+/* @info the cookie accessors, the locale, the route pattern and the two error constructors were all at zero coverage. The cookie pair is the one an authentication middleware reads, and an accessor reading the wrong header would report every client as carrying no session at all. */
+
+func TestRequest_CookieAccessorsReadWhatTheClientSent(t *testing.T) {
+    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/articles", nil)
+    httpRequest.AddCookie(&nethttp.Cookie{Name: "session", Value: "abc"})
+    httpRequest.AddCookie(&nethttp.Cookie{Name: "locale", Value: "de"})
+
+    request := NewRequest(httpRequest, nil, nil, nil)
+
+    sessionCookie, cookieErr := request.Cookie("session")
+    if nil != cookieErr {
+        t.Fatalf("unexpected error reading a cookie the client sent: %v", cookieErr)
+    }
+
+    if "abc" != sessionCookie.Value {
+        t.Fatalf("unexpected cookie value: %q", sessionCookie.Value)
+    }
+
+    if 2 != len(request.Cookies()) {
+        t.Fatalf("expected both cookies, got: %d", len(request.Cookies()))
+    }
+
+    if _, missingErr := request.Cookie("nothing-here"); nil == missingErr {
+        t.Fatalf("expected a cookie the client did not send to be reported missing")
+    }
+}
+
+/* @info the locale and the route pattern are read off the route attributes the router published, not off the url — the pattern is what an application groups metrics and audit records by, and reading the concrete path instead would make every identifier its own route. */
+
+func TestRequest_LocaleAndRoutePatternComeFromTheRouteAttributes(t *testing.T) {
+    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/articles/42", nil), nil, nil, nil)
+
+    if "" != request.Locale() {
+        t.Fatalf("expected no locale before the router publishes one, got: %q", request.Locale())
+    }
+
+    if "" != request.RoutePattern() {
+        t.Fatalf("expected no route pattern before the router publishes one, got: %q", request.RoutePattern())
+    }
+
+    request.Attributes().Set(RouteAttributeLocale, "de")
+    request.Attributes().Set(RouteAttributePattern, "/articles/:id")
+    request.Attributes().Set(RouteAttributeName, "article.show")
+
+    if "de" != request.Locale() {
+        t.Fatalf("unexpected locale: %q", request.Locale())
+    }
+
+    if "/articles/:id" != request.RoutePattern() {
+        t.Fatalf("unexpected route pattern: %q", request.RoutePattern())
+    }
+
+    if "article.show" != request.RouteName() {
+        t.Fatalf("unexpected route name: %q", request.RouteName())
+    }
+
+    if request.RoutePattern() == request.Path() {
+        t.Fatalf("the pattern must not collapse onto the concrete path")
+    }
+}
+
+/* @info the two error constructors are public sentinels an application compares against; each has to carry its own message, because two errors sharing one would make a content-type refusal indistinguishable from a trailing-data refusal in every log that renders them. */
+
+func TestRequestErrors_CarryDistinctMessages(t *testing.T) {
+    unsupportedContentType := ErrorUnsupportedContentType()
+    extraData := ErrorJsonBodyHasExtraData()
+
+    if nil == unsupportedContentType || nil == extraData {
+        t.Fatalf("expected both error constructors to produce an error")
+    }
+
+    if "unsupported content type" != unsupportedContentType.Error() {
+        t.Fatalf("unexpected message: %q", unsupportedContentType.Error())
+    }
+
+    if "json body has extra data" != extraData.Error() {
+        t.Fatalf("unexpected message: %q", extraData.Error())
+    }
+
+    if unsupportedContentType.Error() == extraData.Error() {
+        t.Fatalf("the two refusals must not share a message")
     }
 }

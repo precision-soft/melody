@@ -263,3 +263,122 @@ func TestMiddleware_AppliesHeadersEvenWhenHandlerErrored(t *testing.T) {
         t.Fatalf("expected CORS headers applied even when next returned error")
     }
 }
+
+/* @info Restrictive is the front door of the restrictive policy — the one an application calls — and no test entered it. It is variadic, so calling it with no origin at all is a spelling that compiles and reads like "restrict everything", while it actually reaches NewService with the wildcard default plus credentials and has to refuse the boot. */
+
+func TestRestrictive_RefusesToBootWithoutAnyOrigin(t *testing.T) {
+    defer func() {
+        if nil == recover() {
+            t.Fatalf("expected Restrictive() with no origin to refuse the boot")
+        }
+    }()
+
+    Restrictive()
+}
+
+func TestRestrictive_CarriesTheRestrictivePolicyOntoTheResponse(t *testing.T) {
+    middleware := Restrictive("https://app.example.com")
+
+    next := func(
+        runtimeInstance runtimecontract.Runtime,
+        writer nethttp.ResponseWriter,
+        request httpcontract.Request,
+    ) (httpcontract.Response, error) {
+        return http.EmptyResponse(nethttp.StatusOK), nil
+    }
+
+    handler := middleware(next)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
+    request.Header.Set("Origin", "https://app.example.com")
+
+    response, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if "https://app.example.com" != response.Headers().Get("Access-Control-Allow-Origin") {
+        t.Fatalf("expected the named origin to be echoed, got: %q", response.Headers().Get("Access-Control-Allow-Origin"))
+    }
+
+    if "true" != response.Headers().Get("Access-Control-Allow-Credentials") {
+        t.Fatalf("expected the restrictive policy to allow credentials")
+    }
+}
+
+/* @info an origin the caller did not name gets Vary: Origin and nothing else. Without the refusal the credentials the restrictive policy carries would be granted to whoever asked — which is the whole reason this constructor is the one that pairs credentials with a list. */
+
+func TestRestrictive_RefusesAnOriginTheCallerDidNotName(t *testing.T) {
+    middleware := Restrictive("https://app.example.com")
+
+    next := func(
+        runtimeInstance runtimecontract.Runtime,
+        writer nethttp.ResponseWriter,
+        request httpcontract.Request,
+    ) (httpcontract.Response, error) {
+        return http.EmptyResponse(nethttp.StatusOK), nil
+    }
+
+    handler := middleware(next)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
+    request.Header.Set("Origin", "https://attacker.example")
+
+    response, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if "" != response.Headers().Get("Access-Control-Allow-Origin") {
+        t.Fatalf("expected no allow-origin header for an origin the caller did not name")
+    }
+
+    if "" != response.Headers().Get("Access-Control-Allow-Credentials") {
+        t.Fatalf("expected no credentials header for an origin the caller did not name")
+    }
+
+    if "Origin" != response.Headers().Get("Vary") {
+        t.Fatalf("expected Vary: Origin so a shared cache cannot serve this body to an allowed origin")
+    }
+}
+
+/* @info the preflight a restrictive policy answers advertises its own narrower method list, not the permissive default's. A browser reads Access-Control-Allow-Methods to decide whether to send the real request, so a PATCH advertised here would be a policy the service does not hold. */
+
+func TestRestrictive_PreflightAdvertisesTheNarrowMethodList(t *testing.T) {
+    middleware := Restrictive("https://app.example.com")
+
+    next := func(
+        runtimeInstance runtimecontract.Runtime,
+        writer nethttp.ResponseWriter,
+        request httpcontract.Request,
+    ) (httpcontract.Response, error) {
+        t.Fatalf("next should not be called for a preflight")
+
+        return nil, nil
+    }
+
+    handler := middleware(next)
+
+    request := httptest.NewRequest(nethttp.MethodOptions, "/x", nil)
+    request.Header.Set("Origin", "https://app.example.com")
+    request.Header.Set("Access-Control-Request-Method", nethttp.MethodPatch)
+
+    response, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if nethttp.StatusNoContent != response.StatusCode() {
+        t.Fatalf("unexpected preflight status: %d", response.StatusCode())
+    }
+
+    allowedMethods := response.Headers().Get("Access-Control-Allow-Methods")
+
+    if "GET, POST, PUT, DELETE" != allowedMethods {
+        t.Fatalf("unexpected advertised methods: %q", allowedMethods)
+    }
+
+    if "3600" != response.Headers().Get("Access-Control-Max-Age") {
+        t.Fatalf("unexpected advertised max age: %q", response.Headers().Get("Access-Control-Max-Age"))
+    }
+}

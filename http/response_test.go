@@ -4,6 +4,7 @@ import (
     "bytes"
     "errors"
     "io"
+    nethttp "net/http"
     "net/http/httptest"
     "os"
     "strings"
@@ -322,5 +323,61 @@ func TestContentTypeByExtension_ResolvesIcoAndIsCaseInsensitive(t *testing.T) {
 
     if "" == contentTypeByExtension(".svg") {
         t.Fatalf("expected a content type for .svg, got empty")
+    }
+}
+
+/* @info the three redirect constructors were never entered by a test. A redirect is the one response whose whole content is a header, so a Location that never reached the header map would answer a bare 302 with nothing to follow — a client sits on a blank page and the log shows a successful redirect. */
+
+func TestRedirectResponse_CarriesTheLocationAndTheStatus(t *testing.T) {
+    response := RedirectResponse("/dashboard", nethttp.StatusSeeOther)
+
+    if nethttp.StatusSeeOther != response.StatusCode() {
+        t.Fatalf("unexpected status: %d", response.StatusCode())
+    }
+
+    if "/dashboard" != response.Headers().Get("Location") {
+        t.Fatalf("unexpected location: %q", response.Headers().Get("Location"))
+    }
+}
+
+/* @info a zero status is read as "no status was chosen" and becomes 302, which is the only sane default: writing a literal zero to the wire is not a status at all, and net/http would answer it as an error the handler never sees. */
+
+func TestRedirectResponse_ZeroStatusBecomesFound(t *testing.T) {
+    response := RedirectResponse("/dashboard", 0)
+
+    if nethttp.StatusFound != response.StatusCode() {
+        t.Fatalf("expected a zero status to become 302, got: %d", response.StatusCode())
+    }
+
+    if "/dashboard" != response.Headers().Get("Location") {
+        t.Fatalf("unexpected location: %q", response.Headers().Get("Location"))
+    }
+}
+
+/* @info the two shorthands name different statuses on purpose: 302 is a redirect a client repeats next time and 301 is one it caches forever, so crossing them makes a temporary maintenance redirect permanent in every browser that saw it. */
+
+func TestRedirectShorthands_NameDifferentStatuses(t *testing.T) {
+    found := RedirectFound("/dashboard")
+
+    if nethttp.StatusFound != found.StatusCode() {
+        t.Fatalf("expected RedirectFound to answer 302, got: %d", found.StatusCode())
+    }
+
+    if "/dashboard" != found.Headers().Get("Location") {
+        t.Fatalf("unexpected location: %q", found.Headers().Get("Location"))
+    }
+
+    permanent := RedirectMovedPermanently("/new-home")
+
+    if nethttp.StatusMovedPermanently != permanent.StatusCode() {
+        t.Fatalf("expected RedirectMovedPermanently to answer 301, got: %d", permanent.StatusCode())
+    }
+
+    if "/new-home" != permanent.Headers().Get("Location") {
+        t.Fatalf("unexpected location: %q", permanent.Headers().Get("Location"))
+    }
+
+    if found.StatusCode() == permanent.StatusCode() {
+        t.Fatalf("the temporary and the permanent redirect must not share a status")
     }
 }

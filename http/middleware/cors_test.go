@@ -117,3 +117,143 @@ func TestRestrictiveCorsConfig_Shim_ReturnsExpectedDefaults(t *testing.T) {
         t.Fatalf("expected single origin in restrictive defaults, got %v", config.AllowOrigins())
     }
 }
+
+/* @info the deprecated shim is still the configuration an application written against the old API holds, and CorsMiddleware reads its unexported fields directly — so a setter that stored somewhere the middleware does not read would leave the caller believing a policy that never reaches a request. Each setter is asserted through the accessor AND through a request the middleware answers. */
+
+func TestCorsConfig_SettersReachTheMiddlewareThatReadsThem(t *testing.T) {
+    config := DefaultCorsConfig()
+
+    config.SetAllowOrigins([]string{"https://app.example.com"})
+    config.SetAllowMethods([]string{"GET", "POST"})
+    config.SetAllowHeaders([]string{"Content-Type"})
+
+    if 1 != len(config.AllowOrigins()) || "https://app.example.com" != config.AllowOrigins()[0] {
+        t.Fatalf("unexpected allow origins: %v", config.AllowOrigins())
+    }
+
+    if 2 != len(config.AllowMethods()) || "GET" != config.AllowMethods()[0] {
+        t.Fatalf("unexpected allow methods: %v", config.AllowMethods())
+    }
+
+    if 1 != len(config.AllowHeaders()) || "Content-Type" != config.AllowHeaders()[0] {
+        t.Fatalf("unexpected allow headers: %v", config.AllowHeaders())
+    }
+
+    middleware := CorsMiddleware(config)
+
+    next := func(
+        runtimeInstance runtimecontract.Runtime,
+        writer nethttp.ResponseWriter,
+        request httpcontract.Request,
+    ) (httpcontract.Response, error) {
+        return http.EmptyResponse(nethttp.StatusOK), nil
+    }
+
+    allowedRequest := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
+    allowedRequest.Header.Set("Origin", "https://app.example.com")
+
+    allowedResponse, err := middleware(next)(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(allowedRequest))
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if "https://app.example.com" != allowedResponse.Headers().Get("Access-Control-Allow-Origin") {
+        t.Fatalf("expected the origin set through the shim to be allowed")
+    }
+
+    refusedRequest := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
+    refusedRequest.Header.Set("Origin", "https://other.example.com")
+
+    refusedResponse, refusedErr := middleware(next)(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(refusedRequest))
+    if nil != refusedErr {
+        t.Fatalf("unexpected error: %v", refusedErr)
+    }
+
+    if "" != refusedResponse.Headers().Get("Access-Control-Allow-Origin") {
+        t.Fatalf("expected the wildcard the defaults carried to be replaced by the narrowed list")
+    }
+}
+
+/* @info the three list accessors and the three setters each keep a copy, so a caller holding the slice it passed in cannot rewrite the policy afterwards — the same guarantee the cors package makes, on the shim that feeds it. */
+
+func TestCorsConfig_ListAccessorsAndSettersKeepTheirOwnCopies(t *testing.T) {
+    supplied := []string{"https://app.example.com"}
+
+    config := NewCorsConfig(supplied, []string{"GET"}, []string{"Content-Type"}, []string{"X-Total-Count"}, false, 60, nil)
+
+    supplied[0] = "*"
+
+    if "https://app.example.com" != config.AllowOrigins()[0] {
+        t.Fatalf("expected the constructor to copy the caller's slice")
+    }
+
+    config.AllowOrigins()[0] = "*"
+    config.AllowMethods()[0] = "DELETE"
+    config.AllowHeaders()[0] = "Authorization"
+    config.ExposeHeaders()[0] = "X-Other"
+
+    if "https://app.example.com" != config.AllowOrigins()[0] {
+        t.Fatalf("expected AllowOrigins to hand out a copy")
+    }
+
+    if "GET" != config.AllowMethods()[0] {
+        t.Fatalf("expected AllowMethods to hand out a copy")
+    }
+
+    if "Content-Type" != config.AllowHeaders()[0] {
+        t.Fatalf("expected AllowHeaders to hand out a copy")
+    }
+
+    if "X-Total-Count" != config.ExposeHeaders()[0] {
+        t.Fatalf("expected ExposeHeaders to hand out a copy")
+    }
+
+    setterSupplied := []string{"https://other.example.com"}
+    config.SetAllowOrigins(setterSupplied)
+    setterSupplied[0] = "*"
+
+    if "https://other.example.com" != config.AllowOrigins()[0] {
+        t.Fatalf("expected SetAllowOrigins to copy the caller's slice")
+    }
+}
+
+/* @info the origin predicate is the escape hatch that overrides the list entirely inside cors.Service, so the shim reporting it is what lets a caller verify the one field that can grant an origin no list mentions. */
+
+func TestCorsConfig_AllowOriginFuncIsReportedAndDecidesTheOrigin(t *testing.T) {
+    config := DefaultCorsConfig()
+
+    if nil != config.AllowOriginFunc() {
+        t.Fatalf("expected the defaults to carry no origin predicate")
+    }
+
+    if true == config.AllowCredentials() {
+        t.Fatalf("expected the defaults not to allow credentials beside the wildcard origin they carry")
+    }
+
+    if 86400 != config.MaxAge() {
+        t.Fatalf("unexpected default max age: %d", config.MaxAge())
+    }
+
+    predicated := NewCorsConfig(
+        nil,
+        []string{"GET"},
+        []string{"Content-Type"},
+        nil,
+        false,
+        60,
+        func(origin string) bool { return "https://predicated.example.com" == origin },
+    )
+
+    predicate := predicated.AllowOriginFunc()
+    if nil == predicate {
+        t.Fatalf("expected the predicate to be reported")
+    }
+
+    if false == predicate("https://predicated.example.com") {
+        t.Fatalf("expected the reported predicate to be the one that was configured")
+    }
+
+    if true == predicate("https://other.example.com") {
+        t.Fatalf("expected the reported predicate to refuse an origin it does not name")
+    }
+}

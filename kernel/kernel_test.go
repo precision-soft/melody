@@ -1,6 +1,8 @@
 package kernel
 
 import (
+    "fmt"
+    "strings"
     "testing"
 
     "github.com/precision-soft/melody/clock"
@@ -100,5 +102,98 @@ func TestKernel_DebugModeFalseOutsideDevelopment(t *testing.T) {
 
     if true == kernelInstance.DebugMode() {
         t.Fatalf("expected debug mode to be false outside development")
+    }
+}
+
+/* @info the two accessors nothing had entered are the ones that hand out what the kernel BUILT rather than what it was given: the http kernel it constructed around the router, and the clock every timestamp in the process reads. A kernel reporting a clock other than the one it was built with would give the scheduler and the request log two different notions of now. */
+
+func TestKernel_ReportsTheHttpKernelItBuiltAndTheClockItWasGiven(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    httpRouter := http.NewRouterWithRouteRegistry(http.NewRouteRegistry())
+
+    kernelInstance := NewKernel(
+        newTestConfiguration(t, config.EnvDevelopment),
+        container.NewContainer(),
+        httpRouter,
+        event.NewEventDispatcher(clockInstance),
+        clockInstance,
+    )
+
+    if clockInstance != kernelInstance.Clock() {
+        t.Fatalf("expected the kernel to report the clock it was built with")
+    }
+
+    httpKernel := kernelInstance.HttpKernel()
+    if nil == httpKernel {
+        t.Fatalf("expected the kernel to build an http kernel")
+    }
+
+    if httpKernel != kernelInstance.HttpKernel() {
+        t.Fatalf("expected the http kernel to be built once and reported, not rebuilt per call")
+    }
+}
+
+/* @info each of the five constructor arguments is required and refuses the boot by name. A kernel assembled with any of them missing would fail on the request path instead — the router on the first request, the clock on the first timestamp — where the diagnostic names a nil dereference rather than the wiring that omitted it. */
+
+func TestNewKernel_RefusesEachMissingDependencyByName(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    httpRouter := http.NewRouterWithRouteRegistry(http.NewRouteRegistry())
+    configuration := newTestConfiguration(t, config.EnvDevelopment)
+
+    for _, testCase := range []struct {
+        name     string
+        build    func()
+        expected string
+    }{
+        {
+            "configuration",
+            func() {
+                NewKernel(nil, container.NewContainer(), httpRouter, event.NewEventDispatcher(clockInstance), clockInstance)
+            },
+            "application configuration is required for new kernel",
+        },
+        {
+            "container",
+            func() {
+                NewKernel(configuration, nil, httpRouter, event.NewEventDispatcher(clockInstance), clockInstance)
+            },
+            "service container is required for new kernel",
+        },
+        {
+            "router",
+            func() {
+                NewKernel(configuration, container.NewContainer(), nil, event.NewEventDispatcher(clockInstance), clockInstance)
+            },
+            "http router is required for new kernel",
+        },
+        {
+            "dispatcher",
+            func() {
+                NewKernel(configuration, container.NewContainer(), httpRouter, nil, clockInstance)
+            },
+            "event dispatcher is required for new kernel",
+        },
+        {
+            "clock",
+            func() {
+                NewKernel(configuration, container.NewContainer(), httpRouter, event.NewEventDispatcher(clockInstance), nil)
+            },
+            "clock is required for new kernel",
+        },
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            defer func() {
+                recovered := recover()
+                if nil == recovered {
+                    t.Fatalf("expected the missing %s to refuse the boot", testCase.name)
+                }
+
+                if false == strings.Contains(fmt.Sprintf("%v", recovered), testCase.expected) {
+                    t.Fatalf("expected the refusal to name the missing %s, got: %v", testCase.name, recovered)
+                }
+            }()
+
+            testCase.build()
+        })
     }
 }
