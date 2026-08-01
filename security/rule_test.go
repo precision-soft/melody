@@ -1,36 +1,218 @@
 package security
 
 import (
+    nethttp "net/http"
     "testing"
+
+    "github.com/precision-soft/melody/exception"
+    httpcontract "github.com/precision-soft/melody/http/contract"
+    "github.com/precision-soft/melody/internal/testhelper"
+    securitycontract "github.com/precision-soft/melody/security/contract"
 )
 
-func TestNewApiKeyHeaderRule_EmptyExpectedValuePanics(t *testing.T) {
-    defer func() {
-        if nil == recover() {
-            t.Fatalf("expected panic when the expected api key is empty (would fail open)")
-        }
-    }()
+/* alwaysMatchingRuleMatcher answers yes to every request, a nil one included. The matchers this package ships all decline a nil request, so the nil guards inside Check are reachable only through a matcher written outside it — and "match everything" is the first matcher an application writes. */
+type alwaysMatchingRuleMatcher struct {
+    calledWithNil bool
+}
 
-    _ = NewApiKeyHeaderRule(NewPathPrefixMatcher("/"), "X-Api-Key", "")
+func (instance *alwaysMatchingRuleMatcher) Matches(request httpcontract.Request) bool {
+    if nil == request {
+        instance.calledWithNil = true
+    }
+
+    return true
+}
+
+var _ securitycontract.Matcher = (*alwaysMatchingRuleMatcher)(nil)
+
+/* neverMatchingRuleMatcher declines every request without reading it. */
+type neverMatchingRuleMatcher struct {
+}
+
+func (instance *neverMatchingRuleMatcher) Matches(request httpcontract.Request) bool {
+    return false
+}
+
+var _ securitycontract.Matcher = (*neverMatchingRuleMatcher)(nil)
+
+/* requestWithoutHttpRequest carries the shape Check guards against on its second nil branch: a request object that exists while the net/http request behind it does not. */
+type requestWithoutHttpRequest struct {
+    httpcontract.Request
+}
+
+func (instance *requestWithoutHttpRequest) HttpRequest() *nethttp.Request {
+    return nil
+}
+
+var _ httpcontract.Request = (*requestWithoutHttpRequest)(nil)
+
+func TestNewApiKeyHeaderRule_EmptyExpectedValuePanics(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            _ = NewApiKeyHeaderRule(NewPathPrefixMatcher("/"), "X-Api-Key", "")
+        },
+        "api key header rule expected value is empty",
+    )
 }
 
 func TestNewApiKeyHeaderRule_EmptyHeaderNamePanics(t *testing.T) {
-    defer func() {
-        if nil == recover() {
-            t.Fatalf("expected panic when the header name is empty")
-        }
-    }()
-
-    _ = NewApiKeyHeaderRule(NewPathPrefixMatcher("/"), "", "expected-secret")
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            _ = NewApiKeyHeaderRule(NewPathPrefixMatcher("/"), "", "expected-secret")
+        },
+        "api key header rule header name is empty",
+    )
 }
 
 /* @info a nil matcher is refused at construction the way the other firewall dependencies are: leaving it unvalidated defers the failure to Applies on the request path, outside any recovery, turning a configuration mistake into a panic mid-request instead of a boot error */
 func TestNewApiKeyHeaderRule_NilMatcherPanics(t *testing.T) {
-    defer func() {
-        if nil == recover() {
-            t.Fatalf("expected panic when the matcher is nil")
-        }
-    }()
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            _ = NewApiKeyHeaderRule(nil, "X-Api-Key", "expected-secret")
+        },
+        "api key header rule matcher is nil",
+    )
+}
 
-    _ = NewApiKeyHeaderRule(nil, "X-Api-Key", "expected-secret")
+func TestApiKeyHeaderRule_AppliesFollowsTheMatcher(t *testing.T) {
+    matchingRule := NewApiKeyHeaderRule(&alwaysMatchingRuleMatcher{}, "X-Api-Key", "expected-secret")
+    if false == matchingRule.Applies(newFirewallTestRequest("/anything")) {
+        t.Fatalf("expected the rule to apply when its matcher matches")
+    }
+
+    decliningRule := NewApiKeyHeaderRule(&neverMatchingRuleMatcher{}, "X-Api-Key", "expected-secret")
+    if true == decliningRule.Applies(newFirewallTestRequest("/anything")) {
+        t.Fatalf("expected the rule not to apply when its matcher declines")
+    }
+}
+
+/* @info the whole point of the rule: the configured key is accepted and nothing else is. Check was reached by no test at all, so neither the acceptance nor any of the four refusals below had ever been executed. */
+func TestApiKeyHeaderRule_CheckAcceptsTheConfiguredKey(t *testing.T) {
+    rule := NewApiKeyHeaderRule(NewPathPrefixMatcher("/api"), "X-Api-Key", "expected-secret")
+
+    request := newSecurityTestRequest(
+        nethttp.MethodGet,
+        "/api/resource",
+        map[string]string{"X-Api-Key": "expected-secret"},
+        nil,
+    )
+
+    err := rule.Check(request)
+    if nil != err {
+        t.Fatalf("expected the configured key to be accepted, got %v", err)
+    }
+}
+
+/* @info a wrong key of the SAME length is the case the constant-time comparison exists for: a length-only check, or a comparison that stopped at the first differing byte, would still answer here, so the refusal has to be asserted on equal-length input and not only on an obviously different one */
+func TestApiKeyHeaderRule_CheckRefusesAWrongKeyOfTheSameLength(t *testing.T) {
+    rule := NewApiKeyHeaderRule(NewPathPrefixMatcher("/api"), "X-Api-Key", "expected-secret")
+
+    request := newSecurityTestRequest(
+        nethttp.MethodGet,
+        "/api/resource",
+        map[string]string{"X-Api-Key": "expected-secreT"},
+        nil,
+    )
+
+    assertRuleRefused(t, rule.Check(request))
+}
+
+func TestApiKeyHeaderRule_CheckRefusesAWrongKeyOfAnotherLength(t *testing.T) {
+    rule := NewApiKeyHeaderRule(NewPathPrefixMatcher("/api"), "X-Api-Key", "expected-secret")
+
+    request := newSecurityTestRequest(
+        nethttp.MethodGet,
+        "/api/resource",
+        map[string]string{"X-Api-Key": "expected-secret-and-then-some"},
+        nil,
+    )
+
+    assertRuleRefused(t, rule.Check(request))
+}
+
+/* @info an absent header reads as the empty string, which must not be mistaken for "no key required": the empty expected value is refused at construction precisely so this comparison can never succeed */
+func TestApiKeyHeaderRule_CheckRefusesAnAbsentHeader(t *testing.T) {
+    rule := NewApiKeyHeaderRule(NewPathPrefixMatcher("/api"), "X-Api-Key", "expected-secret")
+
+    request := newSecurityTestRequest(
+        nethttp.MethodGet,
+        "/api/resource",
+        map[string]string{},
+        nil,
+    )
+
+    assertRuleRefused(t, rule.Check(request))
+}
+
+/* @info the CONFIGURED header name is read case-insensitively, because Header.Get canonicalizes the name it looks up. The rule below is configured with a lower-case name while the request carries the canonical one — the shape a raw map read over Header would miss, refusing a legitimate caller over a spelling in a configuration file. Spelling the header in lower case on the request side would prove nothing: net/http canonicalizes on the way in, so both sides would agree no matter how the rule read them. */
+func TestApiKeyHeaderRule_CheckReadsTheConfiguredHeaderNameCaseInsensitively(t *testing.T) {
+    rule := NewApiKeyHeaderRule(NewPathPrefixMatcher("/api"), "x-api-key", "expected-secret")
+
+    request := newSecurityTestRequest(
+        nethttp.MethodGet,
+        "/api/resource",
+        map[string]string{"X-Api-Key": "expected-secret"},
+        nil,
+    )
+
+    err := rule.Check(request)
+    if nil != err {
+        t.Fatalf("expected a lower-case configured header name to find the canonical header, got %v", err)
+    }
+}
+
+/* @info a rule that does not apply answers nil without weighing the key at all. The request below carries a WRONG key, so a nil answer can only come from the early exit — had the check run, it would have refused. */
+func TestApiKeyHeaderRule_CheckSkipsARequestItDoesNotApplyTo(t *testing.T) {
+    rule := NewApiKeyHeaderRule(NewPathPrefixMatcher("/api"), "X-Api-Key", "expected-secret")
+
+    request := newSecurityTestRequest(
+        nethttp.MethodGet,
+        "/public/resource",
+        map[string]string{"X-Api-Key": "wrong-secret"},
+        nil,
+    )
+
+    err := rule.Check(request)
+    if nil != err {
+        t.Fatalf("expected a rule that does not apply to answer nil, got %v", err)
+    }
+}
+
+/* @info a matcher that claims a nil request carries the check past its own early exit; the rule refuses rather than dereferencing, which is the difference between a 403 and a panic on the request path */
+func TestApiKeyHeaderRule_CheckRefusesANilRequestAMatcherClaimed(t *testing.T) {
+    matcher := &alwaysMatchingRuleMatcher{}
+    rule := NewApiKeyHeaderRule(matcher, "X-Api-Key", "expected-secret")
+
+    assertRuleRefused(t, rule.Check(nil))
+
+    if false == matcher.calledWithNil {
+        t.Fatalf("expected the matcher to have been consulted with the nil request")
+    }
+}
+
+/* @info the sibling shape: a request object whose net/http request is missing. Header.Get would dereference it. */
+func TestApiKeyHeaderRule_CheckRefusesARequestWithoutAnHttpRequest(t *testing.T) {
+    rule := NewApiKeyHeaderRule(&alwaysMatchingRuleMatcher{}, "X-Api-Key", "expected-secret")
+
+    assertRuleRefused(t, rule.Check(&requestWithoutHttpRequest{}))
+}
+
+func assertRuleRefused(t *testing.T, err error) {
+    t.Helper()
+
+    if nil == err {
+        t.Fatalf("expected the rule to refuse the request")
+    }
+
+    httpException := exception.AsHttpException(err)
+    if nil == httpException {
+        t.Fatalf("expected the refusal to carry an http status, got %T: %v", err, err)
+    }
+
+    if nethttp.StatusForbidden != httpException.StatusCode() {
+        t.Fatalf("expected the refusal to be a 403, got %d", httpException.StatusCode())
+    }
 }

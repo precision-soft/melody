@@ -149,8 +149,8 @@ run_live_go_suites() {
 # race, with a goroutine and a wait group, which without this lane could only ever pass. No service containers
 # needed; the three add some four seconds per major.
 RACE_SUITE_SPECIFICATION_STRING_LIST=(
-    ". ./cache/... ./clock/... ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/... ./validation/... ./session/... ./http/... ./internal/..."
-    "v2 ./cache/... ./clock/... ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/... ./validation/... ./session/... ./http/... ./internal/..."
+    ". ./cache/... ./clock/... ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/... ./validation/... ./session/... ./security/... ./http/... ./internal/..."
+    "v2 ./cache/... ./clock/... ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/... ./validation/... ./session/... ./security/... ./http/... ./internal/..."
     "v3 ./cache/... ./clock/... ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/... ./mailer/... ./lock/... ./messagebus/... ./validation/... ./openapi/... ./session/... ./security/... ./http/... ./internal/..."
     "integrations/cron ./..."
     "integrations/cron/v2 ./..."

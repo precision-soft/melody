@@ -3,6 +3,7 @@ package config
 import (
     "github.com/precision-soft/melody/exception"
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
+    "github.com/precision-soft/melody/internal"
     "github.com/precision-soft/melody/security"
     securitycontract "github.com/precision-soft/melody/security/contract"
 )
@@ -24,7 +25,7 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
             return nil, exception.NewError("security firewall name may not be empty", nil, nil)
         }
 
-        if nil == firewall.matcher {
+        if true == internal.IsNilInterface(firewall.matcher) {
             return nil, exception.NewError(
                 "security firewall matcher is nil",
                 exceptioncontract.Context{
@@ -34,7 +35,7 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
             )
         }
 
-        if nil == firewall.tokenSource {
+        if true == internal.IsNilInterface(firewall.tokenSource) {
             return nil, exception.NewError(
                 "security firewall token source is nil",
                 exceptioncontract.Context{
@@ -45,7 +46,7 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
         }
 
         if true == firewall.override.stateless {
-            if "" != firewall.loginPath || "" != firewall.logoutPath || nil != firewall.loginHandler || nil != firewall.logoutHandler {
+            if "" != firewall.loginPath || "" != firewall.logoutPath || false == internal.IsNilInterface(firewall.loginHandler) || false == internal.IsNilInterface(firewall.logoutHandler) {
                 return nil, exception.NewError(
                     "security stateless firewall may not define login or logout configuration",
                     exceptioncontract.Context{
@@ -75,7 +76,7 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
                 )
             }
 
-            if nil == firewall.loginHandler {
+            if true == internal.IsNilInterface(firewall.loginHandler) {
                 return nil, exception.NewError(
                     "security firewall login handler is nil",
                     exceptioncontract.Context{
@@ -85,7 +86,7 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
                 )
             }
 
-            if nil == firewall.logoutHandler {
+            if true == internal.IsNilInterface(firewall.logoutHandler) {
                 return nil, exception.NewError(
                     "security firewall logout handler is nil",
                     exceptioncontract.Context{

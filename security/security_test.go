@@ -278,5 +278,30 @@ func registerTestKernelExceptionListener(kernelInstance *testKernel) {
     )
 }
 
+/* newTestCompiledFirewallWithRoleHierarchy builds the smallest firewall a security context needs: the nineteen-argument constructor is spelled out once here rather than in every test that only cares about the role hierarchy behind it. */
+func newTestCompiledFirewallWithRoleHierarchy(name string, roleHierarchy *RoleHierarchy) *CompiledFirewall {
+    return NewCompiledFirewall(
+        name,
+        NewPathPrefixMatcher("/"),
+        "prefix /",
+        nil,
+        nil,
+        nil,
+        nil,
+        roleHierarchy,
+        nil,
+        nil,
+        "",
+        "",
+        nil,
+        nil,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+    )
+}
+
 var _ bagcontract.ParameterBag = bag.NewParameterBag()
 var _ runtimecontract.Runtime = nil

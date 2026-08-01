@@ -34,7 +34,7 @@ func NewCompiledFirewall(
         name:                        name,
         matcher:                     matcher,
         matcherDescription:          matcherDescription,
-        rules:                       rules,
+        rules:                       append([]securitycontract.Rule{}, rules...),
         tokenSource:                 tokenSource,
         accessControl:               accessControl,
         accessDecisionManager:       accessDecisionManager,
@@ -305,7 +305,7 @@ type CompiledConfiguration struct {
 
 func NewCompiledConfiguration(firewalls []*CompiledFirewall, globalAccessControl *AccessControl) *CompiledConfiguration {
     return &CompiledConfiguration{
-        firewalls:           firewalls,
+        firewalls:           append([]*CompiledFirewall{}, firewalls...),
         globalAccessControl: globalAccessControl,
     }
 }

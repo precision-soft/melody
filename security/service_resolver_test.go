@@ -6,7 +6,10 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/container"
+    containercontract "github.com/precision-soft/melody/container/contract"
+    "github.com/precision-soft/melody/internal/testhelper"
     "github.com/precision-soft/melody/runtime"
+    securitycontract "github.com/precision-soft/melody/security/contract"
 )
 
 /* erroringResolverScope answers Has affirmatively but fails every Get, modelling the window in which the security context is present when Has runs and the scope is closed by the time Get runs. */
@@ -34,4 +37,114 @@ func TestSecurityContextFromRuntime_DoesNotPanicWhenResolutionFails(t *testing.T
     if nil != securityContext {
         t.Fatalf("expected a nil security context when resolution fails")
     }
+}
+
+func TestSecurityContextSetOnRuntime_NilRuntimePanics(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            SecurityContextSetOnRuntime(
+                nil,
+                NewSecurityContext(newTestCompiledFirewallWithRoleHierarchy("main", nil), nil),
+            )
+        },
+        "runtime is nil for security context",
+    )
+}
+
+/* @info the two refusals are told apart by message: storing a nil context would put a nil where every reader expects a context, and the failure would surface as a dereference in a handler rather than at the wiring mistake */
+func TestSecurityContextSetOnRuntime_NilSecurityContextPanics(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            SecurityContextSetOnRuntime(newTestRuntime(), nil)
+        },
+        "security context is nil for runtime",
+    )
+}
+
+func TestSecurityContextFromRuntime_RefusesANilRuntime(t *testing.T) {
+    securityContext, exists := SecurityContextFromRuntime(nil)
+    if true == exists {
+        t.Fatalf("expected exists to be false without a runtime")
+    }
+
+    if nil != securityContext {
+        t.Fatalf("expected a nil security context without a runtime")
+    }
+}
+
+/* @info the ordinary round trip: what was stored on the runtime is what comes back */
+func TestSecurityContextSetOnRuntime_RoundTripsThroughTheScope(t *testing.T) {
+    runtimeInstance := newTestRuntime()
+
+    securityContext := NewSecurityContext(
+        newTestCompiledFirewallWithRoleHierarchy("main", nil),
+        NewAuthenticatedToken("u1", []string{"ROLE_USER"}),
+    )
+
+    SecurityContextSetOnRuntime(runtimeInstance, securityContext)
+
+    readContext, exists := SecurityContextFromRuntime(runtimeInstance)
+    if false == exists {
+        t.Fatalf("expected the stored security context to be found")
+    }
+
+    if securityContext != readContext {
+        t.Fatalf("expected the stored security context to be answered")
+    }
+}
+
+/* @info a scope that never carried a security context answers not-found rather than resolving nothing into a typed nil */
+func TestSecurityContextFromRuntime_AnswersNotFoundOnAnEmptyScope(t *testing.T) {
+    securityContext, exists := SecurityContextFromRuntime(newTestRuntime())
+    if true == exists {
+        t.Fatalf("expected exists to be false on a scope without a security context")
+    }
+
+    if nil != securityContext {
+        t.Fatalf("expected a nil security context on a scope without one")
+    }
+}
+
+/* @info the soft container reader answers nil rather than panicking when the firewall manager was never registered, which is what lets a caller decide instead of dying */
+func TestFirewallManagerFromContainer_AnswersNilWhenUnregistered(t *testing.T) {
+    if nil != FirewallManagerFromContainer(container.NewContainer()) {
+        t.Fatalf("expected nil when no firewall manager is registered")
+    }
+}
+
+func TestFirewallManagerFromContainer_AnswersTheRegisteredManager(t *testing.T) {
+    serviceContainer := container.NewContainer()
+
+    manager := NewFirewallManager(NewCompiledConfiguration(nil, nil))
+
+    registerErr := serviceContainer.Register(
+        ServiceFirewallManager,
+        func(resolver containercontract.Resolver) (securitycontract.FirewallManager, error) {
+            return manager, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected error: %v", registerErr)
+    }
+
+    if manager != FirewallManagerFromContainer(serviceContainer) {
+        t.Fatalf("expected the registered firewall manager to be answered")
+    }
+
+    if manager != FirewallManagerMustFromContainer(serviceContainer) {
+        t.Fatalf("expected the strict reader to answer the registered firewall manager")
+    }
+}
+
+/* @info the strict reader is the boot-time one: it panics rather than handing back a nil the caller would dereference later */
+func TestFirewallManagerMustFromContainer_PanicsWhenUnregistered(t *testing.T) {
+    defer func() {
+        if nil == recover() {
+            t.Fatalf("expected the strict reader to panic when no firewall manager is registered")
+        }
+    }()
+
+    _ = FirewallManagerMustFromContainer(container.NewContainer())
 }

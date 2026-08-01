@@ -6,12 +6,13 @@ import (
     "github.com/precision-soft/melody/exception"
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
     httpcontract "github.com/precision-soft/melody/http/contract"
+    "github.com/precision-soft/melody/internal"
     securitycontract "github.com/precision-soft/melody/security/contract"
 )
 
 func NewAuthenticatorManager(authenticators ...securitycontract.Authenticator) *AuthenticatorManager {
     for index, authenticator := range authenticators {
-        if nil == authenticator {
+        if true == internal.IsNilInterface(authenticator) {
             exception.Panic(
                 exception.NewError(
                     fmt.Sprintf(
@@ -26,7 +27,7 @@ func NewAuthenticatorManager(authenticators ...securitycontract.Authenticator) *
     }
 
     return &AuthenticatorManager{
-        authenticators: authenticators,
+        authenticators: append([]securitycontract.Authenticator{}, authenticators...),
     }
 }
 

@@ -18,6 +18,22 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Security: a typed nil is refused where a nil is refused
+
+**What changed.** An interface holding a nil pointer is not equal to nil, so a typed-nil matcher, token source, login handler, logout handler, rule, authenticator, decision voter or wrapped token passed the eager validation at the definition site, passed `Compile`, and was first dereferenced on the request path — inside no recovery, taking the process down on a wiring mistake that had two chances to be caught at boot. Both validation walls now use the reflective check the rest of the framework uses. A stateless firewall handed a typed-nil login handler reads it as the absent handler it is, rather than refusing the firewall as contradictory.
+
+**Symptom.** A boot that used to succeed now panics with the piece and the firewall named — `security firewall matcher is nil`, `security firewall token source is nil`, `security firewall login handler is nil`, `security firewall logout handler is nil`, `security firewall rule is nil`, `authenticator at index N is nil`, `security voter is nil`, or `can not create a security token from nil`.
+
+**Remedy.** The panic names the piece that is nil. A variable declared as a concrete pointer type and never assigned — `var handler *MyLoginHandler` — is the usual source; assign it, or pass an untyped `nil` where the piece is genuinely optional.
+
+### Security: `DecideAll` refuses an empty attribute list
+
+**What changed.** `AccessDecisionManager.DecideAll` read an empty attribute list as an AND over nothing and granted it, while `DecideAny` on the same contract refused the identical input. A caller that asked for no attribute — a list a configuration value resolved away, or a variadic call that lost its argument — was granted. The compiled access control cannot produce an empty list, so the change is reached only by a caller going straight to the decision manager.
+
+**Symptom.** `DecideAll(token, nil, subject)` and `DecideAll(token, []string{}, subject)` return a `403` error where they returned nil.
+
+**Remedy.** Pass the attributes the decision is about. A call site that legitimately means "no authorization required" should not consult the decision manager at all.
+
 ### Internal conversions: a duration spelled as a bare integer is refused
 
 **What changed.** `internal.Duration` — reached through `config.Parameter.Duration()` and `bag.Duration` — read a bare `int`/`int64` as **nanoseconds**. A runtime parameter registered as `30` and meant as seconds became a timeout that fired instantly, with no error anywhere, while the same value spelled `"30"` was already refused for missing its unit. A bare integer is now refused on both paths.

@@ -3,6 +3,7 @@ package config
 import (
     "github.com/precision-soft/melody/exception"
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
+    "github.com/precision-soft/melody/internal"
     "github.com/precision-soft/melody/security"
     securitycontract "github.com/precision-soft/melody/security/contract"
 )
@@ -209,7 +210,7 @@ func (instance *Builder) addFirewall(
         FirewallConfiguration{
             name:          name,
             matcher:       matcher,
-            rules:         rules,
+            rules:         append([]securitycontract.Rule{}, rules...),
             tokenSource:   tokenSource,
             loginPath:     loginPath,
             logoutPath:    logoutPath,
@@ -236,7 +237,7 @@ func (instance *Builder) validateFirewall(
         exception.Panic(exception.NewError("security firewall name may not be empty", nil, nil))
     }
 
-    if nil == matcher {
+    if true == internal.IsNilInterface(matcher) {
         exception.Panic(
             exception.NewError(
                 "security firewall matcher is nil",
@@ -248,7 +249,7 @@ func (instance *Builder) validateFirewall(
         )
     }
 
-    if nil == tokenSource {
+    if true == internal.IsNilInterface(tokenSource) {
         exception.Panic(
             exception.NewError(
                 "security firewall token source is nil",
@@ -261,7 +262,7 @@ func (instance *Builder) validateFirewall(
     }
 
     if true == override.stateless {
-        if "" != loginPath || "" != logoutPath || nil != loginHandler || nil != logoutHandler {
+        if "" != loginPath || "" != logoutPath || false == internal.IsNilInterface(loginHandler) || false == internal.IsNilInterface(logoutHandler) {
             exception.Panic(
                 exception.NewError(
                     "security stateless firewall may not define login or logout configuration",
@@ -300,7 +301,7 @@ func (instance *Builder) validateFirewall(
         )
     }
 
-    if nil == loginHandler {
+    if true == internal.IsNilInterface(loginHandler) {
         exception.Panic(
             exception.NewError(
                 "security firewall login handler is nil",
@@ -312,7 +313,7 @@ func (instance *Builder) validateFirewall(
         )
     }
 
-    if nil == logoutHandler {
+    if true == internal.IsNilInterface(logoutHandler) {
         exception.Panic(
             exception.NewError(
                 "security firewall logout handler is nil",
