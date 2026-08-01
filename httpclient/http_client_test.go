@@ -4,6 +4,7 @@ import (
     "bytes"
     "context"
     "encoding/base64"
+    "errors"
     "fmt"
     "io"
     "math"
@@ -1271,5 +1272,659 @@ func TestHttpClient_ReusesPooledConnectionsAcrossConcurrentWaves(t *testing.T) {
             atomic.LoadInt64(&dialed),
             2*waveSize,
         )
+    }
+}
+
+/* @info the constructor an application reaches for when it has nothing to configure had never been executed: the whole of what "default" means — a thirty-second whole-request timeout, no base url, no configured headers, and a real transport under it — went unproven, and a default drifting to zero would have made every request unbounded without a single test noticing. */
+func TestNewDefaultHttpClient_CarriesTheDocumentedDefaults(t *testing.T) {
+    client := NewDefaultHttpClient()
+    defer client.Close()
+
+    if 30*time.Second != client.client.Timeout {
+        t.Fatalf("expected the documented thirty-second default timeout, got %v", client.client.Timeout)
+    }
+
+    if 30*time.Second != client.timeout {
+        t.Fatalf("expected the per-request fallback to carry the same default, got %v", client.timeout)
+    }
+
+    if "" != client.baseUrl {
+        t.Fatalf("expected no base url, got %q", client.baseUrl)
+    }
+
+    if 0 != len(client.headers) {
+        t.Fatalf("expected no configured headers, got %v", client.headers)
+    }
+
+    if _, isTransport := client.client.Transport.(*http.Transport); false == isTransport {
+        t.Fatalf("expected the client to own a real transport, got %T", client.client.Transport)
+    }
+
+    if nil == client.client.CheckRedirect {
+        t.Fatalf("expected the credential-stripping redirect policy to be installed")
+    }
+}
+
+/* @info Put, Patch and Delete had never been executed. The first two are Post's siblings and carry the same two obligations — the method on the wire and the json encoding of the body — and the third carries neither a body nor a content type; a verb wired to the wrong method would send a create where an update was meant, which no status code distinguishes. */
+func TestHttpClient_PutPatchAndDeleteSendTheirOwnMethods(t *testing.T) {
+    type recordedRequest struct {
+        method      string
+        contentType string
+        body        string
+    }
+
+    recorded := []recordedRequest{}
+
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        body, _ := io.ReadAll(request.Body)
+
+        recorded = append(recorded, recordedRequest{
+            method:      request.Method,
+            contentType: request.Header.Get("Content-Type"),
+            body:        string(body),
+        })
+
+        writer.WriteHeader(http.StatusOK)
+    }))
+    defer server.Close()
+
+    client := NewDefaultHttpClient()
+    defer client.Close()
+
+    if _, err := client.Put(server.URL, map[string]string{"name": "put"}); nil != err {
+        t.Fatalf("unexpected put error: %v", err)
+    }
+
+    if _, err := client.Patch(server.URL, map[string]string{"name": "patch"}); nil != err {
+        t.Fatalf("unexpected patch error: %v", err)
+    }
+
+    if _, err := client.Delete(server.URL); nil != err {
+        t.Fatalf("unexpected delete error: %v", err)
+    }
+
+    if 3 != len(recorded) {
+        t.Fatalf("expected three requests, got %d", len(recorded))
+    }
+
+    if http.MethodPut != recorded[0].method || "application/json" != recorded[0].contentType || `{"name":"put"}` != recorded[0].body {
+        t.Fatalf("unexpected put request: %#v", recorded[0])
+    }
+
+    if http.MethodPatch != recorded[1].method || "application/json" != recorded[1].contentType || `{"name":"patch"}` != recorded[1].body {
+        t.Fatalf("unexpected patch request: %#v", recorded[1])
+    }
+
+    if http.MethodDelete != recorded[2].method || "" != recorded[2].contentType || "" != recorded[2].body {
+        t.Fatalf("expected delete to carry neither a body nor a content type, got %#v", recorded[2])
+    }
+}
+
+/* assertBodyCarryingVerbOwnsItsOptionSlice drives one verb twice, concurrently, over a single option slice with spare capacity. The two calls are held open at the first shared option until both have appended their own body option, so the overlap is forced rather than waited for: without the capacity clamp both appends land in the same spare slot and each call then reads whichever wrote last. It takes ONE verb because a mutation is applied to one verb at a time — a test pitting Put against Patch stays green while either of them still clamps, which is exactly what a shared-slice defect in the other one looks like. */
+func assertBodyCarryingVerbOwnsItsOptionSlice(
+    t *testing.T,
+    verbName string,
+    call func(client *HttpClient, urlString string, body any, options ...httpclientcontract.RequestOption) (httpclientcontract.Response, error),
+) {
+    t.Helper()
+
+    var corruption atomic.Bool
+
+    newBodyServer := func(expected string) *httptest.Server {
+        return httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+            bodyBytes, _ := io.ReadAll(request.Body)
+            if false == bytes.Contains(bodyBytes, []byte(expected)) {
+                corruption.Store(true)
+            }
+            writer.WriteHeader(http.StatusOK)
+        }))
+    }
+
+    firstServer := newBodyServer(`"v":"FIRST"`)
+    defer firstServer.Close()
+    secondServer := newBodyServer(`"v":"SECOND"`)
+    defer secondServer.Close()
+
+    client := NewHttpClient(NewHttpClientConfig("", 5*time.Second, nil))
+    defer client.Close()
+
+    var barrier sync.WaitGroup
+    barrier.Add(2)
+
+    shared := make([]httpclientcontract.RequestOption, 0, 4)
+    shared = append(shared, func(options httpclientcontract.RequestOptions) {
+        barrier.Done()
+        barrier.Wait()
+    })
+
+    var waitGroup sync.WaitGroup
+    waitGroup.Add(2)
+
+    go func() {
+        defer waitGroup.Done()
+        _, _ = call(client, firstServer.URL, map[string]any{"v": "FIRST"}, shared...)
+    }()
+    go func() {
+        defer waitGroup.Done()
+        _, _ = call(client, secondServer.URL, map[string]any{"v": "SECOND"}, shared...)
+    }()
+
+    waitGroup.Wait()
+
+    if true == corruption.Load() {
+        t.Fatalf("a %s body was delivered to the wrong endpoint through a shared options slice", verbName)
+    }
+}
+
+/* @info Put appends a body option to the caller's slice, and Post has carried the proof of that clamp since the httpclient session while its two siblings had none — the caller cannot see past its own length, so a lost clamp is invisible to a sequential assertion. */
+func TestHttpClient_PutDoesNotShareTheCallersOptionSliceAcrossConcurrentCalls(t *testing.T) {
+    assertBodyCarryingVerbOwnsItsOptionSlice(
+        t,
+        "put",
+        func(client *HttpClient, urlString string, body any, options ...httpclientcontract.RequestOption) (httpclientcontract.Response, error) {
+            return client.Put(urlString, body, options...)
+        },
+    )
+}
+
+/* @info Patch carries the same clamp and needs its own proof: the two verbs are separate lines, and a test that drove both at once would stay green while either of them still clamped. */
+func TestHttpClient_PatchDoesNotShareTheCallersOptionSliceAcrossConcurrentCalls(t *testing.T) {
+    assertBodyCarryingVerbOwnsItsOptionSlice(
+        t,
+        "patch",
+        func(client *HttpClient, urlString string, body any, options ...httpclientcontract.RequestOption) (httpclientcontract.Response, error) {
+            return client.Patch(urlString, body, options...)
+        },
+    )
+}
+
+/* @info the redirect policy deletes three credential headers by name AFTER it has deleted the ones it learned from the client and from the request, and only a credential that reaches the request through NEITHER of those channels can prove that the by-name deletion is what removed it. A bearer token is exactly that: applyAuthorization writes the Authorization header straight onto the request, so its name never travels on the option map or on the request context, and this deletion is the only thing standing between it and a host the first server chose. */
+func TestHttpClient_StripsABearerTokenOnCrossOriginRedirect(t *testing.T) {
+    receivedAuthorization := ""
+
+    target := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        receivedAuthorization = request.Header.Get("Authorization")
+
+        writer.WriteHeader(http.StatusOK)
+    }))
+    defer target.Close()
+
+    origin := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        http.Redirect(writer, request, target.URL, http.StatusFound)
+    }))
+    defer origin.Close()
+
+    client := NewDefaultHttpClient()
+    defer client.Close()
+
+    response, requestErr := client.Get(origin.URL, WithBearerToken("SECRET-TOKEN"))
+    if nil != requestErr {
+        t.Fatalf("unexpected request error: %v", requestErr)
+    }
+
+    if 200 != response.StatusCode() {
+        t.Fatalf("unexpected status code: %d", response.StatusCode())
+    }
+
+    if "" != receivedAuthorization {
+        t.Fatalf("the bearer token followed the redirect off its origin: %q", receivedAuthorization)
+    }
+}
+
+/* @info the textual fallback is what sanitizes a url net/url refused to parse, which is exactly the url a caller built by hand and the one most likely to carry a secret. Only one of its shapes had ever been entered — the one with userinfo and no query — so three branches were blind: the query cut, the early return for a string with no scheme separator, and the early return for an authority with no userinfo. Each is asserted on its own shape, because they all answer with a string and a shared assertion would let any of them fall through. */
+func TestSanitizeUrlTextually_CutsTheQueryWholeWhateverFollowsIt(t *testing.T) {
+    sanitized := sanitizeUrlTextually("http://host/path\x7f?token=SECRET&page=2")
+
+    if true == strings.Contains(sanitized, "SECRET") {
+        t.Fatalf("the query value survived the textual fallback: %q", sanitized)
+    }
+
+    if false == strings.HasSuffix(sanitized, "?"+redactedValue) {
+        t.Fatalf("expected the whole query to be replaced by one redaction, got %q", sanitized)
+    }
+
+    if false == strings.HasPrefix(sanitized, "http://host/path") {
+        t.Fatalf("expected the scheme, host and path to survive, got %q", sanitized)
+    }
+}
+
+/* @info a string with no scheme separator has no authority to cut a userinfo out of, and it is returned as it stands — a relative target a client with no base url was handed, which the failure report still has to name. The probe carries an at sign on purpose: without the early return the arithmetic underneath measures an authority that is not there and splices a redaction into the middle of a plain path, which is the only way this branch is distinguishable from the no-userinfo one below it. */
+func TestSanitizeUrlTextually_AStringWithoutASchemeSeparatorIsReturnedUnchanged(t *testing.T) {
+    sanitized := sanitizeUrlTextually("/relative@path\x7f")
+
+    if "/relative@path\x7f" != sanitized {
+        t.Fatalf("expected a string with no authority to be returned unchanged, got %q", sanitized)
+    }
+
+    if true == strings.Contains(sanitized, redactedValue) {
+        t.Fatalf("expected no redaction to be spliced into a path with no authority, got %q", sanitized)
+    }
+}
+
+/* @info an authority with no userinfo carries no credential to cut, and the url is returned with its host and path intact; without this early return the slice arithmetic underneath would splice a redaction into an authority that never had one. */
+func TestSanitizeUrlTextually_AnAuthorityWithoutUserinfoIsReturnedUnchanged(t *testing.T) {
+    sanitized := sanitizeUrlTextually("http://example.com/path\x7f")
+
+    if "http://example.com/path\x7f" != sanitized {
+        t.Fatalf("expected an authority with no userinfo to be returned unchanged, got %q", sanitized)
+    }
+
+    if true == strings.Contains(sanitized, redactedValue) {
+        t.Fatalf("expected no redaction to be spliced into an authority that carried no credential, got %q", sanitized)
+    }
+}
+
+/* @info an authority that ends the string — no path after it — is the shape where the userinfo cut has to measure to the end rather than to a slash that is not there. */
+func TestSanitizeUrlTextually_AnAuthorityEndingTheStringStillLosesItsUserinfo(t *testing.T) {
+    sanitized := sanitizeUrlTextually("http://user:SECRET@host\x7f")
+
+    if true == strings.Contains(sanitized, "SECRET") {
+        t.Fatalf("the userinfo password survived: %q", sanitized)
+    }
+
+    if false == strings.Contains(sanitized, redactedValue+":"+redactedValue+"@host") {
+        t.Fatalf("expected the userinfo to be replaced in place, got %q", sanitized)
+    }
+}
+
+/* @info every case pinned so far handed the sanitizer a url net/url REFUSES, so the parsed branches — the userinfo replacement and the fragment cut — had never run: a perfectly ordinary url with a password in it went through code no test had entered. The fragment matters because net/http does not send it, so a secret placed there reaches the log without ever reaching the wire. */
+func TestSanitizeUrlForDiagnostics_ParsedUrlsLoseTheirUserinfoAndFragment(t *testing.T) {
+    sanitized := sanitizeUrlForDiagnostics("https://user:SECRET@example.com/path?token=ALSOSECRET#fragment-SECRET")
+
+    if true == strings.Contains(sanitized, "SECRET") {
+        t.Fatalf("a secret survived the parsed sanitizer: %q", sanitized)
+    }
+
+    if false == strings.Contains(sanitized, "example.com/path") {
+        t.Fatalf("expected the host and path to survive, got %q", sanitized)
+    }
+
+    if false == strings.Contains(sanitized, "token=") {
+        t.Fatalf("expected the parameter NAMES to survive so a failure stays diagnosable, got %q", sanitized)
+    }
+
+    if true == strings.Contains(sanitized, "#") {
+        t.Fatalf("expected the fragment to be dropped whole, got %q", sanitized)
+    }
+}
+
+/* @info the client installs its own redirect policy, which means net/http's ten-hop cap is no longer in force unless this policy keeps it: without the refusal a server pointing at itself would spin the client forever on one call, holding a connection and a goroutine for the life of the process. */
+func TestHttpClient_StopsAfterTooManyRedirects(t *testing.T) {
+    hops := 0
+
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        hops = hops + 1
+
+        http.Redirect(writer, request, "/next", http.StatusFound)
+    }))
+    defer server.Close()
+
+    client := NewDefaultHttpClient()
+    defer client.Close()
+
+    _, requestErr := client.Get(server.URL)
+    if nil == requestErr {
+        t.Fatalf("expected the redirect loop to be refused")
+    }
+
+    if false == strings.Contains(renderErrorForLog(t, requestErr), "stopped after too many redirects") {
+        t.Fatalf("expected the redirect cap to be named, got %q", renderErrorForLog(t, requestErr))
+    }
+
+    if defaultMaxRedirects != hops {
+        t.Fatalf("expected the exchange to stop at the documented cap, got %d hops", hops)
+    }
+}
+
+/* @info the redirect policy strips three headers by name beyond the ones it learned from the client and from the request, and neither Cookie nor Proxy-Authorization had ever been proven. Both deletions are SHADOWED for anything this API can produce: a caller sets them through WithHeader, which puts their names on the request context, and the per-request stripping above removes them first. They are belt-and-braces against a channel that does not exist today — a cookie jar, a transport-level proxy credential — so this test pins the verdict, that neither reaches a host the first server chose, and not the position of the guard. The bearer-token test below is the one that proves the by-name deletion on its own. */
+func TestHttpClient_StripsCookieAndProxyAuthorizationOnCrossOriginRedirect(t *testing.T) {
+    receivedCookie := ""
+    receivedProxyAuthorization := ""
+
+    target := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        receivedCookie = request.Header.Get("Cookie")
+        receivedProxyAuthorization = request.Header.Get("Proxy-Authorization")
+
+        writer.WriteHeader(http.StatusOK)
+    }))
+    defer target.Close()
+
+    origin := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        http.Redirect(writer, request, target.URL, http.StatusFound)
+    }))
+    defer origin.Close()
+
+    client := NewDefaultHttpClient()
+    defer client.Close()
+
+    response, requestErr := client.Get(
+        origin.URL,
+        WithHeader("Cookie", "session=SECRET"),
+        WithHeader("Proxy-Authorization", "Basic SECRET"),
+    )
+    if nil != requestErr {
+        t.Fatalf("unexpected request error: %v", requestErr)
+    }
+
+    if 200 != response.StatusCode() {
+        t.Fatalf("unexpected status code: %d", response.StatusCode())
+    }
+
+    if "" != receivedCookie {
+        t.Fatalf("the cookie followed the redirect off its origin: %q", receivedCookie)
+    }
+
+    if "" != receivedProxyAuthorization {
+        t.Fatalf("the proxy credential followed the redirect off its origin: %q", receivedProxyAuthorization)
+    }
+}
+
+/* @info the streaming path reads the cap AFTER the exchange, unlike the buffered one which refuses before anything is dialled — a difference the buffered test asserts by counting zero server hits. The asymmetry is real and this test records it: a streaming request with an invalid cap has already committed its side effect when it fails, so a caller retrying on that error repeats the operation. The body is closed on the way out, which is what keeps the connection from being pinned by the refusal. */
+func TestHttpClient_StreamWithAnInvalidCapFailsOnlyAfterTheRequestWasSent(t *testing.T) {
+    serverHits := 0
+
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        serverHits = serverHits + 1
+
+        writer.WriteHeader(http.StatusOK)
+        _, _ = writer.Write([]byte("body"))
+    }))
+    defer server.Close()
+
+    client := NewDefaultHttpClient()
+    defer client.Close()
+
+    _, requestErr := client.RequestStream(http.MethodGet, server.URL, WithMaxResponseBodyBytes(0))
+    if nil == requestErr {
+        t.Fatalf("expected the invalid cap to be refused on the streaming path")
+    }
+
+    if "invalid max response body bytes" != requestErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", requestErr.Error())
+    }
+
+    if 1 != serverHits {
+        t.Fatalf("expected the streaming refusal to arrive after the request was sent, got %d server hits", serverHits)
+    }
+}
+
+/* @info the nil-option refusal had been proven on the buffered path alone, and the streaming path folds its options through the same function — but nothing had ever entered it from there, so a streaming call was relying on a guard proven for its sibling. */
+func TestHttpClient_StreamRefusesANilRequestOption(t *testing.T) {
+    serverHits := 0
+
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        serverHits = serverHits + 1
+
+        writer.WriteHeader(http.StatusOK)
+    }))
+    defer server.Close()
+
+    client := NewDefaultHttpClient()
+    defer client.Close()
+
+    _, requestErr := client.RequestStream(http.MethodGet, server.URL, nil)
+    if nil == requestErr {
+        t.Fatalf("expected a nil request option to be refused on the streaming path")
+    }
+
+    if "nil request option" != requestErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", requestErr.Error())
+    }
+
+    if 0 != serverHits {
+        t.Fatalf("expected the option refusal to arrive before anything was dialled, got %d server hits", serverHits)
+    }
+}
+
+/* @info a body json cannot encode — a channel, a function, a cyclic structure — fails before anything is dialled, and the refusal has to name the encoding rather than the transport: a caller shown a request failure would look at the network for a mistake that is in its own value. */
+func TestHttpClient_AJsonBodyThatCannotBeEncodedIsRefusedBeforeDialling(t *testing.T) {
+    serverHits := 0
+
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        serverHits = serverHits + 1
+
+        writer.WriteHeader(http.StatusOK)
+    }))
+    defer server.Close()
+
+    client := NewDefaultHttpClient()
+    defer client.Close()
+
+    _, requestErr := client.Post(server.URL, make(chan int))
+    if nil == requestErr {
+        t.Fatalf("expected a body json cannot encode to be refused")
+    }
+
+    if "failed to marshal json body" != requestErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", requestErr.Error())
+    }
+
+    if 0 != serverHits {
+        t.Fatalf("expected the encoding refusal to arrive before anything was dialled, got %d server hits", serverHits)
+    }
+}
+
+/* @info a string body is sent verbatim, with no content type invented for it — the branch is what lets a caller send xml, form-encoded text or a pre-rendered json document under a content type it names itself, and nothing had ever entered it: a string falling through to the unsupported-type refusal would have been discovered by an application, not by the suite. */
+func TestHttpClient_AStringBodyIsSentVerbatimWithoutAnInventedContentType(t *testing.T) {
+    receivedBody := ""
+    receivedContentType := ""
+
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        body, _ := io.ReadAll(request.Body)
+        receivedBody = string(body)
+        receivedContentType = request.Header.Get("Content-Type")
+
+        writer.WriteHeader(http.StatusOK)
+    }))
+    defer server.Close()
+
+    client := NewDefaultHttpClient()
+    defer client.Close()
+
+    _, requestErr := client.Request(
+        http.MethodPost,
+        server.URL,
+        WithBody("<document>one</document>"),
+        WithHeader("Content-Type", "application/xml"),
+    )
+    if nil != requestErr {
+        t.Fatalf("unexpected request error: %v", requestErr)
+    }
+
+    if "<document>one</document>" != receivedBody {
+        t.Fatalf("expected the string body to be sent verbatim, got %q", receivedBody)
+    }
+
+    if "application/xml" != receivedContentType {
+        t.Fatalf("expected the caller's own content type, got %q", receivedContentType)
+    }
+}
+
+/* @info a body that ends before the length the server declared is a truncated response, and it has to be reported as a read failure rather than handed to the caller as a short body — a json document cut in half decodes to a zero value, and the caller acts on it. */
+func TestHttpClient_ATruncatedResponseBodyIsReportedAsAReadFailure(t *testing.T) {
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        hijacker, isHijacker := writer.(http.Hijacker)
+        if false == isHijacker {
+            t.Errorf("expected the test server to support hijacking")
+
+            return
+        }
+
+        connection, buffered, hijackErr := hijacker.Hijack()
+        if nil != hijackErr {
+            t.Errorf("unexpected hijack error: %v", hijackErr)
+
+            return
+        }
+
+        _, _ = buffered.WriteString("HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\ntruncated")
+        _ = buffered.Flush()
+        _ = connection.Close()
+    }))
+    defer server.Close()
+
+    client := NewDefaultHttpClient()
+    defer client.Close()
+
+    _, requestErr := client.Get(server.URL)
+    if nil == requestErr {
+        t.Fatalf("expected the truncated body to be reported")
+    }
+
+    if "failed to read response body" != requestErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", requestErr.Error())
+    }
+}
+
+/* @info the origin check parses both sides, and each parse has a refusal of its own: a base url the configuration mangled and a target the caller mangled are different mistakes, and reporting either as the other sends a reader to the wrong file. Neither had been entered. */
+func TestHttpClient_AnUnparsableBaseUrlIsNamedAsTheBase(t *testing.T) {
+    client := NewDefaultHttpClient()
+    defer client.Close()
+
+    client.SetBaseUrl("http://user:SECRET@exam ple.com")
+
+    _, requestErr := client.Get("http://other.example.com/path")
+    if nil == requestErr {
+        t.Fatalf("expected the unparsable base url to be refused")
+    }
+
+    if "failed to parse the base url" != requestErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", requestErr.Error())
+    }
+
+    rendered := renderErrorForLog(t, requestErr)
+
+    if true == strings.Contains(rendered, "SECRET") {
+        t.Fatalf("the base url credential reached the report: %q", rendered)
+    }
+
+    if false == strings.Contains(rendered, "invalid character") {
+        t.Fatalf("expected net/url's own diagnosis to survive without the url it quotes, got %q", rendered)
+    }
+}
+
+/* @info the target half of the same check, which fires for an absolute url the caller built by hand — the report has to name the request url rather than the base one, because a caller reading it is looking at its own call site. */
+func TestHttpClient_AnUnparsableAbsoluteTargetIsNamedAsTheRequestUrl(t *testing.T) {
+    client := NewDefaultHttpClient()
+    defer client.Close()
+
+    client.SetBaseUrl("http://example.com")
+
+    _, requestErr := client.Get("http://example.com/pa\x7fth?token=SECRET")
+    if nil == requestErr {
+        t.Fatalf("expected the unparsable absolute target to be refused")
+    }
+
+    if "failed to parse request url" != requestErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", requestErr.Error())
+    }
+
+    if true == strings.Contains(renderErrorForLog(t, requestErr), "SECRET") {
+        t.Fatalf("the query secret reached the report: %q", renderErrorForLog(t, requestErr))
+    }
+}
+
+/* @info the buffered path reads one byte past the cap precisely so a body ending EXACTLY at it is delivered rather than refused; the streaming sibling has carried that proof since the httpclient session and the buffered one had not, so an off-by-one there would have refused every response that filled its budget exactly. */
+func TestHttpClient_ABufferedBodyEndingExactlyAtTheCapIsDelivered(t *testing.T) {
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        writer.WriteHeader(http.StatusOK)
+        _, _ = writer.Write([]byte("0123456789"))
+    }))
+    defer server.Close()
+
+    client := NewDefaultHttpClient()
+    defer client.Close()
+
+    response, requestErr := client.Get(server.URL, WithMaxResponseBodyBytes(10))
+    if nil != requestErr {
+        t.Fatalf("expected a body ending exactly at the cap to be delivered, got %v", requestErr)
+    }
+
+    if "0123456789" != response.String() {
+        t.Fatalf("unexpected body: %q", response.String())
+    }
+
+    _, oneOverErr := client.Get(server.URL, WithMaxResponseBodyBytes(9))
+    if nil == oneOverErr {
+        t.Fatalf("expected a body one byte past the cap to be refused")
+    }
+
+    if "response body exceeded max size" != oneOverErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", oneOverErr.Error())
+    }
+}
+
+/* @info the origin comparison refuses a nil side rather than dereferencing it. No public path can hand it one — both call sites pass urls that are non-nil by construction — but the function is the credential boundary itself, and a fail-open answer here would keep an api key on a redirect that left the origin. Recorded in the backlog as unreachable through the public API. */
+func TestIsSameOrigin_ANilSideIsNotTheSameOrigin(t *testing.T) {
+    if true == isSameOrigin(nil, mustParseUrl(t, "https://example.com")) {
+        t.Fatalf("expected a nil origin to be refused")
+    }
+
+    if true == isSameOrigin(mustParseUrl(t, "https://example.com"), nil) {
+        t.Fatalf("expected a nil target to be refused")
+    }
+
+    if true == isSameOrigin(nil, nil) {
+        t.Fatalf("expected two nil sides to be refused")
+    }
+}
+
+/* @info the effective port of a scheme that is neither http nor https is the empty string, which makes two urls of one unknown scheme compare EQUAL on port whatever ports they name — a fail-open answer. It cannot be reached today because the schemes must match first and every path guarantees http or https on at least one side, so this pins the behaviour rather than endorsing it; carried to the backlog beside the aliasing findings. */
+func TestEffectivePort_AnUnknownSchemeYieldsNoPortAtAll(t *testing.T) {
+    if "" != effectivePort(mustParseUrl(t, "ftp://example.com/file")) {
+        t.Fatalf("expected an unknown scheme to imply no port, got %q", effectivePort(mustParseUrl(t, "ftp://example.com/file")))
+    }
+
+    if "21" != effectivePort(mustParseUrl(t, "ftp://example.com:21/file")) {
+        t.Fatalf("expected a spelled-out port to win whatever the scheme, got %q", effectivePort(mustParseUrl(t, "ftp://example.com:21/file")))
+    }
+
+    if "443" != effectivePort(mustParseUrl(t, "HTTPS://example.com")) {
+        t.Fatalf("expected the scheme comparison to be case-insensitive, got %q", effectivePort(mustParseUrl(t, "HTTPS://example.com")))
+    }
+}
+
+type foreignRoundTripper struct{}
+
+func (instance foreignRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+    return nil, nil
+}
+
+/* @info Close reaches for the transport's own idle pool, and a transport that is not net/http's has none to release: the guard is what keeps Close a no-op instead of a panic there. Nothing can install a foreign transport through the public API today — there is no setter and no configuration hook — so the transport is replaced white-box; the guard becomes load-bearing the moment such a hook is added. Recorded in the backlog as unreachable through the public API. */
+func TestHttpClient_CloseIsANoOpForATransportItDoesNotOwn(t *testing.T) {
+    client := NewDefaultHttpClient()
+
+    client.client.Transport = foreignRoundTripper{}
+
+    if closeErr := client.Close(); nil != closeErr {
+        t.Fatalf("expected Close to succeed for a foreign transport, got %v", closeErr)
+    }
+}
+
+/* @info the parse-error sanitizer unwraps a *url.Error to drop the url its message quotes, and falls back to the error text for anything else. Every caller feeds it a *url.Error today, so the fallback is unreachable — but it is what keeps the sanitizer total: a nil return or a panic there would take out the very report a failed url was being described in. */
+func TestSanitizeUrlParseError_AnErrorThatIsNotAUrlErrorKeepsItsOwnText(t *testing.T) {
+    sanitized := sanitizeUrlParseError(errors.New("a plain failure"))
+
+    if "a plain failure" != sanitized {
+        t.Fatalf("unexpected sanitized text: %q", sanitized)
+    }
+
+    wrapped := &url.Error{Op: "parse", URL: "https://user:SECRET@example.com", Err: errors.New("invalid character")}
+
+    sanitized = sanitizeUrlParseError(wrapped)
+
+    if "invalid character" != sanitized {
+        t.Fatalf("expected the quoted url to be dropped, got %q", sanitized)
+    }
+}
+
+/* @info the unsupported-body report names the type it was handed, and a nil reaching it would have no type to name — the branch answers "nil" rather than dereferencing. A nil body is filtered one step earlier so nothing can reach it, which is why it is pinned directly. */
+func TestTypeNameOf_ANilValueIsNamedRatherThanDereferenced(t *testing.T) {
+    if "nil" != typeNameOf(nil) {
+        t.Fatalf("unexpected name for a nil value: %q", typeNameOf(nil))
+    }
+
+    if "int" != typeNameOf(3) {
+        t.Fatalf("unexpected name for an int: %q", typeNameOf(3))
     }
 }

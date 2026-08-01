@@ -1,6 +1,9 @@
 package container
 
 import (
+    "errors"
+    "runtime"
+    "strings"
     "sync"
     "testing"
 
@@ -549,3 +552,170 @@ func TestCreationGuard_OverrideInstalledDuringCreationWins(t *testing.T) {
     }
 }
 
+
+type waitingResolverProbe struct {
+    value string
+}
+
+/* awaitCreationWaiter blocks until the creation of serviceName has registered at least the given number of waiters, which is the state a test needs before it can release the owner: the wait registration is what the guard under test then reads. */
+func awaitCreationWaiter(t *testing.T, serviceContainer *container, serviceName string, waiterCount int) {
+    t.Helper()
+
+    for attempt := 0; attempt < 20000; attempt++ {
+        serviceContainer.mutex.RLock()
+        state, exists := serviceContainer.creatingByName[serviceName]
+        registered := 0
+        if true == exists && nil != state {
+            registered = len(state.waiterContextIds)
+        }
+        serviceContainer.mutex.RUnlock()
+
+        if waiterCount <= registered {
+            return
+        }
+
+        runtime.Gosched()
+    }
+
+    t.Fatalf("expected %d waiters on the creation of %q", waiterCount, serviceName)
+}
+
+/* @info a service the container memoizes is created once and handed to the owner AND to every goroutine that arrived while it was being built — so a creation that FAILED has to reach the waiters as a failure too. Nothing had ever entered that branch: a waiter released after a failed creation used to be proven only by the absence of a crash, and a branch that instead fell through to the lookup would have answered "service was not available after creation finished" and sent the reader looking for a missing registration rather than for the provider that refused. */
+func TestCreationGuard_AWaiterInheritsTheOwnersCreationFailure(t *testing.T) {
+    serviceContainer := NewContainer().(*container)
+
+    providerEntered := make(chan struct{})
+    releaseProvider := make(chan struct{})
+
+    registerErr := serviceContainer.Register(
+        "app.failing.shared",
+        func(resolver containercontract.Resolver) (*waitingResolverProbe, error) {
+            close(providerEntered)
+            <-releaseProvider
+
+            return nil, errors.New("the provider refused")
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    ownerDone := make(chan error, 1)
+    go func() {
+        _, ownerErr := serviceContainer.Get("app.failing.shared")
+        ownerDone <- ownerErr
+    }()
+
+    <-providerEntered
+
+    waiterDone := make(chan error, 1)
+    go func() {
+        _, waiterErr := serviceContainer.Get("app.failing.shared")
+        waiterDone <- waiterErr
+    }()
+
+    awaitCreationWaiter(t, serviceContainer, "app.failing.shared", 1)
+
+    close(releaseProvider)
+
+    ownerErr := <-ownerDone
+    if nil == ownerErr {
+        t.Fatalf("expected the owner's resolution to fail")
+    }
+
+    waiterErr := <-waiterDone
+    if nil == waiterErr {
+        t.Fatalf("expected the waiter's resolution to fail with the owner's failure")
+    }
+
+    if "service creation failed" != waiterErr.Error() {
+        t.Fatalf("unexpected waiter refusal message: %q", waiterErr.Error())
+    }
+
+    if false == strings.Contains(renderedCauseChain(waiterErr), "the provider refused") {
+        t.Fatalf("expected the owner's own failure to travel to the waiter, got %q", renderedCauseChain(waiterErr))
+    }
+}
+
+/* @info the resolution stack catches a cycle inside ONE resolver context, and this guard catches the other shape: two contexts each owning a creation the other is waiting on, which no stack can see because neither context ever repeats a key. Without it the two goroutines simply wait on each other's channel for the life of the process — a hang, with no report at all, at the moment the second request arrives. The deadlock is built deliberately, both owners established before either is released, so the detection is what ends it rather than a scheduling accident. */
+func TestCreationGuard_ACycleAcrossTwoConcurrentResolutionsIsReported(t *testing.T) {
+    serviceContainer := NewContainer().(*container)
+
+    firstEntered := make(chan struct{})
+    secondEntered := make(chan struct{})
+    releaseFirst := make(chan struct{})
+    releaseSecond := make(chan struct{})
+
+    registerErr := serviceContainer.Register(
+        "app.cycle.first",
+        func(resolver containercontract.Resolver) (*waitingResolverProbe, error) {
+            close(firstEntered)
+            <-releaseFirst
+
+            _, getErr := resolver.Get("app.cycle.second")
+            if nil != getErr {
+                return nil, getErr
+            }
+
+            return &waitingResolverProbe{value: "first"}, nil
+        },
+        WithoutTypeRegistration(),
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    registerErr = serviceContainer.Register(
+        "app.cycle.second",
+        func(resolver containercontract.Resolver) (*waitingResolverProbe, error) {
+            close(secondEntered)
+            <-releaseSecond
+
+            _, getErr := resolver.Get("app.cycle.first")
+            if nil != getErr {
+                return nil, getErr
+            }
+
+            return &waitingResolverProbe{value: "second"}, nil
+        },
+        WithoutTypeRegistration(),
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    firstDone := make(chan error, 1)
+    go func() {
+        _, firstErr := serviceContainer.Get("app.cycle.first")
+        firstDone <- firstErr
+    }()
+
+    secondDone := make(chan error, 1)
+    go func() {
+        _, secondErr := serviceContainer.Get("app.cycle.second")
+        secondDone <- secondErr
+    }()
+
+    <-firstEntered
+    <-secondEntered
+
+    /* the first resolution reaches for the second and parks as its waiter, which is the edge the detection then closes */
+    close(releaseFirst)
+    awaitCreationWaiter(t, serviceContainer, "app.cycle.second", 1)
+
+    close(releaseSecond)
+
+    secondErr := <-secondDone
+    if nil == secondErr {
+        t.Fatalf("expected the resolution closing the cycle to be refused")
+    }
+
+    if false == strings.Contains(renderedCauseChain(secondErr), "circular service dependency detected across concurrent resolutions") {
+        t.Fatalf("expected the cross-context cycle to be named, got %q", renderedCauseChain(secondErr))
+    }
+
+    firstErr := <-firstDone
+    if nil == firstErr {
+        t.Fatalf("expected the waiting resolution to fail with the refused creation rather than hang")
+    }
+}

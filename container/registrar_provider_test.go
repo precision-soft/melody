@@ -60,6 +60,163 @@ func TestReflectedProvider_TypedNilConcreteErrorMeansSuccess(t *testing.T) {
     }
 }
 
+/* @info the provider contract is one gate with six shape refusals behind it, and only one of them — the argument count — had ever been entered by a test: the other five could each have been deleted without the suite noticing, and a provider that does not honour the contract would then have been registered at boot and called on the request path, where the reflection panics instead of returning the error the registration promised. Every refusal is asserted on its own message, because they all reach the caller through the same return and a shared assertion would let any one of them stand in for the rest. */
+func TestValidateRegistrarProviderSignature_ANonFunctionIsRefused(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register("app.not.a.function", 42)
+    if nil == registerErr {
+        t.Fatalf("expected a provider that is not a function to be refused")
+    }
+
+    if "provider must be a function" != registerErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", registerErr.Error())
+    }
+}
+
+/* @info a provider taking something other than the resolver would be called with a resolver anyway, through reflection, which panics on the request path rather than at the boot line that declared it. */
+func TestValidateRegistrarProviderSignature_AFirstArgumentThatIsNotTheResolverIsRefused(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "app.wrong.argument",
+        func(unrelated int) (*providerContractProbe, error) {
+            return &providerContractProbe{value: "wrong"}, nil
+        },
+    )
+    if nil == registerErr {
+        t.Fatalf("expected a provider whose first argument is not the resolver to be refused")
+    }
+
+    if "provider first argument must be exactly resolver" != registerErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", registerErr.Error())
+    }
+}
+
+/* @info the wrapper reads results[0] and results[1] by index, so a provider returning one value would index past the end of the result slice — inside the creation guard, per resolution. */
+func TestValidateRegistrarProviderSignature_AProviderNotReturningTwoValuesIsRefused(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "app.one.output",
+        func(resolver containercontract.Resolver) *providerContractProbe {
+            return &providerContractProbe{value: "single"}
+        },
+    )
+    if nil == registerErr {
+        t.Fatalf("expected a provider returning a single value to be refused")
+    }
+
+    if "provider must return exactly two values" != registerErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", registerErr.Error())
+    }
+}
+
+/* @info a provider declared to return any files the service under the empty interface, which every value satisfies: the type-keyed resolution would then answer whichever registration reached the map first, for any type asked. */
+func TestValidateRegistrarProviderSignature_AProviderReturningAnyIsRefused(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "app.any.output",
+        func(resolver containercontract.Resolver) (any, error) {
+            return &providerContractProbe{value: "any"}, nil
+        },
+    )
+    if nil == registerErr {
+        t.Fatalf("expected a provider returning any to be refused")
+    }
+
+    if "provider must not return any" != registerErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", registerErr.Error())
+    }
+}
+
+/* @info the wrapper asserts the second result to error, and this refusal is what makes that assertion safe — without it a provider whose second value is a plain string would reach the assertion at resolution time instead of at the line that declared it. */
+func TestValidateRegistrarProviderSignature_ASecondReturnValueThatIsNotAnErrorIsRefused(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "app.wrong.second.output",
+        func(resolver containercontract.Resolver) (*providerContractProbe, string) {
+            return &providerContractProbe{value: "wrong"}, ""
+        },
+    )
+    if nil == registerErr {
+        t.Fatalf("expected a provider whose second return value is not an error to be refused")
+    }
+
+    if "provider second return value must be error" != registerErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", registerErr.Error())
+    }
+}
+
+/* @info the argument-count refusal had only ever been proven through the scoped door; the container one goes through the same gate and has to answer the same way, or the two lifetimes could drift apart on what they accept. */
+func TestValidateRegistrarProviderSignature_TheArgumentCountRefusalHoldsOnTheContainerPathToo(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "app.no.argument",
+        func() (*providerContractProbe, error) {
+            return &providerContractProbe{value: "none"}, nil
+        },
+    )
+    if nil == registerErr {
+        t.Fatalf("expected a provider taking no resolver to be refused")
+    }
+
+    if "provider must accept exactly one argument" != registerErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", registerErr.Error())
+    }
+}
+
+/* @info an untyped nil provider is refused at the container registrar's own door, before the contract gate is reached. The refusal is SHADOWED: the gate underneath answers an untyped nil with the identical message and the identical context, so disarming the door changes nothing a caller can observe and this test pins the verdict rather than the position of the guard. Its scoped sibling below is not shadowed — that one spells "scoped service" — which is why the two are asserted separately. */
+func TestContainerRegistrar_UntypedNilProviderIsRefusedByName(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register("app.nil.provider", nil)
+    if nil == registerErr {
+        t.Fatalf("expected an untyped nil provider to be refused")
+    }
+
+    if "the provider is required to register a service" != registerErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", registerErr.Error())
+    }
+}
+
+/* @info the same refusal on the scoped door, which spells it for its own lifetime: a shared message would let either guard be deleted while the other kept the suite green. */
+func TestContainerScopedRegistrar_UntypedNilProviderIsRefusedByName(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerScopedErr := serviceContainer.RegisterScoped("app.nil.scoped.provider", nil)
+    if nil == registerScopedErr {
+        t.Fatalf("expected an untyped nil scoped provider to be refused")
+    }
+
+    if "the provider is required to register a scoped service" != registerScopedErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", registerScopedErr.Error())
+    }
+}
+
+/* @info an empty scoped name is refused at the door for the reason the container one is: a service filed under it can never be asked for again. */
+func TestContainerScopedRegistrar_EmptyNameIsRefusedByName(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerScopedErr := serviceContainer.RegisterScoped("", scopedNameProbeProvider())
+    if nil == registerScopedErr {
+        t.Fatalf("expected an empty scoped service name to be refused")
+    }
+
+    if "service name is required to register a scoped service" != registerScopedErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", registerScopedErr.Error())
+    }
+}
+
+func scopedNameProbeProvider() containercontract.Provider[*providerContractProbe] {
+    return func(resolver containercontract.Resolver) (*providerContractProbe, error) {
+        return &providerContractProbe{value: "scoped"}, nil
+    }
+}
+
 /* @info the same concrete-error shape still fails the resolution when the provider actually errors — the normalization removes only the typed NIL, not the error channel. */
 func TestReflectedProvider_ConcreteErrorStillFails(t *testing.T) {
     serviceContainer := NewContainer()

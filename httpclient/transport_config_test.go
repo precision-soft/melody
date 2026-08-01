@@ -90,3 +90,35 @@ func TestHttpClientConfigWithTransportRoundTrips(t *testing.T) {
         t.Fatalf("expected WithTransport to store the transport config")
     }
 }
+
+/* @info four of the eight overrides had only ever been asserted through their INHERIT branch — the one taken when the caller names nothing — so the four that actually apply a caller's value were never entered: a transport tuned in configuration would have silently kept the defaults, and the only symptom is a timeout that fires at the wrong moment under load. */
+func TestResolveTransportConfig_TheRemainingFourOverridesAreApplied(t *testing.T) {
+    resolved := resolveTransportConfig(&TransportConfig{
+        IdleConnTimeout:       11 * time.Second,
+        TlsHandshakeTimeout:   12 * time.Second,
+        ExpectContinueTimeout: 13 * time.Second,
+        ResponseHeaderTimeout: 14 * time.Second,
+    })
+
+    if 11*time.Second != resolved.IdleConnTimeout {
+        t.Fatalf("unexpected idle connection timeout: %v", resolved.IdleConnTimeout)
+    }
+
+    if 12*time.Second != resolved.TlsHandshakeTimeout {
+        t.Fatalf("unexpected tls handshake timeout: %v", resolved.TlsHandshakeTimeout)
+    }
+
+    if 13*time.Second != resolved.ExpectContinueTimeout {
+        t.Fatalf("unexpected expect continue timeout: %v", resolved.ExpectContinueTimeout)
+    }
+
+    if 14*time.Second != resolved.ResponseHeaderTimeout {
+        t.Fatalf("unexpected response header timeout: %v", resolved.ResponseHeaderTimeout)
+    }
+
+    defaults := DefaultTransportConfig()
+
+    if defaults.DialTimeout != resolved.DialTimeout || defaults.KeepAlive != resolved.KeepAlive {
+        t.Fatalf("expected the fields the caller did not name to keep the defaults, got %v and %v", resolved.DialTimeout, resolved.KeepAlive)
+    }
+}

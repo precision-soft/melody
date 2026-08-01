@@ -207,3 +207,57 @@ func TestLazyService_GetIsSafeForConcurrentUse(t *testing.T) {
 
     waitGroup.Wait()
 }
+
+/* @info Get is the panicking door of the handle, and its nil-yield refusal had never been entered: a resolver that answers (nil, nil) — a provider whose value the container never filed, a typed nil boxed by a foreign resolver — would otherwise hand the caller a nil the compiler says is a live service, dereferenced somewhere far from the handle. The refusal has to carry its own message, because the failure path of the same call answers with whatever the resolver refused and a reader has to be able to tell the two apart. */
+func TestLazyService_GetRefusesANilYieldByName(t *testing.T) {
+    handle := &LazyService[*lazyProbeItem]{
+        resolve: func() (*lazyProbeItem, error) {
+            return nil, nil
+        },
+    }
+
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected the nil yield to panic on the Get door")
+        }
+
+        recoveredErr, isError := recoveredValue.(error)
+        if false == isError {
+            t.Fatalf("expected an error panic value, got %#v", recoveredValue)
+        }
+
+        if "lazy service resolved to nil" != recoveredErr.Error() {
+            t.Fatalf("unexpected panic message: %q", recoveredErr.Error())
+        }
+    }()
+
+    _ = handle.Get()
+}
+
+/* @info the failure door of Get answers with the resolver's own error rather than the nil-yield message, which is what keeps the two refusals distinguishable in a boot log: a service that is missing and a service that resolved to nothing are different mistakes. */
+func TestLazyService_GetCarriesTheResolversOwnFailure(t *testing.T) {
+    handle := &LazyService[*lazyProbeItem]{
+        resolve: func() (*lazyProbeItem, error) {
+            return nil, errors.New("the resolver refused")
+        },
+    }
+
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected the failed resolution to panic on the Get door")
+        }
+
+        recoveredErr, isError := recoveredValue.(error)
+        if false == isError {
+            t.Fatalf("expected an error panic value, got %#v", recoveredValue)
+        }
+
+        if "the resolver refused" != recoveredErr.Error() {
+            t.Fatalf("unexpected panic message: %q", recoveredErr.Error())
+        }
+    }()
+
+    _ = handle.Get()
+}

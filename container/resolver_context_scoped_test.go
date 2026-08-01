@@ -612,3 +612,65 @@ func TestScopedResolution_ExistingInstanceRecordsDependencyEdge(t *testing.T) {
         t.Fatalf("expected the dependent to be closed before its already-created dependency, got %v", recorded)
     }
 }
+
+type scopedTypeOnlyProbe struct {
+    value  string
+    closed *int
+}
+
+func (instance *scopedTypeOnlyProbe) Close() error {
+    *instance.closed = *instance.closed + 1
+
+    return nil
+}
+
+/* @info a scoped registration reached only by its type, with no name to file it under, has a whole build path of its own — its own creation-guard key, its own store under the empty name — and no public door can produce the state it needs: every registrar writes the type provider and the type-to-name index in the same two lines, so the name index always answers first and this path is never taken. The state is therefore built by hand, because the point of the path is what happens if it ever IS taken: the service must be built once, memoized under its type, and closed with the scope rather than leaking past it. Recorded in the backlog as unreachable through the public API. */
+func TestScopedServiceByType_BuildsATypeOnlyScopedServiceAndClosesItWithTheScope(t *testing.T) {
+    serviceContainer := NewContainer().(*container)
+
+    scopeInstance := serviceContainer.NewScope().(*scope)
+
+    canonicalType := canonicalServiceType(reflect.TypeOf((*scopedTypeOnlyProbe)(nil)))
+
+    buildCount := 0
+    closeCount := 0
+
+    scopeInstance.mutex.Lock()
+    scopeInstance.ownTypeProviders[canonicalType] = func(resolver containercontract.Resolver) (any, error) {
+        buildCount = buildCount + 1
+
+        return &scopedTypeOnlyProbe{value: "type only", closed: &closeCount}, nil
+    }
+    scopeInstance.mutex.Unlock()
+
+    firstValue, firstErr := scopeInstance.GetByType(canonicalType)
+    if nil != firstErr {
+        t.Fatalf("unexpected get by type error: %v", firstErr)
+    }
+
+    firstProbe, isProbe := firstValue.(*scopedTypeOnlyProbe)
+    if false == isProbe || "type only" != firstProbe.value {
+        t.Fatalf("unexpected resolved value: %#v", firstValue)
+    }
+
+    secondValue, secondErr := scopeInstance.GetByType(canonicalType)
+    if nil != secondErr {
+        t.Fatalf("unexpected second get by type error: %v", secondErr)
+    }
+
+    if firstValue != secondValue {
+        t.Fatalf("expected the type-only scoped service to be memoized within its scope")
+    }
+
+    if 1 != buildCount {
+        t.Fatalf("expected the provider to run exactly once, got %d", buildCount)
+    }
+
+    if closeErr := scopeInstance.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != closeCount {
+        t.Fatalf("expected the type-only scoped service to be closed exactly once with its scope, got %d", closeCount)
+    }
+}

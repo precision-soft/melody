@@ -362,3 +362,55 @@ func TestRegisterScoped_ProtectedNameRefused(t *testing.T) {
         t.Fatalf("expected the protected name to be refused even with Replacing declared")
     }
 }
+
+/* @info the container's own panicking scoped door had never been executed. Unlike its two siblings — the generic front door and the one on a live scope, which both wrap the failure with a message naming the declaration — this one re-panics the registration's own refusal unchanged, matching MustRegister beside it; the assertion pins that spelling, because a wrapper added here later would change what a boot log says without any test noticing. */
+func TestContainer_MustRegisterScoped_RegistersAndRePanicsTheRefusalUnchanged(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    serviceContainer.MustRegisterScoped(
+        "app.scoped.must",
+        func(resolver containercontract.Resolver) (*scopedRegistrarProbe, error) {
+            return &scopedRegistrarProbe{value: "scoped"}, nil
+        },
+    )
+
+    scopeInstance := serviceContainer.NewScope()
+
+    value, getErr := scopeInstance.Get("app.scoped.must")
+    if nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    probe, isProbe := value.(*scopedRegistrarProbe)
+    if false == isProbe || "scoped" != probe.value {
+        t.Fatalf("expected the registration to build its own service, got %#v", value)
+    }
+
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected the duplicate scoped registration to panic")
+        }
+
+        recoveredErr, isError := recoveredValue.(error)
+        if false == isError {
+            t.Fatalf("expected an error panic value, got %#v", recoveredValue)
+        }
+
+        if "scoped service already registered" != recoveredErr.Error() {
+            t.Fatalf("unexpected panic message: %q", recoveredErr.Error())
+        }
+
+        if false == errors.Is(recoveredErr, ErrScopedServiceIdAlreadyRegistered) {
+            t.Fatalf("expected the re-panicked refusal to keep its cause, got %v", recoveredErr)
+        }
+    }()
+
+    serviceContainer.MustRegisterScoped(
+        "app.scoped.must",
+        func(resolver containercontract.Resolver) (*scopedRegistrarProbe, error) {
+            return &scopedRegistrarProbe{value: "duplicate"}, nil
+        },
+        WithoutTypeRegistration(),
+    )
+}

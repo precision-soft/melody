@@ -1,8 +1,10 @@
 package container
 
 import (
+    "errors"
     "reflect"
     "strconv"
+    "strings"
     "sync"
     "sync/atomic"
     "testing"
@@ -199,5 +201,169 @@ func TestResolverContext_HasHonorsScopeSuspension(t *testing.T) {
 
     if false == scopeInstance.Has("app.scoped.only") {
         t.Fatalf("expected the unsuspended scope to keep answering for its own name")
+    }
+}
+
+type resolverContextMustProbe struct {
+    value string
+}
+
+type resolverContextMustDependent struct {
+    dependency *resolverContextMustProbe
+}
+
+/* @info the panicking doors of the resolver a PROVIDER is handed had never been executed by anything: the container's own MustGet delegates to its Get rather than to these, so a provider that reaches for a missing dependency with MustGet was relying on a path nothing had ever entered. The message has to be the resolver's own, because that is what tells a reader the failure happened while building another service rather than at the call site that asked for it. */
+func TestResolverContext_MustGet_AnswersInsideAProviderAndNamesItsOwnFailure(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "app.dependency",
+        func(resolver containercontract.Resolver) (*resolverContextMustProbe, error) {
+            return &resolverContextMustProbe{value: "dependency"}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    registerErr = serviceContainer.Register(
+        "app.dependent",
+        func(resolver containercontract.Resolver) (*resolverContextMustDependent, error) {
+            dependency := resolver.MustGet("app.dependency").(*resolverContextMustProbe)
+
+            return &resolverContextMustDependent{dependency: dependency}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    value, getErr := serviceContainer.Get("app.dependent")
+    if nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    dependent, isDependent := value.(*resolverContextMustDependent)
+    if false == isDependent || "dependency" != dependent.dependency.value {
+        t.Fatalf("expected the provider to have resolved its dependency, got %#v", value)
+    }
+
+    registerErr = serviceContainer.Register(
+        "app.broken",
+        func(resolver containercontract.Resolver) (*resolverContextMustDependent, error) {
+            _ = resolver.MustGet("app.never.declared")
+
+            return &resolverContextMustDependent{}, nil
+        },
+        WithoutTypeRegistration(),
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    _, brokenErr := serviceContainer.Get("app.broken")
+    if nil == brokenErr {
+        t.Fatalf("expected the provider's missing dependency to fail the resolution")
+    }
+
+    if false == strings.Contains(renderedCauseChain(brokenErr), "failed to get service instance") {
+        t.Fatalf("expected the resolver's own panic message in the cause chain, got %q", renderedCauseChain(brokenErr))
+    }
+}
+
+/* @info the by-type panicking door of a provider's resolver carries a message of its own, and it must not be the by-name one: the two doors fail for different reasons and a boot log has only the message to tell them apart. */
+func TestResolverContext_MustGetByType_AnswersInsideAProviderAndNamesItsOwnFailure(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "app.dependency",
+        func(resolver containercontract.Resolver) (*resolverContextMustProbe, error) {
+            return &resolverContextMustProbe{value: "dependency"}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    registerErr = serviceContainer.Register(
+        "app.dependent",
+        func(resolver containercontract.Resolver) (*resolverContextMustDependent, error) {
+            dependency := resolver.MustGetByType(reflect.TypeOf((*resolverContextMustProbe)(nil))).(*resolverContextMustProbe)
+
+            return &resolverContextMustDependent{dependency: dependency}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    value, getErr := serviceContainer.Get("app.dependent")
+    if nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    dependent, isDependent := value.(*resolverContextMustDependent)
+    if false == isDependent || "dependency" != dependent.dependency.value {
+        t.Fatalf("expected the provider to have resolved its dependency by type, got %#v", value)
+    }
+
+    registerErr = serviceContainer.Register(
+        "app.broken",
+        func(resolver containercontract.Resolver) (*resolverContextMustDependent, error) {
+            _ = resolver.MustGetByType(reflect.TypeOf((*resolverRaceProbeFirst)(nil)))
+
+            return &resolverContextMustDependent{}, nil
+        },
+        WithoutTypeRegistration(),
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    _, brokenErr := serviceContainer.Get("app.broken")
+    if nil == brokenErr {
+        t.Fatalf("expected the provider's missing dependency to fail the resolution")
+    }
+
+    if false == strings.Contains(renderedCauseChain(brokenErr), "failed to get service instance by type") {
+        t.Fatalf("expected the by-type panic message in the cause chain, got %q", renderedCauseChain(brokenErr))
+    }
+}
+
+/* renderedCauseChain walks the whole chain because a provider panic is wrapped by the creation guard before it reaches the caller, and only the chain says what the provider itself refused. */
+func renderedCauseChain(err error) string {
+    rendered := ""
+    for current := err; nil != current; current = errors.Unwrap(current) {
+        rendered = rendered + current.Error() + "\n"
+    }
+
+    return rendered
+}
+
+/* @info an empty name reaching the resolver is a configuration value that resolved away, and it has to be named as that rather than reported as a service nobody declared — the two send a reader to different places. */
+func TestResolverContext_Get_EmptyNameRefused(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    _, getErr := serviceContainer.Get("")
+    if nil == getErr {
+        t.Fatalf("expected an empty service name to be refused")
+    }
+
+    if "service name is required in get" != getErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", getErr.Error())
+    }
+}
+
+/* @info the by-type door refuses a nil type before it canonicalises it, which is what keeps the failure a described error rather than a nil dereference inside reflect — the scope twin of this guard has been pinned since the container session, the container one had not. */
+func TestResolverContext_GetByType_NilTypeRefused(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    _, getByTypeErr := serviceContainer.GetByType(nil)
+    if nil == getByTypeErr {
+        t.Fatalf("expected a nil type to be refused")
+    }
+
+    if "service type is required in get by type" != getByTypeErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", getByTypeErr.Error())
     }
 }

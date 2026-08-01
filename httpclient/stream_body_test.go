@@ -75,3 +75,61 @@ func TestLimitedStreamBody_CloseReachesTheWrappedBody(t *testing.T) {
         t.Fatalf("expected the wrapped body to be closed once, got %d", wrapped.closes)
     }
 }
+
+/* silentReader answers the first read with neither a byte nor an error, which a real network body may legitimately do and no reader used elsewhere in this suite ever does. */
+type silentReader struct {
+    reads int
+    tail  string
+}
+
+func (instance *silentReader) Read(target []byte) (int, error) {
+    instance.reads = instance.reads + 1
+
+    if 1 == instance.reads {
+        return 0, nil
+    }
+
+    if "" == instance.tail {
+        return 0, io.EOF
+    }
+
+    copied := copy(target, instance.tail)
+    instance.tail = instance.tail[copied:]
+
+    return copied, nil
+}
+
+func (instance *silentReader) Close() error {
+    return nil
+}
+
+/* @info once the allowance is spent the wrapper probes the body for one more byte to tell a stream that ended at the cap from one that runs past it — and a reader answering that probe with neither a byte nor an error has said nothing about either. Treating that silence as the end would deliver a truncated stream as complete; treating it as an overrun would refuse a body that is merely slow. The cap stays unspent and the read is retried, which is the subtlest branch in the file and the one nothing had entered. */
+func TestLimitedStreamBody_AProbeThatReturnsNothingDoesNotDecideTheStream(t *testing.T) {
+    reader := &silentReader{tail: "x"}
+
+    body := newLimitedStreamBody(reader, 0, "GET", "http://example.com")
+
+    target := make([]byte, 4)
+
+    read, readErr := body.Read(target)
+    if nil != readErr {
+        t.Fatalf("expected a silent probe to decide nothing, got %v", readErr)
+    }
+
+    if 0 != read {
+        t.Fatalf("expected no bytes from a silent probe, got %d", read)
+    }
+
+    read, readErr = body.Read(target)
+    if nil == readErr {
+        t.Fatalf("expected the retried probe to find the body past its cap")
+    }
+
+    if "response body exceeded max size" != readErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", readErr.Error())
+    }
+
+    if 0 != read {
+        t.Fatalf("expected no bytes past the cap, got %d", read)
+    }
+}

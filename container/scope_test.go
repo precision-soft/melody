@@ -1,13 +1,16 @@
 package container
 
 import (
+    "errors"
     "reflect"
     "runtime"
+    "strings"
     "sync"
     "sync/atomic"
     "testing"
 
     containercontract "github.com/precision-soft/melody/container/contract"
+    "github.com/precision-soft/melody/exception"
 )
 
 type scopeTestService struct {
@@ -816,5 +819,327 @@ func TestScopeClose_EvictedCreatedInstanceClosedAtTeardown(t *testing.T) {
 
     if 1 != overrideCloses {
         t.Fatalf("expected the ClosedWithScope override to be closed exactly once, got %v", recorded)
+    }
+}
+
+/* @info the three panicking override doors on a scope had never been executed. Two of them are not on the Scope interface at all — they are reached through the optional options companion, which is exactly the shape a caller gets wrong — and all three have to carry their own message: a request-scoped substitution that failed has to say whether the protected door or the plain one refused it. */
+func TestScope_MustOverrideInstance_InstallsAndNamesItsOwnFailure(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    scopeInstance := serviceContainer.NewScope()
+
+    scopeInstance.MustOverrideInstance("app.request.substitute", &scopeTestService{value: "installed"})
+
+    value, getErr := scopeInstance.Get("app.request.substitute")
+    if nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    service, isService := value.(*scopeTestService)
+    if false == isService || "installed" != service.value {
+        t.Fatalf("expected the installed override to answer, got %#v", value)
+    }
+
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected the protected name to panic")
+        }
+
+        recoveredErr, isError := recoveredValue.(error)
+        if false == isError {
+            t.Fatalf("expected an error panic value, got %#v", recoveredValue)
+        }
+
+        if "failed to override service instance" != recoveredErr.Error() {
+            t.Fatalf("unexpected panic message: %q", recoveredErr.Error())
+        }
+    }()
+
+    scopeInstance.MustOverrideInstance("service.protected", &scopeTestService{value: "installed"})
+}
+
+/* @info the options companion is a separate interface precisely so the four original signatures never move, which means a caller reaches it through a type assertion — and a scope that stopped satisfying it would fail silently at that assertion rather than at compile time. The assertion is part of what this test pins. */
+func TestScope_MustOverrideInstanceWithOptions_InstallsAndNamesItsOwnFailure(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    scopeInstance := serviceContainer.NewScope()
+
+    withOptions, hasOptions := scopeInstance.(containercontract.OverrideServiceWithOptions)
+    if false == hasOptions {
+        t.Fatalf("expected a scope to carry the override options companion")
+    }
+
+    withOptions.MustOverrideInstanceWithOptions("app.request.substitute", &scopeTestService{value: "installed"})
+
+    value, getErr := scopeInstance.Get("app.request.substitute")
+    if nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    service, isService := value.(*scopeTestService)
+    if false == isService || "installed" != service.value {
+        t.Fatalf("expected the installed override to answer, got %#v", value)
+    }
+
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected the protected name to panic")
+        }
+
+        recoveredErr, isError := recoveredValue.(error)
+        if false == isError {
+            t.Fatalf("expected an error panic value, got %#v", recoveredValue)
+        }
+
+        if "failed to override service instance" != recoveredErr.Error() {
+            t.Fatalf("unexpected panic message: %q", recoveredErr.Error())
+        }
+    }()
+
+    withOptions.MustOverrideInstanceWithOptions("service.protected", &scopeTestService{value: "installed"})
+}
+
+/* @info the protected door admits the "service." namespace the plain one refuses, and its panicking form has to say so — a failure reported with the plain door's message would send a reader looking for a protection that was never in the way. Its refusal here is the closed scope, the only thing the protected door still turns away. */
+func TestScope_MustOverrideProtectedInstanceWithOptions_InstallsAndNamesItsOwnFailure(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    scopeInstance := serviceContainer.NewScope()
+
+    withOptions, hasOptions := scopeInstance.(containercontract.OverrideServiceWithOptions)
+    if false == hasOptions {
+        t.Fatalf("expected a scope to carry the override options companion")
+    }
+
+    withOptions.MustOverrideProtectedInstanceWithOptions("service.protected", &scopeTestService{value: "installed"})
+
+    value, getErr := scopeInstance.Get("service.protected")
+    if nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    service, isService := value.(*scopeTestService)
+    if false == isService || "installed" != service.value {
+        t.Fatalf("expected the protected door to install the override, got %#v", value)
+    }
+
+    if closeErr := scopeInstance.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected the closed scope to panic")
+        }
+
+        recoveredErr, isError := recoveredValue.(error)
+        if false == isError {
+            t.Fatalf("expected an error panic value, got %#v", recoveredValue)
+        }
+
+        if "failed to override protected service instance" != recoveredErr.Error() {
+            t.Fatalf("unexpected panic message: %q", recoveredErr.Error())
+        }
+    }()
+
+    withOptions.MustOverrideProtectedInstanceWithOptions("service.protected", &scopeTestService{value: "late"})
+}
+
+/* @info a scope-level substitution of a protected name is the framework's own service replaced inside a live request, which is the one thing the namespace exists to prevent; the scope door refuses it exactly as the container door does. */
+func TestScope_OverrideInstance_ProtectedNameRefused(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    scopeInstance := serviceContainer.NewScope()
+
+    overrideErr := scopeInstance.OverrideInstance("service.protected", &scopeTestService{value: "substitute"})
+    if nil == overrideErr {
+        t.Fatalf("expected the protected name to be refused by the plain scope override door")
+    }
+
+    if "service is protected and cannot be overridden" != overrideErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", overrideErr.Error())
+    }
+}
+
+/* @info an empty name on a scope is refused before the options are even read, for the reason the container refuses it: nothing filed under it can ever be asked for again, and a request-scoped substitution silently lost is worse than one that failed loudly. */
+func TestScope_OverrideProtectedInstance_EmptyNameRefused(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    scopeInstance := serviceContainer.NewScope()
+
+    overrideErr := scopeInstance.OverrideProtectedInstance("", &scopeTestService{value: "installed"})
+    if nil == overrideErr {
+        t.Fatalf("expected an empty name to be refused")
+    }
+
+    if "service name is empty in override instance" != overrideErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", overrideErr.Error())
+    }
+}
+
+/* @info a nil substituted into a scope is dereferenced by the first handler that reads it, inside the request, and a typed nil boxed into an interface is not equal to nil — so the plain comparison and the interface one are two guards, and each has to be entered by something. */
+func TestScope_OverrideProtectedInstance_NilValueRefusedInBothSpellings(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    scopeInstance := serviceContainer.NewScope()
+
+    untypedErr := scopeInstance.OverrideProtectedInstance("app.request.substitute", nil)
+    if nil == untypedErr {
+        t.Fatalf("expected an untyped nil override to be refused")
+    }
+
+    if "value is nil in override instance" != untypedErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", untypedErr.Error())
+    }
+
+    var typedNil *scopeTestService
+
+    typedErr := scopeInstance.OverrideProtectedInstance("app.request.substitute", typedNil)
+    if nil == typedErr {
+        t.Fatalf("expected a typed nil override to be refused")
+    }
+
+    if "value is nil in override instance" != typedErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", typedErr.Error())
+    }
+}
+
+/* @info Get on a scope answers the empty-name refusal rather than reaching the resolver with it, so a caller whose configuration resolved a name away is told what it did rather than shown a missing-service report about a service nobody named. */
+func TestScope_Get_EmptyNameRefused(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    scopeInstance := serviceContainer.NewScope()
+
+    _, getErr := scopeInstance.Get("")
+    if nil == getErr {
+        t.Fatalf("expected an empty service name to be refused")
+    }
+
+    if "service name is empty in get" != getErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", getErr.Error())
+    }
+}
+
+/* @info Has and HasType on a scope answer false for the empty name and the nil type. Both refusals are SHADOWED — nothing can be filed under the empty name, and canonicalServiceType answers nil for a nil type so the guard below returns the same false — so this pins the verdict a caller relies on, not the position of the guard. */
+func TestScope_HasAndHasType_AnswerFalseForTheEmptyNameAndTheNilType(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "app.thing",
+        func(resolver containercontract.Resolver) (*scopeTestService, error) {
+            return &scopeTestService{value: "thing"}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+
+    if true == scopeInstance.Has("") {
+        t.Fatalf("expected the empty name to be absent from a scope")
+    }
+
+    if true == scopeInstance.HasType(nil) {
+        t.Fatalf("expected the nil type to be absent from a scope")
+    }
+
+    if false == scopeInstance.Has("app.thing") {
+        t.Fatalf("expected the scope to see the container name")
+    }
+
+    if false == scopeInstance.HasType(reflect.TypeOf((*scopeTestService)(nil))) {
+        t.Fatalf("expected the scope to see the container type")
+    }
+}
+
+type scopeCloseFailingService struct {
+    failure error
+}
+
+func (instance *scopeCloseFailingService) Close() error {
+    return instance.failure
+}
+
+/* @info a scoped service whose Close fails is the request's own teardown reporting a leak, and the report has to reach the caller of Close rather than being swallowed into the silence a nil return means — a connection returned to nobody looks exactly like a clean scope from the outside. */
+func TestScope_Close_ReportsAFailingServiceClose(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerScopedErr := serviceContainer.RegisterScoped(
+        "app.scoped.failing",
+        func(resolver containercontract.Resolver) (*scopeCloseFailingService, error) {
+            return &scopeCloseFailingService{failure: errors.New("the connection refused to close")}, nil
+        },
+    )
+    if nil != registerScopedErr {
+        t.Fatalf("unexpected scoped register error: %v", registerScopedErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+
+    if _, getErr := scopeInstance.Get("app.scoped.failing"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    closeErr := scopeInstance.Close()
+    if nil == closeErr {
+        t.Fatalf("expected the failing service close to be reported")
+    }
+
+    if "failed to close scope services" != closeErr.Error() {
+        t.Fatalf("unexpected close failure message: %q", closeErr.Error())
+    }
+
+    var typedError *exception.Error
+    if false == errors.As(closeErr, &typedError) {
+        t.Fatalf("expected a melody error, got %T", closeErr)
+    }
+
+    failures, hasFailures := typedError.Context()["failures"].(map[string]string)
+    if false == hasFailures {
+        t.Fatalf("expected the failures map in the scope close error context")
+    }
+
+    if 1 != len(failures) {
+        t.Fatalf("expected exactly the one failing service to be recorded, got %v", failures)
+    }
+
+    for nodeKey, failureText := range failures {
+        if false == strings.Contains(failureText, "the connection refused to close") {
+            t.Fatalf("expected the report to carry the service's own failure, got %q", failureText)
+        }
+
+        if false == strings.Contains(nodeKey, "app.scoped.failing") {
+            t.Fatalf("expected the failure to be filed under the service that produced it, got %q", nodeKey)
+        }
+    }
+}
+
+/* @info newScope falls back to an empty plan when it is handed none, which no public path can produce — NewScope always passes the container's published plan, and the rebuild never yields nil. The fallback is what keeps a scope built from a nil plan usable instead of dereferencing it on the first Has, so it is pinned white-box, with the state constructed by hand because the API cannot construct it. */
+func TestNewScope_ANilPlanBecomesAnEmptyPlanRatherThanANilDereference(t *testing.T) {
+    serviceContainer := NewContainer().(*container)
+
+    scopeInstance := newScope(serviceContainer, nil).(*scope)
+
+    if nil == scopeInstance.plan {
+        t.Fatalf("expected the nil plan to be replaced by an empty one")
+    }
+
+    if 0 != len(scopeInstance.plan.providers) || 0 != len(scopeInstance.plan.typeProviders) || 0 != len(scopeInstance.plan.typeRegistrationNamesByType) {
+        t.Fatalf("expected the fallback plan to declare nothing")
+    }
+
+    if true == scopeInstance.Has("app.anything") {
+        t.Fatalf("expected a scope on an empty plan to hold nothing")
+    }
+
+    if true == scopeInstance.HasType(reflect.TypeOf((*scopeTestService)(nil))) {
+        t.Fatalf("expected a scope on an empty plan to hold no type")
+    }
+
+    if closeErr := scopeInstance.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
     }
 }

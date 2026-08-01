@@ -431,3 +431,394 @@ func TestContainer_RegisterTypeIdentityKeyCollisionRefused(t *testing.T) {
         t.Fatalf("expected the colliding identity key to be refused")
     }
 }
+
+/* @info the panicking by-type door on the container had never been executed: nothing proved it resolves at all, and nothing proved its failure carries the by-type message rather than the by-name one — a caller reading a boot log has only that message to tell which door it came in through. */
+func TestContainer_MustGetByType_AnswersAndNamesItsOwnFailure(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "app.typed",
+        func(resolver containercontract.Resolver) (*testService, error) {
+            return &testService{Value: "typed"}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    value := serviceContainer.MustGetByType(reflect.TypeOf((*testService)(nil)))
+
+    service, isService := value.(*testService)
+    if false == isService || "typed" != service.Value {
+        t.Fatalf("unexpected resolved value: %#v", value)
+    }
+
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected the missing type to panic")
+        }
+
+        recoveredErr, isError := recoveredValue.(error)
+        if false == isError {
+            t.Fatalf("expected an error panic value, got %#v", recoveredValue)
+        }
+
+        if "failed to get service instance by type" != recoveredErr.Error() {
+            t.Fatalf("unexpected panic message: %q", recoveredErr.Error())
+        }
+    }()
+
+    _ = serviceContainer.MustGetByType(reflect.TypeOf((*testImplementation)(nil)))
+}
+
+/* @info the panicking override on the container had never been executed either. It has to install the value, and its refusal has to carry its own message rather than the unprotected one it delegates to — the two answer differently and a caller has to be able to tell which verb it called. */
+func TestContainer_MustOverrideInstance_InstallsAndNamesItsOwnFailure(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "app.overridable",
+        func(resolver containercontract.Resolver) (*testService, error) {
+            return &testService{Value: "real"}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    serviceContainer.MustOverrideInstance("app.overridable", &testService{Value: "installed"})
+
+    value, getErr := serviceContainer.Get("app.overridable")
+    if nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    service, isService := value.(*testService)
+    if false == isService || "installed" != service.Value {
+        t.Fatalf("expected the installed override to answer, got %#v", value)
+    }
+
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected the protected name to panic")
+        }
+
+        recoveredErr, isError := recoveredValue.(error)
+        if false == isError {
+            t.Fatalf("expected an error panic value, got %#v", recoveredValue)
+        }
+
+        if "failed to override service instance" != recoveredErr.Error() {
+            t.Fatalf("unexpected panic message: %q", recoveredErr.Error())
+        }
+    }()
+
+    serviceContainer.MustOverrideInstance("service.protected", &testService{Value: "installed"})
+}
+
+/* @info the protected namespace is the framework's, and the override door is the one place an application can substitute a service by name — the refusal is what keeps "service." meaning the same thing for the whole process. */
+func TestContainer_OverrideInstance_ProtectedNameRefused(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "service.protected",
+        func(resolver containercontract.Resolver) (*testService, error) {
+            return &testService{Value: "framework"}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    overrideErr := serviceContainer.OverrideInstance("service.protected", &testService{Value: "substitute"})
+    if nil == overrideErr {
+        t.Fatalf("expected the protected name to be refused by the unprotected override door")
+    }
+
+    if "service is protected and cannot be overridden" != overrideErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", overrideErr.Error())
+    }
+
+    protectedErr := serviceContainer.OverrideProtectedInstance("service.protected", &testService{Value: "substitute"})
+    if nil != protectedErr {
+        t.Fatalf("expected the protected door to admit the same name, got %v", protectedErr)
+    }
+}
+
+/* @info an empty name is refused before anything is written, and the refusal has to be the empty-name one rather than the not-registered one that would answer next: the two describe different mistakes, and a caller whose configuration resolved a name away needs to be told which. */
+func TestContainer_OverrideProtectedInstance_EmptyNameRefused(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    overrideErr := serviceContainer.OverrideProtectedInstance("", &testService{Value: "installed"})
+    if nil == overrideErr {
+        t.Fatalf("expected an empty name to be refused")
+    }
+
+    if "service name is empty in override instance" != overrideErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", overrideErr.Error())
+    }
+}
+
+/* @info an override of nil would file a nil under a name every later lookup answers with, so the first caller to use it dereferences it on the request path — and a typed nil boxed into an interface is NOT equal to nil, so the plain comparison lets it straight through. Both spellings are refused with the same message because they are the same mistake. */
+func TestContainer_OverrideProtectedInstance_NilValueRefusedInBothSpellings(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "app.overridable",
+        func(resolver containercontract.Resolver) (*testService, error) {
+            return &testService{Value: "real"}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    untypedErr := serviceContainer.OverrideProtectedInstance("app.overridable", nil)
+    if nil == untypedErr {
+        t.Fatalf("expected an untyped nil override to be refused")
+    }
+
+    if "value is nil in override instance" != untypedErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", untypedErr.Error())
+    }
+
+    var typedNil *testService
+
+    typedErr := serviceContainer.OverrideProtectedInstance("app.overridable", typedNil)
+    if nil == typedErr {
+        t.Fatalf("expected a typed nil override to be refused")
+    }
+
+    if "value is nil in override instance" != typedErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", typedErr.Error())
+    }
+}
+
+/* @info an override of a name the container never declared would install a service no provider backs, reachable by Get and closed by the teardown as though the container had built it — the refusal keeps the override a substitution rather than a second, undeclared registration door. */
+func TestContainer_OverrideProtectedInstance_UnregisteredNameRefused(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    overrideErr := serviceContainer.OverrideProtectedInstance("app.never.declared", &testService{Value: "installed"})
+    if nil == overrideErr {
+        t.Fatalf("expected an override of an unregistered name to be refused")
+    }
+
+    if "service not registered in container" != overrideErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", overrideErr.Error())
+    }
+}
+
+/* @info two registrations of one name would make which provider answers depend on the order the modules ran in, and the second write simply wins — the refusal carries a cause of its own so a caller can tell it apart from a collision with the scoped lifetime, which is a different mistake. */
+func TestContainer_Register_RefusesADuplicateName(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    firstErr := serviceContainer.Register(
+        "app.thing",
+        func(resolver containercontract.Resolver) (*testService, error) {
+            return &testService{Value: "first"}, nil
+        },
+    )
+    if nil != firstErr {
+        t.Fatalf("unexpected register error: %v", firstErr)
+    }
+
+    secondErr := serviceContainer.Register(
+        "app.thing",
+        func(resolver containercontract.Resolver) (*testService, error) {
+            return &testService{Value: "second"}, nil
+        },
+        WithoutTypeRegistration(),
+    )
+    if nil == secondErr {
+        t.Fatalf("expected the duplicate name to be refused")
+    }
+
+    if "service already registered" != secondErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", secondErr.Error())
+    }
+
+    if false == errors.Is(secondErr, ErrServiceIdAlreadyRegistered) {
+        t.Fatalf("expected a duplicate name cause, got %v", secondErr)
+    }
+}
+
+/* @info strictness is what decides whether two names may share a type at the container lifetime, and it defaults to on: without the refusal, GetByType would answer with whichever of the two the map happened to hold, silently and differently between runs. The non-strict registration is included so the guard is proven to be strictness — not the mere presence of a second name — that refuses. */
+func TestContainer_RegisterType_StrictDuplicateTypeRefused(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    firstErr := serviceContainer.Register(
+        "app.first",
+        func(resolver containercontract.Resolver) (*testService, error) {
+            return &testService{Value: "first"}, nil
+        },
+    )
+    if nil != firstErr {
+        t.Fatalf("unexpected register error: %v", firstErr)
+    }
+
+    strictErr := serviceContainer.Register(
+        "app.second",
+        func(resolver containercontract.Resolver) (*testService, error) {
+            return &testService{Value: "second"}, nil
+        },
+    )
+    if nil == strictErr {
+        t.Fatalf("expected the strict duplicate type to be refused")
+    }
+
+    if "service type already registered" != strictErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", strictErr.Error())
+    }
+
+    if false == errors.Is(strictErr, ErrServiceTypeAlreadyRegistered) {
+        t.Fatalf("expected a duplicate type cause, got %v", strictErr)
+    }
+
+    lenientErr := serviceContainer.Register(
+        "app.third",
+        func(resolver containercontract.Resolver) (*testService, error) {
+            return &testService{Value: "third"}, nil
+        },
+        WithTypeRegistration(false),
+    )
+    if nil != lenientErr {
+        t.Fatalf("expected a non-strict registration to share the type, got %v", lenientErr)
+    }
+}
+
+/* @info a scoped registration landing after Close would be built into scopes the teardown has finished with — the plain registrar has refused a closed container since the container session, and the scoped one carries the same refusal at its own door, where the name it is given is the one the report has to carry. */
+func TestContainer_RegisterScopedRefusedAfterClose(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    registerScopedErr := serviceContainer.RegisterScoped(
+        "app.post.close.scoped",
+        func(resolver containercontract.Resolver) (*testService, error) {
+            return &testService{Value: "late"}, nil
+        },
+    )
+    if nil == registerScopedErr {
+        t.Fatalf("expected the scoped registration on a closed container to be refused")
+    }
+
+    if "container is closed" != registerScopedErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", registerScopedErr.Error())
+    }
+}
+
+/* @info the strict duplicate-type refusal exists at the scoped lifetime too, with a message of its own: the container one and this one are separate guards, and a shared assertion would let either be deleted while the other kept the suite green. */
+func TestContainer_RegisterScoped_StrictDuplicateTypeRefused(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    firstErr := serviceContainer.RegisterScoped(
+        "app.scoped.first",
+        func(resolver containercontract.Resolver) (*testService, error) {
+            return &testService{Value: "first"}, nil
+        },
+    )
+    if nil != firstErr {
+        t.Fatalf("unexpected scoped register error: %v", firstErr)
+    }
+
+    strictErr := serviceContainer.RegisterScoped(
+        "app.scoped.second",
+        func(resolver containercontract.Resolver) (*testService, error) {
+            return &testService{Value: "second"}, nil
+        },
+    )
+    if nil == strictErr {
+        t.Fatalf("expected the strict duplicate scoped type to be refused")
+    }
+
+    if "scoped service type already registered" != strictErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", strictErr.Error())
+    }
+
+    if false == errors.Is(strictErr, ErrScopedServiceTypeAlreadyRegistered) {
+        t.Fatalf("expected a scoped duplicate type cause, got %v", strictErr)
+    }
+}
+
+/* @info Names is what an introspection command prints and what a boot report enumerates, and nothing called it: it could have returned the empty slice for the whole life of the package without a test noticing. It lists the DECLARED container names, sorted so the output is stable between runs, and it must not leak the scoped registrations — those belong to a lifetime the container never resolves. */
+func TestContainer_Names_ListsTheDeclaredContainerNamesSorted(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    if 0 != len(serviceContainer.Names()) {
+        t.Fatalf("expected a fresh container to declare no names, got %v", serviceContainer.Names())
+    }
+
+    registerErr := serviceContainer.Register(
+        "app.zebra",
+        func(resolver containercontract.Resolver) (*testService, error) {
+            return &testService{Value: "zebra"}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    registerErr = serviceContainer.Register(
+        "app.alpaca",
+        func(resolver containercontract.Resolver) (*testImplementation, error) {
+            return &testImplementation{name: "alpaca"}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    registerScopedErr := serviceContainer.RegisterScoped(
+        "app.scoped.mole",
+        func(resolver containercontract.Resolver) (*collisionalpha.Bus, error) {
+            return &collisionalpha.Bus{Region: "mole"}, nil
+        },
+    )
+    if nil != registerScopedErr {
+        t.Fatalf("unexpected scoped register error: %v", registerScopedErr)
+    }
+
+    serviceNames := serviceContainer.Names()
+
+    if 2 != len(serviceNames) {
+        t.Fatalf("expected only the two container registrations, got %v", serviceNames)
+    }
+
+    if "app.alpaca" != serviceNames[0] || "app.zebra" != serviceNames[1] {
+        t.Fatalf("expected the names sorted so the listing is stable between runs, got %v", serviceNames)
+    }
+}
+
+/* @info Has and HasType answer false for the empty name and the nil type, which is the verdict a caller relies on rather than a panic on the request path. Both refusals are SHADOWED by the lookup underneath them — nothing can ever be filed under the empty name, and canonicalServiceType answers nil for a nil type, so the guard below returns the same false — so this test pins the verdict, not the position of the guard. */
+func TestContainer_HasAndHasType_AnswerFalseForTheEmptyNameAndTheNilType(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "app.thing",
+        func(resolver containercontract.Resolver) (*testService, error) {
+            return &testService{Value: "thing"}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if true == serviceContainer.Has("") {
+        t.Fatalf("expected the empty name to be absent")
+    }
+
+    if true == serviceContainer.HasType(nil) {
+        t.Fatalf("expected the nil type to be absent")
+    }
+
+    if false == serviceContainer.Has("app.thing") {
+        t.Fatalf("expected the declared name to be present")
+    }
+
+    if false == serviceContainer.HasType(reflect.TypeOf((*testService)(nil))) {
+        t.Fatalf("expected the declared type to be present")
+    }
+}

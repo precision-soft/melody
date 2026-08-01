@@ -3,6 +3,7 @@ package httpclient
 import (
     "io"
     "net/http"
+    "net/http/httptest"
     "strings"
     "sync"
     "testing"
@@ -74,5 +75,36 @@ func TestStreamResponse_ConcurrentCloseAndBodyDoesNotRace(t *testing.T) {
         }()
 
         waiter.Wait()
+    }
+}
+
+/* @info the streaming response's header accessor had never been executed, and it is the only way a caller of the streaming API reads a content type or a content length before deciding whether to consume the body at all — a stream is precisely the case where reading the body to find out is too late. */
+func TestStreamResponse_HeadersCarryWhatTheServerSent(t *testing.T) {
+    receivedRequests := 0
+
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        receivedRequests = receivedRequests + 1
+
+        writer.Header().Set("Content-Type", "text/event-stream")
+        writer.WriteHeader(http.StatusOK)
+        _, _ = writer.Write([]byte("data: one\n"))
+    }))
+    defer server.Close()
+
+    client := NewDefaultHttpClient()
+    defer client.Close()
+
+    streamResponse, requestErr := client.RequestStream(http.MethodGet, server.URL)
+    if nil != requestErr {
+        t.Fatalf("unexpected request error: %v", requestErr)
+    }
+    defer streamResponse.Close()
+
+    if 1 != receivedRequests {
+        t.Fatalf("expected exactly one request, got %d", receivedRequests)
+    }
+
+    if "text/event-stream" != streamResponse.Headers().Get("Content-Type") {
+        t.Fatalf("expected the stream headers to carry the server's own, got %v", streamResponse.Headers())
     }
 }
