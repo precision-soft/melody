@@ -20,7 +20,6 @@ func TestParameter_Duration_ParsesStringAndNativeValues(t *testing.T) {
         {"string", "1500ms", 1500 * time.Millisecond},
         {"stringWithSurroundingSpace", "  2s  ", 2 * time.Second},
         {"native", 3 * time.Second, 3 * time.Second},
-        {"int", int(5), time.Duration(5)},
     }
 
     for _, testCase := range cases {
@@ -46,6 +45,9 @@ func TestParameter_Duration_RejectsUnparsableAndUnsetValues(t *testing.T) {
     }{
         {"unparsableString", "not-a-duration"},
         {"bareNumberString", "30"},
+        /* a bare integer is refused for the same missing unit as the bare number string — it used to be read as nanoseconds, a timeout that fired instantly with no error anywhere */
+        {"bareInt", int(5)},
+        {"bareInt64", int64(5)},
         {"unset", nil},
         {"unsupportedType", true},
     }
@@ -222,5 +224,30 @@ func TestParameter_SecretConversionWithholdsTheValue(t *testing.T) {
     }
     if false == errors.As(ordinaryErr, &exceptionErr) || nil == exceptionErr.CauseErr() {
         t.Fatalf("expected the ordinary parameter to keep its diagnostic cause")
+    }
+}
+
+/* @info a runtime parameter has no environment key, and passing the empty key into the shared parsers put a nameless parameterName inside the cause of an error whose outer context names the parameter — the operator reading the cause chain concluded the parameter was anonymous */
+func TestParameter_ConversionCauseNamesTheRuntimeParameter(t *testing.T) {
+    parameter := NewParameter("", "not-a-duration", "not-a-duration", false)
+    parameter.name = "app.timeout"
+
+    _, durationErr := parameter.Duration()
+    if nil == durationErr {
+        t.Fatalf("expected the conversion to fail")
+    }
+
+    var causeErr *exception.Error
+    outerErr, isOuter := durationErr.(*exception.Error)
+    if false == isOuter {
+        t.Fatalf("expected an exception error, got %T", durationErr)
+    }
+
+    if false == errors.As(outerErr.Unwrap(), &causeErr) {
+        t.Fatalf("expected an exception cause, got %T", outerErr.Unwrap())
+    }
+
+    if "app.timeout" != causeErr.Context()["parameterName"] {
+        t.Fatalf("expected the cause to name the runtime parameter, got %#v", causeErr.Context()["parameterName"])
     }
 }

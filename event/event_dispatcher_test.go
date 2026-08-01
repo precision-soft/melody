@@ -435,6 +435,76 @@ func TestEventDispatcher_ListenerPanic_IsConvertedToErrorWithContext(t *testing.
     }
 }
 
+/* @info an error-shaped panic value travels as the cause of the dispatcher's wrapper: kept only in the context slot it collapsed to its bare message at the render boundary, so the context map and the cause chain of the very error the listener panicked with reached no record and no caller */
+func TestEventDispatcher_ListenerPanicWithError_CarriesItAsCause(t *testing.T) {
+    dispatcher, clockInstance := testNewEventDispatcher()
+
+    rootCause := exception.NewError("redis dial failed", nil, nil)
+    panicErr := exception.NewError(
+        "cache write failed",
+        map[string]any{"backend": "redis:6379"},
+        rootCause,
+    )
+
+    _ = dispatcher.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            exception.Panic(panicErr)
+            return nil
+        },
+        0,
+    )
+
+    runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
+
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    if nil == err {
+        t.Fatalf("expected error")
+    }
+
+    if false == errors.Is(err, panicErr) {
+        t.Fatalf("expected the panic error to travel as the cause of the returned wrapper")
+    }
+
+    if false == errors.Is(err, rootCause) {
+        t.Fatalf("expected the panic error's own cause chain to stay reachable")
+    }
+}
+
+/* @info a typed-nil error panic value reads as the no-cause it means instead of feeding a nil receiver into the cause chain */
+func TestEventDispatcher_ListenerPanicWithTypedNilError_YieldsNoCause(t *testing.T) {
+    dispatcher, clockInstance := testNewEventDispatcher()
+
+    _ = dispatcher.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            var typedNil *exception.Error
+            panic(typedNil)
+        },
+        0,
+    )
+
+    runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
+
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    if nil == err {
+        t.Fatalf("expected error")
+    }
+
+    exceptionValue, ok := err.(*exception.Error)
+    if false == ok {
+        t.Fatalf("expected *exception.Error, got %T", err)
+    }
+
+    if "event listener panicked" != exceptionValue.Message() {
+        t.Fatalf("unexpected message: %q", exceptionValue.Message())
+    }
+
+    if nil != exceptionValue.Unwrap() {
+        t.Fatalf("expected no cause for a typed-nil panic value, got %v", exceptionValue.Unwrap())
+    }
+}
+
 func TestEventDispatcher_AddSubscriber_HappyPathRegistersListeners(t *testing.T) {
     dispatcher, clockInstance := testNewEventDispatcher()
 
@@ -1321,7 +1391,11 @@ func (instance *testRecordingLogger) Info(message string, context loggingcontrac
 func (instance *testRecordingLogger) Debug(message string, context loggingcontract.Context) {
 }
 
+/* the dispatcher's panic record travels through logging.LogError, which writes a melody error via Log at the error's own level — an error-level record landing here counts the same as one through Error */
 func (instance *testRecordingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+    if loggingcontract.LevelError == level {
+        instance.errorRecords = append(instance.errorRecords, message)
+    }
 }
 
 func (instance *testRecordingLogger) Close() error {

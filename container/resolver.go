@@ -11,6 +11,10 @@ import (
 
 func FromResolver[T any](resolver containercontract.Resolver, serviceName string) (T, error) {
     value, getErr := resolver.Get(serviceName)
+    /* the resolver contract is implementable outside this package, and a typed-nil error from such an implementation reads as the success it means — the same rule the container's own providers get at their gate. Read as a failure it walked into errors.As, whose Unwrap call on a nil receiver panics, or came back wrapped in "service not registered" for a service that is */
+    if true == internal.IsNilInterface(getErr) {
+        getErr = nil
+    }
     if nil != getErr {
         var zero T
 
@@ -75,6 +79,10 @@ func FromResolverByType[T any](resolver containercontract.Resolver) (T, error) {
     canonicalTargetType := canonicalServiceType(targetType)
 
     value, getByTypeErr := resolver.GetByType(canonicalTargetType)
+    /* same rule as FromResolver: a typed-nil error from a resolver implemented outside this package reads as the success it means. Passed through raw it reached exception.FromError in MustFromResolverByType, which reads a typed nil as nil, and exception.Panic(nil) then replaced the whole failure with its own "panic called with nil error" — a diagnostic naming only the reporting machinery */
+    if true == internal.IsNilInterface(getByTypeErr) {
+        getByTypeErr = nil
+    }
     if nil != getByTypeErr {
         var zero T
         return zero, getByTypeErr

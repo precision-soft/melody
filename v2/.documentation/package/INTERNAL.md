@@ -7,6 +7,7 @@ The `internal` package contains framework-internal helper utilities that are **n
 ## Scope
 
 - Small shared helpers used across Melody packages.
+- `MapStringString` converts an `any` holding a `map[string]string` into a defensive copy of it. ([`internal/parse.go`](../../internal/parse.go))
 - Test-only helpers under [`internal/testhelper/`](../../internal/testhelper).
 
 ## Subpackages
@@ -20,4 +21,5 @@ Test utilities used by Melody unit tests.
 Notable helpers:
 
 - `AssertPanics` for panic expectations in tests. ([`internal/testhelper/assert_panics.go`](../../internal/testhelper/assert_panics.go))
+- `AssertPanicsWithError` for panic expectations that also pin the panic's identity by message. ([`internal/testhelper/assert_panics.go`](../../internal/testhelper/assert_panics.go))
 - Embedded filesystem helpers that switch behavior under build tags, used by tests that need a deterministic filesystem view. ([`internal/testhelper/embedded_fs_default.go`](../../internal/testhelper/embedded_fs_default.go), [`internal/testhelper/embedded_fs_env_embedded.go`](../../internal/testhelper/embedded_fs_env_embedded.go), [`internal/testhelper/embedded_fs_static_embedded.go`](../../internal/testhelper/embedded_fs_static_embedded.go), [`internal/testhelper/embedded_fs_env_and_static_embedded.go`](../../internal/testhelper/embedded_fs_env_and_static_embedded.go))

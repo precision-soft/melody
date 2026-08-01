@@ -3,6 +3,8 @@ package clock
 import (
     "testing"
     "time"
+
+    "github.com/precision-soft/melody/internal/testhelper"
 )
 
 func TestFrozenClockNow_ReturnsFrozenTime(t *testing.T) {
@@ -86,4 +88,106 @@ func TestFrozenClockNewTicker_ReflectsTravelToOnNextTick(t *testing.T) {
             t.Fatalf("expected ticker to send traveled time")
         }
     }
+}
+
+/* @info Advance is forward-only: a negative duration silently moved the frozen clock backwards and broke the monotonic invariants the code under test relies on; TravelTo remains the deliberate door for backwards motion */
+func TestFrozenClockAdvance_RefusesNegativeDuration(t *testing.T) {
+    clockInstance := NewFrozenClock(time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC))
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            clockInstance.Advance(-1 * time.Hour)
+        },
+        "invalid advance duration",
+    )
+}
+
+func TestFrozenClockAdvance_AcceptsZero(t *testing.T) {
+    initialTime := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
+    clockInstance := NewFrozenClock(initialTime)
+
+    clockInstance.Advance(0)
+
+    if false == clockInstance.Now().Equal(initialTime) {
+        t.Fatalf("expected a zero advance to leave the frozen time unchanged")
+    }
+}
+
+func TestFrozenClockNewTicker_PanicsOnInvalidInterval(t *testing.T) {
+    clockInstance := NewFrozenClock(time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC))
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            _ = clockInstance.NewTicker(0)
+        },
+        "invalid ticker interval",
+    )
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            _ = clockInstance.NewTicker(-1 * time.Millisecond)
+        },
+        "invalid ticker interval",
+    )
+}
+
+/* @info Stop returns only after the relay goroutine has exited, so a timestamp sampled AFTER Stop can never land in the channel: the asynchronous form let a pending runtime tick be taken after Stop returned, its timestamp read after a TravelTo the caller did next — a tick minted after teardown, from a stopped ticker. The 1ns interval keeps a tick pending at the instant of every Stop, and each round asserts no post-Stop instant is ever delivered. */
+func TestFrozenTickerStop_NoTickMintedAfterStop(t *testing.T) {
+    for round := 0; round < 200; round++ {
+        initialTime := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
+        sentinelTime := time.Date(2030, 6, 1, 0, 0, 0, 0, time.UTC)
+
+        clockInstance := NewFrozenClock(initialTime)
+        tickerInstance := clockInstance.NewTicker(1 * time.Nanosecond)
+
+        select {
+        case <-tickerInstance.Channel():
+        case <-time.After(250 * time.Millisecond):
+            t.Fatalf("expected the ticker to tick")
+        }
+
+        tickerInstance.Stop()
+        clockInstance.TravelTo(sentinelTime)
+
+        for drained := false; false == drained; {
+            select {
+            case tickTime := <-tickerInstance.Channel():
+                if true == tickTime.Equal(sentinelTime) {
+                    t.Fatalf("round %d: a tick carried the post-Stop instant — it was minted after Stop returned", round)
+                }
+            default:
+                drained = true
+            }
+        }
+    }
+}
+
+/* @info the property behind the drain test, proven directly: Stop returns only after the relay goroutine has exited, witnessed by the done channel the relay closes on its way out. The pass side is deterministic — the synchronous Stop always finds the channel closed; the asynchronous form returns while the relay is still parked in its send, and the immediate probe finds the channel open. Each round first parks the relay by letting the buffer fill, so the exit path is the one Stop must wait out. */
+func TestFrozenTickerStop_WaitsForTheRelayGoroutine(t *testing.T) {
+    for round := 0; round < 100; round++ {
+        clockInstance := NewFrozenClock(time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC))
+        tickerInstance := clockInstance.NewTicker(1 * time.Nanosecond).(*frozenTicker)
+
+        /* let the buffered channel fill and the relay park in its inner send */
+        time.Sleep(2 * time.Millisecond)
+
+        tickerInstance.Stop()
+
+        select {
+        case <-tickerInstance.doneChannel:
+        default:
+            t.Fatalf("round %d: Stop returned before the relay goroutine exited", round)
+        }
+    }
+}
+
+func TestFrozenTickerStop_IsIdempotent(t *testing.T) {
+    clockInstance := NewFrozenClock(time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC))
+    tickerInstance := clockInstance.NewTicker(1 * time.Millisecond)
+
+    tickerInstance.Stop()
+    tickerInstance.Stop()
 }

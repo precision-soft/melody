@@ -22,28 +22,6 @@ func runWithSubstituteT(callback func(substituteT *testing.T)) *testing.T {
     return substituteT
 }
 
-func TestAssertPanics_FailsWhenTheCallbackDoesNotPanic(t *testing.T) {
-    substituteT := runWithSubstituteT(func(substituteT *testing.T) {
-        AssertPanics(substituteT, func() {})
-    })
-
-    if false == substituteT.Failed() {
-        t.Fatalf("expected AssertPanics to fail when the callback does not panic")
-    }
-}
-
-func TestAssertPanics_PassesWhenTheCallbackPanics(t *testing.T) {
-    substituteT := runWithSubstituteT(func(substituteT *testing.T) {
-        AssertPanics(substituteT, func() {
-            exception.Panic(exception.NewError("boom", nil, nil))
-        })
-    })
-
-    if true == substituteT.Failed() {
-        t.Fatalf("expected AssertPanics to pass when the callback panics")
-    }
-}
-
 func TestAssertPanicsWithError_FailsWhenTheCallbackDoesNotPanic(t *testing.T) {
     substituteT := runWithSubstituteT(func(substituteT *testing.T) {
         AssertPanicsWithError(substituteT, func() {}, "boom")
@@ -83,6 +61,24 @@ func TestAssertPanicsWithError_FailsWhenThePanicValueIsNotAnError(t *testing.T) 
 
     if false == substituteT.Failed() {
         t.Fatalf("expected AssertPanicsWithError to fail when the panic value is not an error")
+    }
+}
+
+/* @info a typed-nil error passes the error assertion and its Error() dereferences the nil receiver; the helper must fail the test naming the shape instead of crashing the binary at its own line */
+func TestAssertPanicsWithError_FailsWhenThePanicValueIsATypedNilError(t *testing.T) {
+    substituteT := runWithSubstituteT(func(substituteT *testing.T) {
+        AssertPanicsWithError(
+            substituteT,
+            func() {
+                var typedNil *exception.Error
+                panic(typedNil)
+            },
+            "boom",
+        )
+    })
+
+    if false == substituteT.Failed() {
+        t.Fatalf("expected AssertPanicsWithError to fail when the panic value is a typed-nil error")
     }
 }
 

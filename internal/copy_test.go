@@ -2,6 +2,7 @@ package internal
 
 import (
     "testing"
+    "time"
 )
 
 func TestCopyAnyMap_NilReturnsEmptyMap(t *testing.T) {
@@ -225,5 +226,134 @@ func TestCopyAnySlice_CyclicValueDoesNotStackOverflow(t *testing.T) {
     }
     if "value" != copied[1].(string) {
         t.Fatalf("expected the non-cyclic element to be copied, got %v", copied[1])
+    }
+}
+
+/* @info the traversal must be linear in distinct nodes: bounded by depth alone it was exponential for any value reaching one node through two edges — a 28-level two-edge chain is 2^28 visits and never finished, with the caller's lock held — while the depth guard, watching only depth, never fired */
+func TestCopyAnySlice_SharedSubstructureCompletes(t *testing.T) {
+    leaf := "x"
+    node := []any{leaf}
+    for i := 0; i < 28; i++ {
+        node = []any{node, node}
+    }
+
+    done := make(chan struct{})
+    go func() {
+        _ = CopyAnySlice(node)
+        close(done)
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatalf("expected the copy of a 28-level shared-substructure value to complete")
+    }
+}
+
+/* @info a cycle closes onto its own copy: the depth-only form burned ten thousand levels and then planted an alias to the LIVE original inside the copy — an isolation breach exactly where isolation was promised */
+func TestCopyAnyMap_CycleClosesOnTheCopy(t *testing.T) {
+    cyclic := map[string]any{}
+    cyclic["self"] = cyclic
+
+    copied := CopyAnyMap(cyclic)
+
+    innerValue, exists := copied["self"]
+    if false == exists {
+        t.Fatalf("expected the cyclic entry to be present in the copy")
+    }
+
+    innerMap, isMap := innerValue.(map[string]any)
+    if false == isMap {
+        t.Fatalf("expected the cyclic entry to remain a map, got %T", innerValue)
+    }
+
+    innerMap["probe"] = "written through the copy"
+    if _, leaked := cyclic["probe"]; true == leaked {
+        t.Fatalf("expected the cycle to close on the copy, not on the live original")
+    }
+    if _, present := copied["probe"]; false == present {
+        t.Fatalf("expected the cyclic entry to be the copied map itself")
+    }
+}
+
+/* @info two edges into one node stay two edges into ONE copied node: expanded into two independent copies, a caller mutating through one edge no longer saw the change through the other, silently changing the shape of the data */
+func TestCopyAnyMap_PreservesSharing(t *testing.T) {
+    shared := map[string]any{"key": "value"}
+    original := map[string]any{
+        "first":  shared,
+        "second": shared,
+    }
+
+    copied := CopyAnyMap(original)
+
+    firstCopy := copied["first"].(map[string]any)
+    secondCopy := copied["second"].(map[string]any)
+
+    firstCopy["probe"] = "written"
+    if _, sharedInCopy := secondCopy["probe"]; false == sharedInCopy {
+        t.Fatalf("expected both edges to reach the same copied node")
+    }
+    if _, leaked := shared["probe"]; true == leaked {
+        t.Fatalf("expected the write through the copy to stay out of the original")
+    }
+}
+
+/* @info the reflect paths memoize too: a typed map reached through two edges stays one copied node */
+func TestCopyAnyMap_PreservesSharingOfTypedMaps(t *testing.T) {
+    shared := map[string]int{"count": 1}
+    original := map[string]any{
+        "first":  shared,
+        "second": shared,
+    }
+
+    copied := CopyAnyMap(original)
+
+    firstCopy := copied["first"].(map[string]int)
+    secondCopy := copied["second"].(map[string]int)
+
+    firstCopy["probe"] = 2
+    if _, sharedInCopy := secondCopy["probe"]; false == sharedInCopy {
+        t.Fatalf("expected both edges to reach the same copied typed map")
+    }
+    if _, leaked := shared["probe"]; true == leaked {
+        t.Fatalf("expected the write through the copy to stay out of the original")
+    }
+}
+
+func TestCopyAnyMap_PreservesSharingOfTypedSlices(t *testing.T) {
+    shared := []string{"a"}
+    original := map[string]any{
+        "first":  shared,
+        "second": shared,
+    }
+
+    copied := CopyAnyMap(original)
+
+    firstCopy := copied["first"].([]string)
+    secondCopy := copied["second"].([]string)
+
+    firstCopy[0] = "written"
+    if "written" != secondCopy[0] {
+        t.Fatalf("expected both edges to reach the same copied typed slice")
+    }
+    if "a" != shared[0] {
+        t.Fatalf("expected the write through the copy to stay out of the original")
+    }
+}
+
+/* @info the reflect paths key slices by backing pointer AND length: two slices over one array with different lengths are different nodes, and memoizing on the pointer alone would hand the copy of one to a reader of the other */
+func TestCopyAnyMap_SubslicesOfOneArrayStayDistinct(t *testing.T) {
+    backing := []string{"a", "b", "c"}
+    original := map[string]any{
+        "short": backing[:1],
+        "long":  backing[:3],
+    }
+
+    copied := CopyAnyMap(original)
+
+    shortCopy := copied["short"].([]string)
+    longCopy := copied["long"].([]string)
+    if 1 != len(shortCopy) || 3 != len(longCopy) {
+        t.Fatalf("expected the two subslices to keep their lengths, got %d and %d", len(shortCopy), len(longCopy))
     }
 }

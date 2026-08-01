@@ -49,6 +49,15 @@ func (instance *Parameter) diagnosticContext() map[string]any {
     return context
 }
 
+/* conversionName is the identity the shared parsers stamp into their error context: the environment key where one exists, the registration name otherwise — a runtime parameter has no environment key, and passing the empty key put a nameless parameterName inside the cause of an error whose outer context names the parameter, so the operator reading the cause chain concluded the parameter was anonymous. */
+func (instance *Parameter) conversionName() string {
+    if "" != instance.environmentKey {
+        return instance.environmentKey
+    }
+
+    return instance.name
+}
+
 /* conversionCause hands the parse failure through for an ordinary parameter and withholds it for a secret one: the underlying strconv and parse errors quote the value they refused — exactly the right diagnostic for a mistyped pool size, and exactly the wrong log line for a credential that failed a conversion it was never meant for. */
 func (instance *Parameter) conversionCause(causeErr error) error {
     if true == instance.isSecret.Load() {
@@ -180,7 +189,7 @@ func (instance *Parameter) Int() (int, error) {
 }
 
 func (instance *Parameter) Float() (float64, error) {
-    floatValue, isSet, floatErr := internal.Float64(instance.loadValue(), instance.environmentKey)
+    floatValue, isSet, floatErr := internal.Float64(instance.loadValue(), instance.conversionName())
     if nil != floatErr || false == isSet {
         return 0, exception.NewError(
             "cannot convert parameter value to float",
@@ -193,7 +202,7 @@ func (instance *Parameter) Float() (float64, error) {
 }
 
 func (instance *Parameter) Duration() (time.Duration, error) {
-    durationValue, isSet, durationErr := internal.Duration(instance.loadValue(), instance.environmentKey)
+    durationValue, isSet, durationErr := internal.Duration(instance.loadValue(), instance.conversionName())
     if nil != durationErr || false == isSet {
         return 0, exception.NewError(
             "cannot convert parameter value to duration",

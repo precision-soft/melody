@@ -95,6 +95,7 @@ func example() time.Time {
 - Registering `ServiceClock` only affects code that **resolves the clock from the container**.  
   The kernel stores its own clock instance (passed at construction time) and does not auto-resolve the clock from the container.
 - `ClockMustFromContainer` / `ClockMustFromResolver` are fail-fast helpers. They will panic (via Melody’s container/service resolver semantics) when the clock service is missing or has an invalid type.
+- `NewTicker` panics on a non-positive interval, on both implementations, with the interval in the error context.
 
 ## Userland API
 

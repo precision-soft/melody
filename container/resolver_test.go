@@ -3,6 +3,7 @@ package container
 import (
     "errors"
     "reflect"
+    "strings"
     "testing"
 
     containercontract "github.com/precision-soft/melody/container/contract"
@@ -349,4 +350,88 @@ func TestFromResolver_MelodyErrorPassesThroughWithServiceName(t *testing.T) {
     if "kept" != typedError.Context()["detail"] {
         t.Fatalf("expected the original context to survive")
     }
+}
+
+/* @info the resolver contract is implementable outside this package, and a typed-nil error from such an implementation reads as the success it means: read as a failure it walked into errors.As — whose Unwrap on a nil receiver panics — or, on the ByType path, reached exception.FromError which reads a typed nil as nil, and exception.Panic(nil) replaced the whole failure with "panic called with nil error" */
+
+type resolverTestTypedNilError struct{}
+
+func (instance *resolverTestTypedNilError) Error() string {
+    return "never reached on a nil receiver"
+}
+
+type resolverTestTypedNilErrorResolver struct {
+    value any
+}
+
+func (instance *resolverTestTypedNilErrorResolver) Get(serviceName string) (any, error) {
+    var typedNil *resolverTestTypedNilError
+    return instance.value, typedNil
+}
+
+func (instance *resolverTestTypedNilErrorResolver) MustGet(serviceName string) any {
+    return instance.value
+}
+
+func (instance *resolverTestTypedNilErrorResolver) GetByType(targetType reflect.Type) (any, error) {
+    var typedNil *resolverTestTypedNilError
+    return instance.value, typedNil
+}
+
+func (instance *resolverTestTypedNilErrorResolver) MustGetByType(targetType reflect.Type) any {
+    return instance.value
+}
+
+func (instance *resolverTestTypedNilErrorResolver) Has(serviceName string) bool { return true }
+
+func (instance *resolverTestTypedNilErrorResolver) HasType(targetType reflect.Type) bool {
+    return true
+}
+
+func TestFromResolver_TypedNilErrorReadsAsSuccess(t *testing.T) {
+    resolver := &resolverTestTypedNilErrorResolver{value: &resolverTestService{value: "alive"}}
+
+    resolved, fromResolverErr := FromResolver[*resolverTestService](resolver, "service.probe")
+    if nil != fromResolverErr {
+        t.Fatalf("expected the typed-nil error to read as success, got %v", fromResolverErr)
+    }
+
+    if "alive" != resolved.value {
+        t.Fatalf("expected the resolved value to come through")
+    }
+}
+
+func TestFromResolverByType_TypedNilErrorReadsAsSuccess(t *testing.T) {
+    resolver := &resolverTestTypedNilErrorResolver{value: &resolverTestService{value: "alive"}}
+
+    resolved, fromResolverErr := FromResolverByType[*resolverTestService](resolver)
+    if nil != fromResolverErr {
+        t.Fatalf("expected the typed-nil error to read as success, got %v", fromResolverErr)
+    }
+
+    if "alive" != resolved.value {
+        t.Fatalf("expected the resolved value to come through")
+    }
+}
+
+func TestMustFromResolverByType_TypedNilErrorWithNilValueNamesTheFailure(t *testing.T) {
+    resolver := &resolverTestTypedNilErrorResolver{value: (*resolverTestService)(nil)}
+
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected a panic for the nil value")
+        }
+
+        recoveredErr, isError := recoveredValue.(error)
+        if false == isError {
+            t.Fatalf("expected an error panic value, got %#v", recoveredValue)
+        }
+
+        if false == strings.Contains(recoveredErr.Error(), "resolver returned nil value") {
+            t.Fatalf("expected the refusal to name the nil value, got %q", recoveredErr.Error())
+        }
+    }()
+
+    _ = MustFromResolverByType[*resolverTestService](resolver)
 }

@@ -18,6 +18,46 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Internal conversions: a duration spelled as a bare integer is refused
+
+**What changed.** `internal.Duration` — reached through `config.Parameter.Duration()` and `bag.Duration` — read a bare `int`/`int64` as **nanoseconds**. A runtime parameter registered as `30` and meant as seconds became a timeout that fired instantly, with no error anywhere, while the same value spelled `"30"` was already refused for missing its unit. A bare integer is now refused on both paths.
+
+**Symptom.** A `Duration()` conversion over a numeric value fails with `parameter is not a valid 'duration'` and the cause `a bare integer carries no unit`.
+
+**Remedy.** Register the value as a `time.Duration`, or spell it as a string with a unit — `"30s"`.
+
+### Internal conversions: a non-finite float is refused
+
+**What changed.** `internal.Float64` — reached through `config.Parameter.Float()` and `bag.Float64` — accepted `"NaN"`, `"Inf"` and `"Infinity"` (which `strconv.ParseFloat` parses without an error) and passed a typed non-finite `float64`/`float32` through untouched. Every ordered comparison against NaN is false, so a threshold guard written the normal way silently stopped guarding. Non-finite values are refused on every branch now.
+
+**Symptom.** A float conversion over `NaN`/`Inf` (spelled or typed) fails with `parameter is not a valid 'float64'` and the cause `value is not finite`.
+
+**Remedy.** Fix the configuration value; a parameter that legitimately needs "unbounded" spells it as a sentinel the application defines, not as an infinity.
+
+### Bag: a typed-nil `map[string]string` reads as absent
+
+**What changed.** `bag.StringMapStringString` reported an interface holding a nil `map[string]string` as **present**, answering an empty non-nil map, where the strict accessors beside it answer absent for a nil value. It now reports absent.
+
+**Symptom.** A caller branching on the presence flag receives `false` for a nil map and applies its default, where it used to receive an empty map.
+
+**Remedy.** None for the common case — the default branch is almost always what was meant. A caller that deliberately stored a nil map to mean "present and empty" stores an empty map instead.
+
+### Clock: `FrozenClock.Advance` refuses a negative duration
+
+**What changed.** `Advance` accepted a negative duration and silently moved the frozen clock backwards, breaking the monotonic invariants the code under test relies on. It now panics with `invalid advance duration`; zero remains a no-op.
+
+**Symptom.** A test advancing by a negative duration panics at the call site.
+
+**Remedy.** Use `TravelTo`, the deliberate door for backwards motion.
+
+### Internal test helper: `AssertPanics` is removed
+
+**What changed.** `internal/testhelper.AssertPanics` passed on any recovered value, so it could not tell the guard under test firing from the code crashing for an unrelated reason; it had no callers on any major. `AssertPanicsWithError` — which pins the panic's identity by message — is the remaining form.
+
+**Symptom.** A consumer of the internal helper fails to compile. The `internal` package documentation marks its APIs as free to change without notice.
+
+**Remedy.** Use `AssertPanicsWithError` with the guard's message.
+
 ### Httpclient: a client with a base url refuses an absolute url that leaves its origin
 
 **What changed.** `HttpClient` applied its base url only to a relative target; an absolute one bypassed it silently and travelled with the headers and the authorization the client was configured with. A client built with a base url now refuses an absolute url whose scheme, host or effective port differ from that base url. A client built without a base url — `NewDefaultHttpClient`, or `NewHttpClientConfig("", …)` — is unchanged and reaches any host.

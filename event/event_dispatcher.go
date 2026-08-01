@@ -619,20 +619,24 @@ func (instance *EventDispatcher) callListenerSafely(
             string(debug.Stack()),
         )
 
+        /* an error-shaped panic value travels as the cause: kept only in the context slot it collapsed to its bare message at the render boundary — the json logger stringifies an error found in a context — so the context map and the cause chain of the very error the listener panicked with reached no record at all, and the reason a cache write failed was gone while its stack survived. A typed nil reads as the no-cause it means. */
+        var panicCause error
+        recoveredErr, isRecoveredError := recoveredValue.(error)
+        if true == isRecoveredError && false == internal.IsNilInterface(recoveredErr) {
+            panicCause = recoveredErr
+        }
+
         exceptionErr := exception.NewError(
             "event listener panicked",
             exceptionContext,
-            nil,
+            panicCause,
         )
-        _ = exception.MarkLogged(exceptionErr)
 
-        /* a panic value that reports itself already logged was written by whoever raised it; logging it a second time here reports one failure as two */
+        /* a panic value that reports itself already logged was written by whoever raised it; logging it a second time here reports one failure as two. The record is written through LogError, which renders the cause chain the raw logger call dropped, and the wrapper is marked only after it is written — LogError honours the mark. */
         if false == recoveredValueIsAlreadyLogged(recoveredValue) {
-            logger.Error(
-                "event listener panicked",
-                exceptionContext,
-            )
+            logging.LogError(logger, exceptionErr)
         }
+        _ = exception.MarkLogged(exceptionErr)
 
         returnedErr = exceptionErr
     }()
