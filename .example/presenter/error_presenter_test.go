@@ -5,14 +5,19 @@ import (
     "errors"
     "fmt"
     nethttp "net/http"
+    "net/http/httptest"
     "testing"
+    "time"
 
     melodyconfig "github.com/precision-soft/melody/config"
     melodyconfigcontract "github.com/precision-soft/melody/config/contract"
     melodycontainer "github.com/precision-soft/melody/container"
     melodycontainercontract "github.com/precision-soft/melody/container/contract"
+    melodyhttp "github.com/precision-soft/melody/http"
     melodyruntime "github.com/precision-soft/melody/runtime"
     melodyruntimecontract "github.com/precision-soft/melody/runtime/contract"
+    melodyserializer "github.com/precision-soft/melody/serializer"
+    melodyserializercontract "github.com/precision-soft/melody/serializer/contract"
 )
 
 const causeSecret = "connection to 10.0.0.7 refused: password=hunter2"
@@ -58,6 +63,42 @@ func runtimeForEnvironment(t *testing.T, environmentName string) melodyruntimeco
     }
 
     return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+}
+
+/* @info a header that refuses every available media type is answered as not acceptable on the error path exactly as the result handler answers it on the success path: the previous fall-through rendered the failure as json — the very representation the client rejected */
+func TestBuildApiResponseHonoursAnExplicitRefusal(t *testing.T) {
+    containerInstance := melodycontainer.NewContainer()
+
+    registerErr := melodycontainer.Register[*melodyserializer.SerializerManager](
+        containerInstance,
+        melodyserializer.ServiceSerializerManager,
+        func(resolver melodycontainercontract.Resolver) (*melodyserializer.SerializerManager, error) {
+            return melodyserializer.NewSerializerManager(
+                map[string]melodyserializercontract.Serializer{
+                    melodyserializer.MimeApplicationJson: melodyserializer.NewJsonSerializer(),
+                },
+            )
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("register serializer manager: %v", registerErr)
+    }
+
+    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+
+    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/refused", nil)
+    httpRequest.Header.Set("Accept", "*/*;q=0")
+
+    request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("test", time.Now()))
+
+    response := buildApiResponse(runtimeInstance, request, nethttp.StatusForbidden, apiResponse{Success: false})
+    if nil == response {
+        t.Fatalf("expected a response")
+    }
+
+    if nethttp.StatusNotAcceptable != response.StatusCode() {
+        t.Fatalf("expected the explicit refusal to be answered 406 on the error path, got %d", response.StatusCode())
+    }
 }
 
 /* @important the presenter must reach the same decision the framework exception listener reaches, and

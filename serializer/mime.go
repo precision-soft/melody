@@ -2,7 +2,6 @@ package serializer
 
 import (
     "sort"
-    "strconv"
     "strings"
 )
 
@@ -28,8 +27,92 @@ type acceptedMime struct {
     qualityValue float64
 }
 
+/* splitOutsideQuotes splits value on separator while honouring quoted-string sections: a separator inside double quotes belongs to the parameter value it sits in, and a backslash escapes the character after it inside a quoted section, so a media range such as text/plain;version="1,2";q=0 stays one member instead of losing the refusal it carries. */
+func splitOutsideQuotes(value string, separator byte) []string {
+    result := make([]string, 0, 4)
+    insideQuotes := false
+    escaped := false
+    start := 0
+
+    for index := 0; index < len(value); index++ {
+        character := value[index]
+
+        if true == escaped {
+            escaped = false
+
+            continue
+        }
+
+        if true == insideQuotes && '\\' == character {
+            escaped = true
+
+            continue
+        }
+
+        if '"' == character {
+            insideQuotes = false == insideQuotes
+
+            continue
+        }
+
+        if separator == character && false == insideQuotes {
+            result = append(result, value[start:index])
+            start = index + 1
+        }
+    }
+
+    return append(result, value[start:])
+}
+
+/* parseQualityValue validates value against the qvalue grammar of RFC 7231 — a zero with up to three decimal digits, or a one with up to three zero decimals — and reports anything outside it as invalid instead of guessing a weight for it. */
+func parseQualityValue(value string) (float64, bool) {
+    if "" == value {
+        return 0, false
+    }
+
+    integerPart := value[0]
+    if '0' != integerPart && '1' != integerPart {
+        return 0, false
+    }
+
+    decimals := value[1:]
+    if "" != decimals {
+        if '.' != decimals[0] {
+            return 0, false
+        }
+
+        decimals = decimals[1:]
+        if 3 < len(decimals) {
+            return 0, false
+        }
+    }
+
+    qualityValue := 0.0
+    if '1' == integerPart {
+        qualityValue = 1.0
+    }
+
+    scale := 0.1
+    for index := 0; index < len(decimals); index++ {
+        digit := decimals[index]
+        if digit < '0' || digit > '9' {
+            return 0, false
+        }
+
+        if '1' == integerPart && '0' != digit {
+            return 0, false
+        }
+
+        qualityValue += float64(digit-'0') * scale
+        scale = scale / 10
+    }
+
+    return qualityValue, true
+}
+
+/* @important a member whose q parameter falls outside the RFC 7231 qvalue grammar is dropped whole rather than rounded to a guess: the previous leniency scored an unparseable q as full acceptance, clamped a negative one into a refusal and let NaN through as a weight that no comparison could select or refuse, so the same malformed header could open, close or silently poison the negotiation depending on the spelling */
 func parseAcceptHeader(acceptHeader string) []acceptedMime {
-    parts := strings.Split(acceptHeader, ",")
+    parts := splitOutsideQuotes(acceptHeader, ',')
     result := make([]acceptedMime, 0, len(parts))
 
     for _, part := range parts {
@@ -40,6 +123,7 @@ func parseAcceptHeader(acceptHeader string) []acceptedMime {
 
         mimePart := part
         qualityValue := 1.0
+        qualityInvalid := false
 
         parameterSeparatorIndex := strings.Index(part, ";")
         if -1 != parameterSeparatorIndex {
@@ -47,7 +131,7 @@ func parseAcceptHeader(acceptHeader string) []acceptedMime {
             parametersPart := strings.TrimSpace(part[parameterSeparatorIndex+1:])
 
             if "" != parametersPart {
-                parameters := strings.Split(parametersPart, ";")
+                parameters := splitOutsideQuotes(parametersPart, ';')
                 for _, parameter := range parameters {
                     parameter = strings.TrimSpace(parameter)
                     if "" == parameter {
@@ -63,20 +147,21 @@ func parseAcceptHeader(acceptHeader string) []acceptedMime {
                     value := strings.TrimSpace(keyValue[1])
 
                     if "q" == key {
-                        parsedValue, err := strconv.ParseFloat(value, 64)
-                        if nil == err {
-                            if 0 > parsedValue {
-                                parsedValue = 0
-                            }
-                            if 1 < parsedValue {
-                                parsedValue = 1
-                            }
+                        parsedValue, valid := parseQualityValue(value)
+                        if false == valid {
+                            qualityInvalid = true
 
-                            qualityValue = parsedValue
+                            continue
                         }
+
+                        qualityValue = parsedValue
                     }
                 }
             }
+        }
+
+        if true == qualityInvalid {
+            continue
         }
 
         mimePart = normalizeMime(mimePart)

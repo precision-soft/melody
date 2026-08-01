@@ -2,6 +2,7 @@ package serializer
 
 import (
     "github.com/precision-soft/melody/exception"
+    "github.com/precision-soft/melody/internal"
     "github.com/precision-soft/melody/logging"
     "github.com/precision-soft/melody/runtime"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
@@ -21,10 +22,14 @@ func SerializerManagerFromRuntime(runtimeInstance runtimecontract.Runtime) *Seri
     serializerManagerInstance, err := runtime.FromRuntime[*SerializerManager](runtimeInstance, ServiceSerializerManager)
     if nil == serializerManagerInstance || nil != err {
         if nil != err {
-            logging.LoggerMustFromRuntime(runtimeInstance).Error(
-                "failed to resolve the serializer manager",
-                exception.LogContext(err),
-            )
+            /* @important the failure is reported through the soft logger resolver: the Must variant panics when the logger itself cannot be resolved, and a runtime broken enough to lose the serializer manager is the runtime most likely to lose the logger with it — the reporting branch of a return-nil-on-failure resolver must not be the line that panics */
+            logger := logging.LoggerFromRuntime(runtimeInstance)
+            if nil != logger {
+                logger.Error(
+                    "failed to resolve the serializer manager",
+                    exception.LogContext(err),
+                )
+            }
         }
 
         return nil
@@ -37,14 +42,18 @@ func SerializerMustFromRuntime(runtimeInstance runtimecontract.Runtime) serializ
     return runtime.MustFromRuntime[serializercontract.Serializer](runtimeInstance, ServiceSerializer)
 }
 
+/* SerializerFromRuntime resolves the request serializer and answers nil when it cannot, with the failure logged through the soft logger resolver. The typed-nil branch is latent defense: the container refuses a provider-returned typed nil with an error today, so it is reachable only through a resolution path without that refusal — but a typed nil that slipped through would pass the plain comparison, look live to the result handler and dereference its nil receiver on the first Serialize of the request path. */
 func SerializerFromRuntime(runtimeInstance runtimecontract.Runtime) serializercontract.Serializer {
     serializerInstance, err := runtime.FromRuntime[serializercontract.Serializer](runtimeInstance, ServiceSerializer)
-    if nil == serializerInstance || nil != err {
+    if nil == serializerInstance || true == internal.IsNilInterface(serializerInstance) || nil != err {
         if nil != err {
-            logging.LoggerMustFromRuntime(runtimeInstance).Error(
-                "failed to resolve the serializer",
-                exception.LogContext(err),
-            )
+            logger := logging.LoggerFromRuntime(runtimeInstance)
+            if nil != logger {
+                logger.Error(
+                    "failed to resolve the serializer",
+                    exception.LogContext(err),
+                )
+            }
         }
 
         return nil

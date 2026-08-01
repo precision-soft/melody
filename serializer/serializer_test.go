@@ -2,6 +2,7 @@ package serializer
 
 import (
     "bytes"
+    "strings"
     "testing"
 )
 
@@ -88,6 +89,22 @@ func TestJsonSerializer_Deserialize_NilTarget(t *testing.T) {
     err := serializer.Deserialize([]byte("{}"), nil)
     if nil == err {
         t.Fatalf("expected error")
+    }
+}
+
+/* @info a typed-nil pointer target answers with the same refusal the untyped nil gets, so both serializers report the identical misuse identically instead of leaning on the encoder's own diagnostic — the assertion pins the guard's message because the encoder would also answer with an error of its own */
+func TestJsonSerializer_Deserialize_TypedNilTarget(t *testing.T) {
+    serializer := NewJsonSerializer()
+
+    var target *map[string]any
+
+    err := serializer.Deserialize([]byte("{}"), target)
+    if nil == err {
+        t.Fatalf("expected error")
+    }
+
+    if false == strings.Contains(err.Error(), "deserialize target is nil") {
+        t.Fatalf("expected the package's own nil-target refusal, got: %v", err)
     }
 }
 
