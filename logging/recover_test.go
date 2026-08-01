@@ -1,6 +1,7 @@
 package logging
 
 import (
+    "errors"
     "io"
     "os"
     "os/exec"
@@ -140,6 +141,82 @@ func TestLogOnRecover_DoesNotTerminateTheProcessOnAnExitError(t *testing.T) {
 
     if false == strings.Contains(string(output), "deferred-below-ran") {
         t.Fatalf("expected the defers registered below LogOnRecover to still run, got %q", string(output))
+    }
+}
+
+/* @info the sibling exit path names this anomaly and logs it; the recover helper used to skip the logging step entirely for an exit wrapper carrying no error value, returning with no record from the helper whose purpose is the record */
+func TestLogOnRecover_ZeroValueExitErrorLogsTheAnomaly(t *testing.T) {
+    logger := &captureLogger{}
+
+    func() {
+        defer LogOnRecover(logger, false)
+
+        panic(&exception.ExitError{})
+    }()
+
+    if 1 != logger.calls {
+        t.Fatalf("expected one record for the anomaly, got %d", logger.calls)
+    }
+
+    if false == strings.Contains(logger.lastMessage, "exit requested with no error value") {
+        t.Fatalf("expected the anomaly to be named, got %q", logger.lastMessage)
+    }
+}
+
+/* @info a typed-nil exception or exit wrapper is the value someone panicked with, not an exception to dereference: both type asserts used to accept it and the next method call — AlreadyLogged locks a nil receiver, ErrorValue reads through it — panicked inside the recover handler */
+func TestLogOnRecover_TypedNilPanicValuesAreLoggedAsPanics(t *testing.T) {
+    for _, panicValue := range []any{(*exception.Error)(nil), (*exception.ExitError)(nil)} {
+        logger := &captureLogger{}
+
+        func() {
+            defer LogOnRecover(logger, false)
+
+            panic(panicValue)
+        }()
+
+        if 1 != logger.calls {
+            t.Fatalf("expected one record for %T, got %d", panicValue, logger.calls)
+        }
+
+        if "panic" != logger.lastMessage {
+            t.Fatalf("expected the plain panic record for %T, got %q", panicValue, logger.lastMessage)
+        }
+    }
+}
+
+/* @info the mark travels with the record, not with the re-panic: leaving a logged error unmarked under panicAgain false let any later handler holding the same instance — a memoized container failure is shared by design — record it a second time */
+func TestLogOnRecover_MarksLoggedWithoutPanicAgain(t *testing.T) {
+    err := exception.NewError("boom", nil, nil)
+
+    func() {
+        defer LogOnRecover(&captureLogger{}, false)
+
+        exception.Panic(err)
+    }()
+
+    if false == err.AlreadyLogged() {
+        t.Fatalf("expected the logged error to be marked")
+    }
+}
+
+/* @info the deferred handler runs with the panicking frames still on the stack — the only moment the origin of a runtime panic can still be captured for the record; every other recovery boundary in the framework writes it, and these helpers were the ones that did not */
+func TestLogOnRecover_ForeignPanicCarriesThePanicStack(t *testing.T) {
+    logger := &captureLogger{}
+
+    func() {
+        defer LogOnRecover(logger, false)
+
+        panic(errors.New("boom"))
+    }()
+
+    stackValue, hasStack := logger.lastContext["panicStack"]
+    if false == hasStack {
+        t.Fatalf("expected the panic stack in the record, got %v", logger.lastContext)
+    }
+
+    stackText, isString := stackValue.(string)
+    if false == isString || false == strings.Contains(stackText, "TestLogOnRecover_ForeignPanicCarriesThePanicStack") {
+        t.Fatalf("expected the stack to name the panic site")
     }
 }
 
@@ -316,5 +393,125 @@ func TestResolveRecoveredExit_WrapsAForeignErrorAndAPlainValue(t *testing.T) {
     valueErr, _, valueNeedsLogging := resolveRecoveredExit("boom", 5)
     if nil == valueErr || false == strings.Contains(valueErr.Error(), "panic") || false == valueNeedsLogging {
         t.Fatalf("expected the plain value to become a panic error, got %v", valueErr)
+    }
+}
+
+/* @info a typed-nil exception or exit wrapper panicked into the exit handler used to be dereferenced by the type asserts — ErrorValue on a nil wrapper, AlreadyLogged on a nil receiver — replacing the deliberate exit with a second panic; it now normalizes as the plain panic value it is, under the caller's exit code */
+func TestResolveRecoveredExit_TypedNilValuesNormalizeAsPanics(t *testing.T) {
+    for _, recoveredValue := range []any{(*exception.Error)(nil), (*exception.ExitError)(nil)} {
+        err, exitCode, needsLogging := resolveRecoveredExit(recoveredValue, 7)
+
+        if nil == err || "panic" != err.Message() {
+            t.Fatalf("expected the plain panic record for %T, got %v", recoveredValue, err)
+        }
+
+        if 7 != exitCode {
+            t.Fatalf("expected the caller's exit code for %T, got %d", recoveredValue, exitCode)
+        }
+
+        if false == needsLogging {
+            t.Fatalf("expected the anomaly to be logged for %T", recoveredValue)
+        }
+    }
+}
+
+/* @info the foreign error keeps its panic stack: the normalization runs inside the deferred exit handler, with the panicking frames still on the stack, and the record is the only place they survive */
+func TestResolveRecoveredExit_ForeignErrorCarriesThePanicStack(t *testing.T) {
+    err, _, _ := resolveRecoveredExit(errors.New("boom"), 5)
+
+    if nil == err {
+        t.Fatalf("expected an error")
+    }
+
+    stackValue, hasStack := err.Context()["panicStack"]
+    if false == hasStack {
+        t.Fatalf("expected the panic stack in the context")
+    }
+
+    if stackText, isString := stackValue.(string); false == isString || "" == stackText {
+        t.Fatalf("expected a non-empty stack text")
+    }
+}
+
+/* the marker tells a re-executed test binary that it is the child that exercises the shielded exit handler rather than the parent that watches its exit status */
+const exitHandlerShieldProbeMarker = "MELODY_EXIT_HANDLER_SHIELD_PROBE"
+
+type panickingProbeLogger struct{}
+
+func (instance *panickingProbeLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+    panic("logger died while writing the record")
+}
+
+func (instance *panickingProbeLogger) Debug(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelDebug, message, context)
+}
+
+func (instance *panickingProbeLogger) Info(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelInfo, message, context)
+}
+
+func (instance *panickingProbeLogger) Warning(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelWarning, message, context)
+}
+
+func (instance *panickingProbeLogger) Error(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelError, message, context)
+}
+
+func (instance *panickingProbeLogger) Emergency(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelEmergency, message, context)
+}
+
+/* @info the subprocess is the assertion: the shields exist so that a panic in the before-exit hook or in the logger costs its own step and never the exit code — before them, the child died with the Go runtime's code 2, no stderr echo, no os.Exit. The parent reads the child's exit status, which is the only place the difference is visible. */
+func TestLogOnRecoverAndExitAfter_ShieldsTheHookAndTheRecord(t *testing.T) {
+    if "hook" == os.Getenv(exitHandlerShieldProbeMarker) {
+        LogOnRecoverAndExitAfter(
+            &captureLogger{},
+            exception.NewExitError(9, exception.NewError("boom", nil, nil)),
+            1,
+            func() {
+                panic("teardown died")
+            },
+        )
+
+        return
+    }
+
+    if "logger" == os.Getenv(exitHandlerShieldProbeMarker) {
+        LogOnRecoverAndExitAfter(
+            &panickingProbeLogger{},
+            exception.NewExitError(9, exception.NewError("boom", nil, nil)),
+            1,
+            nil,
+        )
+
+        return
+    }
+
+    for _, probeMode := range []string{"hook", "logger"} {
+        command := exec.Command(
+            os.Args[0],
+            "-test.run=^TestLogOnRecoverAndExitAfter_ShieldsTheHookAndTheRecord$",
+        )
+        command.Env = append(os.Environ(), exitHandlerShieldProbeMarker+"="+probeMode)
+
+        output, runErr := command.CombinedOutput()
+
+        var exitErr *exec.ExitError
+        if false == errors.As(runErr, &exitErr) {
+            t.Fatalf("[%s] expected the child to exit non-zero, got %v with output %q", probeMode, runErr, string(output))
+        }
+
+        if 9 != exitErr.ExitCode() {
+            t.Fatalf("[%s] expected the deliberate exit code 9 to survive the panic, got %d with output %q", probeMode, exitErr.ExitCode(), string(output))
+        }
+
+        if false == strings.Contains(string(output), "melody: exiting with code 9") {
+            t.Fatalf("[%s] expected the stderr echo to survive the panic, got %q", probeMode, string(output))
+        }
+
+        if false == strings.Contains(string(output), "melody: panic while") {
+            t.Fatalf("[%s] expected the shielded step to report its own panic, got %q", probeMode, string(output))
+        }
     }
 }

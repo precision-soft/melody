@@ -2,9 +2,11 @@ package logging
 
 import (
     "encoding/json"
+    "fmt"
     "io"
     "os"
     "sync"
+    "sync/atomic"
     "time"
 
     "github.com/precision-soft/melody/exception"
@@ -35,10 +37,16 @@ func NewJsonLoggerWithLabels(output io.Writer, minLevel loggingcontract.Level, l
         )
     }
 
+    /* the labels are copied because the caller keeps its reference: the map is read lock-free on every Log call, and a caller mutating the map it still holds against those reads is a fatal concurrent map access no recover reaches — the copy makes the reads safe the way the immutable output and minLevel fields already are */
+    copiedLabels := make(loggingcontract.LevelLabels, len(labels))
+    for level, label := range labels {
+        copiedLabels[level] = label
+    }
+
     return &jsonLogger{
         output:      output,
         minLevel:    minLevel,
-        levelLabels: labels,
+        levelLabels: copiedLabels,
     }
 }
 
@@ -47,18 +55,26 @@ type jsonLogger struct {
     output      io.Writer
     minLevel    loggingcontract.Level
     levelLabels loggingcontract.LevelLabels
-    closed      bool
+    /* closed is atomic so Closed() can answer without the write lock: the probe is asked by the process-boundary exit handler, and an answer serialized behind an in-flight Write into a stalled pipe would hang the one handler that must reach os.Exit. The writes to the flag still happen under writeMutex — atomicity covers the lock-free read alone. */
+    closed atomic.Bool
 }
 
 func (instance *jsonLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
-    if priorityForLevel(level) < priorityForLevel(instance.minLevel) {
+    /* a level outside the five known ones weighs as error instead of inheriting the default lowest priority: the unknown level is the case that least deserves silence, and the zero-value exception a recover handler can carry reaches this line with an empty level — filed as debug, its fatal record was dropped by every production threshold. The label keeps the raw level, so the record still says what it was handed. */
+    effectivePriority := priorityForLevel(level)
+    if false == IsValidLevel(level) {
+        effectivePriority = priorityForLevel(loggingcontract.LevelError)
+    }
+
+    if effectivePriority < priorityForLevel(instance.minLevel) {
         return
     }
 
     label := instance.levelLabels.LabelFor(level)
     normalizedContext := normalizeJsonContext(context)
 
-    timestamp := time.Now().Format(time.RFC3339)
+    /* nanosecond precision keeps the ordering the write mutex pays for: whole-second stamps made every record of a busy second indistinguishable, and the fraction still parses under the RFC 3339 layouts consumers already use */
+    timestamp := time.Now().Format(time.RFC3339Nano)
 
     entry := logEntry{
         Message: message,
@@ -69,20 +85,26 @@ func (instance *jsonLogger) Log(level loggingcontract.Level, message string, con
 
     encoded, err := json.Marshal(entry)
     if nil != err {
+        /* the fallback keeps the context as text rather than dropping it: one unmarshalable value used to cost every other key of the record — the service name, the cause chain — exactly when the record described a failure. Every fallback value is a string, so the second marshal cannot fail. */
         fallback := map[string]any{
             "message":      message,
             "level":        label,
             "time":         timestamp,
             "marshalError": err.Error(),
+            "context":      fmt.Sprintf("%+v", normalizedContext),
         }
 
         encoded, _ = json.Marshal(fallback)
     }
 
+    if 0 == len(encoded) {
+        return
+    }
+
     instance.writeMutex.Lock()
     defer instance.writeMutex.Unlock()
 
-    if true == instance.closed {
+    if true == instance.closed.Load() {
         return
     }
 
@@ -109,21 +131,17 @@ func (instance *jsonLogger) Emergency(message string, context loggingcontract.Co
     instance.Log(loggingcontract.LevelEmergency, message, context)
 }
 
-/* @important the close takes the same lock the writes take: it hands the writer to a Close that may mutate it, and a goroutine that outlives the container teardown can still be inside Write. The console is left open on purpose, so the flag is set only where the writer was really closed. */
+/* @important the close takes the same lock the writes take: it hands the writer to a Close that may mutate it, and a goroutine that outlives the container teardown can still be inside Write. The process console is recognized by identity — the os.Stdout and os.Stderr values themselves — and left open on purpose, so the flag is set only where the writer was really closed; the previous check compared the file name, which also matched a file the caller opened on "/dev/stdout", skipped the close it owed, and leaked that descriptor once per boot. */
 func (instance *jsonLogger) Close() error {
     instance.writeMutex.Lock()
     defer instance.writeMutex.Unlock()
 
-    if true == instance.closed {
+    if true == instance.closed.Load() {
         return nil
     }
 
-    file, isFile := instance.output.(*os.File)
-    if true == isFile && nil != file {
-        fileName := file.Name()
-        if "/dev/stdout" == fileName || "/dev/stderr" == fileName {
-            return nil
-        }
+    if os.Stdout == instance.output || os.Stderr == instance.output {
+        return nil
     }
 
     closer, isCloser := instance.output.(io.Closer)
@@ -131,41 +149,86 @@ func (instance *jsonLogger) Close() error {
         return nil
     }
 
-    instance.closed = true
+    instance.closed.Store(true)
 
     return closer.Close()
 }
 
-/* Closed reports whether Close really closed the underlying writer, after which every Log call is silently dropped. A console logger never closes its stream and never reports true. The report lets whoever owns a final record — the process-boundary exit handler — refuse a logger that would swallow it and fall back to one that still writes. */
+/* Closed reports whether Close really closed the underlying writer, after which every Log call is silently dropped. A console logger never closes its stream and never reports true. The report lets whoever owns a final record — the process-boundary exit handler — refuse a logger that would swallow it and fall back to one that still writes. The read is lock-free on purpose: the caller is the exit handler, and an answer queued behind an in-flight Write into a stalled writer would hang the exit instead of informing it. */
 func (instance *jsonLogger) Closed() bool {
-    instance.writeMutex.Lock()
-    defer instance.writeMutex.Unlock()
-
-    return instance.closed
+    return instance.closed.Load()
 }
 
 var _ loggingcontract.Logger = (*jsonLogger)(nil)
+
+/* normalizeJsonContextMaxDepth bounds the recursive normalization: the shapes this package itself nests — a cause context chain holding provider maps holding error values — sit two or three levels down, and the cap keeps a pathological self-referencing structure from recursing without end. A value below the cap is passed to the encoder as it is. */
+const normalizeJsonContextMaxDepth = 6
 
 func normalizeJsonContext(input map[string]any) map[string]any {
     if nil == input {
         return map[string]any{}
     }
 
+    return normalizeJsonMap(input, normalizeJsonContextMaxDepth)
+}
+
+func normalizeJsonMap(input map[string]any, remainingDepth int) map[string]any {
     normalized := make(map[string]any, len(input))
 
     for key, value := range input {
-        if nil == value {
-            normalized[key] = nil
-            continue
-        }
-
-        if err, ok := value.(error); true == ok {
-            normalized[key] = err.Error()
-            continue
-        }
-
-        normalized[key] = value
+        normalized[key] = normalizeJsonValue(value, remainingDepth)
     }
 
     return normalized
+}
+
+/* normalizeJsonValue renders every error in the context as its message, however deep the containers this package nests put it: an error left to the encoder marshals as an empty object — every field unexported, no marshaler — so a cause carried inside a chain entry survived as "{}" while the same error one level up rendered fine. A typed nil is the nil its producer meant and renders as null instead of panicking on the Error call; the normalization descends the map and slice shapes the package itself produces and leaves every other value to the encoder. */
+func normalizeJsonValue(value any, remainingDepth int) any {
+    if nil == value {
+        return nil
+    }
+
+    if 0 >= remainingDepth {
+        return value
+    }
+
+    if err, ok := value.(error); true == ok {
+        if true == internal.IsNilInterface(err) {
+            return nil
+        }
+
+        /* an error that also marshals itself opted into a structural rendering — a validation error collection says the same thing here that it says in the response body — while every other error still renders as its message, because the encoder's default for an error is the empty object */
+        if _, isMarshaler := value.(json.Marshaler); true == isMarshaler {
+            return value
+        }
+
+        return err.Error()
+    }
+
+    switch typedValue := value.(type) {
+    case map[string]any:
+        return normalizeJsonMap(typedValue, remainingDepth-1)
+
+    /* the exception contract's Context is an alias of this one, so the single case covers the context maps both packages put into a record */
+    case loggingcontract.Context:
+        return normalizeJsonMap(typedValue, remainingDepth-1)
+
+    case []any:
+        normalized := make([]any, len(typedValue))
+        for index, element := range typedValue {
+            normalized[index] = normalizeJsonValue(element, remainingDepth-1)
+        }
+
+        return normalized
+
+    case []map[string]any:
+        normalized := make([]any, len(typedValue))
+        for index, element := range typedValue {
+            normalized[index] = normalizeJsonMap(element, remainingDepth-1)
+        }
+
+        return normalized
+    }
+
+    return value
 }

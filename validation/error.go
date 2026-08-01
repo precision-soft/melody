@@ -102,6 +102,11 @@ var _ validationcontract.ValidationError = (*ValidationError)(nil)
 
 type ValidationErrors []validationcontract.ValidationError
 
+/* MarshalJSON renders the collection as the array it is, each element through its own marshaler, so a log record carrying it says the same thing the http response body says: the flattened Error() string was the only form the log ever saw, and the per-field structure — field, message, code, context — survived in one place and not the other. The json logger hands an error implementing json.Marshaler to the encoder for exactly this opt-in. */
+func (instance ValidationErrors) MarshalJSON() ([]byte, error) {
+    return json.Marshal([]validationcontract.ValidationError(instance))
+}
+
 func (instance ValidationErrors) Error() string {
     if 0 == len(instance) {
         return ""

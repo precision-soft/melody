@@ -179,6 +179,7 @@ Implemented in:
 - [`GenerateProcessId()`](../../logging/process_id.go)
 - [`EnsureLogger(logger loggingcontract.Logger)`](../../logging/nop_logger.go)
 - [`IsValidLevel(value loggingcontract.Level)`](../../logging/logger.go)
+- [`LogError(logger loggingcontract.Logger, err error)`](../../logging/logger.go)
 
 #### Recovery
 

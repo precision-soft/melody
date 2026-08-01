@@ -102,7 +102,10 @@ func validateInput(input CreateUserInput) error {
   Default `validation/contract.ValidationError` implementation.
 
 - **validation.ValidationErrors**  
-  Slice of validation errors returned as `error` by `Validator.Validate`.
+  Slice of validation errors returned as `error` by `Validator.Validate`. `Error()` flattens the
+  messages into one sorted string; `MarshalJSON` renders the collection as the array it is, each
+  element through its own marshaler, which is what lets a log record carry the same per-field
+  structure the http response body carries.
 
 ### Constructors
 

@@ -3,11 +3,13 @@ package logging
 import (
     "bytes"
     "errors"
+    "fmt"
     "log"
     "strings"
     "testing"
 
     "github.com/precision-soft/melody/exception"
+    loggingcontract "github.com/precision-soft/melody/logging/contract"
 )
 
 func TestLogError_NilLogger_DoesNotPrintEmptyContext(t *testing.T) {
@@ -153,5 +155,160 @@ func TestLogError_PlainError_NilLogger_PrintsError(t *testing.T) {
     output := buffer.String()
     if false == strings.Contains(output, "plain error") {
         t.Fatalf("expected plain error in output, got: %s", output)
+    }
+}
+
+type typedNilProbeError struct {
+    message string
+}
+
+func (instance *typedNilProbeError) Error() string {
+    return instance.message
+}
+
+/* @info a typed nil boxed in the error interface is the nil its producer meant: the entry guard used to compare against the untyped nil alone, so the value walked on and dereferenced — Level() through the errors.As extraction for an exception, Error() on the generic path for anything else — inside the function whose whole job is to record a failure */
+func TestLogError_TypedNilError_DoesNothing(t *testing.T) {
+    capture := &captureLogger{}
+
+    LogError(capture, (*exception.Error)(nil))
+    LogError(capture, (*typedNilProbeError)(nil))
+
+    if 0 != capture.calls {
+        t.Fatalf("expected no record for a typed-nil error, got %d", capture.calls)
+    }
+}
+
+/* @info a typed nil found mid-chain matched the errors.As extraction and handed a nil receiver to Level(); the record now anchors on the wrapper itself and the nil link contributes nothing */
+func TestLogError_TypedNilExceptionInTheChain_LogsTheWrapper(t *testing.T) {
+    wrapper := fmt.Errorf("wrapper failed: %w", error((*exception.Error)(nil)))
+
+    capture := &captureLogger{}
+    LogError(capture, wrapper)
+
+    if 1 != capture.calls {
+        t.Fatalf("expected one record for the wrapper, got %d", capture.calls)
+    }
+
+    if loggingcontract.LevelError != capture.lastLevel {
+        t.Fatalf("expected the record at error level, got %s", capture.lastLevel)
+    }
+
+    if false == strings.Contains(capture.lastMessage, "wrapper failed") {
+        t.Fatalf("expected the wrapper message, got %q", capture.lastMessage)
+    }
+}
+
+/* @info a typed-nil logger passed the plain nil comparison and the first method call dereferenced the nil receiver; the fallback the untyped nil already took is the right answer for both */
+func TestLogError_TypedNilLogger_FallsBackToTheProcessLogger(t *testing.T) {
+    var buffer bytes.Buffer
+
+    originalWriter := log.Writer()
+    log.SetOutput(&buffer)
+    defer func() {
+        log.SetOutput(originalWriter)
+    }()
+
+    LogError((*jsonLogger)(nil), exception.NewError("fallback message", nil, nil))
+
+    if false == strings.Contains(buffer.String(), "fallback message") {
+        t.Fatalf("expected the record on the process logger, got: %s", buffer.String())
+    }
+}
+
+/* @info the mark is read at the depth exception.MarkLogged writes it — the nearest AlreadyLogged implementer in the chain. The reader used to search for the nearest *exception.Error instead, so marking a wrapping http exception was invisible here and the one failure produced two records. */
+func TestLogError_ReadsTheMarkAtTheDepthMarkLoggedWrites(t *testing.T) {
+    inner := exception.NewError("inner", nil, nil)
+    outer := exception.NewHttpExceptionWithCause(500, "outer", inner)
+
+    _ = exception.MarkLogged(outer)
+
+    capture := &captureLogger{}
+    LogError(capture, outer)
+
+    if 0 != capture.calls {
+        t.Fatalf("expected the marked wrapper to suppress the record, got %d", capture.calls)
+    }
+}
+
+/* @info the record anchors on the error the caller handed over: the http exception wrapping a low-severity exception used to be logged as that inner exception — its message, its info level — which dropped the wrapper's framing and filed the whole record below an info-filtering logger's threshold */
+func TestLogError_AnchorsOnTheTopError(t *testing.T) {
+    inner := exception.NewInfo("cache miss", nil, nil)
+    outer := exception.NewHttpExceptionWithCause(500, "failed to answer the request", inner)
+
+    capture := &captureLogger{}
+    LogError(capture, outer)
+
+    if 1 != capture.calls {
+        t.Fatalf("expected one record, got %d", capture.calls)
+    }
+
+    if loggingcontract.LevelError != capture.lastLevel {
+        t.Fatalf("expected the record at error level, got %s", capture.lastLevel)
+    }
+
+    if false == strings.Contains(capture.lastMessage, "failed to answer the request") {
+        t.Fatalf("expected the wrapper message, got %q", capture.lastMessage)
+    }
+
+    causeValue, hasCause := capture.lastContext["cause"]
+    if false == hasCause {
+        t.Fatalf("expected the wrapped exception as the cause")
+    }
+
+    if "cache miss" != causeValue {
+        t.Fatalf("unexpected cause: %v", causeValue)
+    }
+}
+
+/* @info the already-logged check used to sit behind the nil-logger fallback, so an error already recorded through a real logger was printed a second time whenever no logger was at hand */
+func TestLogError_AlreadyLogged_NilLogger_PrintsNothing(t *testing.T) {
+    var buffer bytes.Buffer
+
+    originalWriter := log.Writer()
+    log.SetOutput(&buffer)
+    defer func() {
+        log.SetOutput(originalWriter)
+    }()
+
+    err := exception.NewError("already recorded", nil, nil)
+    err.MarkAsLogged()
+
+    LogError(nil, err)
+
+    if 0 != buffer.Len() {
+        t.Fatalf("expected no output for an already-logged error, got: %s", buffer.String())
+    }
+}
+
+func TestLogError_ForeignErrorCarriesProviderContextAndCauseChain(t *testing.T) {
+    root := errors.New("root cause")
+    outer := exception.NewHttpExceptionWithCause(500, "outer", root)
+    outer.SetContextValue("key", "value")
+
+    capture := &captureLogger{}
+    LogError(capture, outer)
+
+    if 1 != capture.calls {
+        t.Fatalf("expected one record, got %d", capture.calls)
+    }
+
+    if "value" != capture.lastContext["key"] {
+        t.Fatalf("expected the provider context in the record, got %v", capture.lastContext)
+    }
+
+    if "root cause" != capture.lastContext["cause"] {
+        t.Fatalf("expected the cause chain in the record, got %v", capture.lastContext)
+    }
+}
+
+/* @info BuildCauseChain refuses a typed-nil cause at the entry and returns an empty chain, which routed the walk into the branch that renders the cause directly — the only input that ever reached it — where Error() dereferenced the nil receiver */
+func TestEnrichContextWithCause_TypedNilCause_AddsNoCause(t *testing.T) {
+    exceptionValue := exception.NewError("msg", nil, (*exception.Error)(nil))
+
+    enrichedContext := enrichContextWithCause(exceptionValue)
+
+    _, hasCause := enrichedContext["cause"]
+    if true == hasCause {
+        t.Fatalf("expected no cause for a typed-nil cause, got %v", enrichedContext["cause"])
     }
 }

@@ -7,8 +7,9 @@ import (
     loggingcontract "github.com/precision-soft/melody/logging/contract"
 )
 
+/* NewLoggingConfiguration copies the labels on the way in, and LevelLabels hands a copy back out: the map ends up read lock-free on every Log call of the logger built from it, and a live reference kept by the module that registered it — or taken by a caller of the accessor — turns a later write into a fatal concurrent map access no recover reaches. */
 func NewLoggingConfiguration(labels loggingcontract.LevelLabels) loggingcontract.LoggingConfiguration {
-    return &loggingConfiguration{levelLabels: labels}
+    return &loggingConfiguration{levelLabels: copyLevelLabels(labels)}
 }
 
 type loggingConfiguration struct {
@@ -16,7 +17,16 @@ type loggingConfiguration struct {
 }
 
 func (instance *loggingConfiguration) LevelLabels() loggingcontract.LevelLabels {
-    return instance.levelLabels
+    return copyLevelLabels(instance.levelLabels)
+}
+
+func copyLevelLabels(labels loggingcontract.LevelLabels) loggingcontract.LevelLabels {
+    copied := make(loggingcontract.LevelLabels, len(labels))
+    for level, label := range labels {
+        copied[level] = label
+    }
+
+    return copied
 }
 
 func LoggingConfigurationFromModules(moduleConfigurations map[string]any) loggingcontract.LoggingConfiguration {

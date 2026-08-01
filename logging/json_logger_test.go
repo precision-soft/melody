@@ -487,3 +487,267 @@ func TestJsonLogger_ClosedReportsOnlyAReallyClosedWriter(t *testing.T) {
         t.Fatalf("expected the console logger to stay open and report not closed")
     }
 }
+
+/* @info a typed nil stored under a context key matched the error assertion and Error() dereferenced the nil receiver inside Log — a panic on the logging path, reachable from the exit handler; it renders as null, the nil its producer meant */
+func TestJsonLogger_NormalizesTypedNilErrorToNull(t *testing.T) {
+    logger, buffer := testNewJsonLogger()
+
+    logger.Error(
+        "record",
+        map[string]any{
+            "cause": (*typedNilProbeError)(nil),
+        },
+    )
+
+    data := decodeJsonLine(t, strings.TrimSpace(buffer.String()))
+
+    context, isMap := data["context"].(map[string]any)
+    if false == isMap {
+        t.Fatalf("expected context in the record")
+    }
+
+    causeValue, hasCause := context["cause"]
+    if false == hasCause || nil != causeValue {
+        t.Fatalf("expected the typed-nil cause to render as null, got %v", causeValue)
+    }
+}
+
+/* @info an error one level down used to reach the encoder unnormalized and marshal as an empty object — every field unexported, no marshaler — so the diagnostic survived at the top level and vanished one level below it */
+func TestJsonLogger_NormalizesNestedErrors(t *testing.T) {
+    logger, buffer := testNewJsonLogger()
+
+    logger.Error(
+        "record",
+        map[string]any{
+            "details": map[string]any{
+                "dbErr": errors.New("no rows"),
+            },
+            "chain": []map[string]any{
+                {"linkErr": errors.New("link failed")},
+            },
+            "values": []any{errors.New("element failed")},
+        },
+    )
+
+    line := strings.TrimSpace(buffer.String())
+    data := decodeJsonLine(t, line)
+
+    context, isMap := data["context"].(map[string]any)
+    if false == isMap {
+        t.Fatalf("expected context in the record")
+    }
+
+    details, isDetails := context["details"].(map[string]any)
+    if false == isDetails || "no rows" != details["dbErr"] {
+        t.Fatalf("expected the nested error message, got %v", context["details"])
+    }
+
+    if true == strings.Contains(line, "{}") {
+        t.Fatalf("expected no empty-object rendering of an error, got %s", line)
+    }
+}
+
+/* @info one unmarshalable value used to cost every other key of the record: the fallback now carries the whole context as text, so the service name and the cause survive next to the marshal error */
+func TestJsonLogger_FallbackKeepsTheContextAsText(t *testing.T) {
+    logger, buffer := testNewJsonLoggerWithMinLevel(loggingcontract.LevelInfo)
+
+    logger.Error(
+        "record",
+        map[string]any{
+            "bad":     make(chan int),
+            "service": "the-culprit",
+        },
+    )
+
+    data := decodeJsonLine(t, strings.TrimSpace(buffer.String()))
+
+    contextText, isString := data["context"].(string)
+    if false == isString {
+        t.Fatalf("expected the fallback to carry the context as text, got %T", data["context"])
+    }
+
+    if false == strings.Contains(contextText, "the-culprit") {
+        t.Fatalf("expected the surviving keys in the fallback context, got %s", contextText)
+    }
+}
+
+type gatedProbeWriter struct {
+    entered chan struct{}
+    release chan struct{}
+}
+
+func (instance *gatedProbeWriter) Write(payload []byte) (int, error) {
+    close(instance.entered)
+    <-instance.release
+
+    return len(payload), nil
+}
+
+/* @info Closed is asked by the process-boundary exit handler; an answer serialized behind an in-flight Write into a stalled pipe used to hang the one handler that must reach os.Exit — the probe is held open inside Write while Closed is required to answer */
+func TestJsonLogger_ClosedAnswersWhileAWriteIsInFlight(t *testing.T) {
+    writer := &gatedProbeWriter{
+        entered: make(chan struct{}),
+        release: make(chan struct{}),
+    }
+
+    logger := NewJsonLogger(writer, loggingcontract.LevelInfo)
+
+    go func() {
+        logger.Info("stalled record", nil)
+    }()
+
+    <-writer.entered
+
+    answered := make(chan bool, 1)
+    go func() {
+        closedChecker := logger.(interface{ Closed() bool })
+        answered <- closedChecker.Closed()
+    }()
+
+    select {
+    case isClosed := <-answered:
+        if true == isClosed {
+            t.Fatalf("expected the stalled logger to report open")
+        }
+
+    case <-time.After(2 * time.Second):
+        t.Fatalf("expected Closed to answer while the write is in flight")
+    }
+
+    close(writer.release)
+}
+
+/* @info the console is recognized by identity — the os.Stdout and os.Stderr values themselves — not by name: a file the caller opened on the "/dev/stdout" path is a descriptor this logger owns, and the name check skipped the close it owed and leaked it once per boot */
+func TestJsonLogger_CloseClosesAFileOpenedOnTheConsolePath(t *testing.T) {
+    file, openErr := os.OpenFile("/dev/stdout", os.O_WRONLY|os.O_APPEND, 0644)
+    if nil != openErr {
+        t.Skipf("cannot open /dev/stdout in this environment: %v", openErr)
+    }
+
+    logger := NewJsonLogger(file, loggingcontract.LevelInfo)
+
+    closer := logger.(interface{ Close() error })
+    if closeErr := closer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    closedChecker := logger.(interface{ Closed() bool })
+    if false == closedChecker.Closed() {
+        t.Fatalf("expected the opened descriptor to be really closed")
+    }
+}
+
+/* @info the labels are read lock-free on every Log call while the caller keeps its reference: without the copy, a later write into that map raced the reads fatally; with it, the logger keeps rendering the labels it was built with */
+func TestNewJsonLoggerWithLabels_CopiesTheLabels(t *testing.T) {
+    labels := loggingcontract.LevelLabels{
+        loggingcontract.LevelError: loggingcontract.LevelLabelFromString("custom-error"),
+    }
+
+    buffer := &bytes.Buffer{}
+    logger := NewJsonLoggerWithLabels(buffer, loggingcontract.LevelInfo, labels)
+
+    labels[loggingcontract.LevelError] = loggingcontract.LevelLabelFromString("mutated-error")
+
+    logger.Error("record", nil)
+
+    if false == strings.Contains(buffer.String(), "custom-error") {
+        t.Fatalf("expected the label the logger was built with, got %s", buffer.String())
+    }
+}
+
+type marshalingProbeError struct {
+    detail string
+}
+
+func (instance *marshalingProbeError) Error() string {
+    return "flattened"
+}
+
+func (instance *marshalingProbeError) MarshalJSON() ([]byte, error) {
+    return json.Marshal(map[string]string{"detail": instance.detail})
+}
+
+/* @info decizie user 08-01: an error that also marshals itself opts into a structural rendering — the validation error collection says the same thing in the log that it says in the response body — while a plain error still renders as its message */
+func TestJsonLogger_ErrorImplementingMarshalerRendersStructurally(t *testing.T) {
+    logger, buffer := testNewJsonLogger()
+
+    logger.Error(
+        "record",
+        map[string]any{
+            "structured": &marshalingProbeError{detail: "field level"},
+            "plain":      errors.New("plain failure"),
+        },
+    )
+
+    data := decodeJsonLine(t, strings.TrimSpace(buffer.String()))
+
+    context, isMap := data["context"].(map[string]any)
+    if false == isMap {
+        t.Fatalf("expected context in the record")
+    }
+
+    structured, isStructured := context["structured"].(map[string]any)
+    if false == isStructured || "field level" != structured["detail"] {
+        t.Fatalf("expected the marshaler error rendered structurally, got %v", context["structured"])
+    }
+
+    if "plain failure" != context["plain"] {
+        t.Fatalf("expected the plain error rendered as its message, got %v", context["plain"])
+    }
+}
+
+/* @info decizie user 08-01: a level outside the five known ones weighs as error instead of debug — the unknown level is the case that least deserves silence, and the zero-value exception carries an empty one; the label keeps the raw level so the record says what it was handed */
+func TestJsonLogger_UnknownLevelIsWeighedAsError(t *testing.T) {
+    logger, buffer := testNewJsonLoggerWithMinLevel(loggingcontract.LevelInfo)
+
+    logger.Log(loggingcontract.Level(""), "empty level record", nil)
+    logger.Log(loggingcontract.LevelUnknown, "unknown level record", nil)
+
+    lines := strings.Split(strings.TrimSpace(buffer.String()), "\n")
+    if 2 != len(lines) {
+        t.Fatalf("expected both unknown-level records to survive the threshold, got %d lines: %s", len(lines), buffer.String())
+    }
+
+    firstRecord := decodeJsonLine(t, lines[0])
+    if "" != firstRecord["level"] {
+        t.Fatalf("expected the raw empty level in the record, got %v", firstRecord["level"])
+    }
+
+    secondRecord := decodeJsonLine(t, lines[1])
+    if "unknown" != secondRecord["level"] {
+        t.Fatalf("expected the raw unknown level in the record, got %v", secondRecord["level"])
+    }
+}
+
+/* @info decizie user 08-01: nanosecond precision keeps the ordering the write mutex pays for; three records make an all-zero fraction astronomically unlikely, and the stamp still parses under the RFC 3339 layout */
+func TestJsonLogger_TimestampCarriesSubSecondPrecision(t *testing.T) {
+    logger, buffer := testNewJsonLogger()
+
+    logger.Info("first", nil)
+    logger.Info("second", nil)
+    logger.Info("third", nil)
+
+    lines := strings.Split(strings.TrimSpace(buffer.String()), "\n")
+
+    fractionSeen := false
+    for _, line := range lines {
+        data := decodeJsonLine(t, line)
+
+        timeValue, isString := data["time"].(string)
+        if false == isString {
+            t.Fatalf("expected a time value")
+        }
+
+        if _, parseErr := time.Parse(time.RFC3339Nano, timeValue); nil != parseErr {
+            t.Fatalf("expected an RFC 3339 parsable stamp, got %q: %v", timeValue, parseErr)
+        }
+
+        if true == strings.Contains(timeValue, ".") {
+            fractionSeen = true
+        }
+    }
+
+    if false == fractionSeen {
+        t.Fatalf("expected at least one stamp with a sub-second fraction, got %s", buffer.String())
+    }
+}

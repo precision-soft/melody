@@ -13,6 +13,7 @@ import (
     "github.com/precision-soft/melody/exception"
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
     httpcontract "github.com/precision-soft/melody/http/contract"
+    "github.com/precision-soft/melody/internal"
     kernelcontract "github.com/precision-soft/melody/kernel/contract"
     "github.com/precision-soft/melody/logging"
     loggingcontract "github.com/precision-soft/melody/logging/contract"
@@ -321,7 +322,8 @@ func (instance *Application) logOnRecoverAndExit() {
         return
     }
 
-    logging.LogOnRecoverAndExit(instance.resolveExitLogger(), recoveredValue, 1)
+    /* the teardown hook mirrors the one Run passes: a boot that dies after the container was built — the logger service holds the log file open from that moment — used to exit with the container never closed, because os.Exit runs no defer. The record is written first, through a logger the teardown has not touched, and the close runs between the record and the exit; Close asks IsClosed before acting, so a container that never got built costs nothing. */
+    logging.LogOnRecoverAndExitAfter(instance.resolveExitLogger(), recoveredValue, 1, instance.Close)
 }
 
 /* resolveExitLogger picks the logger the final fatal record is written through: the configured container logger while it still writes, the emergency logger otherwise. The container keeps serving built instances after Close, so liveness has to be asked of the logger itself — a file-backed logger a teardown already closed silently drops every write, and preferring it would lose the one record that explains the exit. The kernel guard covers an Application assembled without NewApplication: the one handler that must not panic answers with the emergency logger instead of dereferencing nil. */
@@ -333,7 +335,8 @@ func (instance *Application) resolveExitLogger() loggingcontract.Logger {
     }
 
     containerLogger, loggerErr := logging.LoggerFromContainer(instance.kernel.ServiceContainer())
-    if nil != loggerErr || nil == containerLogger {
+    if nil != loggerErr || nil == containerLogger || true == internal.IsNilInterface(containerLogger) {
+        /* the typed-nil clause is latent defense: the container refuses a provider-returned or overridden typed nil with an error today, but one that did slip through a future resolution path would pass the plain comparison and answer the Closed probe below with a nil receiver — a panic in the one handler that must not panic, in place of the emergency fallback this resolver exists to provide */
         return logger
     }
 

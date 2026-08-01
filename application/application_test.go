@@ -369,3 +369,123 @@ func TestRun_PanicPathWritesTheFatalRecordThroughTheLiveLoggerBeforeTeardown(t *
         t.Fatalf("expected the stderr echo to name the failure, got: %s", string(output))
     }
 }
+
+type typedNilProbeExitLogger struct {
+    closedFlag bool
+}
+
+func (instance *typedNilProbeExitLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+}
+
+func (instance *typedNilProbeExitLogger) Debug(message string, context loggingcontract.Context) {}
+
+func (instance *typedNilProbeExitLogger) Info(message string, context loggingcontract.Context) {}
+
+func (instance *typedNilProbeExitLogger) Warning(message string, context loggingcontract.Context) {
+}
+
+func (instance *typedNilProbeExitLogger) Error(message string, context loggingcontract.Context) {}
+
+func (instance *typedNilProbeExitLogger) Emergency(message string, context loggingcontract.Context) {
+}
+
+func (instance *typedNilProbeExitLogger) Closed() bool {
+    return instance.closedFlag
+}
+
+/* @info a factory handing back a typed nil is refused by the container with an error, and the resolver answers with the emergency logger — the pin covers the whole path; the resolver's own typed-nil clause stays as latent defense for a resolution path without the container's refusal */
+func TestResolveExitLogger_RefusesATypedNilContainerLogger(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+
+    applicationInstance.RegisterService(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return (*typedNilProbeExitLogger)(nil), nil
+        },
+    )
+
+    resolvedLogger := applicationInstance.resolveExitLogger()
+
+    if typedLogger, isTypedProbe := resolvedLogger.(*typedNilProbeExitLogger); true == isTypedProbe && nil == typedLogger {
+        t.Fatalf("expected the typed-nil container logger to be refused for the final record")
+    }
+
+    if nil == resolvedLogger {
+        t.Fatalf("expected the emergency logger, got nil")
+    }
+}
+
+/* @info the exit handler now runs Close as its before-exit hook, and a boot that died before the kernel was assembled reaches it with a nil kernel: the close must be the no-op it means, not a dereference */
+func TestClose_SurvivesANilKernel(t *testing.T) {
+    applicationInstance := &Application{}
+
+    applicationInstance.Close()
+}
+
+/* the marker tells a re-executed test binary that it is the child whose Boot must die and take the teardown hook with it rather than the parent that watches */
+const bootPanicTeardownProbeMarker = "MELODY_TEST_BOOT_PANIC_TEARDOWN_PROBE"
+
+/* @info the proof that a boot panic tears the container down before the exit: the child's container holds a built service whose Close fails, so the teardown leaves a visible trace — the emergency record naming the failed container close — that the old path, which took os.Exit with the container never closed, could not produce. The boot dies on a command-name collision, which panics inside Boot under Boot's own handler. */
+func TestBoot_PanicPathRunsTheTeardownHook(t *testing.T) {
+    projectDirectory := os.Getenv(bootPanicTeardownProbeMarker)
+
+    if "" != projectDirectory {
+        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{}})
+        if nil != environmentErr {
+            os.Exit(91)
+        }
+
+        configuration, configurationErr := config.NewConfiguration(environment, projectDirectory)
+        if nil != configurationErr {
+            os.Exit(92)
+        }
+
+        applicationInstance := &Application{
+            configuration:        configuration,
+            runtimeFlags:         NewRuntimeFlags(config.ModeCli),
+            kernel:               newTestKernel(),
+            cliCommands:          make([]clicontract.Command, 0),
+            moduleConfigurations: make(map[string]any),
+        }
+
+        applicationInstance.RegisterService(
+            "service.test.failing.closer",
+            func(resolver containercontract.Resolver) (*failingCloser, error) {
+                return &failingCloser{}, nil
+            },
+        )
+
+        container.MustFromResolver[*failingCloser](applicationInstance.kernel.ServiceContainer(), "service.test.failing.closer")
+
+        applicationInstance.RegisterCliCommand(&panickingProbeApplicationCommand{})
+        applicationInstance.RegisterCliCommand(&panickingProbeApplicationCommand{})
+
+        applicationInstance.Boot()
+
+        os.Exit(93)
+    }
+
+    childProjectDirectory := t.TempDir()
+
+    child := exec.Command(os.Args[0], "-test.run=TestBoot_PanicPathRunsTheTeardownHook$")
+    child.Env = append(os.Environ(), bootPanicTeardownProbeMarker+"="+childProjectDirectory)
+
+    output, runErr := child.CombinedOutput()
+
+    exitError, isExitError := runErr.(*exec.ExitError)
+    if false == isExitError {
+        t.Fatalf("expected the child to exit non-zero, got err %v with output: %s", runErr, string(output))
+    }
+
+    if 1 != exitError.ExitCode() {
+        t.Fatalf("expected exit code 1, got %d with output: %s", exitError.ExitCode(), string(output))
+    }
+
+    if false == strings.Contains(string(output), "failed to close service container") {
+        t.Fatalf("expected the teardown hook to run and report the failing container close, got: %s", string(output))
+    }
+
+    if false == strings.Contains(string(output), "melody: exiting with code 1") {
+        t.Fatalf("expected the stderr echo after the teardown, got: %s", string(output))
+    }
+}

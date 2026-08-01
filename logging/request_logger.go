@@ -60,6 +60,17 @@ func (instance *requestLogger) Emergency(message string, context loggingcontract
     instance.base.Emergency(message, instance.mergeContextWithRequestId(context, instance.requestId))
 }
 
+/* Closed forwards the liveness question to the base logger: the process-boundary exit handler refuses a logger that reports itself closed, and a decorator that cannot answer hides a dead file logger behind a live-looking wrapper — the final record would be handed to it and silently dropped. A base that does not answer the question is reported open, exactly as the exit handler treats it when asked directly. Close is deliberately not forwarded: the wrapper lives in a request scope and does not own the shared writer of the logger it decorates. */
+func (instance *requestLogger) Closed() bool {
+    closedChecker, isChecker := instance.base.(interface{ Closed() bool })
+    if false == isChecker {
+        return false
+    }
+
+    return closedChecker.Closed()
+}
+
+/* mergeContextWithRequestId writes the real request id under the context key unconditionally: the id this logger was built with is the one trustworthy correlation there is, and a value already sitting under the key frequently originates in an error context assembled from request data — letting it win let whatever the client wrote forge the correlation of the record. A different non-empty claim is kept beside the real id under the key suffixed "Claimed", so nothing the caller said is lost, and the operator sees both the truth and the claim. */
 func (instance *requestLogger) mergeContextWithRequestId(context loggingcontract.Context, requestId string) map[string]any {
     if "" == requestId {
         return context
@@ -69,14 +80,14 @@ func (instance *requestLogger) mergeContextWithRequestId(context loggingcontract
         context = map[string]any{}
     }
 
-    mergedContext := make(map[string]any, len(context)+1)
+    mergedContext := make(map[string]any, len(context)+2)
     for key, value := range context {
         mergedContext[key] = value
     }
 
     if existingValue, exists := mergedContext[instance.contextKey]; true == exists {
-        if stringValue, ok := existingValue.(string); true == ok && "" != stringValue {
-            return mergedContext
+        if stringValue, ok := existingValue.(string); true == ok && "" != stringValue && requestId != stringValue {
+            mergedContext[instance.contextKey+"Claimed"] = stringValue
         }
     }
 
