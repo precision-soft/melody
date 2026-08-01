@@ -751,3 +751,120 @@ func TestJsonLogger_TimestampCarriesSubSecondPrecision(t *testing.T) {
         t.Fatalf("expected at least one stamp with a sub-second fraction, got %s", buffer.String())
     }
 }
+
+/* @info Close is called by the container teardown and can be called again by an owner that also holds the logger; the second call must not hand the writer to Close twice — a file descriptor closed twice is a descriptor another goroutine may already have been given by the operating system */
+func TestJsonLogger_Close_IsIdempotent(t *testing.T) {
+    file, createErr := os.CreateTemp(t.TempDir(), "melody-json-logger-*.log")
+    if nil != createErr {
+        t.Fatalf("unexpected temp file error: %v", createErr)
+    }
+
+    logger := NewJsonLogger(file, loggingcontract.LevelInfo)
+
+    closer := logger.(interface{ Close() error })
+
+    if closeErr := closer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if closeErr := closer.Close(); nil != closeErr {
+        t.Fatalf("expected the second close to be a no-op, got %v", closeErr)
+    }
+
+    if false == logger.(interface{ Closed() bool }).Closed() {
+        t.Fatalf("expected the logger to report itself closed")
+    }
+}
+
+/* @info a writer that cannot be closed — a buffer, a pipe half held by somebody else — is left alone and the logger keeps writing: reporting itself closed would make the exit handler refuse a logger that is perfectly alive, and the final record would be routed to the emergency logger for nothing */
+func TestJsonLogger_Close_WithANonClosableWriter_KeepsTheLoggerAlive(t *testing.T) {
+    logger, buffer := testNewJsonLogger()
+
+    closer := logger.(interface{ Close() error })
+
+    if closeErr := closer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if true == logger.(interface{ Closed() bool }).Closed() {
+        t.Fatalf("expected a logger over a non-closable writer to stay open")
+    }
+
+    logger.Error("after the close", nil)
+
+    if false == strings.Contains(buffer.String(), "after the close") {
+        t.Fatalf("expected the record to still be written, got %q", buffer.String())
+    }
+}
+
+/* @info the normalization descends into the context maps the framework itself nests — the cause context chain is exactly this shape — and the exception contract's Context is the type those maps arrive as; without the case for it, an error one level down inside one would reach the encoder unconverted and marshal as an empty object */
+func TestJsonLogger_NestedContextTypedMap_IsNormalizedLikeAPlainMap(t *testing.T) {
+    logger, buffer := testNewJsonLogger()
+
+    logger.Error(
+        "message",
+        loggingcontract.Context{
+            "nested": loggingcontract.Context{
+                "cause": errors.New("the nested cause"),
+            },
+        },
+    )
+
+    record := map[string]any{}
+    if unmarshalErr := json.Unmarshal(buffer.Bytes(), &record); nil != unmarshalErr {
+        t.Fatalf("unexpected unmarshal error: %v for %q", unmarshalErr, buffer.String())
+    }
+
+    context, isMap := record["context"].(map[string]any)
+    if false == isMap {
+        t.Fatalf("unexpected context shape: %v", record["context"])
+    }
+
+    nested, isNestedMap := context["nested"].(map[string]any)
+    if false == isNestedMap {
+        t.Fatalf("expected the nested context to be rendered as an object, got %v", context["nested"])
+    }
+
+    if "the nested cause" != nested["cause"] {
+        t.Fatalf("expected the nested error to render as its message, got %v", nested["cause"])
+    }
+}
+
+/* @info a nil context value renders as json null rather than being dropped or reaching the encoder as an untyped nil inside a converted container */
+func TestJsonLogger_NilContextValue_RendersAsNull(t *testing.T) {
+    logger, buffer := testNewJsonLogger()
+
+    logger.Error("message", loggingcontract.Context{"missing": nil})
+
+    if false == strings.Contains(buffer.String(), `"missing":null`) {
+        t.Fatalf("expected a null value, got %q", buffer.String())
+    }
+}
+
+/* @info the descent is bounded: a context that nests deeper than the bound is handed to the encoder as it is instead of recursing without end, which is what keeps a pathological self-referencing structure from taking the process down inside the logger. The assertion is written at the boundary itself — one level above it the error still renders as its message, one level below it reaches the encoder unconverted and marshals as an empty object — because a bound asserted from far away survives being moved by one */
+func TestJsonLogger_ContextDepthBound_IsAppliedExactlyWhereItIsDeclared(t *testing.T) {
+    buildNestedContext := func(depth int) loggingcontract.Context {
+        nested := any(map[string]any{"cause": errors.New("at the bound")})
+
+        for level := 0; level < depth; level++ {
+            nested = map[string]any{"level": nested}
+        }
+
+        return loggingcontract.Context{"root": nested}
+    }
+
+    /* the context map itself is the first level the walk descends, so the last level it still converts sits two below the bound */
+    logger, buffer := testNewJsonLogger()
+    logger.Error("message", buildNestedContext(normalizeJsonContextMaxDepth-2))
+
+    if false == strings.Contains(buffer.String(), `"cause":"at the bound"`) {
+        t.Fatalf("expected the error just above the bound to render as its message, got %q", buffer.String())
+    }
+
+    logger, buffer = testNewJsonLogger()
+    logger.Error("message", buildNestedContext(normalizeJsonContextMaxDepth-1))
+
+    if false == strings.Contains(buffer.String(), `"cause":{}`) {
+        t.Fatalf("expected the error below the bound to reach the encoder unconverted, got %q", buffer.String())
+    }
+}

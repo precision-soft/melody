@@ -729,3 +729,165 @@ func TestResolveErrorContextJson_RendersTheNamedSliceCycleAsAMarker(t *testing.T
         t.Fatalf("expected the closed loop to be rendered as %s, got %q", encodedMarker, result)
     }
 }
+
+/* @info the row builder is what turns one failing service into the lines an operator reads, and no test had entered it. A service that built fine occupies exactly one row; a failing one spreads its error over as many rows as the verbosity allows, with the name and the type printed once so the block reads as one service rather than as several */
+func TestBuildContainerServiceTableRows_HealthyService_OccupiesOneRow(t *testing.T) {
+    rows := buildContainerServiceTableRows(
+        containerServiceListItem{
+            Name:     "service.mailer",
+            TypeName: "*mailer.Mailer",
+        },
+        output.Option{Format: output.FormatTable},
+    )
+
+    if 1 != len(rows) {
+        t.Fatalf("expected one row, got %v", rows)
+    }
+
+    if "service.mailer" != rows[0][0] || "*mailer.Mailer" != rows[0][1] || "" != rows[0][2] {
+        t.Fatalf("unexpected row %v", rows[0])
+    }
+}
+
+/* @info a failing service hides its type behind <error>: the type column reports what was built, and nothing was */
+func TestBuildContainerServiceTableRows_FailingService_ReplacesTheTypeAndRepeatsNothing(t *testing.T) {
+    rows := buildContainerServiceTableRows(
+        containerServiceListItem{
+            Name:            "service.mailer",
+            TypeName:        "*mailer.Mailer",
+            ErrorString:     "dial refused",
+            ErrorCauseChain: []string{"connection refused"},
+        },
+        output.Option{Format: output.FormatTable, VerbosityLevel: 3},
+    )
+
+    if 2 > len(rows) {
+        t.Fatalf("expected the error to spread over more than one row, got %v", rows)
+    }
+
+    if "service.mailer" != rows[0][0] {
+        t.Fatalf("expected the name on the first row, got %v", rows[0])
+    }
+
+    if "<error>" != rows[0][1] {
+        t.Fatalf("expected the type to be replaced on a failing service, got %v", rows[0])
+    }
+
+    for index := 1; index < len(rows); index++ {
+        if "" != rows[index][0] || "" != rows[index][1] {
+            t.Fatalf("expected the continuation rows to repeat neither name nor type, got %v", rows[index])
+        }
+    }
+}
+
+/* @info the verbosity ladder decides how much of a failure reaches the terminal: the default shows one line, and each level shows more until the third shows everything. A ladder that collapsed to one value would either flood the default output or hide the cause at every verbosity */
+func TestErrorMaxLinesForVerbosityLevel_IsAStrictLadder(t *testing.T) {
+    expectedList := map[int]int{
+        0: 1,
+        1: 2,
+        2: 4,
+        3: 0,
+        9: 0,
+    }
+
+    for verbosityLevel, expectedMaxLines := range expectedList {
+        if expectedMaxLines != errorMaxLinesForVerbosityLevel(verbosityLevel) {
+            t.Fatalf(
+                "verbosity %d: expected %d lines, got %d",
+                verbosityLevel,
+                expectedMaxLines,
+                errorMaxLinesForVerbosityLevel(verbosityLevel),
+            )
+        }
+    }
+}
+
+/* @info the truncation marks the cut: without the ellipsis the last line shown reads as the whole error, and the operator stops looking exactly where the cause begins */
+func TestLimitLinesByVerbosity_MarksTheCutAndKeepsShortErrorsWhole(t *testing.T) {
+    lines := []string{"one", "two", "three", "four", "five"}
+
+    limited := limitLinesByVerbosity(lines, 1)
+
+    if 2 != len(limited) {
+        t.Fatalf("expected two lines at verbosity 1, got %v", limited)
+    }
+
+    if "one" != limited[0] {
+        t.Fatalf("expected the first line untouched, got %q", limited[0])
+    }
+
+    if false == strings.HasSuffix(limited[1], " ...") {
+        t.Fatalf("expected the cut to be marked, got %q", limited[1])
+    }
+
+    /* the ellipsis must not appear when nothing was dropped */
+    whole := limitLinesByVerbosity([]string{"one"}, 1)
+
+    if 1 != len(whole) || "one" != whole[0] {
+        t.Fatalf("expected a short error to be kept whole, got %v", whole)
+    }
+
+    unlimited := limitLinesByVerbosity(lines, 3)
+
+    if len(lines) != len(unlimited) {
+        t.Fatalf("expected every line at the highest verbosity, got %v", unlimited)
+    }
+}
+
+/* @info the drop list is the noise filter of the rendered error context — documented as a filter of noise, not of credentials — and it must catch the spellings the framework itself writes as well as any key that merely contains them; a filter that only matched the exact names would print a producer's "requestStackTrace" in full */
+func TestShouldDropErrorContextKey_CatchesEverySpellingAndKeepsTheRest(t *testing.T) {
+    droppedKeyList := []string{
+        "trace",
+        "stack",
+        "stackTrace",
+        "stacktrace",
+        "traceString",
+        "trace_string",
+        "panicStack",
+        "requestStackTrace",
+        "SomeTraceValue",
+    }
+
+    for _, key := range droppedKeyList {
+        if false == shouldDropErrorContextKey(key) {
+            t.Fatalf("expected %q to be dropped", key)
+        }
+    }
+
+    keptKeyList := []string{
+        "serviceName",
+        "userId",
+        "",
+        "attempt",
+    }
+
+    for _, key := range keptKeyList {
+        if true == shouldDropErrorContextKey(key) {
+            t.Fatalf("expected %q to be kept", key)
+        }
+    }
+}
+
+/* @info the cause chain starts one link below the resolution error's own message, because the message alone is what the command already prints; a walk anchored on the error itself would repeat it as its own first cause */
+func TestResolveErrorCauseChain_StartsBelowTheErrorItself(t *testing.T) {
+    if nil != resolveErrorCauseChain(nil) {
+        t.Fatalf("expected no chain for a nil error")
+    }
+
+    inner := errors.New("connection refused")
+
+    chain := resolveErrorCauseChain(exception.NewError("could not build the service", nil, inner))
+
+    if 1 != len(chain) {
+        t.Fatalf("expected one cause below the message, got %v", chain)
+    }
+
+    if "connection refused" != chain[0] {
+        t.Fatalf("unexpected cause %q", chain[0])
+    }
+
+    if nil != resolveErrorCauseChain(errors.New("no cause below this")) {
+        t.Fatalf("expected no chain for an error that wraps nothing")
+    }
+}
+

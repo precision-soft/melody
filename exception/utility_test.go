@@ -6,6 +6,7 @@ import (
     "math"
     "testing"
 
+    exceptioncontract "github.com/precision-soft/melody/exception/contract"
     loggingcontract "github.com/precision-soft/melody/logging/contract"
 )
 
@@ -444,6 +445,257 @@ func TestFromErrorWithLevelAndContext_TypedNil_ReturnsNil(t *testing.T) {
 
     if nil != FromErrorWithLevelAndContext(typedNil, loggingcontract.LevelWarning, nil) {
         t.Fatalf("expected nil for a typed-nil error")
+    }
+}
+
+/* @info a plain nil never reaches the helper through LogContext — the caller's own `nil == err` short-circuits first — so the branch that answers true for it is entered only here; it is the answer the rest of the file is written against */
+func TestIsNilInterfaceValue_PlainNil_AnswersTrue(t *testing.T) {
+    if false == isNilInterfaceValue(nil) {
+        t.Fatalf("expected a plain nil to read as nil")
+    }
+}
+
+/* @info a nil map among the extras is skipped rather than ranged over: on the nil-error path the skip is what keeps the merged result nil when every extra is nil, which is the difference between "no context" and "an empty context" in the record */
+func TestLogContext_NilExtras_AreSkippedOnBothPaths(t *testing.T) {
+    onlyNilExtras := LogContext(nil, nil, nil)
+
+    if nil != onlyNilExtras {
+        t.Fatalf("expected nil when every extra is nil, got %v", onlyNilExtras)
+    }
+
+    mixed := LogContext(nil, nil, exceptioncontract.Context{"key": "value"}, nil)
+
+    if 1 != len(mixed) || "value" != mixed["key"] {
+        t.Fatalf("expected only the non-nil extra to be merged, got %v", mixed)
+    }
+
+    withError := LogContext(errors.New("boom"), nil, exceptioncontract.Context{"key": "value"})
+
+    if "boom" != withError["error"] || "value" != withError["key"] {
+        t.Fatalf("expected the nil extra to be skipped beside a real error, got %v", withError)
+    }
+}
+
+/* @info the "error" key of a provider is dropped on purpose: the record's own "error" is the message of the error being logged, and a context that happens to carry the key would replace the identity of the record with whatever a producer put there */
+func TestLogContext_ProviderContextCannotOverwriteTheErrorKey(t *testing.T) {
+    err := NewError(
+        "the real message",
+        map[string]any{
+            "error":       "a value the producer put under the reserved key",
+            "serviceName": "service.mailer",
+        },
+        nil,
+    )
+
+    context := LogContext(err)
+
+    if "the real message" != context["error"] {
+        t.Fatalf("expected the error's own message under the error key, got %v", context["error"])
+    }
+
+    if "service.mailer" != context["serviceName"] {
+        t.Fatalf("expected the rest of the provider context to survive, got %v", context)
+    }
+}
+
+/* @info a maxDepth of zero or below means one link, not zero: the walk exists to describe the cause a caller already knows is there, and answering nothing for a non-positive bound would silently drop it */
+func TestBuildCauseContextChain_NonPositiveMaxDepth_WalksOneLink(t *testing.T) {
+    inner := NewError("inner", map[string]any{"key": "value"}, nil)
+    outer := NewError("outer", map[string]any{"outerKey": "outerValue"}, inner)
+
+    for _, maxDepth := range []int{0, -1} {
+        chain := BuildCauseContextChain(outer, maxDepth)
+
+        if 1 != len(chain) {
+            t.Fatalf("maxDepth %d: expected exactly one link, got %v", maxDepth, chain)
+        }
+
+        if "outerValue" != chain[0]["outerKey"] {
+            t.Fatalf("maxDepth %d: expected the first link's own context, got %v", maxDepth, chain[0])
+        }
+    }
+}
+
+/* @info a provider carrying an empty context still occupies its position in the chain, as a nil entry: the two walks are read side by side, link for link, and a provider that contributed nothing must not shift every link below it up by one */
+func TestBuildCauseContextChain_ProviderWithEmptyContext_KeepsItsPositionAsNil(t *testing.T) {
+    inner := NewError("inner", map[string]any{"key": "value"}, nil)
+    middle := NewError("middle", nil, inner)
+    outer := NewError("outer", nil, middle)
+
+    chain := BuildCauseContextChain(outer, 8)
+
+    if 3 != len(chain) {
+        t.Fatalf("expected one entry per link, got %v", chain)
+    }
+
+    if nil != chain[0] || nil != chain[1] {
+        t.Fatalf("expected the context-less links to hold nil, got %v", chain)
+    }
+
+    if "value" != chain[2]["key"] {
+        t.Fatalf("expected the innermost context at its own position, got %v", chain)
+    }
+}
+
+/* valueError is an error whose concrete type is a struct value, not a pointer: it cannot be nil, and the typed-nil detection has to answer that from the kind alone instead of asking a value that has no IsNil */
+type valueError struct {
+    message string
+}
+
+func (instance valueError) Error() string {
+    return instance.message
+}
+
+/* @info the typed-nil detection reflects on the concrete value and only chan, func, interface, map, pointer and slice can be nil; every other kind falls to the default answer, and answering "nil" there would make every value-typed error in the framework invisible to the utilities that describe errors */
+func TestErrorUtilities_ValueTypedError_IsNotReadAsNil(t *testing.T) {
+    if true == isNilInterfaceValue(valueError{message: "boom"}) {
+        t.Fatalf("expected a struct-valued error not to read as nil")
+    }
+
+    context := LogContext(valueError{message: "boom"})
+
+    if "boom" != context["error"] {
+        t.Fatalf("expected the value-typed error to be described, got %v", context)
+    }
+
+    converted := FromError(valueError{message: "boom"})
+
+    if nil == converted || "boom" != converted.Message() {
+        t.Fatalf("expected the value-typed error to convert, got %v", converted)
+    }
+}
+
+/* @info the level is the whole point of the helper — it is what a caller reaches for when a foreign error must be filed below error, and a logger's threshold reads exactly this field. Only the typed-nil refusal had ever been entered, so nothing said the level the caller asked for is the level the error carries */
+func TestFromErrorWithLevel_CarriesTheRequestedLevelAndWrapsTheError(t *testing.T) {
+    foreignError := errors.New("foreign")
+
+    converted := FromErrorWithLevel(foreignError, loggingcontract.LevelInfo)
+
+    if nil == converted {
+        t.Fatalf("expected a converted error")
+    }
+
+    if loggingcontract.LevelInfo != converted.Level() {
+        t.Fatalf("expected level %q, got %q", loggingcontract.LevelInfo, converted.Level())
+    }
+
+    if "foreign" != converted.Message() {
+        t.Fatalf("unexpected message %q", converted.Message())
+    }
+
+    if false == errors.Is(converted, foreignError) {
+        t.Fatalf("expected the original error to stay reachable as the cause")
+    }
+}
+
+/* @info the context of the nearest provider in the chain travels into the converted error: without it the conversion keeps the message and throws away everything that says which request, which service, which key */
+func TestFromErrorWithLevel_TakesTheContextOfTheProviderInTheChain(t *testing.T) {
+    inner := NewError("inner", map[string]any{"serviceName": "service.mailer"}, nil)
+
+    converted := FromErrorWithLevel(fmt.Errorf("wrapped: %w", inner), loggingcontract.LevelWarning)
+
+    if nil == converted {
+        t.Fatalf("expected a converted error")
+    }
+
+    if "service.mailer" != converted.Context()["serviceName"] {
+        t.Fatalf("expected the provider's context, got %v", converted.Context())
+    }
+
+    if loggingcontract.LevelWarning != converted.Level() {
+        t.Fatalf("expected level %q, got %q", loggingcontract.LevelWarning, converted.Level())
+    }
+}
+
+/* @info the two context sources are merged in one direction only: the caller's map is written after the provider's, so a key the caller spells deliberately overrides what the chain happened to carry. Merged the other way, the explicit argument would be the one silently dropped */
+func TestFromErrorWithLevelAndContext_MergesTheProviderContextUnderTheGivenOne(t *testing.T) {
+    inner := NewError(
+        "inner",
+        map[string]any{
+            "serviceName": "service.mailer",
+            "attempt":     1,
+        },
+        nil,
+    )
+
+    converted := FromErrorWithLevelAndContext(
+        fmt.Errorf("wrapped: %w", inner),
+        loggingcontract.LevelEmergency,
+        map[string]any{
+            "attempt": 2,
+            "host":    "mail.example.com",
+        },
+    )
+
+    if nil == converted {
+        t.Fatalf("expected a converted error")
+    }
+
+    if "service.mailer" != converted.Context()["serviceName"] {
+        t.Fatalf("expected the provider key to survive, got %v", converted.Context())
+    }
+
+    if 2 != converted.Context()["attempt"] {
+        t.Fatalf("expected the given context to win the shared key, got %v", converted.Context()["attempt"])
+    }
+
+    if "mail.example.com" != converted.Context()["host"] {
+        t.Fatalf("expected the given context to be merged, got %v", converted.Context())
+    }
+
+    if loggingcontract.LevelEmergency != converted.Level() {
+        t.Fatalf("expected level %q, got %q", loggingcontract.LevelEmergency, converted.Level())
+    }
+}
+
+/* @info a chain with no provider must still convert: the merged map is built unconditionally, and a nil map reaching the constructor is what the copy on the way in exists to absorb */
+func TestFromErrorWithLevelAndContext_WithoutProviderOrContext_StillConverts(t *testing.T) {
+    converted := FromErrorWithLevelAndContext(errors.New("plain"), loggingcontract.LevelDebug, nil)
+
+    if nil == converted {
+        t.Fatalf("expected a converted error")
+    }
+
+    if 0 != len(converted.Context()) {
+        t.Fatalf("expected an empty context, got %v", converted.Context())
+    }
+
+    if loggingcontract.LevelDebug != converted.Level() {
+        t.Fatalf("expected level %q, got %q", loggingcontract.LevelDebug, converted.Level())
+    }
+}
+
+/* @info the conversion carries the context of the nearest provider in the chain, which is the only thing that survives when a foreign wrapper is turned into an exception; the branch had never been entered from this package's own tests */
+func TestFromError_TakesTheContextOfTheProviderInTheChain(t *testing.T) {
+    inner := NewError("inner", map[string]any{"serviceName": "service.mailer"}, nil)
+
+    converted := FromError(fmt.Errorf("wrapped: %w", inner))
+
+    if nil == converted {
+        t.Fatalf("expected a converted error")
+    }
+
+    if "service.mailer" != converted.Context()["serviceName"] {
+        t.Fatalf("expected the provider's context, got %v", converted.Context())
+    }
+}
+
+/* @info the typed-nil provider is matched by errors.As and then dereferenced by the very loop that reads its context; the guard is per-helper, so each conversion helper needs its own entry */
+func TestFromErrorWithLevelHelpers_TypedNilProviderInChain_DoNotPanic(t *testing.T) {
+    withLevel := FromErrorWithLevel(&nilProviderWrapper{}, loggingcontract.LevelWarning)
+
+    if nil == withLevel || "wrapper" != withLevel.Message() {
+        t.Fatalf("expected the wrapper to convert, got %v", withLevel)
+    }
+
+    withContext := FromErrorWithLevelAndContext(
+        &nilProviderWrapper{},
+        loggingcontract.LevelWarning,
+        map[string]any{"key": "value"},
+    )
+
+    if nil == withContext || "value" != withContext.Context()["key"] {
+        t.Fatalf("expected the given context to survive, got %v", withContext)
     }
 }
 

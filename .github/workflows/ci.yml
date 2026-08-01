@@ -66,7 +66,9 @@ jobs:
     # map, the logger's shared writer, the message bus dispatch, the cron runner's
     # parallel dispatch), and only the detector can see them race — several of
     # those tests assert nothing at all, so without this lane they can only ever
-    # pass. Needs no service containers.
+    # pass. exception is here for the shared error the container memoizes: the
+    # owner writes its context in place while every waiter reads it. Needs no
+    # service containers.
     race:
         runs-on: ubuntu-latest
         steps:
@@ -79,7 +81,7 @@ jobs:
                 run: |
                     set -euo pipefail
                     for major_directory in . v2 v3; do
-                        (cd "${major_directory}" && go test -race -count=1 ./cache/... ./clock/... ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/... ./validation/... ./session/... ./security/... ./http/... ./internal/...)
+                        (cd "${major_directory}" && go test -race -count=1 ./cache/... ./clock/... ./container/... ./application/... ./config/... ./event/... ./exception/... ./httpclient/... ./logging/... ./cli/... ./validation/... ./session/... ./security/... ./http/... ./internal/...)
                     done
                     (cd v3 && go test -race -count=1 ./mailer/... ./lock/... ./messagebus/... ./openapi/...)
                     for cron_directory in integrations/cron integrations/cron/v2 integrations/cron/v3; do

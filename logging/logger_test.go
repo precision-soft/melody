@@ -312,3 +312,84 @@ func TestEnrichContextWithCause_TypedNilCause_AddsNoCause(t *testing.T) {
         t.Fatalf("expected no cause for a typed-nil cause, got %v", enrichedContext["cause"])
     }
 }
+
+/* @info the nil-logger fallback is the path a record takes before the container exists — a boot failure — and the context is the whole diagnostic: the branch that prints it had never been entered, so nothing said the fallback carries more than the message */
+func TestLogError_NilLogger_PrintsTheEnrichedContext(t *testing.T) {
+    var buffer bytes.Buffer
+
+    originalWriter := log.Writer()
+    log.SetOutput(&buffer)
+    defer func() {
+        log.SetOutput(originalWriter)
+    }()
+
+    LogError(
+        nil,
+        exception.NewError(
+            "boot failed",
+            map[string]any{"serviceName": "service.logger"},
+            errors.New("the cause"),
+        ),
+    )
+
+    written := buffer.String()
+
+    if false == strings.Contains(written, "boot failed") {
+        t.Fatalf("expected the message, got %q", written)
+    }
+
+    if false == strings.Contains(written, "serviceName:service.logger") {
+        t.Fatalf("expected the context, got %q", written)
+    }
+
+    if false == strings.Contains(written, "the cause") {
+        t.Fatalf("expected the cause chain in the context, got %q", written)
+    }
+}
+
+/* @info the same fallback for an error that is not an exception: it is filed at error level under its full message, with the context of the nearest provider in its chain — the branch that prints that context had never been entered either */
+func TestLogError_NilLogger_ForeignErrorPrintsItsProviderContext(t *testing.T) {
+    var buffer bytes.Buffer
+
+    originalWriter := log.Writer()
+    log.SetOutput(&buffer)
+    defer func() {
+        log.SetOutput(originalWriter)
+    }()
+
+    inner := exception.NewError("inner", map[string]any{"serviceName": "service.mailer"}, nil)
+
+    LogError(nil, fmt.Errorf("wrapper failed: %w", inner))
+
+    written := buffer.String()
+
+    if false == strings.Contains(written, "[ERROR] wrapper failed") {
+        t.Fatalf("expected the foreign error at error level under its full message, got %q", written)
+    }
+
+    if false == strings.Contains(written, "serviceName:service.mailer") {
+        t.Fatalf("expected the provider context, got %q", written)
+    }
+}
+
+/* @info a foreign error whose chain carries contexts contributes them as the cause context chain, exactly as an exception's own enrichment does; the two enrichments are written twice and can drift apart */
+func TestLogError_ForeignErrorCarriesTheCauseContextChain(t *testing.T) {
+    inner := exception.NewError("inner", map[string]any{"userId": 5}, nil)
+
+    capture := &captureLogger{}
+
+    LogError(capture, fmt.Errorf("wrapper failed: %w", inner))
+
+    if 1 != capture.calls {
+        t.Fatalf("expected one record, got %d", capture.calls)
+    }
+
+    causeContextChain, isChain := capture.lastContext["causeContextChain"].([]map[string]any)
+    if false == isChain || 0 == len(causeContextChain) {
+        t.Fatalf("expected the cause context chain, got %v", capture.lastContext["causeContextChain"])
+    }
+
+    if 5 != causeContextChain[0]["userId"] {
+        t.Fatalf("expected the inner context in the chain, got %v", causeContextChain[0])
+    }
+}

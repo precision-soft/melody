@@ -4,9 +4,11 @@ import (
     "bytes"
     "context"
     "strings"
+    "testing"
 
     clicontract "github.com/precision-soft/melody/cli/contract"
     containercontract "github.com/precision-soft/melody/container/contract"
+    httpcontract "github.com/precision-soft/melody/http/contract"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
@@ -132,4 +134,37 @@ func isDebugTableSeparatorRow(cell []string) bool {
     }
 
     return true
+}
+
+/* @info the name is what an operator types and the description is what `melody list` prints beside it; both are read from these accessors by the cli registrar, and an empty description leaves a command undiscoverable in the only place it is advertised */
+func TestDebugCommands_CarryTheirNameAndDescription(t *testing.T) {
+    commandList := []struct {
+        command      clicontract.Command
+        expectedName string
+    }{
+        {&ContainerCommand{}, "debug:container"},
+        {&EventCommand{}, "debug:events"},
+        {&RouterCommand{}, "debug:router"},
+        {&ParameterCommand{}, "debug:parameters"},
+        {NewMiddlewareCommand(func() []httpcontract.Middleware { return nil }), "debug:middleware"},
+        {&VersionCommand{}, "debug:version"},
+    }
+
+    seenNameList := map[string]bool{}
+
+    for _, commandEntry := range commandList {
+        if commandEntry.expectedName != commandEntry.command.Name() {
+            t.Fatalf("expected name %q, got %q", commandEntry.expectedName, commandEntry.command.Name())
+        }
+
+        if "" == commandEntry.command.Description() {
+            t.Fatalf("%s: expected a description", commandEntry.expectedName)
+        }
+
+        if true == seenNameList[commandEntry.command.Name()] {
+            t.Fatalf("two commands answer to %q", commandEntry.command.Name())
+        }
+
+        seenNameList[commandEntry.command.Name()] = true
+    }
 }

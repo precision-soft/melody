@@ -37,6 +37,66 @@ func TestIsHttpExceptionAndAsHttpException(t *testing.T) {
     }
 }
 
+/* @info the http exception carries the same mutable context as its sibling and must copy it on the way in for the same reason: the caller keeps its map, and the exception is read from the response path while the handler that built it may still be holding the reference */
+func TestHttpException_SetContext_ReplacesTheContextAndCopiesTheInput(t *testing.T) {
+    ex := NewHttpException(nethttp.StatusBadRequest, "bad request")
+
+    ex.SetContextValue("old", "value")
+
+    replacement := map[string]any{"new": "value"}
+
+    ex.SetContext(replacement)
+
+    if nil != ex.Context()["old"] {
+        t.Fatalf("expected the previous context to be replaced, got %v", ex.Context())
+    }
+
+    replacement["new"] = "mutated after the call"
+
+    if "value" != ex.Context()["new"] {
+        t.Fatalf("expected SetContext to copy the caller's map, got %v", ex.Context()["new"])
+    }
+}
+
+/* @info CauseErr is how the cause reaches a caller that does not walk the chain — the logger's enrichment reads it directly to build the cause chain of a record */
+func TestHttpException_CauseErr_ReturnsTheWrappedCause(t *testing.T) {
+    cause := errors.New("cause")
+
+    ex := NewHttpExceptionWithCause(nethttp.StatusBadGateway, "bad gateway", cause)
+
+    if cause != ex.CauseErr() {
+        t.Fatalf("expected the cause to be returned")
+    }
+
+    if nil != NewHttpException(nethttp.StatusBadGateway, "bad gateway").CauseErr() {
+        t.Fatalf("expected no cause when none was given")
+    }
+}
+
+/* @info the entry guard is what keeps the pair honest on a plain nil: errors.As panics when handed a nil target chain of its own, and IsHttpException is written as "As found something", so a nil that got past here would decide both answers */
+func TestAsHttpException_NilError_AnswersNilAndFalse(t *testing.T) {
+    if nil != AsHttpException(nil) {
+        t.Fatalf("expected nil for a nil error")
+    }
+
+    if true == IsHttpException(nil) {
+        t.Fatalf("expected false for a nil error")
+    }
+}
+
+/* @info an error that is not in the chain at all is the ordinary miss, and it must answer the same nil the guards answer */
+func TestAsHttpException_ForeignError_AnswersNilAndFalse(t *testing.T) {
+    foreign := errors.New("foreign")
+
+    if nil != AsHttpException(foreign) {
+        t.Fatalf("expected nil for an unrelated error")
+    }
+
+    if true == IsHttpException(foreign) {
+        t.Fatalf("expected false for an unrelated error")
+    }
+}
+
 func TestValidationFailed_SetsErrorsContext(t *testing.T) {
     payload := map[string]any{"a": "b"}
 

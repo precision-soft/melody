@@ -493,3 +493,178 @@ func TestEventCommand_KeepsThePlainJsonShapeWithoutVerbose(t *testing.T) {
         t.Fatalf("expected the list payload at the data root, got %q", rendered)
     }
 }
+
+/* dispatcherWithoutInspection is an event dispatcher that implements the dispatch contract and nothing else: the inspection contract is optional, and a userland dispatcher that does not carry it is exactly what this command has to survive. */
+type dispatcherWithoutInspection struct{}
+
+func (instance *dispatcherWithoutInspection) AddListener(
+    eventName string,
+    listener eventcontract.EventListener,
+    priority int,
+) eventcontract.ListenerRegistration {
+    return eventcontract.ListenerRegistration{EventName: eventName}
+}
+
+func (instance *dispatcherWithoutInspection) RemoveListener(registration eventcontract.ListenerRegistration) bool {
+    return false
+}
+
+func (instance *dispatcherWithoutInspection) AddSubscriber(subscriber eventcontract.EventSubscriber) {
+}
+
+func (instance *dispatcherWithoutInspection) RemoveSubscriber(subscriber eventcontract.EventSubscriber) int {
+    return 0
+}
+
+func (instance *dispatcherWithoutInspection) Dispatch(
+    runtimeInstance runtimecontract.Runtime,
+    eventInstance eventcontract.Event,
+) (eventcontract.Event, error) {
+    return eventInstance, nil
+}
+
+func (instance *dispatcherWithoutInspection) DispatchName(
+    runtimeInstance runtimecontract.Runtime,
+    eventName string,
+    payload any,
+) (eventcontract.Event, error) {
+    return nil, nil
+}
+
+var _ eventcontract.EventDispatcher = (*dispatcherWithoutInspection)(nil)
+
+func newRuntimeWithDispatcherWithoutInspection() *testRuntime {
+    serviceContainer := container.NewContainer()
+
+    serviceContainer.MustRegister(
+        event.ServiceEventDispatcher,
+        func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {
+            return &dispatcherWithoutInspection{}, nil
+        },
+    )
+
+    return newTestRuntime(serviceContainer)
+}
+
+/* @info a dispatcher that does not implement the inspection contract cannot be listed, and the command says so through a warning instead of failing or printing an empty list that reads as "no listeners are registered" — the difference matters because the answer decides whether an operator goes looking for a wiring mistake */
+func TestEventCommand_DispatcherWithoutInspection_WarnsInsteadOfReportingNoEvents(t *testing.T) {
+    rendered, runErr := runDebugCommand(
+        &EventCommand{},
+        newRuntimeWithDispatcherWithoutInspection(),
+        []string{"--format=json"},
+    )
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    if false == strings.Contains(rendered, "debug.notSupported") {
+        t.Fatalf("expected the warning code, got %q", rendered)
+    }
+
+    if false == strings.Contains(rendered, "does not support inspection") {
+        t.Fatalf("expected the warning message, got %q", rendered)
+    }
+
+    if false == strings.Contains(rendered, "dispatcherWithoutInspection") {
+        t.Fatalf("expected the dispatcher type to be named, got %q", rendered)
+    }
+
+    envelope := decodeEventCommandEnvelope(t, rendered)
+
+    if 0 != envelope.Data.Total {
+        t.Fatalf("expected a total of zero beside the warning, got %d", envelope.Data.Total)
+    }
+}
+
+/* @info the same refusal in the table format prints the empty summary rather than a table of nothing */
+func TestEventCommand_DispatcherWithoutInspection_PrintsTheEmptySummaryInTheTableFormat(t *testing.T) {
+    rendered, runErr := runDebugCommand(
+        &EventCommand{},
+        newRuntimeWithDispatcherWithoutInspection(),
+        []string{},
+    )
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    if false == strings.Contains(rendered, "EVENTS: 0 total") {
+        t.Fatalf("expected the empty summary, got %q", rendered)
+    }
+
+    if false == strings.Contains(rendered, "does not support inspection") {
+        t.Fatalf("expected the warning beside it, got %q", rendered)
+    }
+}
+
+/* @info the listener order is the dispatch order, and every tiebreak below the priority exists so that two runs of the command print the same table: registration order is not stable across boots, so a tiebreak that never fires would leave the report shuffling under the operator */
+func TestSortRegisteredListeners_OrdersByPriorityThenSourceOwnerIdAndName(t *testing.T) {
+    listeners := []eventcontract.RegisteredListener{
+        {Priority: 0, Source: "subscriber", Owner: "b", ListenerId: "2", ListenerName: "z"},
+        {Priority: 0, Source: "listener", Owner: "b", ListenerId: "2", ListenerName: "a"},
+        {Priority: 0, Source: "listener", Owner: "a", ListenerId: "9", ListenerName: "a"},
+        {Priority: 0, Source: "listener", Owner: "a", ListenerId: "1", ListenerName: "b"},
+        {Priority: 0, Source: "listener", Owner: "a", ListenerId: "1", ListenerName: "a"},
+        {Priority: 10, Source: "subscriber", Owner: "z", ListenerId: "99", ListenerName: "z"},
+    }
+
+    sorted := sortRegisteredListeners(listeners)
+
+    expectedOrderList := []eventcontract.RegisteredListener{
+        {Priority: 10, Source: "subscriber", Owner: "z", ListenerId: "99", ListenerName: "z"},
+        {Priority: 0, Source: "listener", Owner: "a", ListenerId: "1", ListenerName: "a"},
+        {Priority: 0, Source: "listener", Owner: "a", ListenerId: "1", ListenerName: "b"},
+        {Priority: 0, Source: "listener", Owner: "a", ListenerId: "9", ListenerName: "a"},
+        {Priority: 0, Source: "listener", Owner: "b", ListenerId: "2", ListenerName: "a"},
+        {Priority: 0, Source: "subscriber", Owner: "b", ListenerId: "2", ListenerName: "z"},
+    }
+
+    for index, listener := range sorted {
+        if expectedOrderList[index] != listener {
+            t.Fatalf("unexpected order at %d: %+v in %+v", index, listener, sorted)
+        }
+    }
+
+    if "1" != sorted[1].ListenerId || "a" != sorted[1].Owner {
+        t.Fatalf("expected the lowest owner and id first among equals, got %+v", sorted[1])
+    }
+
+    if "subscriber" != sorted[len(sorted)-1].Source {
+        t.Fatalf("expected the subscriber source to sort after the listener source, got %+v", sorted[len(sorted)-1])
+    }
+
+    /* the input must not be reordered under the caller: the report reads the dispatcher's own slice */
+    if "subscriber" != listeners[0].Source || 0 != listeners[0].Priority {
+        t.Fatalf("expected the caller's slice to keep its order, got %+v", listeners[0])
+    }
+}
+
+/* @info the column answers whether the fail-closed dispatch guarantee is armed for a listener, and the four combinations say four different things; collapsing any two of them makes an unarmed guarantee look exactly like an armed one */
+func TestRenderRequiredListenerMark_TellsTheFourCombinationsApart(t *testing.T) {
+    expectedList := []struct {
+        required bool
+        maySkip  bool
+        expected string
+    }{
+        {true, false, "yes"},
+        {true, true, "yes (may skip)"},
+        {false, true, "may skip"},
+        {false, false, "no"},
+    }
+
+    for _, expectedEntry := range expectedList {
+        rendered := renderRequiredListenerMark(eventcontract.RegisteredListener{
+            Required:                 expectedEntry.required,
+            MaySkipRequiredListeners: expectedEntry.maySkip,
+        })
+
+        if expectedEntry.expected != rendered {
+            t.Fatalf(
+                "required=%v maySkip=%v: expected %q, got %q",
+                expectedEntry.required,
+                expectedEntry.maySkip,
+                expectedEntry.expected,
+                rendered,
+            )
+        }
+    }
+}

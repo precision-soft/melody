@@ -515,3 +515,148 @@ func TestLogOnRecoverAndExitAfter_ShieldsTheHookAndTheRecord(t *testing.T) {
         }
     }
 }
+
+/* the marker tells a re-executed test binary that it is the child taking the exit that LogOnRecoverAndExit is named for */
+const logOnRecoverAndExitProbeMarker = "MELODY_LOG_ON_RECOVER_AND_EXIT_PROBE"
+
+/* @info the two-argument helper is the one an owner of the process boundary installs when it has no teardown to run between the record and the exit, and nothing had ever entered it: it must take the exit code the recovered value carries, exactly as the four-argument form does, and it can only be observed from a child process because the exit is the point */
+func TestLogOnRecoverAndExit_TakesTheExitCodeOfTheRecoveredValue(t *testing.T) {
+    if "1" == os.Getenv(logOnRecoverAndExitProbeMarker) {
+        LogOnRecoverAndExit(
+            &captureLogger{},
+            exception.NewExitError(9, exception.NewError("boom", nil, nil)),
+            1,
+        )
+
+        return
+    }
+
+    command := exec.Command(
+        os.Args[0],
+        "-test.run=^TestLogOnRecoverAndExit_TakesTheExitCodeOfTheRecoveredValue$",
+    )
+    command.Env = append(os.Environ(), logOnRecoverAndExitProbeMarker+"=1")
+
+    output, runErr := command.CombinedOutput()
+
+    var exitErr *exec.ExitError
+    if false == errors.As(runErr, &exitErr) {
+        t.Fatalf("expected the child to exit non-zero, got %v with output %q", runErr, string(output))
+    }
+
+    if 9 != exitErr.ExitCode() {
+        t.Fatalf("expected the carried exit code 9, got %d with output %q", exitErr.ExitCode(), string(output))
+    }
+
+    if false == strings.Contains(string(output), "melody: exiting with code 9") {
+        t.Fatalf("expected the stderr echo, got %q", string(output))
+    }
+}
+
+/* @info the handler is installed with defer and therefore runs on every return, panicking or not; a nil recovered value is the ordinary return, and taking the exit for it would end the process on success */
+func TestLogOnRecoverAndExitAfter_WithoutAPanic_DoesNothing(t *testing.T) {
+    logger := &captureLogger{}
+
+    hookRan := false
+
+    LogOnRecoverAndExitAfter(logger, nil, 1, func() {
+        hookRan = true
+    })
+
+    if 0 != logger.calls {
+        t.Fatalf("expected no record without a panic, got %d", logger.calls)
+    }
+
+    if true == hookRan {
+        t.Fatalf("expected the before-exit hook not to run without a panic")
+    }
+}
+
+/* @info an already-logged error is re-panicked without a second record: the re-panic is what carries the failure to the owner of the process boundary, and logging it again would produce two records of one failure — the branch that returns early had never been entered with panicAgain set */
+func TestLogOnRecover_AlreadyLoggedException_RePanicsWithoutASecondRecord(t *testing.T) {
+    logger := &captureLogger{}
+
+    alreadyLogged := exception.NewError("boom", nil, nil)
+    alreadyLogged.MarkAsLogged()
+
+    defer func() {
+        recoveredValue := recover()
+
+        if alreadyLogged != recoveredValue {
+            t.Fatalf("expected the same error to be re-panicked, got %#v", recoveredValue)
+        }
+
+        if 0 != logger.calls {
+            t.Fatalf("expected no second record for an already-logged error, got %d", logger.calls)
+        }
+    }()
+
+    func() {
+        defer LogOnRecover(logger, true)
+
+        panic(alreadyLogged)
+    }()
+}
+
+/* @info a typed-nil foreign error is the value someone panicked with, not an error to describe: reading its message dereferences the nil receiver inside the handler that must not panic, so it is recorded as a plain panic payload — the same answer the typed-nil exception shapes get */
+func TestLogOnRecover_TypedNilForeignError_IsLoggedAsAPanicValue(t *testing.T) {
+    logger := &captureLogger{}
+
+    func() {
+        defer LogOnRecover(logger, false)
+
+        panic(error((*typedNilProbeError)(nil)))
+    }()
+
+    if 1 != logger.calls {
+        t.Fatalf("expected one record, got %d", logger.calls)
+    }
+
+    if "panic" != logger.lastMessage {
+        t.Fatalf("expected the plain panic record, got %q", logger.lastMessage)
+    }
+
+    if nil == logger.lastContext["panicStack"] {
+        t.Fatalf("expected the panic stack to travel with the record")
+    }
+}
+
+/* @info the same typed nil reaching the exit path normalizes the same way; the two switches are written twice, so they can drift apart */
+func TestResolveRecoveredExit_TypedNilForeignError_NormalizesAsAPanicValue(t *testing.T) {
+    err, exitCode, needsLogging := resolveRecoveredExit(error((*typedNilProbeError)(nil)), 4)
+
+    if nil == err || "panic" != err.Message() {
+        t.Fatalf("expected the plain panic record, got %v", err)
+    }
+
+    if 4 != exitCode {
+        t.Fatalf("expected the caller's exit code, got %d", exitCode)
+    }
+
+    if false == needsLogging {
+        t.Fatalf("expected the anomaly to still need logging")
+    }
+}
+
+/* @info a panic with a value that is not an error at all — a string from a third-party library, the runtime's own plain values — must still produce a record carrying the value and the frames, because that is all there is to go on */
+func TestLogOnRecover_PlainValuePanic_CarriesTheValueAndTheStack(t *testing.T) {
+    logger := &captureLogger{}
+
+    func() {
+        defer LogOnRecover(logger, false)
+
+        panic("a plain string")
+    }()
+
+    if 1 != logger.calls {
+        t.Fatalf("expected one record, got %d", logger.calls)
+    }
+
+    if "a plain string" != logger.lastContext["value"] {
+        t.Fatalf("expected the panic value in the context, got %v", logger.lastContext["value"])
+    }
+
+    if nil == logger.lastContext["panicStack"] {
+        t.Fatalf("expected the panic stack to travel with the record")
+    }
+}

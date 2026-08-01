@@ -1,6 +1,7 @@
 package exception
 
 import (
+    "errors"
     "testing"
 )
 
@@ -66,5 +67,28 @@ func TestExitError_ZeroValueUnwrap_ReturnsUntypedNil(t *testing.T) {
 
     if nil != zeroValue.Unwrap() {
         t.Fatalf("expected an untyped nil")
+    }
+}
+
+/* @info the carried error must travel out of both doors: Unwrap is what errors.Is and errors.As walk, ErrorValue is what the exit handler reads to decide whether the record still needs writing */
+func TestExitError_CarriesItsErrorThroughUnwrapAndErrorValue(t *testing.T) {
+    carried := NewError("boom", nil, nil)
+
+    exitError := NewExitError(7, carried)
+
+    if carried != exitError.Unwrap() {
+        t.Fatalf("expected Unwrap to return the carried error")
+    }
+
+    if carried != exitError.ErrorValue() {
+        t.Fatalf("expected ErrorValue to return the carried error")
+    }
+
+    if "boom" != exitError.Error() {
+        t.Fatalf("expected the carried message, got %q", exitError.Error())
+    }
+
+    if false == errors.Is(exitError, carried) {
+        t.Fatalf("expected errors.Is to reach the carried error through Unwrap")
     }
 }
