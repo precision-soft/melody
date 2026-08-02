@@ -28,6 +28,108 @@ func (instance *nilMapStorage) Close() error {
     return nil
 }
 
+/* probeFailingStorage answers every existence probe with a failure, which is what the id minting must not swallow: a storage outage while probing would otherwise hand out an id that was never checked against anything. */
+type probeFailingStorage struct{}
+
+func (instance *probeFailingStorage) Load(sessionId string) (map[string]any, bool, error) {
+    return nil, false, exception.NewError("the probe storage is unavailable", nil, nil)
+}
+
+func (instance *probeFailingStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+    return nil
+}
+
+func (instance *probeFailingStorage) Delete(sessionId string) error {
+    return nil
+}
+
+func (instance *probeFailingStorage) Close() error {
+    return nil
+}
+
+/* @info the minting probes each candidate against the storage and gives up after a bounded number of attempts rather than looping forever. A storage that reports every id as taken is what a broken Load looks like from here, and answering with a colliding id would hand a caller the session of whoever already holds it. */
+func TestManager_NewSession_PanicsWhenEveryCandidateIdIsAlreadyTaken(t *testing.T) {
+    manager := NewManager(&nilMapStorage{}, time.Minute)
+
+    testhelper.AssertPanicsWithError(t, func() {
+        _ = manager.NewSession()
+    }, "could not generate unique session id")
+}
+
+/* @info a storage that cannot answer the existence probe stops the minting: continuing would hand out an id checked against nothing, and the caller would learn about the outage only when the session failed to save. */
+func TestManager_NewSession_PanicsWhenTheStorageProbeFails(t *testing.T) {
+    manager := NewManager(&probeFailingStorage{}, time.Minute)
+
+    testhelper.AssertPanicsWithError(t, func() {
+        _ = manager.NewSession()
+    }, "the probe storage is unavailable")
+}
+
+/* deleteFailingStorage mints ids freely and refuses to delete, which is the outage a rotation has to survive without retiring the id it could not remove */
+type deleteFailingStorage struct{}
+
+func (instance *deleteFailingStorage) Load(sessionId string) (map[string]any, bool, error) {
+    return nil, false, nil
+}
+
+func (instance *deleteFailingStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+    return nil
+}
+
+func (instance *deleteFailingStorage) Delete(sessionId string) error {
+    return exception.NewError("the probe storage refuses to delete", nil, nil)
+}
+
+func (instance *deleteFailingStorage) Close() error {
+    return nil
+}
+
+/* @info a storage that cannot answer a load is not a missing session: answering nil would log the holder of a perfectly good cookie out on a transient outage, so the failure travels up as a panic the request recovery turns into a 500 */
+func TestManager_Session_PanicsWhenTheStorageCannotAnswer(t *testing.T) {
+    manager := NewManager(&probeFailingStorage{}, time.Minute)
+
+    testhelper.AssertPanicsWithError(t, func() {
+        _ = manager.Session("0123456789abcdef0123456789abcdef")
+    }, "the probe storage is unavailable")
+}
+
+/* @info a stored session with no values at all is still a session: the storage answers "it exists, with nothing in it", and handing back a session over a nil map would panic on the first write instead */
+func TestManager_Session_AcceptsAStoredSessionWithNoValues(t *testing.T) {
+    manager := NewManager(&nilMapStorage{}, time.Minute)
+
+    sessionInstance := manager.Session("0123456789abcdef0123456789abcdef")
+    if nil == sessionInstance {
+        t.Fatalf("expected a session for an id the storage reports as existing")
+    }
+
+    sessionInstance.Set("k", "v")
+
+    if "v" != sessionInstance.String("k") {
+        t.Fatalf("expected the session to be writable, got %q", sessionInstance.String("k"))
+    }
+}
+
+/* @info a rotation whose delete fails leaves the caller the session it still has: the fresh id was minted but nothing points at it, and clearing the original here would log the user out over a storage hiccup while the previous id stays alive in the storage */
+func TestManager_RegenerateSession_KeepsTheOriginalWhenTheDeleteFails(t *testing.T) {
+    manager := NewManager(&deleteFailingStorage{}, time.Minute)
+
+    sessionInstance := manager.NewSession()
+    sessionInstance.Set("user", "alice")
+
+    rotated, rotateErr := manager.RegenerateSession(sessionInstance)
+    if nil == rotateErr {
+        t.Fatalf("expected the rotation to fail when the previous entry cannot be removed")
+    }
+
+    if nil != rotated {
+        t.Fatalf("expected no rotated session when the rotation failed")
+    }
+
+    if true == sessionInstance.IsCleared() {
+        t.Fatalf("expected the original session to stay usable when the rotation failed")
+    }
+}
+
 func TestNewManager_PanicsWhenStorageIsNil(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
         _ = NewManager(nil, time.Minute)

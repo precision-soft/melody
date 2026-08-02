@@ -91,6 +91,61 @@ func TestApplicationRegisterHttpMiddlewareFactories_PanicsAfterBoot(t *testing.T
     }, "may not register http middlewares after boot")
 }
 
+/* @info a route declared before the boot is only a closure until bootHttp runs it: the router learns about it there, and a boot that skipped the loop would start an application that answers 404 for every route the wiring declared. */
+func TestBootHttp_HandsEveryDeclaredRouteToTheRouter(t *testing.T) {
+    applicationInstance := NewApplication(
+        testhelper.NewEmbeddedEnvFs(),
+        testhelper.NewEmbeddedStaticFs(),
+    )
+
+    applicationInstance.RegisterHttpRoute(
+        nethttp.MethodGet,
+        "/boot-http-probe",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return nil, nil
+        },
+    )
+
+    applicationInstance.bootHttp()
+
+    found := false
+    for _, route := range applicationInstance.kernel.HttpRouter().RouteDefinitions() {
+        if "/boot-http-probe" == route.Pattern() {
+            found = true
+        }
+    }
+
+    if false == found {
+        t.Fatalf("expected the declared route to reach the router when the boot ran the registrars")
+    }
+}
+
+/* @info the two middleware doors hand what they are given to the pipeline: a registration that appended nothing would leave the application serving without the middleware it declared, and nothing else in the boot would notice */
+func TestApplicationRegisterHttpMiddlewares_HandsThemToThePipeline(t *testing.T) {
+    applicationInstance := NewApplication(
+        testhelper.NewEmbeddedEnvFs(),
+        testhelper.NewEmbeddedStaticFs(),
+    )
+
+    before := len(applicationInstance.httpMiddlewares.definitions)
+
+    applicationInstance.RegisterHttpMiddlewares(func(next httpcontract.Handler) httpcontract.Handler {
+        return next
+    })
+
+    applicationInstance.RegisterHttpMiddlewareFactories(
+        func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware {
+            return func(next httpcontract.Handler) httpcontract.Handler {
+                return next
+            }
+        },
+    )
+
+    if before+2 != len(applicationInstance.httpMiddlewares.definitions) {
+        t.Fatalf("expected both registrations to reach the pipeline, got %d definitions over %d", len(applicationInstance.httpMiddlewares.definitions), before)
+    }
+}
+
 type warningRecordingLogger struct {
     mutex    sync.Mutex
     warnings []string

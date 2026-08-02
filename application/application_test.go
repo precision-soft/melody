@@ -229,6 +229,144 @@ func TestResolveExitLogger_SurvivesANilKernel(t *testing.T) {
     }
 }
 
+/* @info the secret front door differs from the ordinary one only in the marking, and the marking is the whole point: it is what keeps the value, and every parameter whose template reads it, out of the rendered configuration. */
+func TestRegisterSecretParameter_MarksTheRegistrationAsHoldingACredential(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+
+    applicationInstance.RegisterSecretParameter("app.token", "sk_live_51H")
+    applicationInstance.RegisterParameter("app.pool", 12)
+
+    secretParameter := applicationInstance.configuration.Get("app.token")
+    if nil == secretParameter {
+        t.Fatalf("expected the secret parameter to be registered")
+    }
+    if false == secretParameter.IsSecret() {
+        t.Fatalf("expected the parameter registered through the secret door to be marked secret")
+    }
+    if "sk_live_51H" != secretParameter.String() {
+        t.Fatalf("expected the value to be registered like any other, got %q", secretParameter.String())
+    }
+
+    ordinaryParameter := applicationInstance.configuration.Get("app.pool")
+    if nil == ordinaryParameter {
+        t.Fatalf("expected the ordinary parameter to be registered")
+    }
+    if true == ordinaryParameter.IsSecret() {
+        t.Fatalf("expected the ordinary door to leave the parameter unmarked")
+    }
+}
+
+/* @info marking an existing parameter takes effect at once; a name that matches nothing is queued rather than refused, because an environment key is legitimately undefined in some environments and the boot retries the queue before the configuration resolves. */
+func TestMarkParameterSecret_MarksWhatExistsAndQueuesWhatDoesNot(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+
+    applicationInstance.RegisterParameter("app.token", "sk_live_51H")
+
+    applicationInstance.MarkParameterSecret("app.token")
+    applicationInstance.MarkParameterSecret("app.absent")
+
+    parameter := applicationInstance.configuration.Get("app.token")
+    if nil == parameter || false == parameter.IsSecret() {
+        t.Fatalf("expected the existing parameter to be marked at once")
+    }
+
+    if 1 != len(applicationInstance.unappliedSecretMarks) || "app.absent" != applicationInstance.unappliedSecretMarks[0] {
+        t.Fatalf("expected the unmatched name to be queued for the retry, got %#v", applicationInstance.unappliedSecretMarks)
+    }
+}
+
+/* @info after the boot the wiring is done and the parameters have been read: a marking arriving here would redact nothing that has not already been rendered, so it is refused loudly rather than accepted as a no-op. */
+func TestMarkParameterSecret_RefusesAfterBoot(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+    applicationInstance.booted = true
+
+    testhelper.AssertPanicsWithError(t, func() {
+        applicationInstance.MarkParameterSecret("app.token")
+    }, "cannot mark a parameter secret after application boot")
+}
+
+/* @info the retry is what makes a marking declared before the module that registers the parameter work at all, and it must run before the resolve or the marking never travels into the templates that read the secret. What still matches nothing stays queued for the warning at the end of the boot. */
+func TestApplyUnappliedSecretMarks_AppliesWhatALaterRegistrationMadeReal(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+
+    applicationInstance.MarkParameterSecret("app.late")
+    applicationInstance.MarkParameterSecret("app.never")
+
+    if 2 != len(applicationInstance.unappliedSecretMarks) {
+        t.Fatalf("expected both markings to be queued, got %#v", applicationInstance.unappliedSecretMarks)
+    }
+
+    /* the module that owns the parameter registers it after the marking was declared */
+    applicationInstance.RegisterParameter("app.late", "sk_live_51H")
+
+    applicationInstance.applyUnappliedSecretMarks()
+
+    parameter := applicationInstance.configuration.Get("app.late")
+    if nil == parameter || false == parameter.IsSecret() {
+        t.Fatalf("expected the retry to mark the parameter its own registration arrived late for")
+    }
+
+    if 1 != len(applicationInstance.unappliedSecretMarks) || "app.never" != applicationInstance.unappliedSecretMarks[0] {
+        t.Fatalf("expected the still-unmatched name to stay queued, got %#v", applicationInstance.unappliedSecretMarks)
+    }
+}
+
+/* @info the warning at the end of the boot is what keeps a misspelled name from silently redacting nothing: every phase that can register a parameter has run by then, so a marking still matching nothing names something that does not exist. A name a late phase did make real is applied here instead, without a warning, and the queue is emptied either way. */
+func TestWarnUnappliedSecretMarks_WarnsOnlyAboutWhatStillMatchesNothing(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+
+    logger := &recordingLogger{}
+    applicationInstance.RegisterService(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return logger, nil
+        },
+    )
+
+    applicationInstance.MarkParameterSecret("app.misspelled")
+    applicationInstance.MarkParameterSecret("app.registered.last")
+
+    applicationInstance.RegisterParameter("app.registered.last", "sk_live_51H")
+
+    applicationInstance.warnUnappliedSecretMarks()
+
+    parameter := applicationInstance.configuration.Get("app.registered.last")
+    if nil == parameter || false == parameter.IsSecret() {
+        t.Fatalf("expected a name a late phase made real to be marked here rather than warned about")
+    }
+
+    if 1 != len(logger.warnings) {
+        t.Fatalf("expected exactly one warning, got %d", len(logger.warnings))
+    }
+
+    if "app.misspelled" != logger.warnings[0]["parameterName"] {
+        t.Fatalf("expected the warning to name the marking that matched nothing, got %+v", logger.warnings[0])
+    }
+
+    if 0 != len(applicationInstance.unappliedSecretMarks) {
+        t.Fatalf("expected the queue to be emptied after the last retry, got %#v", applicationInstance.unappliedSecretMarks)
+    }
+}
+
+/* @info ProcessRole is what wiring code asks to decide whether this process registers its background runners: the explicit --role flag wins, and an unset role widens to all rather than to nothing. */
+func TestProcessRole_AnswersTheResolvedRole(t *testing.T) {
+    applicationInstance := &Application{
+        runtimeFlags: NewRuntimeFlagsWithRole(config.ModeCli, config.RoleWorker),
+    }
+
+    if config.RoleWorker != applicationInstance.ProcessRole() {
+        t.Fatalf("expected the explicit role, got %q", applicationInstance.ProcessRole())
+    }
+
+    defaultRoleApplication := &Application{
+        runtimeFlags: NewRuntimeFlags(config.ModeCli),
+    }
+
+    if config.RoleAll != defaultRoleApplication.ProcessRole() {
+        t.Fatalf("expected an unset role to widen to all, got %q", defaultRoleApplication.ProcessRole())
+    }
+}
+
 func newEnvironmentRefusalApplication(t *testing.T, mode string, environmentValues map[string]string) *Application {
     t.Helper()
 

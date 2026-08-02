@@ -288,3 +288,177 @@ func TestConfigurationHttpStaticExcludedPathsAcceptAWhitespaceOnlyValueAsNoList(
         t.Fatalf("expected a blank value to exclude nothing, got %v", configuration.Http().StaticExcludedPaths())
     }
 }
+
+/* @info the http values are validated at construction the way the kernel ones are, and each refusal names what it refused. These are the settings that decide what the process binds, what it serves and how much of a request body it reads: a port out of range, a public directory that climbs out of the project, an index file with a path in it, an unbounded body limit. Every one of them fails at boot rather than at the first request that meets it. */
+func TestNewHttpConfiguration_RefusesEveryValueItCannotAct(t *testing.T) {
+    cases := []struct {
+        name                string
+        address             string
+        defaultLocale       string
+        publicDir           string
+        staticIndexFile     string
+        maxRequestBodyBytes int
+        staticCacheMaxAge   int
+        staticExcludedPaths []string
+        sessionTtl          time.Duration
+        expectedMessage     string
+    }{
+        {
+            name:            "an address with no port at all",
+            address:         ":",
+            expectedMessage: "http port is invalid",
+        },
+        {
+            name:            "an address whose port is not a number",
+            address:         "localhost:http",
+            expectedMessage: "http port is invalid",
+        },
+        {
+            name:            "a port above the range",
+            address:         ":65536",
+            expectedMessage: "http port is out of range",
+        },
+        {
+            name:            "a port below the range",
+            address:         ":0",
+            expectedMessage: "http port is out of range",
+        },
+        {
+            name:            "an address that is not host and port",
+            address:         "localhost:8080:9090",
+            expectedMessage: "http address is invalid",
+        },
+        {
+            name:            "an empty locale",
+            address:         ":8080",
+            defaultLocale:   "",
+            expectedMessage: "default locale may not be empty",
+        },
+        {
+            name:            "a locale that is not a language tag",
+            address:         ":8080",
+            defaultLocale:   "english",
+            expectedMessage: "default locale is invalid",
+        },
+        {
+            name:            "an empty public directory",
+            address:         ":8080",
+            defaultLocale:   "en",
+            publicDir:       "",
+            expectedMessage: "public directory may not be empty",
+        },
+        {
+            name:            "a public directory that climbs out of the project",
+            address:         ":8080",
+            defaultLocale:   "en",
+            publicDir:       "public/../..",
+            expectedMessage: "public directory is invalid",
+        },
+        {
+            name:            "an empty index file",
+            address:         ":8080",
+            defaultLocale:   "en",
+            publicDir:       "public",
+            staticIndexFile: "",
+            expectedMessage: "static index file may not be empty",
+        },
+        {
+            name:            "an index file that carries a path",
+            address:         ":8080",
+            defaultLocale:   "en",
+            publicDir:       "public",
+            staticIndexFile: "html/index.html",
+            expectedMessage: "static index file is invalid",
+        },
+        {
+            name:                "an unbounded request body limit",
+            address:             ":8080",
+            defaultLocale:       "en",
+            publicDir:           "public",
+            staticIndexFile:     "index.html",
+            maxRequestBodyBytes: 0,
+            expectedMessage:     "invalid http max request body bytes",
+        },
+        {
+            name:                "a negative cache max age",
+            address:             ":8080",
+            defaultLocale:       "en",
+            publicDir:           "public",
+            staticIndexFile:     "index.html",
+            maxRequestBodyBytes: 1024,
+            staticCacheMaxAge:   -1,
+            expectedMessage:     "static cache max age must be zero or positive",
+        },
+    }
+
+    for _, testCase := range cases {
+        t.Run(testCase.name, func(t *testing.T) {
+            httpConfigurationInstance, httpErr := newHttpConfiguration(
+                testCase.address,
+                testCase.defaultLocale,
+                testCase.publicDir,
+                testCase.staticIndexFile,
+                testCase.maxRequestBodyBytes,
+                false,
+                testCase.staticCacheMaxAge,
+                testCase.staticExcludedPaths,
+                testCase.sessionTtl,
+            )
+
+            if nil == httpErr {
+                t.Fatalf("expected the value to be refused")
+            }
+
+            if nil != httpConfigurationInstance {
+                t.Fatalf("expected no configuration over a refused value")
+            }
+
+            if testCase.expectedMessage != httpErr.Error() {
+                t.Fatalf("expected %q, got %q", testCase.expectedMessage, httpErr.Error())
+            }
+        })
+    }
+}
+
+/* @info a bare port is read as one: a deployment writing 8080 means every interface on that port, and the address is completed rather than refused. Everything acceptable is kept as given. */
+func TestNewHttpConfiguration_CompletesABarePortAndKeepsEveryAcceptedValue(t *testing.T) {
+    httpConfigurationInstance, httpErr := newHttpConfiguration(
+        "8080",
+        "en-GB",
+        "public",
+        "index.html",
+        2048,
+        true,
+        3600,
+        []string{"/internal"},
+        time.Minute,
+    )
+    if nil != httpErr {
+        t.Fatalf("unexpected error: %v", httpErr)
+    }
+
+    if ":8080" != httpConfigurationInstance.Address() {
+        t.Fatalf("expected a bare port to be completed, got %q", httpConfigurationInstance.Address())
+    }
+    if "en-GB" != httpConfigurationInstance.DefaultLocale() {
+        t.Fatalf("unexpected locale: %q", httpConfigurationInstance.DefaultLocale())
+    }
+    if "public" != httpConfigurationInstance.PublicDir() {
+        t.Fatalf("unexpected public directory: %q", httpConfigurationInstance.PublicDir())
+    }
+    if "index.html" != httpConfigurationInstance.StaticIndexFile() {
+        t.Fatalf("unexpected index file: %q", httpConfigurationInstance.StaticIndexFile())
+    }
+    if 2048 != httpConfigurationInstance.MaxRequestBodyBytes() {
+        t.Fatalf("unexpected body limit: %d", httpConfigurationInstance.MaxRequestBodyBytes())
+    }
+    if false == httpConfigurationInstance.StaticEnableCache() {
+        t.Fatalf("expected the static cache to be enabled")
+    }
+    if 3600 != httpConfigurationInstance.StaticCacheMaxAge() {
+        t.Fatalf("unexpected cache max age: %d", httpConfigurationInstance.StaticCacheMaxAge())
+    }
+    if time.Minute != httpConfigurationInstance.SessionTtl() {
+        t.Fatalf("unexpected session ttl: %s", httpConfigurationInstance.SessionTtl())
+    }
+}

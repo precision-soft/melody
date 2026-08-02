@@ -108,3 +108,16 @@ func TestWarnIgnoredProcessEnvironment_SkipsMalformedEntries(t *testing.T) {
 }
 
 var _ loggingcontract.Logger = (*recordingLogger)(nil)
+
+/* @info the boot logger is asked for before the container is necessarily able to answer — the warnings it carries are emitted around the wiring itself — so a container that has no logger yet must yield the emergency one rather than a nil the caller then writes through */
+func TestBootLogger_FallsBackToTheEmergencyLoggerWhenTheContainerHasNone(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+
+    logger := applicationInstance.bootLogger()
+    if nil == logger {
+        t.Fatalf("expected a logger even when the container carries none")
+    }
+
+    /* it must be usable, not merely non-nil: the warnings around the wiring are written through it */
+    logger.Warning("probe", loggingcontract.Context{})
+}

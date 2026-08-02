@@ -227,6 +227,57 @@ func TestParameter_SecretConversionWithholdsTheValue(t *testing.T) {
     }
 }
 
+/* @info MustString is the accessor wiring code reaches for when a missing string is a boot failure, so its refusal has to name what it refused: the environment key, the registration name of a runtime parameter that has no key, and the type it actually found — the value itself stays out, the way every other conversion diagnostic here does. */
+func TestParameter_MustString_PanicRefusalNamesTheParameterAndTheTypeItFound(t *testing.T) {
+    parameter := NewParameter("APP_POOL_SIZE", 12, 12, false)
+    parameter.name = "app.pool.size"
+
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected MustString to panic for a non-string value")
+        }
+
+        recoveredErr, isException := recoveredValue.(*exception.Error)
+        if false == isException {
+            t.Fatalf("expected an exception error, got %T", recoveredValue)
+        }
+
+        if "cannot convert parameter value to string" != recoveredErr.Error() {
+            t.Fatalf("unexpected refusal message: %q", recoveredErr.Error())
+        }
+
+        context := recoveredErr.Context()
+
+        if "APP_POOL_SIZE" != context["environmentKey"] {
+            t.Fatalf("expected the refusal to name the environment key, got %#v", context["environmentKey"])
+        }
+
+        if "app.pool.size" != context["parameterName"] {
+            t.Fatalf("expected the refusal to name the registration name, got %#v", context["parameterName"])
+        }
+
+        if "int" != context["valueType"] {
+            t.Fatalf("expected the refusal to name the type it found, got %#v", context["valueType"])
+        }
+
+        if true == strings.Contains(fmt.Sprintf("%v", context), "12") {
+            t.Fatalf("expected the refused value itself to stay out of the context, got %#v", context)
+        }
+    }()
+
+    _ = parameter.MustString()
+}
+
+/* @info a parameter that really holds a string is handed back by MustString without any refusal — the panic above is the refusal path, not the ordinary one */
+func TestParameter_MustString_ReturnsTheStoredString(t *testing.T) {
+    parameter := NewParameter("APP_NAME", "melody", "melody", false)
+
+    if "melody" != parameter.MustString() {
+        t.Fatalf("expected the stored string, got %q", parameter.MustString())
+    }
+}
+
 /* @info a runtime parameter has no environment key, and passing the empty key into the shared parsers put a nameless parameterName inside the cause of an error whose outer context names the parameter — the operator reading the cause chain concluded the parameter was anonymous */
 func TestParameter_ConversionCauseNamesTheRuntimeParameter(t *testing.T) {
     parameter := NewParameter("", "not-a-duration", "not-a-duration", false)
@@ -249,5 +300,52 @@ func TestParameter_ConversionCauseNamesTheRuntimeParameter(t *testing.T) {
 
     if "app.timeout" != causeErr.Context()["parameterName"] {
         t.Fatalf("expected the cause to name the runtime parameter, got %#v", causeErr.Context()["parameterName"])
+    }
+}
+
+/* @info Bool reads a native bool as itself and a string through the shared parser, and refuses everything else by name: a parameter that decides whether a feature is on must never answer false because it happened to hold a number, and the value of a secret never reaches the diagnostic */
+func TestParameter_Bool_ReadsBothShapesAndRefusesTheRest(t *testing.T) {
+    nativeParameter := NewParameter("APP_FEATURE", true, true, false)
+
+    nativeValue, nativeErr := nativeParameter.Bool()
+    if nil != nativeErr {
+        t.Fatalf("unexpected error: %v", nativeErr)
+    }
+    if false == nativeValue {
+        t.Fatalf("expected the native bool to be handed back")
+    }
+
+    for _, textualValue := range []string{"true", "1", "false", "0"} {
+        textualParameter := NewParameter("APP_FEATURE", textualValue, textualValue, false)
+
+        parsedValue, parsedErr := textualParameter.Bool()
+        if nil != parsedErr {
+            t.Fatalf("unexpected error for %q: %v", textualValue, parsedErr)
+        }
+
+        expected := "true" == textualValue || "1" == textualValue
+        if expected != parsedValue {
+            t.Fatalf("expected %q to read as %v, got %v", textualValue, expected, parsedValue)
+        }
+    }
+
+    unparsableParameter := NewParameter("APP_FEATURE", "yes-please", "yes-please", false)
+    _, unparsableErr := unparsableParameter.Bool()
+    if nil == unparsableErr || "cannot convert parameter value to bool" != unparsableErr.Error() {
+        t.Fatalf("expected the conversion refusal, got %v", unparsableErr)
+    }
+
+    foreignParameter := NewParameter("APP_FEATURE", 12, 12, false)
+    _, foreignErr := foreignParameter.Bool()
+    if nil == foreignErr || "cannot convert parameter value to bool" != foreignErr.Error() {
+        t.Fatalf("expected a value of another type to be refused, got %v", foreignErr)
+    }
+
+    var foreignExceptionErr *exception.Error
+    if false == errors.As(foreignErr, &foreignExceptionErr) {
+        t.Fatalf("expected an exception error")
+    }
+    if nil != foreignExceptionErr.CauseErr() {
+        t.Fatalf("expected no parser cause for a value the parser never saw")
     }
 }

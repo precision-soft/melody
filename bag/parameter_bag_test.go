@@ -103,6 +103,56 @@ func TestNewParameterBagFromValues_SeparatesSingleFromRepeated(t *testing.T) {
     }
 }
 
+/* @info Remove takes the name out of the bag entirely: Get, Has and Count must all stop seeing it, and removing a name that was never there is not an error */
+func TestParameterBag_Remove_TakesTheNameOutOfEveryReader(t *testing.T) {
+    parameterBag := NewParameterBag()
+    parameterBag.Set("kept", "value")
+    parameterBag.Set("removed", "value")
+
+    parameterBag.Remove("removed")
+    parameterBag.Remove("never-present")
+
+    if _, exists := parameterBag.Get("removed"); true == exists {
+        t.Fatalf("expected Get to stop seeing the removed name")
+    }
+
+    if true == parameterBag.Has("removed") {
+        t.Fatalf("expected Has to stop seeing the removed name")
+    }
+
+    if 1 != parameterBag.Count() {
+        t.Fatalf("expected one remaining parameter, got %d", parameterBag.Count())
+    }
+
+    if false == parameterBag.Has("kept") {
+        t.Fatalf("expected Remove to leave every other name alone")
+    }
+}
+
+/* @info Count answers the number of names the bag holds, not the number of values stored under them: a repeated key appended twice is still one name */
+func TestParameterBag_Count_CountsNamesNotValues(t *testing.T) {
+    parameterBag := NewParameterBag()
+
+    if 0 != parameterBag.Count() {
+        t.Fatalf("expected a fresh bag to count zero, got %d", parameterBag.Count())
+    }
+
+    parameterBag.Set("first", "value")
+    parameterBag.Set("second", "value")
+
+    if 2 != parameterBag.Count() {
+        t.Fatalf("expected two names, got %d", parameterBag.Count())
+    }
+
+    if appendErr := parameterBag.AppendString("second", "another"); nil != appendErr {
+        t.Fatalf("unexpected append error: %v", appendErr)
+    }
+
+    if 2 != parameterBag.Count() {
+        t.Fatalf("expected the appended value to stay under the same name, got %d names", parameterBag.Count())
+    }
+}
+
 /* @info All copies as deep as the bag's own writers go: a mutation on the returned slice or map must not write into the stored value behind the lock */
 func TestParameterBag_All_CopiesKnownShapesDeep(t *testing.T) {
     parameterBag := NewParameterBag()

@@ -239,3 +239,23 @@ func TestString_DeliversTheSingleOccurrence(t *testing.T) {
         t.Fatalf("expected HasNonEmptyString to see the provided value")
     }
 }
+
+/* @info every typed reader answers "unset" for a name the bag does not hold, rather than the zero value of its type: a request parameter that was never sent must not read as false, as zero, or as an empty list, because each of those is also a value somebody could legitimately have sent */
+func TestBagTypedReaders_AnAbsentNameIsUnsetRatherThanTheZeroValue(t *testing.T) {
+    parameterBag := NewParameterBag()
+
+    boolValue, boolExists, boolErr := Bool(parameterBag, "missing")
+    if true == boolExists || nil != boolErr || false != boolValue {
+        t.Fatalf("expected Bool to report an absent name unset, got value=%v exists=%v err=%v", boolValue, boolExists, boolErr)
+    }
+
+    floatValue, floatExists, floatErr := Float64(parameterBag, "missing")
+    if true == floatExists || nil != floatErr || 0 != floatValue {
+        t.Fatalf("expected Float64 to report an absent name unset, got value=%v exists=%v err=%v", floatValue, floatExists, floatErr)
+    }
+
+    intValue, intExists, intErr := Int(parameterBag, "missing")
+    if true == intExists || nil != intErr || 0 != intValue {
+        t.Fatalf("expected Int to report an absent name unset, got value=%v exists=%v err=%v", intValue, intExists, intErr)
+    }
+}

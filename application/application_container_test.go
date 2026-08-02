@@ -19,6 +19,10 @@ import (
     httpcontract "github.com/precision-soft/melody/http/contract"
     "github.com/precision-soft/melody/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/kernel/contract"
+    runtimecontract "github.com/precision-soft/melody/runtime/contract"
+    "github.com/precision-soft/melody/security"
+    securityconfig "github.com/precision-soft/melody/security/config"
+    securitycontract "github.com/precision-soft/melody/security/contract"
     "github.com/precision-soft/melody/session"
     sessioncontract "github.com/precision-soft/melody/session/contract"
 )
@@ -123,6 +127,107 @@ func TestApplicationRegisterService_PanicsAfterBoot(t *testing.T) {
             },
         )
     }, "may not register services after boot")
+}
+
+/* anonymousProbeTokenSource is the smallest token source a firewall can be compiled with */
+type anonymousProbeTokenSource struct{}
+
+func (instance *anonymousProbeTokenSource) Name() string {
+    return "anonymous"
+}
+
+func (instance *anonymousProbeTokenSource) Resolve(
+    runtimeInstance runtimecontract.Runtime,
+    request httpcontract.Request,
+) (securitycontract.Token, error) {
+    return security.NewAnonymousToken(), nil
+}
+
+var _ securitycontract.TokenSource = (*anonymousProbeTokenSource)(nil)
+
+func newSecurityWiringApplication(t *testing.T, mode string) *Application {
+    t.Helper()
+
+    applicationInstance := newCollisionTestApplication(t)
+    applicationInstance.runtimeFlags = NewRuntimeFlags(mode)
+
+    builder := securityconfig.NewBuilder()
+    builder.AddStatelessFirewall(
+        "api",
+        security.NewPathPrefixMatcher("/api"),
+        []securitycontract.Rule{},
+        &anonymousProbeTokenSource{},
+        securityconfig.NewFirewallOverrideConfiguration(),
+    )
+
+    applicationInstance.securityConfiguration = builder.BuildAndCompile()
+
+    return applicationInstance
+}
+
+/* registeredListenerCount reads how many listeners the kernel dispatcher carries, through the introspection the debug commands use */
+func registeredListenerCount(t *testing.T, applicationInstance *Application) int {
+    t.Helper()
+
+    inspector, isInspector := applicationInstance.kernel.EventDispatcher().(eventcontract.EventDispatcherInspector)
+    if false == isInspector {
+        t.Fatalf("expected the kernel dispatcher to be inspectable")
+    }
+
+    total := 0
+    for _, registeredEvent := range inspector.RegisteredEvents() {
+        total = total + len(registeredEvent.Listeners)
+    }
+
+    return total
+}
+
+/* @info a compiled security configuration only becomes enforcement when this runs: the firewall manager reaches the container and the two kernel listeners reach the dispatcher. Security in this framework is a pair of listeners rather than middleware, so a boot that skipped them would serve every protected route wide open with a configuration that looks correct everywhere it is printed. */
+func TestRegisterHttpSecurity_WiresTheFirewallManagerAndTheKernelListeners(t *testing.T) {
+    applicationInstance := newSecurityWiringApplication(t, config.ModeHttp)
+
+    if nil == applicationInstance.securityConfiguration {
+        t.Fatalf("the probe configuration did not compile, so the assertions below would be vacuous")
+    }
+
+    listenersBefore := registeredListenerCount(t, applicationInstance)
+
+    if wiringErr := applicationInstance.registerHttpSecurity(); nil != wiringErr {
+        t.Fatalf("unexpected wiring error: %v", wiringErr)
+    }
+
+    if false == applicationInstance.kernel.ServiceContainer().Has(security.ServiceFirewallManager) {
+        t.Fatalf("expected the firewall manager to be registered")
+    }
+
+    listenersAfter := registeredListenerCount(t, applicationInstance)
+    if listenersBefore >= listenersAfter {
+        t.Fatalf("expected the security listeners to reach the dispatcher, got %d listeners over %d", listenersAfter, listenersBefore)
+    }
+}
+
+/* @info a console process wires no request security: there is no request to guard, and registering the listeners would put the firewall in the path of nothing. A process without a compiled configuration wires nothing either — that is an application that declared no security at all, not one whose security failed to compile, which the compile step refuses on its own. */
+func TestRegisterHttpSecurity_WiresNothingOutsideAnHttpProcessOrWithoutAConfiguration(t *testing.T) {
+    cliApplication := newSecurityWiringApplication(t, config.ModeCli)
+
+    if wiringErr := cliApplication.registerHttpSecurity(); nil != wiringErr {
+        t.Fatalf("unexpected wiring error: %v", wiringErr)
+    }
+
+    if true == cliApplication.kernel.ServiceContainer().Has(security.ServiceFirewallManager) {
+        t.Fatalf("expected a console process to wire no firewall manager")
+    }
+
+    unconfiguredApplication := newCollisionTestApplication(t)
+    unconfiguredApplication.runtimeFlags = NewRuntimeFlags(config.ModeHttp)
+
+    if wiringErr := unconfiguredApplication.registerHttpSecurity(); nil != wiringErr {
+        t.Fatalf("unexpected wiring error: %v", wiringErr)
+    }
+
+    if true == unconfiguredApplication.kernel.ServiceContainer().Has(security.ServiceFirewallManager) {
+        t.Fatalf("expected an application that declared no security to wire no firewall manager")
+    }
 }
 
 type ttlRecordingSessionStorage struct {
@@ -266,5 +371,48 @@ func TestApplicationRegisterCache_LeavesAnApplicationSuppliedBackendUnmarked(t *
 
     if true == applicationInstance.unboundedDefaultCacheBackend {
         t.Fatalf("expected an application-supplied cache backend to leave the warning unarmed")
+    }
+}
+
+/* @info every one of the three cache services is only supplied when the application did not: a framework registration that overwrote an application's own serializer would silently change the format of everything already in the cache, and one that overwrote the cache itself would hand every consumer a different instance than the one the wiring built */
+func TestApplicationRegisterCache_LeavesEveryApplicationSuppliedServiceAlone(t *testing.T) {
+    applicationInstance := newSessionTtlTestApplication(t, "30m")
+
+    suppliedSerializer := cache.NewJsonSerializer()
+    suppliedBackend := cache.NewInMemoryBackend(128, time.Hour, clock.NewSystemClock())
+    suppliedCache := cache.NewManager(suppliedBackend, suppliedSerializer)
+
+    applicationInstance.RegisterService(
+        cache.ServiceCacheSerializer,
+        func(resolver containercontract.Resolver) (cachecontract.Serializer, error) {
+            return suppliedSerializer, nil
+        },
+    )
+    applicationInstance.RegisterService(
+        cache.ServiceCacheBackend,
+        func(resolver containercontract.Resolver) (cachecontract.Backend, error) {
+            return suppliedBackend, nil
+        },
+    )
+    applicationInstance.RegisterService(
+        cache.ServiceCache,
+        func(resolver containercontract.Resolver) (cachecontract.Cache, error) {
+            return suppliedCache, nil
+        },
+    )
+
+    applicationInstance.registerCache()
+
+    if 0 != len(applicationInstance.bootCollisions) {
+        t.Fatalf("expected the framework to register nothing over the application's own services, got %+v", applicationInstance.bootCollisions)
+    }
+
+    resolvedCache := container.MustFromResolver[cachecontract.Cache](applicationInstance.kernel.ServiceContainer(), cache.ServiceCache)
+    if suppliedCache != resolvedCache {
+        t.Fatalf("expected the application's own cache to be the one consumers resolve")
+    }
+
+    if true == applicationInstance.unboundedDefaultCacheBackend {
+        t.Fatalf("expected an application-supplied backend to leave the warning unarmed")
     }
 }

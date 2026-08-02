@@ -8,6 +8,7 @@ import (
     "github.com/precision-soft/melody/config"
     "github.com/precision-soft/melody/container"
     containercontract "github.com/precision-soft/melody/container/contract"
+    "github.com/precision-soft/melody/internal/testhelper"
     loggingcontract "github.com/precision-soft/melody/logging/contract"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
@@ -136,6 +137,101 @@ func TestBootCollision_NonStrictTypeRegistrationIsNotRecorded(t *testing.T) {
     if 0 != len(application.bootCollisions) {
         t.Fatalf("expected no recorded collisions, got %d", len(application.bootCollisions))
     }
+}
+
+/* @info a name claimed at one lifetime and then declared at the other is the same wiring mistake seen from the other side: it joins the aggregated report rather than ending the boot on its own, from either direction */
+func TestBootCollision_ANameClaimedAtTheOtherLifetimeIsRecordedFromBothDirections(t *testing.T) {
+    singletonFirst := newCollisionTestApplication(t)
+
+    singletonFirst.RegisterService("test.scoped.value", stringProvider("first"))
+    singletonFirst.RegisterScopedService("test.scoped.value", stringProvider("second"))
+
+    if 1 != len(singletonFirst.bootCollisions) {
+        t.Fatalf("expected one recorded collision, got %d", len(singletonFirst.bootCollisions))
+    }
+    if bootCollisionKindScopedService != singletonFirst.bootCollisions[0].kind {
+        t.Fatalf("unexpected collision kind: %s", singletonFirst.bootCollisions[0].kind)
+    }
+
+    scopedFirst := newCollisionTestApplication(t)
+
+    scopedFirst.RegisterScopedService("test.scoped.value", stringProvider("first"))
+    scopedFirst.RegisterService("test.scoped.value", stringProvider("second"))
+
+    if 1 != len(scopedFirst.bootCollisions) {
+        t.Fatalf("expected one recorded collision, got %d", len(scopedFirst.bootCollisions))
+    }
+    if bootCollisionKindScopedService != scopedFirst.bootCollisions[0].kind {
+        t.Fatalf("unexpected collision kind: %s", scopedFirst.bootCollisions[0].kind)
+    }
+}
+
+/* @info the type is claimed across lifetimes too, and reported the same way: a request-scoped service whose type a singleton already declares would otherwise make a by-type lookup answer one of the two at random */
+func TestBootCollision_ATypeClaimedAtTheOtherLifetimeIsRecordedFromBothDirections(t *testing.T) {
+    type marker struct{ value string }
+
+    markerProvider := func(value string) func(resolver containercontract.Resolver) (*marker, error) {
+        return func(resolver containercontract.Resolver) (*marker, error) {
+            return &marker{value: value}, nil
+        }
+    }
+
+    singletonFirst := newCollisionTestApplication(t)
+
+    singletonFirst.RegisterService("test.scoped.first", markerProvider("first"))
+    singletonFirst.RegisterScopedService("test.scoped.second", markerProvider("second"))
+
+    if 1 != len(singletonFirst.bootCollisions) {
+        t.Fatalf("expected one recorded collision, got %d", len(singletonFirst.bootCollisions))
+    }
+    if bootCollisionKindScopedServiceType != singletonFirst.bootCollisions[0].kind {
+        t.Fatalf("unexpected collision kind: %s", singletonFirst.bootCollisions[0].kind)
+    }
+
+    scopedFirst := newCollisionTestApplication(t)
+
+    scopedFirst.RegisterScopedService("test.scoped.first", markerProvider("first"))
+    scopedFirst.RegisterService("test.scoped.second", markerProvider("second"))
+
+    if 1 != len(scopedFirst.bootCollisions) {
+        t.Fatalf("expected one recorded collision, got %d", len(scopedFirst.bootCollisions))
+    }
+    if bootCollisionKindScopedServiceType != scopedFirst.bootCollisions[0].kind {
+        t.Fatalf("unexpected collision kind: %s", scopedFirst.bootCollisions[0].kind)
+    }
+}
+
+/* @info a duplicate is the one registration failure that is collected instead of thrown: anything else — a provider that is not a provider at all — ends the boot where it was written, because no later phase can make it valid */
+func TestRegisterService_StaysFailFastForAFailureThatIsNotACollision(t *testing.T) {
+    singletonApplication := newCollisionTestApplication(t)
+
+    testhelper.AssertPanicsWithError(t, func() {
+        singletonApplication.RegisterService("test.scoped.broken", "not a provider at all")
+    }, "provider must be a function")
+
+    if 0 != len(singletonApplication.bootCollisions) {
+        t.Fatalf("expected a non-collision failure to stay out of the aggregated report, got %+v", singletonApplication.bootCollisions)
+    }
+
+    scopedApplication := newCollisionTestApplication(t)
+
+    testhelper.AssertPanicsWithError(t, func() {
+        scopedApplication.RegisterScopedService("test.scoped.broken", "not a provider at all")
+    }, "provider must be a function")
+
+    if 0 != len(scopedApplication.bootCollisions) {
+        t.Fatalf("expected a non-collision failure to stay out of the aggregated report, got %+v", scopedApplication.bootCollisions)
+    }
+}
+
+/* @info the scoped door closes at boot exactly as the singleton one does: the scopes are built by then, and a registration arriving here would be visible to some requests and not others */
+func TestRegisterScopedService_RefusesAfterBoot(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+    applicationInstance.booted = true
+
+    testhelper.AssertPanicsWithError(t, func() {
+        applicationInstance.RegisterScopedService("test.scoped.value", stringProvider("late"))
+    }, "may not register scoped services after boot")
 }
 
 func TestBootCollision_DuplicateParameterIsRecorded(t *testing.T) {

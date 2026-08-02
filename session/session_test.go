@@ -108,6 +108,26 @@ func TestSession_String_ReturnsEmptyWhenMissing(t *testing.T) {
     }
 }
 
+/* @info String answers the empty string for a value that is not one, rather than rendering it: the accessor exists so a handler can read a stored name without asserting, and handing back the rendering of an int or a map would put a value into a page that no writer ever stored as text */
+func TestSession_String_ReturnsEmptyForAValueThatIsNotAString(t *testing.T) {
+    storage := NewInMemoryStorage()
+    defer storage.Close()
+
+    manager := NewManager(storage, 30*time.Minute)
+
+    sessionInstance := manager.NewSession()
+    sessionInstance.Set("count", 12)
+    sessionInstance.Set("name", "melody")
+
+    if "" != sessionInstance.String("count") {
+        t.Fatalf("expected a non-string value to answer the empty string, got %q", sessionInstance.String("count"))
+    }
+
+    if "melody" != sessionInstance.String("name") {
+        t.Fatalf("expected a stored string to be handed back, got %q", sessionInstance.String("name"))
+    }
+}
+
 var _ sessioncontract.Session = (*Session)(nil)
 
 /* @info Clear ends the session and the ending latches: a later Set puts the value back and still marks the session modified, but it cannot make the session look live again. Without the latch a logout handler that clears the session, followed by anything writing to the same object — a middleware or an event listener leaving a farewell message — had the response path take the save branch instead of the delete branch, so the values were overwritten while the pre-logout id stayed alive in the storage and was re-issued under the same cookie. */

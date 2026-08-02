@@ -161,6 +161,24 @@ func (instance *typedNilRuntime) Container() containercontract.Container {
     return nil
 }
 
+/* @info a runtime that is itself present but carries neither a scope nor a container has nothing to resolve through, and says so: handing back a nil resolver would move the failure into the container call, where the message names a service instead of the wiring that has no resolver at all */
+func TestFromRuntime_RefusesARuntimeWithNeitherScopeNorContainer(t *testing.T) {
+    runtimeInstance := &typedNilRuntime{}
+
+    _, resolveErr := FromRuntime[string](runtimeInstance, "service.test")
+    if nil == resolveErr {
+        t.Fatalf("expected a runtime with no resolver to be refused")
+    }
+
+    if "runtime resolver may not be nil" != resolveErr.Error() {
+        t.Fatalf("expected the resolver refusal, got %q", resolveErr.Error())
+    }
+
+    testhelper.AssertPanicsWithError(t, func() {
+        MustFromRuntime[string](runtimeInstance, "service.test")
+    }, "runtime resolver may not be nil")
+}
+
 func TestFromRuntime_RefusesATypedNilRuntime(t *testing.T) {
     _, resolveErr := FromRuntime[string]((*typedNilRuntime)(nil), "service.test")
     if nil == resolveErr {

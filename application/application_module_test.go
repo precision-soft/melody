@@ -5,11 +5,13 @@ import (
     "testing"
 
     applicationcontract "github.com/precision-soft/melody/application/contract"
+    clicontract "github.com/precision-soft/melody/cli/contract"
     "github.com/precision-soft/melody/config"
     "github.com/precision-soft/melody/container"
     containercontract "github.com/precision-soft/melody/container/contract"
     "github.com/precision-soft/melody/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/kernel/contract"
+    securityconfig "github.com/precision-soft/melody/security/config"
 )
 
 type fakeModule struct {
@@ -119,6 +121,147 @@ func TestRegisterModuleProvider_RegistersChildrenWithoutProvider(t *testing.T) {
     instance.RegisterModuleProvider(provider)
 
     assertModuleNames(t, instance.modules, []string{"child-a", "child-b"})
+}
+
+/* @info the module doors close at boot and refuse a nil, because a module registered after the boot phases have run is registered into nothing: its hooks are never called, and the application starts missing whatever the module was supposed to wire */
+func TestRegisterModule_RefusesAfterBootAndRefusesANilModule(t *testing.T) {
+    bootedApplication := &Application{booted: true}
+
+    testhelper.AssertPanicsWithError(t, func() {
+        bootedApplication.RegisterModule(fakeModule{name: "late"})
+    }, "may not register modules after boot")
+
+    testhelper.AssertPanicsWithError(t, func() {
+        (&Application{}).RegisterModule(nil)
+    }, "module instance may not be nil")
+}
+
+func TestRegisterModuleProvider_RefusesAfterBootAndRefusesANilProvider(t *testing.T) {
+    bootedApplication := &Application{booted: true}
+
+    testhelper.AssertPanicsWithError(t, func() {
+        bootedApplication.RegisterModuleProvider(fakeModuleProvider{fakeModule: fakeModule{name: "late"}})
+    }, "may not register modules after boot")
+
+    testhelper.AssertPanicsWithError(t, func() {
+        (&Application{}).RegisterModuleProvider(nil)
+    }, "module provider may not be nil")
+}
+
+/* hookRecordingModule implements every module hook the boot phases call, so one registration proves which phase reached which hook */
+type hookRecordingModule struct {
+    fakeModule
+    configurationsRegistered  bool
+    parametersRegistered      bool
+    servicesRegistered        bool
+    eventSubscribersOnKernel  bool
+    httpMiddlewaresRegistered bool
+    httpRoutesRegistered      bool
+    cliCommandsRegistered     bool
+    securityRegistered        bool
+}
+
+func (instance *hookRecordingModule) RegisterConfigurations(registrar applicationcontract.ConfigRegistrar) {
+    instance.configurationsRegistered = true
+}
+
+func (instance *hookRecordingModule) RegisterParameters(registrar applicationcontract.ParameterRegistrar) {
+    instance.parametersRegistered = true
+
+    registrar.RegisterParameter("module.parameter", "value")
+}
+
+func (instance *hookRecordingModule) RegisterServices(
+    kernelInstance kernelcontract.Kernel,
+    registrar applicationcontract.ServiceRegistrar,
+) {
+    instance.servicesRegistered = true
+}
+
+func (instance *hookRecordingModule) RegisterEventSubscribers(kernelInstance kernelcontract.Kernel) {
+    instance.eventSubscribersOnKernel = true
+}
+
+func (instance *hookRecordingModule) RegisterHttpMiddlewares(
+    kernelInstance kernelcontract.Kernel,
+    registrar applicationcontract.HttpMiddlewareRegistrar,
+) {
+    instance.httpMiddlewaresRegistered = true
+}
+
+func (instance *hookRecordingModule) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel) {
+    instance.httpRoutesRegistered = true
+}
+
+func (instance *hookRecordingModule) RegisterCliCommands(kernelInstance kernelcontract.Kernel) []clicontract.Command {
+    instance.cliCommandsRegistered = true
+
+    return []clicontract.Command{&namedTestCommand{name: "module:work"}}
+}
+
+func (instance *hookRecordingModule) RegisterSecurity(builder *securityconfig.Builder) {
+    instance.securityRegistered = true
+}
+
+/* @info the configuration and parameter hooks run BEFORE the configuration resolves, which is the whole reason they are a separate phase: a parameter registered after the resolve would never have its template expanded, and a logging configuration registered after it would never reach the logger the container builds. */
+func TestBootModulesPreConfigurationResolve_RunsTheConfigurationAndParameterHooks(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+
+    moduleInstance := &hookRecordingModule{fakeModule: fakeModule{name: "recording"}}
+    applicationInstance.RegisterModule(moduleInstance)
+
+    applicationInstance.bootModulesPreConfigurationResolve()
+
+    if false == moduleInstance.configurationsRegistered {
+        t.Fatalf("expected the configuration hook to run before the resolve")
+    }
+
+    if false == moduleInstance.parametersRegistered {
+        t.Fatalf("expected the parameter hook to run before the resolve")
+    }
+
+    if nil == applicationInstance.configuration.Get("module.parameter") {
+        t.Fatalf("expected the parameter the module registered to reach the configuration")
+    }
+
+    /* nothing the post-resolve phase owns has run yet */
+    if true == moduleInstance.servicesRegistered || true == moduleInstance.httpRoutesRegistered {
+        t.Fatalf("expected the post-resolve hooks to stay untouched by the pre-resolve phase")
+    }
+}
+
+/* @info everything a module wires against resolved configuration runs in the second phase, and each hook is optional: a module implementing all of them must see all of them called, or one silently-missing hook means an unwired subsystem with a green boot. */
+func TestBootModulesPostConfigurationResolve_RunsEveryLaterHook(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+    applicationInstance.httpMiddlewares = NewHttpMiddleware(nil, applicationInstance.configuration)
+
+    moduleInstance := &hookRecordingModule{fakeModule: fakeModule{name: "recording"}}
+    applicationInstance.RegisterModule(moduleInstance)
+
+    applicationInstance.bootModulesPostConfigurationResolve()
+
+    if false == moduleInstance.servicesRegistered {
+        t.Fatalf("expected the service hook to run")
+    }
+    if false == moduleInstance.securityRegistered {
+        t.Fatalf("expected the security hook to run")
+    }
+    if false == moduleInstance.eventSubscribersOnKernel {
+        t.Fatalf("expected the event subscriber hook to run")
+    }
+    if false == moduleInstance.httpMiddlewaresRegistered {
+        t.Fatalf("expected the http middleware hook to run")
+    }
+    if false == moduleInstance.httpRoutesRegistered {
+        t.Fatalf("expected the http route hook to run")
+    }
+    if false == moduleInstance.cliCommandsRegistered {
+        t.Fatalf("expected the cli command hook to run")
+    }
+
+    if 1 != len(applicationInstance.cliCommands) {
+        t.Fatalf("expected the command the module returned to be registered, got %d", len(applicationInstance.cliCommands))
+    }
 }
 
 type scopedRequestProbe struct {

@@ -41,3 +41,19 @@ func TestBagDuration_ConversionsAndErrors(t *testing.T) {
         t.Fatalf("expected error")
     }
 }
+
+/* @info a name the bag does not hold is unset, not a zero duration: a caller reading a timeout that was never configured must be able to tell "nobody said" from "somebody said zero", which is the difference between applying a default and applying no timeout at all */
+func TestBagDuration_AnAbsentNameIsUnsetRatherThanZero(t *testing.T) {
+    parameterBag := NewParameterBag()
+
+    value, exists, durationErr := Duration(parameterBag, "missing")
+    if true == exists {
+        t.Fatalf("expected an absent name to be reported unset")
+    }
+    if nil != durationErr {
+        t.Fatalf("expected no error for an absent name, got %v", durationErr)
+    }
+    if 0 != value {
+        t.Fatalf("expected the zero duration for an absent name, got %v", value)
+    }
+}

@@ -492,3 +492,18 @@ func TestParseRuntimeFlags_BareRoleBeforeCommandConsumesIt(t *testing.T) {
         _ = ParseRuntimeFlags(config.ModeHttp)
     }, "invalid role: --role is a runtime flag")
 }
+
+/* @info an empty role widens to all rather than to nothing: the direct constructor is what wiring code calls when it builds its own flags, and a runtime whose role answered the empty string would gate every background runner off with no error anywhere */
+func TestNewRuntimeFlagsWithRole_AnEmptyRoleWidensToAll(t *testing.T) {
+    if config.RoleAll != NewRuntimeFlagsWithRole(config.ModeCli, "").Role() {
+        t.Fatalf("expected an empty role to widen to all, got %q", NewRuntimeFlagsWithRole(config.ModeCli, "").Role())
+    }
+
+    if config.RoleWorker != NewRuntimeFlagsWithRole(config.ModeCli, config.RoleWorker).Role() {
+        t.Fatalf("expected an explicit role to be kept")
+    }
+
+    if config.ModeCli != NewRuntimeFlagsWithRole(config.ModeCli, config.RoleWorker).Mode() {
+        t.Fatalf("expected the mode to be kept")
+    }
+}
