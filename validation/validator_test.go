@@ -2112,3 +2112,136 @@ type embedHolder struct {
     NamedEmbed `json:"named"`
     PlainEmbed
 }
+
+type NestedEmbedTagCore struct {
+    Value string `json:"value"`
+}
+
+type nestedEmbedTagHolder struct {
+    NestedEmbedTagCore `validate:"notBlank"`
+}
+
+type nestedEmbedTagPayload struct {
+    Inner nestedEmbedTagHolder `json:"inner"`
+}
+
+/* @info an embed's own tag reports under the parent's path: the embed has no json name of its own, so the error points at it by field name below the path that reached it — without the prefix a nested failure claimed a top-level member the payload does not even spell */
+func TestValidateStruct_AnEmbedsOwnTagReportsUnderTheParentsPath(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    validationErrors := requireValidationErrors(t, validatorInstance.Validate(nestedEmbedTagPayload{}))
+
+    if "inner.NestedEmbedTagCore: value must be a string" != validationErrors.Error() {
+        t.Fatalf("expected the embed's own tag to report under the parent's path, got %q", validationErrors.Error())
+    }
+}
+
+type DashExcludedEmbedCore struct {
+    Value string `json:"value" validate:"notBlank"`
+}
+
+type dashExcludedEmbedPayload struct {
+    DashExcludedEmbedCore `json:"-"`
+}
+
+/* @info a `json:"-"` embed is dropped exactly as encoding/json drops it: it neither flattens its fields onto the parent nor becomes a named object, so no payload can populate what it carries and none of its constraints may run — enforcing them would validate permanent zero values and reject every request. This test is not the proof of the dash guard in isPromotedValidationEmbed: for the exact "-" tag the split check below it answers the same false, so a dead-branch mutation there survives by shadowing; the guard is proved on verdict by inversion, which stops flattening every plain embed and dies against the promotion tests. */
+func TestIsPromotedValidationEmbed_ADashTaggedEmbedIsNeitherFlattenedNorNamed(t *testing.T) {
+    encoded, marshalErr := json.Marshal(dashExcludedEmbedPayload{})
+    if nil != marshalErr {
+        t.Fatalf("unexpected error: %v", marshalErr)
+    }
+
+    if `{}` != string(encoded) {
+        t.Fatalf("expected encoding/json to drop the dash-tagged embed, got %s", encoded)
+    }
+
+    validatorInstance := NewValidator()
+
+    requireNoValidationErrors(t, validatorInstance.Validate(dashExcludedEmbedPayload{}))
+}
+
+type tiedTimeLeft struct {
+    time.Time
+}
+
+type tiedTimeRight struct {
+    time.Time
+}
+
+type tiedTimeCarrier struct {
+    tiedTimeLeft
+    tiedTimeRight
+}
+
+func (instance tiedTimeCarrier) MarshalJSON() ([]byte, error) {
+    return []byte(`"carrier"`), nil
+}
+
+func (instance *tiedTimeCarrier) UnmarshalJSON(data []byte) error {
+    return exception.NewError("carrier accepts no object body", nil, nil)
+}
+
+type tiedTimeHostPayload struct {
+    tiedTimeCarrier
+    Name string `json:"name" validate:"notBlank"`
+}
+
+/* @info two time-origin codecs tied at equal depth inside the carrier cancel each other in the origin walk, so the carrier resolves to itself and the host's promoted codec is the carrier's own, not time.Time's — the host is walked and its constraints stay enforced. Without the tie count a single deeper time origin would win the walk and, the carrier's decoder refusing an object body, the host would read as a promoted time codec and skip every sibling constraint. */
+func TestValidateStruct_ANestedCodecTieResolvesToTheCarrierAndKeepsItsSiblingsValidated(t *testing.T) {
+    origin, depth, resolved := promotedValidationMarshalerOrigin(reflect.TypeOf(tiedTimeCarrier{}), map[reflect.Type]bool{})
+    if false == resolved || 0 != depth || reflect.TypeOf(tiedTimeCarrier{}) != origin {
+        t.Fatalf("expected the equal-depth tie to resolve to the carrier itself, got %v at depth %d (resolved=%v)", origin, depth, resolved)
+    }
+
+    validatorInstance := NewValidator()
+
+    validationErrors := requireValidationErrors(t, validatorInstance.Validate(tiedTimeHostPayload{}))
+    if "name: this field is required" != validationErrors.Error() {
+        t.Fatalf("expected the sibling constraint to be enforced, got %q", validationErrors.Error())
+    }
+}
+
+type WalkedPointerEmbedCore struct {
+    Value string `json:"value" validate:"notBlank"`
+}
+
+type walkedPointerEmbedPayload struct {
+    *WalkedPointerEmbedCore
+}
+
+/* @info a non-nil pointer embed is walked through its pointee: the promoted fields a payload populates live behind the pointer, so the dereference is what keeps their constraints enforced — only the nil pointer stands in for "nothing was supplied" and validates the zero embed instead */
+func TestValidator_ANonNilPointerEmbedIsWalkedThroughItsValue(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    validationErrors := requireValidationErrors(t, validatorInstance.Validate(walkedPointerEmbedPayload{WalkedPointerEmbedCore: &WalkedPointerEmbedCore{}}))
+
+    if "value: this field is required" != validationErrors.Error() {
+        t.Fatalf("expected the pointee's constraint to be enforced through the pointer embed, got %q", validationErrors.Error())
+    }
+}
+
+type typedNilWithParamsConstraint struct{}
+
+func (instance *typedNilWithParamsConstraint) Validate(value any, field string) validationcontract.ValidationError {
+    return nil
+}
+
+func (instance *typedNilWithParamsConstraint) WithParams(params map[string]string) (validationcontract.Constraint, error) {
+    return (*typedNilWithParamsConstraint)(nil), nil
+}
+
+/* @info a WithParams that returns a typed-nil constraint with a nil error is userland output crossing back into the validator, so it is normalized like every other third-party boundary: accepted, the nil would pass a plain comparison and panic on the first value routed to it, on the request path */
+func TestValidator_BuildConstraintWithParamsRefusesATypedNilConstruction(t *testing.T) {
+    validatorInstance := NewValidator()
+    validatorInstance.RegisterConstraint("typedNilFromParams", &typedNilWithParamsConstraint{})
+
+    constraint, ok, refusalCause := validatorInstance.createConstraintWithParams("typedNilFromParams", map[string]string{"value": "x"})
+
+    if nil != constraint || true == ok {
+        t.Fatalf("expected a typed-nil construction to fail closed, got constraint=%v ok=%v", constraint, ok)
+    }
+
+    if "constraint construction returned nil" != refusalCause {
+        t.Fatalf("expected the typed-nil refusal cause, got %q", refusalCause)
+    }
+}

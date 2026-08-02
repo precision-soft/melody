@@ -225,3 +225,75 @@ func TestBool_ParsesTheDocumentedSpellings(t *testing.T) {
         t.Fatalf("expected an unknown spelling to be refused")
     }
 }
+
+/* @info until this pin the branches below were entered only by the tests of bag and config, never by this package's own suite: a rewrite of those callers' tests would have left the guards silently unproven, so the suite is made self-sufficient here */
+
+func TestInt_NilIsAbsentAndAnInt64PassesThrough(t *testing.T) {
+    _, isSet, err := Int(nil, "probe")
+    if nil != err || true == isSet {
+        t.Fatalf("expected nil to be absent without error, got isSet=%v err=%v", isSet, err)
+    }
+
+    parsedValue, isSet, err := Int(int64(-7), "probe")
+    if nil != err || false == isSet || -7 != parsedValue {
+        t.Fatalf("expected an int64 to pass through unchanged, got %v/%v/%v", parsedValue, isSet, err)
+    }
+}
+
+func TestBool_NilIsAbsentAndATypedBoolPassesThrough(t *testing.T) {
+    _, isSet, err := Bool(nil, "probe")
+    if nil != err || true == isSet {
+        t.Fatalf("expected nil to be absent without error, got isSet=%v err=%v", isSet, err)
+    }
+
+    for _, typedValue := range []bool{true, false} {
+        parsedValue, isSet, err := Bool(typedValue, "probe")
+        if nil != err || false == isSet || typedValue != parsedValue {
+            t.Fatalf("expected the typed bool %v to pass through unchanged, got %v/%v/%v", typedValue, parsedValue, isSet, err)
+        }
+    }
+}
+
+func TestBool_ParsesTheFalseSpellings(t *testing.T) {
+    for _, spelling := range []string{"0", "FALSE", "No", "n", "off"} {
+        parsedValue, isSet, err := Bool(spelling, "probe")
+        if nil != err || false == isSet || false != parsedValue {
+            t.Fatalf("expected %q to parse false, got %v/%v/%v", spelling, parsedValue, isSet, err)
+        }
+    }
+}
+
+func TestFloat64_NilIsAbsentAndAnUnsupportedShapeIsRefused(t *testing.T) {
+    _, isSet, err := Float64(nil, "probe")
+    if nil != err || true == isSet {
+        t.Fatalf("expected nil to be absent without error, got isSet=%v err=%v", isSet, err)
+    }
+
+    _, isSet, err = Float64(true, "probe")
+    if nil == err || false == isSet {
+        t.Fatalf("expected a bool to be refused by Float64 and reported as set, got isSet=%v err=%v", isSet, err)
+    }
+    if false == strings.Contains(err.Error(), "parameter is not a 'float64'") {
+        t.Fatalf("expected the refusal to name the expected type, got %q", err.Error())
+    }
+}
+
+func TestDuration_RefusesAnUnsupportedShape(t *testing.T) {
+    _, isSet, err := Duration(true, "probe")
+    if nil == err || false == isSet {
+        t.Fatalf("expected a bool to be refused by Duration and reported as set, got isSet=%v err=%v", isSet, err)
+    }
+    if false == strings.Contains(err.Error(), "parameter is not a 'duration'") {
+        t.Fatalf("expected the refusal to name the expected type, got %q", err.Error())
+    }
+}
+
+func TestMapStringString_RefusesAnUnsupportedShape(t *testing.T) {
+    _, isSet, err := MapStringString(42, "probe")
+    if nil == err || false == isSet {
+        t.Fatalf("expected an int to be refused by MapStringString and reported as set, got isSet=%v err=%v", isSet, err)
+    }
+    if false == strings.Contains(err.Error(), "parameter is not a 'map[string]string'") {
+        t.Fatalf("expected the refusal to name the expected type, got %q", err.Error())
+    }
+}
