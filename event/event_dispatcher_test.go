@@ -1405,3 +1405,284 @@ func (instance *testRecordingLogger) Close() error {
 func (instance *testRecordingLogger) Closed() bool {
     return false
 }
+
+/* the propagation probe is what dispatch calls outside the listener recovery, so a panic raised there escapes into dispatchSafely — the only door to the generic diagnostic, since a melody error and an exit are re-raised untouched above it */
+type testPanickingPropagationEvent struct {
+    panicValue any
+}
+
+func (instance *testPanickingPropagationEvent) Name() string {
+    return "e"
+}
+
+func (instance *testPanickingPropagationEvent) Payload() any {
+    return nil
+}
+
+func (instance *testPanickingPropagationEvent) Timestamp() time.Time {
+    return time.Time{}
+}
+
+func (instance *testPanickingPropagationEvent) StopPropagation() {
+}
+
+func (instance *testPanickingPropagationEvent) IsPropagationStopped() bool {
+    panic(instance.panicValue)
+}
+
+/* @info a panic that is neither a melody error nor an exit is described rather than passed on bare: the caller used to receive the raw value with no event name, no event type and no stack, which for a panic raised inside the dispatch machinery names nothing an operator can act on */
+func TestEventDispatcher_DispatchPanic_IsDescribedWithTheEventAndTheStack(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+
+    runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
+
+    eventValue := &testPanickingPropagationEvent{panicValue: "propagation probe exploded"}
+
+    recoveredValue := func() (recovered any) {
+        defer func() {
+            recovered = recover()
+        }()
+
+        _, _ = dispatcher.Dispatch(runtimeInstance, eventValue)
+
+        return nil
+    }()
+
+    if nil == recoveredValue {
+        t.Fatalf("expected the dispatch panic to travel to the caller")
+    }
+
+    exceptionValue, isException := recoveredValue.(*exception.Error)
+    if false == isException {
+        t.Fatalf("expected the panic to be described by a melody error, got %T (%v)", recoveredValue, recoveredValue)
+    }
+
+    if "event dispatch panicked" != exceptionValue.Message() {
+        t.Fatalf("unexpected message: %q", exceptionValue.Message())
+    }
+
+    context := exceptionValue.Context()
+
+    if "e" != context["eventName"] {
+        t.Fatalf("expected the event name in the context, got %v", context["eventName"])
+    }
+    if "*event.testPanickingPropagationEvent" != context["eventType"] {
+        t.Fatalf("expected the event type in the context, got %v", context["eventType"])
+    }
+    if "propagation probe exploded" != context["recoveredValue"] {
+        t.Fatalf("expected the recovered value in the context, got %v", context["recoveredValue"])
+    }
+
+    panicStack, isString := context["panicStack"].(string)
+    if false == isString || "" == panicStack {
+        t.Fatalf("expected a panic stack in the context, got %v", context["panicStack"])
+    }
+}
+
+/* @info the two refusals of the mark, which is the door a fail-closed guarantee is armed through: an empty event name files the mark under a bucket no dispatch reads, and a zero listener id matches no registration — both used to be discovered as a guarantee that silently never armed */
+func TestEventDispatcher_MarkListenerRequired_RefusesAnUnusableRegistration(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+
+    registration := dispatcher.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            return nil
+        },
+        0,
+    )
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            dispatcher.MarkListenerRequired(
+                eventcontract.ListenerRegistration{EventName: "", ListenerId: registration.ListenerId},
+            )
+        },
+        "event name is required to mark a listener",
+    )
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            dispatcher.MarkListenerMaySkipRequiredListeners(
+                eventcontract.ListenerRegistration{EventName: "e", ListenerId: 0},
+            )
+        },
+        "event listener id is required to mark a listener",
+    )
+}
+
+/* @info the same two refusals on the removal door: without them an empty name removes nothing while reporting a search, and a zero id would match the zero value of any registration a caller assembled by hand */
+func TestEventDispatcher_RemoveListener_RefusesAnUnusableRegistration(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+
+    registration := dispatcher.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            return nil
+        },
+        0,
+    )
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            _ = dispatcher.RemoveListener(
+                eventcontract.ListenerRegistration{EventName: "", ListenerId: registration.ListenerId},
+            )
+        },
+        "event name is required to remove a listener",
+    )
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            _ = dispatcher.RemoveListener(
+                eventcontract.ListenerRegistration{EventName: "e", ListenerId: 0},
+            )
+        },
+        "event listener id is required to remove a listener",
+    )
+}
+
+type testTwoEventSubscriber struct {
+}
+
+func (instance *testTwoEventSubscriber) SubscribedEvents() map[string][]eventcontract.SubscribedEvent {
+    return map[string][]eventcontract.SubscribedEvent{
+        "first": {
+            NewSubscribedEvent(
+                func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                    return nil
+                },
+                0,
+            ),
+        },
+        "second": {
+            NewSubscribedEvent(
+                func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                    return nil
+                },
+                0,
+            ),
+        },
+    }
+}
+
+/* @info removing one listener of a subscriber scrubs exactly that entry from the subscriber's record and leaves the rest: the record is what RemoveSubscriber later walks, so an entry left behind names a listener that no longer exists — and a subscriber whose last entry went must leave no key behind, or a second registration of the same subscriber is refused as already registered forever */
+func TestEventDispatcher_RemoveListener_ScrubsOnlyTheRemovedEntryFromTheSubscriberRecord(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+
+    subscriber := &testTwoEventSubscriber{}
+
+    dispatcher.AddSubscriber(subscriber)
+
+    identityValue := eventSubscriberIdentity(subscriber)
+
+    dispatcher.mutex.RLock()
+    registrations := append([]subscriberRegistration(nil), dispatcher.subscriberRegistrations[identityValue]...)
+    dispatcher.mutex.RUnlock()
+
+    if 2 != len(registrations) {
+        t.Fatalf("expected the subscriber to hold two registrations, got %d", len(registrations))
+    }
+
+    removed := dispatcher.RemoveListener(
+        eventcontract.ListenerRegistration{
+            EventName:  registrations[0].eventName,
+            ListenerId: registrations[0].listenerId,
+        },
+    )
+    if false == removed {
+        t.Fatalf("expected the listener to be removed")
+    }
+
+    dispatcher.mutex.RLock()
+    remaining := append([]subscriberRegistration(nil), dispatcher.subscriberRegistrations[identityValue]...)
+    dispatcher.mutex.RUnlock()
+
+    if 1 != len(remaining) {
+        t.Fatalf("expected exactly the removed entry to be scrubbed, got %d remaining", len(remaining))
+    }
+    if registrations[1].listenerId != remaining[0].listenerId {
+        t.Fatalf("expected the surviving entry to be the one not removed, got %d", remaining[0].listenerId)
+    }
+
+    removed = dispatcher.RemoveListener(
+        eventcontract.ListenerRegistration{
+            EventName:  remaining[0].eventName,
+            ListenerId: remaining[0].listenerId,
+        },
+    )
+    if false == removed {
+        t.Fatalf("expected the last listener to be removed")
+    }
+
+    dispatcher.mutex.RLock()
+    _, keyExists := dispatcher.subscriberRegistrations[identityValue]
+    dispatcher.mutex.RUnlock()
+
+    if true == keyExists {
+        t.Fatalf("expected the subscriber key to be dropped once its last registration went")
+    }
+
+    /* the record is gone, so the same subscriber may be registered again — the proof that nothing stale was left behind */
+    dispatcher.AddSubscriber(subscriber)
+}
+
+type testValueSubscriber struct {
+}
+
+func (instance testValueSubscriber) SubscribedEvents() map[string][]eventcontract.SubscribedEvent {
+    return map[string][]eventcontract.SubscribedEvent{
+        "e": {
+            NewSubscribedEvent(
+                func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                    return nil
+                },
+                0,
+            ),
+        },
+    }
+}
+
+/* @info a subscriber that is not a pointer has no address to be filed under, so two instances carrying the same fields would be one registration and removing either would unregister both; it is refused at the door instead, naming the type the caller passed */
+func TestEventDispatcher_AddSubscriber_RefusesASubscriberThatIsNotAPointer(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+
+    identityValue := eventSubscriberIdentity(testValueSubscriber{})
+    if 0 != identityValue.pointer {
+        t.Fatalf("expected a value subscriber to have no identity, got %d", identityValue.pointer)
+    }
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            dispatcher.AddSubscriber(testValueSubscriber{})
+        },
+        "event subscriber pointer is required to add a subscriber",
+    )
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            _ = dispatcher.RemoveSubscriber(testValueSubscriber{})
+        },
+        "event subscriber pointer is required to remove a subscriber",
+    )
+}
+
+/* @info the identity of a nil subscriber is the WHOLE zero identity, type included: the pointer alone would also read zero for a typed nil that walked past this guard into the reflect path below, so the type is what tells the two apart — and the identity is a map key, where a zero pointer paired with a type is a different key from the zero value */
+func TestEventSubscriberIdentity_AnswersTheZeroIdentityForANilSubscriber(t *testing.T) {
+    untypedIdentity := eventSubscriberIdentity(nil)
+    if 0 != untypedIdentity.pointer || nil != untypedIdentity.subscriberType {
+        t.Fatalf("expected an untyped nil subscriber to have no identity, got %#v", untypedIdentity)
+    }
+
+    var typedNil *testTwoEventSubscriber
+
+    typedIdentity := eventSubscriberIdentity(typedNil)
+    if 0 != typedIdentity.pointer || nil != typedIdentity.subscriberType {
+        t.Fatalf("expected a typed nil subscriber to have no identity, got %#v", typedIdentity)
+    }
+}

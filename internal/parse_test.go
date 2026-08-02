@@ -170,6 +170,50 @@ func TestMapStringString_CopiesThePresentMap(t *testing.T) {
     }
 }
 
+/* @info an untyped nil is the absence the strict accessors answer with, and it is the shape a parameter bag hands over for a key it does not hold — reported present it would have reached the type switch and been refused as a wrong type instead */
+func TestMapStringString_UntypedNilIsAbsent(t *testing.T) {
+    value, isSet, err := MapStringString(nil, "probe")
+    if nil != err || true == isSet || nil != value {
+        t.Fatalf("expected an untyped nil to be absent, got %#v/%v/%v", value, isSet, err)
+    }
+}
+
+/* @info the refusal of a shape Int has no branch for names the type it received: without it an unsupported value would fall out of the switch and be reported as the zero it never was */
+func TestInt_RefusesAnUnsupportedShape(t *testing.T) {
+    parsedValue, isSet, err := Int(true, "probe")
+    if nil == err {
+        t.Fatalf("expected a bool to be refused by Int, got %v", parsedValue)
+    }
+    if false == isSet {
+        t.Fatalf("expected the refused value to be reported as set")
+    }
+    if false == strings.Contains(err.Error(), "parameter is not a 'int'") {
+        t.Fatalf("expected the refusal to name the expected type, got %q", err.Error())
+    }
+}
+
+/* @info the plain int branch: the widest spelling a Go caller writes by hand, and the one a literal in a configuration map carries */
+func TestInt_AcceptsAPlainInt(t *testing.T) {
+    parsedValue, isSet, err := Int(42, "probe")
+    if nil != err || false == isSet || 42 != parsedValue {
+        t.Fatalf("expected a plain int to pass through, got %v/%v/%v", parsedValue, isSet, err)
+    }
+}
+
+/* @info the same refusal on the Bool side — a numeric 1 is not a spelling BoolFromString accepts, and reporting it as false would have armed a disabled feature flag */
+func TestBool_RefusesAnUnsupportedShape(t *testing.T) {
+    parsedValue, isSet, err := Bool(1, "probe")
+    if nil == err {
+        t.Fatalf("expected an int to be refused by Bool, got %v", parsedValue)
+    }
+    if false == isSet {
+        t.Fatalf("expected the refused value to be reported as set")
+    }
+    if false == strings.Contains(err.Error(), "parameter is not a 'bool'") {
+        t.Fatalf("expected the refusal to name the expected type, got %q", err.Error())
+    }
+}
+
 func TestBool_ParsesTheDocumentedSpellings(t *testing.T) {
     trueValue, isSet, err := Bool("Yes", "probe")
     if nil != err || false == isSet || true != trueValue {

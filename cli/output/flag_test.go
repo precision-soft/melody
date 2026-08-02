@@ -36,6 +36,30 @@ func TestMergeFlags_PanicsOnADuplicateInsideTheCommandSpecificFlags(t *testing.T
     }, "cli flag name declared twice")
 }
 
+/* @info a nil entry is refused where it is declared: read past the guard it dereferences on Names() while collecting the declared names, so a hole in a command's flag slice killed the boot inside the framework instead of naming the command that left it.
+   The nil is the ONLY entry on purpose. Merged behind the standard set, this assertion passes over a guard armed for the wrong entry as well: the first standard flag then answers with the very same message, and the nil never reaches the line under test. */
+func TestMergeFlags_PanicsOnANilFlag(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        MergeFlags(
+            nil,
+            []clicontract.Flag{nil},
+        )
+    }, "cli flag may not be nil in merge")
+}
+
+/* @info the same refusal where a command actually puts it — behind the standard flags, at an entry of its own */
+func TestMergeFlags_PanicsOnANilFlagBehindTheStandardSet(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        MergeFlags(
+            StandardFlags(),
+            []clicontract.Flag{
+                &clicontract.StringFlag{Name: "manager"},
+                nil,
+            },
+        )
+    }, "cli flag may not be nil in merge")
+}
+
 func TestMergeFlags_MergesDisjointFlagSets(t *testing.T) {
     merged := MergeFlags(
         StandardFlags(),

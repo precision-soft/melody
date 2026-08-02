@@ -40,6 +40,19 @@ func newEventDispatcherAdapterTestRuntime(t *testing.T) runtimecontract.Runtime 
     return runtime.New(context.Background(), scope, serviceContainer)
 }
 
+/* @info the clock is read through the interface: a typed nil passes a plain comparison and the failure would surface one frame later, inside Now(), naming the event constructor instead of the wiring that handed over a nil clock */
+func TestNewEvent_RefusesATypedNilClock(t *testing.T) {
+    var clockInstance *testTypedNilClock
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            _ = NewEvent("e", nil, clockInstance)
+        },
+        "clock is nil",
+    )
+}
+
 func TestEvent_StopPropagation(t *testing.T) {
     eventInstance := NewEvent("e", nil, clock.NewSystemClock())
 

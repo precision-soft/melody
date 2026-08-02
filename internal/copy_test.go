@@ -5,6 +5,11 @@ import (
     "time"
 )
 
+/* the two defined types below are the only shapes that reach the reflect paths carrying interface elements: the type switch above them matches []any and map[string]any exactly, so a named type with the same underlying type walks past it, and an interface element holding nothing is the untyped nil the zero-value clauses exist for */
+type copyTestAnySlice []any
+
+type copyTestAnyMap map[string]any
+
 func TestCopyAnyMap_NilReturnsEmptyMap(t *testing.T) {
     result := CopyAnyMap(nil)
 
@@ -338,6 +343,158 @@ func TestCopyAnyMap_PreservesSharingOfTypedSlices(t *testing.T) {
     }
     if "a" != shared[0] {
         t.Fatalf("expected the write through the copy to stay out of the original")
+    }
+}
+
+/* @info the nil map answers an empty one rather than nil: every caller writes into what it receives, and handing back the nil would turn the first write into "assignment to entry in nil map" at a site that only asked for a copy */
+func TestCopyStringMap_NilInputAnswersAWritableEmptyMap(t *testing.T) {
+    copied := CopyStringMap[string](nil)
+
+    if nil == copied {
+        t.Fatalf("expected a non-nil map for a nil input")
+    }
+    if 0 != len(copied) {
+        t.Fatalf("expected an empty map, got %d entries", len(copied))
+    }
+
+    copied["key"] = "value"
+    if "value" != copied["key"] {
+        t.Fatalf("expected the answered map to be writable")
+    }
+}
+
+/* @info a zero-length slice is copied rather than handed back: its backing pointer is not a stable identity so it stays out of the visited map, but the caller's spare capacity still belongs to the caller — returned as-is, one append through the copy overwrites the element the caller had trimmed off */
+func TestCopyAnySlice_ZeroLengthSliceDoesNotShareTheCallersCapacity(t *testing.T) {
+    backing := make([]any, 1, 4)
+    backing[0] = "kept"
+
+    copied := CopyAnySlice(backing[:0])
+
+    if nil == copied {
+        t.Fatalf("expected a non-nil slice for a zero-length input")
+    }
+    if 0 != len(copied) {
+        t.Fatalf("expected an empty slice, got %d elements", len(copied))
+    }
+
+    copied = append(copied, "written through the copy")
+
+    if "kept" != backing[0].(string) {
+        t.Fatalf("appending through the copy wrote into the caller's backing array: got %v", backing[0])
+    }
+}
+
+/* @info at the depth bound the value is returned as-is rather than copied further: the bound is a safety net against a stack overflow no recover() can catch, and the alias it hands back is the documented price. Without it a genuinely deep value would ride the recursion past the goroutine stack instead of stopping. */
+func TestCopyAnyMap_AtTheDepthBoundTheValueIsAliased(t *testing.T) {
+    const chainLength = maxCopyDepth + 2
+
+    deepest := map[string]any{"marker": "original"}
+
+    current := deepest
+    for index := 0; index < chainLength; index++ {
+        current = map[string]any{"next": current}
+    }
+
+    copied := CopyAnyMap(current)
+
+    node := copied
+    for index := 0; index < chainLength; index++ {
+        next, isMap := node["next"].(map[string]any)
+        if false == isMap {
+            t.Fatalf("expected the chain to stay a chain of maps at level %d, got %T", index, node["next"])
+        }
+        node = next
+    }
+
+    node["probe"] = "written through the copy"
+
+    if _, aliased := deepest["probe"]; false == aliased {
+        t.Fatalf("expected the node past the depth bound to be returned as-is, not copied")
+    }
+}
+
+/* @info a typed nil slice stays nil through the copy: materialized into an empty non-nil slice it would answer false to the nil test every caller distinguishing "absent" from "empty" writes */
+func TestCopyAnyMap_TypedNilSliceStaysNil(t *testing.T) {
+    original := map[string]any{
+        "roles": []string(nil),
+    }
+
+    copied := CopyAnyMap(original)
+
+    copiedRoles, isSlice := copied["roles"].([]string)
+    if false == isSlice {
+        t.Fatalf("expected the entry to remain a []string, got %T", copied["roles"])
+    }
+    if nil != copiedRoles {
+        t.Fatalf("expected the typed nil slice to stay nil, got %#v", copiedRoles)
+    }
+}
+
+/* @info the same for a typed nil map — and here materializing it would be worse than cosmetic: an empty non-nil map accepts the writes a nil one refuses, so the copy would silently take a mutation the original could never have carried */
+func TestCopyAnyMap_TypedNilMapStaysNil(t *testing.T) {
+    original := map[string]any{
+        "flags": map[string]int(nil),
+    }
+
+    copied := CopyAnyMap(original)
+
+    copiedFlags, isMap := copied["flags"].(map[string]int)
+    if false == isMap {
+        t.Fatalf("expected the entry to remain a map[string]int, got %T", copied["flags"])
+    }
+    if nil != copiedFlags {
+        t.Fatalf("expected the typed nil map to stay nil, got %#v", copiedFlags)
+    }
+}
+
+/* @info an interface element holding nothing is written as the element type's zero: reflect.ValueOf(nil) is the zero Value, and Set refuses it with a panic raised inside the copy — a value the caller only asked to duplicate would take down the request */
+func TestCopyAnyMap_NilElementOfANamedSliceIsCopiedAsTheZeroValue(t *testing.T) {
+    original := map[string]any{
+        "list": copyTestAnySlice{nil, "value"},
+    }
+
+    copied := CopyAnyMap(original)
+
+    copiedList, isSlice := copied["list"].(copyTestAnySlice)
+    if false == isSlice {
+        t.Fatalf("expected the entry to remain a copyTestAnySlice, got %T", copied["list"])
+    }
+    if 2 != len(copiedList) {
+        t.Fatalf("expected both elements to be copied, got %d", len(copiedList))
+    }
+    if nil != copiedList[0] {
+        t.Fatalf("expected the nil element to stay nil, got %#v", copiedList[0])
+    }
+    if "value" != copiedList[1].(string) {
+        t.Fatalf("expected the element beside the nil one to be copied, got %#v", copiedList[1])
+    }
+}
+
+/* @info the map half of the same clause, on the entry a json document produces for `"key": null` */
+func TestCopyAnyMap_NilValueOfANamedMapIsCopiedAsTheZeroValue(t *testing.T) {
+    original := map[string]any{
+        "document": copyTestAnyMap{"absent": nil, "present": "value"},
+    }
+
+    copied := CopyAnyMap(original)
+
+    copiedDocument, isMap := copied["document"].(copyTestAnyMap)
+    if false == isMap {
+        t.Fatalf("expected the entry to remain a copyTestAnyMap, got %T", copied["document"])
+    }
+    if 2 != len(copiedDocument) {
+        t.Fatalf("expected both entries to be copied, got %d", len(copiedDocument))
+    }
+
+    absentValue, absentExists := copiedDocument["absent"]
+    if false == absentExists {
+        t.Fatalf("expected the nil entry to be present in the copy")
+    }
+    if nil != absentValue {
+        t.Fatalf("expected the nil entry to stay nil, got %#v", absentValue)
+    }
+    if "value" != copiedDocument["present"].(string) {
+        t.Fatalf("expected the entry beside the nil one to be copied, got %#v", copiedDocument["present"])
     }
 }
 

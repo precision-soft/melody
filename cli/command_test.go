@@ -226,6 +226,121 @@ func TestRegister_PanicsOnDuplicateCommandName(t *testing.T) {
     }, "cli command name already registered")
 }
 
+/* @info the duplicate scan walks a list the caller owns, and urfave admits a nil entry into it: read without the guard, the very next registration dereferences that nil while looking for a name clash — a boot that dies inside the framework over a hole somebody else punched in the list */
+func TestRegister_SkipsANilEntryWhenScanningForADuplicateName(t *testing.T) {
+    runtimeInstance := newTestRuntime()
+    rootCommand := NewCommandContext("app", "desc")
+
+    rootCommand.Commands = append(rootCommand.Commands, nil)
+
+    command := &testCommand{
+        nameValue:        "hello",
+        descriptionValue: "hello command",
+        flagsValue:       nil,
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            return nil
+        },
+    }
+
+    Register(rootCommand, command, runtimeInstance)
+
+    if 2 != len(rootCommand.Commands) {
+        t.Fatalf("expected the command to be registered beside the nil entry, got %d entries", len(rootCommand.Commands))
+    }
+
+    registered := rootCommand.Commands[1]
+    if nil == registered || "hello" != registered.Name {
+        t.Fatalf("expected the registered command to be named %q, got %#v", "hello", registered)
+    }
+}
+
+/* @info the scope close is weighed beside the container close: its failure reached nothing before, so a scoped service whose teardown failed — a transaction left unfinished, a file left unflushed — ended a command that reported success */
+func TestRegister_ActionReportsAFailingScopeClose(t *testing.T) {
+    closeErr := errors.New("scope close failed")
+
+    command := &testCommand{
+        nameValue:        "hello",
+        descriptionValue: "hello command",
+        flagsValue:       output.DebugFlags(),
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            return nil
+        },
+    }
+
+    _, runErr := runRegisteredCommandWithRuntime(
+        newScopeCloseFailingRuntime(closeErr),
+        command,
+        []string{"--format=json"},
+    )
+    if nil == runErr {
+        t.Fatalf("expected the scope close failure to surface")
+    }
+
+    if false == strings.Contains(runErr.Error(), "failed to shutdown cli") {
+        t.Fatalf("expected the shutdown aggregate, got %q", runErr.Error())
+    }
+
+    exceptionErr, isException := runErr.(*exception.Error)
+    if false == isException {
+        t.Fatalf("expected a melody error, got %T", runErr)
+    }
+
+    failures := fmt.Sprintf("%v", exceptionErr.Context()["failures"])
+    if false == strings.Contains(failures, "scope") {
+        t.Fatalf("expected the failure to be filed under the scope, got %v", failures)
+    }
+    if false == strings.Contains(failures, "scope close failed") {
+        t.Fatalf("expected the scope close message to be reported, got %v", failures)
+    }
+}
+
+/* @info a close error filed under no name is dropped rather than reported as an anonymous failure: the name is the only thing telling an operator which teardown broke, and "" beside a message is a report that cannot be acted on */
+func TestAggregateCliErrors_DropsAnUnnamedFailure(t *testing.T) {
+    runErr := errors.New("command failed")
+
+    aggregatedErr := aggregateCliErrors(runErr, map[string]error{"": errors.New("unnamed close failure")})
+
+    if runErr != aggregatedErr {
+        t.Fatalf("expected the command error to be answered untouched, got %#v", aggregatedErr)
+    }
+}
+
+/* @info a name registered with a nil error is not a failure: reported as one it would reach Error() on a nil error while building the report */
+func TestAggregateCliErrors_DropsANamedNilFailure(t *testing.T) {
+    runErr := errors.New("command failed")
+
+    aggregatedErr := aggregateCliErrors(runErr, map[string]error{"scope": nil})
+
+    if runErr != aggregatedErr {
+        t.Fatalf("expected the command error to be answered untouched, got %#v", aggregatedErr)
+    }
+}
+
+/* @info a command that failed WITHOUT an exit code hands back the aggregate itself: wrapping it in an exit error regardless would invent a code the command never chose, and answering the command error alone would drop the shutdown failures that exist nowhere else */
+func TestAggregateCliErrors_AnswersThePlainAggregateWhenTheCommandCarriesNoExitCode(t *testing.T) {
+    runErr := errors.New("command failed")
+
+    aggregatedErr := aggregateCliErrors(runErr, map[string]error{"scope": errors.New("scope close failed")})
+
+    var exitError *exception.ExitError
+    if true == errors.As(aggregatedErr, &exitError) {
+        t.Fatalf("expected no exit error to be invented, got code %d", exitError.ExitCode())
+    }
+
+    exceptionErr, isException := aggregatedErr.(*exception.Error)
+    if false == isException {
+        t.Fatalf("expected a melody error, got %T", aggregatedErr)
+    }
+
+    if "cli command failed with shutdown errors" != exceptionErr.Error() {
+        t.Fatalf("expected the aggregate message, got %q", exceptionErr.Error())
+    }
+
+    if false == errors.Is(aggregatedErr, runErr) {
+        t.Fatalf("expected the command error to remain the cause of the aggregate")
+    }
+}
+
 func TestRegister_ActionCallsRunWithRuntimeInstance(t *testing.T) {
     runtimeInstance := newTestRuntime()
 
@@ -359,6 +474,26 @@ func newCloseFailingRuntime(closeErr error) *testRuntime {
         contextValue:   context.Background(),
         scopeValue:     scope,
         containerValue: &closeFailingContainer{Container: serviceContainer, closeErr: closeErr},
+    }
+}
+
+type closeFailingScope struct {
+    containercontract.Scope
+    closeErr error
+}
+
+func (instance *closeFailingScope) Close() error {
+    return instance.closeErr
+}
+
+func newScopeCloseFailingRuntime(closeErr error) *testRuntime {
+    serviceContainer := container.NewContainer()
+    scope := serviceContainer.NewScope()
+
+    return &testRuntime{
+        contextValue:   context.Background(),
+        scopeValue:     &closeFailingScope{Scope: scope, closeErr: closeErr},
+        containerValue: serviceContainer,
     }
 }
 

@@ -107,6 +107,44 @@ func TestRender_ReturnsTheEnvelopeFailureUnmarked(t *testing.T) {
     }
 }
 
+/* @info a detail filed under no name is left out of the reported context: carried over it becomes an "" key beside a value, which the log renderer prints as a nameless pair and no operator can read — while the two reserved names stay the framework's, so a command cannot overwrite which command failed */
+func TestRender_LeavesTheUnnamedAndReservedDetailsOutOfTheReportedContext(t *testing.T) {
+    envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
+    envelope.SetError(
+        "cmd.failed",
+        "the command failed",
+        map[string]any{
+            "":          "filed under no name",
+            "command":   "an impostor command",
+            "errorCode": "an impostor code",
+            "subject":   "order",
+        },
+        nil,
+    )
+
+    renderErr := Render(&bytes.Buffer{}, envelope, DefaultOption())
+
+    var exitError *exception.ExitError
+    if false == errors.As(renderErr, &exitError) {
+        t.Fatalf("expected an ExitError, got %v", renderErr)
+    }
+
+    context := exitError.ErrorValue().Context()
+
+    if _, unnamed := context[""]; true == unnamed {
+        t.Fatalf("expected the unnamed detail to be left out, got %v", context)
+    }
+    if "cmd" != context["command"] {
+        t.Fatalf("expected the command name to stay the framework's, got %v", context["command"])
+    }
+    if "cmd.failed" != context["errorCode"] {
+        t.Fatalf("expected the error code to stay the framework's, got %v", context["errorCode"])
+    }
+    if "order" != context["subject"] {
+        t.Fatalf("expected the named detail to be carried over, got %v", context["subject"])
+    }
+}
+
 type failingRenderWriter struct {
 }
 
