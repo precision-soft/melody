@@ -45,3 +45,27 @@ func TestMinLength_WithParamsRefusesNegativeBound(t *testing.T) {
         t.Fatalf("expected a negative min length bound to be refused")
     }
 }
+
+/* @info the lower bound refuses a non-string for the same reason the upper one does, and its accessor was equally unentered: a min that read back as zero would report every field as unbounded to whoever asked. */
+func TestMinLength_MeasuresStringsAndRefusesEverythingElse(t *testing.T) {
+    constraint := NewMinLength(3)
+
+    if 3 != constraint.Min() {
+        t.Fatalf("expected the accessor to answer the configured bound, got %d", constraint.Min())
+    }
+
+    for _, refusedValue := range []any{42, []byte("abc"), []string{"a", "b", "c"}, true} {
+        validationError := constraint.Validate(refusedValue, "field")
+        if nil == validationError {
+            t.Fatalf("expected %#v to be refused rather than measured, got a pass", refusedValue)
+        }
+
+        if "value must be a string" != validationError.Message() {
+            t.Fatalf("expected the type refusal for %#v, got %q", refusedValue, validationError.Message())
+        }
+    }
+
+    if validationError := constraint.Validate("abc", "field"); nil != validationError {
+        t.Fatalf("expected a string exactly at the bound to pass, got %v", validationError)
+    }
+}

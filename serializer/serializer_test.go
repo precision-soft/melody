@@ -162,3 +162,47 @@ func TestJsonSerializer_Serialize_ProducesValidJson(t *testing.T) {
         t.Fatalf("expected json object")
     }
 }
+
+/* @info the pretty constructor and the indented branch of Serialize it is the only way to reach were never entered by anything: nothing in the framework builds one, so a constructor that handed back the compact serializer — or an indent that never reached MarshalIndent — would have left every caller who asked for readable output silently getting one line, with the round-trip tests still green because both spellings deserialize the same. */
+func TestNewPrettyJsonSerializer_IndentsWhereTheCompactOneDoesNot(t *testing.T) {
+    value := map[string]any{"x": "y"}
+
+    prettyPayload, prettyErr := NewPrettyJsonSerializer().Serialize(value)
+    if nil != prettyErr {
+        t.Fatalf("unexpected error: %v", prettyErr)
+    }
+
+    compactPayload, compactErr := NewJsonSerializer().Serialize(value)
+    if nil != compactErr {
+        t.Fatalf("unexpected error: %v", compactErr)
+    }
+
+    if false == bytes.Contains(prettyPayload, []byte("\n  ")) {
+        t.Fatalf("expected the pretty serializer to indent, got %q", prettyPayload)
+    }
+
+    if true == bytes.Contains(compactPayload, []byte("\n")) {
+        t.Fatalf("expected the compact serializer to stay on one line, got %q", compactPayload)
+    }
+
+    if string(prettyPayload) == string(compactPayload) {
+        t.Fatalf("expected the two serializers to render differently")
+    }
+}
+
+/* @info both spellings must still deserialize to the same value: the indentation is a rendering choice, not a format change, and a pretty payload no reader can parse back is worse than an unindented one. */
+func TestNewPrettyJsonSerializer_RoundTripsThroughTheCompactDeserializer(t *testing.T) {
+    payload, serializeErr := NewPrettyJsonSerializer().Serialize(map[string]any{"x": "y"})
+    if nil != serializeErr {
+        t.Fatalf("unexpected error: %v", serializeErr)
+    }
+
+    var result map[string]any
+    if err := NewJsonSerializer().Deserialize(payload, &result); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if "y" != result["x"] {
+        t.Fatalf("unexpected round-trip result: %v", result)
+    }
+}

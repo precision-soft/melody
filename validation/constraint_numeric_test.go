@@ -24,3 +24,7 @@ func TestNumeric_NonStringIsRejected(t *testing.T) {
         t.Fatalf("fail-open: non-string passed the numeric constraint")
     }
 }
+
+func TestNumeric_TheFourExitsTakenBeforeThePatternRuns(t *testing.T) {
+    assertCharacterConstraintExits(t, &Numeric{}, "123", ConstraintNumericErrorNotNumeric)
+}

@@ -24,3 +24,7 @@ func TestAlphanumeric_NonStringIsRejected(t *testing.T) {
         t.Fatalf("fail-open: non-string passed the alphanumeric constraint")
     }
 }
+
+func TestAlphanumeric_TheFourExitsTakenBeforeThePatternRuns(t *testing.T) {
+    assertCharacterConstraintExits(t, &Alphanumeric{}, "letters123", ConstraintAlphanumericErrorNotAlphanumeric)
+}

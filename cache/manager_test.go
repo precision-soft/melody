@@ -5,6 +5,7 @@ import (
     "testing"
     "time"
 
+    cachecontract "github.com/precision-soft/melody/cache/contract"
     "github.com/precision-soft/melody/exception"
 )
 
@@ -427,4 +428,161 @@ func TestManager_GetCounterRejectsANonCounterPayload(t *testing.T) {
     if _, _, getCounterErr := manager.GetCounter("greeting"); nil == getCounterErr {
         t.Fatalf("expected a serialized value to be refused by GetCounter")
     }
+}
+
+/* @info Decrement had never been executed by anything. It is the sibling of Increment and the two are not interchangeable — a Decrement wired to the backend's Increment would count the wrong way for every quota, every remaining-attempts counter and every rate limiter built on it — and like Increment it is backend-native, so the value it leaves must be readable by GetCounter and not by Get. */
+func TestManager_DecrementCountsDownAndLeavesACounterGetCounterCanRead(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    defer backend.Close()
+
+    manager := NewManager(backend, NewJsonSerializer())
+
+    if _, incrementErr := manager.Increment("remaining", 10); nil != incrementErr {
+        t.Fatalf("unexpected increment error: %v", incrementErr)
+    }
+
+    newValue, decrementErr := manager.Decrement("remaining", 3)
+    if nil != decrementErr {
+        t.Fatalf("unexpected decrement error: %v", decrementErr)
+    }
+
+    if 7 != newValue {
+        t.Fatalf("expected the decrement to count down to 7, got %d", newValue)
+    }
+
+    storedValue, exists, getCounterErr := manager.GetCounter("remaining")
+    if nil != getCounterErr || false == exists {
+        t.Fatalf("unexpected get counter result: %t, %v", exists, getCounterErr)
+    }
+
+    if 7 != storedValue {
+        t.Fatalf("expected the stored counter to be 7, got %d", storedValue)
+    }
+
+    /* a counter written by Decrement crosses zero into the negatives rather than clamping: a remaining-quota counter that stopped at zero would report the same value for "exactly used up" and "overdrawn by a thousand" */
+    newValue, decrementErr = manager.Decrement("remaining", 10)
+    if nil != decrementErr {
+        t.Fatalf("unexpected decrement error: %v", decrementErr)
+    }
+
+    if -3 != newValue {
+        t.Fatalf("expected the counter to cross zero, got %d", newValue)
+    }
+}
+
+/* @info a decrement on a key that was never written starts from zero, exactly as an increment does — the absent counter is not an error, or every rate limiter would have to seed its keys before it could refuse anything. */
+func TestManager_DecrementOnAnAbsentKeyStartsFromZero(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    defer backend.Close()
+
+    manager := NewManager(backend, NewJsonSerializer())
+
+    newValue, decrementErr := manager.Decrement("never.written", 2)
+    if nil != decrementErr {
+        t.Fatalf("unexpected decrement error: %v", decrementErr)
+    }
+
+    if -2 != newValue {
+        t.Fatalf("expected an absent counter to start from zero, got %d", newValue)
+    }
+}
+
+/* @info a backend failure travels out of Get, Many and GetCounter as itself rather than as an empty answer. All three read the backend first and each had only its success and its miss pinned: a manager that turned a dead backend into a clean miss would make every caller recompute silently while the operator sees nothing, which is the difference between a slow deployment and one nobody knows is broken. */
+func TestManager_ABackendFailureTravelsOutOfEveryRead(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    manager := NewManager(backend, NewJsonSerializer())
+
+    if setErr := manager.Set("key", "value", 0); nil != setErr {
+        t.Fatalf("unexpected set error: %v", setErr)
+    }
+
+    if closeErr := backend.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    value, exists, getErr := manager.Get("key")
+    if nil == getErr {
+        t.Fatalf("expected Get to report the closed backend, got %v, %t", value, exists)
+    }
+    if nil != value || true == exists {
+        t.Fatalf("expected Get to answer nothing alongside the failure, got %v, %t", value, exists)
+    }
+    if "cache backend is closed" != getErr.Error() {
+        t.Fatalf("unexpected Get error: %v", getErr)
+    }
+
+    manyResult, manyErr := manager.Many([]string{"key"})
+    if nil == manyErr {
+        t.Fatalf("expected Many to report the closed backend, got %v", manyResult)
+    }
+    if nil != manyResult {
+        t.Fatalf("expected Many to answer nothing alongside the failure, got %v", manyResult)
+    }
+    if "cache backend is closed" != manyErr.Error() {
+        t.Fatalf("unexpected Many error: %v", manyErr)
+    }
+
+    counterValue, counterExists, counterErr := manager.GetCounter("key")
+    if nil == counterErr {
+        t.Fatalf("expected GetCounter to report the closed backend, got %d, %t", counterValue, counterExists)
+    }
+    if 0 != counterValue || true == counterExists {
+        t.Fatalf("expected GetCounter to answer nothing alongside the failure, got %d, %t", counterValue, counterExists)
+    }
+    if "cache backend is closed" != counterErr.Error() {
+        t.Fatalf("unexpected GetCounter error: %v", counterErr)
+    }
+}
+
+/* @info a key repeated in the request is deserialized once and appears once. The backend answers a map, so the duplicate would otherwise pay a second decode of the same payload and — where the payload is corrupt — name the same key twice in the error the caller is handed. */
+func TestManager_ManyDeserializesARepeatedKeyOnlyOnce(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    defer backend.Close()
+
+    countingSerializer := &cacheTestCountingSerializer{inner: NewJsonSerializer()}
+    manager := NewManager(backend, countingSerializer)
+
+    if setErr := manager.Set("key", "value", 0); nil != setErr {
+        t.Fatalf("unexpected set error: %v", setErr)
+    }
+
+    result, manyErr := manager.Many([]string{"key", "key", "key"})
+    if nil != manyErr {
+        t.Fatalf("unexpected many error: %v", manyErr)
+    }
+
+    if 1 != len(result) {
+        t.Fatalf("expected the repeated key to appear once, got %#v", result)
+    }
+
+    if "value" != result["key"] {
+        t.Fatalf("unexpected value: %v", result["key"])
+    }
+
+    if 1 != countingSerializer.deserializeCallCount {
+        t.Fatalf("expected exactly one deserialization for the repeated key, got %d", countingSerializer.deserializeCallCount)
+    }
+}
+
+type cacheTestCountingSerializer struct {
+    inner                cachecontract.Serializer
+    deserializeCallCount int
+}
+
+func (instance *cacheTestCountingSerializer) Serialize(value any) ([]byte, error) {
+    return instance.inner.Serialize(value)
+}
+
+func (instance *cacheTestCountingSerializer) Deserialize(payload []byte) (any, error) {
+    instance.deserializeCallCount = instance.deserializeCallCount + 1
+
+    return instance.inner.Deserialize(payload)
 }

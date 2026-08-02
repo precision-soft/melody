@@ -5,6 +5,7 @@ import (
     "strings"
     "testing"
 
+    exceptioncontract "github.com/precision-soft/melody/exception/contract"
     serializercontract "github.com/precision-soft/melody/serializer/contract"
 )
 
@@ -304,5 +305,129 @@ func TestResolveByAcceptHeader_UnmatchedHeaderStillFallsBackToJson(t *testing.T)
 
     if false == strings.HasPrefix(resolved.ContentType(), MimeApplicationJson) {
         t.Fatalf("expected the default representation, got %s", resolved.ContentType())
+    }
+}
+
+/* @info Get answers false for a mime that normalizes away to nothing, before it ever touches the map. The branch had no test of its own: an empty header value, a whitespace-only one and a bare parameter list all arrive here from the same place — a caller reading a Content-Type off a request that carried none — and without the guard the lookup would run with the empty key, which is exactly the key a manager built from a map with an empty spelling would have had, had the constructor not refused it. */
+func TestSerializerManager_Get_RefusesAMimeThatNormalizesToNothing(t *testing.T) {
+    manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
+        MimeApplicationJson: NewJsonSerializer(),
+    })
+    if nil != managerErr {
+        t.Fatalf("unexpected manager error: %v", managerErr)
+    }
+
+    for _, emptyMime := range []string{"", "   ", "\t", ";charset=utf-8", "  ; charset=utf-8"} {
+        resolved, exists := manager.Get(emptyMime)
+        if true == exists || nil != resolved {
+            t.Fatalf("expected %q to be refused as a mime, got %#v", emptyMime, resolved)
+        }
+    }
+}
+
+/* @info a mime the manager simply does not carry is a miss too, and it has to be told apart from the one above: both answer false, so a guard that returned early for every input would keep a test that only asserts the miss green while the registered serializer became unreachable. */
+func TestSerializerManager_Get_AnswersTheRegisteredSerializerAndMissesTheOthers(t *testing.T) {
+    registered := NewJsonSerializer()
+
+    manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
+        MimeApplicationJson: registered,
+    })
+    if nil != managerErr {
+        t.Fatalf("unexpected manager error: %v", managerErr)
+    }
+
+    resolved, exists := manager.Get("Application/JSON; charset=utf-8")
+    if false == exists || registered != resolved {
+        t.Fatalf("expected the registered serializer for a spelled-out mime, got %#v, %t", resolved, exists)
+    }
+
+    resolved, exists = manager.Get(MimeTextPlain)
+    if true == exists || nil != resolved {
+        t.Fatalf("expected an unregistered mime to miss, got %#v, %t", resolved, exists)
+    }
+}
+
+/* @info the empty manager is the misconfiguration a deployment produces when the serializer map comes from configuration that resolved to nothing. Both error paths belong to it, and they are NOT the same answer: an empty accept header means "anything", so its failure says no default is configured, while a header that named something says nothing was found for that header — and only the second one carries the header in its context, which is the whole diagnostic. Since the fallback was widened, no other test reaches either branch. */
+func TestResolveByAcceptHeader_AnEmptyManagerRefusesBothWays(t *testing.T) {
+    manager, managerErr := NewSerializerManager(nil)
+    if nil != managerErr {
+        t.Fatalf("unexpected manager error: %v", managerErr)
+    }
+
+    resolved, resolveErr := manager.ResolveByAcceptHeader("")
+    if nil == resolveErr || nil != resolved {
+        t.Fatalf("expected an empty manager to refuse an empty accept header, got %#v, %v", resolved, resolveErr)
+    }
+
+    if "no default serializer configured" != resolveErr.Error() {
+        t.Fatalf("unexpected refusal for the empty header: %q", resolveErr.Error())
+    }
+
+    resolved, resolveErr = manager.ResolveByAcceptHeader("application/json")
+    if nil == resolveErr || nil != resolved {
+        t.Fatalf("expected an empty manager to refuse a named accept header, got %#v, %v", resolved, resolveErr)
+    }
+
+    if "no serializer found for accept header" != resolveErr.Error() {
+        t.Fatalf("unexpected refusal for the named header: %q", resolveErr.Error())
+    }
+
+    contextualErr, isContextual := resolveErr.(interface {
+        error
+        Context() exceptioncontract.Context
+    })
+    if false == isContextual {
+        t.Fatalf("expected the refusal to carry a context, got %T", resolveErr)
+    }
+
+    if "application/json" != contextualErr.Context()["accept"] {
+        t.Fatalf("expected the refusal to name the header it could not satisfy, got %v", contextualErr.Context()["accept"])
+    }
+}
+
+/* @info an empty manager cannot even be asked for a default: defaultSerializer's zero-length branch is what turns "json is absent, take the first configured one" into an honest miss instead of an index into an empty slice. */
+func TestSerializerManager_DefaultSerializer_AnEmptyManagerHasNoDefault(t *testing.T) {
+    manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{})
+    if nil != managerErr {
+        t.Fatalf("unexpected manager error: %v", managerErr)
+    }
+
+    resolved, exists := manager.defaultSerializer()
+    if true == exists || nil != resolved {
+        t.Fatalf("expected an empty manager to have no default, got %#v, %t", resolved, exists)
+    }
+}
+
+/* @info a nil map is the same manager as an empty one — the constructor substitutes an empty map rather than carrying the nil into every later lookup, where a read would work and the collision bookkeeping would not. */
+func TestNewSerializerManager_ANilMapBuildsAnEmptyManager(t *testing.T) {
+    manager, managerErr := NewSerializerManager(nil)
+    if nil != managerErr {
+        t.Fatalf("unexpected manager error: %v", managerErr)
+    }
+
+    if nil == manager.serializersByMime {
+        t.Fatalf("expected the nil map to be substituted rather than carried")
+    }
+
+    if 0 != len(manager.serializersByMime) {
+        t.Fatalf("expected an empty manager, got %d entries", len(manager.serializersByMime))
+    }
+}
+
+/* @info normalizeMime is used as an invariant by the matching above it — matchWildcardSubtype normalizes BOTH of its arguments — so a normalization that changed an already-normalized value would make a range match on the first pass and miss on the second. */
+func TestNormalizeMime_IsIdempotent(t *testing.T) {
+    for _, rawMime := range []string{
+        "Application/JSON; charset=utf-8",
+        "  TEXT/plain ",
+        "application/json",
+        "*/*",
+        "text/*",
+    } {
+        once := normalizeMime(rawMime)
+        twice := normalizeMime(once)
+
+        if once != twice {
+            t.Fatalf("expected normalizeMime to be idempotent on %q, got %q then %q", rawMime, once, twice)
+        }
     }
 }

@@ -22,6 +22,61 @@ func runWithSubstituteT(callback func(substituteT *testing.T)) *testing.T {
     return substituteT
 }
 
+/* @info the three refusals at the head guard the helper's own wiring, and each one has to be named: without them a nil t makes the deferred t.Fatalf dereference nil — inside a recover, so the failure surfaces as a crash in this file rather than as the miswired call — a nil callback reports "got no panic" for a test that never ran anything, and an empty expected message turns the substring match into one that accepts every panic, including the crash the guard under test was supposed to prevent. */
+func TestAssertPanicsWithError_RefusesANilTestingT(t *testing.T) {
+    assertRefusal(t, "testing t may not be nil", func() {
+        AssertPanicsWithError(nil, func() {}, "boom")
+    })
+}
+
+func TestAssertPanicsWithError_RefusesANilCallback(t *testing.T) {
+    substituteT := &testing.T{}
+
+    assertRefusal(t, "callback may not be nil", func() {
+        AssertPanicsWithError(substituteT, nil, "boom")
+    })
+
+    if true == substituteT.Failed() {
+        t.Fatalf("expected the refusal to be raised rather than reported as a test failure")
+    }
+}
+
+func TestAssertPanicsWithError_RefusesAnEmptyExpectedMessage(t *testing.T) {
+    substituteT := &testing.T{}
+
+    assertRefusal(t, "expected message may not be empty", func() {
+        AssertPanicsWithError(substituteT, func() {}, "")
+    })
+
+    if true == substituteT.Failed() {
+        t.Fatalf("expected the refusal to be raised rather than reported as a test failure")
+    }
+}
+
+func assertRefusal(t *testing.T, expectedMessage string, callback func()) {
+    t.Helper()
+
+    defer func() {
+        t.Helper()
+
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected %q to be refused, got no panic", expectedMessage)
+        }
+
+        recoveredErr, isError := recoveredValue.(error)
+        if false == isError {
+            t.Fatalf("expected an error panic value, got %#v", recoveredValue)
+        }
+
+        if expectedMessage != recoveredErr.Error() {
+            t.Fatalf("unexpected refusal message: %q", recoveredErr.Error())
+        }
+    }()
+
+    callback()
+}
+
 func TestAssertPanicsWithError_FailsWhenTheCallbackDoesNotPanic(t *testing.T) {
     substituteT := runWithSubstituteT(func(substituteT *testing.T) {
         AssertPanicsWithError(substituteT, func() {}, "boom")

@@ -955,3 +955,337 @@ func TestRemember_CacheSidePanicIsNotBlamedOnTheCallback(t *testing.T) {
         t.Fatalf("expected the cache-side panic message, got: %v", rememberErr)
     }
 }
+
+/* the scripted cache answers each Get from a queue and can be told to fail its Set, which is how the leader's own re-read — the one that runs after the caller already missed — is driven to each of its three outcomes deterministically rather than by racing two goroutines. */
+type testScriptedCache struct {
+    stateMutex   sync.Mutex
+    getResults   []testScriptedGetResult
+    getCallCount int
+    setErr       error
+    setCallCount int
+}
+
+type testScriptedGetResult struct {
+    value  any
+    exists bool
+    err    error
+}
+
+func (instance *testScriptedCache) Get(key string) (any, bool, error) {
+    instance.stateMutex.Lock()
+    defer instance.stateMutex.Unlock()
+
+    index := instance.getCallCount
+    instance.getCallCount = instance.getCallCount + 1
+
+    if index >= len(instance.getResults) {
+        return nil, false, nil
+    }
+
+    result := instance.getResults[index]
+
+    return result.value, result.exists, result.err
+}
+
+func (instance *testScriptedCache) Set(key string, value any, ttl time.Duration) error {
+    instance.stateMutex.Lock()
+    defer instance.stateMutex.Unlock()
+
+    instance.setCallCount = instance.setCallCount + 1
+
+    return instance.setErr
+}
+
+func (instance *testScriptedCache) setCalls() int {
+    instance.stateMutex.Lock()
+    defer instance.stateMutex.Unlock()
+
+    return instance.setCallCount
+}
+
+func (instance *testScriptedCache) Delete(key string) error { return nil }
+
+func (instance *testScriptedCache) Has(key string) (bool, error) { return false, nil }
+
+func (instance *testScriptedCache) Clear() error { return nil }
+
+func (instance *testScriptedCache) Many(keys []string) (map[string]any, error) {
+    return map[string]any{}, nil
+}
+
+func (instance *testScriptedCache) SetMultiple(items map[string]any, ttl time.Duration) error {
+    return nil
+}
+
+func (instance *testScriptedCache) DeleteMultiple(keys []string) error { return nil }
+
+func (instance *testScriptedCache) Increment(key string, delta int64) (int64, error) {
+    return 0, nil
+}
+
+func (instance *testScriptedCache) Decrement(key string, delta int64) (int64, error) {
+    return 0, nil
+}
+
+func (instance *testScriptedCache) Close() error { return nil }
+
+/* @info a cache failure that is NOT a corrupt payload ends Remember there. The healing branch beside it — a payload the serializer cannot decode is a miss and the callback recomputes over it — was pinned; this one, the ordinary "the cache is down" answer, was not, so a Remember that swallowed a dead backend and recomputed on every single request would have looked exactly like a cache that never hits. */
+func TestRemember_ACacheFailureThatIsNotACorruptPayloadEndsThere(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    manager := NewManager(backend, NewJsonSerializer())
+
+    if closeErr := backend.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    callbackCalled := false
+
+    value, rememberErr := Remember(
+        manager,
+        "key",
+        time.Minute,
+        func(ctx context.Context) (any, error) {
+            callbackCalled = true
+            return "computed", nil
+        },
+        nil,
+    )
+
+    if nil == rememberErr {
+        t.Fatalf("expected the closed backend to end Remember, got %v", value)
+    }
+
+    if "cache backend is closed" != rememberErr.Error() {
+        t.Fatalf("unexpected error: %v", rememberErr)
+    }
+
+    if true == callbackCalled {
+        t.Fatalf("expected the callback not to run over a failed cache read")
+    }
+
+    /* with stampede protection on, the leader carries the same refusal one level down, so disarming this one changes nothing observable. Without protection there is no leader at all: this half is what proves the guard on its own position rather than on its sibling's. */
+    callbackCalled = false
+
+    value, rememberErr = Remember(
+        manager,
+        "key",
+        time.Minute,
+        func(ctx context.Context) (any, error) {
+            callbackCalled = true
+            return "computed", nil
+        },
+        NewDefaultRememberOption().WithStampedeProtectionEnabled(false),
+    )
+
+    if nil == rememberErr {
+        t.Fatalf("expected the closed backend to end Remember without stampede protection too, got %v", value)
+    }
+
+    if "cache backend is closed" != rememberErr.Error() {
+        t.Fatalf("unexpected error without stampede protection: %v", rememberErr)
+    }
+
+    if true == callbackCalled {
+        t.Fatalf("expected the callback not to run over a failed cache read without stampede protection")
+    }
+}
+
+/* @info the leader re-reads the key before computing, and a value that appeared meanwhile is served instead of recomputed — that re-read is the whole point of the single flight, and it had no test that made it FIND something. The scripted cache makes the caller miss and the leader hit, which is the real interleaving: another process wrote the key between the two reads. */
+func TestRemember_TheLeaderServesAValueThatAppearedBetweenTheTwoReads(t *testing.T) {
+    scriptedCache := &testScriptedCache{
+        getResults: []testScriptedGetResult{
+            {value: nil, exists: false, err: nil},
+            {value: "written by somebody else", exists: true, err: nil},
+        },
+    }
+
+    callbackCalled := false
+
+    value, rememberErr := Remember(
+        scriptedCache,
+        "key",
+        time.Minute,
+        func(ctx context.Context) (any, error) {
+            callbackCalled = true
+            return "computed", nil
+        },
+        nil,
+    )
+
+    if nil != rememberErr {
+        t.Fatalf("unexpected error: %v", rememberErr)
+    }
+
+    if "written by somebody else" != value {
+        t.Fatalf("expected the value found on the re-read, got %v", value)
+    }
+
+    if true == callbackCalled {
+        t.Fatalf("expected the callback not to run once the re-read found a value")
+    }
+
+    if 0 != scriptedCache.setCalls() {
+        t.Fatalf("expected nothing to be written over the value that was already there")
+    }
+}
+
+/* @info a cache failure on the leader's re-read reaches every waiter as that failure, not as a recomputation: the leader completes the flight with the error, so the caller learns the cache is down instead of silently paying the callback on every request while believing it is cached. */
+func TestRemember_ACacheFailureOnTheLeaderReReadCompletesTheFlightWithIt(t *testing.T) {
+    scriptedCache := &testScriptedCache{
+        getResults: []testScriptedGetResult{
+            {value: nil, exists: false, err: nil},
+            {value: nil, exists: false, err: errors.New("backend unreachable")},
+        },
+    }
+
+    callbackCalled := false
+
+    _, rememberErr := Remember(
+        scriptedCache,
+        "key",
+        time.Minute,
+        func(ctx context.Context) (any, error) {
+            callbackCalled = true
+            return "computed", nil
+        },
+        nil,
+    )
+
+    if nil == rememberErr {
+        t.Fatalf("expected the re-read failure to end the flight")
+    }
+
+    if "backend unreachable" != rememberErr.Error() {
+        t.Fatalf("unexpected error: %v", rememberErr)
+    }
+
+    if true == callbackCalled {
+        t.Fatalf("expected the callback not to run over a failed re-read")
+    }
+}
+
+/* @info a write that fails after a successful computation is reported rather than swallowed. The value IS correct — the callback produced it — so a leader that answered it anyway would look right on this request and recompute on every following one, with the cache silently never filling; the caller has to learn the write failed. */
+func TestRemember_AFailedWriteIsReportedRatherThanSwallowed(t *testing.T) {
+    scriptedCache := &testScriptedCache{
+        getResults: []testScriptedGetResult{
+            {value: nil, exists: false, err: nil},
+            {value: nil, exists: false, err: nil},
+        },
+        setErr: errors.New("disk full"),
+    }
+
+    _, rememberErr := Remember(
+        scriptedCache,
+        "key",
+        time.Minute,
+        func(ctx context.Context) (any, error) {
+            return "computed", nil
+        },
+        nil,
+    )
+
+    if nil == rememberErr {
+        t.Fatalf("expected the failed write to be reported")
+    }
+
+    if "disk full" != rememberErr.Error() {
+        t.Fatalf("unexpected error: %v", rememberErr)
+    }
+}
+
+/* @info with stampede protection deliberately off there is no leader and no flight, so both of its error exits belong to the direct path and neither was entered: a callback that failed and a write that failed both have to reach the caller, or the protection-off setting would silently become "always recompute, never report". */
+func TestRemember_WithoutStampedeProtectionBothFailuresReachTheCaller(t *testing.T) {
+    option := NewDefaultRememberOption().WithStampedeProtectionEnabled(false)
+
+    scriptedCache := &testScriptedCache{}
+
+    _, callbackFailureErr := Remember(
+        scriptedCache,
+        "key",
+        time.Minute,
+        func(ctx context.Context) (any, error) {
+            return nil, errors.New("computation refused")
+        },
+        option,
+    )
+
+    if nil == callbackFailureErr || "computation refused" != callbackFailureErr.Error() {
+        t.Fatalf("expected the callback failure to reach the caller, got %v", callbackFailureErr)
+    }
+
+    if 0 != scriptedCache.setCalls() {
+        t.Fatalf("expected nothing to be written after a failed computation")
+    }
+
+    failingWriteCache := &testScriptedCache{setErr: errors.New("disk full")}
+
+    _, writeFailureErr := Remember(
+        failingWriteCache,
+        "key",
+        time.Minute,
+        func(ctx context.Context) (any, error) {
+            return "computed", nil
+        },
+        option,
+    )
+
+    if nil == writeFailureErr || "disk full" != writeFailureErr.Error() {
+        t.Fatalf("expected the write failure to reach the caller, got %v", writeFailureErr)
+    }
+}
+
+/* @info a callback that panics is turned into an error naming the callback, on BOTH paths — the flight's and the direct one — and the two messages differ on purpose: the leader's own recover blames the cache side, so a callback panic that fell through to it would send the reader looking at the backend. Without stampede protection there is no leader to catch it at all, and the panic would leave the caller's own goroutine. */
+func TestRemember_ACallbackPanicIsReportedAsTheCallbacksOnBothPaths(t *testing.T) {
+    for _, testCase := range []struct {
+        name   string
+        option *RememberOption
+    }{
+        {name: "with stampede protection", option: nil},
+        {name: "without stampede protection", option: NewDefaultRememberOption().WithStampedeProtectionEnabled(false)},
+    } {
+        scriptedCache := &testScriptedCache{}
+
+        value, rememberErr := Remember(
+            scriptedCache,
+            "key",
+            time.Minute,
+            func(ctx context.Context) (any, error) {
+                panic("callback exploded")
+            },
+            testCase.option,
+        )
+
+        if nil == rememberErr {
+            t.Fatalf("%s: expected the callback panic to surface as an error", testCase.name)
+        }
+
+        if "cache remember callback panicked" != rememberErr.Error() {
+            t.Fatalf("%s: expected the callback to be blamed, got %v", testCase.name, rememberErr)
+        }
+
+        if nil != value {
+            t.Fatalf("%s: expected no value from a panicking callback, got %v", testCase.name, value)
+        }
+
+        if 0 != scriptedCache.setCalls() {
+            t.Fatalf("%s: expected nothing to be written after a panicking callback", testCase.name)
+        }
+    }
+}
+
+/* @info the last waiter of a cancelable flight cancels it, and the guard above that decision covers a call declared cancelable whose cancel function is absent. It is unreachable through Remember — the constructor builds the pair together — and stays as defense for a call assembled by hand: without it the last waiter leaving would dereference a nil function, inside a deferred call on the request path where the panic has no owner. */
+func TestRememberInFlightCall_RemoveWaiterToleratesAnAbsentCancelFunction(t *testing.T) {
+    shard := getRememberInFlightShard("absent.cancel.function")
+
+    call := newRememberInFlightCall(true)
+    call.cancelFunc = nil
+    call.AddWaiter()
+
+    call.RemoveWaiter(shard)
+
+    if true == call.IsCanceled() {
+        t.Fatalf("expected a call with no cancel function to stay uncanceled")
+    }
+}

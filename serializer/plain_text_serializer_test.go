@@ -124,3 +124,29 @@ func TestPlainTextSerializer_Deserialize_UnsupportedTarget(t *testing.T) {
         t.Fatalf("expected error")
     }
 }
+
+/* @info the default branch renders anything that is neither a string nor a byte slice through %v. It is the branch a handler returning a struct, an int or a nil takes, and its only pin was indirect — a round-trip through another package — so a branch that returned an empty payload would have left every non-string plain-text response silently blank. */
+func TestPlainTextSerializer_Serialize_RendersAnyOtherValue(t *testing.T) {
+    serializer := NewPlainTextSerializer()
+
+    for _, testCase := range []struct {
+        value    any
+        expected string
+    }{
+        {value: 42, expected: "42"},
+        {value: 1.5, expected: "1.5"},
+        {value: true, expected: "true"},
+        {value: nil, expected: "<nil>"},
+        {value: struct{ Name string }{Name: "melody"}, expected: "{melody}"},
+        {value: []int{1, 2}, expected: "[1 2]"},
+    } {
+        payload, err := serializer.Serialize(testCase.value)
+        if nil != err {
+            t.Fatalf("unexpected error for %#v: %v", testCase.value, err)
+        }
+
+        if testCase.expected != string(payload) {
+            t.Fatalf("expected %#v to render as %q, got %q", testCase.value, testCase.expected, payload)
+        }
+    }
+}

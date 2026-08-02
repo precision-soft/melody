@@ -285,3 +285,128 @@ func TestParseValidationTag_RefusesATagWithZeroRules(t *testing.T) {
 func pointerOf(value string) *string {
     return &value
 }
+
+/* @info every shape the tag grammar refuses, entered by name. They were reachable only as a group before — one generic "invalid validation tag syntax" covers all of them and the memo caches it — so a refusal that stopped firing for one spelling would leave that spelling silently parsing to something, and the field it decorates would be validated by a rule nobody wrote. Each case here is a plausible typo, not a synthetic string: a missing rule name before the parentheses, a doubled comma between parameters, a parameter given without a value, a parameter with no name, an equals sign with nothing before it, and a whole tag that comes to no rule at all. */
+func TestParseValidationTag_EveryShapeTheGrammarRefuses(t *testing.T) {
+    for _, refusedTag := range []string{
+        "(1,2)",
+        "between(min=1,oops)",
+        "between(=1)",
+        "=5",
+        ",",
+        " , ",
+    } {
+        rules, parseErr := parseValidationTagUncached(refusedTag)
+        if nil == parseErr {
+            t.Fatalf("expected %q to be refused, got %#v", refusedTag, rules)
+        }
+
+        if "invalid validation tag syntax" != parseErr.Error() {
+            t.Fatalf("unexpected refusal for %q: %v", refusedTag, parseErr)
+        }
+    }
+}
+
+/* @info a doubled comma between parameters is skipped rather than refused — it is whitespace in the parameter list, not a missing parameter — while a doubled comma between RULES comes to a part with no name and is skipped too. The two live in different loops and neither had a test; a refusal in either place would reject tags that read perfectly well. */
+func TestParseValidationTag_ADoubledCommaIsSkippedRatherThanRefused(t *testing.T) {
+    rules, parseErr := parseValidationTagUncached("between(min=1,,max=9)")
+    if nil != parseErr {
+        t.Fatalf("unexpected error: %v", parseErr)
+    }
+
+    if 1 != len(rules) {
+        t.Fatalf("expected one rule, got %#v", rules)
+    }
+
+    if "1" != rules[0].params["min"] || "9" != rules[0].params["max"] {
+        t.Fatalf("expected both parameters to survive the doubled comma, got %#v", rules[0].params)
+    }
+
+    rules, parseErr = parseValidationTagUncached("notBlank,  ,max=5")
+    if nil != parseErr {
+        t.Fatalf("unexpected error: %v", parseErr)
+    }
+
+    if 2 != len(rules) {
+        t.Fatalf("expected the empty part to be skipped and both rules to survive, got %#v", rules)
+    }
+
+    if "notBlank" != rules[0].name || "max" != rules[1].name {
+        t.Fatalf("unexpected rules: %#v", rules)
+    }
+}
+
+/* @info an unbalanced closing brace is refused the way an unbalanced closing parenthesis is. Only the parenthesis half was pinned, and the two counters are separate — a quantifier brace that stopped being counted would let a truncated regex through, where it compiles to something that matches more than the author wrote. */
+func TestHasBalancedBrackets_AnUnbalancedClosingBraceIsRefusedToo(t *testing.T) {
+    if true == hasBalancedBrackets("a}b") {
+        t.Fatalf("expected a stray closing brace to be refused")
+    }
+
+    if true == hasBalancedBrackets("a)b") {
+        t.Fatalf("expected a stray closing parenthesis to be refused")
+    }
+
+    if false == hasBalancedBrackets("a{2}b") {
+        t.Fatalf("expected a balanced quantifier to be accepted")
+    }
+
+    if false == hasBalancedBrackets("(a){2}") {
+        t.Fatalf("expected balanced parentheses and braces to be accepted")
+    }
+}
+
+/* @info a quoted parameter value keeps its commas, and both quote characters do it. Only one of them was exercised, through a case that also sat inside a character class — so the plain quoted-value path, which is what a caller writes to put a comma inside a message or a pattern, had no test of its own on either quote. */
+func TestSplitByCommaOutsideRegexMeta_BothQuoteCharactersHoldACommaTogether(t *testing.T) {
+    doubleQuoted := splitByCommaOutsideRegexMeta(`message="one, two",max=5`)
+    if 2 != len(doubleQuoted) {
+        t.Fatalf("expected the double-quoted comma to stay inside its member, got %#v", doubleQuoted)
+    }
+
+    if `message="one, two"` != doubleQuoted[0] {
+        t.Fatalf("unexpected first member: %q", doubleQuoted[0])
+    }
+
+    singleQuoted := splitByCommaOutsideRegexMeta(`message='one, two',max=5`)
+    if 2 != len(singleQuoted) {
+        t.Fatalf("expected the single-quoted comma to stay inside its member, got %#v", singleQuoted)
+    }
+
+    if `message='one, two'` != singleQuoted[0] {
+        t.Fatalf("unexpected first member: %q", singleQuoted[0])
+    }
+
+    /* a quote of the other kind inside a quoted section is a literal, so it must not close the section it sits in */
+    mixed := splitByCommaOutsideRegexMeta(`message="it's one, two",max=5`)
+    if 2 != len(mixed) {
+        t.Fatalf("expected the apostrophe inside the double-quoted value to stay literal, got %#v", mixed)
+    }
+}
+
+/* @info an escape inside a character class marks the class as having content, which is what keeps the caret from being read as a negation marker and the bracket that follows from being read as a close. Without it a pattern like [\]] — a class whose only member is an escaped bracket — would be split in the middle and the rule after it lost. */
+func TestSplitByCommaOutsideRegexMeta_AnEscapeInsideACharacterClassCountsAsContent(t *testing.T) {
+    parts := splitByCommaOutsideRegexMeta(`regex=[\],]+,max=5`)
+    if 2 != len(parts) {
+        t.Fatalf("expected the comma inside the class to stay literal, got %#v", parts)
+    }
+
+    if `regex=[\],]+` != parts[0] {
+        t.Fatalf("unexpected first member: %q", parts[0])
+    }
+
+    if `max=5` != parts[1] {
+        t.Fatalf("unexpected second member: %q", parts[1])
+    }
+
+    if false == hasBalancedBrackets(`[\]]`) {
+        t.Fatalf("expected a class whose member is an escaped bracket to be balanced")
+    }
+
+    rules, parseErr := parseValidationTagUncached(`regex=[\d],max=5`)
+    if nil != parseErr {
+        t.Fatalf("unexpected error: %v", parseErr)
+    }
+
+    if 2 != len(rules) {
+        t.Fatalf("expected the escaped class member to keep both rules, got %#v", rules)
+    }
+}

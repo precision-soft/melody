@@ -104,3 +104,53 @@ func TestWildcardSubtypeMatching(t *testing.T) {
         t.Fatalf("expected no match")
     }
 }
+
+/* @info the members a header can carry that are not media ranges at all — an empty one from a doubled comma, one whose parameters are doubled semicolons, a parameter with no equals sign, and one that normalizes away to nothing because it was only ever a parameter list — each has its own skip in the loop. Together they are the shapes a hand-assembled or proxy-rewritten Accept header actually arrives in, and a skip that fell through instead would put a member with an empty mime into the negotiation, where the empty key matches nothing and the header silently loses the range that followed it. */
+func TestParseAcceptHeader_SkipsTheMembersThatAreNotMediaRanges(t *testing.T) {
+    parsed := parseAcceptHeader("application/json,,text/plain;;charset=utf-8;novalue,  ,;q=0.5")
+
+    if 2 != len(parsed) {
+        t.Fatalf("expected only the two real ranges to survive, got %d: %#v", len(parsed), parsed)
+    }
+
+    surviving := map[string]bool{}
+    for _, member := range parsed {
+        surviving[member.mime] = true
+    }
+
+    if false == surviving[MimeApplicationJson] || false == surviving[MimeTextPlain] {
+        t.Fatalf("expected both real ranges to survive, got %#v", parsed)
+    }
+
+    if true == surviving[""] {
+        t.Fatalf("expected no empty mime to enter the negotiation, got %#v", parsed)
+    }
+}
+
+/* @info the qvalue grammar refuses each of its shapes for its own reason, and the reasons are not interchangeable: a one with a non-zero decimal is a weight ABOVE the maximum, four decimals is more precision than the grammar allows, a non-digit is not a number at all, and a missing decimal point is a different token entirely. Each was reachable only through a header, where a dropped member and a member scored 1.0 look the same from the outside for a single-range header. */
+func TestParseQualityValue_RefusesEachShapeOutsideTheGrammar(t *testing.T) {
+    for _, refused := range []string{"", "2", "-0.5", "1.5", "1.001", "0.1234", "1.0000", "0.5x", "0..5", "05", "1,0"} {
+        parsed, valid := parseQualityValue(refused)
+        if true == valid {
+            t.Fatalf("expected %q to be refused by the qvalue grammar, got %v", refused, parsed)
+        }
+    }
+
+    for accepted, expected := range map[string]float64{
+        "0":     0,
+        "1":     1,
+        "0.5":   0.5,
+        "0.001": 0.001,
+        "1.0":   1,
+        "1.000": 1,
+    } {
+        parsed, valid := parseQualityValue(accepted)
+        if false == valid {
+            t.Fatalf("expected %q to be accepted by the qvalue grammar", accepted)
+        }
+
+        if 0.0001 < parsed-expected || 0.0001 < expected-parsed {
+            t.Fatalf("expected %q to parse to %v, got %v", accepted, expected, parsed)
+        }
+    }
+}

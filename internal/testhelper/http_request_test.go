@@ -1,9 +1,13 @@
 package testhelper
 
 import (
+    "context"
     "net/http"
     "net/http/httptest"
     "testing"
+
+    containercontract "github.com/precision-soft/melody/container/contract"
+    runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
 /* @info this is the request every http-facing test of the framework is built from — the kernel's, the security listeners', the middleware chain's — so a builder that dropped a header or handed back a shared bag would make a whole class of tests assert against something the real request never looks like. It had no mirror of its own: its correctness was only ever implied by the tests that used it. */
@@ -66,3 +70,75 @@ func TestNewHttpTestRequest_TwoRequestsDoNotShareTheirBags(t *testing.T) {
         t.Fatalf("expected each built request to wrap its own net/http request")
     }
 }
+
+/* @info Param is what a routing test reads after seeding a path parameter, and its second result is the whole signal: a route that never matched and a route that matched with an empty value both answer "" on the first result alone. */
+func TestHttpTestRequest_ParamSeparatesAnAbsentParameterFromAnEmptyOne(t *testing.T) {
+    request := NewHttpTestRequest(http.MethodGet, "/articles/7").(*HttpTestRequest)
+    request.paramsValue["id"] = "7"
+    request.paramsValue["slug"] = ""
+
+    value, ok := request.Param("id")
+    if false == ok || "7" != value {
+        t.Fatalf("expected a seeded parameter to be found, got %q, %t", value, ok)
+    }
+
+    value, ok = request.Param("slug")
+    if false == ok || "" != value {
+        t.Fatalf("expected a seeded empty parameter to be found, got %q, %t", value, ok)
+    }
+
+    value, ok = request.Param("missing")
+    if true == ok || "" != value {
+        t.Fatalf("expected an absent parameter to be reported absent, got %q, %t", value, ok)
+    }
+}
+
+/* @info Params hands out a copy: a test that mutates what it read would otherwise rewrite the request it is asserting against, and the mutation would survive into every later read of the same request. */
+func TestHttpTestRequest_ParamsHandsOutACopyRatherThanTheLiveMap(t *testing.T) {
+    request := NewHttpTestRequest(http.MethodGet, "/articles/7").(*HttpTestRequest)
+    request.paramsValue["id"] = "7"
+
+    handedOut := request.Params()
+    handedOut["id"] = "9"
+    handedOut["injected"] = "value"
+
+    if "7" != request.paramsValue["id"] {
+        t.Fatalf("expected the request to keep its own value, got %q", request.paramsValue["id"])
+    }
+
+    if _, exists := request.paramsValue["injected"]; true == exists {
+        t.Fatalf("expected a key added to the handed-out map to stay out of the request")
+    }
+
+    if "7" != request.Params()["id"] {
+        t.Fatalf("expected a second read to answer the request's own value")
+    }
+}
+
+/* @info RuntimeInstance answers the runtime the test put there, and answers nil when nothing was put there — a scoped-service test that reads a runtime it never seeded must see the absence rather than a leftover from another request. */
+func TestHttpTestRequest_RuntimeInstanceAnswersWhatWasSeeded(t *testing.T) {
+    request := NewHttpTestRequest(http.MethodGet, "/articles").(*HttpTestRequest)
+
+    if nil != request.RuntimeInstance() {
+        t.Fatalf("expected a freshly built request to carry no runtime")
+    }
+
+    seeded := &stubRuntime{ctx: context.Background()}
+    request.runtimeValue = seeded
+
+    if seeded != request.RuntimeInstance() {
+        t.Fatalf("expected the seeded runtime to be handed back")
+    }
+}
+
+type stubRuntime struct {
+    ctx context.Context
+}
+
+func (instance *stubRuntime) Context() context.Context { return instance.ctx }
+
+func (instance *stubRuntime) Scope() containercontract.Scope { return nil }
+
+func (instance *stubRuntime) Container() containercontract.Container { return nil }
+
+var _ runtimecontract.Runtime = (*stubRuntime)(nil)

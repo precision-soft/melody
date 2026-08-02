@@ -11,6 +11,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/exception"
+    "github.com/precision-soft/melody/internal/testhelper"
     validationcontract "github.com/precision-soft/melody/validation/contract"
 )
 
@@ -1926,4 +1927,188 @@ func TestValidator_TimeCodecVerdictSettlesOnTheFirstStored(t *testing.T) {
     if cached, exists := validationTimeCodecCache.Load(structType); false == exists || true == cached.(bool) {
         t.Fatalf("expected the cached verdict to stay the first stored one, got %v (exists=%v)", cached, exists)
     }
+}
+
+/* @info the three refusals at the door of the constraint registry. Only the duplicate refusal had a test, and these three are what keep a registry from being populated with something no tag can ever name: an empty name, a name whose padding makes the lookup miss for every tag that spells it without padding — the tag parser trims, the registry does not — and an instance that is nil through its interface, which would pass a plain comparison and panic on the first value routed to it, on the request path. A registration is boot code, so refusing loudly here is the whole design. */
+func TestValidator_RegisterConstraintRefusesTheThreeShapesNoTagCanEverName(t *testing.T) {
+    for _, testCase := range []struct {
+        name            string
+        constraintName  string
+        constraint      validationcontract.Constraint
+        expectedMessage string
+    }{
+        {
+            name:            "an empty name",
+            constraintName:  "",
+            constraint:      &Alpha{},
+            expectedMessage: "constraint name is empty",
+        },
+        {
+            name:            "a padded name",
+            constraintName:  " alpha",
+            constraint:      &Alpha{},
+            expectedMessage: "constraint name must not contain leading or trailing whitespace",
+        },
+        {
+            name:            "a trailing-padded name",
+            constraintName:  "alpha ",
+            constraint:      &Alpha{},
+            expectedMessage: "constraint name must not contain leading or trailing whitespace",
+        },
+        {
+            name:            "an untyped nil instance",
+            constraintName:  "custom",
+            constraint:      nil,
+            expectedMessage: "constraint instance is nil",
+        },
+        {
+            name:            "a typed nil instance",
+            constraintName:  "custom",
+            constraint:      (*Alpha)(nil),
+            expectedMessage: "constraint instance is nil",
+        },
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            validator := NewValidator()
+
+            testhelper.AssertPanicsWithError(
+                t,
+                func() {
+                    validator.RegisterConstraint(testCase.constraintName, testCase.constraint)
+                },
+                testCase.expectedMessage,
+            )
+        })
+    }
+}
+
+/* @info a decoder that panics on the probe counts as accepting the object body, which is the direction that keeps the constraints on the struct enforced. The opposite reading would let any type crash its own decoder into silently skipping every rule declared on it — the one outcome a validator must never produce from a failure it cannot explain. */
+func TestRefusesValidationObjectBody_APanickingDecoderCountsAsAccepting(t *testing.T) {
+    if true == refusesValidationObjectBody(reflect.TypeOf(panickingDecodeTarget{})) {
+        t.Fatalf("expected a panicking decoder to count as accepting the object body")
+    }
+
+    /* the two sides it sits between: a plain struct accepts an empty object, and a type whose body must be a string refuses it */
+    if true == refusesValidationObjectBody(reflect.TypeOf(struct{ Name string }{})) {
+        t.Fatalf("expected a plain struct to accept an empty object body")
+    }
+
+    if false == refusesValidationObjectBody(reflect.TypeOf(time.Time{})) {
+        t.Fatalf("expected a type whose body must be a string to refuse an empty object body")
+    }
+}
+
+type panickingDecodeTarget struct {
+    Name string `json:"name" validate:"notBlank"`
+}
+
+func (instance *panickingDecodeTarget) UnmarshalJSON(payload []byte) error {
+    panic("decoder exploded")
+}
+
+/* @info a byte slice is a scalar payload, not a sequence of validatable elements, so the walk stops at it instead of descending into every byte with a path of its own. Without the cut a modest uploaded blob would produce one walk step per byte and a path string per step. */
+func TestValidator_AByteSliceIsAScalarPayloadRatherThanASequence(t *testing.T) {
+    validator := NewValidator()
+
+    type payloadHolder struct {
+        Blob    []byte `json:"blob"`
+        Members []struct {
+            Name string `json:"name" validate:"notBlank"`
+        } `json:"members"`
+    }
+
+    validateErr := validator.Validate(payloadHolder{
+        Blob: []byte{0, 1, 2, 3},
+        Members: []struct {
+            Name string `json:"name" validate:"notBlank"`
+        }{
+            {Name: ""},
+        },
+    })
+
+    errors := validationErrorsFrom(t, validateErr)
+
+    if 1 != len(errors) {
+        t.Fatalf("expected exactly the one nested failure, got %#v", errors)
+    }
+
+    if "members[0].name" != errors[0].Field() {
+        t.Fatalf("expected the failure to name the nested member, got %q", errors[0].Field())
+    }
+}
+
+func validationErrorsFrom(t *testing.T, validateErr error) ValidationErrors {
+    t.Helper()
+
+    if nil == validateErr {
+        t.Fatalf("expected validation to fail")
+    }
+
+    errors, isValidationErrors := validateErr.(ValidationErrors)
+    if false == isValidationErrors {
+        t.Fatalf("expected ValidationErrors, got %T: %v", validateErr, validateErr)
+    }
+
+    return errors
+}
+
+/* @info the json name a field is validated under follows encoding/json's own reading of the tag, and the shapes that mean "no name here" have to keep the Go field name: a tag that is only options (",omitempty") names nothing, and a tag of "-" removes the field from the wire entirely. A validator that read ",omitempty" as an empty name would report failures under a field called "" for every optional field on every payload. */
+func TestValidator_TheFieldNameFollowsEncodingJsonsOwnReadingOfTheTag(t *testing.T) {
+    validator := NewValidator()
+
+    type tagShapes struct {
+        OptionsOnly string `json:",omitempty" validate:"notBlank"`
+        Renamed     string `json:"renamed,omitempty" validate:"notBlank"`
+        Plain       string `validate:"notBlank"`
+    }
+
+    errors := validationErrorsFrom(t, validator.Validate(tagShapes{}))
+
+    reported := map[string]bool{}
+    for _, validationError := range errors {
+        reported[validationError.Field()] = true
+    }
+
+    for _, expectedField := range []string{"OptionsOnly", "renamed", "Plain"} {
+        if false == reported[expectedField] {
+            t.Fatalf("expected a failure under %q, got %#v", expectedField, reported)
+        }
+    }
+
+    if true == reported[""] {
+        t.Fatalf("expected no failure to be reported under an empty field name, got %#v", reported)
+    }
+}
+
+/* @info an embed carrying an explicit json name is an object of its own on the wire, not a set of promoted fields, so its members are validated under a nested path rather than at the top level — and an embed marked "-" is not on the wire at all. Reading either as a promotion would report a nested failure under a top-level name the payload never carried. */
+func TestValidator_AnEmbedWithAJsonNameIsAnObjectRatherThanAPromotion(t *testing.T) {
+    validator := NewValidator()
+
+    errors := validationErrorsFrom(t, validator.Validate(embedHolder{}))
+
+    reported := map[string]bool{}
+    for _, validationError := range errors {
+        reported[validationError.Field()] = true
+    }
+
+    if false == reported["named.inner"] {
+        t.Fatalf("expected the named embed to be validated under its own path, got %#v", reported)
+    }
+
+    if false == reported["promoted"] {
+        t.Fatalf("expected the plain embed to be validated as a promotion, got %#v", reported)
+    }
+}
+
+type NamedEmbed struct {
+    Inner string `json:"inner" validate:"notBlank"`
+}
+
+type PlainEmbed struct {
+    Promoted string `json:"promoted" validate:"notBlank"`
+}
+
+type embedHolder struct {
+    NamedEmbed `json:"named"`
+    PlainEmbed
 }
