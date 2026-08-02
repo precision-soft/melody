@@ -414,3 +414,93 @@ func TestContainer_MustRegisterScoped_RegistersAndRePanicsTheRefusalUnchanged(t 
         WithoutTypeRegistration(),
     )
 }
+
+/* @info the same refusal on the scoped door, which spells it for its own lifetime: a shared message would let either guard be deleted while the other kept the suite green. */
+func TestContainerScopedRegistrar_UntypedNilProviderIsRefusedByName(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerScopedErr := serviceContainer.RegisterScoped("app.nil.scoped.provider", nil)
+    if nil == registerScopedErr {
+        t.Fatalf("expected an untyped nil scoped provider to be refused")
+    }
+
+    if "the provider is required to register a scoped service" != registerScopedErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", registerScopedErr.Error())
+    }
+}
+
+/* @info an empty scoped name is refused at the door for the reason the container one is: a service filed under it can never be asked for again. */
+func TestContainerScopedRegistrar_EmptyNameIsRefusedByName(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerScopedErr := serviceContainer.RegisterScoped("", scopedNameProbeProvider())
+    if nil == registerScopedErr {
+        t.Fatalf("expected an empty scoped service name to be refused")
+    }
+
+    if "service name is required to register a scoped service" != registerScopedErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", registerScopedErr.Error())
+    }
+}
+
+func scopedNameProbeProvider() containercontract.Provider[*providerContractProbe] {
+    return func(resolver containercontract.Resolver) (*providerContractProbe, error) {
+        return &providerContractProbe{value: "scoped"}, nil
+    }
+}
+
+/* @info a scoped registration landing after Close would be built into scopes the teardown has finished with — the plain registrar has refused a closed container since the container session, and the scoped one carries the same refusal at its own door, where the name it is given is the one the report has to carry. */
+func TestContainer_RegisterScopedRefusedAfterClose(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    registerScopedErr := serviceContainer.RegisterScoped(
+        "app.post.close.scoped",
+        func(resolver containercontract.Resolver) (*testService, error) {
+            return &testService{Value: "late"}, nil
+        },
+    )
+    if nil == registerScopedErr {
+        t.Fatalf("expected the scoped registration on a closed container to be refused")
+    }
+
+    if "container is closed" != registerScopedErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", registerScopedErr.Error())
+    }
+}
+
+/* @info the strict duplicate-type refusal exists at the scoped lifetime too, with a message of its own: the container one and this one are separate guards, and a shared assertion would let either be deleted while the other kept the suite green. */
+func TestContainer_RegisterScoped_StrictDuplicateTypeRefused(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    firstErr := serviceContainer.RegisterScoped(
+        "app.scoped.first",
+        func(resolver containercontract.Resolver) (*testService, error) {
+            return &testService{Value: "first"}, nil
+        },
+    )
+    if nil != firstErr {
+        t.Fatalf("unexpected scoped register error: %v", firstErr)
+    }
+
+    strictErr := serviceContainer.RegisterScoped(
+        "app.scoped.second",
+        func(resolver containercontract.Resolver) (*testService, error) {
+            return &testService{Value: "second"}, nil
+        },
+    )
+    if nil == strictErr {
+        t.Fatalf("expected the strict duplicate scoped type to be refused")
+    }
+
+    if "scoped service type already registered" != strictErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", strictErr.Error())
+    }
+
+    if false == errors.Is(strictErr, ErrScopedServiceTypeAlreadyRegistered) {
+        t.Fatalf("expected a scoped duplicate type cause, got %v", strictErr)
+    }
+}

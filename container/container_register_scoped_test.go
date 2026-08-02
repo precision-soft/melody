@@ -2,7 +2,6 @@ package container
 
 import (
     "reflect"
-    "strings"
     "testing"
 
     containercontract "github.com/precision-soft/melody/container/contract"
@@ -267,55 +266,5 @@ func TestMustRegisterScopedTypeGeneric_RegistersOnTheHappyPath(t *testing.T) {
 
     if "by type" != value.value {
         t.Fatalf("unexpected resolved value: %#v", value)
-    }
-}
-
-/* @info the deferred by-type handle is the counterpart of Lazy for a component assembled before the service is safe to resolve; nothing executed it, so the closure it builds — the one that reaches FromResolverByType rather than FromResolver — was never proven to resolve anything at all. */
-func TestLazyByType_ResolvesTheServiceOnFirstUse(t *testing.T) {
-    serviceContainer := NewContainer()
-
-    resolutionCount := 0
-
-    registerErr := RegisterType[*registerScopedProbe](
-        serviceContainer,
-        func(resolver containercontract.Resolver) (*registerScopedProbe, error) {
-            resolutionCount++
-
-            return &registerScopedProbe{value: "lazy by type"}, nil
-        },
-    )
-    if nil != registerErr {
-        t.Fatalf("unexpected register error: %v", registerErr)
-    }
-
-    lazyService := LazyByType[*registerScopedProbe](serviceContainer)
-
-    if 0 != resolutionCount {
-        t.Fatalf("expected the handle to resolve nothing before its first use, got %d resolutions", resolutionCount)
-    }
-
-    value := lazyService.Get()
-    if "lazy by type" != value.value {
-        t.Fatalf("unexpected resolved value: %#v", value)
-    }
-
-    if value != lazyService.Get() {
-        t.Fatalf("expected the second use to answer with the memoized value")
-    }
-}
-
-/* @info a by-type handle over a type nothing registered has to fail through the by-type resolution, not through a name lookup: the two doors report differently, and a handle wired to the wrong one would name a service the caller never spelled. */
-func TestLazyByType_MissingRegistrationFailsThroughTheByTypeResolution(t *testing.T) {
-    serviceContainer := NewContainer()
-
-    lazyService := LazyByType[*registerScopedOtherProbe](serviceContainer)
-
-    _, resolveErr := lazyService.Resolve()
-    if nil == resolveErr {
-        t.Fatalf("expected the by-type resolution of an unregistered type to fail")
-    }
-
-    if false == strings.Contains(resolveErr.Error(), "service type is not registered") {
-        t.Fatalf("expected the by-type refusal, got %q", resolveErr.Error())
     }
 }

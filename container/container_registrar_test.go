@@ -60,3 +60,17 @@ func TestContainer_MustRegister_PanicsOnInvalidArguments(t *testing.T) {
         },
     )
 }
+
+/* @info an untyped nil provider is refused at the container registrar's own door, before the contract gate is reached. The refusal is SHADOWED: the gate underneath answers an untyped nil with the identical message and the identical context, so disarming the door changes nothing a caller can observe and this test pins the verdict rather than the position of the guard. Its scoped sibling below is not shadowed — that one spells "scoped service" — which is why the two are asserted separately. */
+func TestContainerRegistrar_UntypedNilProviderIsRefusedByName(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register("app.nil.provider", nil)
+    if nil == registerErr {
+        t.Fatalf("expected an untyped nil provider to be refused")
+    }
+
+    if "the provider is required to register a service" != registerErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", registerErr.Error())
+    }
+}

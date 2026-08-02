@@ -1,3 +1,8 @@
+/* The shared test material of this package: the doubles every test file of it reaches for, the helpers
+that build them, and — where a contract spans every source rather than any one of them — the test that
+asserts it. It carries no mirror of its own on purpose: it is the ONE test file of a package allowed to
+exist without a matching source, which is what keeps every other one honest. A test provable from a
+single source belongs in that source's own mirror, not here. */
 package http
 
 import (

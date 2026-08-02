@@ -3,6 +3,9 @@ package config
 import (
     "errors"
     "fmt"
+    "io"
+    "log"
+    "os"
     "path/filepath"
     "strings"
     "sync"
@@ -573,4 +576,39 @@ func TestRuntimeParameter_ConversionErrorNamesTheParameter(t *testing.T) {
     if "app.pool_size" != exceptionErr.Context()["parameterName"] {
         t.Fatalf("expected the parameter name in the error context, got: %v", exceptionErr.Context())
     }
+}
+
+/* TestMain silences the standard logger for the whole package: the configuration reports through it on
+several paths, and the output belongs to the code under test rather than to the test run. */
+func TestMain(mainInstance *testing.M) {
+    log.SetOutput(io.Discard)
+    os.Exit(mainInstance.Run())
+}
+
+/* newResolvedConfiguration builds a configuration over a fixed environment, lets the caller declare its
+parameters and resolves them, which is the shape almost every test of this file and of the resolve path
+needs before it can assert anything. */
+func newResolvedConfiguration(
+    t *testing.T,
+    environmentValues map[string]string,
+    declare func(configuration *Configuration),
+) *Configuration {
+    t.Helper()
+
+    configuration, newConfigurationErr := NewConfiguration(
+        &Environment{values: environmentValues},
+        "/srv/app",
+    )
+    if nil != newConfigurationErr {
+        t.Fatalf("expected the configuration to build, got %v", newConfigurationErr)
+    }
+
+    declare(configuration)
+
+    resolveErr := configuration.Resolve()
+    if nil != resolveErr {
+        t.Fatalf("expected the parameters to resolve, got %v", resolveErr)
+    }
+
+    return configuration
 }

@@ -280,3 +280,8 @@ func TestParseValidationTag_RefusesATagWithZeroRules(t *testing.T) {
         }
     }
 }
+
+/* pointerOf builds the optional value every constraint has to skip rather than refuse; it lives beside the rule that decides optionality, and the constraint test files reach it from the package. */
+func pointerOf(value string) *string {
+    return &value
+}

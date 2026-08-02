@@ -687,62 +687,6 @@ func TestContainer_RegisterType_StrictDuplicateTypeRefused(t *testing.T) {
     }
 }
 
-/* @info a scoped registration landing after Close would be built into scopes the teardown has finished with — the plain registrar has refused a closed container since the container session, and the scoped one carries the same refusal at its own door, where the name it is given is the one the report has to carry. */
-func TestContainer_RegisterScopedRefusedAfterClose(t *testing.T) {
-    serviceContainer := NewContainer()
-
-    if closeErr := serviceContainer.Close(); nil != closeErr {
-        t.Fatalf("unexpected close error: %v", closeErr)
-    }
-
-    registerScopedErr := serviceContainer.RegisterScoped(
-        "app.post.close.scoped",
-        func(resolver containercontract.Resolver) (*testService, error) {
-            return &testService{Value: "late"}, nil
-        },
-    )
-    if nil == registerScopedErr {
-        t.Fatalf("expected the scoped registration on a closed container to be refused")
-    }
-
-    if "container is closed" != registerScopedErr.Error() {
-        t.Fatalf("unexpected refusal message: %q", registerScopedErr.Error())
-    }
-}
-
-/* @info the strict duplicate-type refusal exists at the scoped lifetime too, with a message of its own: the container one and this one are separate guards, and a shared assertion would let either be deleted while the other kept the suite green. */
-func TestContainer_RegisterScoped_StrictDuplicateTypeRefused(t *testing.T) {
-    serviceContainer := NewContainer()
-
-    firstErr := serviceContainer.RegisterScoped(
-        "app.scoped.first",
-        func(resolver containercontract.Resolver) (*testService, error) {
-            return &testService{Value: "first"}, nil
-        },
-    )
-    if nil != firstErr {
-        t.Fatalf("unexpected scoped register error: %v", firstErr)
-    }
-
-    strictErr := serviceContainer.RegisterScoped(
-        "app.scoped.second",
-        func(resolver containercontract.Resolver) (*testService, error) {
-            return &testService{Value: "second"}, nil
-        },
-    )
-    if nil == strictErr {
-        t.Fatalf("expected the strict duplicate scoped type to be refused")
-    }
-
-    if "scoped service type already registered" != strictErr.Error() {
-        t.Fatalf("unexpected refusal message: %q", strictErr.Error())
-    }
-
-    if false == errors.Is(strictErr, ErrScopedServiceTypeAlreadyRegistered) {
-        t.Fatalf("expected a scoped duplicate type cause, got %v", strictErr)
-    }
-}
-
 /* @info Names is what an introspection command prints and what a boot report enumerates, and nothing called it: it could have returned the empty slice for the whole life of the package without a test noticing. It lists the DECLARED container names, sorted so the output is stable between runs, and it must not leak the scoped registrations — those belong to a lifetime the container never resolves. */
 func TestContainer_Names_ListsTheDeclaredContainerNamesSorted(t *testing.T) {
     serviceContainer := NewContainer()

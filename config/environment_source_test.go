@@ -473,3 +473,23 @@ func TestEnvironmentSource_StillResolvesAnUpperCaseReference(t *testing.T) {
         t.Fatalf("expected the braced reference to resolve, got %q", values["BRACED"])
     }
 }
+
+/* the double stands in for the source this file mirrors, so it lives here; the other test files of the
+package reach it from the package. */
+type testEnvironmentSource struct {
+    values map[string]string
+    err    error
+}
+
+func (instance *testEnvironmentSource) Load() (map[string]string, error) {
+    if nil != instance.err {
+        return nil, instance.err
+    }
+
+    copied := make(map[string]string, len(instance.values))
+    for key, value := range instance.values {
+        copied[key] = value
+    }
+
+    return copied, nil
+}
