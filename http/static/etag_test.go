@@ -86,6 +86,17 @@ func TestGenerateEtag_ChangesWithEitherTheSizeOrTheModificationTime(t *testing.T
     }
 }
 
+/* @info the field is a list, and a proxy that rewrites it leaves an empty member behind, so ", \"abc\"" is a shape a real cache sends. Skipping the empty member is what keeps it from being compared against the tag; the control below shows that a list of nothing but empty members still matches nothing, so the skip does not turn an empty header into a match. */
+func TestEtagMatchesIfNoneMatch_AnEmptyMemberIsSkippedRatherThanCompared(t *testing.T) {
+    if false == EtagMatchesIfNoneMatch(", \"abc\"", "\"abc\"") {
+        t.Fatalf("expected the tag to be found past an empty member of the list")
+    }
+
+    if true == EtagMatchesIfNoneMatch(" , , ", "\"abc\"") {
+        t.Fatalf("expected a list carrying nothing but empty members to match no tag")
+    }
+}
+
 type staticEtagFileInfo struct {
     size    int64
     modTime time.Time

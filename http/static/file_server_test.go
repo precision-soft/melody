@@ -2,15 +2,20 @@ package static
 
 import (
     "bytes"
+    "errors"
+    "io"
     "io/fs"
     "net/http"
     "os"
+    "path"
+    "path/filepath"
     "strings"
     "testing"
     "testing/fstest"
     "time"
 
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
+    httpcontract "github.com/precision-soft/melody/http/contract"
     "github.com/precision-soft/melody/internal/testhelper"
     "github.com/precision-soft/melody/logging"
     loggingcontract "github.com/precision-soft/melody/logging/contract"
@@ -1585,4 +1590,1288 @@ func TestFileServer_RootStillServesTheIndexFileWhenNotExcluded(t *testing.T) {
     if "index" != string(body) {
         t.Fatalf("expected the index body, got %q", string(body))
     }
+}
+
+/* trackingFileSystem hands out files that record their own closing. Wherever the streaming resolution refuses after it has already opened a file — a stat that fails, a target that turns out to be a directory, a conditional request answered 304 — the refusal has to close what it opened, or a running application leaks one descriptor for every such request; the count is that assertion. */
+type trackingFileSystem struct {
+    inner       fs.FS
+    closedCount int
+}
+
+func (instance *trackingFileSystem) Open(name string) (fs.File, error) {
+    file, err := instance.inner.Open(name)
+    if nil != err {
+        return nil, err
+    }
+
+    return &trackingFile{File: file, fileSystem: instance}, nil
+}
+
+type trackingFile struct {
+    fs.File
+    fileSystem *trackingFileSystem
+}
+
+func (instance *trackingFile) Close() error {
+    instance.fileSystem.closedCount++
+
+    return instance.File.Close()
+}
+
+/* statFailingFileSystem opens successfully and then refuses to describe what it opened, which is the shape that reaches the stat refusal: a file unlinked between the open and the description, or a mount that answers an open out of a cache it can no longer stat. */
+type statFailingFileSystem struct {
+    statErr     error
+    closedCount int
+}
+
+func (instance *statFailingFileSystem) Open(name string) (fs.File, error) {
+    return &statFailingFile{fileSystem: instance}, nil
+}
+
+type statFailingFile struct {
+    fileSystem *statFailingFileSystem
+}
+
+func (instance *statFailingFile) Stat() (fs.FileInfo, error) {
+    return nil, instance.fileSystem.statErr
+}
+
+func (instance *statFailingFile) Read(buffer []byte) (int, error) {
+    return 0, io.EOF
+}
+
+func (instance *statFailingFile) Close() error {
+    instance.fileSystem.closedCount++
+
+    return nil
+}
+
+/* readFailingFileSystem describes an ordinary file and then fails to hand over its bytes — a truncated network mount, a medium error — which is the only door to the buffered resolution's read failure. The streaming resolution has no such door: it hands the open file to the caller without reading it. */
+type readFailingFileSystem struct {
+    readErr error
+}
+
+func (instance *readFailingFileSystem) Open(name string) (fs.File, error) {
+    return &readFailingFile{readErr: instance.readErr}, nil
+}
+
+type readFailingFile struct {
+    readErr error
+}
+
+func (instance *readFailingFile) Stat() (fs.FileInfo, error) {
+    return &readFailingFileInfo{}, nil
+}
+
+func (instance *readFailingFile) Read(buffer []byte) (int, error) {
+    return 0, instance.readErr
+}
+
+func (instance *readFailingFile) Close() error {
+    return nil
+}
+
+type readFailingFileInfo struct{}
+
+func (instance *readFailingFileInfo) Name() string { return "a.txt" }
+
+func (instance *readFailingFileInfo) Size() int64 { return 5 }
+
+func (instance *readFailingFileInfo) Mode() fs.FileMode { return 0o644 }
+
+func (instance *readFailingFileInfo) ModTime() time.Time { return time.Unix(0, 0).UTC() }
+
+func (instance *readFailingFileInfo) IsDir() bool { return false }
+
+func (instance *readFailingFileInfo) Sys() any { return nil }
+
+/* @info the public directory is what a deployment names in its configuration, and leaving it unset is the ordinary case rather than a mistake: the shipped default is "public", so an application that says nothing serves the directory the convention names. */
+func TestNewFileServer_AnUnnamedPublicDirectoryDefaultsToPublic(t *testing.T) {
+    directory := t.TempDir()
+
+    makeDirErr := os.MkdirAll(filepath.Join(directory, "public"), 0o755)
+    if nil != makeDirErr {
+        t.Fatalf("make directory error: %v", makeDirErr)
+    }
+
+    writeErr := osWriteFile(filepath.Join(directory, "public", "a.txt"), []byte("a"))
+    if nil != writeErr {
+        t.Fatalf("write file error: %v", writeErr)
+    }
+
+    server := NewFileServer(
+        NewOptions(
+            NewFileServerConfig(
+                ModeFilesystem,
+                "",
+                "index.html",
+                "",
+                false,
+                0,
+                false,
+            ),
+            directory,
+            nil,
+        ),
+    )
+
+    _, _, body, served := server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt"),
+        logging.NewNopLogger(),
+    )
+
+    if false == served {
+        t.Fatalf("expected an unnamed public directory to resolve to \"public\"")
+    }
+
+    if "a" != string(body) {
+        t.Fatalf("expected the body out of the default public directory, got %q", string(body))
+    }
+}
+
+/* @info a relative public directory is anchored on the configured root, and an unset root means the directory the process was started in — which is what a development run and a container whose working directory is the application both rely on. The base path is asserted rather than a served file, because the anchoring is the whole behaviour and a served file would only prove it for whatever directory the test happens to run in. */
+func TestNewFileServer_AnUnnamedRootAnchorsARelativePublicDirectoryWhereTheProcessRuns(t *testing.T) {
+    server := NewFileServer(
+        NewOptions(
+            NewFileServerConfig(
+                ModeFilesystem,
+                "assets",
+                "index.html",
+                "",
+                false,
+                0,
+                false,
+            ),
+            "",
+            nil,
+        ),
+    )
+
+    directoryFileSystem, ok := server.fileSystem.(*dirFileSystem)
+    if false == ok {
+        t.Fatalf("expected the filesystem mode to build a directory filesystem, got %T", server.fileSystem)
+    }
+
+    if "assets" != directoryFileSystem.basePath {
+        t.Fatalf("expected an unnamed root to anchor the relative public directory where the process runs, got %q", directoryFileSystem.basePath)
+    }
+
+    anchored := NewFileServer(
+        NewOptions(
+            NewFileServerConfig(
+                ModeFilesystem,
+                "assets",
+                "index.html",
+                "",
+                false,
+                0,
+                false,
+            ),
+            "/srv/application",
+            nil,
+        ),
+    )
+
+    anchoredFileSystem, ok := anchored.fileSystem.(*dirFileSystem)
+    if false == ok {
+        t.Fatalf("expected the filesystem mode to build a directory filesystem, got %T", anchored.fileSystem)
+    }
+
+    if filepath.Join("/srv/application", "assets") != anchoredFileSystem.basePath {
+        t.Fatalf("expected a named root to anchor the relative public directory, got %q", anchoredFileSystem.basePath)
+    }
+}
+
+/* @info the embedded mode carries no directory of its own, so the filesystem is the one thing the caller must hand over; without the refusal the server is built and every request panics on the nil filesystem, one per request, in the outermost middleware. */
+func TestNewFileServer_ANilFileSystemIsRefused(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            NewFileServer(
+                NewOptions(
+                    NewFileServerConfig(
+                        ModeEmbedded,
+                        "",
+                        "index.html",
+                        "",
+                        false,
+                        0,
+                        false,
+                    ),
+                    "",
+                    nil,
+                ),
+            )
+        },
+        "file system may not be nil for the file server",
+    )
+}
+
+/* @info the streaming door is the one every request takes, so a nil request has to be answered there rather than panicking inside the resolution. The message is its own — the buffered door says "static serve skipped", this one says "static serve reader skipped" — so the record names which door was knocked on. */
+func TestFileServer_ServeReader_ANilRequestIsRefusedAndRecorded(t *testing.T) {
+    logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
+
+    server := NewFileServer(
+        NewOptions(
+            NewFileServerConfig(
+                ModeEmbedded,
+                "",
+                "index.html",
+                "",
+                false,
+                0,
+                false,
+            ),
+            "",
+            fstest.MapFS{},
+        ),
+    )
+
+    statusCode, headers, bodyReader, served := server.ServeReader(nil, logger)
+
+    if true == served {
+        t.Fatalf("expected a nil request not to be served")
+    }
+
+    if 0 != statusCode || nil != headers || nil != bodyReader {
+        t.Fatalf("expected an empty refusal, got status=%d headers=%v reader=%v", statusCode, headers, bodyReader)
+    }
+
+    if 1 != len(logger.warningMessages) || false == strings.Contains(logger.warningMessages[0], "static serve reader skipped because request is nil") {
+        t.Fatalf("expected the streaming door to record the nil request, got %v", logger.warningMessages)
+    }
+}
+
+/* @info the buffered door records its own refusal under its own message, and the two are distinguishable on purpose: an application that calls Serve directly and one that goes through the middleware leave different records for the same mistake. */
+func TestFileServer_Serve_ANilRequestIsRefusedAndRecorded(t *testing.T) {
+    logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
+
+    server := NewFileServer(
+        NewOptions(
+            NewFileServerConfig(
+                ModeEmbedded,
+                "",
+                "index.html",
+                "",
+                false,
+                0,
+                false,
+            ),
+            "",
+            fstest.MapFS{},
+        ),
+    )
+
+    statusCode, headers, body, served := server.Serve(nil, logger)
+
+    if true == served {
+        t.Fatalf("expected a nil request not to be served")
+    }
+
+    if 0 != statusCode || nil != headers || nil != body {
+        t.Fatalf("expected an empty refusal, got status=%d headers=%v body=%v", statusCode, headers, body)
+    }
+
+    if 1 != len(logger.warningMessages) || false == strings.Contains(logger.warningMessages[0], "static serve skipped because request is nil") {
+        t.Fatalf("expected the buffered door to record the nil request, got %v", logger.warningMessages)
+    }
+}
+
+/* @info the resolution has a nil check of its own, below the door's. It is reached only white-box, because the door refuses first, and it is the one refusal in the whole resolution that records nothing — deliberately, since the door above it has already said so. */
+func TestFileServer_TheResolutionRefusesANilRequestWithoutRecordingItTwice(t *testing.T) {
+    logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
+
+    server := NewFileServer(
+        NewOptions(
+            NewFileServerConfig(
+                ModeEmbedded,
+                "",
+                "index.html",
+                "",
+                false,
+                0,
+                false,
+            ),
+            "",
+            fstest.MapFS{},
+        ),
+    )
+
+    statusCode, headers, file, fileInfo, served := server.serveForStreaming(nil, logger)
+
+    if true == served {
+        t.Fatalf("expected a nil request not to be resolved")
+    }
+
+    if 0 != statusCode || nil != headers || nil != file || nil != fileInfo {
+        t.Fatalf("expected an empty refusal, got status=%d headers=%v file=%v info=%v", statusCode, headers, file, fileInfo)
+    }
+
+    if 0 != len(logger.warningMessages) || 0 != len(logger.debugMessages) {
+        t.Fatalf("expected the resolution to leave the record to the door above it, got warnings=%v debug=%v", logger.warningMessages, logger.debugMessages)
+    }
+}
+
+/* @info a HEAD answers the size without the bytes, and it has to close the file it opened to learn that size: the resolution hands back an open file for every successful retrieval, and the door is what decides no body will be read. Without the close a running application leaks one descriptor per HEAD, which is what a health check and a link checker send. */
+func TestFileServer_ServeReader_HeadAnswersTheLengthWithoutABodyAndClosesTheFile(t *testing.T) {
+    fileSystem := &trackingFileSystem{
+        inner: fstest.MapFS{
+            "a.txt": &fstest.MapFile{
+                Data: []byte("hello"),
+            },
+        },
+    }
+
+    server := NewFileServer(
+        NewOptions(
+            NewFileServerConfig(
+                ModeEmbedded,
+                "",
+                "index.html",
+                "",
+                false,
+                0,
+                false,
+            ),
+            "",
+            fileSystem,
+        ),
+    )
+
+    statusCode, headers, bodyReader, served := server.ServeReader(
+        testhelper.NewHttpTestRequest(http.MethodHead, "http://example.com/a.txt"),
+        logging.NewNopLogger(),
+    )
+
+    if false == served {
+        t.Fatalf("expected the head request to be answered")
+    }
+
+    if http.StatusOK != statusCode {
+        t.Fatalf("expected 200 for a head request, got %d", statusCode)
+    }
+
+    if nil != bodyReader {
+        t.Fatalf("expected no body for a head request")
+    }
+
+    if "5" != headers.Get("Content-Length") {
+        t.Fatalf("expected the length of the file it did not send, got %q", headers.Get("Content-Length"))
+    }
+
+    if 1 != fileSystem.closedCount {
+        t.Fatalf("expected the head answer to close the file it opened, closed %d", fileSystem.closedCount)
+    }
+}
+
+/* @info a 304 travels back through the door with no body at all, and the file was already closed by the resolution that decided it — so the door must hand the status through rather than fall into the body path, where the nil file it was given would be read. */
+func TestFileServer_ServeReader_ANotModifiedAnswerCarriesNoBody(t *testing.T) {
+    modifiedAt := time.Date(2026, 1, 3, 12, 34, 56, 0, time.UTC)
+
+    fileSystem := &trackingFileSystem{
+        inner: fstest.MapFS{
+            "a.txt": &fstest.MapFile{
+                Data:    []byte("a"),
+                ModTime: modifiedAt,
+            },
+        },
+    }
+
+    server := NewFileServer(
+        NewOptions(
+            NewFileServerConfig(
+                ModeEmbedded,
+                "",
+                "index.html",
+                "",
+                true,
+                3600,
+                false,
+            ),
+            "",
+            fileSystem,
+        ),
+    )
+
+    etag := GenerateEtag(&staticEtagFileInfo{size: 1, modTime: modifiedAt}, false)
+
+    request := testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt")
+    request.HttpRequest().Header.Set("If-None-Match", etag)
+
+    statusCode, headers, bodyReader, served := server.ServeReader(request, logging.NewNopLogger())
+
+    if false == served {
+        t.Fatalf("expected the conditional request to be answered")
+    }
+
+    if http.StatusNotModified != statusCode {
+        t.Fatalf("expected 304, got %d", statusCode)
+    }
+
+    if nil != bodyReader {
+        t.Fatalf("expected no body with a 304")
+    }
+
+    if etag != headers.Get("ETag") {
+        t.Fatalf("expected the 304 to carry the tag it matched, got %q", headers.Get("ETag"))
+    }
+
+    if 1 != fileSystem.closedCount {
+        t.Fatalf("expected the 304 to close the file it opened, closed %d", fileSystem.closedCount)
+    }
+}
+
+/* @info both of the door's nil-header guards are LATENT, and this is the measurement: the resolution builds its header map before any answer is decided and hands the same map back on every outcome it reports as resolved — the 200 and the 304 alike. Neither guard can fire while that holds, and if it stops holding this test is what says so. */
+func TestFileServer_TheResolutionAlwaysHandsBackAHeaderMap(t *testing.T) {
+    modifiedAt := time.Date(2026, 1, 3, 12, 34, 56, 0, time.UTC)
+
+    fileSystem := fstest.MapFS{
+        "a.txt": &fstest.MapFile{
+            Data:    []byte("a"),
+            ModTime: modifiedAt,
+        },
+    }
+
+    server := NewFileServer(
+        NewOptions(
+            NewFileServerConfig(
+                ModeEmbedded,
+                "",
+                "index.html",
+                "",
+                true,
+                3600,
+                false,
+            ),
+            "",
+            fileSystem,
+        ),
+    )
+
+    etag := GenerateEtag(&staticEtagFileInfo{size: 1, modTime: modifiedAt}, false)
+
+    conditional := testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt")
+    conditional.HttpRequest().Header.Set("If-None-Match", etag)
+
+    for _, probe := range []struct {
+        name    string
+        request httpcontract.Request
+    }{
+        {name: "retrieval", request: testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt")},
+        {name: "conditional", request: conditional},
+    } {
+        statusCode, headers, file, _, served := server.serveForStreaming(probe.request, logging.NewNopLogger())
+
+        if false == served {
+            t.Fatalf("expected the %s probe to resolve", probe.name)
+        }
+
+        if nil != file {
+            _ = file.Close()
+        }
+
+        if nil == headers {
+            t.Fatalf("expected the %s probe to carry a header map, status %d", probe.name, statusCode)
+        }
+    }
+}
+
+/* @info the door's refusal of a file that is not a read closer is LATENT, and this is the measurement rather than a reading: the fs.File contract carries Read and Close, so every type that satisfies it satisfies io.ReadCloser too and the assertion cannot fail for a value that exists. The declaration below is the proof — it is a compile error the day fs.File stops carrying either method, which is the day the refusal becomes reachable. */
+var _ io.ReadCloser = fs.File(nil)
+
+func TestFileServer_ServeReader_EveryResolvedFileIsAReadCloser(t *testing.T) {
+    fileSystem := fstest.MapFS{
+        "a.txt": &fstest.MapFile{
+            Data: []byte("a"),
+        },
+    }
+
+    server := NewFileServer(
+        NewOptions(
+            NewFileServerConfig(
+                ModeEmbedded,
+                "",
+                "index.html",
+                "",
+                false,
+                0,
+                false,
+            ),
+            "",
+            fileSystem,
+        ),
+    )
+
+    _, _, file, _, served := server.serveForStreaming(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt"),
+        logging.NewNopLogger(),
+    )
+
+    if false == served {
+        t.Fatalf("expected the file to resolve")
+    }
+
+    readCloser, ok := file.(io.ReadCloser)
+    if false == ok {
+        t.Fatalf("expected every resolved file to be a read closer, got %T", file)
+    }
+
+    _ = readCloser.Close()
+}
+
+/* @info the spellings that fold onto the mount root all clean to "/", never to "." and never to the empty string, because the received path is anchored with a leading slash before it is cleaned. The two guards that answer "." and "" are therefore LATENT, and this is the measurement of why — a defence against a folding rule that does not hold today. */
+func TestFileServer_TheFoldingSpellingsCleanToTheRootRatherThanARelativeName(t *testing.T) {
+    for _, spelling := range []string{"/", "//", "/.", "/..", "/./", "/../..", "/a/..", "///.//.."} {
+        cleaned := path.Clean(spelling)
+
+        if "." == cleaned || "" == cleaned {
+            t.Fatalf("expected %q to fold onto an absolute path, got %q", spelling, cleaned)
+        }
+
+        if false == strings.HasPrefix(cleaned, "/") {
+            t.Fatalf("expected %q to stay absolute, got %q", spelling, cleaned)
+        }
+    }
+}
+
+/* @info the mount root resolves to the configured index file without cleaning it again, so an index file naming an escape reaches the filesystem as a relative path that leaves the served directory. It is refused there, which is the one place left to refuse it: the name came from configuration, not from the request, so no earlier guard was ever aimed at it. */
+func TestFileServer_Serve_AnIndexFileThatLeavesThePublicDirectoryIsRefused(t *testing.T) {
+    logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
+
+    server := NewFileServer(
+        NewOptions(
+            NewFileServerConfig(
+                ModeEmbedded,
+                "",
+                "../secret",
+                "",
+                false,
+                0,
+                false,
+            ),
+            "",
+            fstest.MapFS{},
+        ),
+    )
+
+    _, _, _, served := server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/"),
+        logger,
+    )
+
+    if true == served {
+        t.Fatalf("expected an index file that leaves the public directory to be refused")
+    }
+
+    if false == recordedContains(logger.warningMessages, "static serve invalid relative path") {
+        t.Fatalf("expected the refusal to be recorded, got %v", logger.warningMessages)
+    }
+}
+
+func TestFileServer_ServeReader_AnIndexFileThatLeavesThePublicDirectoryIsRefused(t *testing.T) {
+    logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
+
+    server := NewFileServer(
+        NewOptions(
+            NewFileServerConfig(
+                ModeEmbedded,
+                "",
+                "../secret",
+                "",
+                false,
+                0,
+                false,
+            ),
+            "",
+            fstest.MapFS{},
+        ),
+    )
+
+    _, _, _, _, served := server.serveForStreaming(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/"),
+        logger,
+    )
+
+    if true == served {
+        t.Fatalf("expected an index file that leaves the public directory to be refused")
+    }
+
+    if false == recordedContains(logger.warningMessages, "static serve invalid relative path") {
+        t.Fatalf("expected the refusal to be recorded, got %v", logger.warningMessages)
+    }
+}
+
+/* @info a file that opens and then refuses to describe itself is not served. The buffered resolution closes it through its deferred close; the streaming one has no such deferral and closes it by hand, which is the difference the twin below pins. */
+func TestFileServer_Serve_AFileThatCannotBeDescribedIsNotServed(t *testing.T) {
+    fileSystem := &statFailingFileSystem{statErr: errors.New("stat refused")}
+
+    server := &FileServer{
+        config: NewFileServerConfig(
+            ModeEmbedded,
+            "",
+            "index.html",
+            "",
+            false,
+            0,
+            false,
+        ),
+        fileSystem: fileSystem,
+    }
+
+    statusCode, _, _, served := server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt"),
+        logging.NewNopLogger(),
+    )
+
+    if true == served {
+        t.Fatalf("expected a file that cannot be described not to be served, got status %d", statusCode)
+    }
+}
+
+func TestFileServer_ServeReader_AFileThatCannotBeDescribedIsNotServedAndIsClosed(t *testing.T) {
+    fileSystem := &statFailingFileSystem{statErr: errors.New("stat refused")}
+
+    server := &FileServer{
+        config: NewFileServerConfig(
+            ModeEmbedded,
+            "",
+            "index.html",
+            "",
+            false,
+            0,
+            false,
+        ),
+        fileSystem: fileSystem,
+    }
+
+    _, _, _, _, served := server.serveForStreaming(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt"),
+        logging.NewNopLogger(),
+    )
+
+    if true == served {
+        t.Fatalf("expected a file that cannot be described not to be served")
+    }
+
+    if 1 != fileSystem.closedCount {
+        t.Fatalf("expected the refusal to close the file it opened, closed %d", fileSystem.closedCount)
+    }
+}
+
+/* @info a directory is not an asset. Answering one with its bytes hands out whatever the filesystem calls a directory read, and answering it with a listing publishes the names of everything beside it — so it is refused, and the streaming twin closes what it opened while refusing. */
+func TestFileServer_Serve_ADirectoryIsNotServed(t *testing.T) {
+    server := NewFileServer(
+        NewOptions(
+            NewFileServerConfig(
+                ModeEmbedded,
+                "",
+                "index.html",
+                "",
+                false,
+                0,
+                false,
+            ),
+            "",
+            fstest.MapFS{
+                "assets/a.txt": &fstest.MapFile{
+                    Data: []byte("a"),
+                },
+            },
+        ),
+    )
+
+    _, _, _, served := server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/assets"),
+        logging.NewNopLogger(),
+    )
+
+    if true == served {
+        t.Fatalf("expected a directory not to be served")
+    }
+}
+
+func TestFileServer_ServeReader_ADirectoryIsNotServedAndIsClosed(t *testing.T) {
+    fileSystem := &trackingFileSystem{
+        inner: fstest.MapFS{
+            "assets/a.txt": &fstest.MapFile{
+                Data: []byte("a"),
+            },
+        },
+    }
+
+    server := NewFileServer(
+        NewOptions(
+            NewFileServerConfig(
+                ModeEmbedded,
+                "",
+                "index.html",
+                "",
+                false,
+                0,
+                false,
+            ),
+            "",
+            fileSystem,
+        ),
+    )
+
+    _, _, _, _, served := server.serveForStreaming(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/assets"),
+        logging.NewNopLogger(),
+    )
+
+    if true == served {
+        t.Fatalf("expected a directory not to be served")
+    }
+
+    if 1 != fileSystem.closedCount {
+        t.Fatalf("expected the refusal to close the directory it opened, closed %d", fileSystem.closedCount)
+    }
+}
+
+/* @info a read that fails after the file was described is the one failure the buffered resolution answers with a status instead of a refusal: the headers are already decided and the request was already claimed, so declining here would run the rest of the chain for a request the file server had taken. The streaming resolution never reaches this — it hands the open file over unread. */
+func TestFileServer_Serve_AFileThatCannotBeReadAnswersInternalServerError(t *testing.T) {
+    server := &FileServer{
+        config: NewFileServerConfig(
+            ModeEmbedded,
+            "",
+            "index.html",
+            "",
+            false,
+            0,
+            false,
+        ),
+        fileSystem: &readFailingFileSystem{readErr: errors.New("read refused")},
+    }
+
+    statusCode, headers, body, served := server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt"),
+        logging.NewNopLogger(),
+    )
+
+    if false == served {
+        t.Fatalf("expected a read failure to be claimed rather than declined")
+    }
+
+    if http.StatusInternalServerError != statusCode {
+        t.Fatalf("expected 500 for a file that cannot be read, got %d", statusCode)
+    }
+
+    if nil != headers || nil != body {
+        t.Fatalf("expected the failed read to carry neither headers nor body, got headers=%v body=%v", headers, body)
+    }
+}
+
+/* @info the strip prefix is what mounts the file server under part of the url, and the streaming resolution is the one every request takes — so the matching half, the trimming, and the refusal of a path outside the mount all belong here rather than only on the buffered twin. */
+func TestFileServer_ServeReader_StripPrefixServesTheFileBeneathTheMount(t *testing.T) {
+    server := NewFileServer(
+        NewOptions(
+            NewFileServerConfig(
+                ModeEmbedded,
+                "",
+                "index.html",
+                "/static/",
+                false,
+                0,
+                false,
+            ),
+            "",
+            fstest.MapFS{
+                "a.txt": &fstest.MapFile{
+                    Data: []byte("a"),
+                },
+            },
+        ),
+    )
+
+    statusCode, _, bodyReader, served := server.ServeReader(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/static/a.txt"),
+        logging.NewNopLogger(),
+    )
+
+    if false == served {
+        t.Fatalf("expected the file beneath the mount to be served")
+    }
+
+    if http.StatusOK != statusCode {
+        t.Fatalf("expected 200, got %d", statusCode)
+    }
+
+    content, readErr := io.ReadAll(bodyReader)
+    if nil != readErr {
+        t.Fatalf("read error: %v", readErr)
+    }
+
+    _ = bodyReader.Close()
+
+    if "a" != string(content) {
+        t.Fatalf("expected the body beneath the mount, got %q", string(content))
+    }
+}
+
+/* @info the mount point itself is the site root as far as the client is concerned, so a request for the prefix alone answers the index file.
+
+The substitution that puts "/" back is SHADOWED, and this test is not its proof: the anchoring below it prefixes a leading slash onto whatever the trim left, so an empty remainder folds onto the root either way and removing the substitution changes nothing observable. It is proved on its verdict instead, by the inversion that turns every non-empty remainder into the root — which is the mount serving its index file for every asset beneath it. */
+func TestFileServer_ServeReader_TheMountPointAloneResolvesToTheIndexFile(t *testing.T) {
+    server := NewFileServer(
+        NewOptions(
+            NewFileServerConfig(
+                ModeEmbedded,
+                "",
+                "index.html",
+                "/static/",
+                false,
+                0,
+                false,
+            ),
+            "",
+            fstest.MapFS{
+                "index.html": &fstest.MapFile{
+                    Data: []byte("index"),
+                },
+            },
+        ),
+    )
+
+    statusCode, _, bodyReader, served := server.ServeReader(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/static/"),
+        logging.NewNopLogger(),
+    )
+
+    if false == served {
+        t.Fatalf("expected the mount point alone to answer the index file")
+    }
+
+    if http.StatusOK != statusCode {
+        t.Fatalf("expected 200, got %d", statusCode)
+    }
+
+    content, readErr := io.ReadAll(bodyReader)
+    if nil != readErr {
+        t.Fatalf("read error: %v", readErr)
+    }
+
+    _ = bodyReader.Close()
+
+    if "index" != string(content) {
+        t.Fatalf("expected the index body, got %q", string(content))
+    }
+}
+
+/* @info a path outside the mount belongs to whatever the application routed it to, and the file server declines it without looking at the disk. The refusal is SHADOWED on its verdict — a path the mount does not claim also fails the canonical rebuild below, which refuses it too — so the assertion is the record rather than the verdict: the mount declines at info level and says "strip prefix mismatch", while the canonical check refuses at warning level. An empty warning list is therefore what says the mount declined it, and it is what fails when the mount stops declining. */
+func TestFileServer_ServeReader_APathOutsideTheMountIsDeclined(t *testing.T) {
+    logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
+
+    server := NewFileServer(
+        NewOptions(
+            NewFileServerConfig(
+                ModeEmbedded,
+                "",
+                "index.html",
+                "/static/",
+                false,
+                0,
+                false,
+            ),
+            "",
+            fstest.MapFS{
+                "a.txt": &fstest.MapFile{
+                    Data: []byte("a"),
+                },
+            },
+        ),
+    )
+
+    _, _, bodyReader, served := server.ServeReader(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/elsewhere/a.txt"),
+        logger,
+    )
+
+    if true == served {
+        if nil != bodyReader {
+            _ = bodyReader.Close()
+        }
+
+        t.Fatalf("expected a path outside the mount to be declined")
+    }
+
+    if 0 != len(logger.warningMessages) {
+        t.Fatalf("expected the mount to decline the path before the canonical check refused it, got %v", logger.warningMessages)
+    }
+}
+
+/* @info a mount written without a trailing slash still matches only whole segments. "/staticky/a.txt" begins with "/static", so the remainder is "ky/a.txt" — a name with no leading slash, which is anchored before it is cleaned and then fails to match the path that arrived. Rebuilding the path around the mount is what catches it: comparing only the remainder would let the segment boundary be absorbed. */
+func TestFileServer_ServeReader_AMountWithoutATrailingSlashDoesNotMatchALongerSegment(t *testing.T) {
+    logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
+
+    server := NewFileServer(
+        NewOptions(
+            NewFileServerConfig(
+                ModeEmbedded,
+                "",
+                "index.html",
+                "/static",
+                false,
+                0,
+                false,
+            ),
+            "",
+            fstest.MapFS{
+                "ky/a.txt": &fstest.MapFile{
+                    Data: []byte("a"),
+                },
+            },
+        ),
+    )
+
+    _, _, bodyReader, served := server.ServeReader(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/staticky/a.txt"),
+        logger,
+    )
+
+    if true == served {
+        if nil != bodyReader {
+            _ = bodyReader.Close()
+        }
+
+        t.Fatalf("expected a longer segment not to be absorbed by the mount")
+    }
+
+    if false == recordedContains(logger.warningMessages, "static serve non canonical path") {
+        t.Fatalf("expected the mismatch to be recorded as non canonical, got %v", logger.warningMessages)
+    }
+}
+
+/* @info the embedded mode packs the public directory into the binary under its own name, so the resolved path is joined onto it before the filesystem is asked. Without the join the request reaches for the file at the root of the embedded tree, where it is not. */
+func TestFileServer_ServeReader_TheEmbeddedPublicDirectoryIsJoinedOntoThePath(t *testing.T) {
+    server := NewFileServer(
+        NewOptions(
+            NewFileServerConfig(
+                ModeEmbedded,
+                "public",
+                "index.html",
+                "",
+                false,
+                0,
+                false,
+            ),
+            "",
+            fstest.MapFS{
+                "public/a.txt": &fstest.MapFile{
+                    Data: []byte("a"),
+                },
+            },
+        ),
+    )
+
+    statusCode, _, bodyReader, served := server.ServeReader(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt"),
+        logging.NewNopLogger(),
+    )
+
+    if false == served {
+        t.Fatalf("expected the embedded public directory to be joined onto the path")
+    }
+
+    if http.StatusOK != statusCode {
+        t.Fatalf("expected 200, got %d", statusCode)
+    }
+
+    content, readErr := io.ReadAll(bodyReader)
+    if nil != readErr {
+        t.Fatalf("read error: %v", readErr)
+    }
+
+    _ = bodyReader.Close()
+
+    if "a" != string(content) {
+        t.Fatalf("expected the body out of the embedded public directory, got %q", string(content))
+    }
+}
+
+/* @info every caching header a static answer carries is decided on the streaming resolution, which is the one a running application uses — and none of it had a test there. The tag is what a revalidating cache offers back, the modification date is what an older one offers, and the cache control is what tells a shared cache it may keep the copy at all. */
+func TestFileServer_ServeReader_ACachedAnswerCarriesTheTagTheDateAndTheCacheControl(t *testing.T) {
+    modifiedAt := time.Date(2026, 1, 3, 12, 34, 56, 0, time.UTC)
+
+    server := NewFileServer(
+        NewOptions(
+            NewFileServerConfig(
+                ModeEmbedded,
+                "",
+                "index.html",
+                "",
+                true,
+                600,
+                false,
+            ),
+            "",
+            fstest.MapFS{
+                "a.txt": &fstest.MapFile{
+                    Data:    []byte("a"),
+                    ModTime: modifiedAt,
+                },
+            },
+        ),
+    )
+
+    statusCode, headers, file, _, served := server.serveForStreaming(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt"),
+        logging.NewNopLogger(),
+    )
+
+    if false == served {
+        t.Fatalf("expected the file to resolve")
+    }
+
+    if nil != file {
+        _ = file.Close()
+    }
+
+    if http.StatusOK != statusCode {
+        t.Fatalf("expected 200, got %d", statusCode)
+    }
+
+    expectedEtag := GenerateEtag(&staticEtagFileInfo{size: 1, modTime: modifiedAt}, false)
+    if expectedEtag != headers.Get("ETag") {
+        t.Fatalf("expected the entity tag %q, got %q", expectedEtag, headers.Get("ETag"))
+    }
+
+    if modifiedAt.Format(http.TimeFormat) != headers.Get("Last-Modified") {
+        t.Fatalf("expected the modification date, got %q", headers.Get("Last-Modified"))
+    }
+
+    if "public, max-age=600" != headers.Get("Cache-Control") {
+        t.Fatalf("expected the configured cache control, got %q", headers.Get("Cache-Control"))
+    }
+}
+
+/* @info the tag a revalidating cache offers back is answered on the streaming resolution too, and the answer closes the file it had already opened to build the tag. */
+func TestFileServer_ServeReader_AMatchingTagAnswersNotModifiedAndClosesTheFile(t *testing.T) {
+    modifiedAt := time.Date(2026, 1, 3, 12, 34, 56, 0, time.UTC)
+
+    fileSystem := &trackingFileSystem{
+        inner: fstest.MapFS{
+            "a.txt": &fstest.MapFile{
+                Data:    []byte("a"),
+                ModTime: modifiedAt,
+            },
+        },
+    }
+
+    server := NewFileServer(
+        NewOptions(
+            NewFileServerConfig(
+                ModeEmbedded,
+                "",
+                "index.html",
+                "",
+                true,
+                600,
+                false,
+            ),
+            "",
+            fileSystem,
+        ),
+    )
+
+    request := testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt")
+    request.HttpRequest().Header.Set("If-None-Match", GenerateEtag(&staticEtagFileInfo{size: 1, modTime: modifiedAt}, false))
+
+    statusCode, _, file, _, served := server.serveForStreaming(request, logging.NewNopLogger())
+
+    if false == served {
+        t.Fatalf("expected the conditional request to be answered")
+    }
+
+    if http.StatusNotModified != statusCode {
+        t.Fatalf("expected 304, got %d", statusCode)
+    }
+
+    if nil != file {
+        _ = file.Close()
+
+        t.Fatalf("expected a 304 to hand back no file")
+    }
+
+    if 1 != fileSystem.closedCount {
+        t.Fatalf("expected the 304 to close the file it opened, closed %d", fileSystem.closedCount)
+    }
+}
+
+/* @info the modification date is the older cache's question, and the streaming resolution answers it as well — closing the file it opened, exactly as the tag answer does. */
+func TestFileServer_ServeReader_AnUnchangedDateAnswersNotModifiedAndClosesTheFile(t *testing.T) {
+    modifiedAt := time.Date(2026, 1, 3, 12, 34, 56, 0, time.UTC)
+
+    fileSystem := &trackingFileSystem{
+        inner: fstest.MapFS{
+            "a.txt": &fstest.MapFile{
+                Data:    []byte("a"),
+                ModTime: modifiedAt,
+            },
+        },
+    }
+
+    server := NewFileServer(
+        NewOptions(
+            NewFileServerConfig(
+                ModeEmbedded,
+                "",
+                "index.html",
+                "",
+                true,
+                600,
+                false,
+            ),
+            "",
+            fileSystem,
+        ),
+    )
+
+    request := testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt")
+    request.HttpRequest().Header.Set("If-Modified-Since", modifiedAt.Format(http.TimeFormat))
+
+    statusCode, _, file, _, served := server.serveForStreaming(request, logging.NewNopLogger())
+
+    if false == served {
+        t.Fatalf("expected the conditional request to be answered")
+    }
+
+    if http.StatusNotModified != statusCode {
+        t.Fatalf("expected 304, got %d", statusCode)
+    }
+
+    if nil != file {
+        _ = file.Close()
+
+        t.Fatalf("expected a 304 to hand back no file")
+    }
+
+    if 1 != fileSystem.closedCount {
+        t.Fatalf("expected the 304 to close the file it opened, closed %d", fileSystem.closedCount)
+    }
+}
+
+/* @info a client that offered a tag has already said which bytes it holds, so the date is not consulted at all — otherwise a deploy that rewrites content while preserving timestamps answers 304 to a cache that just proved, by offering a tag that does not match, that it holds different bytes. The buffered twin has this test; the streaming one, which is the path every request takes, did not. */
+func TestFileServer_ServeReader_TheDateIsIgnoredWhenATagWasOffered(t *testing.T) {
+    modifiedAt := time.Date(2026, 1, 3, 12, 34, 56, 0, time.UTC)
+
+    server := NewFileServer(
+        NewOptions(
+            NewFileServerConfig(
+                ModeEmbedded,
+                "",
+                "index.html",
+                "",
+                true,
+                600,
+                false,
+            ),
+            "",
+            fstest.MapFS{
+                "a.txt": &fstest.MapFile{
+                    Data:    []byte("a"),
+                    ModTime: modifiedAt,
+                },
+            },
+        ),
+    )
+
+    request := testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt")
+    request.HttpRequest().Header.Set("If-None-Match", "\"an-older-deployment\"")
+    request.HttpRequest().Header.Set("If-Modified-Since", modifiedAt.Format(http.TimeFormat))
+
+    statusCode, _, file, _, served := server.serveForStreaming(request, logging.NewNopLogger())
+
+    if false == served {
+        t.Fatalf("expected the request to be answered")
+    }
+
+    if nil != file {
+        _ = file.Close()
+    }
+
+    if http.StatusOK != statusCode {
+        t.Fatalf("expected the whole body for a tag that does not match, got %d", statusCode)
+    }
+}
+
+/* @info the buffered and the streaming resolutions carry the same refusals, written twice. Only the streaming one is ever reached by a request, so a guard repaired on one and forgotten on the other would leave the reachable half open with the battery green. This is not the proof of any single guard — each has its own test, where it is the only candidate — it is the signal that the two halves have not drifted apart. */
+func TestFileServer_TheBufferedAndStreamingResolutionsAgreeOnEveryRefusal(t *testing.T) {
+    fileSystem := fstest.MapFS{
+        "a.txt": &fstest.MapFile{
+            Data: []byte("a"),
+        },
+        "internal/secret.json": &fstest.MapFile{
+            Data: []byte("secret"),
+        },
+        ".env": &fstest.MapFile{
+            Data: []byte("APP_SECRET=1"),
+        },
+        "excluded/a.txt": &fstest.MapFile{
+            Data: []byte("a"),
+        },
+        "assets/a.txt": &fstest.MapFile{
+            Data: []byte("a"),
+        },
+    }
+
+    config := NewFileServerConfig(
+        ModeEmbedded,
+        "",
+        "index.html",
+        "",
+        false,
+        0,
+        false,
+    )
+    config.SetExcludedPathList([]string{"/excluded/"})
+
+    server := NewFileServer(NewOptions(config, "", fileSystem))
+
+    for _, probe := range []struct {
+        name        string
+        method      string
+        requestPath string
+        served      bool
+    }{
+        {name: "an ordinary asset", method: http.MethodGet, requestPath: "/a.txt", served: true},
+        {name: "a path that is not canonical", method: http.MethodGet, requestPath: "/open/../internal/secret.json", served: false},
+        {name: "a dot prefixed element", method: http.MethodGet, requestPath: "/.env", served: false},
+        {name: "an excluded prefix", method: http.MethodGet, requestPath: "/excluded/a.txt", served: false},
+        {name: "a method that is not a retrieval", method: http.MethodPost, requestPath: "/a.txt", served: false},
+        {name: "a directory", method: http.MethodGet, requestPath: "/assets", served: false},
+        {name: "a name that is not there", method: http.MethodGet, requestPath: "/absent.txt", served: false},
+    } {
+        _, _, _, bufferedServed := server.Serve(
+            testhelper.NewHttpTestRequest(probe.method, "http://example.com"+probe.requestPath),
+            logging.NewNopLogger(),
+        )
+
+        _, _, file, _, streamingServed := server.serveForStreaming(
+            testhelper.NewHttpTestRequest(probe.method, "http://example.com"+probe.requestPath),
+            logging.NewNopLogger(),
+        )
+
+        if nil != file {
+            _ = file.Close()
+        }
+
+        if probe.served != bufferedServed {
+            t.Fatalf("expected the buffered resolution to answer served=%v for %s, got %v", probe.served, probe.name, bufferedServed)
+        }
+
+        if bufferedServed != streamingServed {
+            t.Fatalf("the two resolutions disagree on %s: buffered=%v streaming=%v", probe.name, bufferedServed, streamingServed)
+        }
+    }
+}
+
+func recordedContains(messages []string, expected string) bool {
+    for _, message := range messages {
+        if true == strings.Contains(message, expected) {
+            return true
+        }
+    }
+
+    return false
 }

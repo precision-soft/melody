@@ -216,3 +216,41 @@ func TestHasExcludedPathPrefix_EmptyEntryExcludesEverything(t *testing.T) {
         t.Fatalf("expected an empty entry to exclude every path")
     }
 }
+
+/* @info the fs.FS contract names the served root ".", and the file server itself never asks for it that way — it hands over a real file name — so this is the door a caller outside the package uses. The substitution to the empty name is inert for the outcome: joining "." onto the base resolves back to the base, so removing it opens the very same directory. What it is not inert for is the inversion, which empties every name that is not "." and answers the root for a request that named a file; that is where it is proved. */
+func TestDirFileSystem_OpenDotNamesTheServedDirectory(t *testing.T) {
+    directory := t.TempDir()
+
+    fileSystem := osDirFileSystem(directory)
+
+    file, err := fileSystem.Open(".")
+    if nil != err {
+        t.Fatalf("open dot error: %v", err)
+    }
+    defer file.Close()
+
+    info, statErr := file.Stat()
+    if nil != statErr {
+        t.Fatalf("stat error: %v", statErr)
+    }
+
+    if false == info.IsDir() {
+        t.Fatalf("expected \".\" to name the served directory")
+    }
+}
+
+/* @info the fallback that keeps the configured base when the base itself does not resolve is LATENT, and this is the measurement rather than the claim. Resolving the target resolves the base as its prefix, so the base cannot fail while the target succeeds, and the target's own failure is answered above it — which is what this asserts. Measured in the container: a missing base, a base that is a dangling symlink and a base with mode 000 all fail on the target first, and the suite runs as root, so no permission denies a search. Only the base being removed between the two resolutions could enter it, which no in-process state forces. */
+func TestDirFileSystem_ABaseThatDoesNotResolveIsRefusedOnTheTargetFirst(t *testing.T) {
+    directory := t.TempDir()
+
+    fileSystem := osDirFileSystem(filepath.Join(directory, "absent"))
+
+    _, err := fileSystem.Open("a.txt")
+    if nil == err {
+        t.Fatalf("expected a base that does not resolve to refuse the target")
+    }
+
+    if true == errors.Is(err, fs.ErrPermission) {
+        t.Fatalf("expected the target's own resolution failure rather than the containment refusal, got %v", err)
+    }
+}
