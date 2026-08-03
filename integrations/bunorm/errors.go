@@ -17,3 +17,5 @@ var ErrProviderIsRequired = errors.New("provider is required")
 var ErrResolverIsRequired = errors.New("resolver is required")
 
 var ErrManagerRegistryClosed = errors.New("manager registry is closed")
+
+var ErrProviderReturnedNilDatabase = errors.New("provider returned neither a database nor an error")

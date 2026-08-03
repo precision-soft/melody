@@ -45,11 +45,33 @@ func TestDefaultOptions_Values(t *testing.T) {
     }
 }
 
-func TestRegisterCommands_NilMigrationsReturnsEmptySet(t *testing.T) {
-    commands := RegisterCommands(nil, DefaultOptions())
+/* @info the empty set used to be the answer here; it left the caller believing it had registered the family and finding out at invocation time, as "unknown command". The refusal is deliberate: it names the wiring mistake where it was made */
+func TestRegisterCommands_NilMigrationsIsRefused(t *testing.T) {
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatalf("expected nil migrations to be refused")
+        }
 
-    if 0 != len(commands) {
-        t.Fatalf("expected no commands for nil migrations, got %d", len(commands))
+        recoveredErr, isError := recovered.(error)
+        if false == isError {
+            t.Fatalf("expected an error panic, got %#v", recovered)
+        }
+
+        if false == strings.Contains(recoveredErr.Error(), "migrations are nil") {
+            t.Fatalf("expected the refusal to name the nil migrations, got %q", recoveredErr.Error())
+        }
+    }()
+
+    RegisterCommands(nil, DefaultOptions())
+}
+
+/* @info the module gates its own optional set before calling the registrar, so a binary that registers only migration contexts never reaches the refusal above */
+func TestModule_WithoutMigrationsDoesNotReachTheRefusal(t *testing.T) {
+    module := NewModule(ModuleConfig{Migrations: nil, Options: DefaultOptions()})
+
+    if commands := module.RegisterCliCommands(nil); nil != commands {
+        t.Fatalf("expected no commands for a module without migrations or contexts, got %d", len(commands))
     }
 }
 

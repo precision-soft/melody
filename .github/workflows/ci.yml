@@ -87,6 +87,9 @@ jobs:
                     for cron_directory in integrations/cron integrations/cron/v2 integrations/cron/v3; do
                         (cd "${cron_directory}" && go test -race -count=1 ./...)
                     done
+                    for bunorm_directory in integrations/bunorm integrations/bunorm/v2 integrations/bunorm/v3; do
+                        (cd "${bunorm_directory}" && go test -race -count=1 ./...)
+                    done
 
     # the env-gated live suites the matrix job cannot exercise: real RabbitMQ,
     # Redis, MySQL, PostgreSQL and S3 (localstack) service containers. Every

@@ -1,6 +1,8 @@
 package bunorm
 
 import (
+    "fmt"
+    "reflect"
     "sync"
 
     "github.com/uptrace/bun"
@@ -18,7 +20,9 @@ type ManagerRegistry struct {
     lock              sync.Mutex
     managers          map[string]*Manager
     pendingOpenByName map[string]*managerOpen
-    closed            bool
+    /* the migration databases live beside the request pools, never inside them: a migration connection lifts the driver deadlines, and handing it to request traffic would trade one failure mode for another */
+    migrationDatabases map[string]*bun.DB
+    closed             bool
 }
 
 /*
@@ -33,7 +37,7 @@ type managerOpen struct {
 }
 
 func NewManagerRegistry(resolver containercontract.Resolver, providerDefinitions ...ProviderDefinition) (*ManagerRegistry, error) {
-    if nil == resolver {
+    if true == isNilInterface(resolver) {
         return nil, ErrResolverIsRequired
     }
 
@@ -50,7 +54,7 @@ func NewManagerRegistry(resolver containercontract.Resolver, providerDefinitions
             return nil, ErrProviderDefinitionNameIsRequired
         }
 
-        if nil == providerDefinition.Provider {
+        if true == isNilInterface(providerDefinition.Provider) {
             return nil, ErrProviderIsRequired
         }
 
@@ -80,7 +84,99 @@ func NewManagerRegistry(resolver containercontract.Resolver, providerDefinitions
         defaultProviderDefinitionName: defaultProviderDefinitionName,
         managers:                      make(map[string]*Manager),
         pendingOpenByName:             make(map[string]*managerOpen),
+        migrationDatabases:            make(map[string]*bun.DB),
     }, nil
+}
+
+/* isNilInterface answers whether the interface value is nil outright or holds a nil pointer, map, slice, channel or function: a typed nil passes a plain nil comparison and then panics on first use, far from the wiring mistake that produced it. Duplicated from the framework's internal package, which a separate module cannot import. */
+func isNilInterface(value any) bool {
+    if nil == value {
+        return true
+    }
+
+    reflected := reflect.ValueOf(value)
+
+    switch reflected.Kind() {
+    case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func, reflect.Interface:
+        return reflected.IsNil()
+    default:
+        return false
+    }
+}
+
+/* MigrationDatabase answers the connection the migration commands should run on: a dedicated one with the driver deadlines lifted when the provider implements MigrationProvider — reported through the second return — and the ordinary pooled connection otherwise. A request pool carries read and write deadlines sized for requests, and a DDL statement that legitimately runs past them is cut mid-statement with "invalid connection", outside any transaction MySQL would roll back; the dedicated connection exists so a long migration finishes instead. An empty name selects the default definition. The dedicated database is opened once per name, cached, and closed by Close. */
+func (instance *ManagerRegistry) MigrationDatabase(name string) (*bun.DB, bool, error) {
+    if "" == name {
+        name = instance.defaultProviderDefinitionName
+    }
+
+    instance.lock.Lock()
+
+    if true == instance.closed {
+        instance.lock.Unlock()
+
+        return nil, false, ErrManagerRegistryClosed
+    }
+
+    if database, exists := instance.migrationDatabases[name]; true == exists {
+        instance.lock.Unlock()
+
+        return database, true, nil
+    }
+
+    providerDefinition, exists := instance.providerDefinitionByName[name]
+    if false == exists {
+        instance.lock.Unlock()
+
+        return nil, false, ErrProviderDefinitionNotFound
+    }
+
+    migrationProvider, isMigrationProvider := providerDefinition.Provider.(MigrationProvider)
+    if false == isMigrationProvider {
+        instance.lock.Unlock()
+
+        manager, managerErr := instance.Manager(name)
+        if nil != managerErr {
+            return nil, false, managerErr
+        }
+
+        return manager.Database(), false, nil
+    }
+
+    /* the dial runs outside the registry-wide lock for the same reason Manager's does: a down database must not serialize cache hits or a concurrent Close. Migrations run from a sequential cli command, so no coalescing machinery is warranted — a concurrent duplicate open is resolved below by closing the loser. */
+    instance.lock.Unlock()
+
+    database, openErr := migrationProvider.OpenForMigration(instance.resolver)
+    if nil != openErr {
+        if nil != database {
+            _ = database.Close()
+        }
+
+        return nil, false, openErr
+    }
+
+    if nil == database {
+        return nil, false, ErrProviderReturnedNilDatabase
+    }
+
+    instance.lock.Lock()
+    defer instance.lock.Unlock()
+
+    if true == instance.closed {
+        _ = database.Close()
+
+        return nil, false, ErrManagerRegistryClosed
+    }
+
+    if existingDatabase, exists := instance.migrationDatabases[name]; true == exists {
+        _ = database.Close()
+
+        return existingDatabase, true, nil
+    }
+
+    instance.migrationDatabases[name] = database
+
+    return database, true, nil
 }
 
 func (instance *ManagerRegistry) DefaultManager() (*Manager, error) {
@@ -120,6 +216,13 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
     }
 
     instance.lock.Lock()
+
+    /* the refusal stands at the entry, ahead of the cache: Close ends every pool it memoized without emptying the map, so a cache hit would hand back a manager over a dead pool with a nil error, while the open path below refuses the same call by name — one registry answering the same question two ways, and the answer that looks like success fails at the first query instead */
+    if true == instance.closed {
+        instance.lock.Unlock()
+
+        return nil, ErrManagerRegistryClosed
+    }
 
     if manager, exists := instance.managers[name]; true == exists {
         instance.lock.Unlock()
@@ -166,9 +269,10 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
         delete(instance.pendingOpenByName, name)
         instance.lock.Unlock()
 
+        /* the panic value rides along for the coalesced waiters: they receive this error instead of the re-raised panic, and without the value their log names the definition but not the refusal that produced it */
         pendingOpen.openError = exception.NewError(
             "bunorm manager provider panicked while opening",
-            map[string]any{"name": name},
+            map[string]any{"name": name, "panic": fmt.Sprintf("%v", recovered)},
             nil,
         )
         close(pendingOpen.done)
@@ -187,7 +291,19 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
         delete(instance.pendingOpenByName, name)
 
         if nil != openErr {
+            /* the Provider contract does not promise a nil database beside a non-nil error, and a pool handed over with an error would otherwise be the last reference anyone holds */
+            if nil != database {
+                _ = database.Close()
+            }
+
             pendingOpen.openError = openErr
+
+            return
+        }
+
+        if nil == database {
+            /* a provider answering neither a database nor an error would otherwise be memoized as a manager wrapping nil, turning a wiring bug into a nil dereference at the first query, far from its cause */
+            pendingOpen.openError = ErrProviderReturnedNilDatabase
 
             return
         }
@@ -250,16 +366,43 @@ func (instance *ManagerRegistry) Close() error {
     instance.closed = true
 
     var closeErr error
+    failedNames := make([]string, 0)
 
-    for _, manager := range instance.managers {
+    for name, manager := range instance.managers {
         if nil == manager {
             continue
         }
 
         managerCloseErr := manager.Close()
+        if nil != managerCloseErr {
+            failedNames = append(failedNames, name)
+        }
         if nil == closeErr && nil != managerCloseErr {
             closeErr = managerCloseErr
         }
+    }
+
+    for name, migrationDatabase := range instance.migrationDatabases {
+        if nil == migrationDatabase {
+            continue
+        }
+
+        migrationDatabaseCloseErr := migrationDatabase.Close()
+        if nil != migrationDatabaseCloseErr {
+            failedNames = append(failedNames, name+" (migration)")
+        }
+        if nil == closeErr && nil != migrationDatabaseCloseErr {
+            closeErr = migrationDatabaseCloseErr
+        }
+    }
+
+    /* teardown diagnostics must name every pool that failed to close, not the first alone: the caller gets one error, so the other failures would otherwise leave no trace anywhere */
+    if 1 < len(failedNames) {
+        return exception.NewError(
+            "bunorm manager registry close failed for multiple databases",
+            map[string]any{"names": failedNames},
+            closeErr,
+        )
     }
 
     return closeErr

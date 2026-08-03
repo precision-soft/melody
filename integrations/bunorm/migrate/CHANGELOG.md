@@ -6,9 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- the migrate and rollback commands prefer the dedicated migration connection when the registry's provider implements `bunorm.MigrationProvider`, and fall back to the ordinary pool otherwise: the request pool carries driver deadlines sized for requests, and a DDL statement that legitimately runs past them is cut mid-statement. The verbose manager label says which connection the run rides — "(dedicated migration connection)"
+- the verbose DATABASE block is answered for PostgreSQL too, through `current_database()`, `inet_server_addr()`, `inet_server_port()`, `current_user` and `version()`. It was a MySQL-only facility, so on a pgsql-backed manager the operator's confirmation of which database a migration was about to touch was silently absent rather than reported as unavailable. A connection over a unix socket, the one a local migration is most likely to use, reports its host as `<local socket>`
+
 ### Fixed
 
 - the migration lock is released on a context detached from the command's own, so interrupting a running migration no longer leaves the lock row behind and refusing every later migration until someone runs the unlock command by hand. The cancelled context made the delete fail before it reached the database, and the failure was discarded; it is now reported
+- a failed lock release fails the command. The failure was printed and then dropped, so a migrate or rollback whose unlock failed exited 0 while the lock row survived — a deploy script read success over a database that refuses every later migration on every replica. **Behavioural**: the exit code now reports it; a migration that itself failed keeps its own error as the verdict, with the unlock failure printed beside it
+- `RunQueries` and `RunQueriesWithOption` report an empty query set as a warning instead of printing "all 0 queries executed successfully". The run still succeeds — the caller decides what an empty migration means — but under `WithMarkAppliedOnSuccess(true)` the migration is marked applied and never runs again, so a builder that produced nothing must not read like the queries ran
+- `RegisterCommands` refuses a nil migration set instead of returning no commands at all. The silence left a direct caller believing it had registered the command family and finding out at invocation time, as "unknown command", far from the wiring that caused it; `Module` gates its own optional set before calling, so a binary registering only migration contexts is unaffected. **Behavioural**: `RegisterCommands(nil, ...)` now panics at registration
+- table cells are truncated by runes, not bytes: the format widths pad by rune count, so a multi-byte value was truncated even when it fit the column, with the cut landing mid-rune and rendering as a replacement character; a budget too small for the ellipsis no longer slices negative
 
 ## [v1.2.0] - 2026-07-11 - Multi-Context Migration Command Families
 

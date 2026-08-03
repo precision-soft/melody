@@ -106,10 +106,20 @@ func (instance *commandOutput) newline() {
     _, _ = fmt.Fprintln(instance.writer)
 }
 
+/* truncateString bounds the cell to maxLen runes, not bytes: the format widths in the blocks above pad by rune count, so a byte-sliced multi-byte value would be truncated even when it fits the column, with the cut landing mid-rune. A budget with no room for the ellipsis answers the clipped runes alone rather than slicing negative. */
 func truncateString(s string, maxLen int) string {
-    if len(s) <= maxLen {
+    if 0 >= maxLen {
+        return ""
+    }
+
+    runes := []rune(s)
+    if len(runes) <= maxLen {
         return s
     }
 
-    return s[:maxLen-3] + "..."
+    if 3 >= maxLen {
+        return string(runes[:maxLen])
+    }
+
+    return string(runes[:maxLen-3]) + "..."
 }

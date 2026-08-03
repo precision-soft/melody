@@ -573,3 +573,52 @@ func TestComputeBackoffDelayNaNMultiplierFallsBackToDefault(t *testing.T) {
         t.Fatalf("expected the NaN fallback to keep the default 5s clamp, got %s", provider.computeBackoffDelay(10))
     }
 }
+
+/* @info a zero arrives here far more often from an environment key nobody set than from a caller who means "no deadline", and the guards read a non-positive connect timeout as no deadline at all — so the zero-value configuration would disarm the protection the nil one arms */
+func TestResolvedTimeoutConfig_NonPositiveConnectTimeoutFallsBackToTheDefault(t *testing.T) {
+    defaultConfig := DefaultTimeoutConfig()
+
+    if defaultConfig.ConnectTimeout != (&Provider{}).resolvedTimeoutConfig().ConnectTimeout {
+        t.Fatalf("expected the default for a nil configuration")
+    }
+
+    if defaultConfig.ConnectTimeout != (&Provider{timeoutConfig: &TimeoutConfig{}}).resolvedTimeoutConfig().ConnectTimeout {
+        t.Fatalf("expected the default for a zero-value configuration")
+    }
+
+    if defaultConfig.ConnectTimeout != (&Provider{timeoutConfig: NewTimeoutConfig(-1)}).resolvedTimeoutConfig().ConnectTimeout {
+        t.Fatalf("expected the default for a negative connect timeout")
+    }
+
+    if 7*time.Second != (&Provider{timeoutConfig: NewTimeoutConfig(7 * time.Second)}).resolvedTimeoutConfig().ConnectTimeout {
+        t.Fatalf("expected the configured connect timeout to survive")
+    }
+}
+
+/* @info on database/sql a zero maximum means an UNLIMITED pool and a zero lifetime means connections that are never recycled, so a pool assembled from unset environment keys would remove the bounds the nil configuration installs */
+func TestResolvedPoolConfig_NonPositiveFieldsFallBackToTheDefaults(t *testing.T) {
+    defaultConfig := DefaultPoolConfig()
+
+    fromZero := (&Provider{poolConfig: &PoolConfig{}}).resolvedPoolConfig()
+    if defaultConfig.MaxOpenConnections != fromZero.MaxOpenConnections ||
+        defaultConfig.MaxIdleConnections != fromZero.MaxIdleConnections ||
+        defaultConfig.ConnectionMaxLifetime != fromZero.ConnectionMaxLifetime ||
+        defaultConfig.ConnectionMaxIdleTime != fromZero.ConnectionMaxIdleTime {
+        t.Fatalf("expected the defaults for a zero-value pool, got %+v", fromZero)
+    }
+
+    fromNegative := (&Provider{poolConfig: NewPoolConfig(-1, -1, -1, -1)}).resolvedPoolConfig()
+    if defaultConfig.MaxOpenConnections != fromNegative.MaxOpenConnections ||
+        defaultConfig.ConnectionMaxLifetime != fromNegative.ConnectionMaxLifetime {
+        t.Fatalf("expected the defaults for a negative pool, got %+v", fromNegative)
+    }
+
+    configured := (&Provider{poolConfig: NewPoolConfig(3, 2, time.Minute, time.Second)}).resolvedPoolConfig()
+    if 3 != configured.MaxOpenConnections || time.Minute != configured.ConnectionMaxLifetime {
+        t.Fatalf("expected the configured pool to survive, got %+v", configured)
+    }
+
+    if defaultConfig.MaxOpenConnections != (&Provider{}).resolvedPoolConfig().MaxOpenConnections {
+        t.Fatalf("expected the defaults for a nil pool configuration")
+    }
+}

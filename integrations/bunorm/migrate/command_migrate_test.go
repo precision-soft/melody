@@ -2,8 +2,11 @@ package migrate
 
 import (
     "context"
+    "errors"
     "strings"
     "testing"
+
+    "github.com/uptrace/bun/migrate"
 )
 
 func TestMigrateCommand_TakesLockBeforeMigratingAndReleasesIt(t *testing.T) {
@@ -131,5 +134,78 @@ func TestMigrateCommand_NoPendingMigrationsWarns(t *testing.T) {
 
     if 0 > recorder.firstIndexMatching(isUnlockDelete) {
         t.Fatalf("migration lock was not released: %v", recorder.recordedQueries())
+    }
+}
+
+/* @info a lock row that survives a failed release refuses every later migration on every replica; the printed line alone reaches nobody's pipeline, so the failure must become the exit code — while a migration that itself failed keeps its own error as the verdict, with the unlock failure printed beside it */
+func TestMigrateCommand_FailedUnlockFailsTheCommand(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.execHook = func(query string) error {
+        if true == isUnlockDelete(query) {
+            return context.DeadlineExceeded
+        }
+
+        return nil
+    }
+
+    runtimeInstance := newRuntimeWithDatabase(t, database)
+
+    upCalls := 0
+    migrations := newSingleMigrationSet("20240101000000", "create_users", &upCalls, nil)
+
+    command := NewMigrateCommand(migrations, DefaultOptions())
+
+    rendered, runErr := runMigrationCommand(t, runtimeInstance, command, "--no-color")
+    if nil == runErr {
+        t.Fatal("expected the failed unlock to fail the command")
+    }
+
+    if 1 != upCalls {
+        t.Fatalf("expected the migration itself to have run once, ran %d times", upCalls)
+    }
+
+    if false == strings.Contains(rendered, "ERROR:") {
+        t.Fatalf("unlock failure was not printed beside the exit code: %q", rendered)
+    }
+}
+
+/* @info the failed migration keeps its own error as the verdict even when the unlock beneath it also fails: the fold only fills an empty verdict, it never replaces one */
+func TestMigrateCommand_FailedMigrationKeepsItsErrorOverAFailedUnlock(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.execHook = func(query string) error {
+        if true == isUnlockDelete(query) {
+            return context.DeadlineExceeded
+        }
+
+        return nil
+    }
+
+    runtimeInstance := newRuntimeWithDatabase(t, database)
+
+    migrations := migrate.NewMigrations()
+    migrations.Add(migrate.Migration{
+        Name:    "20240101000000",
+        Comment: "create_users",
+        Up: func(ctx context.Context, migrator *migrate.Migrator, migration *migrate.Migration) error {
+            return errors.New("up exploded")
+        },
+        Down: func(ctx context.Context, migrator *migrate.Migrator, migration *migrate.Migration) error {
+            return nil
+        },
+    })
+
+    command := NewMigrateCommand(migrations, DefaultOptions())
+
+    _, runErr := runMigrationCommand(t, runtimeInstance, command, "--no-color")
+    if nil == runErr {
+        t.Fatal("expected the failed migration to fail the command")
+    }
+
+    if false == strings.Contains(runErr.Error(), "up exploded") {
+        t.Fatalf("expected the migration's own error as the verdict, got %q", runErr.Error())
+    }
+
+    if true == errors.Is(runErr, context.DeadlineExceeded) {
+        t.Fatalf("expected the unlock failure not to replace the migration's error, got %q", runErr.Error())
     }
 }

@@ -119,6 +119,59 @@ func (instance *Provider) Open(resolver containercontract.Resolver) (*bun.DB, er
     return instance.openWithRetry(resolver)
 }
 
+/* resolvedTimeoutConfig answers the configuration the connector is built from, with every non-positive field replaced by the constructor default. A zero reaches here far more often from an environment key nobody set than from a caller who means "no deadline", and the guards below read a non-positive connect timeout as no deadline at all — so the unset key would disarm the very protection the nil configuration arms, and a negative one would put the deadline in the past. */
+func (instance *Provider) resolvedTimeoutConfig() *TimeoutConfig {
+    defaultConfig := DefaultTimeoutConfig()
+
+    if nil == instance.timeoutConfig {
+        return defaultConfig
+    }
+
+    resolved := &TimeoutConfig{
+        ConnectTimeout: instance.timeoutConfig.ConnectTimeout,
+    }
+
+    if 0 >= resolved.ConnectTimeout {
+        resolved.ConnectTimeout = defaultConfig.ConnectTimeout
+    }
+
+    return resolved
+}
+
+/* resolvedPoolConfig answers the pool sizing the database is built with, with every non-positive field replaced by the constructor default: on database/sql a zero maximum means an UNLIMITED pool and a zero lifetime means connections that are never recycled, so a configuration assembled from unset environment keys would remove the bounds the nil configuration installs. */
+func (instance *Provider) resolvedPoolConfig() *PoolConfig {
+    defaultConfig := DefaultPoolConfig()
+
+    if nil == instance.poolConfig {
+        return defaultConfig
+    }
+
+    resolved := &PoolConfig{
+        MaxOpenConnections:    instance.poolConfig.MaxOpenConnections,
+        MaxIdleConnections:    instance.poolConfig.MaxIdleConnections,
+        ConnectionMaxLifetime: instance.poolConfig.ConnectionMaxLifetime,
+        ConnectionMaxIdleTime: instance.poolConfig.ConnectionMaxIdleTime,
+    }
+
+    if 0 >= resolved.MaxOpenConnections {
+        resolved.MaxOpenConnections = defaultConfig.MaxOpenConnections
+    }
+
+    if 0 >= resolved.MaxIdleConnections {
+        resolved.MaxIdleConnections = defaultConfig.MaxIdleConnections
+    }
+
+    if 0 >= resolved.ConnectionMaxLifetime {
+        resolved.ConnectionMaxLifetime = defaultConfig.ConnectionMaxLifetime
+    }
+
+    if 0 >= resolved.ConnectionMaxIdleTime {
+        resolved.ConnectionMaxIdleTime = defaultConfig.ConnectionMaxIdleTime
+    }
+
+    return resolved
+}
+
 func (instance *Provider) openWithRetry(resolver containercontract.Resolver) (*bun.DB, error) {
     logger, loggerErr := logging.LoggerFromResolver(resolver)
     if nil != loggerErr {
@@ -200,15 +253,8 @@ func (instance *Provider) open(resolver containercontract.Resolver) (*bun.DB, er
 
     connectionConfig := NewConnectionConfig(host, port, databaseName, user, password)
 
-    poolConfig := instance.poolConfig
-    if nil == poolConfig {
-        poolConfig = DefaultPoolConfig()
-    }
-
-    timeoutConfig := instance.timeoutConfig
-    if nil == timeoutConfig {
-        timeoutConfig = DefaultTimeoutConfig()
-    }
+    poolConfig := instance.resolvedPoolConfig()
+    timeoutConfig := instance.resolvedTimeoutConfig()
 
     address := fmt.Sprintf("%s:%s", host, port)
 

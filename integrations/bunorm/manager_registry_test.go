@@ -5,8 +5,10 @@ import (
     "database/sql"
     "database/sql/driver"
     "errors"
+    "fmt"
     "io"
     "reflect"
+    "strings"
     "sync"
     "testing"
     "time"
@@ -17,6 +19,7 @@ import (
     "github.com/uptrace/bun/schema"
 
     containercontract "github.com/precision-soft/melody/container/contract"
+    "github.com/precision-soft/melody/exception"
 )
 
 type fakeResolver struct{}
@@ -53,7 +56,11 @@ type fakeProvider struct {
 
 func (instance *fakeProvider) Open(resolver containercontract.Resolver) (*bun.DB, error) {
     instance.openCount = instance.openCount + 1
-    return nil, nil
+
+    /* a real stub database: the registry refuses a provider answering neither a database nor an error */
+    database, _ := newCloseRaceDatabase()
+
+    return database, nil
 }
 
 type blockingProvider struct {
@@ -65,7 +72,10 @@ func (instance *blockingProvider) Open(resolver containercontract.Resolver) (*bu
     close(instance.openStarted)
     <-instance.releaseOpen
 
-    return nil, nil
+    /* a real stub database: the registry refuses a provider answering neither a database nor an error */
+    database, _ := newCloseRaceDatabase()
+
+    return database, nil
 }
 
 type panickingProvider struct {
@@ -301,6 +311,21 @@ func TestManagerRegistry_PanicDuringOpenReleasesCoalescedWaiters(t *testing.T) {
         if nil == secondErr {
             t.Fatalf("expected the coalesced caller to receive an error after the open panicked")
         }
+
+        /* the panic value must ride the waiter's error: the re-raised panic unwinds only the opening goroutine, so without it the waiter's log names the definition but not the refusal that produced it */
+        var exceptionErr *exception.Error
+        if false == errors.As(secondErr, &exceptionErr) {
+            t.Fatalf("expected an exception error for the coalesced caller, got %v", secondErr)
+        }
+
+        panicValue, hasPanicValue := exceptionErr.Context()["panic"]
+        if false == hasPanicValue {
+            t.Fatalf("expected the panic value in the error context, got %v", exceptionErr.Context())
+        }
+
+        if false == strings.Contains(fmt.Sprintf("%v", panicValue), "bunorm provider open exploded") {
+            t.Fatalf("expected the panic value to carry the original message, got %v", panicValue)
+        }
     case <-time.After(2 * time.Second):
         t.Fatalf("the coalesced Manager call blocked forever on the un-closed done channel")
     }
@@ -515,5 +540,578 @@ func TestManagerRegistry_CloseDuringInFlightOpenClosesDatabaseAndRefuses(t *test
         }
     case <-time.After(2 * time.Second):
         t.Fatalf("Close never returned")
+    }
+}
+
+type migrationCapableProvider struct {
+    ordinaryDatabase   *bun.DB
+    migrationDatabase  *bun.DB
+    migrationOpenCount int
+}
+
+func (instance *migrationCapableProvider) Open(resolver containercontract.Resolver) (*bun.DB, error) {
+    return instance.ordinaryDatabase, nil
+}
+
+func (instance *migrationCapableProvider) OpenForMigration(resolver containercontract.Resolver) (*bun.DB, error) {
+    instance.migrationOpenCount = instance.migrationOpenCount + 1
+
+    return instance.migrationDatabase, nil
+}
+
+var _ MigrationProvider = (*migrationCapableProvider)(nil)
+
+func TestManagerRegistry_MigrationDatabasePrefersTheCapability(t *testing.T) {
+    ordinaryDatabase, _ := newCloseRaceDatabase()
+    migrationDatabase, _ := newCloseRaceDatabase()
+
+    provider := &migrationCapableProvider{
+        ordinaryDatabase:  ordinaryDatabase,
+        migrationDatabase: migrationDatabase,
+    }
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeResolver{},
+        ProviderDefinition{Name: "main", Provider: provider, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    database, dedicated, migrationDatabaseErr := registry.MigrationDatabase("")
+    if nil != migrationDatabaseErr {
+        t.Fatalf("migration database error: %v", migrationDatabaseErr)
+    }
+    if false == dedicated {
+        t.Fatalf("expected the dedicated migration connection to be preferred")
+    }
+    if migrationDatabase != database {
+        t.Fatalf("expected the migration database, not the ordinary pool")
+    }
+
+    databaseAgain, _, migrationDatabaseAgainErr := registry.MigrationDatabase("main")
+    if nil != migrationDatabaseAgainErr {
+        t.Fatalf("migration database error: %v", migrationDatabaseAgainErr)
+    }
+    if database != databaseAgain {
+        t.Fatalf("expected the cached migration database")
+    }
+    if 1 != provider.migrationOpenCount {
+        t.Fatalf("expected exactly one migration open, got %d", provider.migrationOpenCount)
+    }
+}
+
+/* @info a provider without the capability keeps the old behaviour: the ordinary pooled connection, reported as not dedicated */
+func TestManagerRegistry_MigrationDatabaseFallsBackWithoutTheCapability(t *testing.T) {
+    registry, registryErr := NewManagerRegistry(
+        &fakeResolver{},
+        ProviderDefinition{Name: "main", Provider: &fakeProvider{}, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    _, dedicated, migrationDatabaseErr := registry.MigrationDatabase("main")
+    if nil != migrationDatabaseErr {
+        t.Fatalf("migration database error: %v", migrationDatabaseErr)
+    }
+    if true == dedicated {
+        t.Fatalf("expected the fallback to the ordinary connection")
+    }
+
+    if _, managerErr := registry.Manager("main"); nil != managerErr {
+        t.Fatalf("expected the ordinary manager path to have been taken: %v", managerErr)
+    }
+
+    if 0 != len(registry.migrationDatabases) {
+        t.Fatalf("expected no dedicated database to be cached on the fallback path")
+    }
+}
+
+/* @info the dedicated migration database belongs to the registry: Close ends it beside the managers, so a lifted-deadline connection never outlives the shutdown */
+func TestManagerRegistry_CloseClosesTheMigrationDatabase(t *testing.T) {
+    migrationDatabase, migrationCloseSignal := newCloseRaceDatabase()
+
+    provider := &migrationCapableProvider{
+        ordinaryDatabase:  nil,
+        migrationDatabase: migrationDatabase,
+    }
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeResolver{},
+        ProviderDefinition{Name: "main", Provider: provider, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    if _, _, migrationDatabaseErr := registry.MigrationDatabase("main"); nil != migrationDatabaseErr {
+        t.Fatalf("migration database error: %v", migrationDatabaseErr)
+    }
+
+    if closeErr := registry.Close(); nil != closeErr {
+        t.Fatalf("close error: %v", closeErr)
+    }
+
+    select {
+    case <-migrationCloseSignal:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("expected Close to close the dedicated migration database")
+    }
+
+    if _, _, afterCloseErr := registry.MigrationDatabase("main"); false == errors.Is(afterCloseErr, ErrManagerRegistryClosed) {
+        t.Fatalf("expected the closed registry to refuse a migration database, got %v", afterCloseErr)
+    }
+}
+
+/* @info a typed nil passes a plain nil comparison and then panics on first use, far from the wiring mistake that produced it; the constructor is the place that can still name the mistake */
+func TestNewManagerRegistry_ErrorsWhenResolverIsTypedNil(t *testing.T) {
+    var typedNilResolver *fakeResolver
+
+    _, registryErr := NewManagerRegistry(
+        typedNilResolver,
+        ProviderDefinition{Name: "main", Provider: &fakeProvider{}, IsDefault: true},
+    )
+
+    if false == errors.Is(registryErr, ErrResolverIsRequired) {
+        t.Fatalf("expected ErrResolverIsRequired for a typed-nil resolver, got %v", registryErr)
+    }
+}
+
+func TestNewManagerRegistry_ErrorsWhenProviderIsTypedNil(t *testing.T) {
+    var typedNilProvider *fakeProvider
+
+    _, registryErr := NewManagerRegistry(
+        &fakeResolver{},
+        ProviderDefinition{Name: "main", Provider: typedNilProvider, IsDefault: true},
+    )
+
+    if false == errors.Is(registryErr, ErrProviderIsRequired) {
+        t.Fatalf("expected ErrProviderIsRequired for a typed-nil provider, got %v", registryErr)
+    }
+}
+
+type nilPairProvider struct {
+    openCount int
+}
+
+func (instance *nilPairProvider) Open(resolver containercontract.Resolver) (*bun.DB, error) {
+    instance.openCount = instance.openCount + 1
+
+    return nil, nil
+}
+
+/* @info a provider answering neither a database nor an error must be refused, not memoized as a manager wrapping nil that panics at the first query; the refusal is not memoized either, so a repaired provider is retried */
+func TestManagerRegistry_RefusesProviderReturningNeitherDatabaseNorError(t *testing.T) {
+    provider := &nilPairProvider{}
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeResolver{},
+        ProviderDefinition{Name: "main", Provider: provider, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    _, managerErr := registry.Manager("main")
+    if false == errors.Is(managerErr, ErrProviderReturnedNilDatabase) {
+        t.Fatalf("expected ErrProviderReturnedNilDatabase, got %v", managerErr)
+    }
+
+    if 0 != len(registry.managers) {
+        t.Fatalf("expected no manager to be memoized for the refused open")
+    }
+
+    _, secondErr := registry.Manager("main")
+    if false == errors.Is(secondErr, ErrProviderReturnedNilDatabase) {
+        t.Fatalf("expected the refusal again on retry, got %v", secondErr)
+    }
+
+    if 2 != provider.openCount {
+        t.Fatalf("expected the refused open to be retried, got %d opens", provider.openCount)
+    }
+}
+
+type databaseBesideErrorProvider struct {
+    database *bun.DB
+    openErr  error
+}
+
+func (instance *databaseBesideErrorProvider) Open(resolver containercontract.Resolver) (*bun.DB, error) {
+    return instance.database, instance.openErr
+}
+
+/* @info the Provider contract does not promise a nil database beside a non-nil error; the registry is the last holder of that pool, so it must close it instead of leaking it */
+func TestManagerRegistry_ClosesTheDatabaseAProviderReturnsBesideAnError(t *testing.T) {
+    database, databaseClosed := newCloseRaceDatabase()
+    providerErr := errors.New("open failed after the pool was assembled")
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeResolver{},
+        ProviderDefinition{Name: "main", Provider: &databaseBesideErrorProvider{database: database, openErr: providerErr}, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    _, managerErr := registry.Manager("main")
+    if false == errors.Is(managerErr, providerErr) {
+        t.Fatalf("expected the provider's own error, got %v", managerErr)
+    }
+
+    select {
+    case <-databaseClosed:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("expected the registry to close the database handed over beside the error")
+    }
+}
+
+/*
+   failClosingConnector backs a real *bun.DB whose Close fails with the given error,
+   so the aggregation of teardown failures can be observed per database name.
+*/
+type failClosingConnector struct {
+    closeErr error
+}
+
+func (instance *failClosingConnector) Connect(ctx context.Context) (driver.Conn, error) {
+    return nil, errors.New("connect is not supported by the fail-closing connector")
+}
+
+func (instance *failClosingConnector) Driver() driver.Driver {
+    return &closeRaceDriver{}
+}
+
+func (instance *failClosingConnector) Close() error {
+    return instance.closeErr
+}
+
+var _ io.Closer = (*failClosingConnector)(nil)
+
+func newFailClosingDatabase(closeErr error) *bun.DB {
+    return bun.NewDB(sql.OpenDB(&failClosingConnector{closeErr: closeErr}), newCloseRaceDialect())
+}
+
+type pinnedDatabaseProvider struct {
+    database *bun.DB
+}
+
+func (instance *pinnedDatabaseProvider) Open(resolver containercontract.Resolver) (*bun.DB, error) {
+    return instance.database, nil
+}
+
+/* @info teardown diagnostics must name every pool that failed to close: the caller receives one error, so without the aggregation the failures past the first leave no trace anywhere */
+func TestManagerRegistry_CloseNamesEveryDatabaseThatFailedToClose(t *testing.T) {
+    alphaErr := errors.New("alpha close refused")
+    betaErr := errors.New("beta close refused")
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeResolver{},
+        ProviderDefinition{Name: "alpha", Provider: &pinnedDatabaseProvider{database: newFailClosingDatabase(alphaErr)}, IsDefault: true},
+        ProviderDefinition{Name: "beta", Provider: &pinnedDatabaseProvider{database: newFailClosingDatabase(betaErr)}},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    if _, managerErr := registry.Manager("alpha"); nil != managerErr {
+        t.Fatalf("manager error: %v", managerErr)
+    }
+    if _, managerErr := registry.Manager("beta"); nil != managerErr {
+        t.Fatalf("manager error: %v", managerErr)
+    }
+
+    closeErr := registry.Close()
+    if nil == closeErr {
+        t.Fatalf("expected an error from Close")
+    }
+
+    var exceptionErr *exception.Error
+    if false == errors.As(closeErr, &exceptionErr) {
+        t.Fatalf("expected the aggregated exception error, got %v", closeErr)
+    }
+
+    names, hasNames := exceptionErr.Context()["names"]
+    if false == hasNames {
+        t.Fatalf("expected the failed names in the error context, got %v", exceptionErr.Context())
+    }
+
+    namesString := fmt.Sprintf("%v", names)
+    if false == strings.Contains(namesString, "alpha") || false == strings.Contains(namesString, "beta") {
+        t.Fatalf("expected both database names among the failures, got %v", namesString)
+    }
+}
+
+/* @info a single failed close keeps its own error untouched: the aggregation exists for the failures that would otherwise vanish, not to re-wrap a lone one */
+func TestManagerRegistry_CloseKeepsALoneCloseFailureUntouched(t *testing.T) {
+    alphaErr := errors.New("alpha close refused")
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeResolver{},
+        ProviderDefinition{Name: "alpha", Provider: &pinnedDatabaseProvider{database: newFailClosingDatabase(alphaErr)}, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    if _, managerErr := registry.Manager("alpha"); nil != managerErr {
+        t.Fatalf("manager error: %v", managerErr)
+    }
+
+    closeErr := registry.Close()
+    if false == errors.Is(closeErr, alphaErr) {
+        t.Fatalf("expected the lone close failure itself, got %v", closeErr)
+    }
+
+    var exceptionErr *exception.Error
+    if true == errors.As(closeErr, &exceptionErr) {
+        t.Fatalf("expected no aggregation wrapper around a lone failure, got %v", closeErr)
+    }
+}
+
+/*
+   configurableMigrationProvider answers OpenForMigration with whatever pair the
+   test pinned, optionally parking mid-open on its channels so a Close can land
+   while the migration open is in flight.
+*/
+type configurableMigrationProvider struct {
+    migrationDatabase *bun.DB
+    migrationErr      error
+    openStarted       chan struct{}
+    releaseOpen       chan struct{}
+}
+
+func (instance *configurableMigrationProvider) Open(resolver containercontract.Resolver) (*bun.DB, error) {
+    database, _ := newCloseRaceDatabase()
+
+    return database, nil
+}
+
+func (instance *configurableMigrationProvider) OpenForMigration(resolver containercontract.Resolver) (*bun.DB, error) {
+    if nil != instance.openStarted {
+        close(instance.openStarted)
+        <-instance.releaseOpen
+    }
+
+    return instance.migrationDatabase, instance.migrationErr
+}
+
+var _ MigrationProvider = (*configurableMigrationProvider)(nil)
+
+/* @info the twin of the Manager-path refusal, proved on its own line: a capability answering neither a database nor an error must be refused, not cached as a nil migration connection */
+func TestManagerRegistry_MigrationDatabaseRefusesProviderReturningNeitherDatabaseNorError(t *testing.T) {
+    registry, registryErr := NewManagerRegistry(
+        &fakeResolver{},
+        ProviderDefinition{Name: "main", Provider: &configurableMigrationProvider{}, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    _, _, migrationDatabaseErr := registry.MigrationDatabase("main")
+    if false == errors.Is(migrationDatabaseErr, ErrProviderReturnedNilDatabase) {
+        t.Fatalf("expected ErrProviderReturnedNilDatabase, got %v", migrationDatabaseErr)
+    }
+
+    if 0 != len(registry.migrationDatabases) {
+        t.Fatalf("expected no migration database to be cached for the refused open")
+    }
+}
+
+/* @info the twin of the Manager-path handover close, proved on its own line: the registry is the last holder of a pool handed over beside an error */
+func TestManagerRegistry_MigrationDatabaseClosesTheDatabaseReturnedBesideAnError(t *testing.T) {
+    database, databaseClosed := newCloseRaceDatabase()
+    providerErr := errors.New("migration open failed after the pool was assembled")
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeResolver{},
+        ProviderDefinition{Name: "main", Provider: &configurableMigrationProvider{migrationDatabase: database, migrationErr: providerErr}, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    _, _, migrationDatabaseErr := registry.MigrationDatabase("main")
+    if false == errors.Is(migrationDatabaseErr, providerErr) {
+        t.Fatalf("expected the provider's own error, got %v", migrationDatabaseErr)
+    }
+
+    select {
+    case <-databaseClosed:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("expected the registry to close the migration database handed over beside the error")
+    }
+}
+
+/* @info the twin of the Manager-path close race, proved on its own line: a Close landing while a migration open is in flight must close the fresh pool and refuse, not cache a connection the shutdown already missed */
+func TestManagerRegistry_CloseDuringInFlightMigrationOpenClosesDatabaseAndRefuses(t *testing.T) {
+    database, databaseClosed := newCloseRaceDatabase()
+
+    openStarted := make(chan struct{})
+    releaseOpen := make(chan struct{})
+
+    provider := &configurableMigrationProvider{
+        migrationDatabase: database,
+        openStarted:       openStarted,
+        releaseOpen:       releaseOpen,
+    }
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeResolver{},
+        ProviderDefinition{Name: "main", Provider: provider, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    type migrationOutcome struct {
+        database *bun.DB
+        err      error
+    }
+
+    outcomeChannel := make(chan migrationOutcome, 1)
+    go func() {
+        migrationDatabase, _, migrationDatabaseErr := registry.MigrationDatabase("main")
+        outcomeChannel <- migrationOutcome{database: migrationDatabase, err: migrationDatabaseErr}
+    }()
+
+    select {
+    case <-openStarted:
+    case <-time.After(2 * time.Second):
+        close(releaseOpen)
+        t.Fatalf("the migration open never started")
+    }
+
+    closeReturned := make(chan error, 1)
+    go func() {
+        closeReturned <- registry.Close()
+    }()
+
+    /* give Close time to take the registry lock and mark it closed before the parked open resumes */
+    time.Sleep(100 * time.Millisecond)
+
+    close(releaseOpen)
+
+    var outcome migrationOutcome
+    select {
+    case outcome = <-outcomeChannel:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("MigrationDatabase never returned after the open was released")
+    }
+
+    if false == errors.Is(outcome.err, ErrManagerRegistryClosed) {
+        t.Fatalf("expected ErrManagerRegistryClosed, got database=%v err=%v", outcome.database, outcome.err)
+    }
+
+    select {
+    case <-databaseClosed:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("the freshly opened migration database was not closed after the registry closed mid-open")
+    }
+
+    select {
+    case closeErr := <-closeReturned:
+        if nil != closeErr {
+            t.Fatalf("unexpected error closing registry: %v", closeErr)
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatalf("Close never returned")
+    }
+}
+
+func TestManagerRegistry_MigrationDatabaseRefusesAnUnknownName(t *testing.T) {
+    registry, registryErr := NewManagerRegistry(
+        &fakeResolver{},
+        ProviderDefinition{Name: "main", Provider: &fakeProvider{}, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    _, _, migrationDatabaseErr := registry.MigrationDatabase("missing")
+    if false == errors.Is(migrationDatabaseErr, ErrProviderDefinitionNotFound) {
+        t.Fatalf("expected ErrProviderDefinitionNotFound, got %v", migrationDatabaseErr)
+    }
+}
+
+type erroringProvider struct {
+    openErr error
+}
+
+func (instance *erroringProvider) Open(resolver containercontract.Resolver) (*bun.DB, error) {
+    return nil, instance.openErr
+}
+
+/* @info the fallback path hands the ordinary open's failure through unchanged */
+func TestManagerRegistry_MigrationDatabaseFallbackPropagatesTheOpenFailure(t *testing.T) {
+    openRefused := errors.New("open refused")
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeResolver{},
+        ProviderDefinition{Name: "main", Provider: &erroringProvider{openErr: openRefused}, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    _, dedicated, migrationDatabaseErr := registry.MigrationDatabase("main")
+    if false == errors.Is(migrationDatabaseErr, openRefused) {
+        t.Fatalf("expected the open failure through the fallback, got %v", migrationDatabaseErr)
+    }
+    if true == dedicated {
+        t.Fatalf("expected no dedicated connection to be reported beside a failure")
+    }
+}
+
+/* @info Close ends every pool it memoized without emptying the map, so a cache hit after it would hand back a manager over a dead pool with a NIL error, while the open path refuses the same call by name — the refusal now stands at the entry, ahead of the cache, so one registry gives one answer */
+func TestManagerRegistry_RefusesACachedManagerAfterClose(t *testing.T) {
+    registry, registryErr := NewManagerRegistry(
+        &fakeResolver{},
+        ProviderDefinition{Name: "main", Provider: &fakeProvider{}, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    if _, warmErr := registry.Manager("main"); nil != warmErr {
+        t.Fatalf("unexpected error warming the manager: %v", warmErr)
+    }
+
+    if closeErr := registry.Close(); nil != closeErr {
+        t.Fatalf("close error: %v", closeErr)
+    }
+
+    manager, managerErr := registry.Manager("main")
+    if false == errors.Is(managerErr, ErrManagerRegistryClosed) {
+        t.Fatalf("expected ErrManagerRegistryClosed for the cached manager, got manager=%v err=%v", manager, managerErr)
+    }
+
+    if nil != manager {
+        t.Fatalf("expected no manager to be handed out after Close, got %v", manager)
+    }
+}
+
+/* @info the entry refusal also spares the dial: a name never opened used to be dialed in full — with the retry sleeps of a database the same shutdown just stopped — before the publish step refused it */
+func TestManagerRegistry_RefusesAnUnopenedNameAfterCloseWithoutDialing(t *testing.T) {
+    provider := &fakeProvider{}
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeResolver{},
+        ProviderDefinition{Name: "main", Provider: provider, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    if closeErr := registry.Close(); nil != closeErr {
+        t.Fatalf("close error: %v", closeErr)
+    }
+
+    if _, managerErr := registry.Manager("main"); false == errors.Is(managerErr, ErrManagerRegistryClosed) {
+        t.Fatalf("expected ErrManagerRegistryClosed, got %v", managerErr)
+    }
+
+    if 0 != provider.openCount {
+        t.Fatalf("expected no dial after Close, got %d", provider.openCount)
     }
 }

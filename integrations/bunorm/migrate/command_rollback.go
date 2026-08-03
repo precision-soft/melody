@@ -30,7 +30,7 @@ func (instance *RollbackCommand) Flags() []clicontract.Flag {
     )
 }
 
-func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) (runErr error) {
     option := instance.base.optionFromCommand(commandContext)
     outputInstance := newCommandOutput(commandContext.Writer, option)
 
@@ -51,7 +51,13 @@ func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, co
         outputInstance.printError(lockErr)
         return lockErr
     }
-    defer unlockMigrations(runtimeInstance.Context(), migrator, outputInstance)
+    /* the unlock failure becomes the command's verdict only when the rollback itself succeeded: a failed rollback keeps its own error, with the unlock failure printed beside it */
+    defer func() {
+        unlockErr := unlockMigrations(runtimeInstance.Context(), migrator, outputInstance)
+        if nil == runErr && nil != unlockErr {
+            runErr = unlockErr
+        }
+    }()
 
     if option.Verbose {
         identity, identityErr := fetchDatabaseIdentity(runtimeInstance.Context(), db)

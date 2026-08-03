@@ -555,3 +555,34 @@ var (
     _ driver.Connector      = (*fakeConnector)(nil)
     _ schema.Dialect        = (*fakeDialect)(nil)
 )
+
+/* @info an empty set is almost always a builder that produced nothing rather than a migration with nothing to do, and the migrator marks the migration applied on success — burying it, since an applied migration never runs again. The run still succeeds, so the caller decides; what it must not do is read like the queries ran */
+func TestRunQueriesWithOption_EmptySetWarnsInsteadOfReportingSuccess(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    buffer := &bytes.Buffer{}
+
+    runErr := RunQueriesWithOption(
+        context.Background(),
+        database,
+        "up",
+        "20240101000000_create_users",
+        nil,
+        RunnerOption{Writer: buffer, NoColor: true},
+    )
+    if nil != runErr {
+        t.Fatalf("expected an empty set to still succeed, got %v", runErr)
+    }
+
+    rendered := buffer.String()
+    if false == strings.Contains(rendered, "WARNING") {
+        t.Fatalf("expected the empty set to be reported as a warning, got %q", rendered)
+    }
+
+    if true == strings.Contains(rendered, "executed successfully") {
+        t.Fatalf("expected no success line for a set that executed nothing, got %q", rendered)
+    }
+
+    if 0 != len(recorder.recordedQueries()) {
+        t.Fatalf("expected no statement to reach the database, got %v", recorder.recordedQueries())
+    }
+}

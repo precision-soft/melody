@@ -1,6 +1,7 @@
 package migrate
 
 import (
+    "context"
     "strings"
     "testing"
 )
@@ -66,5 +67,38 @@ func TestRollbackCommand_NoMigrationsWarns(t *testing.T) {
 
     if false == strings.Contains(rendered, "WARNING: no migrations to rollback") {
         t.Fatalf("missing warning in %q", rendered)
+    }
+}
+
+/* @info the rollback twin of the migrate proof: the two commands fold the unlock failure into their verdicts separately, so each fold carries its own test */
+func TestRollbackCommand_FailedUnlockFailsTheCommand(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = appliedMigrationRowsHook("20240101000000")
+    recorder.execHook = func(query string) error {
+        if true == isUnlockDelete(query) {
+            return context.DeadlineExceeded
+        }
+
+        return nil
+    }
+
+    runtimeInstance := newRuntimeWithDatabase(t, database)
+
+    downCalls := 0
+    migrations := newSingleMigrationSet("20240101000000", "create_users", nil, &downCalls)
+
+    command := NewRollbackCommand(migrations, DefaultOptions())
+
+    rendered, runErr := runMigrationCommand(t, runtimeInstance, command, "--no-color")
+    if nil == runErr {
+        t.Fatal("expected the failed unlock to fail the command")
+    }
+
+    if 1 != downCalls {
+        t.Fatalf("expected the rollback itself to have run once, ran %d times", downCalls)
+    }
+
+    if false == strings.Contains(rendered, "ERROR:") {
+        t.Fatalf("unlock failure was not printed beside the exit code: %q", rendered)
     }
 }

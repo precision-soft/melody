@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- `provider.go` — every non-positive field of `PoolConfig` and `TimeoutConfig` falls back to the constructor default, the way the retry configuration already did. A zero reaches the provider far more often from an environment key nobody set than from a caller who means "no limit": on `database/sql` a zero maximum is an UNLIMITED pool and a zero lifetime means connections that are never recycled, and a non-positive connect timeout left the startup ping with no deadline of its own. **Behavioural**: a configuration that relied on zero meaning "unlimited" now receives the documented defaults
+- `IsDuplicateKey` answers on the typed SQLSTATE — `23505`, matched through `errors.As`, which sees through wrapping — instead of probing the rendered message for a substring. The probe answered true for any error whose text merely contained the digits (a quoted value in a CHECK-violation detail was enough) and answered false for a real duplicate-key error wrapped in an exception whose message hides its cause. **Behavioural**: errors that carry no PostgreSQL protocol error — a hand-written message containing "duplicate key", an error stringified across a process boundary — no longer match
+
 - `provider.go` — transient-error detection recognises a connection abort through explicit markers for both spellings its platforms give it (`software caused connection abort` and `established connection was aborted`), and the deprecated `net.Error.Temporary()` call is removed: the interface was deprecated in Go 1.18 for its ill-defined semantics, and the one retryable case it uniquely caught is now covered by the marker
 
 ## [v1.1.6] - 2026-07-24 - Cold-Start Transient Markers

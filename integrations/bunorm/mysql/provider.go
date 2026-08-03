@@ -83,6 +83,80 @@ type Provider struct {
     timeoutConfig *TimeoutConfig
     retryConfig   *RetryConfig
     postBuildHook PostBuildHook
+
+    /* the migration derivation means its zeroes: they lift the deadlines and the recycling on purpose, which is the one intent the resolution below must not read as an unset field */
+    tunedForMigration bool
+}
+
+/* resolvedTimeoutConfig answers the configuration the connector is built from, with every non-positive field replaced by the constructor default. A zero reaches here far more often from an environment key nobody set than from a caller who means "no deadline", and on this driver a zero read or write deadline means exactly no deadline — so the unset key would disarm the very protection the nil configuration arms, and a negative one would put the deadline in the past, failing every dial instantly with an i/o timeout no network event caused. */
+func (instance *Provider) resolvedTimeoutConfig() *TimeoutConfig {
+    defaultConfig := DefaultTimeoutConfig()
+
+    if nil == instance.timeoutConfig {
+        return defaultConfig
+    }
+
+    resolved := &TimeoutConfig{
+        ConnectTimeout: instance.timeoutConfig.ConnectTimeout,
+        ReadTimeout:    instance.timeoutConfig.ReadTimeout,
+        WriteTimeout:   instance.timeoutConfig.WriteTimeout,
+    }
+
+    if 0 >= resolved.ConnectTimeout {
+        resolved.ConnectTimeout = defaultConfig.ConnectTimeout
+    }
+
+    if true == instance.tunedForMigration {
+        return resolved
+    }
+
+    if 0 >= resolved.ReadTimeout {
+        resolved.ReadTimeout = defaultConfig.ReadTimeout
+    }
+
+    if 0 >= resolved.WriteTimeout {
+        resolved.WriteTimeout = defaultConfig.WriteTimeout
+    }
+
+    return resolved
+}
+
+/* resolvedPoolConfig answers the pool sizing the database is built with, with every non-positive field replaced by the constructor default: on database/sql a zero maximum means an UNLIMITED pool and a zero lifetime means connections that are never recycled, so a configuration assembled from unset environment keys would remove the bounds the nil configuration installs. */
+func (instance *Provider) resolvedPoolConfig() *PoolConfig {
+    defaultConfig := DefaultPoolConfig()
+
+    if nil == instance.poolConfig {
+        return defaultConfig
+    }
+
+    resolved := &PoolConfig{
+        MaxOpenConnections:    instance.poolConfig.MaxOpenConnections,
+        MaxIdleConnections:    instance.poolConfig.MaxIdleConnections,
+        ConnectionMaxLifetime: instance.poolConfig.ConnectionMaxLifetime,
+        ConnectionMaxIdleTime: instance.poolConfig.ConnectionMaxIdleTime,
+    }
+
+    if 0 >= resolved.MaxOpenConnections {
+        resolved.MaxOpenConnections = defaultConfig.MaxOpenConnections
+    }
+
+    if 0 >= resolved.MaxIdleConnections {
+        resolved.MaxIdleConnections = defaultConfig.MaxIdleConnections
+    }
+
+    if true == instance.tunedForMigration {
+        return resolved
+    }
+
+    if 0 >= resolved.ConnectionMaxLifetime {
+        resolved.ConnectionMaxLifetime = defaultConfig.ConnectionMaxLifetime
+    }
+
+    if 0 >= resolved.ConnectionMaxIdleTime {
+        resolved.ConnectionMaxIdleTime = defaultConfig.ConnectionMaxIdleTime
+    }
+
+    return resolved
 }
 
 func (instance *Provider) WithPoolConfig(poolConfig *PoolConfig) *Provider {
@@ -109,6 +183,50 @@ func (instance *Provider) Open(resolver containercontract.Resolver) (*bun.DB, er
     }
 
     return instance.openWithRetry(resolver)
+}
+
+/* OpenForMigration opens the same database with the driver deadlines lifted: ReadTimeout and WriteTimeout are per-connection settings baked into the connector, sized for request traffic, and a DDL statement that legitimately runs past them — an ALTER TABLE adding constraints on a large table — is cut mid-statement with "invalid connection", outside any transaction MySQL would roll back. The connect timeout stays armed (a down database must still fail fast), the pool is kept to the two connections a sequential migration run needs, and no connection is recycled mid-run — a lifetime rotation under a running statement is the same cut by another name. */
+func (instance *Provider) OpenForMigration(resolver containercontract.Resolver) (*bun.DB, error) {
+    return instance.migrationProvider().Open(resolver)
+}
+
+/* migrationProvider derives the provider OpenForMigration dials with: the same parameters, hook and retry policy, over the migration pool and the lifted deadlines. */
+func (instance *Provider) migrationProvider() *Provider {
+    return &Provider{
+        hostParameterName:     instance.hostParameterName,
+        portParameterName:     instance.portParameterName,
+        databaseParameterName: instance.databaseParameterName,
+        userParameterName:     instance.userParameterName,
+        passwordParameterName: instance.passwordParameterName,
+        poolConfig:            migrationPoolConfig(),
+        timeoutConfig:         migrationTimeoutConfig(instance.timeoutConfig),
+        retryConfig:           instance.retryConfig,
+        postBuildHook:         instance.postBuildHook,
+        tunedForMigration:     true,
+    }
+}
+
+/* migrationTimeoutConfig lifts the read and write deadlines and keeps the connect timeout of the configuration it derives from. */
+func migrationTimeoutConfig(baseConfig *TimeoutConfig) *TimeoutConfig {
+    connectTimeout := DefaultTimeoutConfig().ConnectTimeout
+    if nil != baseConfig {
+        connectTimeout = baseConfig.ConnectTimeout
+    }
+
+    return &TimeoutConfig{
+        ConnectTimeout: connectTimeout,
+        ReadTimeout:    0,
+        WriteTimeout:   0,
+    }
+}
+
+func migrationPoolConfig() *PoolConfig {
+    return &PoolConfig{
+        MaxOpenConnections:    2,
+        MaxIdleConnections:    1,
+        ConnectionMaxLifetime: 0,
+        ConnectionMaxIdleTime: 0,
+    }
 }
 
 func (instance *Provider) openWithRetry(resolver containercontract.Resolver) (*bun.DB, error) {
@@ -192,15 +310,8 @@ func (instance *Provider) open(resolver containercontract.Resolver) (*bun.DB, er
 
     connectionConfig := NewConnectionConfig(host, port, databaseName, user, password)
 
-    poolConfig := instance.poolConfig
-    if nil == poolConfig {
-        poolConfig = DefaultPoolConfig()
-    }
-
-    timeoutConfig := instance.timeoutConfig
-    if nil == timeoutConfig {
-        timeoutConfig = DefaultTimeoutConfig()
-    }
+    poolConfig := instance.resolvedPoolConfig()
+    timeoutConfig := instance.resolvedTimeoutConfig()
 
     address := fmt.Sprintf("%s:%s", host, port)
 
@@ -373,4 +484,7 @@ func (instance *Provider) isTransientError(inputErr error) bool {
     return false
 }
 
-var _ bunorm.Provider = (*Provider)(nil)
+var (
+    _ bunorm.Provider          = (*Provider)(nil)
+    _ bunorm.MigrationProvider = (*Provider)(nil)
+)

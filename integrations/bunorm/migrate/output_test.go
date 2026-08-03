@@ -5,6 +5,7 @@ import (
     "errors"
     "strings"
     "testing"
+    "unicode/utf8"
 
     "github.com/precision-soft/melody/cli"
     "github.com/precision-soft/melody/cli/output"
@@ -249,5 +250,37 @@ func TestTruncateString(t *testing.T) {
 
     if 18 != len(truncated) {
         t.Fatalf("truncated string length = %d, want 18", len(truncated))
+    }
+}
+
+/* @info the format widths pad by rune count, so the budget is runes too: a byte-sliced multi-byte value would be truncated even when it fits the column, with the cut landing mid-rune and rendering as a replacement character */
+func TestTruncateString_CountsRunesNotBytes(t *testing.T) {
+    seventeenRunes := strings.Repeat("愛", 17)
+    if seventeenRunes != truncateString(seventeenRunes, 18) {
+        t.Fatalf("a value that fits the column in runes was truncated: %q", truncateString(seventeenRunes, 18))
+    }
+
+    truncated := truncateString(strings.Repeat("愛", 30), 18)
+    if strings.Repeat("愛", 15)+"..." != truncated {
+        t.Fatalf("truncated string = %q, want 15 runes plus ellipsis", truncated)
+    }
+
+    if false == utf8.ValidString(truncated) {
+        t.Fatalf("truncation split a rune: %q", truncated)
+    }
+}
+
+/* @info a budget with no room for the ellipsis answers the clipped runes alone instead of slicing negative */
+func TestTruncateString_SurvivesABudgetSmallerThanTheEllipsis(t *testing.T) {
+    if "ab" != truncateString("abcdef", 2) {
+        t.Fatalf("expected the clipped runes alone, got %q", truncateString("abcdef", 2))
+    }
+
+    if "" != truncateString("abcdef", 0) {
+        t.Fatalf("expected nothing for a zero budget, got %q", truncateString("abcdef", 0))
+    }
+
+    if "" != truncateString("abcdef", -1) {
+        t.Fatalf("expected nothing for a negative budget, got %q", truncateString("abcdef", -1))
     }
 }

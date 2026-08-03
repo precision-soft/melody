@@ -41,6 +41,13 @@ func RunQueriesWithOption(ctx context.Context, db *bun.DB, direction string, mig
     total := len(queries)
     printer := &migrationPrinter{writer: writer, noColor: option.NoColor}
 
+    /* an empty set is almost always a builder that produced nothing rather than a migration with nothing to do, and the migrator marks the migration applied on success — burying it, since an applied migration never runs again. The run still succeeds, so the caller decides; what it must not do is read like the queries ran. */
+    if 0 == total {
+        printer.printEmpty(direction, migrationName)
+
+        return nil
+    }
+
     for index, query := range queries {
         step := index + 1
         prefix := fmt.Sprintf("[migration:%s] %s [%d/%d]", direction, migrationName, step, total)
@@ -120,6 +127,17 @@ func (instance *migrationPrinter) printFailed(prefix string, queryName string, e
         cli.AnsiYellow, cli.AnsiReset,
         cli.AnsiYellow, formatQueryForLog(sql), cli.AnsiReset,
     )
+}
+
+func (instance *migrationPrinter) printEmpty(direction string, migrationName string) {
+    message := fmt.Sprintf("[migration:%s] %s: WARNING no queries to execute; the migration is marked applied without running anything", direction, migrationName)
+
+    if instance.noColor {
+        _, _ = fmt.Fprintf(instance.writer, "%s\n", message)
+        return
+    }
+
+    _, _ = fmt.Fprintf(instance.writer, "%s%s%s%s\n", cli.AnsiYellow, cli.AnsiBold, message, cli.AnsiReset)
 }
 
 func (instance *migrationPrinter) printSuccess(direction string, migrationName string, total int) {

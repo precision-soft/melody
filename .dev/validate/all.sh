@@ -149,8 +149,11 @@ run_live_go_suites() {
 # race, with a goroutine and a wait group, which without this lane could only ever pass. exception belongs here
 # for the same reason: a creation failure the container memoizes is handed to the owner and to every waiter at
 # once, so one error's context map is written in place while another goroutine iterates it, and the mutex that
-# orders them is only observable to the detector. No service containers
-# needed; the three add some four seconds per major.
+# orders them is only observable to the detector. bunorm's manager registry belongs here for the same class of
+# reason and needs no database to show it: it coalesces concurrent opens of one definition onto a single dial,
+# publishes the result to parked waiters through a channel, and races a Close against an open still in flight —
+# and its suite holds the tests written for exactly those windows, which without this lane could only ever pass.
+# No service containers needed; the three add some four seconds per major.
 RACE_SUITE_SPECIFICATION_STRING_LIST=(
     ". ./cache/... ./clock/... ./container/... ./application/... ./config/... ./event/... ./exception/... ./httpclient/... ./logging/... ./cli/... ./validation/... ./session/... ./security/... ./http/... ./internal/..."
     "v2 ./cache/... ./clock/... ./container/... ./application/... ./config/... ./event/... ./exception/... ./httpclient/... ./logging/... ./cli/... ./validation/... ./session/... ./security/... ./http/... ./internal/..."
@@ -158,6 +161,9 @@ RACE_SUITE_SPECIFICATION_STRING_LIST=(
     "integrations/cron ./..."
     "integrations/cron/v2 ./..."
     "integrations/cron/v3 ./..."
+    "integrations/bunorm ./..."
+    "integrations/bunorm/v2 ./..."
+    "integrations/bunorm/v3 ./..."
 )
 
 run_race_go_suites() {

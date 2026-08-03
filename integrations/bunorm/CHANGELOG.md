@@ -6,9 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `MigrationProvider`, the optional capability of opening a connection tuned for migrations, and `ManagerRegistry.MigrationDatabase`, which answers the connection the migration commands should run on: the dedicated one with the driver deadlines lifted when the provider implements the capability, the ordinary pooled connection otherwise. The request pool carries read and write deadlines sized for requests, and a DDL statement that legitimately runs past them — an `ALTER TABLE` adding constraints on a large table — is cut mid-statement with "invalid connection", outside any transaction MySQL would roll back. The dedicated database is opened once per name, cached beside the request pools — never inside them — closed by `Close`, and refused after it
+
 ### Fixed
 
 - the manager registry no longer wedges permanently when opening a database panics while the registry is being closed. The section that publishes the opened manager released its lock without a defer, so a panic from the database's own `Close` unwound with the lock held and the recovery path then blocked on that same lock — after which every later call to the registry blocked forever, silently. A provider returning a nil database was enough to trigger it
+- `NewManagerRegistry` refuses a typed-nil resolver or provider. A nil concrete pointer boxed in the interface passed the plain nil comparison, so the boot-time refusal degraded into a panic at the first resolution, far from the wiring mistake that produced it
+- a provider answering neither a database nor an error is refused with `ErrProviderReturnedNilDatabase` instead of being memoized as a manager wrapping nil, which handed callers a nil `*bun.DB` with no error and panicked at the first query; the refusal is not memoized, so a repaired provider is retried. Both open paths — `Manager` and `MigrationDatabase` — refuse it
+- a database handed over beside a non-nil error is closed instead of leaked: the `Provider` contract does not promise a nil database with the error, and the registry was the last holder of that pool. Both open paths close it
+- the error handed to callers coalesced onto a panicked open now carries the panic value in its context; they received an error naming only the definition while the actual reason rode a separate panic on the opening goroutine
+- `Close` names every database that failed to close: with several failures, only the first was returned and the rest left no trace anywhere. A lone failure keeps its own error untouched
+- `Manager` refuses everything after `Close` instead of only the names it had not opened yet. `Close` ends every pool it memoized without emptying the map, so a name already opened was answered with the manager over the now-dead pool and a nil error, while the same call for an unopened name was refused by `ErrManagerRegistryClosed` — one registry answering the same question two ways, with the answer that looked like success failing at the first query. The refusal also spares the dial: an unopened name used to be dialed in full, retry backoffs included, before the publish step refused it. **Behavioural**: `Manager`, `DefaultManager`, `Database` and their `Must` forms now refuse after `Close`
 
 ## [v1.0.1] - 2026-07-11 - Manager Registry Open Concurrency and Panic Safety
 

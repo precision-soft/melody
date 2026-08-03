@@ -6,8 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `Provider.OpenForMigration` — the provider implements `bunorm.MigrationProvider` and opens the same database with the driver deadlines lifted: `ReadTimeout` and `WriteTimeout` are per-connection settings baked into the connector, sized for request traffic, and a DDL statement that legitimately runs past them is cut mid-statement with "invalid connection", outside any transaction MySQL would roll back. The connect timeout stays armed, the pool is kept to the two connections a sequential migration run needs, and no connection is recycled mid-run — a lifetime rotation under a running statement is the same cut by another name
+
 ### Fixed
 
+- `provider.go` — every non-positive field of `PoolConfig` and `TimeoutConfig` falls back to the constructor default, the way the retry configuration already did. A zero reaches the provider far more often from an environment key nobody set than from a caller who means "no limit": on `database/sql` a zero maximum is an UNLIMITED pool and a zero lifetime means connections that are never recycled, while on this driver a zero read or write deadline means no deadline at all — so the zero-value configuration disarmed exactly the protections the nil configuration installs, and a negative one put the deadline in the past, failing every dial instantly with an i/o timeout no network event caused. **Behavioural**: a configuration that relied on zero meaning "unlimited" now receives the documented defaults; the migration connection keeps its deliberately lifted deadlines and disabled recycling
 - `provider.go` — transient-error detection recognises a connection abort through explicit markers for both spellings its platforms give it (`software caused connection abort` and `established connection was aborted`), aligning with the pgsql provider
 
 ## [v1.1.5] - 2026-07-24 - Server Shutdown Transient Marker
