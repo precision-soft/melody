@@ -12,7 +12,7 @@ import (
 type HttpException struct {
     statusCode int
     message    string
-    /* @important stateMutex guards context and alreadyLogged for the reason Error documents: the instance can be shared across request goroutines through a memoized failure, and the immutable fields need no lock */
+    /* stateMutex guards context and alreadyLogged: a memoized failure is shared across request goroutines. The immutable fields need no lock. */
     stateMutex    sync.RWMutex
     context       exceptioncontract.Context
     causeErr      error
@@ -53,7 +53,7 @@ func (instance *HttpException) SetContextValue(key string, value any) {
     instance.stateMutex.Lock()
     defer instance.stateMutex.Unlock()
 
-    /* the zero value is constructible outside the constructors and carries a nil map; the first write allocates it instead of panicking on the assignment */
+    /* the zero value is constructible outside the constructors and carries a nil map */
     if nil == instance.context {
         instance.context = make(exceptioncontract.Context)
     }
@@ -86,13 +86,14 @@ func (instance *HttpException) MarkAsLogged() {
 var _ exceptioncontract.ContextProvider = (*HttpException)(nil)
 var _ exceptioncontract.AlreadyLogged = (*HttpException)(nil)
 
-/* IsHttpException answers whether AsHttpException would find a usable exception, so the pair cannot disagree: a typed-nil match answered true here while AsHttpException answered nil, and a caller that trusted Is and then dereferenced panicked on the disagreement. */
+/* IsHttpException answers whether AsHttpException would find a usable exception, so a caller that trusts it and then dereferences cannot meet a disagreement. */
 func IsHttpException(err error) bool {
     return nil != AsHttpException(err)
 }
 
 func AsHttpException(err error) *HttpException {
-    if nil == err {
+    /* the typed nil is refused with the plain one: errors.As walks the chain through Unwrap, and every Unwrap in this package reads a field off its receiver */
+    if nil == err || true == isNilInterfaceValue(err) {
         return nil
     }
 
@@ -107,7 +108,7 @@ func AsHttpException(err error) *HttpException {
 func ValidationFailed(validationErrors any) *HttpException {
     httpException := NewHttpException(nethttp.StatusUnprocessableEntity, "validation failed")
 
-    /* the errors key is the one the kernel exception listener serves to the client; the detail used to travel under a key nothing on the response path reads, so it reached no one */
+    /* the errors key is the one the kernel exception listener serves to the client */
     httpException.SetContextValue("errors", validationErrors)
 
     return httpException

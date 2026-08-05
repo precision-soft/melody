@@ -33,7 +33,6 @@ func TestNewExitError_NilError_Panics(t *testing.T) {
     })
 }
 
-/* @info os.Exit hands the code to the operating system, which keeps its low 8 bits: 256 reports success from a dying process and a negative reads as 255, while 0 contradicts the error the constructor requires */
 func TestNewExitError_CodeOutOfRange_Panics(t *testing.T) {
     for _, exitCode := range []int{-1, 0, 256, 1000} {
         assertPanicsWithEmergency(t, "exit code out of range", func() {
@@ -52,7 +51,6 @@ func TestNewExitError_AcceptsTheRangeBoundaries(t *testing.T) {
     }
 }
 
-/* @info the zero value is constructible outside the constructor that refuses a nil error; the methods name the anomaly instead of dereferencing it at the process boundary */
 func TestExitError_ZeroValueError_NamesTheAnomaly(t *testing.T) {
     zeroValue := &ExitError{}
 
@@ -61,7 +59,6 @@ func TestExitError_ZeroValueError_NamesTheAnomaly(t *testing.T) {
     }
 }
 
-/* @info returning the nil field through the interface would box a typed nil that passes every nil comparison downstream */
 func TestExitError_ZeroValueUnwrap_ReturnsUntypedNil(t *testing.T) {
     zeroValue := &ExitError{}
 
@@ -70,7 +67,6 @@ func TestExitError_ZeroValueUnwrap_ReturnsUntypedNil(t *testing.T) {
     }
 }
 
-/* @info the carried error must travel out of both doors: Unwrap is what errors.Is and errors.As walk, ErrorValue is what the exit handler reads to decide whether the record still needs writing */
 func TestExitError_CarriesItsErrorThroughUnwrapAndErrorValue(t *testing.T) {
     carried := NewError("boom", nil, nil)
 
@@ -90,5 +86,33 @@ func TestExitError_CarriesItsErrorThroughUnwrapAndErrorValue(t *testing.T) {
 
     if false == errors.Is(exitError, carried) {
         t.Fatalf("expected errors.Is to reach the carried error through Unwrap")
+    }
+}
+
+func TestExitError_NilReceiverAccessorsAnswerInsteadOfDereferencing(t *testing.T) {
+    var typedNil *ExitError
+
+    if 0 != typedNil.ExitCode() {
+        t.Fatalf("expected a nil receiver to answer the out-of-range zero, got %d", typedNil.ExitCode())
+    }
+
+    if nil != typedNil.ErrorValue() {
+        t.Fatalf("expected a nil receiver to answer no error value")
+    }
+
+    /* the shape that reaches it: a typed-nil wrapper found through the chain by errors.As */
+    wrapped := NewError("command failed", nil, typedNil)
+
+    var found *ExitError
+    if false == errors.As(wrapped, &found) {
+        t.Fatalf("test setup broken: errors.As must match the typed-nil link")
+    }
+
+    if nil != found {
+        t.Fatalf("test setup broken: the matched pointer must be nil")
+    }
+
+    if 0 != found.ExitCode() {
+        t.Fatalf("expected the matched typed nil to answer instead of panicking")
     }
 }

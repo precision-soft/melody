@@ -37,7 +37,6 @@ func TestIsHttpExceptionAndAsHttpException(t *testing.T) {
     }
 }
 
-/* @info the http exception carries the same mutable context as its sibling and must copy it on the way in for the same reason: the caller keeps its map, and the exception is read from the response path while the handler that built it may still be holding the reference */
 func TestHttpException_SetContext_ReplacesTheContextAndCopiesTheInput(t *testing.T) {
     ex := NewHttpException(nethttp.StatusBadRequest, "bad request")
 
@@ -58,7 +57,6 @@ func TestHttpException_SetContext_ReplacesTheContextAndCopiesTheInput(t *testing
     }
 }
 
-/* @info CauseErr is how the cause reaches a caller that does not walk the chain — the logger's enrichment reads it directly to build the cause chain of a record */
 func TestHttpException_CauseErr_ReturnsTheWrappedCause(t *testing.T) {
     cause := errors.New("cause")
 
@@ -73,7 +71,6 @@ func TestHttpException_CauseErr_ReturnsTheWrappedCause(t *testing.T) {
     }
 }
 
-/* @info the entry guard is what keeps the pair honest on a plain nil: errors.As panics when handed a nil target chain of its own, and IsHttpException is written as "As found something", so a nil that got past here would decide both answers */
 func TestAsHttpException_NilError_AnswersNilAndFalse(t *testing.T) {
     if nil != AsHttpException(nil) {
         t.Fatalf("expected nil for a nil error")
@@ -84,7 +81,6 @@ func TestAsHttpException_NilError_AnswersNilAndFalse(t *testing.T) {
     }
 }
 
-/* @info an error that is not in the chain at all is the ordinary miss, and it must answer the same nil the guards answer */
 func TestAsHttpException_ForeignError_AnswersNilAndFalse(t *testing.T) {
     foreign := errors.New("foreign")
 
@@ -110,7 +106,6 @@ func TestValidationFailed_SetsErrorsContext(t *testing.T) {
         t.Fatalf("unexpected message")
     }
 
-    /* @info the detail travels under the errors key, the one the kernel exception listener serves to the client; validationErrors was a key nothing on the response path reads */
     errorsValue, exists := ex.Context()["errors"]
     if false == exists {
         t.Fatalf("expected errors context to exist")
@@ -126,7 +121,6 @@ func TestValidationFailed_SetsErrorsContext(t *testing.T) {
     }
 }
 
-/* @info the zero value is constructible outside the constructors and carries a nil map; the first context write must allocate it instead of panicking on the assignment */
 func TestHttpException_ZeroValueSetContextValue_AllocatesTheMap(t *testing.T) {
     zeroValue := &HttpException{}
 
@@ -137,7 +131,6 @@ func TestHttpException_ZeroValueSetContextValue_AllocatesTheMap(t *testing.T) {
     }
 }
 
-/* @info the pair cannot disagree on a typed nil: Is answered true while As answered nil, and a caller that trusted Is and then dereferenced panicked on the disagreement */
 func TestIsHttpException_TypedNilMatch_AnswersFalse(t *testing.T) {
     wrappedTypedNil := &nilProviderWrapper{}
 
@@ -150,7 +143,6 @@ func TestIsHttpException_TypedNilMatch_AnswersFalse(t *testing.T) {
     }
 }
 
-/* @info the mutable fields are locked for the reason Error documents; the proof is one writer held against one reader on the same instance */
 func TestHttpException_ConcurrentContextWriteAndRead_IsOrdered(t *testing.T) {
     sharedException := NewHttpException(500, "boom")
 
@@ -188,5 +180,31 @@ func TestHttpException_ConcurrentContextWriteAndRead_IsOrdered(t *testing.T) {
 
     if nil == sharedException.Context()["serviceName"] {
         t.Fatalf("expected the written key to survive")
+    }
+}
+
+func TestAsHttpException_TypedNilIsRefusedInsteadOfDereferenced(t *testing.T) {
+    var typedNilException *HttpException
+
+    var asError error = typedNilException
+
+    if nil == asError {
+        t.Fatalf("test setup broken: the typed nil must be a non-nil interface")
+    }
+
+    if nil != AsHttpException(asError) {
+        t.Fatalf("expected a typed nil to answer no http exception")
+    }
+
+    if true == IsHttpException(asError) {
+        t.Fatalf("expected Is and As to agree on a typed nil")
+    }
+
+    var typedNilError *Error
+
+    var errorAsInterface error = typedNilError
+
+    if nil != AsHttpException(errorAsInterface) {
+        t.Fatalf("expected a typed-nil *Error to answer no http exception")
     }
 }

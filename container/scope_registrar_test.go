@@ -19,7 +19,6 @@ func scopeRegistrarProvider(value string) containercontract.Provider[*scopeRegis
     }
 }
 
-/* @info a registration on a live scope is the same substitution one request wide, and the protected "service." namespace holds there too — with or without Replacing. */
 func TestScopeRegisterScoped_ProtectedNameRefused(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -47,7 +46,6 @@ func TestScopeRegisterScoped_ProtectedNameRefused(t *testing.T) {
     }
 }
 
-/* @info the protected-name refusal returns before the registration body is ever entered, so the only test this file held left the whole of it — two closed checks, the container-to-scope lock hand-off, four collision refusals and a rollback — never executed by anything. This is the body's happy path: what a live scope registers must be built through that scope, must be reachable by name and by type, and must not exist for the sibling scopes of the same container. */
 func TestScopeRegisterScoped_RegistersOnThisScopeAlone(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -87,7 +85,6 @@ func TestScopeRegisterScoped_RegistersOnThisScopeAlone(t *testing.T) {
     }
 }
 
-/* @info an empty name is a configuration value that resolved away, and a service filed under it can never be asked for again — it is refused where it is declared rather than accepted into a map nothing reads. */
 func TestScopeRegisterScoped_EmptyNameRefused(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -103,7 +100,6 @@ func TestScopeRegisterScoped_EmptyNameRefused(t *testing.T) {
     }
 }
 
-/* @info a nil provider is a wiring mistake that would otherwise be discovered on the request path, inside the creation guard, as a panic rather than as the error the registration promised. */
 func TestScopeRegisterScoped_NilProviderRefused(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -119,7 +115,6 @@ func TestScopeRegisterScoped_NilProviderRefused(t *testing.T) {
     }
 }
 
-/* @info a registration on a scope the kernel has already closed would land in maps the teardown has finished walking: built by nobody, closed by nobody. The refusal is read before the container is even consulted. */
 func TestScopeRegisterScoped_ClosedScopeRefused(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -140,7 +135,6 @@ func TestScopeRegisterScoped_ClosedScopeRefused(t *testing.T) {
     }
 }
 
-/* @info the registration asks the container first and lets its lock go before taking the scope's, never holding one across the other — which leaves a window where the scope closes between the two. The second closed check is the other side of that hand-off, and it answers with the same message as the first, so only the window itself tells them apart: the container write lock parks the registration after it has read the container and before it can take the scope lock, the scope is closed there, and the registration must still be refused rather than writing a provider into a scope nothing will ever build or close. */
 func TestScopeRegisterScoped_ClosedDuringTheLockHandOffIsStillRefused(t *testing.T) {
     serviceContainer := NewContainer()
     containerInstance := serviceContainer.(*container)
@@ -179,7 +173,6 @@ func TestScopeRegisterScoped_ClosedDuringTheLockHandOffIsStillRefused(t *testing
     }
 }
 
-/* @info two registrations of one name on the same scope would make which provider answers depend on nothing at all — the second write simply wins. The refusal carries a cause of its own so a caller can tell a duplicate from a collision with another lifetime. */
 func TestScopeRegisterScoped_RefusesADuplicateOnTheSameScope(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -208,7 +201,6 @@ func TestScopeRegisterScoped_RefusesADuplicateOnTheSameScope(t *testing.T) {
     }
 }
 
-/* @info a name the container declared for every scope already answers inside this one, so a registration adding a second provider for it would give one name two meanings within a single request. The refusal names the plan rather than the container, because that is where the name came from. */
 func TestScopeRegisterScoped_RefusesANameThePlanAlreadyHolds(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -237,7 +229,6 @@ func TestScopeRegisterScoped_RefusesANameThePlanAlreadyHolds(t *testing.T) {
     }
 }
 
-/* @info a name the container holds as a process singleton would answer differently inside this one scope, which is the ambiguity the two lifetimes exist to keep apart — the same refusal the container-level scoped registrar makes, at the level where the scope makes it. */
 func TestScopeRegisterScoped_RefusesANameTheContainerAlreadyHolds(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -266,7 +257,6 @@ func TestScopeRegisterScoped_RefusesANameTheContainerAlreadyHolds(t *testing.T) 
     }
 }
 
-/* @info the type half of the plan collision is a separate guard from the name one and needs its own proof, or deleting either leaves the other covering for it — the names differ here precisely so the name checks pass and only the type one can answer. */
 func TestScopeRegisterScoped_RefusesATypeThePlanAlreadyHolds(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -291,7 +281,6 @@ func TestScopeRegisterScoped_RefusesATypeThePlanAlreadyHolds(t *testing.T) {
     }
 }
 
-/* @info a type answering with a singleton outside the scope and with a per-request service inside it is the ambiguity itself, and the container's registrations are read across the lock hand-off precisely so this check can be made — the snapshot taken there is what this guard judges. */
 func TestScopeRegisterScoped_RefusesATypeTheContainerAlreadyHolds(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -316,7 +305,6 @@ func TestScopeRegisterScoped_RefusesATypeTheContainerAlreadyHolds(t *testing.T) 
     }
 }
 
-/* @info strictness decides whether two names of the SAME lifetime may share a type, and on a scope that is the scope's own registrations — a second one under a type already taken is refused with the scope's own message, which is what tells it apart from the plan collision that carries the identical cause. */
 func TestScopeRegisterScoped_RefusesADuplicateTypeOnTheSameScope(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -341,7 +329,6 @@ func TestScopeRegisterScoped_RefusesADuplicateTypeOnTheSameScope(t *testing.T) {
     }
 }
 
-/* @info a name kept without its type would answer by name and be absent by type — a half-registered service nobody declared, on a scope that lives for one request. The container-level twin of this rollback has been pinned since the container session; the scope-level one had never been entered. */
 func TestScopeRegisterScoped_RollsBackTheNameWhenTheTypeRegistrationFails(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -379,7 +366,6 @@ func TestScopeRegisterScoped_RollsBackTheNameWhenTheTypeRegistrationFails(t *tes
     }
 }
 
-/* @info a registration that opts out of strictness shares the type with the one already there instead of being refused, and the two names accumulate — which is what makes the by-type resolution ambiguous and therefore refusable, rather than silently answering with whichever name the map yielded first. */
 func TestScopeRegisterScoped_NonStrictTypeRegistrationAccumulatesTheNames(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -419,7 +405,6 @@ func TestScopeRegisterScoped_NonStrictTypeRegistrationAccumulatesTheNames(t *tes
     }
 }
 
-/* @info Replacing is the deliberate declaration that this scope means to shadow what the container holds, and it has to waive the name and the type together — a waiver honoured for one and not the other would refuse the registration it was written to admit. */
 func TestScopeRegisterScoped_ReplacingAdmitsWhatTheContainerHolds(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -458,7 +443,6 @@ func TestScopeRegisterScoped_ReplacingAdmitsWhatTheContainerHolds(t *testing.T) 
     }
 }
 
-/* @info the panicking form is what a caller with nowhere to put an error uses, and it has to carry a message of its own: a failure that surfaced as whatever the registration answered would not say which scope, or which verb, produced it. */
 func TestScopeMustRegisterScoped_PanicNamesTheScopeRegistration(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -483,7 +467,6 @@ func TestScopeMustRegisterScoped_PanicNamesTheScopeRegistration(t *testing.T) {
     scopeInstance.MustRegisterScoped("", scopeRegistrarProvider("late"))
 }
 
-/* @info the happy path of the panicking form has to register rather than merely not panic, or a wrapper that dropped its delegation would pass a panic-only assertion. */
 func TestScopeMustRegisterScoped_RegistersOnTheHappyPath(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -502,7 +485,6 @@ func TestScopeMustRegisterScoped_RegistersOnTheHappyPath(t *testing.T) {
     }
 }
 
-/* @info a scoped registration whose provider does not honour the contract has to be refused at the one gate all three registration paths share, so a scope cannot accept a shape the container would turn away. */
 func TestScopeRegisterScoped_RefusesAProviderWithTheWrongSignature(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -520,5 +502,29 @@ func TestScopeRegisterScoped_RefusesAProviderWithTheWrongSignature(t *testing.T)
 
     if "provider must accept exactly one argument" != registerErr.Error() {
         t.Fatalf("unexpected refusal message: %q", registerErr.Error())
+    }
+}
+
+func TestScopeRegisterScoped_RefusedAfterTheContainerIsClosed(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    scopeInstance := serviceContainer.NewScope()
+
+    closeErr := serviceContainer.Close()
+    if nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    registerErr := scopeInstance.RegisterScoped("app.scope.late", scopeRegistrarProvider("late"))
+    if nil == registerErr {
+        t.Fatalf("expected a registration on a live scope of a closed container to be refused")
+    }
+
+    if "container is closed" != registerErr.Error() {
+        t.Fatalf("expected the same refusal the other two registration doors give, got %q", registerErr.Error())
+    }
+
+    if true == scopeInstance.Has("app.scope.late") {
+        t.Fatalf("expected the refused registration to leave nothing behind on the scope")
     }
 }

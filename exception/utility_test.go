@@ -45,8 +45,6 @@ func TestFromError_WrapsNonExceptionError(t *testing.T) {
     }
 }
 
-/* @info unclamped huge maxDepth must not drive the up-front allocation */
-
 func TestBuildCauseChain_HugeMaxDepthDoesNotPanic(t *testing.T) {
     causeErr := errors.New("cause")
 
@@ -309,8 +307,6 @@ func TestLogContext_WithExtra_MergesExtraIntoContext(t *testing.T) {
     }
 }
 
-/* @info a typed-nil error passes every nil comparison while any method call on it dereferences the nil receiver; the utilities must treat it as the nil it means instead of dying on the line that logs it */
-
 func TestLogContext_TypedNilError_ReturnsNil(t *testing.T) {
     typedNil := (*Error)(nil)
 
@@ -357,7 +353,6 @@ func TestLogContext_TypedNilProviderInChain_DoesNotPanic(t *testing.T) {
     }
 }
 
-/* @info the variadic extras were silently truncated to the first map */
 func TestLogContext_MergesEveryExtraInOrder(t *testing.T) {
     context := LogContext(
         errors.New("boom"),
@@ -374,7 +369,6 @@ func TestLogContext_MergesEveryExtraInOrder(t *testing.T) {
     }
 }
 
-/* @info the cause walk is anchored on the top error's own wrap link: anchored on the nearest deep *Error it skipped every link above that error and dropped its own context from the record whenever it was not the top */
 func TestLogContext_HttpExceptionWrappingError_KeepsTheInnerErrorAndItsContext(t *testing.T) {
     rootErr := errors.New("root")
     innerErr := NewError(
@@ -448,14 +442,12 @@ func TestFromErrorWithLevelAndContext_TypedNil_ReturnsNil(t *testing.T) {
     }
 }
 
-/* @info a plain nil never reaches the helper through LogContext — the caller's own `nil == err` short-circuits first — so the branch that answers true for it is entered only here; it is the answer the rest of the file is written against */
 func TestIsNilInterfaceValue_PlainNil_AnswersTrue(t *testing.T) {
     if false == isNilInterfaceValue(nil) {
         t.Fatalf("expected a plain nil to read as nil")
     }
 }
 
-/* @info a nil map among the extras is skipped rather than ranged over: on the nil-error path the skip is what keeps the merged result nil when every extra is nil, which is the difference between "no context" and "an empty context" in the record */
 func TestLogContext_NilExtras_AreSkippedOnBothPaths(t *testing.T) {
     onlyNilExtras := LogContext(nil, nil, nil)
 
@@ -476,7 +468,6 @@ func TestLogContext_NilExtras_AreSkippedOnBothPaths(t *testing.T) {
     }
 }
 
-/* @info the "error" key of a provider is dropped on purpose: the record's own "error" is the message of the error being logged, and a context that happens to carry the key would replace the identity of the record with whatever a producer put there */
 func TestLogContext_ProviderContextCannotOverwriteTheErrorKey(t *testing.T) {
     err := NewError(
         "the real message",
@@ -498,7 +489,6 @@ func TestLogContext_ProviderContextCannotOverwriteTheErrorKey(t *testing.T) {
     }
 }
 
-/* @info a maxDepth of zero or below means one link, not zero: the walk exists to describe the cause a caller already knows is there, and answering nothing for a non-positive bound would silently drop it */
 func TestBuildCauseContextChain_NonPositiveMaxDepth_WalksOneLink(t *testing.T) {
     inner := NewError("inner", map[string]any{"key": "value"}, nil)
     outer := NewError("outer", map[string]any{"outerKey": "outerValue"}, inner)
@@ -516,7 +506,6 @@ func TestBuildCauseContextChain_NonPositiveMaxDepth_WalksOneLink(t *testing.T) {
     }
 }
 
-/* @info a provider carrying an empty context still occupies its position in the chain, as a nil entry: the two walks are read side by side, link for link, and a provider that contributed nothing must not shift every link below it up by one */
 func TestBuildCauseContextChain_ProviderWithEmptyContext_KeepsItsPositionAsNil(t *testing.T) {
     inner := NewError("inner", map[string]any{"key": "value"}, nil)
     middle := NewError("middle", nil, inner)
@@ -546,7 +535,6 @@ func (instance valueError) Error() string {
     return instance.message
 }
 
-/* @info the typed-nil detection reflects on the concrete value and only chan, func, interface, map, pointer and slice can be nil; every other kind falls to the default answer, and answering "nil" there would make every value-typed error in the framework invisible to the utilities that describe errors */
 func TestErrorUtilities_ValueTypedError_IsNotReadAsNil(t *testing.T) {
     if true == isNilInterfaceValue(valueError{message: "boom"}) {
         t.Fatalf("expected a struct-valued error not to read as nil")
@@ -565,7 +553,6 @@ func TestErrorUtilities_ValueTypedError_IsNotReadAsNil(t *testing.T) {
     }
 }
 
-/* @info the level is the whole point of the helper — it is what a caller reaches for when a foreign error must be filed below error, and a logger's threshold reads exactly this field. Only the typed-nil refusal had ever been entered, so nothing said the level the caller asked for is the level the error carries */
 func TestFromErrorWithLevel_CarriesTheRequestedLevelAndWrapsTheError(t *testing.T) {
     foreignError := errors.New("foreign")
 
@@ -588,7 +575,6 @@ func TestFromErrorWithLevel_CarriesTheRequestedLevelAndWrapsTheError(t *testing.
     }
 }
 
-/* @info the context of the nearest provider in the chain travels into the converted error: without it the conversion keeps the message and throws away everything that says which request, which service, which key */
 func TestFromErrorWithLevel_TakesTheContextOfTheProviderInTheChain(t *testing.T) {
     inner := NewError("inner", map[string]any{"serviceName": "service.mailer"}, nil)
 
@@ -607,7 +593,6 @@ func TestFromErrorWithLevel_TakesTheContextOfTheProviderInTheChain(t *testing.T)
     }
 }
 
-/* @info the two context sources are merged in one direction only: the caller's map is written after the provider's, so a key the caller spells deliberately overrides what the chain happened to carry. Merged the other way, the explicit argument would be the one silently dropped */
 func TestFromErrorWithLevelAndContext_MergesTheProviderContextUnderTheGivenOne(t *testing.T) {
     inner := NewError(
         "inner",
@@ -648,7 +633,6 @@ func TestFromErrorWithLevelAndContext_MergesTheProviderContextUnderTheGivenOne(t
     }
 }
 
-/* @info a chain with no provider must still convert: the merged map is built unconditionally, and a nil map reaching the constructor is what the copy on the way in exists to absorb */
 func TestFromErrorWithLevelAndContext_WithoutProviderOrContext_StillConverts(t *testing.T) {
     converted := FromErrorWithLevelAndContext(errors.New("plain"), loggingcontract.LevelDebug, nil)
 
@@ -665,7 +649,6 @@ func TestFromErrorWithLevelAndContext_WithoutProviderOrContext_StillConverts(t *
     }
 }
 
-/* @info the conversion carries the context of the nearest provider in the chain, which is the only thing that survives when a foreign wrapper is turned into an exception; the branch had never been entered from this package's own tests */
 func TestFromError_TakesTheContextOfTheProviderInTheChain(t *testing.T) {
     inner := NewError("inner", map[string]any{"serviceName": "service.mailer"}, nil)
 
@@ -680,7 +663,6 @@ func TestFromError_TakesTheContextOfTheProviderInTheChain(t *testing.T) {
     }
 }
 
-/* @info the typed-nil provider is matched by errors.As and then dereferenced by the very loop that reads its context; the guard is per-helper, so each conversion helper needs its own entry */
 func TestFromErrorWithLevelHelpers_TypedNilProviderInChain_DoNotPanic(t *testing.T) {
     withLevel := FromErrorWithLevel(&nilProviderWrapper{}, loggingcontract.LevelWarning)
 
@@ -710,7 +692,6 @@ func TestMarkLogged_TypedNil_ReturnsItUnchangedWithoutPanicking(t *testing.T) {
     }
 }
 
-/* @info the mark is written at the depth the reader searches: logging.LogError finds the nearest *Error through errors.As, so a mark that stopped at a plain wrapper was a silent no-op and the one failure produced two records */
 func TestMarkLogged_MarksThroughAPlainWrapper(t *testing.T) {
     innerErr := NewError("inner", nil, nil)
     wrappedErr := fmt.Errorf("outer: %w", innerErr)
@@ -766,7 +747,6 @@ func TestBuildCauseContextChain_TypedNilLink_EndsTheChain(t *testing.T) {
     }
 }
 
-/* @info the immediate-node assertion is on ContextProvider, so an HttpException in the chain contributes its context instead of a silent nil */
 func TestBuildCauseContextChain_HttpExceptionLink_ContributesItsContext(t *testing.T) {
     httpException := NewHttpException(404, "missing")
     httpException.SetContextValue("resource", "order")
@@ -778,7 +758,6 @@ func TestBuildCauseContextChain_HttpExceptionLink_ContributesItsContext(t *testi
     }
 }
 
-/* @info the entry guard is the one that stops the chain walk itself: errors.As calls Unwrap on a non-matching node, and a typed-nil node whose Unwrap dereferences the receiver panics inside the walk before the post-search guard can matter */
 func TestMarkLogged_TypedNilWithUnwrap_DoesNotWalkTheChain(t *testing.T) {
     typedNil := (*ExitError)(nil)
 
@@ -787,5 +766,58 @@ func TestMarkLogged_TypedNilWithUnwrap_DoesNotWalkTheChain(t *testing.T) {
     resultExit, ok := result.(*ExitError)
     if false == ok || nil != resultExit {
         t.Fatalf("expected the typed nil back, got %v", result)
+    }
+}
+
+func TestIsAlreadyLogged_ReadsTheMarkAtTheDepthMarkLoggedWritesIt(t *testing.T) {
+    httpException := NewHttpException(500, "reported once")
+
+    if true == IsAlreadyLogged(httpException) {
+        t.Fatalf("expected a fresh http exception to carry no mark")
+    }
+
+    _ = MarkLogged(httpException)
+
+    if false == IsAlreadyLogged(httpException) {
+        t.Fatalf("expected the mark written on the http exception to be read back")
+    }
+}
+
+func TestIsAlreadyLogged_FindsTheMarkThroughAWrapper(t *testing.T) {
+    marked := NewError("the reported failure", nil, nil)
+
+    _ = MarkLogged(marked)
+
+    wrapper := fmt.Errorf("while serving the request: %w", marked)
+
+    if false == IsAlreadyLogged(wrapper) {
+        t.Fatalf("expected the mark to be found through the wrapper")
+    }
+}
+
+func TestIsAlreadyLogged_TypedNilCarriesNoMarkAndDoesNotPanic(t *testing.T) {
+    var typedNil *Error
+
+    var asError error = typedNil
+
+    if nil == asError {
+        t.Fatalf("test setup broken: the typed nil must be a non-nil interface")
+    }
+
+    if true == IsAlreadyLogged(asError) {
+        t.Fatalf("expected a typed nil to carry no mark")
+    }
+
+    if true == IsAlreadyLogged(nil) {
+        t.Fatalf("expected a nil error to carry no mark")
+    }
+
+    /* an *Error is matched by errors.As at the top node, so the post-search guard answers it and the entry guard is never the only thing standing. An *ExitError implements no AlreadyLogged, so the search has to walk it through Unwrap, which reads a field off the nil receiver. */
+    var typedNilExit *ExitError
+
+    var exitAsError error = typedNilExit
+
+    if true == IsAlreadyLogged(exitAsError) {
+        t.Fatalf("expected a typed nil exit error to carry no mark")
     }
 }

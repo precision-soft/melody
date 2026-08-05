@@ -8,7 +8,7 @@ import (
     loggingcontract "github.com/precision-soft/melody/logging/contract"
 )
 
-/* isNilInterfaceValue reports whether value is an interface holding a typed nil — a non-nil interface whose concrete pointer, map, slice, function or channel is nil. Such a value passes every `nil == err` comparison while any method call on it dereferences the nil receiver, so the utilities in this file treat it exactly like the nil it means. The helper is local rather than shared: internal.IsNilInterface lives in a package that imports this one, so importing it back would close an import cycle. */
+/* isNilInterfaceValue reports whether value is an interface holding a typed nil. It duplicates internal.IsNilInterface because that package imports this one. */
 func isNilInterfaceValue(value any) bool {
     if nil == value {
         return true
@@ -24,7 +24,7 @@ func isNilInterfaceValue(value any) bool {
     }
 }
 
-/* LogContext assembles the loggable context of an error: its message under "error", the context of the nearest ContextProvider in its chain, the cause chain walked from the error's own wrap link, and every extra map merged on top in order, later entries winning. A nil error — including a typed nil, which would otherwise panic on the very line that logs it — yields only the merged extras. */
+/* LogContext assembles the loggable context of an error: its message under "error", the context of the nearest ContextProvider in its chain, the cause chain walked from the error's own wrap link, and every extra map merged on top in order, later entries winning. */
 func LogContext(err error, extra ...exceptioncontract.Context) exceptioncontract.Context {
     if nil == err || true == isNilInterfaceValue(err) {
         mergedContext := (exceptioncontract.Context)(nil)
@@ -62,7 +62,7 @@ func LogContext(err error, extra ...exceptioncontract.Context) exceptioncontract
         }
     }
 
-    /* the chain is anchored on the top error's own wrap link, not on the nearest *Error found by a deep search: anchoring deep skipped every link above the found error and dropped that error's own context from the record entirely whenever it was not the top — the standard HttpException-wrapping-an-Error shape logged neither */
+    /* the chain is anchored on the top error's own wrap link, not on the nearest *Error a deep search would find: anchoring deep drops the context of every link above it */
     causeErr := errors.Unwrap(err)
     if nil != causeErr && false == isNilInterfaceValue(causeErr) {
         _, hasCause := context["cause"]
@@ -160,7 +160,7 @@ func FromErrorWithLevelAndContext(err error, level loggingcontract.Level, contex
     return newWithLevel(err.Error(), mergedContext, err, level)
 }
 
-/* MarkLogged marks the nearest markable error in the chain, matching the depth at which logging.LogError reads the mark back: the mark was written on the top value alone while the reader searched the chain, so marking a wrapped error was a silent no-op and the one failure produced two records. A typed nil is returned unchanged instead of dereferenced — the previous nil guard compared an interface produced by a successful assertion, which is never nil, so it could not fire. */
+/* MarkLogged marks the nearest AlreadyLogged implementer in the chain — the depth IsAlreadyLogged reads the mark back from — and returns the error unchanged. */
 func MarkLogged(err error) error {
     if nil == err || true == isNilInterfaceValue(err) {
         return err
@@ -172,6 +172,20 @@ func MarkLogged(err error) error {
     }
 
     return err
+}
+
+/* IsAlreadyLogged reads the mark at the depth MarkLogged writes it. It is the single reader: reading the mark off a concrete *Error instead misses a marked HttpException and anything wrapping a marked error, which are then rendered a second time. */
+func IsAlreadyLogged(err error) bool {
+    if nil == err || true == isNilInterfaceValue(err) {
+        return false
+    }
+
+    var alreadyLoggedValue exceptioncontract.AlreadyLogged
+    if false == errors.As(err, &alreadyLoggedValue) || true == isNilInterfaceValue(alreadyLoggedValue) {
+        return false
+    }
+
+    return alreadyLoggedValue.AlreadyLogged()
 }
 
 func copyStringMap[T any](input map[string]T) map[string]T {
@@ -188,7 +202,7 @@ func copyStringMap[T any](input map[string]T) map[string]T {
     return copied
 }
 
-/* causeChainCapacityHint bounds the pre-allocated slice capacity for the cause-chain builders. The walk still honours the caller's maxDepth, but the up-front allocation must not be driven by an unclamped caller value: a maxDepth meaning "unlimited" (for example math.MaxInt) would otherwise panic in makeslice, and merely large values would eagerly allocate gigabytes for a short chain. */
+/* causeChainCapacityHint bounds the pre-allocated capacity of the cause-chain builders; the walk still honours the caller's maxDepth. An unclamped maxDepth of math.MaxInt panics in makeslice. */
 const causeChainCapacityHint = 8
 
 func BuildCauseChain(causeErr error, maxDepth int) []string {
@@ -209,7 +223,7 @@ func BuildCauseChain(causeErr error, maxDepth int) []string {
 
     current := causeErr
     for depth := 0; depth < maxDepth && nil != current; depth++ {
-        /* a typed-nil link ends the chain: it is the nil its producer meant, and calling Error() through it would panic inside the walk that exists to describe a failure */
+        /* a typed-nil link is the nil its producer meant and ends the chain */
         if true == isNilInterfaceValue(current) {
             break
         }
@@ -222,7 +236,6 @@ func BuildCauseChain(causeErr error, maxDepth int) []string {
 }
 
 func BuildCauseContextChain(causeErr error, maxDepth int) []map[string]any {
-    /* a typed nil needs no entry guard here: unlike BuildCauseChain there is no pre-loop Error() call to protect, and the per-link guard below ends the walk before anything dereferences it */
     if nil == causeErr {
         return nil
     }
@@ -241,12 +254,12 @@ func BuildCauseContextChain(causeErr error, maxDepth int) []map[string]any {
 
     current := causeErr
     for depth := 0; depth < maxDepth && nil != current; depth++ {
-        /* a typed-nil link ends the chain exactly as it ends BuildCauseChain, so the two walks stay aligned link for link */
+        /* a typed-nil link is the nil its producer meant and ends the chain */
         if true == isNilInterfaceValue(current) {
             break
         }
 
-        /* @important assert on the immediate node, do not errors.As: a deep search jumps ahead to the nearest provider while the cursor advances one link at a time, so a plain wrapper in front of a provider would emit that provider's context once per intervening level. One entry per link, matching BuildCauseChain. The assertion is on ContextProvider rather than *Error so an HttpException — or any userland error carrying a context — contributes its context instead of a silent nil. */
+        /* the immediate node is asserted rather than searched with errors.As: a deep search emits the nearest provider's context once per intervening wrapper, while the cursor advances one link at a time */
         causeProvider, isProvider := current.(exceptioncontract.ContextProvider)
         if true == isProvider {
             causeContext := causeProvider.Context()

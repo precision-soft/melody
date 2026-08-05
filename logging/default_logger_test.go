@@ -29,7 +29,6 @@ func captureStandardLog(callback func()) string {
     return buffer.String()
 }
 
-/* @info this is the logger a process gets before any configuration is loaded — the one that carries the records of a boot that fails early — and no test had ever entered it. The record's shape is its whole contract: the label of the level in brackets, the message, then the context */
 func TestDefaultLogger_WritesTheLevelLabelAndTheMessage(t *testing.T) {
     logger := NewDefaultLogger()
 
@@ -46,7 +45,6 @@ func TestDefaultLogger_WritesTheLevelLabelAndTheMessage(t *testing.T) {
     }
 }
 
-/* @info the five level methods are the whole public surface of the logger, and each one is a single delegation that a copy-paste can point at the wrong level: a Warning that files at debug disappears under any threshold above it */
 func TestDefaultLogger_EachLevelMethodFilesUnderItsOwnLevel(t *testing.T) {
     logger := NewDefaultLogger()
 
@@ -73,7 +71,6 @@ func TestDefaultLogger_EachLevelMethodFilesUnderItsOwnLevel(t *testing.T) {
     }
 }
 
-/* @info the labels are configurable, and the logger must read them rather than the level's own name: a deployment that files by syslog number gets the number in every record or in none */
 func TestDefaultLogger_UsesTheConfiguredLabels(t *testing.T) {
     logger := NewDefaultLoggerWithLabels(loggingcontract.LevelLabels{
         loggingcontract.LevelError: loggingcontract.LevelLabelFromInt(3),
@@ -88,7 +85,6 @@ func TestDefaultLogger_UsesTheConfiguredLabels(t *testing.T) {
     }
 }
 
-/* @info the context is rendered with its keys sorted, so two records carrying the same context read the same on every run: map iteration order is randomized per process, and an unsorted rendering makes the records of one failure impossible to compare or to grep for */
 func TestDefaultLogger_RendersTheContextWithSortedKeys(t *testing.T) {
     logger := NewDefaultLogger()
 
@@ -109,7 +105,6 @@ func TestDefaultLogger_RendersTheContextWithSortedKeys(t *testing.T) {
     }
 }
 
-/* @info an empty context and a nil one render the same nothing: the braces exist to carry keys, and printing an empty pair of them on every context-less record is noise in the one logger that writes a boot failure */
 func TestDefaultLogger_EmptyAndNilContext_RenderNothing(t *testing.T) {
     logger := NewDefaultLogger()
 
@@ -124,7 +119,6 @@ func TestDefaultLogger_EmptyAndNilContext_RenderNothing(t *testing.T) {
     }
 }
 
-/* @info the pair joiner puts exactly one space between pairs and none before the first: a leading separator changes every record's context, and the single-pair case is the one where an unconditional separator hides */
 func TestDefaultLogger_SinglePairContext_CarriesNoSeparator(t *testing.T) {
     logger := NewDefaultLogger()
 
@@ -134,5 +128,28 @@ func TestDefaultLogger_SinglePairContext_CarriesNoSeparator(t *testing.T) {
 
     if false == strings.Contains(written, "{only=pair}") {
         t.Fatalf("expected a single pair with no separator, got %q", written)
+    }
+}
+
+func TestNewDefaultLoggerWithLabels_CopiesTheLabelsTheCallerKeeps(t *testing.T) {
+    labels := loggingcontract.LevelLabels{
+        loggingcontract.LevelError: loggingcontract.LevelLabelFromString("error"),
+    }
+
+    logger := NewDefaultLoggerWithLabels(labels)
+
+    /* the caller mutates the map it still holds, exactly what the copy exists to survive */
+    labels[loggingcontract.LevelError] = loggingcontract.LevelLabelFromString("MUTATED")
+
+    written := captureStandardLog(func() {
+        logger.Error("a record", nil)
+    })
+
+    if false == strings.Contains(written, "[error]") {
+        t.Fatalf("expected the logger to keep the labels it was built with, got %q", written)
+    }
+
+    if true == strings.Contains(written, "MUTATED") {
+        t.Fatalf("expected the caller's later write not to reach the logger, got %q", written)
     }
 }

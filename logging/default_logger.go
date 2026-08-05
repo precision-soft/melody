@@ -13,7 +13,13 @@ func NewDefaultLogger() loggingcontract.Logger {
 }
 
 func NewDefaultLoggerWithLabels(labels loggingcontract.LevelLabels) loggingcontract.Logger {
-    return &defaultLogger{levelLabels: labels}
+    /* the labels are copied for the reason the json logger and the logging configuration name at their own doors: the map is read lock-free on every Log call, so a caller mutating the map it still holds is a fatal concurrent map access no recover reaches */
+    copiedLabels := make(loggingcontract.LevelLabels, len(labels))
+    for level, label := range labels {
+        copiedLabels[level] = label
+    }
+
+    return &defaultLogger{levelLabels: copiedLabels}
 }
 
 type defaultLogger struct {

@@ -11,7 +11,7 @@ func NewExitError(exitCode int, err *Error) *ExitError {
         )
     }
 
-    /* os.Exit hands the code to the operating system, which keeps its low 8 bits: 256 reports success from a dying process and a negative reads as 255 — neither is a code the caller can have meant — while 0 contradicts the error this constructor requires */
+    /* the operating system keeps only the low 8 bits of the code: 256 would report success from a dying process and a negative would read as 255, while 0 contradicts the error this constructor requires */
     if 1 > exitCode || 255 < exitCode {
         Panic(
             NewEmergency(
@@ -36,7 +36,7 @@ type ExitError struct {
 }
 
 func (instance *ExitError) Error() string {
-    /* the zero value is constructible outside the constructor that refuses a nil error; naming the anomaly beats dereferencing it at the exact moment the process boundary prints why it is exiting */
+    /* the zero value is constructible outside the constructor that refuses a nil error */
     if nil == instance.err {
         return "exit error carries no error value"
     }
@@ -53,10 +53,19 @@ func (instance *ExitError) Unwrap() error {
     return instance.err
 }
 
+/* ExitCode answers the nil receiver with the out-of-range 0 rather than dereferencing it: errors.As matches this type on a typed-nil link and reports success with a nil pointer, which the callers that decide how the process ends read the code straight off. */
 func (instance *ExitError) ExitCode() int {
+    if nil == instance {
+        return 0
+    }
+
     return instance.exitCode
 }
 
 func (instance *ExitError) ErrorValue() *Error {
+    if nil == instance {
+        return nil
+    }
+
     return instance.err
 }

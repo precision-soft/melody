@@ -96,7 +96,6 @@ func TestLogOnRecover_PanicAgainRePanicsAndMarksLogged(t *testing.T) {
     }()
 }
 
-/* @info the subprocess is the assertion: LogOnRecover runs on top of every defer registered before it, so an os.Exit inside it cannot be observed from the same goroutine — the process is simply gone, together with the container teardown and the shutdown hooks those defers hold. Re-running this test in a child with the marker set lets the parent read the child's exit status and its output, which is the only place the difference between "logged and returned" and "terminated the process" is visible. */
 func TestLogOnRecover_DoesNotTerminateTheProcessOnAnExitError(t *testing.T) {
     if "1" == os.Getenv(logOnRecoverExitProbeMarker) {
         logger := &captureLogger{}
@@ -144,7 +143,6 @@ func TestLogOnRecover_DoesNotTerminateTheProcessOnAnExitError(t *testing.T) {
     }
 }
 
-/* @info the sibling exit path names this anomaly and logs it; the recover helper used to skip the logging step entirely for an exit wrapper carrying no error value, returning with no record from the helper whose purpose is the record */
 func TestLogOnRecover_ZeroValueExitErrorLogsTheAnomaly(t *testing.T) {
     logger := &captureLogger{}
 
@@ -163,7 +161,6 @@ func TestLogOnRecover_ZeroValueExitErrorLogsTheAnomaly(t *testing.T) {
     }
 }
 
-/* @info a typed-nil exception or exit wrapper is the value someone panicked with, not an exception to dereference: both type asserts used to accept it and the next method call — AlreadyLogged locks a nil receiver, ErrorValue reads through it — panicked inside the recover handler */
 func TestLogOnRecover_TypedNilPanicValuesAreLoggedAsPanics(t *testing.T) {
     for _, panicValue := range []any{(*exception.Error)(nil), (*exception.ExitError)(nil)} {
         logger := &captureLogger{}
@@ -184,7 +181,6 @@ func TestLogOnRecover_TypedNilPanicValuesAreLoggedAsPanics(t *testing.T) {
     }
 }
 
-/* @info the mark travels with the record, not with the re-panic: leaving a logged error unmarked under panicAgain false let any later handler holding the same instance — a memoized container failure is shared by design — record it a second time */
 func TestLogOnRecover_MarksLoggedWithoutPanicAgain(t *testing.T) {
     err := exception.NewError("boom", nil, nil)
 
@@ -199,7 +195,6 @@ func TestLogOnRecover_MarksLoggedWithoutPanicAgain(t *testing.T) {
     }
 }
 
-/* @info the deferred handler runs with the panicking frames still on the stack — the only moment the origin of a runtime panic can still be captured for the record; every other recovery boundary in the framework writes it, and these helpers were the ones that did not */
 func TestLogOnRecover_ForeignPanicCarriesThePanicStack(t *testing.T) {
     logger := &captureLogger{}
 
@@ -220,7 +215,6 @@ func TestLogOnRecover_ForeignPanicCarriesThePanicStack(t *testing.T) {
     }
 }
 
-/* @info the exit code is the whole point of an *exception.ExitError, so the re-panic must carry the wrapper and not the error inside it: an outer handler reads the code off the wrapper, and unwrapping here would quietly downgrade a deliberate code to whatever that handler falls back to */
 func TestLogOnRecover_PanicAgainCarriesTheExitErrorOnward(t *testing.T) {
     logger := &captureLogger{}
 
@@ -275,7 +269,6 @@ func TestEchoExitToStderr_WritesOneLineForNonZeroExit(t *testing.T) {
         t.Fatalf("unexpected read error: %v", readErr)
     }
 
-    /* @important a fatal non-zero exit must leave a visible trace on stderr even when the configured logger writes elsewhere (e.g. a file logger), which would otherwise exit completely silently on the AlreadyLogged path */
     if false == strings.Contains(string(output), "melody: exiting with code 1") || false == strings.Contains(string(output), "http server error") {
         t.Fatalf("expected the exit echo line on stderr, got %q", string(output))
     }
@@ -307,8 +300,6 @@ func TestEchoExitToStderr_StaysSilentForZeroExit(t *testing.T) {
         t.Fatalf("expected no stderr echo for a zero exit code, got %q", string(output))
     }
 }
-
-/* @info resolveRecoveredExit is the pure half of LogOnRecoverAndExit: everything below proves the normalization without taking the process exit. */
 
 func TestResolveRecoveredExit_ZeroValueExitErrorDoesNotPanicTheExitHandler(t *testing.T) {
     err, exitCode, needsLogging := resolveRecoveredExit(&exception.ExitError{}, 1)
@@ -396,7 +387,6 @@ func TestResolveRecoveredExit_WrapsAForeignErrorAndAPlainValue(t *testing.T) {
     }
 }
 
-/* @info a typed-nil exception or exit wrapper panicked into the exit handler used to be dereferenced by the type asserts — ErrorValue on a nil wrapper, AlreadyLogged on a nil receiver — replacing the deliberate exit with a second panic; it now normalizes as the plain panic value it is, under the caller's exit code */
 func TestResolveRecoveredExit_TypedNilValuesNormalizeAsPanics(t *testing.T) {
     for _, recoveredValue := range []any{(*exception.Error)(nil), (*exception.ExitError)(nil)} {
         err, exitCode, needsLogging := resolveRecoveredExit(recoveredValue, 7)
@@ -415,7 +405,6 @@ func TestResolveRecoveredExit_TypedNilValuesNormalizeAsPanics(t *testing.T) {
     }
 }
 
-/* @info the foreign error keeps its panic stack: the normalization runs inside the deferred exit handler, with the panicking frames still on the stack, and the record is the only place they survive */
 func TestResolveRecoveredExit_ForeignErrorCarriesThePanicStack(t *testing.T) {
     err, _, _ := resolveRecoveredExit(errors.New("boom"), 5)
 
@@ -462,7 +451,6 @@ func (instance *panickingProbeLogger) Emergency(message string, context loggingc
     instance.Log(loggingcontract.LevelEmergency, message, context)
 }
 
-/* @info the subprocess is the assertion: the shields exist so that a panic in the before-exit hook or in the logger costs its own step and never the exit code — before them, the child died with the Go runtime's code 2, no stderr echo, no os.Exit. The parent reads the child's exit status, which is the only place the difference is visible. */
 func TestLogOnRecoverAndExitAfter_ShieldsTheHookAndTheRecord(t *testing.T) {
     if "hook" == os.Getenv(exitHandlerShieldProbeMarker) {
         LogOnRecoverAndExitAfter(
@@ -519,7 +507,6 @@ func TestLogOnRecoverAndExitAfter_ShieldsTheHookAndTheRecord(t *testing.T) {
 /* the marker tells a re-executed test binary that it is the child taking the exit that LogOnRecoverAndExit is named for */
 const logOnRecoverAndExitProbeMarker = "MELODY_LOG_ON_RECOVER_AND_EXIT_PROBE"
 
-/* @info the two-argument helper is the one an owner of the process boundary installs when it has no teardown to run between the record and the exit, and nothing had ever entered it: it must take the exit code the recovered value carries, exactly as the four-argument form does, and it can only be observed from a child process because the exit is the point */
 func TestLogOnRecoverAndExit_TakesTheExitCodeOfTheRecoveredValue(t *testing.T) {
     if "1" == os.Getenv(logOnRecoverAndExitProbeMarker) {
         LogOnRecoverAndExit(
@@ -553,7 +540,6 @@ func TestLogOnRecoverAndExit_TakesTheExitCodeOfTheRecoveredValue(t *testing.T) {
     }
 }
 
-/* @info the handler is installed with defer and therefore runs on every return, panicking or not; a nil recovered value is the ordinary return, and taking the exit for it would end the process on success */
 func TestLogOnRecoverAndExitAfter_WithoutAPanic_DoesNothing(t *testing.T) {
     logger := &captureLogger{}
 
@@ -572,7 +558,6 @@ func TestLogOnRecoverAndExitAfter_WithoutAPanic_DoesNothing(t *testing.T) {
     }
 }
 
-/* @info an already-logged error is re-panicked without a second record: the re-panic is what carries the failure to the owner of the process boundary, and logging it again would produce two records of one failure — the branch that returns early had never been entered with panicAgain set */
 func TestLogOnRecover_AlreadyLoggedException_RePanicsWithoutASecondRecord(t *testing.T) {
     logger := &captureLogger{}
 
@@ -598,7 +583,6 @@ func TestLogOnRecover_AlreadyLoggedException_RePanicsWithoutASecondRecord(t *tes
     }()
 }
 
-/* @info a typed-nil foreign error is the value someone panicked with, not an error to describe: reading its message dereferences the nil receiver inside the handler that must not panic, so it is recorded as a plain panic payload — the same answer the typed-nil exception shapes get */
 func TestLogOnRecover_TypedNilForeignError_IsLoggedAsAPanicValue(t *testing.T) {
     logger := &captureLogger{}
 
@@ -621,7 +605,6 @@ func TestLogOnRecover_TypedNilForeignError_IsLoggedAsAPanicValue(t *testing.T) {
     }
 }
 
-/* @info the same typed nil reaching the exit path normalizes the same way; the two switches are written twice, so they can drift apart */
 func TestResolveRecoveredExit_TypedNilForeignError_NormalizesAsAPanicValue(t *testing.T) {
     err, exitCode, needsLogging := resolveRecoveredExit(error((*typedNilProbeError)(nil)), 4)
 
@@ -638,7 +621,6 @@ func TestResolveRecoveredExit_TypedNilForeignError_NormalizesAsAPanicValue(t *te
     }
 }
 
-/* @info a panic with a value that is not an error at all — a string from a third-party library, the runtime's own plain values — must still produce a record carrying the value and the frames, because that is all there is to go on */
 func TestLogOnRecover_PlainValuePanic_CarriesTheValueAndTheStack(t *testing.T) {
     logger := &captureLogger{}
 
@@ -658,5 +640,96 @@ func TestLogOnRecover_PlainValuePanic_CarriesTheValueAndTheStack(t *testing.T) {
 
     if nil == logger.lastContext["panicStack"] {
         t.Fatalf("expected the panic stack to travel with the record")
+    }
+}
+
+func TestLogOnRecover_AlreadyLoggedHttpException_ProducesNoSecondRecord(t *testing.T) {
+    httpException := exception.NewHttpException(500, "already reported")
+
+    _ = exception.MarkLogged(httpException)
+
+    logger := &captureLogger{}
+
+    func() {
+        defer LogOnRecover(logger, false)
+
+        panic(httpException)
+    }()
+
+    if 0 != logger.calls {
+        t.Fatalf("expected the mark to suppress the record, got %d record(s): %q", logger.calls, logger.lastMessage)
+    }
+}
+
+func TestLogOnRecover_AlreadyLoggedHttpException_RePanicsTheMarkedValueUnchanged(t *testing.T) {
+    httpException := exception.NewHttpException(500, "already reported")
+
+    _ = exception.MarkLogged(httpException)
+
+    logger := &captureLogger{}
+
+    var rePanicked any
+
+    func() {
+        defer func() {
+            rePanicked = recover()
+        }()
+
+        defer LogOnRecover(logger, true)
+
+        panic(httpException)
+    }()
+
+    if 0 != logger.calls {
+        t.Fatalf("expected no record, got %d", logger.calls)
+    }
+
+    rePanickedHttpException, isHttpException := rePanicked.(*exception.HttpException)
+    if false == isHttpException {
+        t.Fatalf("expected the http exception to be re-panicked unchanged, got %T", rePanicked)
+    }
+
+    if httpException != rePanickedHttpException {
+        t.Fatalf("expected the very value that carries the mark, got a different instance")
+    }
+
+    if false == rePanickedHttpException.AlreadyLogged() {
+        t.Fatalf("expected the re-panicked value to still carry the mark")
+    }
+}
+
+func TestResolveRecoveredExit_AlreadyLoggedHttpExceptionIsNotLoggedAgain(t *testing.T) {
+    httpException := exception.NewHttpException(500, "already reported")
+
+    _ = exception.MarkLogged(httpException)
+
+    err, exitCode, needsLogging := resolveRecoveredExit(httpException, 9)
+
+    if true == needsLogging {
+        t.Fatalf("expected the mark to spare the record at the exit boundary")
+    }
+
+    if 9 != exitCode {
+        t.Fatalf("expected the caller's exit code, got %d", exitCode)
+    }
+
+    if nil == err {
+        t.Fatalf("expected an error for the stderr echo even when the record is spared")
+    }
+}
+
+func TestLogOnRecover_UnmarkedHttpException_IsStillLogged(t *testing.T) {
+    httpException := exception.NewHttpException(500, "never reported")
+
+    logger := &captureLogger{}
+
+    func() {
+        defer LogOnRecover(logger, false)
+
+        panic(httpException)
+    }()
+
+    if 1 != logger.calls {
+        t.Fatalf("expected one record for an unmarked http exception, got %d", logger.calls)
     }
 }

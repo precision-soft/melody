@@ -7,7 +7,6 @@ import (
     loggingcontract "github.com/precision-soft/melody/logging/contract"
 )
 
-/* @info the labels end up read lock-free on every Log call of the logger built from this configuration: a live reference kept by the registering module — or handed out by the accessor — turns a later write into a fatal concurrent map access, so both directions copy */
 func TestNewLoggingConfiguration_CopiesTheLabelsBothWays(t *testing.T) {
     labels := loggingcontract.LevelLabels{
         loggingcontract.LevelError: loggingcontract.LevelLabelFromString("configured-error"),
@@ -30,7 +29,6 @@ func TestNewLoggingConfiguration_CopiesTheLabelsBothWays(t *testing.T) {
     }
 }
 
-/* @info this is the one reader of the module-configuration registry, and it decides the labels of every record the process writes. Absent configuration is the ordinary case and must land on the defaults rather than on an empty label map — an empty one renders every level as its own name only by accident of the fallback */
 func TestLoggingConfigurationFromModules_WithoutConfiguration_UsesTheDefaults(t *testing.T) {
     for _, moduleConfigurations := range []map[string]any{nil, {}, {"other": "value"}} {
         configuration := LoggingConfigurationFromModules(moduleConfigurations)
@@ -102,7 +100,6 @@ func assertPanicsWithReportedType(t *testing.T, callback func(), expectedActualT
     callback()
 }
 
-/* @info a key present under the logging name but carrying nothing is a wiring mistake, not an absence: falling back to the defaults would hide it forever, and the value is read once at boot where the panic names it */
 func TestLoggingConfigurationFromModules_NilConfiguration_Panics(t *testing.T) {
     assertPanicsWithReportedType(
         t,
@@ -115,7 +112,6 @@ func TestLoggingConfigurationFromModules_NilConfiguration_Panics(t *testing.T) {
     )
 }
 
-/* @info a value of the wrong type under the logging name is the same wiring mistake wearing another face; the refusal names the type it got so the mistake is readable without a debugger */
 func TestLoggingConfigurationFromModules_WrongType_Panics(t *testing.T) {
     assertPanicsWithReportedType(
         t,
@@ -126,4 +122,56 @@ func TestLoggingConfigurationFromModules_WrongType_Panics(t *testing.T) {
         },
         "string",
     )
+}
+
+/* nilLevelLabelsConfiguration carries its method on the pointer, so a nil pointer of this type satisfies the configuration interface while every call through it dereferences the nil receiver — the shape a module registers when it declares its configuration and never assigns it. */
+type nilLevelLabelsConfiguration struct{}
+
+func (instance *nilLevelLabelsConfiguration) LevelLabels() loggingcontract.LevelLabels {
+    return instance.mustNotBeReached()
+}
+
+func (instance *nilLevelLabelsConfiguration) mustNotBeReached() loggingcontract.LevelLabels {
+    panic("the nil receiver was dereferenced")
+}
+
+var _ loggingcontract.LoggingConfiguration = (*nilLevelLabelsConfiguration)(nil)
+
+func TestLoggingConfigurationFromModules_TypedNilIsRefusedByName(t *testing.T) {
+    var typedNil *nilLevelLabelsConfiguration
+
+    moduleConfigurations := map[string]any{
+        loggingcontract.LoggingConfigurationName: typedNil,
+    }
+
+    assertPanicsWithEmergencyNamingTheConfiguration(t, func() {
+        _ = LoggingConfigurationFromModules(moduleConfigurations)
+    })
+}
+
+func assertPanicsWithEmergencyNamingTheConfiguration(t *testing.T, callback func()) {
+    t.Helper()
+
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatalf("expected the typed nil to be refused")
+        }
+
+        err, isError := recovered.(*exception.Error)
+        if false == isError {
+            t.Fatalf("expected a melody emergency, got %T: %v", recovered, recovered)
+        }
+
+        if "invalid logging configuration" != err.Message() {
+            t.Fatalf("unexpected refusal message: %q", err.Message())
+        }
+
+        actualType := err.Context()["actualType"]
+        if "*logging.nilLevelLabelsConfiguration" != actualType {
+            t.Fatalf("expected the refusal to name the registered type, got %v", actualType)
+        }
+    }()
+
+    callback()
 }

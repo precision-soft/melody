@@ -239,9 +239,6 @@ func TestContainer_MustFromResolver_PanicsWhenMissing(t *testing.T) {
 
 var _ containercontract.Resolver = (*resolverTestResolver)(nil)
 
-/* @info same-String() types from different packages */
-
-/* @info two distinct types from same-named packages share a String() ("contract.Bus"); a nested by-type resolution of one from the other's provider must resolve and close cleanly, not read as a self-cycle on the aliased key */
 func TestResolution_SameStringTypesFromDifferentPackagesDoNotAlias(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -314,7 +311,6 @@ func (instance *melodyErrorResolver) HasType(targetType reflect.Type) bool {
     return false
 }
 
-/* @info a melody error passes back through FromResolver whole, with the service name added to its context in place. The old rebuild produced a lookalike that had shed the already-logged mark, the log level and every wrapper above the found error — a refusal already logged at its source was logged again at the kernel boundary. */
 func TestFromResolver_MelodyErrorPassesThroughWithServiceName(t *testing.T) {
     originalErr := exception.NewError(
         "the original refusal",
@@ -351,8 +347,6 @@ func TestFromResolver_MelodyErrorPassesThroughWithServiceName(t *testing.T) {
         t.Fatalf("expected the original context to survive")
     }
 }
-
-/* @info the resolver contract is implementable outside this package, and a typed-nil error from such an implementation reads as the success it means: read as a failure it walked into errors.As — whose Unwrap on a nil receiver panics — or, on the ByType path, reached exception.FromError which reads a typed nil as nil, and exception.Panic(nil) replaced the whole failure with "panic called with nil error" */
 
 type resolverTestTypedNilError struct{}
 
@@ -434,4 +428,51 @@ func TestMustFromResolverByType_TypedNilErrorWithNilValueNamesTheFailure(t *test
     }()
 
     _ = MustFromResolverByType[*resolverTestService](resolver)
+}
+
+func TestFromResolver_NilResolverIsRefusedInsteadOfDereferenced(t *testing.T) {
+    value, fromResolverErr := FromResolver[*resolverTestService](nil, "app.service")
+
+    if nil == fromResolverErr {
+        t.Fatalf("expected a nil resolver to be refused")
+    }
+
+    if "resolver is nil" != fromResolverErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", fromResolverErr.Error())
+    }
+
+    if nil != value {
+        t.Fatalf("expected the zero value alongside the refusal")
+    }
+
+    melodyErr := exception.FromError(fromResolverErr)
+    if "app.service" != melodyErr.Context()["serviceName"] {
+        t.Fatalf("expected the refusal to name the service, got %v", melodyErr.Context()["serviceName"])
+    }
+}
+
+func TestFromResolverByType_NilResolverIsRefusedInsteadOfDereferenced(t *testing.T) {
+    _, fromResolverByTypeErr := FromResolverByType[*resolverTestService](nil)
+
+    if nil == fromResolverByTypeErr {
+        t.Fatalf("expected a nil resolver to be refused by the type door as well")
+    }
+
+    if "resolver is nil" != fromResolverByTypeErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", fromResolverByTypeErr.Error())
+    }
+}
+
+func TestLazy_NilResolverSurfacesAsAnErrorAtFirstUse(t *testing.T) {
+    lazyService := Lazy[*resolverTestService](nil, "app.service")
+
+    _, resolveErr := lazyService.Resolve()
+
+    if nil == resolveErr {
+        t.Fatalf("expected the deferred resolution to report the nil resolver")
+    }
+
+    if "resolver is nil" != resolveErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", resolveErr.Error())
+    }
 }

@@ -4,10 +4,11 @@ import (
     "fmt"
 
     "github.com/precision-soft/melody/exception"
+    "github.com/precision-soft/melody/internal"
     loggingcontract "github.com/precision-soft/melody/logging/contract"
 )
 
-/* NewLoggingConfiguration copies the labels on the way in, and LevelLabels hands a copy back out: the map ends up read lock-free on every Log call of the logger built from it, and a live reference kept by the module that registered it — or taken by a caller of the accessor — turns a later write into a fatal concurrent map access no recover reaches. */
+/* NewLoggingConfiguration copies the labels on the way in, and LevelLabels hands a copy back out: the map is read lock-free on every Log call of the logger built from it, so a reference kept by the caller turns a later write into a fatal concurrent map access no recover reaches. */
 func NewLoggingConfiguration(labels loggingcontract.LevelLabels) loggingcontract.LoggingConfiguration {
     return &loggingConfiguration{levelLabels: copyLevelLabels(labels)}
 }
@@ -39,14 +40,20 @@ func LoggingConfigurationFromModules(moduleConfigurations map[string]any) loggin
         return &loggingConfiguration{levelLabels: loggingcontract.DefaultLevelLabels()}
     }
 
-    if nil == raw {
+    /* the typed nil is refused above the assertion, which would otherwise accept it: the boot then dies inside the logger provider, naming service.logger instead of the configuration that was registered wrong */
+    if nil == raw || true == internal.IsNilInterface(raw) {
+        actualType := "<nil>"
+        if nil != raw {
+            actualType = fmt.Sprintf("%T", raw)
+        }
+
         exception.Panic(
             exception.NewEmergency(
                 "invalid logging configuration",
                 map[string]any{
                     "configurationName": loggingcontract.LoggingConfigurationName,
                     "expectedType":      "loggingcontract.LoggingConfiguration",
-                    "actualType":        "<nil>",
+                    "actualType":        actualType,
                 },
                 nil,
             ),
