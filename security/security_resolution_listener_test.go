@@ -317,7 +317,7 @@ func TestSecurityResolutionListener_WhenTokenSourcePanics_SetsSecurityContextWit
     }
 }
 
-/* @info a nil token source panics on Resolve and the recovery handler reads the source name; reading it off the nil source panics a second time after recover and the diagnostic escapes unrecovered, so the recovery must read the name defensively and still fail closed with an anonymous context */
+/* a nil token source panics on Resolve and the recovery handler reads the source name; reading it off the nil source panics a second time after recover and the diagnostic escapes unrecovered, so the recovery must read the name defensively and still fail closed with an anonymous context */
 func TestSecurityResolutionListener_WhenTokenSourceIsNil_RecoversWithoutSecondPanic(t *testing.T) {
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
@@ -436,5 +436,68 @@ func TestSecurityResolutionListener_WhenTokenSourceReturnsNilToken_SetsAnonymous
     }
     if true == securityContext.Token().IsAuthenticated() {
         t.Fatalf("expected anonymous token when token source returns nil")
+    }
+}
+
+/* The token source is the application's, so a nil pointer of its own token type reaches the listener as a
+non-nil interface: taken for a live token it is published into the security context, and the first voter to
+call Roles on it panics on the request path. */
+func TestSecurityResolutionListener_WhenTokenSourceReturnsATypedNilToken_SetsAnonymousToken(t *testing.T) {
+    kernel := newTestKernel()
+    runtimeInstance := newTestRuntime()
+
+    var unassignedToken *AuthenticatedToken
+
+    firewall := NewCompiledFirewall(
+        "main",
+        &resolutionListenerTestMatcher{matches: true},
+        "matcher:main",
+        []securitycontract.Rule{},
+        &resolutionListenerTestTokenSource{
+            resolveToken: unassignedToken,
+            resolveErr:   nil,
+        },
+        nil,
+        nil,
+        nil,
+        nil,
+        nil,
+        "/admin/login",
+        "/admin/logout",
+        nil,
+        nil,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+    )
+
+    registry := NewFirewallRegistry(
+        NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil),
+    )
+
+    registerTestKernelExceptionListener(kernel)
+    RegisterKernelSecurityResolutionListener(kernel, registry)
+
+    request := newSecurityTestRequest("GET", "/admin", nil, runtimeInstance)
+    requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, request)
+
+    _, err := kernel.EventDispatcher().DispatchName(
+        runtimeInstance,
+        "kernel.request",
+        requestEvent,
+    )
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    securityContext, exists := SecurityContextFromRuntime(runtimeInstance)
+    if false == exists {
+        t.Fatalf("expected security context to be set on runtime")
+    }
+
+    if _, isAnonymous := securityContext.Token().(*AnonymousToken); false == isAnonymous {
+        t.Fatalf("expected the anonymous token, got %T", securityContext.Token())
     }
 }

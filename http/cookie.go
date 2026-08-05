@@ -14,6 +14,14 @@ func SetCookie(response httpcontract.Response, cookie *nethttp.Cookie) {
         )
     }
 
+    /* nil headers are a state the contract permits — SetHeaders stores the nil it is given — and every other
+    consumer of Headers() in the chain checks for it before writing. This one wrote into a nil map, which on
+    the session paths is a panic on a response the handler had already produced, and on the panic-recovery
+    path a second panic after recover has run. */
+    if nil == response.Headers() {
+        response.SetHeaders(make(nethttp.Header))
+    }
+
     response.Headers().Add("Set-Cookie", cookie.String())
 }
 

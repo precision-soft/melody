@@ -86,7 +86,8 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
                 return nil
             }
 
-            if nil == token {
+            /* the token source is the application's, so the same reading the recovery below already applies to the source applies to what it hands back: a typed nil is the nil it means, and taking it for a live token publishes it into the security context every voter then reads */
+            if true == internal.IsNilInterface(token) {
                 token = NewAnonymousToken()
             }
 
@@ -126,7 +127,7 @@ func resolveTokenSourceSafely(
             recoveredErr = err
         }
 
-        /* @important the recovered value may itself be a nil token source panicking on Resolve: read its name only when it is present, or the deferred function panics a second time after recover and the original diagnostic escapes unrecovered */
+        /* the recovered value may itself be a nil token source panicking on Resolve: read its name only when it is present, or the deferred function panics a second time after recover and the original diagnostic escapes unrecovered */
         tokenSourceName := ""
         if false == internal.IsNilInterface(tokenSource) {
             tokenSourceName = tokenSource.Name()

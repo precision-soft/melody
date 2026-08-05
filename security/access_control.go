@@ -1,6 +1,7 @@
 package security
 
 import (
+    stdpath "path"
     "regexp"
     "strings"
 
@@ -31,7 +32,7 @@ func normalizeAccessControlAttributes(attributes []string) []string {
         )
     }
 
-    /* @important a rule whose attributes all normalize away still matches its path, and an empty attribute list grants every authenticated principal while shadowing any longer-prefixed rule that would have denied; the blank attribute is refused here rather than degrading the guard silently */
+    /* a rule whose attributes all normalize away still matches its path, and an empty attribute list grants every authenticated principal while shadowing any longer-prefixed rule that would have denied; the blank attribute is refused here rather than degrading the guard silently */
     if 0 == len(normalizedAttributes) {
         exception.Panic(
             exception.NewError("access control rule requires at least one attribute", nil, nil),
@@ -42,7 +43,7 @@ func normalizeAccessControlAttributes(attributes []string) []string {
 }
 
 func NewAccessControlRule(pathPrefix string, attributes ...string) AccessControlRule {
-    /* @important a raw prefix rule matches across segment boundaries, so PUBLIC_ACCESS on it opens every path that merely begins with the prefix and, being the longest match, shadows a correctly bounded rule that would have denied. A public path is declared through a segment prefix (AllowAnonymous), an exact rule, or a regex rule, none of which reach past their own boundary. */
+    /* a raw prefix rule matches across segment boundaries, so PUBLIC_ACCESS on it opens every path that merely begins with the prefix and, being the longest match, shadows a correctly bounded rule that would have denied. A public path is declared through a segment prefix (AllowAnonymous), an exact rule, or a regex rule, none of which reach past their own boundary. */
     for _, attribute := range attributes {
         if securitycontract.AttributePublicAccess == strings.TrimSpace(attribute) {
             exception.Panic(
@@ -119,7 +120,7 @@ func NewAccessControlRegexRule(pattern string, attributes ...string) AccessContr
 func NewAccessControlRuleWithSegmentPrefix(pathPrefix string, attributes ...string) AccessControlRule {
     normalizedPrefix := normalizePathPrefix(pathPrefix)
 
-    /* @important reject an empty segment prefix the way the exact and regex constructors reject empty input: an empty prefix would otherwise normalize to "" and become a catch-all fallback rule, so AllowAnonymous("") would silently open every unmatched path to anonymous access. A genuinely public service declares an explicit "/" prefix. */
+    /* reject an empty segment prefix the way the exact and regex constructors reject empty input: an empty prefix would otherwise normalize to "" and become a catch-all fallback rule, so AllowAnonymous("") would silently open every unmatched path to anonymous access. A genuinely public service declares an explicit "/" prefix. */
     if "" == normalizedPrefix {
         exception.Panic(
             exception.NewError("access control segment prefix may not be empty", nil, nil),
@@ -202,18 +203,35 @@ func (instance *AccessControl) Match(path string) ([]string, bool) {
     return append([]string{}, instance.rules[matchedIndex].attributes...), true
 }
 
-func (instance *AccessControl) matchRuleIndex(path string) (int, bool) {
-    normalizedPath := strings.TrimSpace(path)
-    if "" == normalizedPath {
-        normalizedPath = "/"
+/* canonicalizeAccessControlPath folds the spellings that reach the same resource into the one the rules are
+written in. net/http hands the path through unfolded, so "//admin/panel" and "/open/../admin/panel" are
+matched by no rule that names "/admin" — and no rule matched is granted, with the token never consulted.
+A route ending in a catch-all parameter, which is how a single-page application, a proxy or a documentation
+mount is registered, accepts exactly those spellings and hands them to its handler. Folding can only make a
+rule match a request it did not match before, so it never opens what was closed.
+
+The surrounding whitespace is trimmed before the fold rather than left alone: the trim makes the matcher
+answer for one spelling more than the router accepts, which refuses more than intended and never less. */
+func canonicalizeAccessControlPath(requestPath string) string {
+    canonicalPath := strings.TrimSpace(requestPath)
+    if "" == canonicalPath {
+        return "/"
     }
 
-    if "/" != normalizedPath {
-        normalizedPath = strings.TrimRight(normalizedPath, "/")
-        if "" == normalizedPath {
-            normalizedPath = "/"
-        }
+    if false == strings.HasPrefix(canonicalPath, "/") {
+        canonicalPath = "/" + canonicalPath
     }
+
+    canonicalPath = stdpath.Clean(canonicalPath)
+    if "." == canonicalPath || "" == canonicalPath {
+        return "/"
+    }
+
+    return canonicalPath
+}
+
+func (instance *AccessControl) matchRuleIndex(path string) (int, bool) {
+    normalizedPath := canonicalizeAccessControlPath(path)
 
     for index, rule := range instance.rules {
         if true == rule.isExact {

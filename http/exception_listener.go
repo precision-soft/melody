@@ -78,19 +78,13 @@ func RegisterKernelExceptionListener(eventDispatcher eventcontract.EventDispatch
             statusCode := nethttp.StatusInternalServerError
             message := "internal server error"
 
-            var httpException *exception.HttpException
-            ok = errors.As(exceptionEvent.Err(), &httpException)
-            if true == ok {
+            /* the search goes through the door of the package, which refuses the typed nil the raw errors.As matches and reports as found: a handler returning an unassigned *HttpException as its error made StatusCode() dereference nil here, and the same value reaching the kernel's recovery instead panicked inside the handler that had already recovered. The two branches this replaces asked the same question twice, one of them without the guard. */
+            httpException := exception.AsHttpException(exceptionEvent.Err())
+            if nil != httpException {
                 statusCode = httpException.StatusCode()
                 message = httpException.Message()
-            } else {
-                exceptionHttpException := exception.AsHttpException(exceptionEvent.Err())
-                if nil != exceptionHttpException {
-                    statusCode = exceptionHttpException.StatusCode()
-                    message = exceptionHttpException.Message()
-                } else if true == debugMode {
-                    message = exceptionEvent.Err().Error()
-                }
+            } else if true == debugMode {
+                message = exceptionEvent.Err().Error()
             }
 
             response := (httpcontract.Response)(nil)
@@ -124,8 +118,8 @@ func RegisterKernelExceptionListener(eventDispatcher eventcontract.EventDispatch
 
                 if true == debugMode {
                     var melodyError *exception.Error
-                    ok = errors.As(exceptionEvent.Err(), &melodyError)
-                    if true == ok && nil != melodyError {
+                    melodyErrorFound := errors.As(exceptionEvent.Err(), &melodyError)
+                    if true == melodyErrorFound && nil != melodyError {
                         payload["context"] = melodyError.Context()
 
                         causeErr := melodyError.CauseErr()

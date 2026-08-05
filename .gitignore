@@ -14,5 +14,8 @@
 zz_*_test.go
 /.dev/e2e/e2e
 
+# per-lot mutation tables are session artifacts: the harness that reads them is tracked, the tables are not
+/.dev/mutate/
+
 # a hook-install run once left a self-referential broken symlink here; keep it out of the tree
 .dev/git-hooks/git-hooks

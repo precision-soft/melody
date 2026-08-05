@@ -83,3 +83,20 @@ func TestRecordingResponseWriter_UnwrapReturnsUnderlying(t *testing.T) {
         t.Fatal("expected Unwrap to return the underlying response writer so http.ResponseController can reach it")
     }
 }
+
+/* WriteToHttpResponseWriter is a public door, so a nil pointer of a response type boxed into the contract
+reaches it and passes a plain comparison. */
+func TestWriteToHttpResponseWriter_ReadsATypedNilResponseAsAbsent(t *testing.T) {
+    var unassignedResponse *Response
+
+    recorder := httptest.NewRecorder()
+
+    err := WriteToHttpResponseWriter(nil, nil, recorder, unassignedResponse)
+    if nil != err {
+        t.Fatalf("expected no error, got %v", err)
+    }
+
+    if 200 != recorder.Code || "" != recorder.Body.String() {
+        t.Fatalf("expected nothing written, got status %d body %q", recorder.Code, recorder.Body.String())
+    }
+}

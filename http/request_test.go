@@ -6,6 +6,8 @@ import (
     "net/http/httptest"
     "strings"
     "testing"
+
+    "github.com/precision-soft/melody/bag"
 )
 
 func TestNewRequest_ValidHttpRequest(t *testing.T) {
@@ -37,7 +39,7 @@ func TestNewRequest_ValidHttpRequest(t *testing.T) {
         t.Fatalf("expected query param 'foo' to exist")
     }
 
-    /* @info a key that appeared once is stored as the string it really is; only a repeated key stays a string slice */
+    /* a key that appeared once is stored as the string it really is; only a repeated key stays a string slice */
     fooRaw, fooExists := queryBag.Get("foo")
     if false == fooExists {
         t.Fatalf("expected query param 'foo' to exist in bag")
@@ -362,7 +364,7 @@ func TestNewRequest_ParseFormError_NilRuntime_NoPanic(t *testing.T) {
     }
 }
 
-/* @info Input delivers the query and post values it silently lost: the request bags stored every value as a list and the lax string accessor answered ("", true) for a list, so a provided parameter read as an empty field */
+/* Input delivers the query and post values it silently lost: the request bags stored every value as a list and the lax string accessor answered ("", true) for a list, so a provided parameter read as an empty field */
 func TestRequest_Input_DeliversQueryAndPostValues(t *testing.T) {
     queryRequest := httptest.NewRequest("GET", "/search?term=melody", nil)
     request := NewRequest(queryRequest, nil, nil, nil)
@@ -381,21 +383,36 @@ func TestRequest_Input_DeliversQueryAndPostValues(t *testing.T) {
     }
 }
 
-/* @info a repeated key is a genuine array and reading it as one string is refused loudly: answering with the empty string lost the value, answering with one element hid the rest; StringSlice reads it whole */
-func TestRequest_Input_RefusesARepeatedKey(t *testing.T) {
+/* The shape of a request parameter is the client's to choose, so repeating one is not a programming error
+to refuse loudly: the refusal was a 500 with a full stack record that any client could raise at will. The
+whole array is still reachable, through bag.StringSlice. */
+func TestRequest_Input_AnswersTheFirstValueOfARepeatedKey(t *testing.T) {
     repeatedRequest := httptest.NewRequest("GET", "/search?a=1&a=2", nil)
     request := NewRequest(repeatedRequest, nil, nil, nil)
 
-    defer func() {
-        if recoveredValue := recover(); nil == recoveredValue {
-            t.Fatalf("expected the repeated key read as a single string to be refused")
-        }
-    }()
+    if "1" != request.Input("a") {
+        t.Fatalf("expected the first value of the repeated key, got %q", request.Input("a"))
+    }
 
-    _ = request.Input("a")
+    values, exists := bag.StringSlice(request.Query(), "a")
+    if false == exists || 2 != len(values) || "1" != values[0] || "2" != values[1] {
+        t.Fatalf("expected the repeated key to stay readable whole, got %v", values)
+    }
 }
 
-/* @info a form that does not parse is refused the way a body that does not read is: a warning that let the request continue handed the handler an empty form for a real submission */
+func TestRequest_Input_AnswersTheFirstValueOfARepeatedFormKey(t *testing.T) {
+    formBody := strings.NewReader("a=1&a=2")
+    postRequest := httptest.NewRequest("POST", "/submit", formBody)
+    postRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+    request := NewRequest(postRequest, nil, nil, nil)
+
+    if "1" != request.Input("a") {
+        t.Fatalf("expected the first value of the repeated form key, got %q", request.Input("a"))
+    }
+}
+
+/* a form that does not parse is refused the way a body that does not read is: a warning that let the request continue handed the handler an empty form for a real submission */
 func TestNewRequest_UnparsableFormIsRecordedForRefusal(t *testing.T) {
     formBody := strings.NewReader("a=%zz&csrf=token")
     postRequest := httptest.NewRequest("POST", "/submit", formBody)
@@ -412,7 +429,7 @@ func TestNewRequest_UnparsableFormIsRecordedForRefusal(t *testing.T) {
     }
 }
 
-/* @info the cookie accessors, the locale, the route pattern and the two error constructors were all at zero coverage. The cookie pair is the one an authentication middleware reads, and an accessor reading the wrong header would report every client as carrying no session at all. */
+/* the cookie accessors, the locale, the route pattern and the two error constructors were all at zero coverage. The cookie pair is the one an authentication middleware reads, and an accessor reading the wrong header would report every client as carrying no session at all. */
 
 func TestRequest_CookieAccessorsReadWhatTheClientSent(t *testing.T) {
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/articles", nil)
@@ -439,7 +456,7 @@ func TestRequest_CookieAccessorsReadWhatTheClientSent(t *testing.T) {
     }
 }
 
-/* @info the locale and the route pattern are read off the route attributes the router published, not off the url — the pattern is what an application groups metrics and audit records by, and reading the concrete path instead would make every identifier its own route. */
+/* the locale and the route pattern are read off the route attributes the router published, not off the url — the pattern is what an application groups metrics and audit records by, and reading the concrete path instead would make every identifier its own route. */
 
 func TestRequest_LocaleAndRoutePatternComeFromTheRouteAttributes(t *testing.T) {
     request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/articles/42", nil), nil, nil, nil)
@@ -473,7 +490,7 @@ func TestRequest_LocaleAndRoutePatternComeFromTheRouteAttributes(t *testing.T) {
     }
 }
 
-/* @info the two error constructors are public sentinels an application compares against; each has to carry its own message, because two errors sharing one would make a content-type refusal indistinguishable from a trailing-data refusal in every log that renders them. */
+/* the two error constructors are public sentinels an application compares against; each has to carry its own message, because two errors sharing one would make a content-type refusal indistinguishable from a trailing-data refusal in every log that renders them. */
 
 func TestRequestErrors_CarryDistinctMessages(t *testing.T) {
     unsupportedContentType := ErrorUnsupportedContentType()

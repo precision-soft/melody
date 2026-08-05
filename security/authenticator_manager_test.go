@@ -130,7 +130,7 @@ func TestAuthenticatorManager_FirstSupportingAuthenticatorWins(t *testing.T) {
 
 var _ securitycontract.Authenticator = (*testAuthenticator)(nil)
 
-/* @info a nil authenticator is refused at construction, naming its position: left in place it is called on the request path, outside any recovery */
+/* a nil authenticator is refused at construction, naming its position: left in place it is called on the request path, outside any recovery */
 func TestNewAuthenticatorManager_NilAuthenticatorPanics(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
@@ -149,7 +149,7 @@ func TestNewAuthenticatorManager_NilAuthenticatorPanics(t *testing.T) {
     )
 }
 
-/* @info a typed-nil authenticator passed the plain nil comparison and was called on the request path; the reflective guard moves the failure to the definition site */
+/* a typed-nil authenticator passed the plain nil comparison and was called on the request path; the reflective guard moves the failure to the definition site */
 func TestNewAuthenticatorManager_TypedNilAuthenticatorPanics(t *testing.T) {
     var typedNilAuthenticator *ApiKeyHeaderAuthenticator
 
@@ -162,7 +162,7 @@ func TestNewAuthenticatorManager_TypedNilAuthenticatorPanics(t *testing.T) {
     )
 }
 
-/* @info the manager owns the authenticator list it was built with */
+/* the manager owns the authenticator list it was built with */
 func TestNewAuthenticatorManager_CopiesTheCallersAuthenticators(t *testing.T) {
     callerAuthenticators := []securitycontract.Authenticator{
         &testAuthenticator{
@@ -193,5 +193,36 @@ func TestNewAuthenticatorManager_CopiesTheCallersAuthenticators(t *testing.T) {
 
     if false == token.IsAuthenticated() {
         t.Fatalf("expected the original authenticator to have run")
+    }
+}
+
+/* The authenticator is the application's, and a nil pointer of its own token type is how "no user" gets
+written by hand; boxed in the contract it is not equal to nil. */
+func TestAuthenticatorManager_AuthenticateReadsATypedNilTokenAsAbsent(t *testing.T) {
+    manager := NewAuthenticatorManager(
+        &testAuthenticator{
+            supportsCallback: func(request httpcontract.Request) bool {
+                return true
+            },
+            authenticateCallback: func(request httpcontract.Request) (securitycontract.Token, error) {
+                var unassignedToken *AuthenticatedToken
+
+                return unassignedToken, nil
+            },
+        },
+    )
+
+    token, usedAuthenticator, err := manager.Authenticate(nil)
+
+    if nil != err {
+        t.Fatalf("expected no error, got %v", err)
+    }
+
+    if false == usedAuthenticator {
+        t.Fatalf("expected the authenticator to be reported as used")
+    }
+
+    if _, isAnonymous := token.(*AnonymousToken); false == isAnonymous {
+        t.Fatalf("expected the anonymous token, got %T", token)
     }
 }

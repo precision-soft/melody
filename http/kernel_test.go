@@ -178,7 +178,7 @@ func TestKernel_ClosesDiscardedResponseBodyWhenResponseListenerSwapsResponse(t *
 
     handler.ServeHTTP(recorder, request)
 
-    /* @important an EventKernelResponse listener swapped the response, so the original file-backed body must be closed rather than leaked */
+    /* an EventKernelResponse listener swapped the response, so the original file-backed body must be closed rather than leaked */
     if 1 != body.closeCount {
         t.Fatalf("expected the discarded original response body to be closed exactly once after a response listener swapped the response, got %d", body.closeCount)
     }
@@ -359,7 +359,7 @@ func TestKernel_DoesNotDoublePersistSessionWhenWriteFailsAfterCommit(t *testing.
 
     request := httptest.NewRequest(nethttp.MethodGet, "/save", nil)
 
-    /* @info the write fails after the headers were committed, so the first writeResponse persists the session and then panics, and the panic-recovery path re-enters writeResponse. */
+    /* the write fails after the headers were committed, so the first writeResponse persists the session and then panics, and the panic-recovery path re-enters writeResponse. */
     handler.ServeHTTP(&writeFailingResponseWriter{}, request)
 
     if 1 != storage.saveCount {
@@ -727,7 +727,7 @@ func TestKernel_HandlerPathResponseDispatchErrorRespectsAlreadyLogged(t *testing
         t.Fatalf("expected the response despite the dispatch error, got %d", recorder.Code)
     }
 
-    /* @important the dispatcher already logs "event listener error" once and marks the returned wrapper as logged; the handler-response finalization block must respect that mark (logEventDispatchError) instead of re-logging it — inline logging here would produce two error lines for one failure */
+    /* the dispatcher already logs "event listener error" once and marks the returned wrapper as logged; the handler-response finalization block must respect that mark (logEventDispatchError) instead of re-logging it — inline logging here would produce two error lines for one failure */
     if 1 != atomic.LoadInt64(&countingLogger.errorCount) {
         t.Fatalf("expected the dispatch error to be logged exactly once on the handler-response path, got %d error logs", atomic.LoadInt64(&countingLogger.errorCount))
     }
@@ -776,7 +776,7 @@ func (instance *panicOnceSessionStorage) Close() error {
     return nil
 }
 
-/* @info writeResponse persists the session BEFORE WriteToHttpResponseWriter registers the body's deferred Close, so a panic in the session backend unwinds with the file-backed response assigned to finalResponse and its descriptor still open. The recover handler replaces finalResponse with an error response; unless it closes the discarded one, every such request leaks a file descriptor. */
+/* writeResponse persists the session BEFORE WriteToHttpResponseWriter registers the body's deferred Close, so a panic in the session backend unwinds with the file-backed response assigned to finalResponse and its descriptor still open. The recover handler replaces finalResponse with an error response; unless it closes the discarded one, every such request leaks a file descriptor. */
 func TestKernel_PanicRecoveryClosesTheDiscardedFileBackedResponse(t *testing.T) {
     bodyReader := &closeTrackingReader{}
     storage := &panicOnceSessionStorage{}
@@ -822,7 +822,7 @@ func TestKernel_PanicRecoveryClosesTheDiscardedFileBackedResponse(t *testing.T) 
     }
 }
 
-/* @info net/http documents this sentinel as "abort the connection and suppress the log"; converting it into an error answered an aborted upload with a 500 and an error line, and a reverse proxy panics with it on every client disconnect mid-stream */
+/* net/http documents this sentinel as "abort the connection and suppress the log"; converting it into an error answered an aborted upload with a 500 and an error line, and a reverse proxy panics with it on every client disconnect mid-stream */
 func TestKernel_AbortHandlerPanicClosesTheConnectionWithoutAResponse(t *testing.T) {
     router := NewRouter()
 
@@ -847,7 +847,7 @@ func TestKernel_AbortHandlerPanicClosesTheConnectionWithoutAResponse(t *testing.
     }
 }
 
-/* @info the kernel resolves the scheme through the configured forwarded-headers policy and publishes it on the request; a listener has no access to that policy, so without the attribute the access log reported http for every request a trusted proxy terminated as https */
+/* the kernel resolves the scheme through the configured forwarded-headers policy and publishes it on the request; a listener has no access to that policy, so without the attribute the access log reported http for every request a trusted proxy terminated as https */
 func TestKernel_PublishesThePolicyResolvedSchemeOnTheRequest(t *testing.T) {
     router := NewRouter()
 
@@ -1245,7 +1245,7 @@ func TestKernel_RouteAttributesCannotReplaceTheKernelOwnedAttributes(t *testing.
     }
 }
 
-/* @info A handler returning (nil, nil) was answered with an empty 204 written straight out, without kernel.response ever being dispatched — so the one hook that decorates a response never saw it. Measured with the framework's own cross-origin wiring, a nil-returning DELETE came back with no Access-Control-Allow-Origin at all while the identical explicit 204 carried the full set, and the access log recorded status 0. */
+/* A handler returning (nil, nil) was answered with an empty 204 written straight out, without kernel.response ever being dispatched — so the one hook that decorates a response never saw it. Measured with the framework's own cross-origin wiring, a nil-returning DELETE came back with no Access-Control-Allow-Origin at all while the identical explicit 204 carried the full set, and the access log recorded status 0. */
 func TestKernel_DispatchesResponseEventForHandlerReturningNoResponse(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -1308,7 +1308,7 @@ func TestKernel_DispatchesResponseEventForHandlerReturningNoResponse(t *testing.
     }
 }
 
-/* @info A listener may still replace the synthesized empty response, the same way it may replace any other. */
+/* A listener may still replace the synthesized empty response, the same way it may replace any other. */
 func TestKernel_ResponseListenerMayReplaceTheSynthesizedEmptyResponse(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -1395,7 +1395,7 @@ func (instance *errorContextRecordingLogger) errorContextFor(message string) (lo
     return nil, false
 }
 
-/* @info the recovery boundary must record the stack of the panic site: the error value alone names the symptom but not the line that raised it, and net/http's own stack print never fires for a panic this recovery absorbs — without the frames a production nil-pointer is unlocatable from the logs */
+/* the recovery boundary must record the stack of the panic site: the error value alone names the symptom but not the line that raised it, and net/http's own stack print never fires for a panic this recovery absorbs — without the frames a production nil-pointer is unlocatable from the logs */
 
 func TestKernel_PanicRecoveryLogsPanicSiteStack(t *testing.T) {
     router := NewRouter()
@@ -1438,7 +1438,7 @@ func TestKernel_PanicRecoveryLogsPanicSiteStack(t *testing.T) {
     }
 }
 
-/* @info the error handler is application code invoked while the failed response's body is still open and held only in a local the recovery defer cannot see: a panic escaping it must not leak that body — the kernel recovers it, logs it with its stack, and serves the default error response with every close still running */
+/* the error handler is application code invoked while the failed response's body is still open and held only in a local the recovery defer cannot see: a panic escaping it must not leak that body — the kernel recovers it, logs it with its stack, and serves the default error response with every close still running */
 
 func TestKernel_ErrorHandlerPanicOnHandlerErrorPathClosesBodyAndDelivers500(t *testing.T) {
     bodyReader := &closeTrackingReader{}
@@ -1564,7 +1564,7 @@ func TestKernel_ErrorHandlerPanicOnRecoveryPathClosesBodyAndDelivers500(t *testi
     }
 }
 
-/* @info a urlencoded body whose read failed must refuse the request the way the json path refuses the identical condition: dispatching it would hand the handler a syntactically valid request whose form is simply empty, and an oversized submission would be processed as an empty one */
+/* a urlencoded body whose read failed must refuse the request the way the json path refuses the identical condition: dispatching it would hand the handler a syntactically valid request whose form is simply empty, and an oversized submission would be processed as an empty one */
 
 func TestKernel_OversizedUrlencodedFormIsRefusedWith413(t *testing.T) {
     handlerInvoked := false
@@ -1676,7 +1676,7 @@ func (instance *typedNilReturningSessionManager) Close() error {
     return instance.delegate.Close()
 }
 
-/* @info The session manager is a replaceable service, so the kernel must test what it hands back with IsNilInterface rather than against nil: a typed nil passes a bare comparison, the kernel skips NewSession and publishes it, and the first handler that touches the session dereferences nil. The request must be served a working session instead. */
+/* The session manager is a replaceable service, so the kernel must test what it hands back with IsNilInterface rather than against nil: a typed nil passes a bare comparison, the kernel skips NewSession and publishes it, and the first handler that touches the session dereferences nil. The request must be served a working session instead. */
 func TestKernel_MintsASessionWhenTheManagerAnswersWithATypedNil(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -1763,7 +1763,7 @@ func (instance *warningRecordingLogger) hasWarning(message string) bool {
     return false
 }
 
-/* @info A handler that commits its own response and then rotates the session loses everything the session held: the rotation deletes the previous entry, and the response path refuses to store the replacement because no Set-Cookie can reach the client on a committed response. Refusing the write is right, but it must not be silent — without a line in the log this is indistinguishable from the ordinary case the branch exists for, a first-time visitor on a stream with nothing worth storing. */
+/* A handler that commits its own response and then rotates the session loses everything the session held: the rotation deletes the previous entry, and the response path refuses to store the replacement because no Set-Cookie can reach the client on a committed response. Refusing the write is right, but it must not be silent — without a line in the log this is indistinguishable from the ordinary case the branch exists for, a first-time visitor on a stream with nothing worth storing. */
 func TestKernel_LogsWhenACommittedResponseDropsARotatedSession(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -1798,7 +1798,7 @@ func TestKernel_LogsWhenACommittedResponseDropsARotatedSession(t *testing.T) {
     }
 }
 
-/* @info a listener that stops propagation is entitled to answer the request, but not to answer it with a listener marked required never consulted: the fail-closed branch tested for the absence of a response, so a cache listener that stopped propagation ahead of access control had its cached page served to whoever asked */
+/* a listener that stops propagation is entitled to answer the request, but not to answer it with a listener marked required never consulted: the fail-closed branch tested for the absence of a response, so a cache listener that stopped propagation ahead of access control had its cached page served to whoever asked */
 func TestKernel_FailsClosedWhenARequiredListenerWasSkippedEvenThoughAResponseWasProduced(t *testing.T) {
     handlerRan := false
 
@@ -1874,7 +1874,7 @@ func TestKernel_FailsClosedWhenARequiredListenerWasSkippedEvenThoughAResponseWas
     }
 }
 
-/* @info a stopping listener that skipped nothing required keeps answering the request: the refusal must not cost every short-circuiting listener its response */
+/* a stopping listener that skipped nothing required keeps answering the request: the refusal must not cost every short-circuiting listener its response */
 func TestKernel_ServesTheResponseOfAStoppingListenerWhenNothingRequiredWasSkipped(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -1917,5 +1917,154 @@ func TestKernel_ServesTheResponseOfAStoppingListenerWhenNothingRequiredWasSkippe
 
     if "from the cache" != recorder.Body.String() {
         t.Fatalf("expected the stopping listener's response, got %q", recorder.Body.String())
+    }
+}
+
+/* noMatchRouter reports "no match" the way the contract permits and the framework's own router does not: a
+nil result beside the false flag. */
+type noMatchRouter struct {
+    *Router
+}
+
+func (instance *noMatchRouter) Match(method string, path string, host string, scheme string) (*httpcontract.MatchResult, bool) {
+    return nil, false
+}
+
+func TestKernel_ServeHttpAnswersARouterThatReportsNoMatchWithANilResult(t *testing.T) {
+    router := &noMatchRouter{Router: NewRouter()}
+
+    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/anything", nil)
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, request)
+
+    if nethttp.StatusNotFound != recorder.Code {
+        t.Fatalf("expected %d, got %d", nethttp.StatusNotFound, recorder.Code)
+    }
+}
+
+/* The terminate dispatch is the one in ServeHttp with no recovery above it — its defer is registered before
+the recovery defer, so it runs after that one has already fired. It needs none: the dispatcher recovers a
+listener panic per listener and hands it back as an error. This pins that division, because a recovery added
+here would swallow the one panic the dispatcher re-raises on purpose, a deliberate exit. */
+func TestKernel_ServeHttpAnswersARequestWhoseTerminateListenerPanics(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/hello",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(nethttp.StatusOK, "handler"), nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainer()
+
+    event.EventDispatcherMustFromContainer(serviceContainer).AddListener(
+        kernelcontract.EventKernelTerminate,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            panic("terminate listener")
+        },
+        0,
+    )
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/hello", nil)
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, request)
+
+    if nethttp.StatusOK != recorder.Code {
+        t.Fatalf("expected %d, got %d", nethttp.StatusOK, recorder.Code)
+    }
+}
+
+/* The listener is what the assertion turns on, not the status: writeResponse answers 204 for an absent
+response whichever way it became absent, so a status alone cannot tell the kernel's door from the writer's
+fallback. A listener is the only thing that decorates a response, and it must see the empty 204 the door
+built rather than the nothing a typed nil would have carried this far. */
+func TestKernel_ServeHttpAnswersATypedNilResponseFromAHandlerWithTheEmptyDefault(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/hello",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            var unassignedResponse *Response
+
+            return unassignedResponse, nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainer()
+
+    responseSeenByListener := false
+
+    event.EventDispatcherMustFromContainer(serviceContainer).AddListener(
+        kernelcontract.EventKernelResponse,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            responseEvent, ok := eventValue.Payload().(*KernelResponseEvent)
+            if false == ok {
+                return nil
+            }
+
+            responseSeenByListener = nil != responseEvent.Response()
+
+            return nil
+        },
+        0,
+    )
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/hello", nil)
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, request)
+
+    if nethttp.StatusNoContent != recorder.Code {
+        t.Fatalf("expected %d, got %d", nethttp.StatusNoContent, recorder.Code)
+    }
+
+    if false == responseSeenByListener {
+        t.Fatalf("expected the empty default to reach the response listener, it saw no response at all")
+    }
+}
+
+/* explodingError is what an application error looks like when its own rendering is broken. It is the input
+that reaches the window: a listener cannot panic out of a dispatch — the dispatcher recovers it per listener
+— so the only thing left between the chain returning and the response being published is the log context the
+kernel builds from the error, which reads it by calling Error(). */
+type explodingError struct{}
+
+func (instance *explodingError) Error() string {
+    panic("the error cannot render itself")
+}
+
+func TestKernel_ServeHttpClosesTheChainResponseWhenTheErrorLogPanics(t *testing.T) {
+    bodyReader := &closeRecordingReadCloser{}
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/hello",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            response := EmptyResponse(nethttp.StatusOK)
+            response.SetBodyReader(bodyReader)
+
+            return response, &explodingError{}
+        },
+    )
+
+    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/hello", nil)
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, request)
+
+    if 0 == bodyReader.closeCount {
+        t.Fatalf("expected the response the chain produced to be closed by the recovery, it was never seen")
     }
 }

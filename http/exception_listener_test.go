@@ -321,7 +321,7 @@ func readResponseBody(t *testing.T, response httpcontract.Response) string {
     return string(data)
 }
 
-/* @info the errors context key is the public half of an http exception's context: BindJsonAndValidate attaches the per-field validation errors under it, and without this the client of a failed validation received only the flat message */
+/* the errors context key is the public half of an http exception's context: BindJsonAndValidate attaches the per-field validation errors under it, and without this the client of a failed validation received only the flat message */
 func TestExceptionListener_ErrorsContextReachesTheJsonBody(t *testing.T) {
     clockInstance := clock.NewSystemClock()
     dispatcher := event.NewEventDispatcher(clockInstance)
@@ -362,7 +362,7 @@ func TestExceptionListener_ErrorsContextReachesTheJsonBody(t *testing.T) {
     }
 }
 
-/* @info an http exception without the errors key keeps today's body: the exposure is opt-in per context key, not a blanket context dump */
+/* an http exception without the errors key keeps today's body: the exposure is opt-in per context key, not a blanket context dump */
 func TestExceptionListener_ContextWithoutErrorsKeyStaysPrivate(t *testing.T) {
     clockInstance := clock.NewSystemClock()
     dispatcher := event.NewEventDispatcher(clockInstance)
@@ -394,5 +394,37 @@ func TestExceptionListener_ContextWithoutErrorsKeyStaysPrivate(t *testing.T) {
 
     if true == strings.Contains(body, "must not leak") {
         t.Fatalf("expected non-errors context to stay out of the body, got %s", body)
+    }
+}
+
+/* errors.As matches the dynamic type of a typed nil and reports it as found, so reading the status straight
+off the result dereferenced it; the package's own door refuses the typed nil with the plain one, and the
+same call three lines below already used it. */
+func TestExceptionListener_AnswersATypedNilHttpExceptionWithoutDereferencingIt(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := event.NewEventDispatcher(clockInstance)
+    runtimeInstance := newTestRuntime()
+
+    RegisterKernelExceptionListener(dispatcher, false)
+
+    var unassignedHttpException *exception.HttpException
+
+    request := httptest.NewRequest("GET", "/test", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, unassignedHttpException)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    response := exceptionEvent.Response()
+    if nil == response {
+        t.Fatalf("expected a response to be set")
+    }
+
+    if 500 != response.StatusCode() {
+        t.Fatalf("expected the generic 500 a typed nil carries no status for, got %d", response.StatusCode())
     }
 }

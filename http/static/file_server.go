@@ -211,7 +211,22 @@ func (instance *FileServer) Serve(
     }
 
     if "/" == cleanedPath {
-        /* the mount root answers with the configured index file, and keeps answering it for the spellings that fold into the root, because that page is what a browser asks for by visiting the site. The index file is named by configuration and never by the request, so this resolution cannot be aimed at another file. */
+        /* the spellings that fold into the root are refused on the ground the branch below states and until now alone carried: the matchers in front of the application compare the raw path, so "/open/.." is a url no rule on this mount ever saw, and answering it serves the mount's index page from behind whatever rule that other prefix carries. The index file is named by configuration and never by the request, so the target cannot be aimed elsewhere — the exposure of that one page can. Canonical is the mount root itself, with or without its trailing slash. */
+        canonicalRoot := strings.TrimSuffix(instance.config.stripPrefix, "/")
+
+        if canonicalRoot != request.HttpRequest().URL.Path && canonicalRoot+"/" != request.HttpRequest().URL.Path {
+            logger.Warning(
+                "static serve non canonical path",
+                loggingcontract.Context{
+                    "path":          request.HttpRequest().URL.Path,
+                    "canonicalPath": canonicalRoot + "/",
+                },
+            )
+
+            return 0, nil, nil, false
+        }
+
+        /* the mount root answers with the configured index file, because that page is what a browser asks for by visiting the site */
         cleanedPath = "/" + instance.config.indexFile
 
         /* the exclusion list was consulted with the spelling the client sent, and the root resolves to the index file only after that consultation: an exclusion naming the index file must fire for the resolved spelling too, or "/" would serve off the disk the very page the operator handed to the application */
@@ -506,7 +521,22 @@ func (instance *FileServer) serveForStreaming(
     }
 
     if "/" == cleanedPath {
-        /* the mount root answers with the configured index file, and keeps answering it for the spellings that fold into the root, because that page is what a browser asks for by visiting the site. The index file is named by configuration and never by the request, so this resolution cannot be aimed at another file. */
+        /* the spellings that fold into the root are refused on the ground the branch below states and until now alone carried: the matchers in front of the application compare the raw path, so "/open/.." is a url no rule on this mount ever saw, and answering it serves the mount's index page from behind whatever rule that other prefix carries. The index file is named by configuration and never by the request, so the target cannot be aimed elsewhere — the exposure of that one page can. Canonical is the mount root itself, with or without its trailing slash. */
+        canonicalRoot := strings.TrimSuffix(instance.config.stripPrefix, "/")
+
+        if canonicalRoot != request.HttpRequest().URL.Path && canonicalRoot+"/" != request.HttpRequest().URL.Path {
+            logger.Warning(
+                "static serve non canonical path",
+                loggingcontract.Context{
+                    "path":          request.HttpRequest().URL.Path,
+                    "canonicalPath": canonicalRoot + "/",
+                },
+            )
+
+            return 0, nil, nil, nil, false
+        }
+
+        /* the mount root answers with the configured index file, because that page is what a browser asks for by visiting the site */
         cleanedPath = "/" + instance.config.indexFile
 
         /* the exclusion list was consulted with the spelling the client sent, and the root resolves to the index file only after that consultation: an exclusion naming the index file must fire for the resolved spelling too, or "/" would serve off the disk the very page the operator handed to the application */

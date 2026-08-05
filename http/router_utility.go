@@ -182,7 +182,7 @@ func splitPath(value string) []string {
     return splitNormalizedPath(strings.TrimSpace(value))
 }
 
-/* @important a request path is never trimmed: whitespace is significant to whatever sits in front of the application, so trimming it would let "/admin%20" reach the "/admin" handler through a proxy rule that never saw a match */
+/* a request path is never trimmed: whitespace is significant to whatever sits in front of the application, so trimming it would let "/admin%20" reach the "/admin" handler through a proxy rule that never saw a match */
 func splitRequestPath(value string) []string {
     return splitNormalizedPath(value)
 }
@@ -217,7 +217,7 @@ func writeResponse(
     forwardedHeadersPolicy httpcontract.ForwardedHeadersPolicy,
     sessionCookiePolicy httpcontract.SessionCookiePolicy,
 ) {
-    if nil == response {
+    if true == internal.IsNilInterface(response) {
         response = &Response{
             statusCode: nethttp.StatusNoContent,
             headers:    make(nethttp.Header),
@@ -225,7 +225,7 @@ func writeResponse(
         }
     }
 
-    /* @info persist the session at most once per request: the panic-recovery path can re-enter writeResponse after the first call already committed the session but then failed while writing the body, and SaveSession does not reset the modified flag, so without this guard the session store would be written twice. The header-commit flag cannot gate this — a handler that streamed its own response still needs its session persisted on that first (already-committed) call. */
+    /* persist the session at most once per request: the panic-recovery path can re-enter writeResponse after the first call already committed the session but then failed while writing the body, and SaveSession does not reset the modified flag, so without this guard the session store would be written twice. The header-commit flag cannot gate this — a handler that streamed its own response still needs its session persisted on that first (already-committed) call. */
     persistenceRecorder, isPersistenceRecorder := writer.(sessionPersistenceRecorder)
     sessionAlreadyPersisted := true == isPersistenceRecorder && true == persistenceRecorder.SessionPersisted()
 
@@ -239,7 +239,7 @@ func writeResponse(
 
         if true == sessionInstance.IsCleared() {
             if err := sessionManager.DeleteSession(sessionInstance.Id()); nil != err {
-                /* @important a session-backend outage on logout must degrade to a logged error but STILL expire the browser cookie: clearing the cookie is independent of and strictly safer than the backend delete (it can only end a session, never resurrect an unpersisted one), so a failed DeleteSession must not leave the client holding a live session cookie while it is told it was logged out. Mark the persistence failed so MarkSessionPersisted is skipped, but emit the clearing cookie below regardless. (This differs from the save path, where a failed SaveSession MUST suppress the cookie so the browser is not pointed at a never-persisted session id.) */
+                /* a session-backend outage on logout must degrade to a logged error but STILL expire the browser cookie: clearing the cookie is independent of and strictly safer than the backend delete (it can only end a session, never resurrect an unpersisted one), so a failed DeleteSession must not leave the client holding a live session cookie while it is told it was logged out. Mark the persistence failed so MarkSessionPersisted is skipped, but emit the clearing cookie below regardless. (This differs from the save path, where a failed SaveSession MUST suppress the cookie so the browser is not pointed at a never-persisted session id.) */
                 sessionPersistFailed = true
 
                 logSessionPersistenceError(runtimeInstance, "failed to delete session", err)
@@ -260,7 +260,7 @@ func writeResponse(
         } else if true == sessionInstance.IsModified() {
             /* a discarded response carries no Set-Cookie, so storing a session the client does not already hold would write a row nothing can ever reference: a first-time visitor on a streamed response (Server-Sent Events commit the headers before the handler runs) would leave one unreachable session behind per reconnect. A session the request already names is stored as before, since it needs no cookie to be reachable — and the clear path above still destroys a session whatever the response does with it. */
             if true == responseIsDiscarded && false == requestNamesSession(request, sessionInstance.Id()) {
-                /* @important say so in the log. Suppressing the write is right — nothing could carry the id to the client — but a handler that rotated the session on a response it had already committed reaches here too, and for it the rotation has destroyed the previous entry while this drops the replacement: everything the session held is gone, from two calls that both reported success. Silence made that indistinguishable from the ordinary case this branch exists for, a first-time visitor on a stream who simply has no session worth storing. */
+                /* say so in the log. Suppressing the write is right — nothing could carry the id to the client — but a handler that rotated the session on a response it had already committed reaches here too, and for it the rotation has destroyed the previous entry while this drops the replacement: everything the session held is gone, from two calls that both reported success. Silence made that indistinguishable from the ordinary case this branch exists for, a first-time visitor on a stream who simply has no session worth storing. */
                 sessionPersistFailed = true
 
                 logger := logging.LoggerFromRuntime(runtimeInstance)
@@ -275,7 +275,7 @@ func writeResponse(
             } else {
                 err := sessionManager.SaveSession(sessionInstance)
                 if true == errors.Is(err, session.ErrSessionDeleted) {
-                    /* @important the session ended while this request was running — another request logged it out, or rotated it away. That is not a failure of this request and it is not a storage outage: the write is refused so the deleted session cannot be re-created, the cookie is expired so the client stops presenting an id that no longer exists, and the handler's own response is served unchanged. */
+                    /* the session ended while this request was running — another request logged it out, or rotated it away. That is not a failure of this request and it is not a storage outage: the write is refused so the deleted session cannot be re-created, the cookie is expired so the client stops presenting an id that no longer exists, and the handler's own response is served unchanged. */
                     sessionPersistFailed = true
 
                     logSessionPersistenceError(runtimeInstance, "session was deleted while the request was in flight", err)
@@ -294,7 +294,7 @@ func writeResponse(
                         },
                     )
                 } else if nil != err {
-                    /* @important a storage outage on the save path answers 500 rather than the response the handler produced. The handler wrote to the session and returned success on the assumption the write would land — a login answering "welcome" with the identity never stored, or an attempt counter that never grows while the backend is down — and the client cannot tell the difference. The headers are not committed at this point (the branch above holds the case where they are), so the response can still be replaced; the cookie is suppressed either way, so the browser is never pointed at an id nothing persisted. */
+                    /* a storage outage on the save path answers 500 rather than the response the handler produced. The handler wrote to the session and returned success on the assumption the write would land — a login answering "welcome" with the identity never stored, or an attempt counter that never grows while the backend is down — and the client cannot tell the difference. The headers are not committed at this point (the branch above holds the case where they are), so the response can still be replaced; the cookie is suppressed either way, so the browser is never pointed at an id nothing persisted. */
                     sessionPersistFailed = true
 
                     logSessionPersistenceError(runtimeInstance, "failed to save session", err)
@@ -323,7 +323,7 @@ func writeResponse(
         }
     }
 
-    /* @info a handler that streamed its own response (for example Server-Sent Events) has already committed the headers; whether it then returned no response or failed after committing, skip writing so we do not emit a superfluous WriteHeader over the in-flight stream. */
+    /* a handler that streamed its own response (for example Server-Sent Events) has already committed the headers; whether it then returned no response or failed after committing, skip writing so we do not emit a superfluous WriteHeader over the in-flight stream. */
     if true == responseIsDiscarded {
         closeDiscardedResponseBody(response, logging.LoggerFromRuntime(runtimeInstance))
         return
@@ -331,7 +331,7 @@ func writeResponse(
 
     err := WriteToHttpResponseWriter(runtimeInstance, request, writer, response)
     if nil != err {
-        /* @important the headers (and part of the body) may already be committed by the failed write, so a panic cannot produce a better response — and on the panic-recovery path it would escape ServeHttp and reset the connection; log and return instead */
+        /* the headers (and part of the body) may already be committed by the failed write, so a panic cannot produce a better response — and on the panic-recovery path it would escape ServeHttp and reset the connection; log and return instead */
         logger := logging.LoggerFromRuntime(runtimeInstance)
         if nil != logger {
             logger.Error(
@@ -450,7 +450,8 @@ func logSessionPersistenceError(
 }
 
 func closeDiscardedResponseBody(response httpcontract.Response, logger loggingcontract.Logger) {
-    if nil == response {
+    /* the interface is read through, not compared: this runs inside the kernel's recovery defer, where a typed nil dereferenced on BodyReader below is a second panic after recover has already run and ServeHttp answers nothing at all */
+    if true == internal.IsNilInterface(response) {
         return
     }
 
@@ -712,7 +713,7 @@ func matchPath(
         pathPart := pathSegments[pathIndex]
 
         if true == strings.HasPrefix(routePart, ":") {
-            /* @important an empty segment does not satisfy a named parameter: "/users//profile" would otherwise bind an empty id that a handler cannot tell from a supplied one */
+            /* an empty segment does not satisfy a named parameter: "/users//profile" would otherwise bind an empty id that a handler cannot tell from a supplied one */
             if "" == pathPart {
                 /* a trailing optional reached through the root is omitted rather than refused: "/" is the one path whose trailing slash cannot be trimmed away, so it splits into two empty segments and the optional lands on the second one. UrlGenerator mints exactly "/" for this shape and the openapi document advertises it, so refusing it would 404 a url the framework itself produced. The parameter is left unbound, which is what an omitted optional means everywhere else. */
                 if true == isLastPattern && pathIndex == len(pathSegments)-1 && true == strings.HasSuffix(routePart, "?") {

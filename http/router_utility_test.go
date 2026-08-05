@@ -89,7 +89,7 @@ func TestIsRequestFromTrustedProxy_MatchesIpAndCidr(t *testing.T) {
     }
 }
 
-/* @info A peer whose RemoteAddr arrives in IPv4-mapped IPv6 form (::ffff:172.18.0.2 from a PROXY-protocol listener or a custom net.Conn) is the IPv4 address it names, so an IPv4 CIDR or an unmapped literal in the trusted proxy list must still match it. isRequestFromTrustedProxy mirrors the per-address check in http/middleware/client_ip.go, which unmaps both sides before comparing. */
+/* A peer whose RemoteAddr arrives in IPv4-mapped IPv6 form (::ffff:172.18.0.2 from a PROXY-protocol listener or a custom net.Conn) is the IPv4 address it names, so an IPv4 CIDR or an unmapped literal in the trusted proxy list must still match it. isRequestFromTrustedProxy mirrors the per-address check in http/middleware/client_ip.go, which unmaps both sides before comparing. */
 func TestIsRequestFromTrustedProxy_UnmapsIpv4MappedIpv6Peer(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "[::ffff:172.18.0.2]:5555"
@@ -106,7 +106,7 @@ func TestIsRequestFromTrustedProxy_UnmapsIpv4MappedIpv6Peer(t *testing.T) {
     }
 }
 
-/* @info detectSchemeWithForwardedHeadersPolicy must trust a mapped IPv4-in-IPv6 proxy peer so it honours X-Forwarded-Proto: without the Unmap the trusted-proxy check fails, the scheme collapses to http, and the session cookie is set with Secure=false behind a TLS-terminating proxy. */
+/* detectSchemeWithForwardedHeadersPolicy must trust a mapped IPv4-in-IPv6 proxy peer so it honours X-Forwarded-Proto: without the Unmap the trusted-proxy check fails, the scheme collapses to http, and the session cookie is set with Secure=false behind a TLS-terminating proxy. */
 func TestDetectSchemeWithForwardedHeadersPolicy_TrustsIpv4MappedIpv6Peer(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "[::ffff:172.18.0.2]:5555"
@@ -125,7 +125,7 @@ func TestDetectSchemeWithForwardedHeadersPolicy_TrustsIpv4MappedIpv6Peer(t *test
     }
 }
 
-/* @info A trusted proxy entry written in IPv4-mapped IPv6 CIDR form (::ffff:10.0.0.0/104) names the IPv4 range it embeds, so an unmapped IPv4 peer inside that range must still be trusted. Without rewriting the mapped prefix to its 10.0.0.0/8 equivalent, netip.Prefix.Contains rejects the IPv4 peer across address families, the proxy reads as untrusted, X-Forwarded-Proto is discarded and the scheme collapses to http — which sets the session cookie with Secure=false behind a TLS-terminating proxy. */
+/* A trusted proxy entry written in IPv4-mapped IPv6 CIDR form (::ffff:10.0.0.0/104) names the IPv4 range it embeds, so an unmapped IPv4 peer inside that range must still be trusted. Without rewriting the mapped prefix to its 10.0.0.0/8 equivalent, netip.Prefix.Contains rejects the IPv4 peer across address families, the proxy reads as untrusted, X-Forwarded-Proto is discarded and the scheme collapses to http — which sets the session cookie with Secure=false behind a TLS-terminating proxy. */
 func TestDetectSchemeWithForwardedHeadersPolicy_TrustsMappedFormCidr(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "10.0.0.5:5555"
@@ -1003,7 +1003,7 @@ func TestWrapControllerWithContainer_PanicsWhenDependencyIsNilFromScope(t *testi
     _, _ = handler(runtimeInstance, httptest.NewRecorder(), request)
 }
 
-/* @info A chain of proxies appends to X-Forwarded-Proto rather than replacing it, so the header arrives as "https, http". The client-facing hop is the leftmost entry; returning the whole list yields a scheme equal to neither "http" nor "https", which quietly drops the Secure attribute from every cookie the response sets. */
+/* A chain of proxies appends to X-Forwarded-Proto rather than replacing it, so the header arrives as "https, http". The client-facing hop is the leftmost entry; returning the whole list yields a scheme equal to neither "http" nor "https", which quietly drops the Secure attribute from every cookie the response sets. */
 func TestDetectSchemeWithForwardedHeadersPolicy_UsesTheClientFacingProtoOfAChain(t *testing.T) {
     for _, headerValue := range []string{"https, http", "https,http", " https , http "} {
         netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
@@ -1077,7 +1077,7 @@ func TestWriteResponse_NilResponsePersistsSessionAndWritesNoContent(t *testing.T
     }
 }
 
-/* @info A typed nil session must not reach the persistence block. The session manager is a replaceable service, and one that reports "not found" by returning a nil pointer of its own session type hands back an interface that is not equal to nil — a `nil !=` test takes it for a live session and IsCleared below dereferences it. This call happens inside the kernel's recovery defer, where recover has already run, so that panic escapes ServeHttp and the client is served nothing at all. */
+/* A typed nil session must not reach the persistence block. The session manager is a replaceable service, and one that reports "not found" by returning a nil pointer of its own session type hands back an interface that is not equal to nil — a `nil !=` test takes it for a live session and IsCleared below dereferences it. This call happens inside the kernel's recovery defer, where recover has already run, so that panic escapes ServeHttp and the client is served nothing at all. */
 func TestWriteResponse_SkipsPersistenceForATypedNilSession(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
@@ -1117,7 +1117,7 @@ func TestWriteResponse_SkipsPersistenceForATypedNilSession(t *testing.T) {
     }
 }
 
-/* @info The same applies to a typed nil manager: the persistence block must test both with IsNilInterface. */
+/* The same applies to a typed nil manager: the persistence block must test both with IsNilInterface. */
 func TestWriteResponse_SkipsPersistenceForATypedNilManager(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
@@ -1153,7 +1153,7 @@ func TestWriteResponse_SkipsPersistenceForATypedNilManager(t *testing.T) {
     }
 }
 
-/* @info A session deleted while the request was running is not a storage outage and must not be answered as one: the write is refused so the deleted session cannot be re-created, the browser cookie is expired so the client stops presenting an id that no longer exists, and the handler's own response is served unchanged. */
+/* A session deleted while the request was running is not a storage outage and must not be answered as one: the write is refused so the deleted session cannot be re-created, the browser cookie is expired so the client stops presenting an id that no longer exists, and the handler's own response is served unchanged. */
 func TestWriteResponse_ADeletedSessionExpiresTheCookieAndKeepsTheResponse(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
@@ -1195,7 +1195,7 @@ func TestWriteResponse_ADeletedSessionExpiresTheCookieAndKeepsTheResponse(t *tes
     }
 }
 
-/* @info A storage outage on the save path answers 500 rather than the response the handler produced: the handler wrote to the session and returned success on the assumption the write would land — a login answering "welcome" with the identity never stored — and the client cannot tell the difference. The cookie is suppressed either way, so the browser is never pointed at an id nothing persisted. */
+/* A storage outage on the save path answers 500 rather than the response the handler produced: the handler wrote to the session and returned success on the assumption the write would land — a login answering "welcome" with the identity never stored — and the client cannot tell the difference. The cookie is suppressed either way, so the browser is never pointed at an id nothing persisted. */
 func TestWriteResponse_ASaveOutageAnswersFiveHundredWithoutACookie(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
@@ -1229,5 +1229,34 @@ func TestWriteResponse_ASaveOutageAnswersFiveHundredWithoutACookie(t *testing.T)
 
     if 0 != len(httpResponse.Cookies()) {
         t.Fatalf("expected no session cookie when nothing was persisted")
+    }
+}
+
+/* closeDiscardedResponseBody runs inside the kernel's recovery defer, where a typed nil dereferenced on
+BodyReader is a second panic after recover has already run and ServeHttp answers nothing at all. */
+func TestCloseDiscardedResponseBody_ReadsATypedNilResponseAsAbsent(t *testing.T) {
+    var unassignedResponse *Response
+
+    closeDiscardedResponseBody(unassignedResponse, nil)
+}
+
+func TestWriteResponse_ReadsATypedNilResponseAsTheEmptyDefault(t *testing.T) {
+    var unassignedResponse *Response
+
+    recorder := httptest.NewRecorder()
+
+    writeResponse(
+        nil,
+        nil,
+        recorder,
+        unassignedResponse,
+        nil,
+        nil,
+        httpcontract.ForwardedHeadersPolicy{},
+        httpcontract.SessionCookiePolicy{},
+    )
+
+    if nethttp.StatusNoContent != recorder.Code {
+        t.Fatalf("expected %d, got %d", nethttp.StatusNoContent, recorder.Code)
     }
 }

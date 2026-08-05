@@ -160,6 +160,11 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             scheme,
         )
 
+        /* the contract returns a pointer and a flag, so an implementation is entitled to report "no match" as a nil result; the second call below already reads it that way. Read here without the check, a nil dereferences above the recovery defer installed further down, which leaves net/http closing the connection with no response, no terminate event and no access-log line. */
+        if nil == matchResult {
+            matchResult = &httpcontract.MatchResult{}
+        }
+
         handler := matchResult.Handler
         params := matchResult.Params
         routeAttributes := matchResult.RouteAttributes
@@ -702,6 +707,10 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         finalHandler := instance.buildHandler(baseHandler, middlewaresSnapshot)
 
         response, finalHandlerErr := finalHandler(runtimeInstance, writer, melodyRequest)
+
+        /* the response the chain produced is published to the recovery defer here rather than after the error branch below: it may own an open file (FileResponse/ServeReader through the static middleware) and the defer closes only what it can see through finalResponse. Everything between this line and that assignment can panic — the exception dispatch re-raises a listener panic, and PrefersHtml reads the request — and the defer would then find the nil it closed over and leak the descriptor for the life of the process. */
+        finalResponse = response
+
         if nil != finalHandlerErr {
             requestLogger.Error(
                 "controller handler error",
@@ -750,7 +759,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         }
 
         /* a handler that returns no response is answered with an empty 204, and it is given one here rather than deep inside writeResponse, so that kernel.response is dispatched for it like for every other outcome. A listener is the only thing that decorates a response — cross-origin headers, cache directives, the access log's status code — and a response that never reaches one comes out visibly different from the identical response written explicitly: the browser drops a nil-returning cross-origin DELETE for want of the headers its explicit-204 twin carries, and the log records status 0. */
-        if nil == response {
+        if true == internal.IsNilInterface(response) {
             response = EmptyResponse(nethttp.StatusNoContent)
         }
 

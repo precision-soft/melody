@@ -310,7 +310,7 @@ func TestNewAccessControlRule_PublicAccessCombinedWithOtherAttributesPanics(t *t
     _ = NewAccessControlRule("/admin", "PUBLIC_ACCESS", "ROLE_ADMIN")
 }
 
-/* @info a raw prefix rule matches across segment boundaries, so PUBLIC_ACCESS on it opens every path that begins with the prefix and shadows a bounded rule that would have denied; the constructor refuses it and a public path is declared through a segment prefix, exact, or regex rule instead */
+/* a raw prefix rule matches across segment boundaries, so PUBLIC_ACCESS on it opens every path that begins with the prefix and shadows a bounded rule that would have denied; the constructor refuses it and a public path is declared through a segment prefix, exact, or regex rule instead */
 func TestNewAccessControlRule_PublicAccessOnRawPrefixIsRefused(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
         NewAccessControlRule("/health", "PUBLIC_ACCESS")
@@ -335,7 +335,7 @@ func TestNewAccessControlRule_LonePublicAccessIsAllowedOnBoundedRules(t *testing
     }
 }
 
-/* @info a rule whose attributes all normalize away still matches its path, so it granted every authenticated principal and shadowed any longer-prefixed rule that would have denied; the blank attribute is refused at construction instead */
+/* a rule whose attributes all normalize away still matches its path, so it granted every authenticated principal and shadowed any longer-prefixed rule that would have denied; the blank attribute is refused at construction instead */
 func TestAccessControlRule_RejectsAnAttributeListThatNormalizesToEmpty(t *testing.T) {
     for _, attributes := range [][]string{
         {},
@@ -363,5 +363,56 @@ func TestAccessControlRule_RejectsAnAttributeListThatNormalizesToEmpty(t *testin
     rule := NewAccessControlRule("/admin", "", "ROLE_ADMIN", "   ")
     if 1 != len(rule.attributes) || "ROLE_ADMIN" != rule.attributes[0] {
         t.Fatalf("expected the blank attributes to be trimmed from a non-empty list, got %v", rule.attributes)
+    }
+}
+
+/* A route ending in a catch-all parameter accepts the spellings net/http hands through unfolded, so a rule
+that only matches the folded one is a rule the request walks past — and no rule matched means granted. */
+func TestAccessControl_MatchFoldsTheSpellingsACatchAllRouteAccepts(t *testing.T) {
+    control := NewAccessControl(
+        NewAccessControlRule("/admin", "ROLE_ADMIN"),
+    )
+
+    for _, requestPath := range []string{
+        "//admin/panel",
+        "/./admin/panel",
+        "/open/../admin/panel",
+        "/admin//panel",
+        "///admin",
+    } {
+        attributes, matched := control.Match(requestPath)
+
+        if false == matched {
+            t.Fatalf("expected %q to be matched by the rule on /admin, it reached no rule at all", requestPath)
+        }
+
+        if 1 != len(attributes) || "ROLE_ADMIN" != attributes[0] {
+            t.Fatalf("expected ROLE_ADMIN for %q, got %v", requestPath, attributes)
+        }
+    }
+}
+
+func TestAccessControl_MatchFoldsTheSpellingsForASegmentPrefixRule(t *testing.T) {
+    control := NewAccessControl(
+        NewAccessControlRuleWithSegmentPrefix("/admin", "ROLE_ADMIN"),
+    )
+
+    attributes, matched := control.Match("//admin/panel")
+
+    if false == matched || 1 != len(attributes) || "ROLE_ADMIN" != attributes[0] {
+        t.Fatalf("expected the segment prefix rule to match the doubled slash, got matched=%v attributes=%v", matched, attributes)
+    }
+}
+
+/* The fold must not reach past the mount: "/administration" is not "/admin" with anything folded away. */
+func TestAccessControl_MatchStillRefusesAPathThatOnlySharesThePrefixText(t *testing.T) {
+    control := NewAccessControl(
+        NewAccessControlRuleWithSegmentPrefix("/admin", "ROLE_ADMIN"),
+    )
+
+    _, matched := control.Match("//administration/panel")
+
+    if true == matched {
+        t.Fatalf("expected the segment prefix rule not to match a longer segment")
     }
 }

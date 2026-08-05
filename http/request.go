@@ -47,7 +47,7 @@ func NewRequest(
     var bodyReadErr error
 
     if true == shouldAutoParseForm(httpRequest) {
-        /* @important a urlencoded body is drained by ParseForm; buffer it first and restore Body/GetBody
+        /* a urlencoded body is drained by ParseForm; buffer it first and restore Body/GetBody
            afterwards so a later reader that needs the raw bytes still sees them — in particular the HMAC
            internal-auth source, whose signed body-hash check would otherwise verify against an empty body and
            silently accept a tampered form-encoded request. multipart bodies are left untouched: ParseForm does
@@ -237,13 +237,19 @@ func (instance *Request) FormValue(key string) string {
     return instance.httpRequest.FormValue(key)
 }
 
+/* Input answers the first value of a repeated key, as FormValue beside it and url.Values.Get already do.
+The request bags keep a single key and a repeated one apart by type and bag.String refuses a slice with a
+panic — right where the key is the programmer's, wrong here, because the shape of a request parameter is
+the client's to choose: "?tag=a&tag=b" turned every handler reading a parameter by name into a 500 with a
+full stack record, unauthenticated and free to repeat. A handler that needs the whole array reads it with
+bag.StringSlice, which is what the panic was pointing at. */
 func (instance *Request) Input(key string) string {
     if nil != instance.post && true == instance.post.Has(key) {
-        return bag.StringOrDefault(instance.post, key, "")
+        return firstStringValue(instance.post, key)
     }
 
     if nil != instance.query && true == instance.query.Has(key) {
-        return bag.StringOrDefault(instance.query, key, "")
+        return firstStringValue(instance.query, key)
     }
 
     if nil != instance.params {
@@ -254,6 +260,15 @@ func (instance *Request) Input(key string) string {
     }
 
     return ""
+}
+
+func firstStringValue(parameterBag bagcontract.ParameterBag, key string) string {
+    value, exists, err := bag.StringAt(parameterBag, key, 0)
+    if false == exists || nil != err {
+        return ""
+    }
+
+    return value
 }
 
 func (instance *Request) Cookie(name string) (*nethttp.Cookie, error) {
