@@ -3,10 +3,12 @@ package application
 import (
     "context"
     "errors"
+    "net"
     nethttp "net/http"
     "strings"
     "sync"
     "testing"
+    "time"
 
     "github.com/precision-soft/melody/config"
     containercontract "github.com/precision-soft/melody/container/contract"
@@ -91,7 +93,6 @@ func TestApplicationRegisterHttpMiddlewareFactories_PanicsAfterBoot(t *testing.T
     }, "may not register http middlewares after boot")
 }
 
-/* @info a route declared before the boot is only a closure until bootHttp runs it: the router learns about it there, and a boot that skipped the loop would start an application that answers 404 for every route the wiring declared. */
 func TestBootHttp_HandsEveryDeclaredRouteToTheRouter(t *testing.T) {
     applicationInstance := NewApplication(
         testhelper.NewEmbeddedEnvFs(),
@@ -120,7 +121,6 @@ func TestBootHttp_HandsEveryDeclaredRouteToTheRouter(t *testing.T) {
     }
 }
 
-/* @info the two middleware doors hand what they are given to the pipeline: a registration that appended nothing would leave the application serving without the middleware it declared, and nothing else in the boot would notice */
 func TestApplicationRegisterHttpMiddlewares_HandsThemToThePipeline(t *testing.T) {
     applicationInstance := NewApplication(
         testhelper.NewEmbeddedEnvFs(),
@@ -241,7 +241,6 @@ func newCacheWarningTestApplication(t *testing.T, mode string, logger loggingcon
     return applicationInstance
 }
 
-/* @info The unbounded default cache keeps every key for the life of the process, which only matters in a process that stays up; the http path is where the application is told, once, at boot. */
 func TestRunHttp_WarnsAboutTheUnboundedDefaultCacheBackend(t *testing.T) {
     logger := &warningRecordingLogger{}
 
@@ -261,7 +260,6 @@ func TestRunHttp_WarnsAboutTheUnboundedDefaultCacheBackend(t *testing.T) {
     }
 }
 
-/* @info An application that bounded its own cache backend must not be nagged, or the warning stops meaning anything. */
 func TestRunHttp_StaysSilentWhenTheApplicationBoundedItsCacheBackend(t *testing.T) {
     logger := &warningRecordingLogger{}
 
@@ -324,7 +322,6 @@ func newSessionWarningTestApplication(t *testing.T, sessionTtl string, logger lo
     return applicationInstance
 }
 
-/* @info The storage melody wired itself lives in this process and nothing outside it can expire an entry; with a ttl of zero nothing inside it can either. A request that arrives without a session cookie gets a session regardless of who sent it, so the pair is the one combination in which an unauthenticated caller decides how much memory this process keeps. */
 func TestRunHttp_WarnsAboutTheDefaultSessionStorageWithAnUnboundedTtl(t *testing.T) {
     logger := &warningRecordingLogger{}
 
@@ -344,7 +341,6 @@ func TestRunHttp_WarnsAboutTheDefaultSessionStorageWithAnUnboundedTtl(t *testing
     }
 }
 
-/* @info a lifetime the deployment chose reclaims the entries the default storage holds, so there is nothing left to warn about. */
 func TestRunHttp_StaysSilentWhenTheSessionTtlIsBounded(t *testing.T) {
     logger := &warningRecordingLogger{}
 
@@ -364,7 +360,6 @@ func TestRunHttp_StaysSilentWhenTheSessionTtlIsBounded(t *testing.T) {
     }
 }
 
-/* @info a storage the application registered is the operator's to expire, so an unbounded ttl beside it is a choice rather than a hazard melody introduced. */
 func TestRunHttp_StaysSilentWhenTheApplicationRegisteredItsSessionStorage(t *testing.T) {
     logger := &warningRecordingLogger{}
 
@@ -385,7 +380,6 @@ func TestRunHttp_StaysSilentWhenTheApplicationRegisteredItsSessionStorage(t *tes
     }
 }
 
-/* @info a failure runHttp already wrote to the log is marked logged, or the process-boundary handler renders the same failure a second time */
 func TestMarkHttpRunErrorLogged_WrapsAndMarks(t *testing.T) {
     original := errors.New("bind refused")
 
@@ -405,7 +399,6 @@ func TestMarkHttpRunErrorLogged_WrapsAndMarks(t *testing.T) {
     }
 }
 
-/* @info when the listen fails in the same instant the context is cancelled, the select's branch choice is arbitrary; the shutdown branch used to discard the real failure and a process that never served a byte reported a clean shutdown. The error is deposited before the wait begins, so whichever branch the select takes must surface it. */
 func TestAwaitHttpServerEnd_ReportsAServeErrorWhicheverBranchWins(t *testing.T) {
     serveErr := errors.New("listen tcp: bind refused by the probe")
 
@@ -416,7 +409,7 @@ func TestAwaitHttpServerEnd_ReportsAServeErrorWhicheverBranchWins(t *testing.T) 
         cancelledContext, cancel := context.WithCancel(context.Background())
         cancel()
 
-        endErr := awaitHttpServerEnd(cancelledContext, &nethttp.Server{}, errorChannel, &warningRecordingLogger{})
+        endErr := awaitHttpServerEnd(cancelledContext, &nethttp.Server{}, errorChannel, &warningRecordingLogger{}, time.Second)
         if nil == endErr {
             t.Fatalf("expected the serve error to be reported instead of a clean shutdown (iteration %d)", iteration)
         }
@@ -427,6 +420,155 @@ func TestAwaitHttpServerEnd_ReportsAServeErrorWhicheverBranchWins(t *testing.T) 
     }
 }
 
+/* the configured budget must travel from the environment key through the configuration into the shutdown, so the proof drives runHttp itself: a connection that sent half a request stays active through the whole shutdown, and only the 50ms the environment named — not the 5s default — explains a shutdown that gives up this fast. */
+func TestRunHttp_CutsTheShutdownAtTheBudgetTheEnvironmentConfigured(t *testing.T) {
+    logger := &warningRecordingLogger{}
+
+    environment, environmentErr := config.NewEnvironment(
+        &mapEnvironmentSource{
+            values: map[string]string{
+                config.HttpAddressKey:         "127.0.0.1:34519",
+                config.HttpShutdownTimeoutKey: "50ms",
+            },
+        },
+    )
+    if nil != environmentErr {
+        t.Fatalf("unexpected environment error: %v", environmentErr)
+    }
+
+    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+    if nil != configurationErr {
+        t.Fatalf("unexpected configuration error: %v", configurationErr)
+    }
+
+    applicationInstance := &Application{
+        configuration:        configuration,
+        runtimeFlags:         NewRuntimeFlags(config.ModeHttp),
+        kernel:               newTestKernel(),
+        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerOptions(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
+        moduleConfigurations: make(map[string]any),
+    }
+
+    applicationInstance.RegisterService(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return logger, nil
+        },
+    )
+
+    applicationInstance.registerCache()
+
+    runContext, cancelRun := context.WithCancel(context.Background())
+    defer cancelRun()
+
+    runResult := make(chan error, 1)
+    go func() {
+        runResult <- applicationInstance.runHttp(runContext)
+    }()
+
+    var connection net.Conn
+    var dialErr error
+    for attempt := 0; attempt < 200; attempt++ {
+        connection, dialErr = net.Dial("tcp", "127.0.0.1:34519")
+        if nil == dialErr {
+            break
+        }
+
+        time.Sleep(10 * time.Millisecond)
+    }
+    if nil != dialErr {
+        t.Fatalf("the server never came up: %v", dialErr)
+    }
+    defer func() {
+        _ = connection.Close()
+    }()
+
+    /* half a request keeps the connection active for the whole shutdown: the header never completes, so the server cannot idle it */
+    _, writeErr := connection.Write([]byte("GET / HTTP/1.1\r\n"))
+    if nil != writeErr {
+        t.Fatalf("unexpected write error: %v", writeErr)
+    }
+
+    shutdownRequestedAt := time.Now()
+    cancelRun()
+
+    var runErr error
+    select {
+    case runErr = <-runResult:
+
+    case <-time.After(4 * time.Second):
+        t.Fatalf("expected runHttp to return within the configured budget; it is still waiting")
+    }
+
+    elapsed := time.Since(shutdownRequestedAt)
+
+    if nil == runErr {
+        t.Fatalf("expected the overrun shutdown budget to be reported as a failure")
+    }
+
+    if false == strings.Contains(runErr.Error(), "context deadline exceeded") {
+        t.Fatalf("expected the budget overrun in the failure, got %q", runErr.Error())
+    }
+
+    if elapsed > 2*time.Second {
+        t.Fatalf("expected the shutdown to be cut at the configured 50ms, took %v", elapsed)
+    }
+}
+
+/* the budget is the parameter, not a constant: a request held open past the configured wait must be cut when the budget says so, and well before the default would. The handler is released only after the assertion, so the shutdown can never finish on its own first. */
+func TestAwaitHttpServerEnd_CutsTheShutdownAtTheConfiguredBudget(t *testing.T) {
+    handlerStarted := make(chan struct{})
+    releaseHandler := make(chan struct{})
+
+    serveMux := nethttp.NewServeMux()
+    serveMux.HandleFunc("/", func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+        close(handlerStarted)
+        <-releaseHandler
+    })
+
+    listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+    if nil != listenErr {
+        t.Fatalf("unexpected listen error: %v", listenErr)
+    }
+
+    httpServer := &nethttp.Server{Handler: serveMux}
+
+    errorChannel := make(chan error, 1)
+    go func() {
+        errorChannel <- httpServer.Serve(listener)
+    }()
+
+    go func() {
+        response, requestErr := nethttp.Get("http://" + listener.Addr().String() + "/")
+        if nil == requestErr {
+            _ = response.Body.Close()
+        }
+    }()
+
+    <-handlerStarted
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    shutdownStartedAt := time.Now()
+    endErr := awaitHttpServerEnd(cancelledContext, httpServer, errorChannel, &warningRecordingLogger{}, 50*time.Millisecond)
+    elapsed := time.Since(shutdownStartedAt)
+
+    close(releaseHandler)
+
+    if nil == endErr {
+        t.Fatalf("expected the overrun shutdown budget to be reported as a failure")
+    }
+
+    if false == strings.Contains(endErr.Error(), "context deadline exceeded") {
+        t.Fatalf("expected the budget overrun in the failure, got %q", endErr.Error())
+    }
+
+    if elapsed > 2*time.Second {
+        t.Fatalf("expected the shutdown to be cut at the 50ms budget, took %v", elapsed)
+    }
+}
+
 func TestAwaitHttpServerEnd_TreatsServerClosedAsACleanShutdown(t *testing.T) {
     errorChannel := make(chan error, 1)
     errorChannel <- nethttp.ErrServerClosed
@@ -434,7 +576,7 @@ func TestAwaitHttpServerEnd_TreatsServerClosedAsACleanShutdown(t *testing.T) {
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
 
-    endErr := awaitHttpServerEnd(cancelledContext, &nethttp.Server{}, errorChannel, &warningRecordingLogger{})
+    endErr := awaitHttpServerEnd(cancelledContext, &nethttp.Server{}, errorChannel, &warningRecordingLogger{}, time.Second)
     if nil != endErr {
         t.Fatalf("expected a clean shutdown for the server's own closed signal, got: %v", endErr)
     }

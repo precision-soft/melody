@@ -65,6 +65,10 @@ var environmentKeyAliasMap = map[string][]string{
         HttpSessionTtlKey,
         KernelHttpSessionTtl,
     },
+    HttpShutdownTimeoutKey: {
+        HttpShutdownTimeoutKey,
+        KernelHttpShutdownTimeout,
+    },
 }
 
 func (instance *Configuration) addAliasedParameterFromEnvironment(

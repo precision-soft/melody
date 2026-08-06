@@ -7,7 +7,6 @@ import (
     loggingcontract "github.com/precision-soft/melody/logging/contract"
 )
 
-/* @info these are the values an application gets by declaring nothing, so every one of them is a decision the framework makes on the caller's behalf — and nothing had ever read them back. The three that matter most are the ones the hardening sweep argued over: a bounded session lifetime rather than an unbounded store, a body limit rather than none, and the development environment rather than production, because the safe default of the last one is the LOUD one. */
 func TestRegisterDefaultParameters_DeclaresTheDefaultsAnApplicationInheritsByDeclaringNothing(t *testing.T) {
     configuration := newResolvedConfiguration(t, map[string]string{}, func(configuration *Configuration) {})
 
@@ -19,6 +18,7 @@ func TestRegisterDefaultParameters_DeclaresTheDefaultsAnApplicationInheritsByDec
         HttpAddressKey:             ":8080",
         HttpMaxRequestBodyBytesKey: 1048576,
         HttpSessionTtlKey:          DefaultSessionTtl.String(),
+        HttpShutdownTimeoutKey:     DefaultHttpShutdownTimeout.String(),
         CliNameKey:                 "melody",
         CliDescriptionKey:          "",
         LogLevelKey:                string(loggingcontract.LevelDebug),
@@ -43,7 +43,6 @@ func TestRegisterDefaultParameters_DeclaresTheDefaultsAnApplicationInheritsByDec
     }
 }
 
-/* @info the directory defaults are declared as REFERENCES to the project directory rather than as absolute paths, so an application that moves its project moves them with it; the resolution is what turns them into paths, and a default written absolute would pin them to whatever the first boot saw. */
 func TestRegisterDefaultParameters_TheDirectoryDefaultsHangUnderTheProjectDirectory(t *testing.T) {
     configuration := newResolvedConfiguration(t, map[string]string{}, func(configuration *Configuration) {})
 
@@ -66,7 +65,6 @@ func TestRegisterDefaultParameters_TheDirectoryDefaultsHangUnderTheProjectDirect
     }
 }
 
-/* @info a value the environment declares must win over the default, or the defaults would be a floor nobody can raise — the parameter names ARE the environment keys, which is what makes the override a single lookup rather than a mapping table, and the parameter stops reporting itself as a default once one arrives. */
 func TestRegisterDefaultParameters_AnEnvironmentValueWinsOverTheDefault(t *testing.T) {
     configuration := newResolvedConfiguration(
         t,

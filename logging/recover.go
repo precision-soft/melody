@@ -4,6 +4,7 @@ import (
     "fmt"
     "os"
     "runtime/debug"
+    "time"
 
     "github.com/precision-soft/melody/exception"
     "github.com/precision-soft/melody/internal"
@@ -121,6 +122,19 @@ func LogOnRecoverAndExitAfter(
     exitCode int,
     beforeExit func(),
 ) {
+    /* the rule NewExitError enforces, applied to the code this handler would exit with: zero makes the echo silent and os.Exit report success after a fatal failure. The refusal runs before the no-panic return so a caller wired with a bad code is caught on its first healthy pass, deterministically, not on the first panic months later. */
+    if 1 > exitCode || 255 < exitCode {
+        exception.Panic(
+            exception.NewEmergency(
+                "exit code out of range",
+                map[string]any{
+                    "exitCode": exitCode,
+                },
+                nil,
+            ),
+        )
+    }
+
     if nil == recovered {
         return
     }
@@ -147,18 +161,35 @@ func LogOnRecoverAndExitAfter(
     os.Exit(resolvedExitCode)
 }
 
-/* runExitStepShielded contains a panic inside one step of the exit handler and echoes it to stderr best-effort. */
-func runExitStepShielded(stepName string, step func()) {
-    defer func() {
-        recoveredValue := recover()
-        if nil == recoveredValue {
-            return
-        }
+/* exitStepBudget is how long one step of the exit handler may run before it is abandoned; tests replace it to drive the timeout without real waits. Ten seconds is double the default http shutdown wait on purpose — the exit handler is the last resort, not the first — and it is a package constant rather than a tunable because this package cannot read the configuration: the logger it builds is what the configuration is loaded through. */
+var exitStepBudget = 10 * time.Second
 
-        _, _ = fmt.Fprintf(os.Stderr, "melody: panic while %s during the exit handler: %v\n", stepName, recoveredValue)
+/* runExitStepShielded contains a panic inside one step of the exit handler and echoes it to stderr best-effort, and abandons a step that does not return within the budget: the steps stand between a fatal failure and os.Exit, so a teardown blocked on a close that never returns — a drain on an unbuffered channel, a lock somebody died holding — would otherwise turn a dying process into a hung one, with the record written and the exit never taken. The step keeps running on its goroutine after abandonment; os.Exit ends it with the process. */
+func runExitStepShielded(stepName string, step func()) {
+    stepDone := make(chan struct{})
+
+    go func() {
+        defer close(stepDone)
+
+        /* the recover lives on the step's own goroutine: a recover in the waiting parent could never catch a panic raised here */
+        defer func() {
+            recoveredValue := recover()
+            if nil == recoveredValue {
+                return
+            }
+
+            _, _ = fmt.Fprintf(os.Stderr, "melody: panic while %s during the exit handler: %v\n", stepName, recoveredValue)
+        }()
+
+        step()
     }()
 
-    step()
+    select {
+    case <-stepDone:
+
+    case <-time.After(exitStepBudget):
+        _, _ = fmt.Fprintf(os.Stderr, "melody: %s did not return within %s during the exit handler; abandoning it\n", stepName, exitStepBudget)
+    }
 }
 
 /* resolveRecoveredExit normalizes a recovered value into the error the exit reports, the exit code the process takes, and whether that error still needs logging. An ExitError carries its own code; one holding no error value is given an error naming the anomaly instead of dereferencing nil inside the one handler that must not panic. A typed-nil exception is the value someone panicked with and is normalized as a plain panic value under the caller's code. */
@@ -168,23 +199,44 @@ func resolveRecoveredExit(
 ) (*exception.Error, int, bool) {
     exitError, isExitError := recovered.(*exception.ExitError)
     if true == isExitError && nil != exitError {
+        ownExitCode := exitError.ExitCode()
+
+        /* the rule NewExitError enforces at construction, read again at the one door that decides how the process ends: the zero value is constructible outside the constructor and answers 0, which os.Exit would report as success after a fatal panic. A wrapper carrying an out-of-range code is not honored as an exit — it is normalized under the caller's code, like the typed nil below. The upper bound is latent by construction, since the fields are unexported and the constructor refuses anything outside the range. */
+        if 1 > ownExitCode || 255 < ownExitCode {
+            var cause error
+            if carried := exitError.ErrorValue(); nil != carried {
+                cause = carried
+            }
+
+            err := exception.NewError(
+                "exit error carries an out-of-range exit code",
+                map[string]any{
+                    "exitCode": ownExitCode,
+                },
+                cause,
+            )
+
+            return err, exitCode, true
+        }
+
         err := exitError.ErrorValue()
 
         if nil == err {
+            /* latent defense: the zero value was the one producer of a nil error value and the range guard above intercepts it, but the branch keeps this reader answering instead of dereferencing nil should another producer ever appear */
             err = exception.NewError(
                 "exit requested with no error value",
                 nil,
                 nil,
             )
 
-            return err, exitError.ExitCode(), true
+            return err, ownExitCode, true
         }
 
         if true == err.AlreadyLogged() {
-            return err, exitError.ExitCode(), false
+            return err, ownExitCode, false
         }
 
-        return err, exitError.ExitCode(), true
+        return err, ownExitCode, true
     }
 
     alreadyLogged := isAlreadyLoggedValue(recovered)

@@ -5,7 +5,6 @@ import (
     "time"
 )
 
-/* @info an application that never names a session ttl still gets a bounded one, because melody mints a session for every cookie-less request and the default storage keeps whatever it is handed for the life of the process */
 func TestConfigurationHttpSessionTtlDefaultsToABoundedLifetime(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{}}
 
@@ -24,7 +23,6 @@ func TestConfigurationHttpSessionTtlDefaultsToABoundedLifetime(t *testing.T) {
     }
 }
 
-/* @info no expiry stays reachable, but only by asking for it: the value zero keeps its meaning and is not what an application gets by staying silent */
 func TestConfigurationHttpSessionTtlKeepsZeroAsAnExplicitChoice(t *testing.T) {
     source := &testEnvironmentSource{
         values: map[string]string{
@@ -44,6 +42,84 @@ func TestConfigurationHttpSessionTtlKeepsZeroAsAnExplicitChoice(t *testing.T) {
 
     if 0 != configuration.Http().SessionTtl() {
         t.Fatalf("expected an explicit zero to stay unbounded, got %v", configuration.Http().SessionTtl())
+    }
+}
+
+func TestConfigurationHttpShutdownTimeoutDefaultsToFiveSeconds(t *testing.T) {
+    source := &testEnvironmentSource{values: map[string]string{}}
+
+    environment, err := NewEnvironment(source)
+    if nil != err {
+        t.Fatalf("new environment error: %v", err)
+    }
+
+    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    if nil != err {
+        t.Fatalf("new configuration error: %v", err)
+    }
+
+    if DefaultHttpShutdownTimeout != configuration.Http().ShutdownTimeout() {
+        t.Fatalf("expected the default shutdown timeout, got %v", configuration.Http().ShutdownTimeout())
+    }
+}
+
+func TestConfigurationHttpShutdownTimeoutIsReadFromTheEnvironment(t *testing.T) {
+    source := &testEnvironmentSource{
+        values: map[string]string{
+            HttpShutdownTimeoutKey: "45s",
+        },
+    }
+
+    environment, err := NewEnvironment(source)
+    if nil != err {
+        t.Fatalf("new environment error: %v", err)
+    }
+
+    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    if nil != err {
+        t.Fatalf("new configuration error: %v", err)
+    }
+
+    if 45*time.Second != configuration.Http().ShutdownTimeout() {
+        t.Fatalf("expected the configured shutdown timeout, got %v", configuration.Http().ShutdownTimeout())
+    }
+}
+
+func TestConfigurationHttpShutdownTimeoutRejectsZeroAndNegative(t *testing.T) {
+    for _, value := range []string{"0", "-1s"} {
+        source := &testEnvironmentSource{
+            values: map[string]string{
+                HttpShutdownTimeoutKey: value,
+            },
+        }
+
+        environment, err := NewEnvironment(source)
+        if nil != err {
+            t.Fatalf("new environment error: %v", err)
+        }
+
+        _, err = NewConfiguration(environment, "/tmp/melody")
+        if nil == err {
+            t.Fatalf("expected the shutdown timeout %q to fail the boot", value)
+        }
+    }
+}
+
+func TestConfigurationHttpShutdownTimeoutRejectsAnUnparsableValue(t *testing.T) {
+    source := &testEnvironmentSource{
+        values: map[string]string{
+            HttpShutdownTimeoutKey: "soon",
+        },
+    }
+
+    environment, err := NewEnvironment(source)
+    if nil != err {
+        t.Fatalf("new environment error: %v", err)
+    }
+
+    _, err = NewConfiguration(environment, "/tmp/melody")
+    if nil == err {
+        t.Fatalf("expected an unparsable shutdown timeout to fail the boot")
     }
 }
 
@@ -87,7 +163,6 @@ func TestConfigurationHttpSessionTtlRejectsANegativeValue(t *testing.T) {
     }
 }
 
-/* @info Validation rejected only a negative ttl, so "1ns" parsed and was accepted. FileStorage.Save purges every lapsed entry on the very write that stores the new one — the boundary measured between 1µs and 10µs — so the caller was told the save succeeded and nothing was persisted: a login that reports success and stores no session. */
 func TestConfigurationHttpSessionTtlRejectsAValueBelowTheFloor(t *testing.T) {
     cases := []string{"1ns", "1us", "500ms", "999ms"}
 
@@ -110,7 +185,6 @@ func TestConfigurationHttpSessionTtlRejectsAValueBelowTheFloor(t *testing.T) {
     }
 }
 
-/* @info The floor is one second, and one second itself is accepted; zero keeps its own meaning of no expiry. */
 func TestConfigurationHttpSessionTtlAcceptsTheFloorAndZero(t *testing.T) {
     cases := map[string]time.Duration{
         "1s":  time.Second,
@@ -289,7 +363,6 @@ func TestConfigurationHttpStaticExcludedPathsAcceptAWhitespaceOnlyValueAsNoList(
     }
 }
 
-/* @info the http values are validated at construction the way the kernel ones are, and each refusal names what it refused. These are the settings that decide what the process binds, what it serves and how much of a request body it reads: a port out of range, a public directory that climbs out of the project, an index file with a path in it, an unbounded body limit. Every one of them fails at boot rather than at the first request that meets it. */
 func TestNewHttpConfiguration_RefusesEveryValueItCannotAct(t *testing.T) {
     cases := []struct {
         name                string
@@ -403,6 +476,7 @@ func TestNewHttpConfiguration_RefusesEveryValueItCannotAct(t *testing.T) {
                 testCase.staticCacheMaxAge,
                 testCase.staticExcludedPaths,
                 testCase.sessionTtl,
+                DefaultHttpShutdownTimeout,
             )
 
             if nil == httpErr {
@@ -420,7 +494,6 @@ func TestNewHttpConfiguration_RefusesEveryValueItCannotAct(t *testing.T) {
     }
 }
 
-/* @info a bare port is read as one: a deployment writing 8080 means every interface on that port, and the address is completed rather than refused. Everything acceptable is kept as given. */
 func TestNewHttpConfiguration_CompletesABarePortAndKeepsEveryAcceptedValue(t *testing.T) {
     httpConfigurationInstance, httpErr := newHttpConfiguration(
         "8080",
@@ -432,6 +505,7 @@ func TestNewHttpConfiguration_CompletesABarePortAndKeepsEveryAcceptedValue(t *te
         3600,
         []string{"/internal"},
         time.Minute,
+        7*time.Second,
     )
     if nil != httpErr {
         t.Fatalf("unexpected error: %v", httpErr)
@@ -460,5 +534,37 @@ func TestNewHttpConfiguration_CompletesABarePortAndKeepsEveryAcceptedValue(t *te
     }
     if time.Minute != httpConfigurationInstance.SessionTtl() {
         t.Fatalf("unexpected session ttl: %s", httpConfigurationInstance.SessionTtl())
+    }
+    if 7*time.Second != httpConfigurationInstance.ShutdownTimeout() {
+        t.Fatalf("unexpected shutdown timeout: %s", httpConfigurationInstance.ShutdownTimeout())
+    }
+}
+
+func TestNewHttpConfiguration_RefusesANonPositiveShutdownTimeout(t *testing.T) {
+    for _, invalidTimeout := range []time.Duration{0, -time.Second} {
+        httpConfigurationInstance, httpErr := newHttpConfiguration(
+            ":8080",
+            "en",
+            "public",
+            "index.html",
+            1024,
+            false,
+            3600,
+            nil,
+            0,
+            invalidTimeout,
+        )
+
+        if nil == httpErr {
+            t.Fatalf("expected the shutdown timeout %v to be refused", invalidTimeout)
+        }
+
+        if nil != httpConfigurationInstance {
+            t.Fatalf("expected no configuration over a refused value")
+        }
+
+        if "http shutdown timeout must be positive" != httpErr.Error() {
+            t.Fatalf("expected the refusal to name the rule, got %q", httpErr.Error())
+        }
     }
 }

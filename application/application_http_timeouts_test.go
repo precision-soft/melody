@@ -5,8 +5,6 @@ import (
     "testing"
 )
 
-/* @info the override interfaces were removed: nothing implemented them and nothing could inject an implementation, so the server limits are fixed defaults in this major */
-
 func TestApplyHttpServerTimeoutsDefaults(t *testing.T) {
     server := &nethttp.Server{}
 
@@ -26,11 +24,5 @@ func TestApplyHttpServerTimeoutsDefaults(t *testing.T) {
     }
     if defaultHttpMaxHeaderBytes != server.MaxHeaderBytes {
         t.Fatalf("expected default MaxHeaderBytes %v, got %v", defaultHttpMaxHeaderBytes, server.MaxHeaderBytes)
-    }
-}
-
-func TestResolveHttpShutdownTimeoutIsTheDefault(t *testing.T) {
-    if defaultHttpShutdownTimeout != resolveHttpShutdownTimeout() {
-        t.Fatalf("expected the default shutdown timeout")
     }
 }

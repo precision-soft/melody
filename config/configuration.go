@@ -90,7 +90,7 @@ type Configuration struct {
     /* set once the boot-time Resolve has run, so a parameter registered afterwards is resolved on registration instead of keeping its raw template */
     resolved bool
 
-    /* @important written and read under the configuration write lock so the refusal in Resolve is airtight — a MarkServing racing a Resolve either waits for the rewrite to finish (still pre-serving) or lands first and the rewrite is refused; the atomic wrapper keeps any future lock-free reader honest rather than carrying the synchronization itself */
+    /* written and read under the configuration write lock so the refusal in Resolve is airtight — a MarkServing racing a Resolve either waits for the rewrite to finish (still pre-serving) or lands first and the rewrite is refused; the atomic wrapper keeps any future lock-free reader honest rather than carrying the synchronization itself */
     serving atomic.Bool
 }
 
@@ -115,7 +115,7 @@ func (instance *Configuration) Http() configcontract.HttpConfiguration {
 }
 
 func (instance *Configuration) Parameters() ParameterMap {
-    /* @important read under the read lock because RegisterRuntime mutates the shared parameters map at runtime; an unguarded range here races the writer and trips Go's fatal "concurrent map read and map write" */
+    /* read under the read lock because RegisterRuntime mutates the shared parameters map at runtime; an unguarded range here races the writer and trips Go's fatal "concurrent map read and map write" */
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
 
@@ -135,7 +135,7 @@ func (instance *Configuration) projectDirectoryParameterValue() string {
 }
 
 func (instance *Configuration) Get(name string) configcontract.Parameter {
-    /* @important read under the read lock because RegisterRuntime mutates the shared parameters map at runtime; an unguarded read here races the writer and trips Go's fatal "concurrent map read and map write" */
+    /* read under the read lock because RegisterRuntime mutates the shared parameters map at runtime; an unguarded read here races the writer and trips Go's fatal "concurrent map read and map write" */
     instance.mutex.RLock()
     parameter := instance.getInternalParameter(name)
     instance.mutex.RUnlock()
@@ -208,7 +208,7 @@ func (instance *Configuration) registerRuntimeParameter(name string, value any, 
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    /* @important use the lock-free lookup here, not Get: Get now takes the read lock and sync.RWMutex is non-reentrant, so self-calling it while holding the write lock would deadlock */
+    /* use the lock-free lookup here, not Get: Get now takes the read lock and sync.RWMutex is non-reentrant, so self-calling it while holding the write lock would deadlock */
     existingParameter := instance.getInternalParameter(name)
     if nil != existingParameter {
         exception.Panic(
@@ -310,7 +310,7 @@ func templateReadsName(template string, name string) bool {
 }
 
 func (instance *Configuration) Names() []string {
-    /* @important read under the read lock because RegisterRuntime mutates the shared parameters map at runtime; an unguarded range here races the writer and trips Go's fatal "concurrent map read and map write" */
+    /* read under the read lock because RegisterRuntime mutates the shared parameters map at runtime; an unguarded range here races the writer and trips Go's fatal "concurrent map read and map write" */
     instance.mutex.RLock()
 
     names := make([]string, 0, len(instance.parameters))
@@ -374,7 +374,7 @@ func (instance *Configuration) applyEnvironmentOverrides() error {
     return nil
 }
 
-/* @important the constructor's own pass does not mark the configuration resolved: the composition root registers its parameters after it and before boot, and a parameter registered while the configuration counts as resolved is resolved eagerly against whatever exists at that moment — which makes registration order significant and reports a forward reference as a failure "after boot" that boot has not yet reached. The boot pass resolves them all in one order-independent batch. */
+/* the constructor's own pass does not mark the configuration resolved: the composition root registers its parameters after it and before boot, and a parameter registered while the configuration counts as resolved is resolved eagerly against whatever exists at that moment — which makes registration order significant and reports a forward reference as a failure "after boot" that boot has not yet reached. The boot pass resolves them all in one order-independent batch. */
 func (instance *Configuration) resolvePlaceholders() error {
     resolveErr := instance.Resolve()
     if nil != resolveErr {
@@ -473,6 +473,17 @@ func (instance *Configuration) buildHttpConfiguration() error {
         )
     }
 
+    shutdownTimeout, shutdownTimeoutErr := instance.MustGet(KernelHttpShutdownTimeout).Duration()
+    if nil != shutdownTimeoutErr {
+        return exception.NewError(
+            "invalid environment value",
+            exceptioncontract.Context{
+                "environmentKey": HttpShutdownTimeoutKey,
+            },
+            shutdownTimeoutErr,
+        )
+    }
+
     httpConfigurationInstance, newHttpConfigurationErr := newHttpConfiguration(
         instance.MustGet(KernelHttpAddress).MustString(),
         instance.MustGet(KernelDefaultLocale).MustString(),
@@ -483,6 +494,7 @@ func (instance *Configuration) buildHttpConfiguration() error {
         staticCacheMaxAge,
         staticExcludedPaths,
         sessionTtl,
+        shutdownTimeout,
     )
     if nil != newHttpConfigurationErr {
         return exception.NewError("could not initialize the http configuration", nil, newHttpConfigurationErr)
@@ -531,7 +543,7 @@ func (instance *Configuration) isReserved(name string) bool {
     return strings.HasPrefix(name, "kernel.")
 }
 
-/* @important getInternalParameter is the lock-free map lookup primitive; it must NOT take the lock because it is called both at single-threaded construction (placeholder resolution) and while the write lock is already held (RegisterRuntime). Concurrent readers go through Get/Parameters/Names, which take the read lock around it. */
+/* getInternalParameter is the lock-free map lookup primitive; it must NOT take the lock because it is called both at single-threaded construction (placeholder resolution) and while the write lock is already held (RegisterRuntime). Concurrent readers go through Get/Parameters/Names, which take the read lock around it. */
 func (instance *Configuration) getInternalParameter(name string) *Parameter {
     parameter, exists := instance.parameters[name]
     if false == exists || nil == parameter {

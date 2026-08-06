@@ -4,6 +4,7 @@ import (
     "context"
     "errors"
     nethttp "net/http"
+    "time"
 
     "github.com/precision-soft/melody/cache"
     "github.com/precision-soft/melody/config"
@@ -106,7 +107,7 @@ func (instance *Application) runHttp(
         errorChannel <- listenAndServeErr
     }()
 
-    return awaitHttpServerEnd(ctx, httpServer, errorChannel, logger)
+    return awaitHttpServerEnd(ctx, httpServer, errorChannel, logger, configuration.Http().ShutdownTimeout())
 }
 
 /* awaitHttpServerEnd waits for whichever ends the serving first: the cancelled context or the server's own failure. The serve error is read even on the shutdown branch — when the listen fails in the same instant the context is cancelled, the select's choice of branch is arbitrary, and taking the shutdown branch used to discard the real failure, so a process that never served a byte reported a clean shutdown. Shutdown closes the listeners before it returns, so the serve goroutine has already been released and the receive is bounded. */
@@ -115,10 +116,11 @@ func awaitHttpServerEnd(
     httpServer *nethttp.Server,
     errorChannel chan error,
     logger loggingcontract.Logger,
+    shutdownTimeout time.Duration,
 ) error {
     select {
     case <-ctx.Done():
-        shutdownContext, cancel := context.WithTimeout(context.Background(), resolveHttpShutdownTimeout())
+        shutdownContext, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
         defer cancel()
 
         shutdownErr := httpServer.Shutdown(shutdownContext)

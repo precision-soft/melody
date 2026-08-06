@@ -24,6 +24,8 @@ func (instance *Configuration) registerDefaultParameters(
     /* a bounded lifetime is what an application gets by not choosing one, because the unbounded storage it would otherwise fill is also what it gets by not choosing one; zero stays available as the explicit way to ask for no expiry */
     instance.setDefaultParameter(HttpSessionTtlKey, DefaultSessionTtl.String())
 
+    instance.setDefaultParameter(HttpShutdownTimeoutKey, DefaultHttpShutdownTimeout.String())
+
     instance.setDefaultParameter(CliNameKey, "melody")
 
     instance.setDefaultParameter(CliDescriptionKey, "")

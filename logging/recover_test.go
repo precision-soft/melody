@@ -7,6 +7,7 @@ import (
     "os/exec"
     "strings"
     "testing"
+    "time"
 
     "github.com/precision-soft/melody/exception"
     loggingcontract "github.com/precision-soft/melody/logging/contract"
@@ -301,23 +302,40 @@ func TestEchoExitToStderr_StaysSilentForZeroExit(t *testing.T) {
     }
 }
 
-func TestResolveRecoveredExit_ZeroValueExitErrorDoesNotPanicTheExitHandler(t *testing.T) {
+func TestResolveRecoveredExit_ZeroValueExitErrorIsNotHonoredAsAnExit(t *testing.T) {
     err, exitCode, needsLogging := resolveRecoveredExit(&exception.ExitError{}, 1)
 
     if nil == err {
-        t.Fatalf("expected a substitute error for an exit error carrying no error value")
+        t.Fatalf("expected a substitute error for an exit error carrying an out-of-range code")
     }
 
-    if false == strings.Contains(err.Error(), "exit requested with no error value") {
+    if false == strings.Contains(err.Error(), "exit error carries an out-of-range exit code") {
         t.Fatalf("expected the substitute error to name the anomaly, got %q", err.Error())
     }
 
-    if 0 != exitCode {
-        t.Fatalf("expected the zero value's own exit code to be honored, got %d", exitCode)
+    if 1 != exitCode {
+        t.Fatalf("expected the caller's exit code instead of the zero value's own 0, got %d", exitCode)
     }
 
     if false == needsLogging {
         t.Fatalf("expected the anomaly to be logged")
+    }
+}
+
+func TestResolveRecoveredExit_OutOfRangeExitErrorCarriesItsErrorValueAsTheCause(t *testing.T) {
+    err, exitCode, needsLogging := resolveRecoveredExit(&exception.ExitError{}, 3)
+
+    if 3 != exitCode {
+        t.Fatalf("expected the caller's exit code, got %d", exitCode)
+    }
+
+    if nil == err || false == needsLogging {
+        t.Fatalf("expected a substitute error pending logging")
+    }
+
+    /* the zero value carries no error value, so the substitute must not box a typed nil as its cause */
+    if nil != err.Unwrap() {
+        t.Fatalf("expected no cause for a wrapper carrying no error value, got %v", err.Unwrap())
     }
 }
 
@@ -731,5 +749,152 @@ func TestLogOnRecover_UnmarkedHttpException_IsStillLogged(t *testing.T) {
 
     if 1 != logger.calls {
         t.Fatalf("expected one record for an unmarked http exception, got %d", logger.calls)
+    }
+}
+
+func TestLogOnRecoverAndExitAfter_RefusesAnOutOfRangeExitCode(t *testing.T) {
+    for _, outOfRangeCode := range []int{0, -1, 256} {
+        func() {
+            defer func() {
+                recoveredValue := recover()
+                if nil == recoveredValue {
+                    t.Fatalf("expected the out-of-range exit code %d to be refused", outOfRangeCode)
+                }
+
+                recoveredErr, isError := recoveredValue.(error)
+                if false == isError || false == strings.Contains(recoveredErr.Error(), "exit code out of range") {
+                    t.Fatalf("expected the refusal to name the rule for code %d, got %v", outOfRangeCode, recoveredValue)
+                }
+            }()
+
+            /* nil recovered: the refusal must fire on the healthy pass, so a caller wired with a bad code is caught on its first run rather than on its first panic */
+            LogOnRecoverAndExitAfter(&captureLogger{}, nil, outOfRangeCode, nil)
+        }()
+    }
+}
+
+func TestLogOnRecoverAndExitAfter_AcceptsTheRangeBoundsOnTheHealthyPass(t *testing.T) {
+    for _, validCode := range []int{1, 255} {
+        LogOnRecoverAndExitAfter(&captureLogger{}, nil, validCode, nil)
+    }
+}
+
+/* the marker tells a re-executed test binary that it is the child taking the exit for a zero-value exit error */
+const zeroValueExitErrorProbeMarker = "MELODY_ZERO_VALUE_EXIT_ERROR_PROBE"
+
+func TestLogOnRecoverAndExitAfter_ZeroValueExitErrorExitsWithTheCallersCode(t *testing.T) {
+    if "1" == os.Getenv(zeroValueExitErrorProbeMarker) {
+        LogOnRecoverAndExitAfter(
+            &captureLogger{},
+            &exception.ExitError{},
+            1,
+            nil,
+        )
+
+        return
+    }
+
+    command := exec.Command(
+        os.Args[0],
+        "-test.run=^TestLogOnRecoverAndExitAfter_ZeroValueExitErrorExitsWithTheCallersCode$",
+    )
+    command.Env = append(os.Environ(), zeroValueExitErrorProbeMarker+"=1")
+
+    output, runErr := command.CombinedOutput()
+
+    var exitErr *exec.ExitError
+    if false == errors.As(runErr, &exitErr) {
+        t.Fatalf("expected the child to exit non-zero instead of reporting success, got %v with output %q", runErr, string(output))
+    }
+
+    if 1 != exitErr.ExitCode() {
+        t.Fatalf("expected the caller's exit code 1 instead of the zero value's own 0, got %d with output %q", exitErr.ExitCode(), string(output))
+    }
+
+    if false == strings.Contains(string(output), "melody: exiting with code 1") {
+        t.Fatalf("expected the stderr echo for the normalized exit, got %q", string(output))
+    }
+}
+
+func TestRunExitStepShielded_AbandonsAStepThatDoesNotReturn(t *testing.T) {
+    originalBudget := exitStepBudget
+    exitStepBudget = 30 * time.Millisecond
+    defer func() {
+        exitStepBudget = originalBudget
+    }()
+
+    readEnd, writeEnd, pipeErr := os.Pipe()
+    if nil != pipeErr {
+        t.Fatalf("unexpected pipe error: %v", pipeErr)
+    }
+
+    originalStderr := os.Stderr
+    os.Stderr = writeEnd
+    defer func() {
+        os.Stderr = originalStderr
+    }()
+
+    helperDone := make(chan struct{})
+
+    go func() {
+        defer close(helperDone)
+
+        runExitStepShielded("running the probe teardown", func() {
+            select {}
+        })
+    }()
+
+    select {
+    case <-helperDone:
+
+    case <-time.After(2 * time.Second):
+        os.Stderr = originalStderr
+        t.Fatalf("expected the shielded step to be abandoned within the budget; the exit handler would hang")
+    }
+
+    _ = writeEnd.Close()
+    os.Stderr = originalStderr
+
+    output, readErr := io.ReadAll(readEnd)
+    if nil != readErr {
+        t.Fatalf("unexpected read error: %v", readErr)
+    }
+
+    if false == strings.Contains(string(output), "running the probe teardown did not return within") {
+        t.Fatalf("expected the abandonment line on stderr, got %q", string(output))
+    }
+}
+
+func TestRunExitStepShielded_ReportsNothingForAStepThatReturns(t *testing.T) {
+    readEnd, writeEnd, pipeErr := os.Pipe()
+    if nil != pipeErr {
+        t.Fatalf("unexpected pipe error: %v", pipeErr)
+    }
+
+    originalStderr := os.Stderr
+    os.Stderr = writeEnd
+    defer func() {
+        os.Stderr = originalStderr
+    }()
+
+    stepRan := false
+    runExitStepShielded("running the probe teardown", func() {
+        stepRan = true
+    })
+
+    _ = writeEnd.Close()
+    os.Stderr = originalStderr
+
+    output, readErr := io.ReadAll(readEnd)
+    if nil != readErr {
+        t.Fatalf("unexpected read error: %v", readErr)
+    }
+
+    if false == stepRan {
+        t.Fatalf("expected the step to run")
+    }
+
+    if "" != string(output) {
+        t.Fatalf("expected no stderr line for a step that returned, got %q", string(output))
     }
 }

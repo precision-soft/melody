@@ -196,7 +196,9 @@ func (instance *Application) registerParameter(
     instance.configuration.RegisterRuntime(name, value)
 }
 
-/* ProcessRole is the resolved process role (config.RoleWeb, config.RoleWorker or config.RoleAll): an explicit --role flag wins over the MELODY_PROCESS_ROLE parameter, which defaults to all. Melody gates nothing on it — wiring code queries it to decide whether to register background runners (outbox relays, consumers) on this process; services resolve the same value through ServiceProcessRole. */
+/* ProcessRole is the resolved process role (config.RoleWeb, config.RoleWorker or config.RoleAll): an explicit --role flag wins over the MELODY_PROCESS_ROLE parameter, which defaults to all. Melody gates nothing on it — wiring code queries it to decide whether to register background runners (outbox relays, consumers) on this process; services resolve the same value through ServiceProcessRole.
+
+Nothing in this major waits for those runners: when Run returns, the container closes immediately, so a goroutine still draining loses its services under it. A runner that must finish its work observes the run context and completes its drain before the handler that received the context returns. */
 func (instance *Application) ProcessRole() string {
     return instance.runtimeFlags.Role()
 }
