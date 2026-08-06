@@ -2,6 +2,7 @@ package cache
 
 import (
     "context"
+    "sort"
     "strconv"
     "strings"
     "time"
@@ -104,6 +105,10 @@ func (instance *Backend) SetCtx(ctx context.Context, key string, payload []byte,
     normalizedKey, normalizeErr := instance.normalizeKey(key)
     if nil != normalizeErr {
         return normalizeErr
+    }
+
+    if 0 > ttl {
+        return negativeTtlError(ttl)
     }
 
     var command rueidis.Completed
@@ -245,12 +250,19 @@ func (instance *Backend) ManyCtx(ctx context.Context, keys []string) (map[string
             continue
         }
 
+        originalKey := instance.stripPrefix(fullKey)
+
         payload, payloadErr := message.AsBytes()
         if nil != payloadErr {
-            return nil, payloadErr
+            return nil, exception.NewError(
+                "cache entry could not be read as a payload",
+                exceptioncontract.Context{
+                    "key": originalKey,
+                },
+                payloadErr,
+            )
         }
 
-        originalKey := instance.stripPrefix(fullKey)
         result[originalKey] = payload
     }
 
@@ -267,6 +279,12 @@ func (instance *Backend) SetMultipleCtx(ctx context.Context, items map[string][]
         return nil
     }
 
+    if 0 > ttl {
+        return negativeTtlError(ttl)
+    }
+
+    /* the keys are carried alongside the commands because a failing response is identified by position only: the map iterates in a random order, so without this the same two bad items would report a different one on every call, and the caller would learn that a batch failed without learning which of its entries did not land. */
+    commandKeys := make([]string, 0, len(items))
     cmds := make(rueidis.Commands, 0, len(items))
     for key, payload := range items {
         normalizedKey, normalizeErr := instance.normalizeKey(key)
@@ -281,12 +299,20 @@ func (instance *Backend) SetMultipleCtx(ctx context.Context, items map[string][]
             command = instance.client.B().Set().Key(normalizedKey).Value(rueidis.BinaryString(payload)).Build()
         }
 
+        commandKeys = append(commandKeys, key)
         cmds = append(cmds, command)
     }
 
-    for _, response := range instance.client.DoMulti(ctx, cmds...) {
+    for index, response := range instance.client.DoMulti(ctx, cmds...) {
         if err := response.Error(); nil != err {
-            return err
+            return exception.NewError(
+                "cache set failed",
+                exceptioncontract.Context{
+                    "key":            commandKeys[index],
+                    "requestedCount": len(commandKeys),
+                },
+                err,
+            )
         }
     }
 
@@ -313,18 +339,11 @@ func (instance *Backend) DeleteMultipleCtx(ctx context.Context, keys []string) e
         normalizedKeys = append(normalizedKeys, normalizedKey)
     }
 
-    deleteErrors := rueidis.MDel(
+    return instance.firstDeleteFailure(rueidis.MDel(
         instance.client,
         ctx,
         normalizedKeys,
-    )
-    for _, deleteErr := range deleteErrors {
-        if nil != deleteErr {
-            return deleteErr
-        }
-    }
-
-    return nil
+    ))
 }
 
 /* Deprecated: prefer DeleteMultipleCtx, which takes ctx per call. */
@@ -390,6 +409,18 @@ func (instance *Backend) Close() error {
     return nil
 }
 
+/* negativeTtlError refuses the already-lapsed duration the in-memory backend refuses too. Without it a negative ttl falls into the branch that writes no expiry at all, so the one value the caller meant to be unreadable is the one value stored forever. Zero keeps meaning no expiry, as both backends document. */
+func negativeTtlError(ttl time.Duration) error {
+    return exception.NewError(
+        "cache ttl is negative",
+        exceptioncontract.Context{
+            "ttl": ttl.String(),
+        },
+        nil,
+    )
+}
+
+/* normalizeKey names the offending key in every refusal: a batch call validates keys the caller handed in as a set, and a refusal that does not say which of them is malformed leaves nothing to act on. */
 func (instance *Backend) normalizeKey(key string) (string, error) {
     if "" == key {
         return "", exception.NewError(
@@ -402,7 +433,9 @@ func (instance *Backend) normalizeKey(key string) (string, error) {
     if true == strings.Contains(key, " ") {
         return "", exception.NewError(
             "cache key contains spaces",
-            nil,
+            exceptioncontract.Context{
+                "key": key,
+            },
             nil,
         )
     }
@@ -410,7 +443,9 @@ func (instance *Backend) normalizeKey(key string) (string, error) {
     if true == strings.Contains(key, "\n") {
         return "", exception.NewError(
             "cache key contains newlines",
-            nil,
+            exceptioncontract.Context{
+                "key": key,
+            },
             nil,
         )
     }
@@ -419,6 +454,7 @@ func (instance *Backend) normalizeKey(key string) (string, error) {
         return "", exception.NewError(
             "cache key is too long",
             exceptioncontract.Context{
+                "key":          key,
                 "maxKeyLength": rueidisBackendDefaultMaxKeyLength,
                 "keyLength":    len(key),
             },
@@ -446,14 +482,31 @@ func escapeRedisGlobMeta(value string) string {
     return builder.String()
 }
 
+/* scanKeys walks every node rather than the client as a whole. SCAN names no key, so a cluster client routes it to whichever node it happens to pick first, and a clear that scanned one node would delete that node's share of the matching keys and report success — the caller would read a complete invalidation from a partial one. Nodes() answers with the one client itself when the deployment is not a cluster, so the single-node path is the same walk over one node. */
 func (instance *Backend) scanKeys(ctx context.Context, pattern string) ([]string, error) {
+    keys := make([]string, 0)
+
+    nodes := instance.client.Nodes()
+    for _, node := range nodes {
+        nodeKeys, nodeErr := scanNodeKeys(ctx, node, pattern, instance.scanCount)
+        if nil != nodeErr {
+            return nil, nodeErr
+        }
+
+        keys = append(keys, nodeKeys...)
+    }
+
+    return keys, nil
+}
+
+func scanNodeKeys(ctx context.Context, node rueidis.Client, pattern string, scanCount int) ([]string, error) {
     cursor := uint64(0)
     keys := make([]string, 0)
 
     for {
-        response := instance.client.Do(
+        response := node.Do(
             ctx,
-            instance.client.B().Scan().Cursor(cursor).Match(pattern).Count(int64(instance.scanCount)).Build(),
+            node.B().Scan().Cursor(cursor).Match(pattern).Count(int64(scanCount)).Build(),
         )
         if err := response.Error(); nil != err {
             return nil, err
@@ -522,15 +575,38 @@ func (instance *Backend) deleteKeysInBatches(ctx context.Context, keys []string)
         }
 
         batch := keys[startIndex:endIndex]
-        deleteErrors := rueidis.MDel(instance.client, ctx, batch)
-        for _, deleteErr := range deleteErrors {
-            if nil != deleteErr {
-                return deleteErr
-            }
+        if batchErr := instance.firstDeleteFailure(rueidis.MDel(instance.client, ctx, batch)); nil != batchErr {
+            return batchErr
         }
     }
 
     return nil
+}
+
+/* firstDeleteFailure names the key that failed. MDel reports per key, and a batch delete that answers with the bare store error tells the caller neither which entry stopped it nor that the entries before it are already gone. The map is unordered, so the reported key is chosen by sorting rather than by iteration, which keeps two identical failures reporting identically. */
+func (instance *Backend) firstDeleteFailure(deleteErrors map[string]error) error {
+    failedKeys := make([]string, 0, len(deleteErrors))
+    for key, deleteErr := range deleteErrors {
+        if nil != deleteErr {
+            failedKeys = append(failedKeys, key)
+        }
+    }
+
+    if 0 == len(failedKeys) {
+        return nil
+    }
+
+    sort.Strings(failedKeys)
+
+    return exception.NewError(
+        "cache delete failed",
+        exceptioncontract.Context{
+            "key":            instance.stripPrefix(failedKeys[0]),
+            "failedKeyCount": len(failedKeys),
+            "requestedCount": len(deleteErrors),
+        },
+        deleteErrors[failedKeys[0]],
+    )
 }
 
 func floorPositiveExpiry(ttl time.Duration) time.Duration {

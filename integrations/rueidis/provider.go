@@ -123,11 +123,7 @@ func (instance *Provider) Open(resolver containercontract.Resolver) (rueidis.Cli
         return client, nil
     }
 
-    pingContext := context.Background()
-    pingCancel := func() {}
-    if 0 < timeoutConfig.ConnectTimeout {
-        pingContext, pingCancel = context.WithTimeout(context.Background(), timeoutConfig.ConnectTimeout)
-    }
+    pingContext, pingCancel := context.WithTimeout(context.Background(), resolveConnectTimeout(timeoutConfig))
     defer pingCancel()
 
     pingErr := client.Do(pingContext, client.B().Ping().Build()).Error()
@@ -142,6 +138,15 @@ func (instance *Provider) Open(resolver containercontract.Resolver) (rueidis.Cli
         connectionConfig.SafeContext(),
         pingErr,
     )
+}
+
+/* resolveConnectTimeout bounds the boot ping. A non-positive value takes the default rather than removing the bound, the way Ping reads its own zero and the way this package's options read theirs: a TimeoutConfig that names only the command timeout would otherwise run the ping on a context with no deadline, and a store that accepts the connection without answering would hang boot forever holding a client no one can close yet. */
+func resolveConnectTimeout(timeoutConfig *TimeoutConfig) time.Duration {
+    if nil == timeoutConfig || 0 >= timeoutConfig.ConnectTimeout {
+        return DefaultTimeoutConfig().ConnectTimeout
+    }
+
+    return timeoutConfig.ConnectTimeout
 }
 
 func (instance *Provider) Close(client rueidis.Client) error {

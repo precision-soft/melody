@@ -4,6 +4,7 @@ import (
     "context"
     "errors"
     "fmt"
+    "math"
     "os"
     "reflect"
     "strings"
@@ -496,7 +497,7 @@ func (instance *RunnerCommand) invoke(runtimeInstance runtimecontract.Runtime, e
     /* the abandon signal sits one unwind grace PAST the deadline, so a command that honours its cancelled context always reports its own outcome and only a command that ignores it is abandoned. An entry that opted out of the deadline never abandons: a nil channel blocks forever. */
     var abandon <-chan time.Time
     if 0 < entry.timeout {
-        abandonTimer := time.NewTimer(entry.timeout + instance.gracefulTimeoutOf(entry))
+        abandonTimer := time.NewTimer(abandonDelayOf(entry.timeout, instance.gracefulTimeoutOf(entry)))
         defer abandonTimer.Stop()
 
         abandon = abandonTimer.C
@@ -511,20 +512,49 @@ func (instance *RunnerCommand) invoke(runtimeInstance runtimecontract.Runtime, e
 
         return runErr
     case <-abandon:
-        /* the kill is announced where an operator reads logs, not only in the aggregated dispatch error: this is the one path on which the runner tears a scope down under code that is still executing, and it names the entry and the window it overran so the answer — a longer GracefulTimeout, or a command that watches its context — is readable from the line itself */
-        if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
-            logger.Warning(
-                "cron: scheduled command ignored its cancelled context for the whole graceful window and is being abandoned; its container scope is closed under it while it may still be running",
-                exceptioncontract.Context{
-                    "commandName":     entry.commandName,
-                    "timeout":         entry.timeout.String(),
-                    "gracefulTimeout": instance.gracefulTimeoutOf(entry).String(),
-                },
-            )
+        return instance.resolveAbandonedRun(runtimeInstance, entry, childContext, completed)
+    }
+}
+
+/* resolveAbandonedRun answers a run whose abandon window lapsed. It reads the completion channel one last time before announcing the kill, because the outer select picks at random between two ready cases: a command that returned in the same instant the timer fired has already done its work, and without this read its outcome would be discarded and the scope reported as closed under running code — by nothing but scheduling luck. The window cannot be produced from the outside, which is why the branch is a function: a test hands it a channel that already carries the answer. */
+func (instance *RunnerCommand) resolveAbandonedRun(
+    runtimeInstance runtimecontract.Runtime,
+    entry *scheduledRunEntry,
+    childContext context.Context,
+    completed <-chan error,
+) error {
+    select {
+    case runErr := <-completed:
+        if nil != runErr && true == errors.Is(childContext.Err(), context.DeadlineExceeded) {
+            return errors.Join(instance.timeoutError(entry, false), runErr)
         }
 
-        return instance.timeoutError(entry, true)
+        return runErr
+    default:
     }
+
+    /* the kill is announced where an operator reads logs, not only in the aggregated dispatch error: this is the one path on which the runner tears a scope down under code that is still executing, and it names the entry and the window it overran so the answer — a longer GracefulTimeout, or a command that watches its context — is readable from the line itself */
+    if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
+        logger.Warning(
+            "cron: scheduled command ignored its cancelled context for the whole graceful window and is being abandoned; its container scope is closed under it while it may still be running",
+            exceptioncontract.Context{
+                "commandName":     entry.commandName,
+                "timeout":         entry.timeout.String(),
+                "gracefulTimeout": instance.gracefulTimeoutOf(entry).String(),
+            },
+        )
+    }
+
+    return instance.timeoutError(entry, true)
+}
+
+/* abandonDelayOf places the abandon signal one unwind grace past the deadline without letting the sum wrap. Both durations are caller-supplied and unbounded, so a graceful window written as the largest duration — the natural spelling of "never abandon this one" — would overflow into a negative delay, and a timer armed with one fires at once: every run of that entry would be killed the instant it started, its scope closed under it, and reported as having ignored a cancellation it never received. Saturating at the maximum keeps that spelling meaning what it says. */
+func abandonDelayOf(timeout time.Duration, gracefulTimeout time.Duration) time.Duration {
+    if gracefulTimeout > math.MaxInt64-timeout {
+        return math.MaxInt64
+    }
+
+    return timeout + gracefulTimeout
 }
 
 /* commandContextOf derives the command's context from the runner's, adding the entry's deadline when it has one. A non-positive timeout is the explicit opt-out and yields a merely cancellable context — the shape a job whose duration is genuinely unbounded needs, and the shape every entry had before the deadline existed. */
@@ -569,7 +599,7 @@ func (instance *RunnerCommand) timeoutError(entry *scheduledRunEntry, abandoned 
             exceptioncontract.Context{
                 "commandName": entry.commandName,
                 "timeout":     entry.timeout.String(),
-                "unwindGrace": instance.unwindGrace.String(),
+                "unwindGrace": instance.gracefulTimeoutOf(entry).String(),
             },
             ErrCommandTimeout,
         )

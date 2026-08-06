@@ -109,8 +109,9 @@ func ValidateNoForbiddenCharacters(tokens []string, forbidden []ForbiddenCharact
     return nil
 }
 
+/* validateUserField reads the same whitespace rule the schedule fields read: any unicode space, not the ascii four. The user column sits on the generated line beside them, and crond splits that line on a vertical tab or a no-break space exactly as it splits on a plain space — so a user carrying one either fails the daemon's user lookup, and the entry silently never runs, or shifts the column boundary and hands part of the name to the shell as the command. */
 func validateUserField(label string, value string) error {
-    if true == strings.ContainsAny(value, " \t\n\r") {
+    if -1 != strings.IndexFunc(value, unicode.IsSpace) {
         return exception.NewError(
             fmt.Sprintf("cron: %s %q contains whitespace; user fields must be single tokens", label, value),
             exceptioncontract.Context{
@@ -233,7 +234,7 @@ func validateScheduleFields(entry Entry, forbidden []ForbiddenCharacter) error {
             return forbiddenErr
         }
 
-        /* @important the rendered field must parse under the bounds crond enforces: crond treats one bad field as a parse error and refuses the whole crontab file with it — so an out-of-range value fails generation instead. */
+        /* the rendered field must parse under the bounds crond enforces: crond treats one bad field as a parse error and refuses the whole crontab file with it — so an out-of-range value fails generation instead. */
         if _, parseErr := parseCronField(fieldOrWildcard(normalizeCronNameTokens(field.value, field.names)), field.minimum, field.maximum); nil != parseErr {
             return exception.NewError(
                 fmt.Sprintf("cron: entry %q has an invalid Schedule.%s (%q)", entry.Name, field.name, field.value),

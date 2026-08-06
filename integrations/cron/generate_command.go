@@ -181,7 +181,7 @@ func (instance *GenerateCommand) resolveRunOptions(
     }
     options.template = template
 
-    /* @info the crontab-no-user dialect renders no user column at all (busybox crond and per-user crontabs reject one), so a user is never needed to place the heartbeat line — demanding one turned a valid configuration into a hard error */
+    /* the crontab-no-user dialect renders no user column at all (busybox crond and per-user crontabs reject one), so a user is never needed to place the heartbeat line — demanding one turned a valid configuration into a hard error */
     templateRendersUserColumn := TemplateNameCrontabNoUser != template.Name()
 
     outputPath := resolveDefault(commandContext, configuration, flagNameOutput, ParameterDestinationFile)
@@ -232,8 +232,15 @@ func (instance *GenerateCommand) resolveRunOptions(
     options.defaultUserName = resolveDefault(commandContext, configuration, flagNameDefaultUser, ParameterUser)
 
     heartbeatPath := resolveDefault(commandContext, configuration, flagNameHeartbeatPath, ParameterHeartbeatPath)
-    if "" == heartbeatPath && "" != logsDir && true == isHeartbeatAutoEnabled(configuration) {
-        heartbeatPath = filepath.Join(logsDir, "heartbeat.crontab")
+    if "" == heartbeatPath && "" != logsDir {
+        autoEnabled, autoEnabledErr := isHeartbeatAutoEnabled(configuration)
+        if nil != autoEnabledErr {
+            return nil, autoEnabledErr
+        }
+
+        if true == autoEnabled {
+            heartbeatPath = filepath.Join(logsDir, "heartbeat.crontab")
+        }
     }
     if "" != heartbeatPath {
         absoluteHeartbeatPath, heartbeatPathAbsErr := filepath.Abs(heartbeatPath)
@@ -792,22 +799,29 @@ func resolveDefault(
     return ""
 }
 
-func isHeartbeatAutoEnabled(configuration configcontract.Configuration) bool {
+/* isHeartbeatAutoEnabled separates an unset opt-in from a malformed one. Reading a value the parameter cannot convert as "not enabled" would generate a crontab without the liveness line the operator asked for and report success — the misspelling would be indistinguishable from never having asked. */
+func isHeartbeatAutoEnabled(configuration configcontract.Configuration) (bool, error) {
     if nil == configuration {
-        return false
+        return false, nil
     }
 
     parameter := configuration.Get(ParameterHeartbeatAutoEnabled)
     if nil == parameter {
-        return false
+        return false, nil
     }
 
     enabled, parameterBoolErr := parameter.Bool()
     if nil != parameterBoolErr {
-        return false
+        return false, exception.NewError(
+            "cron: the heartbeat opt-in parameter does not hold a boolean",
+            exceptioncontract.Context{
+                "parameter": ParameterHeartbeatAutoEnabled,
+            },
+            parameterBoolErr,
+        )
     }
 
-    return enabled
+    return enabled, nil
 }
 
 var _ clicontract.Command = (*GenerateCommand)(nil)

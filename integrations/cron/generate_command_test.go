@@ -8,6 +8,7 @@ import (
     "testing"
 
     clicontract "github.com/precision-soft/melody/cli/contract"
+    "github.com/precision-soft/melody/exception"
 )
 
 func TestNewGenerateCommandIdentity(t *testing.T) {
@@ -2169,7 +2170,6 @@ func TestAtomicWriteFileRollsBackTemporaryOnRenameFailure(t *testing.T) {
     }
 }
 
-/* @info the crontab-no-user dialect renders no user column at all, so the heartbeat line needs no user to place; demanding --user turned a valid busybox-crond configuration into a hard ErrHeartbeatUserMissing. */
 func TestRunCrontabNoUserTemplateWithHeartbeatAndNoUserSucceeds(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
@@ -2202,5 +2202,44 @@ func TestRunCrontabNoUserTemplateWithHeartbeatAndNoUserSucceeds(t *testing.T) {
     expectedHeartbeat := "* * * * * /bin/touch " + heartbeatPath
     if false == strings.Contains(string(body), expectedHeartbeat) {
         t.Fatalf("expected user-less heartbeat line %q in:\n%s", expectedHeartbeat, string(body))
+    }
+}
+
+/* a malformed opt-in is not an absent one: reading it as "not enabled" would emit a crontab without the liveness line the operator asked for and report success, leaving a typo indistinguishable from never having asked. */
+func TestRun_RefusesAMalformedHeartbeatOptIn(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+    logsDir := filepath.Join(tempDir, "logs")
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("backup:run", &testSchedule{Minute: "0", Hour: "2"}),
+    }
+
+    configuration := newStubConfiguration(map[string]string{
+        ParameterHeartbeatAutoEnabled: "ture",
+    })
+
+    _, err := runGenerateCommandWithConfiguration(
+        t,
+        commands,
+        []string{
+            "--out", outputPath,
+            "--logs-dir", logsDir,
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "apache",
+        },
+        configuration,
+    )
+    if nil == err {
+        t.Fatal("a heartbeat opt-in that does not hold a boolean must fail generation, not silently disable the heartbeat")
+    }
+
+    reported, isReported := err.(*exception.Error)
+    if false == isReported {
+        t.Fatalf("expected an exception error, got %T", err)
+    }
+
+    if ParameterHeartbeatAutoEnabled != reported.Context()["parameter"] {
+        t.Fatalf("the refusal must name the parameter, got %v", reported.Context()["parameter"])
     }
 }

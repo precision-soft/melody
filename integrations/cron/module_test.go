@@ -64,7 +64,7 @@ func TestModule_RegisterCliCommandsFromConfiguration(t *testing.T) {
     }
 }
 
-/* @info the schedule steps the day of month across the odd days and pins Monday; 2026-07-20 is an even-numbered Monday, matched only by the kubernetes dialect's or rule, so the assertions prove ModuleConfig.RunnerDialect reaches the runner's matchers and that the zero value keeps the crontab default. */
+/* the schedule steps the day of month across the odd days and pins Monday; 2026-07-20 is an even-numbered Monday, matched only by the kubernetes dialect's or rule, so the assertions prove ModuleConfig.RunnerDialect reaches the runner's matchers and that the zero value keeps the crontab default. */
 func TestModule_RegisterCliCommandsThreadsTheRunnerDialect(t *testing.T) {
     evenMonday := time.Date(2026, time.July, 20, 0, 0, 0, 0, time.UTC)
     if time.Monday != evenMonday.Weekday() {

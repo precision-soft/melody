@@ -137,7 +137,7 @@ func TestRateLimiter_AllowWithRuntimeSharesTheCounter(t *testing.T) {
     }
 }
 
-/* @info the runtime context the http kernel hands a request carries no deadline, so the call timeout must bound AllowWithRuntime itself; a 1ns timeout must fail closed instead of riding the unbounded context */
+/* the runtime context the http kernel hands a request carries no deadline, so the call timeout must bound AllowWithRuntime itself; a 1ns timeout must fail closed instead of riding the unbounded context */
 func TestRateLimiter_AllowWithRuntimeAppliesCallTimeout(t *testing.T) {
     client := rateLimiterTestClient(t)
     runtimeInstance := rateLimiterTestRuntime()

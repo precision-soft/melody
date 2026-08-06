@@ -270,3 +270,25 @@ func TestProvider_Open_ZeroConnectTimeoutPingsWithoutDeadline(t *testing.T) {
         t.Fatalf("close: %v", closeErr)
     }
 }
+
+
+/* the boot ping is bounded even where the connect timeout is left at zero: a TimeoutConfig naming only the command timeout would otherwise put the ping on a context with no deadline, and a store that accepts the connection without answering would hang boot forever holding a client no one can close yet. Ping one screen below reads its own zero the same way. */
+func TestResolveConnectTimeout_ANonPositiveValueTakesTheDefaultRatherThanRemovingTheBound(t *testing.T) {
+    defaultConnectTimeout := DefaultTimeoutConfig().ConnectTimeout
+
+    if defaultConnectTimeout != resolveConnectTimeout(nil) {
+        t.Fatalf("a missing config must take the default, got %s", resolveConnectTimeout(nil))
+    }
+
+    if defaultConnectTimeout != resolveConnectTimeout(&TimeoutConfig{CommandTimeout: 5 * time.Second}) {
+        t.Fatal("a config naming only the command timeout must still bound the ping")
+    }
+
+    if defaultConnectTimeout != resolveConnectTimeout(&TimeoutConfig{ConnectTimeout: -time.Second}) {
+        t.Fatal("a negative connect timeout must take the default rather than build an already-lapsed context")
+    }
+
+    if 7*time.Second != resolveConnectTimeout(&TimeoutConfig{ConnectTimeout: 7 * time.Second}) {
+        t.Fatal("a configured connect timeout must govern")
+    }
+}

@@ -60,7 +60,7 @@ func TestValidateNoForbiddenCharsEmptyTokensReturnsNil(t *testing.T) {
     }
 }
 
-/* @info crond treats one out-of-range field as a parse error and refuses the whole crontab file with it, so generation must fail on the same bounds the in-process matcher enforces */
+/* crond treats one out-of-range field as a parse error and refuses the whole crontab file with it, so generation must fail on the same bounds the in-process matcher enforces */
 func TestValidateScheduleFieldsRejectsOutOfRangeValues(t *testing.T) {
     cases := []struct {
         field    string
@@ -91,7 +91,7 @@ func TestValidateScheduleFieldsRejectsOutOfRangeValues(t *testing.T) {
     }
 }
 
-/* @info day of week 7 is the Sunday alias vixie crond accepts */
+/* day of week 7 is the Sunday alias vixie crond accepts */
 func TestValidateScheduleFieldsAcceptsValidShapes(t *testing.T) {
     cases := []*Schedule{
         {Minute: "5-59/15"},
@@ -104,6 +104,31 @@ func TestValidateScheduleFieldsAcceptsValidShapes(t *testing.T) {
     for index, schedule := range cases {
         if err := validateScheduleFields(Entry{Name: "job", Schedule: schedule}, CrontabForbiddenCharacters); nil != err {
             t.Fatalf("expected schedule %d to pass, got: %v", index, err)
+        }
+    }
+}
+
+/* the user column sits on the generated line beside the schedule fields, and crond splits that line on any unicode space — so this guard reads the same rule the schedule parser reads rather than the four ascii spellings. */
+func TestValidateUserField_RefusesEveryUnicodeSpace(t *testing.T) {
+    spellings := map[string]string{
+        "vertical tab": "deploy\vrole",
+        "form feed":    "deploy\frole",
+        "no-break":     "deploy role",
+        "ideographic":  "deploy　role",
+        "plain space":  "deploy role",
+        "tab":          "deploy\trole",
+        "newline":      "deploy\nrole",
+        "carriage":     "deploy\rrole",
+    }
+
+    for spelling, value := range spellings {
+        err := validateUserField("user", value)
+        if nil == err {
+            t.Fatalf("%s: a user carrying whitespace must be refused", spelling)
+        }
+
+        if false == errors.Is(err, ErrFieldContainsWhitespace) && false == errors.Is(err, ErrForbiddenCharacter) {
+            t.Fatalf("%s: expected a whitespace refusal, got %v", spelling, err)
         }
     }
 }
