@@ -2,6 +2,7 @@ package application
 
 import (
     "github.com/precision-soft/melody/exception"
+    "github.com/precision-soft/melody/internal"
     "github.com/precision-soft/melody/logging"
 )
 
@@ -11,8 +12,8 @@ func (instance *Application) Close() {
 
 /* close tears the application down and returns the teardown failure only when this call was the one that discovered it. A container somebody else already closed — the cli action closes it right after the command runs — hands its memoized error to every later Close; re-reporting it here would present one failure as two incidents, and its exit code already belongs to whoever performed that close, which folded it into the command's own result. */
 func (instance *Application) close() error {
-    /* a boot that died before the kernel was assembled has nothing to tear down: the exit handler now runs this close as its before-exit hook, and dereferencing the absent kernel there would replace a clean exit with a panic inside the one handler that must not panic */
-    if nil == instance.kernel {
+    /* a boot that died before the kernel was assembled has nothing to tear down: the exit handler now runs this close as its before-exit hook, and dereferencing the absent kernel there would replace a clean exit with a panic inside the one handler that must not panic. The check reads through the interface, since a typed nil passes a plain comparison and reaches the same dereference. */
+    if true == internal.IsNilInterface(instance.kernel) {
         return nil
     }
 

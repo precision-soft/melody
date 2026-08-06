@@ -123,7 +123,7 @@ func TestRegisterModuleProvider_RegistersChildrenWithoutProvider(t *testing.T) {
     assertModuleNames(t, instance.modules, []string{"child-a", "child-b"})
 }
 
-/* @info the module doors close at boot and refuse a nil, because a module registered after the boot phases have run is registered into nothing: its hooks are never called, and the application starts missing whatever the module was supposed to wire */
+/* the module doors close at boot and refuse a nil, because a module registered after the boot phases have run is registered into nothing: its hooks are never called, and the application starts missing whatever the module was supposed to wire */
 func TestRegisterModule_RefusesAfterBootAndRefusesANilModule(t *testing.T) {
     bootedApplication := &Application{booted: true}
 
@@ -203,7 +203,7 @@ func (instance *hookRecordingModule) RegisterSecurity(builder *securityconfig.Bu
     instance.securityRegistered = true
 }
 
-/* @info the configuration and parameter hooks run BEFORE the configuration resolves, which is the whole reason they are a separate phase: a parameter registered after the resolve would never have its template expanded, and a logging configuration registered after it would never reach the logger the container builds. */
+/* the configuration and parameter hooks run BEFORE the configuration resolves, which is the whole reason they are a separate phase: a parameter registered after the resolve would never have its template expanded, and a logging configuration registered after it would never reach the logger the container builds. */
 func TestBootModulesPreConfigurationResolve_RunsTheConfigurationAndParameterHooks(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
 
@@ -230,7 +230,7 @@ func TestBootModulesPreConfigurationResolve_RunsTheConfigurationAndParameterHook
     }
 }
 
-/* @info everything a module wires against resolved configuration runs in the second phase, and each hook is optional: a module implementing all of them must see all of them called, or one silently-missing hook means an unwired subsystem with a green boot. */
+/* everything a module wires against resolved configuration runs in the second phase, and each hook is optional: a module implementing all of them must see all of them called, or one silently-missing hook means an unwired subsystem with a green boot. */
 func TestBootModulesPostConfigurationResolve_RunsEveryLaterHook(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
     applicationInstance.httpMiddlewares = NewHttpMiddleware(nil, applicationInstance.configuration)
@@ -294,7 +294,7 @@ func newScopedServiceApplication(kernelInstance *testKernel) *Application {
     }
 }
 
-/* @info Without the hook a module has no way to declare a request-lifetime service at all, and the only mechanism left is the override the framework installs for its own logger and request context. */
+/* Without the hook a module has no way to declare a request-lifetime service at all, and the only mechanism left is the override the framework installs for its own logger and request context. */
 func TestApplication_RegisterScopedServicesHookRunsForScopedServiceModules(t *testing.T) {
     kernelInstance := newTestKernel()
     applicationInstance := newScopedServiceApplication(kernelInstance)
@@ -324,7 +324,7 @@ func TestApplication_RegisterScopedServicesHookRunsForScopedServiceModules(t *te
     }
 }
 
-/* @info The boot seal has to cover both lifetimes: a scoped registration accepted after boot would reach the scopes created next while every scope already running keeps the plan it started with, so the same process would answer the same name two different ways depending on when the request arrived. */
+/* The boot seal has to cover both lifetimes: a scoped registration accepted after boot would reach the scopes created next while every scope already running keeps the plan it started with, so the same process would answer the same name two different ways depending on when the request arrived. */
 func TestApplication_RegisterScopedAfterBootPanics(t *testing.T) {
     applicationInstance := NewApplication(
         testhelper.NewEmbeddedEnvFs(),
@@ -343,7 +343,7 @@ func TestApplication_RegisterScopedAfterBootPanics(t *testing.T) {
     }, "may not register scoped services after boot")
 }
 
-/* @info A name claimed at both lifetimes is a wiring mistake, and it has to join the aggregated boot report rather than end the boot on its own — the report exists so a consolidation that produced several collisions surfaces them all at once. */
+/* A name claimed at both lifetimes is a wiring mistake, and it has to join the aggregated boot report rather than end the boot on its own — the report exists so a consolidation that produced several collisions surfaces them all at once. */
 func TestApplication_AScopedNameCollidingWithAContainerServiceIsReportedAtBoot(t *testing.T) {
     kernelInstance := newTestKernel()
     applicationInstance := newScopedServiceApplication(kernelInstance)
@@ -375,4 +375,43 @@ func TestApplication_AScopedNameCollidingWithAContainerServiceIsReportedAtBoot(t
     testhelper.AssertPanicsWithError(t, func() {
         applicationInstance.panicOnBootCollisions()
     }, "duplicate registrations detected at boot")
+}
+
+/* typedNilProbeModule exists to be handed over as a typed nil: a plain comparison accepts it, it is stored, the boot reports success, and the failure surfaces as a bare dereference inside the module's own hook */
+type typedNilProbeModule struct{}
+
+func (instance *typedNilProbeModule) Name() string {
+    return "typed-nil-probe"
+}
+
+func (instance *typedNilProbeModule) Description() string {
+    return "typed nil probe"
+}
+
+func (instance *typedNilProbeModule) Modules() []applicationcontract.Module {
+    return nil
+}
+
+func TestApplicationRegisterModule_RefusesATypedNilModule(t *testing.T) {
+    applicationInstance := &Application{}
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            applicationInstance.RegisterModule((*typedNilProbeModule)(nil))
+        },
+        "module instance may not be nil",
+    )
+}
+
+func TestApplicationRegisterModuleProvider_RefusesATypedNilProvider(t *testing.T) {
+    applicationInstance := &Application{}
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            applicationInstance.RegisterModuleProvider((*typedNilProbeModule)(nil))
+        },
+        "module provider may not be nil",
+    )
 }

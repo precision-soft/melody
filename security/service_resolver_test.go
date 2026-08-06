@@ -9,6 +9,7 @@ import (
     containercontract "github.com/precision-soft/melody/container/contract"
     "github.com/precision-soft/melody/internal/testhelper"
     "github.com/precision-soft/melody/runtime"
+    runtimecontract "github.com/precision-soft/melody/runtime/contract"
     securitycontract "github.com/precision-soft/melody/security/contract"
 )
 
@@ -25,7 +26,84 @@ func (instance *erroringResolverScope) Get(serviceName string) (any, error) {
     return nil, errors.New("scope is closed")
 }
 
-/* @info SecurityContextFromRuntime runs from IsGranted, which a handler can call from a goroutine that outlives the request; resolving the logger with the panicking Must variant on a closed scope crashes that uncovered goroutine, so a failed resolution must return (nil, false) rather than panic */
+/* substitutableRuntime stands for a Runtime supplied by application code rather than built by runtime.New, which is the only shape that can carry a typed-nil scope past construction. */
+type substitutableRuntime struct {
+    scope            containercontract.Scope
+    serviceContainer containercontract.Container
+}
+
+func (instance *substitutableRuntime) Context() context.Context {
+    return context.Background()
+}
+
+func (instance *substitutableRuntime) Scope() containercontract.Scope {
+    return instance.scope
+}
+
+func (instance *substitutableRuntime) Container() containercontract.Container {
+    return instance.serviceContainer
+}
+
+func newTypedNilScopeRuntime() runtimecontract.Runtime {
+    return &substitutableRuntime{
+        scope:            (*testScope)(nil),
+        serviceContainer: container.NewContainer(),
+    }
+}
+
+func TestSecurityContextFromRuntime_AnswersNotFoundForATypedNilRuntime(t *testing.T) {
+    var runtimeInstance runtimecontract.Runtime = (*substitutableRuntime)(nil)
+
+    securityContext, exists := SecurityContextFromRuntime(runtimeInstance)
+    if true == exists {
+        t.Fatalf("expected exists to be false for a typed-nil runtime")
+    }
+
+    if nil != securityContext {
+        t.Fatalf("expected a nil security context for a typed-nil runtime")
+    }
+}
+
+func TestSecurityContextFromRuntime_AnswersNotFoundForATypedNilScope(t *testing.T) {
+    securityContext, exists := SecurityContextFromRuntime(newTypedNilScopeRuntime())
+    if true == exists {
+        t.Fatalf("expected exists to be false for a typed-nil scope")
+    }
+
+    if nil != securityContext {
+        t.Fatalf("expected a nil security context for a typed-nil scope")
+    }
+}
+
+func TestSecurityContextSetOnRuntime_TypedNilRuntimePanicsWithTheRefusal(t *testing.T) {
+    var runtimeInstance runtimecontract.Runtime = (*substitutableRuntime)(nil)
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            SecurityContextSetOnRuntime(
+                runtimeInstance,
+                NewSecurityContext(newTestCompiledFirewallWithRoleHierarchy("main", nil), nil),
+            )
+        },
+        "runtime is nil for security context",
+    )
+}
+
+func TestSecurityContextSetOnRuntime_TypedNilScopePanicsWithTheRefusal(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            SecurityContextSetOnRuntime(
+                newTypedNilScopeRuntime(),
+                NewSecurityContext(newTestCompiledFirewallWithRoleHierarchy("main", nil), nil),
+            )
+        },
+        "runtime scope is nil for security context",
+    )
+}
+
+/* SecurityContextFromRuntime runs from IsGranted, which a handler can call from a goroutine that outlives the request; resolving the logger with the panicking Must variant on a closed scope crashes that uncovered goroutine, so a failed resolution must return (nil, false) rather than panic */
 func TestSecurityContextFromRuntime_DoesNotPanicWhenResolutionFails(t *testing.T) {
     scope := &erroringResolverScope{testScope: newTestScope()}
     runtimeInstance := runtime.New(context.Background(), scope, container.NewContainer())
@@ -52,7 +130,7 @@ func TestSecurityContextSetOnRuntime_NilRuntimePanics(t *testing.T) {
     )
 }
 
-/* @info the two refusals are told apart by message: storing a nil context would put a nil where every reader expects a context, and the failure would surface as a dereference in a handler rather than at the wiring mistake */
+/* the two refusals are told apart by message: storing a nil context would put a nil where every reader expects a context, and the failure would surface as a dereference in a handler rather than at the wiring mistake */
 func TestSecurityContextSetOnRuntime_NilSecurityContextPanics(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
@@ -74,7 +152,7 @@ func TestSecurityContextFromRuntime_RefusesANilRuntime(t *testing.T) {
     }
 }
 
-/* @info the ordinary round trip: what was stored on the runtime is what comes back */
+/* the ordinary round trip: what was stored on the runtime is what comes back */
 func TestSecurityContextSetOnRuntime_RoundTripsThroughTheScope(t *testing.T) {
     runtimeInstance := newTestRuntime()
 
@@ -95,7 +173,7 @@ func TestSecurityContextSetOnRuntime_RoundTripsThroughTheScope(t *testing.T) {
     }
 }
 
-/* @info a scope that never carried a security context answers not-found rather than resolving nothing into a typed nil */
+/* a scope that never carried a security context answers not-found rather than resolving nothing into a typed nil */
 func TestSecurityContextFromRuntime_AnswersNotFoundOnAnEmptyScope(t *testing.T) {
     securityContext, exists := SecurityContextFromRuntime(newTestRuntime())
     if true == exists {
@@ -107,7 +185,7 @@ func TestSecurityContextFromRuntime_AnswersNotFoundOnAnEmptyScope(t *testing.T) 
     }
 }
 
-/* @info the soft container reader answers nil rather than panicking when the firewall manager was never registered, which is what lets a caller decide instead of dying */
+/* the soft container reader answers nil rather than panicking when the firewall manager was never registered, which is what lets a caller decide instead of dying */
 func TestFirewallManagerFromContainer_AnswersNilWhenUnregistered(t *testing.T) {
     if nil != FirewallManagerFromContainer(container.NewContainer()) {
         t.Fatalf("expected nil when no firewall manager is registered")
@@ -138,7 +216,7 @@ func TestFirewallManagerFromContainer_AnswersTheRegisteredManager(t *testing.T) 
     }
 }
 
-/* @info the strict reader is the boot-time one: it panics rather than handing back a nil the caller would dereference later */
+/* the strict reader is the boot-time one: it panics rather than handing back a nil the caller would dereference later */
 func TestFirewallManagerMustFromContainer_PanicsWhenUnregistered(t *testing.T) {
     defer func() {
         if nil == recover() {

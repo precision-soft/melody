@@ -2,6 +2,7 @@ package application
 
 import (
     "os"
+    "path/filepath"
     "testing"
     "time"
 
@@ -19,6 +20,7 @@ import (
     httpcontract "github.com/precision-soft/melody/http/contract"
     "github.com/precision-soft/melody/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/kernel/contract"
+    loggingcontract "github.com/precision-soft/melody/logging/contract"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
     "github.com/precision-soft/melody/security"
     securityconfig "github.com/precision-soft/melody/security/config"
@@ -182,7 +184,7 @@ func registeredListenerCount(t *testing.T, applicationInstance *Application) int
     return total
 }
 
-/* @info a compiled security configuration only becomes enforcement when this runs: the firewall manager reaches the container and the two kernel listeners reach the dispatcher. Security in this framework is a pair of listeners rather than middleware, so a boot that skipped them would serve every protected route wide open with a configuration that looks correct everywhere it is printed. */
+/* a compiled security configuration only becomes enforcement when this runs: the firewall manager reaches the container and the two kernel listeners reach the dispatcher. Security in this framework is a pair of listeners rather than middleware, so a boot that skipped them would serve every protected route wide open with a configuration that looks correct everywhere it is printed. */
 func TestRegisterHttpSecurity_WiresTheFirewallManagerAndTheKernelListeners(t *testing.T) {
     applicationInstance := newSecurityWiringApplication(t, config.ModeHttp)
 
@@ -206,7 +208,7 @@ func TestRegisterHttpSecurity_WiresTheFirewallManagerAndTheKernelListeners(t *te
     }
 }
 
-/* @info a console process wires no request security: there is no request to guard, and registering the listeners would put the firewall in the path of nothing. A process without a compiled configuration wires nothing either — that is an application that declared no security at all, not one whose security failed to compile, which the compile step refuses on its own. */
+/* a console process wires no request security: there is no request to guard, and registering the listeners would put the firewall in the path of nothing. A process without a compiled configuration wires nothing either — that is an application that declared no security at all, not one whose security failed to compile, which the compile step refuses on its own. */
 func TestRegisterHttpSecurity_WiresNothingOutsideAnHttpProcessOrWithoutAConfiguration(t *testing.T) {
     cliApplication := newSecurityWiringApplication(t, config.ModeCli)
 
@@ -345,7 +347,7 @@ func TestApplicationRegisterHttpSession_KeepsAnUnconfiguredTtlUnbounded(t *testi
     }
 }
 
-/* @info The framework's fallback cache backend is unbounded in both dimensions, so the application has to be told; the flag is what carries that to the http path, and it must be set exactly when melody supplied the backend itself. */
+/* The framework's fallback cache backend is unbounded in both dimensions, so the application has to be told; the flag is what carries that to the http path, and it must be set exactly when melody supplied the backend itself. */
 func TestApplicationRegisterCache_MarksTheFallbackBackendAsUnbounded(t *testing.T) {
     applicationInstance := newSessionTtlTestApplication(t, "30m")
 
@@ -356,7 +358,7 @@ func TestApplicationRegisterCache_MarksTheFallbackBackendAsUnbounded(t *testing.
     }
 }
 
-/* @info An application that brought its own backend chose its own bounds, and melody has nothing to warn it about. */
+/* An application that brought its own backend chose its own bounds, and melody has nothing to warn it about. */
 func TestApplicationRegisterCache_LeavesAnApplicationSuppliedBackendUnmarked(t *testing.T) {
     applicationInstance := newSessionTtlTestApplication(t, "30m")
 
@@ -374,7 +376,7 @@ func TestApplicationRegisterCache_LeavesAnApplicationSuppliedBackendUnmarked(t *
     }
 }
 
-/* @info every one of the three cache services is only supplied when the application did not: a framework registration that overwrote an application's own serializer would silently change the format of everything already in the cache, and one that overwrote the cache itself would hand every consumer a different instance than the one the wiring built */
+/* every one of the three cache services is only supplied when the application did not: a framework registration that overwrote an application's own serializer would silently change the format of everything already in the cache, and one that overwrote the cache itself would hand every consumer a different instance than the one the wiring built */
 func TestApplicationRegisterCache_LeavesEveryApplicationSuppliedServiceAlone(t *testing.T) {
     applicationInstance := newSessionTtlTestApplication(t, "30m")
 
@@ -414,5 +416,41 @@ func TestApplicationRegisterCache_LeavesEveryApplicationSuppliedServiceAlone(t *
 
     if true == applicationInstance.unboundedDefaultCacheBackend {
         t.Fatalf("expected an application-supplied backend to leave the warning unarmed")
+    }
+}
+
+func TestNewContainerLogger_LeavesNoDescriptorBehindWhenTheModuleConfigurationIsInvalid(t *testing.T) {
+    logPath := filepath.Join(t.TempDir(), "application.log")
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            _ = newContainerLogger(
+                logPath,
+                loggingcontract.LevelDebug,
+                map[string]any{
+                    loggingcontract.LoggingConfigurationName: "not a logging configuration",
+                },
+            )
+        },
+        "invalid logging configuration",
+    )
+
+    _, statErr := os.Stat(logPath)
+    if false == os.IsNotExist(statErr) {
+        t.Fatalf("expected the log file never to be created when the module configuration is refused, stat answered %v", statErr)
+    }
+}
+
+func TestNewContainerLogger_OpensTheLogFileWhenEverythingItNeedsIsSound(t *testing.T) {
+    logPath := filepath.Join(t.TempDir(), "application.log")
+
+    logger := newContainerLogger(logPath, loggingcontract.LevelDebug, nil)
+    if nil == logger {
+        t.Fatalf("expected a logger")
+    }
+
+    if _, statErr := os.Stat(logPath); nil != statErr {
+        t.Fatalf("expected the log file to be created, got %v", statErr)
     }
 }

@@ -3,6 +3,7 @@ package application
 import (
     applicationcontract "github.com/precision-soft/melody/application/contract"
     "github.com/precision-soft/melody/exception"
+    "github.com/precision-soft/melody/internal"
     securityconfig "github.com/precision-soft/melody/security/config"
 )
 
@@ -17,7 +18,8 @@ func (instance *Application) registerModuleAtDepth(moduleInstance applicationcon
         exception.Panic(exception.NewError("may not register modules after boot", nil, nil))
     }
 
-    if nil == moduleInstance {
+    /* read through the interface: a typed nil passes a plain comparison, is stored, and boots reporting success — the failure then surfaces as a bare dereference inside the module's own hook rather than as the refusal this guard exists to give */
+    if true == internal.IsNilInterface(moduleInstance) {
         exception.Panic(
             exception.NewError("module instance may not be nil", nil, nil),
         )
@@ -43,7 +45,8 @@ func (instance *Application) RegisterModuleProvider(provider applicationcontract
         exception.Panic(exception.NewError("may not register modules after boot", nil, nil))
     }
 
-    if nil == provider {
+    /* read through the interface, like the module door above: a typed nil reaches the Modules() call on the next line */
+    if true == internal.IsNilInterface(provider) {
         exception.Panic(
             exception.NewError("module provider may not be nil", nil, nil),
         )

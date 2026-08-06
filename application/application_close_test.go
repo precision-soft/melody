@@ -8,7 +8,7 @@ import (
     containercontract "github.com/precision-soft/melody/container/contract"
 )
 
-/* @info Close is what a boot that died halfway and a clean shutdown both reach, and neither shape had ever been driven: an application assembled without a kernel — the state a boot failure leaves — has nothing to tear down, and dereferencing the absent kernel there would replace a clean exit with a panic inside the one handler that must not panic. */
+/* Close is what a boot that died halfway and a clean shutdown both reach, and neither shape had ever been driven: an application assembled without a kernel — the state a boot failure leaves — has nothing to tear down, and dereferencing the absent kernel there would replace a clean exit with a panic inside the one handler that must not panic. */
 func TestApplicationClose_AnApplicationWithoutAKernelHasNothingToTearDown(t *testing.T) {
     applicationInstance := &Application{
         runtimeFlags: NewRuntimeFlags(config.ModeHttp),
@@ -22,7 +22,7 @@ func TestApplicationClose_AnApplicationWithoutAKernelHasNothingToTearDown(t *tes
     applicationInstance.Close()
 }
 
-/* @info the teardown closes the container the kernel holds, and it has to be idempotent: the cli action closes the container right after the command runs, and the deferred Close arrives afterwards. */
+/* the teardown closes the container the kernel holds, and it has to be idempotent: the cli action closes the container right after the command runs, and the deferred Close arrives afterwards. */
 func TestApplicationClose_ClosesTheContainerAndStaysIdempotent(t *testing.T) {
     kernelInstance := newTestKernel()
     applicationInstance := newScopedServiceApplication(kernelInstance)
@@ -49,7 +49,7 @@ func TestApplicationClose_ClosesTheContainerAndStaysIdempotent(t *testing.T) {
     }
 }
 
-/* @info a container SOMEBODY ELSE already closed hands its memoized failure to every later Close, and re-reporting it here would present one incident as two — the exit code of that failure already belongs to whoever performed the close, which folded it into its own result. The teardown reports only the failure IT discovered. */
+/* a container SOMEBODY ELSE already closed hands its memoized failure to every later Close, and re-reporting it here would present one incident as two — the exit code of that failure already belongs to whoever performed the close, which folded it into its own result. The teardown reports only the failure IT discovered. */
 func TestApplicationClose_AFailureSomebodyElseAlreadyCarriedAwayIsNotReportedAgain(t *testing.T) {
     kernelInstance := newTestKernel()
     applicationInstance := newScopedServiceApplication(kernelInstance)
@@ -81,7 +81,7 @@ func TestApplicationClose_AFailureSomebodyElseAlreadyCarriedAwayIsNotReportedAga
     }
 }
 
-/* @info the failure the teardown DID discover has to travel out of it, because the exit code of the process is built from it — a shutdown that lost a connection back to nobody used to exit zero. */
+/* the failure the teardown DID discover has to travel out of it, because the exit code of the process is built from it — a shutdown that lost a connection back to nobody used to exit zero. */
 func TestApplicationClose_AFailureItDiscoversItselfTravelsOut(t *testing.T) {
     kernelInstance := newTestKernel()
     applicationInstance := newScopedServiceApplication(kernelInstance)
@@ -115,3 +115,15 @@ func (instance *failingCloseProbe) Close() error {
 }
 
 var errFailingCloseProbe = errors.New("the service refused to close")
+
+/* the same absence reached through the interface: a typed-nil kernel passes a plain comparison and reaches ServiceContainer() on a nil receiver, inside the before-exit hook of the one handler that must not panic */
+func TestApplicationClose_ATypedNilKernelHasNothingToTearDown(t *testing.T) {
+    applicationInstance := &Application{
+        kernel:       (*testKernel)(nil),
+        runtimeFlags: NewRuntimeFlags(config.ModeHttp),
+    }
+
+    if closeErr := applicationInstance.close(); nil != closeErr {
+        t.Fatalf("expected a typed-nil kernel to close cleanly, got %v", closeErr)
+    }
+}

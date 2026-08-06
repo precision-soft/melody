@@ -55,7 +55,7 @@ func (instance *servingProbeApplicationCommand) Run(
     return nil
 }
 
-/* @info Run must tell the configuration the wiring phase is over before it dispatches anything, or a late Resolve silently rewrites parameters under services that already read them. The config package tests what MarkServing does; nothing tested that Run calls it, so deleting the call left both ./application/... and ./config/... green. This drives the real Run in cli mode and asks the configuration from inside the command. */
+/* Run must tell the configuration the wiring phase is over before it dispatches anything, or a late Resolve silently rewrites parameters under services that already read them. The config package tests what MarkServing does; nothing tested that Run calls it, so deleting the call left both ./application/... and ./config/... green. This drives the real Run in cli mode and asks the configuration from inside the command. */
 func TestRun_MarksTheConfigurationServingBeforeItDispatches(t *testing.T) {
     originalArguments := os.Args
     os.Args = []string{"probe", "probe:serving"}
@@ -109,7 +109,7 @@ func newFailingCloseApplication(t *testing.T) *Application {
     return applicationInstance
 }
 
-/* @info the container memoizes its close error, so a repeated Close re-receives a failure somebody else already discovered and folded into their own report; close must only report the failure it was first to see. */
+/* the container memoizes its close error, so a repeated Close re-receives a failure somebody else already discovered and folded into their own report; close must only report the failure it was first to see. */
 func TestClose_DoesNotRereportAFailureSomebodyElseDiscovered(t *testing.T) {
     applicationInstance := newFailingCloseApplication(t)
 
@@ -136,7 +136,7 @@ func TestClose_ReportsTheFailureItDiscoveredItself(t *testing.T) {
     }
 }
 
-/* @info a teardown failure on the non-panic return of Run turns into a non-zero exit, symmetric with the cli path that folds close failures into the command result; exit 0 on a failed flush told the supervisor a clean story. */
+/* a teardown failure on the non-panic return of Run turns into a non-zero exit, symmetric with the cli path that folds close failures into the command result; exit 0 on a failed flush told the supervisor a clean story. */
 func TestCloseAndExitOnFailure_ExitsNonZeroOnATeardownFailureItDiscovered(t *testing.T) {
     exitedWith := -1
     originalExit := applicationExit
@@ -167,7 +167,7 @@ func TestCloseAndExitOnFailure_StaysSilentOnACleanTeardown(t *testing.T) {
     }
 }
 
-/* @info the exit logger must refuse a container logger the teardown already closed: a closed file-backed logger silently drops every write, and preferring it loses the one record that explains the exit. */
+/* the exit logger must refuse a container logger the teardown already closed: a closed file-backed logger silently drops every write, and preferring it loses the one record that explains the exit. */
 func TestResolveExitLogger_PrefersTheContainerLoggerWhileItWrites(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
 
@@ -220,7 +220,7 @@ func TestResolveExitLogger_FallsBackWhenTheContainerLoggerIsClosed(t *testing.T)
     }
 }
 
-/* @info the recover handler is the one place that must not panic: an Application assembled without NewApplication has a nil kernel, and the handler answers with the emergency logger instead of dereferencing it. */
+/* the recover handler is the one place that must not panic: an Application assembled without NewApplication has a nil kernel, and the handler answers with the emergency logger instead of dereferencing it. */
 func TestResolveExitLogger_SurvivesANilKernel(t *testing.T) {
     applicationInstance := &Application{}
 
@@ -229,7 +229,7 @@ func TestResolveExitLogger_SurvivesANilKernel(t *testing.T) {
     }
 }
 
-/* @info the secret front door differs from the ordinary one only in the marking, and the marking is the whole point: it is what keeps the value, and every parameter whose template reads it, out of the rendered configuration. */
+/* the secret front door differs from the ordinary one only in the marking, and the marking is the whole point: it is what keeps the value, and every parameter whose template reads it, out of the rendered configuration. */
 func TestRegisterSecretParameter_MarksTheRegistrationAsHoldingACredential(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
 
@@ -256,7 +256,7 @@ func TestRegisterSecretParameter_MarksTheRegistrationAsHoldingACredential(t *tes
     }
 }
 
-/* @info marking an existing parameter takes effect at once; a name that matches nothing is queued rather than refused, because an environment key is legitimately undefined in some environments and the boot retries the queue before the configuration resolves. */
+/* marking an existing parameter takes effect at once; a name that matches nothing is queued rather than refused, because an environment key is legitimately undefined in some environments and the boot retries the queue before the configuration resolves. */
 func TestMarkParameterSecret_MarksWhatExistsAndQueuesWhatDoesNot(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
 
@@ -275,7 +275,7 @@ func TestMarkParameterSecret_MarksWhatExistsAndQueuesWhatDoesNot(t *testing.T) {
     }
 }
 
-/* @info after the boot the wiring is done and the parameters have been read: a marking arriving here would redact nothing that has not already been rendered, so it is refused loudly rather than accepted as a no-op. */
+/* after the boot the wiring is done and the parameters have been read: a marking arriving here would redact nothing that has not already been rendered, so it is refused loudly rather than accepted as a no-op. */
 func TestMarkParameterSecret_RefusesAfterBoot(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
     applicationInstance.booted = true
@@ -285,7 +285,7 @@ func TestMarkParameterSecret_RefusesAfterBoot(t *testing.T) {
     }, "cannot mark a parameter secret after application boot")
 }
 
-/* @info the retry is what makes a marking declared before the module that registers the parameter work at all, and it must run before the resolve or the marking never travels into the templates that read the secret. What still matches nothing stays queued for the warning at the end of the boot. */
+/* the retry is what makes a marking declared before the module that registers the parameter work at all, and it must run before the resolve or the marking never travels into the templates that read the secret. What still matches nothing stays queued for the warning at the end of the boot. */
 func TestApplyUnappliedSecretMarks_AppliesWhatALaterRegistrationMadeReal(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
 
@@ -311,7 +311,7 @@ func TestApplyUnappliedSecretMarks_AppliesWhatALaterRegistrationMadeReal(t *test
     }
 }
 
-/* @info the warning at the end of the boot is what keeps a misspelled name from silently redacting nothing: every phase that can register a parameter has run by then, so a marking still matching nothing names something that does not exist. A name a late phase did make real is applied here instead, without a warning, and the queue is emptied either way. */
+/* the warning at the end of the boot is what keeps a misspelled name from silently redacting nothing: every phase that can register a parameter has run by then, so a marking still matching nothing names something that does not exist. A name a late phase did make real is applied here instead, without a warning, and the queue is emptied either way. */
 func TestWarnUnappliedSecretMarks_WarnsOnlyAboutWhatStillMatchesNothing(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
 
@@ -348,7 +348,7 @@ func TestWarnUnappliedSecretMarks_WarnsOnlyAboutWhatStillMatchesNothing(t *testi
     }
 }
 
-/* @info ProcessRole is what wiring code asks to decide whether this process registers its background runners: the explicit --role flag wins, and an unset role widens to all rather than to nothing. */
+/* ProcessRole is what wiring code asks to decide whether this process registers its background runners: the explicit --role flag wins, and an unset role widens to all rather than to nothing. */
 func TestProcessRole_AnswersTheResolvedRole(t *testing.T) {
     applicationInstance := &Application{
         runtimeFlags: NewRuntimeFlagsWithRole(config.ModeCli, config.RoleWorker),
@@ -388,7 +388,7 @@ func newEnvironmentRefusalApplication(t *testing.T, mode string, environmentValu
     }
 }
 
-/* @info every built-in parameter has a development default, so an http process whose .env artifacts contributed nothing would serve as dev with debug tooling, announced by one warning; the refusal is the same direction the empty CORS allow list took. */
+/* every built-in parameter has a development default, so an http process whose .env artifacts contributed nothing would serve as dev with debug tooling, announced by one warning; the refusal is the same direction the empty CORS allow list took. */
 func TestRefuseHttpBootWithoutEnvironment_RefusesAnHttpBootOnZeroKeys(t *testing.T) {
     applicationInstance := newEnvironmentRefusalApplication(t, config.ModeHttp, map[string]string{})
 
@@ -409,7 +409,7 @@ func TestRefuseHttpBootWithoutEnvironment_LeavesTheCliPermissive(t *testing.T) {
     applicationInstance.refuseHttpBootWithoutEnvironment()
 }
 
-/* @info the configuration registry accepts exactly one name in this major; any other name is unreadable by construction, so storing it would tell the operator a configuration is active while nothing can ever consult it. */
+/* the configuration registry accepts exactly one name in this major; any other name is unreadable by construction, so storing it would tell the operator a configuration is active while nothing can ever consult it. */
 func TestRegisterConfiguration_RefusesANameNothingConsumes(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
 
@@ -444,7 +444,7 @@ func (instance *panickingProbeApplicationCommand) Run(
     return nil
 }
 
-/* @info the one proof that the fatal record survives the teardown ordering: the record must land in the configured file logger BEFORE Close runs, because the teardown closes that logger and a closed file logger silently drops every write. The child re-execution is required — the handler ends in os.Exit — and the mutant that restores the old defer order (teardown first) leaves the log file without the record. */
+/* the one proof that the fatal record survives the teardown ordering: the record must land in the configured file logger BEFORE Close runs, because the teardown closes that logger and a closed file logger silently drops every write. The child re-execution is required — the handler ends in os.Exit — and the mutant that restores the old defer order (teardown first) leaves the log file without the record. */
 func TestRun_PanicPathWritesTheFatalRecordThroughTheLiveLoggerBeforeTeardown(t *testing.T) {
     projectDirectory := os.Getenv(runPanicPathProbeMarker)
 
@@ -531,7 +531,7 @@ func (instance *typedNilProbeExitLogger) Closed() bool {
     return instance.closedFlag
 }
 
-/* @info a factory handing back a typed nil is refused by the container with an error, and the resolver answers with the emergency logger — the pin covers the whole path; the resolver's own typed-nil clause stays as latent defense for a resolution path without the container's refusal */
+/* a factory handing back a typed nil is refused by the container with an error, and the resolver answers with the emergency logger — the pin covers the whole path; the resolver's own typed-nil clause stays as latent defense for a resolution path without the container's refusal */
 func TestResolveExitLogger_RefusesATypedNilContainerLogger(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
 
@@ -553,7 +553,7 @@ func TestResolveExitLogger_RefusesATypedNilContainerLogger(t *testing.T) {
     }
 }
 
-/* @info the exit handler now runs Close as its before-exit hook, and a boot that died before the kernel was assembled reaches it with a nil kernel: the close must be the no-op it means, not a dereference */
+/* the exit handler now runs Close as its before-exit hook, and a boot that died before the kernel was assembled reaches it with a nil kernel: the close must be the no-op it means, not a dereference */
 func TestClose_SurvivesANilKernel(t *testing.T) {
     applicationInstance := &Application{}
 
@@ -563,7 +563,7 @@ func TestClose_SurvivesANilKernel(t *testing.T) {
 /* the marker tells a re-executed test binary that it is the child whose Boot must die and take the teardown hook with it rather than the parent that watches */
 const bootPanicTeardownProbeMarker = "MELODY_TEST_BOOT_PANIC_TEARDOWN_PROBE"
 
-/* @info the proof that a boot panic tears the container down before the exit: the child's container holds a built service whose Close fails, so the teardown leaves a visible trace — the emergency record naming the failed container close — that the old path, which took os.Exit with the container never closed, could not produce. The boot dies on a command-name collision, which panics inside Boot under Boot's own handler. */
+/* the proof that a boot panic tears the container down before the exit: the child's container holds a built service whose Close fails, so the teardown leaves a visible trace — the emergency record naming the failed container close — that the old path, which took os.Exit with the container never closed, could not produce. The boot dies on a command-name collision, which panics inside Boot under Boot's own handler. */
 func TestBoot_PanicPathRunsTheTeardownHook(t *testing.T) {
     projectDirectory := os.Getenv(bootPanicTeardownProbeMarker)
 
@@ -625,5 +625,59 @@ func TestBoot_PanicPathRunsTheTeardownHook(t *testing.T) {
 
     if false == strings.Contains(string(output), "melody: exiting with code 1") {
         t.Fatalf("expected the stderr echo after the teardown, got: %s", string(output))
+    }
+}
+
+/* chainedError carries a cause the way a wrapped run failure does, so errors.As can be walked onto a typed-nil link. */
+type chainedError struct {
+    cause error
+}
+
+func (instance *chainedError) Error() string {
+    return "chained"
+}
+
+func (instance *chainedError) Unwrap() error {
+    return instance.cause
+}
+
+func TestResolveCliExitError_AnswersTheExitErrorTheChainCarries(t *testing.T) {
+    exitError := exception.NewExitError(3, exception.NewError("command failed", nil, nil))
+
+    resolved, isExitRequested := resolveCliExitError(&chainedError{cause: exitError})
+    if false == isExitRequested {
+        t.Fatalf("expected the wrapped exit error to be recognised")
+    }
+
+    if exitError != resolved {
+        t.Fatalf("expected the wrapped exit error to be answered, got %v", resolved)
+    }
+}
+
+func TestResolveCliExitError_AnswersNothingForAChainWithoutOne(t *testing.T) {
+    if _, isExitRequested := resolveCliExitError(exception.NewError("command failed", nil, nil)); true == isExitRequested {
+        t.Fatalf("expected no exit error")
+    }
+}
+
+/* errors.As matches *ExitError on a typed-nil link and reports success; answering it would hand Exit a nil it refuses and discard the run's own error */
+func TestResolveCliExitError_AnswersNothingForATypedNilLink(t *testing.T) {
+    var typedNilExitError *exception.ExitError
+    var cause error = typedNilExitError
+
+    if _, isExitRequested := resolveCliExitError(&chainedError{cause: cause}); true == isExitRequested {
+        t.Fatalf("expected a typed-nil link to answer no exit error")
+    }
+}
+
+/* resolveExitLogger is evaluated as an argument, so it runs before the exit handler's own per-step shield begins: a nil receiver here would replace the panic being reported with a bare traceback that runs neither the teardown nor os.Exit */
+func TestResolveExitLogger_AnswersTheEmergencyLoggerForATypedNilKernel(t *testing.T) {
+    applicationInstance := &Application{
+        kernel:       (*testKernel)(nil),
+        runtimeFlags: NewRuntimeFlags(config.ModeCli),
+    }
+
+    if nil == applicationInstance.resolveExitLogger() {
+        t.Fatalf("expected a logger for a typed-nil kernel")
     }
 }

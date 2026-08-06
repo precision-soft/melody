@@ -224,9 +224,8 @@ func (instance *Application) Run(ctx context.Context) {
 
         runCliErr := instance.runCli(ctx)
         if nil != runCliErr {
-            /* the exit-coded error may arrive wrapped — the cli action folds a command's error together with shutdown-close failures — so walk the cause chain rather than assert the top type, or an intended exit code degrades into a panic with a different code */
-            var exitError *exception.ExitError
-            if true == errors.As(runCliErr, &exitError) {
+            exitError, isExitRequested := resolveCliExitError(runCliErr)
+            if true == isExitRequested {
                 exception.Exit(exitError)
             }
 
@@ -244,6 +243,22 @@ func (instance *Application) Run(ctx context.Context) {
             exception.FromError(runHttpErr),
         )
     }
+}
+
+/* resolveCliExitError answers the exit error a failed cli run should end the process with, or nil when the failure carries none. The exit-coded error may arrive wrapped — the cli action folds a command's error together with shutdown-close failures — so the cause chain is walked rather than the top type asserted, or an intended exit code degrades into a panic with a different code. The branch is a function so the typed-nil decision can be handed a chain rather than reached through a process exit. */
+func resolveCliExitError(runCliErr error) (*exception.ExitError, bool) {
+    var exitError *exception.ExitError
+
+    if false == errors.As(runCliErr, &exitError) {
+        return nil, false
+    }
+
+    /* errors.As matches this type on a typed-nil link and reports success. Answering that as an exit would hand Exit a nil it refuses, and the run's real error would be discarded in favour of a message about melody's own plumbing, so the run falls through to the ordinary panic that carries it. The answer is a separate boolean because the typed nil and the absence are the same pointer, and only the boolean can tell the caller them apart. */
+    if nil == exitError {
+        return nil, false
+    }
+
+    return exitError, true
 }
 
 func (instance *Application) RegisterConfiguration(name string, configuration any) {
@@ -330,7 +345,8 @@ func (instance *Application) logOnRecoverAndExit() {
 func (instance *Application) resolveExitLogger() loggingcontract.Logger {
     logger := logging.EmergencyLogger()
 
-    if nil == instance.kernel {
+    /* read through the interface, like the logger clause below: this resolver is evaluated as an argument, so it runs before the exit handler's own per-step shield begins, and a nil receiver here would replace the panic being reported with a bare traceback that runs neither the teardown nor os.Exit */
+    if true == internal.IsNilInterface(instance.kernel) {
         return logger
     }
 

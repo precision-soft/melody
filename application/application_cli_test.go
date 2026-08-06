@@ -26,7 +26,7 @@ func exitCodedProbeCommand() *clicontract.CommandContext {
     }
 }
 
-/* @info runCli installs a no-op ExitErrHandler on the root command, and the whole cli shutdown path depends on what that buys: the library must hand the exit-coded error back instead of taking the process down from inside Run, or the application's deferred Close and its structured error log never run. This locks that library contract, so a cli upgrade that changes it fails here rather than silently skipping teardown in production. */
+/* runCli installs a no-op ExitErrHandler on the root command, and the whole cli shutdown path depends on what that buys: the library must hand the exit-coded error back instead of taking the process down from inside Run, or the application's deferred Close and its structured error log never run. This locks that library contract, so a cli upgrade that changes it fails here rather than silently skipping teardown in production. */
 func TestRunCli_ExitCodedErrorLeavesRunInsteadOfExitingInside(t *testing.T) {
     exitedWith := -1
     originalExiter := urfavecli.OsExiter
@@ -54,7 +54,7 @@ func TestRunCli_ExitCodedErrorLeavesRunInsteadOfExitingInside(t *testing.T) {
     }
 }
 
-/* @info the control: with no handler the library resolves the exit itself from inside Run, which is exactly the path that skipped the application's teardown */
+/* the control: with no handler the library resolves the exit itself from inside Run, which is exactly the path that skipped the application's teardown */
 func TestRunCli_WithoutExitErrHandlerTheLibraryExitsFromInsideRun(t *testing.T) {
     exitedWith := -1
     originalExiter := urfavecli.OsExiter
@@ -92,7 +92,7 @@ func (instance *exitCodedProbeApplicationCommand) Run(
     return exception.NewExitError(7, exception.NewError("command asked for an exit code", nil, nil))
 }
 
-/* @info the two tests above lock the library contract, but both build their own root command, so they would still pass if runCli stopped installing the handler; this one drives the real runCli */
+/* the two tests above lock the library contract, but both build their own root command, so they would still pass if runCli stopped installing the handler; this one drives the real runCli */
 func TestRunCli_InstallsTheExitErrHandlerOnTheRootCommand(t *testing.T) {
     exitedWith := -1
     originalExiter := urfavecli.OsExiter
@@ -128,7 +128,7 @@ func TestRunCli_InstallsTheExitErrHandlerOnTheRootCommand(t *testing.T) {
     }
 }
 
-/* @info The unbounded default cache is a hazard only in a process that stays up: a command builds its map, runs and takes it away with it. A cli invocation must therefore see no cache warning at all, or every command a scheduler runs prints advice its lifetime makes meaningless. This drives the real runCli against the same wiring the http test warns from. */
+/* The unbounded default cache is a hazard only in a process that stays up: a command builds its map, runs and takes it away with it. A cli invocation must therefore see no cache warning at all, or every command a scheduler runs prints advice its lifetime makes meaningless. This drives the real runCli against the same wiring the http test warns from. */
 func TestRunCli_DoesNotWarnAboutTheUnboundedDefaultCacheBackend(t *testing.T) {
     logger := &warningRecordingLogger{}
 
@@ -153,7 +153,7 @@ func TestRunCli_DoesNotWarnAboutTheUnboundedDefaultCacheBackend(t *testing.T) {
     }
 }
 
-/* @info three normalization points must agree on a command's name — the boot registration, the cli library's trimmed registration, and the suggestion gate's trimmed input. A padded name judged raw at boot registered under a spelling no argv can produce: the suggestion table blocked every invocation of a command that exists. */
+/* three normalization points must agree on a command's name — the boot registration, the cli library's trimmed registration, and the suggestion gate's trimmed input. A padded name judged raw at boot registered under a spelling no argv can produce: the suggestion table blocked every invocation of a command that exists. */
 func TestRegisterCliCommand_JudgesTheNameTrimmed(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
 
@@ -179,7 +179,7 @@ func TestRegisterCliCommand_JudgesTheNameTrimmed(t *testing.T) {
     }, "cli command name may not be empty")
 }
 
-/* @info the whole path: a command whose Name carries padding must still be reachable from argv — the suggestion gate compares the trimmed input against the trimmed name and the cli library dispatches the trimmed registration. */
+/* the whole path: a command whose Name carries padding must still be reachable from argv — the suggestion gate compares the trimmed input against the trimmed name and the cli library dispatches the trimmed registration. */
 func TestRunCli_DispatchesACommandWhoseNameCarriesPadding(t *testing.T) {
     applicationInstance := NewApplication(
         testhelper.NewEmbeddedEnvFs(),
@@ -230,7 +230,7 @@ func (instance *paddedNameProbeCommand) Run(
     return instance.inner.Run(runtimeInstance, commandContext)
 }
 
-/* @info the suggestion refusal travels unmarked so the exit path writes it to the application log: the rendered table lives only on stderr, and a run refused here used to be invisible to anything reading the log file */
+/* the suggestion refusal travels unmarked so the exit path writes it to the application log: the rendered table lives only on stderr, and a run refused here used to be invisible to anything reading the log file */
 func TestSuggestCliCommand_ReturnsTheRefusalUnmarked(t *testing.T) {
     /* the input is a substring of the available name, so this refusal travels through the matches-found branch, not the zero-match one */
     suggestErr := suggestCliCommand(
@@ -255,7 +255,7 @@ func TestSuggestCliCommand_ReturnsTheRefusalUnmarked(t *testing.T) {
     }
 }
 
-/* @info the zero-match refusal is the same contract: unmarked, exit-coded, the full command list rendered on stderr */
+/* the zero-match refusal is the same contract: unmarked, exit-coded, the full command list rendered on stderr */
 func TestSuggestCliCommand_ReturnsTheZeroMatchRefusalUnmarked(t *testing.T) {
     suggestErr := suggestCliCommand(
         []string{"app", "nosuchthing"},
@@ -276,7 +276,7 @@ func TestSuggestCliCommand_ReturnsTheZeroMatchRefusalUnmarked(t *testing.T) {
     }
 }
 
-/* @info the short verbosity flags are rewritten before the cli library parses anything, because the library has no notion of a repeated letter: -vv means level two here and nothing at all there. Everything else must pass through untouched — a lone dash, a long flag, a short flag that merely starts with v, and everything after the end-of-options terminator, which belongs to the command and not to the runtime. */
+/* the short verbosity flags are rewritten before the cli library parses anything, because the library has no notion of a repeated letter: -vv means level two here and nothing at all there. Everything else must pass through untouched — a lone dash, a long flag, a short flag that merely starts with v, and everything after the end-of-options terminator, which belongs to the command and not to the runtime. */
 func TestNormalizeCliVerbosityArguments_RewritesOnlyTheRepeatedVerbosityFlag(t *testing.T) {
     cases := []struct {
         name      string
@@ -340,4 +340,38 @@ func TestNormalizeCliVerbosityArguments_RewritesOnlyTheRepeatedVerbosityFlag(t *
             }
         })
     }
+}
+
+/* typedNilProbeCommand is handed over as a typed nil, which a plain comparison accepts and command.Name() three lines below dereferences */
+type typedNilProbeCommand struct{}
+
+func (instance *typedNilProbeCommand) Name() string {
+    return "typed:nil:probe"
+}
+
+func (instance *typedNilProbeCommand) Description() string {
+    return "typed nil probe"
+}
+
+func (instance *typedNilProbeCommand) Flags() []clicontract.Flag {
+    return nil
+}
+
+func (instance *typedNilProbeCommand) Run(
+    runtimeInstance runtimecontract.Runtime,
+    commandContext *clicontract.CommandContext,
+) error {
+    return nil
+}
+
+func TestApplicationRegisterCliCommand_RefusesATypedNilCommand(t *testing.T) {
+    applicationInstance := &Application{}
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            applicationInstance.RegisterCliCommand((*typedNilProbeCommand)(nil))
+        },
+        "cli command may not be nil",
+    )
 }

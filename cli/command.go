@@ -324,9 +324,9 @@ func aggregateCliErrors(runErr error, closeErrorByName map[string]error) error {
         runErr,
     )
 
-    /* the exit code is resolved with errors.As, which matches the outermost ExitError in the chain: returning the aggregate unwrapped would hand the caller the command's own exit error instead, and the shutdown failures — carried only here — would never reach the log */
+    /* the exit code is resolved with errors.As, which matches the outermost ExitError in the chain: returning the aggregate unwrapped would hand the caller the command's own exit error instead, and the shutdown failures — carried only here — would never reach the log. A typed-nil link matches too and answers code 0, which NewExitError refuses with a panic, so the match is honoured only for a wrapper that carries one and the aggregate is returned plainly otherwise. */
     var exitError *exception.ExitError
-    if true == errors.As(runErr, &exitError) {
+    if true == errors.As(runErr, &exitError) && nil != exitError {
         return exception.NewExitError(exitError.ExitCode(), aggregatedErr)
     }
 

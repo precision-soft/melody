@@ -18,6 +18,7 @@ import (
     "github.com/precision-soft/melody/exception"
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
     httpcontract "github.com/precision-soft/melody/http/contract"
+    "github.com/precision-soft/melody/internal"
     "github.com/precision-soft/melody/logging"
     "github.com/precision-soft/melody/runtime"
     "github.com/precision-soft/melody/version"
@@ -39,7 +40,8 @@ func (instance *Application) RegisterCliCommand(command clicontract.Command) {
         )
     }
 
-    if nil == command {
+    /* read through the interface: a typed nil passes a plain comparison and reaches command.Name() three lines below */
+    if true == internal.IsNilInterface(command) {
         exception.Panic(
             exception.NewError(
                 "cli command may not be nil",
