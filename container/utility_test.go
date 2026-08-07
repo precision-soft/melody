@@ -14,7 +14,7 @@ type utilityProbeInterface interface {
     Probe()
 }
 
-/* @info every registration and every by-type lookup goes through this canonicalisation, and it had no mirror: a service declared from a provider returning *T is filed under *T, so asking with T has to reach the same entry or Has and Get disagree about the same container. An interface is its own canonical form — wrapping it in a pointer would file it under a type no caller ever asks with. */
+/* every registration and every by-type lookup goes through this canonicalisation, and it had no mirror: a service declared from a provider returning *T is filed under *T, so asking with T has to reach the same entry or Has and Get disagree about the same container. An interface is its own canonical form — wrapping it in a pointer would file it under a type no caller ever asks with. */
 func TestCanonicalServiceType_FilesValuesUnderTheirPointerAndLeavesInterfacesAlone(t *testing.T) {
     valueType := reflect.TypeOf(utilityProbe{})
     pointerType := reflect.TypeOf(&utilityProbe{})
@@ -37,7 +37,7 @@ func TestCanonicalServiceType_FilesValuesUnderTheirPointerAndLeavesInterfacesAlo
     }
 }
 
-/* @info the identity key is what the creation guard and the teardown are keyed on, so two DIFFERENT types sharing one key mean false cycles at resolution and merged nodes at close — the defect the container session repaired by refusing the second such registration. String() alone shares a key between same-named types of different packages; the import path is what separates them. */
+/* the identity key is what the creation guard and the teardown are keyed on, so two DIFFERENT types sharing one key mean false cycles at resolution and merged nodes at close — the defect the container session repaired by refusing the second such registration. String() alone shares a key between same-named types of different packages; the import path is what separates them. */
 func TestTypeIdentityKey_SeparatesSameNamedTypesOfDifferentPackages(t *testing.T) {
     alphaKey := typeIdentityKey(reflect.TypeOf(&collisionalpha.Bus{}))
     betaKey := typeIdentityKey(reflect.TypeOf(&collisionbeta.Bus{}))
@@ -55,7 +55,7 @@ func TestTypeIdentityKey_SeparatesSameNamedTypesOfDifferentPackages(t *testing.T
     }
 }
 
-/* @info the key reaches the named type through any depth of pointer, so *T and **T of one declaration key to the same package while keeping their own spellings apart. */
+/* the key reaches the named type through any depth of pointer, so *T and **T of one declaration key to the same package while keeping their own spellings apart. */
 func TestTypeIdentityKey_ReachesTheNamedTypeThroughEveryPointer(t *testing.T) {
     singleKey := typeIdentityKey(reflect.TypeOf(&utilityProbe{}))
     doubleKey := typeIdentityKey(reflect.TypeOf(new(*utilityProbe)))
@@ -69,7 +69,7 @@ func TestTypeIdentityKey_ReachesTheNamedTypeThroughEveryPointer(t *testing.T) {
     }
 }
 
-/* @info the derived service name is what a by-type registration is filed under, and it has to be import-path qualified for the reason the identity key is: two same-named types would otherwise take one name, and the second registration would be refused as a duplicate of a service it has nothing to do with. */
+/* the derived service name is what a by-type registration is filed under, and it has to be import-path qualified for the reason the identity key is: two same-named types would otherwise take one name, and the second registration would be refused as a duplicate of a service it has nothing to do with. */
 func TestDefaultServiceNameForType_QualifiesTheNameWithTheImportPath(t *testing.T) {
     alphaName := defaultServiceNameForType(reflect.TypeOf(&collisionalpha.Bus{}))
     betaName := defaultServiceNameForType(reflect.TypeOf(&collisionbeta.Bus{}))
@@ -92,7 +92,7 @@ func TestDefaultServiceNameForType_QualifiesTheNameWithTheImportPath(t *testing.
     }
 }
 
-/* @info a builtin or unnamed type has no import path to qualify with and keeps its own spelling — the fallback is what stops the name from becoming a bare dot. */
+/* a builtin or unnamed type has no import path to qualify with and keeps its own spelling — the fallback is what stops the name from becoming a bare dot. */
 func TestUniqueTypeName_FallsBackToTheSpellingForUnqualifiedTypes(t *testing.T) {
     if "*int" != uniqueTypeName(reflect.TypeOf(new(int))) {
         t.Fatalf("unexpected name for a pointer to a builtin: %q", uniqueTypeName(reflect.TypeOf(new(int))))
@@ -103,7 +103,7 @@ func TestUniqueTypeName_FallsBackToTheSpellingForUnqualifiedTypes(t *testing.T) 
     }
 }
 
-/* @info the any refusal is what keeps a service from being filed under the empty interface, which every value satisfies — the by-type resolution would then answer whichever registration reached the map first, for any type asked. A NON-empty interface is a legitimate service type and must not be caught by it. */
+/* the any refusal is what keeps a service from being filed under the empty interface, which every value satisfies — the by-type resolution would then answer whichever registration reached the map first, for any type asked. A NON-empty interface is a legitimate service type and must not be caught by it. */
 func TestIsAnyType_CatchesTheEmptyInterfaceAndNothingElse(t *testing.T) {
     anyType := reflect.TypeOf((*any)(nil)).Elem()
     if false == isAnyType(anyType) {
@@ -121,5 +121,41 @@ func TestIsAnyType_CatchesTheEmptyInterfaceAndNothingElse(t *testing.T) {
 
     if true == isAnyType(nil) {
         t.Fatalf("expected a nil type not to be read as any")
+    }
+}
+
+type fitsProbeGreeter interface {
+    Greet() string
+}
+
+type fitsProbeImplementer struct{}
+
+func (instance *fitsProbeImplementer) Greet() string {
+    return "fits"
+}
+
+type fitsProbeOutsider struct{}
+
+func TestOverrideValueFitsRegisteredType_JudgesRawAssignabilityAndCanonicalIdentity(t *testing.T) {
+    greeterType := reflect.TypeOf((*fitsProbeGreeter)(nil)).Elem()
+
+    if false == overrideValueFitsRegisteredType(reflect.TypeOf(&fitsProbeImplementer{}), greeterType) {
+        t.Fatalf("expected an implementing pointer to fit the registered interface")
+    }
+
+    if true == overrideValueFitsRegisteredType(reflect.TypeOf(&fitsProbeOutsider{}), greeterType) {
+        t.Fatalf("expected a non-implementing value to be refused for the registered interface")
+    }
+
+    if false == overrideValueFitsRegisteredType(reflect.TypeOf(""), reflect.PointerTo(reflect.TypeOf(""))) {
+        t.Fatalf("expected a raw value to fit the canonical key its own registration stores under")
+    }
+
+    if true == overrideValueFitsRegisteredType(reflect.TypeOf(""), reflect.PointerTo(reflect.TypeOf(0))) {
+        t.Fatalf("expected a foreign value type to be refused")
+    }
+
+    if false == overrideValueFitsRegisteredType(reflect.TypeOf(&fitsProbeImplementer{}), reflect.TypeOf(&fitsProbeImplementer{})) {
+        t.Fatalf("expected the identical pointer type to fit")
     }
 }

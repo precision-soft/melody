@@ -5,7 +5,7 @@ import (
     kernelcontract "github.com/precision-soft/melody/kernel/contract"
 )
 
-/* ScopedServiceModule is the hook for services whose lifetime is one scope — one http request, one command run. What it registers is built on the first resolution through a scope and closed when that scope closes, so a service may hold the request it was built for without holding it for the life of the process.
+/* ScopedServiceModule is the hook for services whose lifetime is one scope — one http request, one command run. What it registers is built on the first resolution through a scope and closed when that scope closes, so a service may hold the request it was built for without holding it for the life of the process. A long-running command that processes many units of work under its one run scope creates a child runtime per unit — a fresh scope, a runtime over it, closed with the unit, the cron runner's shape — so what is registered here stays unit-lifetime there too.
 
 It is a separate interface rather than a second method on ServiceModule because every module that exists implements the latter, and a hook nobody asked for must not be a compile break.
 

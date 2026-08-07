@@ -60,6 +60,15 @@ func uniqueTypeName(targetType reflect.Type) string {
     return pointerPrefix + named.PkgPath() + "." + named.Name()
 }
 
+/* overrideValueFitsRegisteredType decides whether an override value may sit under a registered type, judging it the way the readers will: raw assignability covers the interface registrations, whose stored value is asserted against the interface at resolution; the canonical-identity arm covers the value-typed registrations, whose canonical key already holds raw values built by the provider itself — a string service is registered under *string, so a string override occupies exactly the slot a built string occupies, and raw assignability alone would refuse what the registration's own creations serve. */
+func overrideValueFitsRegisteredType(valueType reflect.Type, registeredType reflect.Type) bool {
+    if true == valueType.AssignableTo(registeredType) {
+        return true
+    }
+
+    return canonicalServiceType(valueType) == registeredType
+}
+
 func isAnyType(targetType reflect.Type) bool {
     if nil == targetType {
         return false

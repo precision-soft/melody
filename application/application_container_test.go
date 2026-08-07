@@ -187,7 +187,7 @@ func registeredListenerCount(t *testing.T, applicationInstance *Application) int
 }
 
 /* a compiled security configuration only becomes enforcement when this runs: the firewall manager reaches the container and the two kernel listeners reach the dispatcher. Security in this framework is a pair of listeners rather than middleware, so a boot that skipped them would serve every protected route wide open with a configuration that looks correct everywhere it is printed. */
-func TestRegisterHttpSecurity_WiresTheFirewallManagerAndTheKernelListeners(t *testing.T) {
+func TestRegisterSecurity_WiresTheFirewallManagerAndTheKernelListeners(t *testing.T) {
     applicationInstance := newSecurityWiringApplication(t, config.ModeHttp)
 
     if nil == applicationInstance.securityConfiguration {
@@ -196,7 +196,7 @@ func TestRegisterHttpSecurity_WiresTheFirewallManagerAndTheKernelListeners(t *te
 
     listenersBefore := registeredListenerCount(t, applicationInstance)
 
-    if wiringErr := applicationInstance.registerHttpSecurity(); nil != wiringErr {
+    if wiringErr := applicationInstance.registerSecurity(); nil != wiringErr {
         t.Fatalf("unexpected wiring error: %v", wiringErr)
     }
 
@@ -210,22 +210,29 @@ func TestRegisterHttpSecurity_WiresTheFirewallManagerAndTheKernelListeners(t *te
     }
 }
 
-/* a console process wires no request security: there is no request to guard, and registering the listeners would put the firewall in the path of nothing. A process without a compiled configuration wires nothing either — that is an application that declared no security at all, not one whose security failed to compile, which the compile step refuses on its own. */
-func TestRegisterHttpSecurity_WiresNothingOutsideAnHttpProcessOrWithoutAConfiguration(t *testing.T) {
+/* a console process with a compiled configuration resolves the firewall manager — configured means resolvable, whatever the mode — but wires no listeners: they are the enforcement, they listen for requests, and a console process has no request to guard. A process without a compiled configuration wires nothing at all — that is an application that declared no security, not one whose security failed to compile, which the compile step refuses on its own. */
+func TestRegisterSecurity_AConsoleProcessResolvesTheManagerAndWiresNoListeners(t *testing.T) {
     cliApplication := newSecurityWiringApplication(t, config.ModeCli)
 
-    if wiringErr := cliApplication.registerHttpSecurity(); nil != wiringErr {
+    listenersBefore := registeredListenerCount(t, cliApplication)
+
+    if wiringErr := cliApplication.registerSecurity(); nil != wiringErr {
         t.Fatalf("unexpected wiring error: %v", wiringErr)
     }
 
-    if true == cliApplication.kernel.ServiceContainer().Has(security.ServiceFirewallManager) {
-        t.Fatalf("expected a console process to wire no firewall manager")
+    if false == cliApplication.kernel.ServiceContainer().Has(security.ServiceFirewallManager) {
+        t.Fatalf("expected a console process with security configured to resolve the firewall manager")
+    }
+
+    listenersAfter := registeredListenerCount(t, cliApplication)
+    if listenersBefore != listenersAfter {
+        t.Fatalf("expected a console process to wire no security listeners, got %d listeners over %d", listenersAfter, listenersBefore)
     }
 
     unconfiguredApplication := newCollisionTestApplication(t)
     unconfiguredApplication.runtimeFlags = NewRuntimeFlags(config.ModeHttp)
 
-    if wiringErr := unconfiguredApplication.registerHttpSecurity(); nil != wiringErr {
+    if wiringErr := unconfiguredApplication.registerSecurity(); nil != wiringErr {
         t.Fatalf("unexpected wiring error: %v", wiringErr)
     }
 

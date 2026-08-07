@@ -118,9 +118,12 @@ func (instance *Application) runCli(ctx context.Context) error {
     runtimeInstance := runtime.New(ctx, scope, serviceContainer)
 
     processId := logging.GenerateProcessId()
-    loggerWithProcess := logging.NewRequestLogger(logger, processId, "processId")
+    loggerWithProcess := logging.NewProcessLogger(logger, processId, "processId")
 
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, loggerWithProcess)
+
+    /* the console counterpart of the request context the http kernel installs into each request's scope: the run's identity lives where a scoped service can resolve it, instead of being computed for the logger and thrown away */
+    scope.MustOverrideProtectedInstance(ServiceProcessContext, NewProcessContext(processId, time.Now()))
 
     loggerWithProcess.Info("starting cli application", nil)
 

@@ -44,7 +44,7 @@ type container struct {
     resolverContextIdCounter    atomic.Uint64
     resolverWaitGraph           map[uint64]map[uint64]struct{}
     typeRegistrationNamesByType map[reflect.Type][]string
-    /* @important the identity key is a string, and distinct types CAN share it — pointer-to-unnamed-composite types drop their package path, so *[]alpha.Bus and *[]beta.Bus of two same-short-named packages read identically. The string keys the creation guard and the teardown; two types behind one key mean false cycles at resolution and merged nodes at close. Every type registration therefore records its key here and a second, DIFFERENT type arriving under the same key is refused at the boot line that declares it. */
+    /* the identity key is a string, and distinct types CAN share it — pointer-to-unnamed-composite types drop their package path, so *[]alpha.Bus and *[]beta.Bus of two same-short-named packages read identically. The string keys the creation guard and the teardown; two types behind one key mean false cycles at resolution and merged nodes at close. Every type registration therefore records its key here and a second, DIFFERENT type arriving under the same key is refused at the boot line that declares it. */
     typeIdentityKeyToType map[string]reflect.Type
     dependencyGraph       map[string]map[string]struct{}
     /* builtServiceNames marks the name-keyed instances the container itself created, as opposed to installed overrides: an override replacing a built instance orphans a value only the container ever held, and the teardown closes what this set points at even after the maps stopped naming it (via replacedBuiltInstances). An installed override evicted by a later override is NOT the container's to close — it belongs to whoever installed it. */
@@ -121,7 +121,7 @@ func (instance *container) HasType(targetType reflect.Type) bool {
         return false
     }
 
-    /* @important the lookup is canonical because the registrations are: a service registered from a provider returning *T is filed under *T, and GetByType canonicalises before it looks. Asking with the value type therefore used to be answered "no" for a service GetByType resolves happily, so Has and Get disagreed about the same container. */
+    /* the lookup is canonical because the registrations are: a service registered from a provider returning *T is filed under *T, and GetByType canonicalises before it looks. Asking with the value type therefore used to be answered "no" for a service GetByType resolves happily, so Has and Get disagreed about the same container. */
     canonicalType := canonicalServiceType(targetType)
     if nil == canonicalType {
         return false
@@ -207,7 +207,7 @@ func (instance *container) OverrideProtectedInstance(serviceName string, value a
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    /* @important an override landing after Close has enumerated the instances is stored into a map no teardown will ever read again — it is served by later lookups and closed by nobody. Refused, like the scoped registrar refuses; the read paths keep serving what was built, so a shutdown-racing request degrades gracefully instead of half-working. */
+    /* an override landing after Close has enumerated the instances is stored into a map no teardown will ever read again — it is served by later lookups and closed by nobody. Refused, like the scoped registrar refuses; the read paths keep serving what was built, so a shutdown-racing request degrades gracefully instead of half-working. */
     if true == instance.isClosed {
         return newContainerClosedError(serviceName)
     }
@@ -245,14 +245,14 @@ func (instance *container) OverrideProtectedInstance(serviceName string, value a
         )
     }
 
-    /* @important the override propagates to every type this name is registered under, and a type-keyed resolution hands out whatever sits there with no re-check — the call-time assignability guard of the provider contract does not see overrides. A value the registered type cannot hold is refused before anything is written, so GetByType keeps its contract and the name/type maps never learn two different answers. */
+    /* the override propagates to every type this name is registered under, and a type-keyed resolution hands out whatever sits there with no re-check — the call-time assignability guard of the provider contract does not see overrides. A value the registered type cannot hold is refused before anything is written, so GetByType keeps its contract and the name/type maps never learn two different answers. */
     for registeredType, registeredServiceNames := range instance.typeRegistrationNamesByType {
         for _, registeredServiceName := range registeredServiceNames {
             if serviceName != registeredServiceName {
                 continue
             }
 
-            if false == valueType.AssignableTo(registeredType) {
+            if false == overrideValueFitsRegisteredType(valueType, registeredType) {
                 return exception.NewError(
                     "override value is not assignable to the registered service type",
                     map[string]any{
@@ -313,6 +313,25 @@ func (instance *container) NewScope() containercontract.Scope {
     return newScope(instance, instance.scopePlanForNewScope())
 }
 
+/* registeredTypesForServiceName answers every type the name is registered under, for the scope override that propagates to them; the scope calls it before taking its own lock, container-then-scope being the only order the two locks are ever taken in. */
+func (instance *container) registeredTypesForServiceName(serviceName string) []reflect.Type {
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
+
+    var registeredTypes []reflect.Type
+
+    for registeredType, registeredServiceNames := range instance.typeRegistrationNamesByType {
+        for _, registeredServiceName := range registeredServiceNames {
+            if serviceName == registeredServiceName {
+                registeredTypes = append(registeredTypes, registeredType)
+                break
+            }
+        }
+    }
+
+    return registeredTypes
+}
+
 func (instance *container) Names() []string {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
@@ -370,7 +389,7 @@ func (instance *container) register(
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    /* @important the scoped registrar already refuses a closed container; the plain one accepted silently, reporting success for a service whose every resolution the creation guard then refuses. Same condition, same answer. */
+    /* the scoped registrar already refuses a closed container; the plain one accepted silently, reporting success for a service whose every resolution the creation guard then refuses. Same condition, same answer. */
     if true == instance.isClosed {
         return newContainerClosedError(serviceName)
     }

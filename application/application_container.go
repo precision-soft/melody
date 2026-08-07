@@ -70,7 +70,9 @@ func (instance *Application) RegisterService(
     exception.Panic(exception.FromError(registerErr))
 }
 
-/* RegisterScopedService declares a service the application's scopes own: one instance per request, closed with the request. It mirrors RegisterService in everything but lifetime, collisions included — a name claimed at both lifetimes is absorbed into the aggregated boot report, so a module that scopes a name the framework registers later hears about it beside every other collision instead of one panic per boot attempt. */
+/* RegisterScopedService declares a service the application's scopes own: one instance per scope — one http request, one command run — closed with it. It mirrors RegisterService in everything but lifetime, collisions included — a name claimed at both lifetimes is absorbed into the aggregated boot report, so a module that scopes a name the framework registers later hears about it beside every other collision instead of one panic per boot attempt.
+
+In console the run's scope spans the whole command, so for a one-shot command "scoped" and "per run" are the same thing — but a long-running command that processes many units of work holds one scope for all of them, and a scoped transaction or identity quietly becomes a process singleton. Such a command creates a child runtime per unit, the way the cron runner does around each scheduled run: a fresh scope from Container().NewScope(), a runtime.New over it, and a Close whose error is joined onto the unit's own when the unit ends. */
 func (instance *Application) RegisterScopedService(
     serviceName string,
     provider any,
@@ -200,9 +202,9 @@ func (instance *Application) bootContainer() {
 
     instance.registerHttpSession()
 
-    httpSecurityErr := instance.registerHttpSecurity()
-    if nil != httpSecurityErr {
-        exception.Panic(exception.FromError(httpSecurityErr))
+    securityErr := instance.registerSecurity()
+    if nil != securityErr {
+        exception.Panic(exception.FromError(securityErr))
     }
 
     /* the logger is resolved once, eagerly, whoever registered it: its provider is the one whose failure bootLogger otherwise swallows — the container recovers the provider panic into an error, the fallback answers the emergency logger, and the boot reported success for a process whose next logger resolution could only panic, attributed to the run instead of to the configuration that broke it. Failing here names the boot step that owns the failure, and the container memoizes the built logger, so nothing opens the log file a second time. */
@@ -339,11 +341,8 @@ func (instance *Application) registerHttpSession() {
     }
 }
 
-func (instance *Application) registerHttpSecurity() error {
-    if config.ModeHttp != instance.runtimeFlags.Mode() {
-        return nil
-    }
-
+/* registerSecurity wires what a compiled security configuration means for this process. The firewall manager is registered whatever the mode: it is a plain view of the compiled configuration with no request in it, and gating it on the mode sent a console process asking for it to a "service is not registered" panic that reads as a wiring mistake when the actual difference was the process shape — configured means resolvable. The two kernel listeners remain http-only: they are the enforcement, they listen for requests, and a console process has no request to guard. */
+func (instance *Application) registerSecurity() error {
     if nil == instance.securityConfiguration {
         return nil
     }
@@ -357,6 +356,10 @@ func (instance *Application) registerHttpSecurity() error {
                 return security.NewFirewallManager(instance.securityConfiguration), nil
             },
         )
+    }
+
+    if config.ModeHttp != instance.runtimeFlags.Mode() {
+        return nil
     }
 
     registry := security.NewFirewallRegistry(instance.securityConfiguration)

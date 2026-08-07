@@ -6,7 +6,23 @@ import (
     loggingcontract "github.com/precision-soft/melody/logging/contract"
 )
 
+/* NewRequestLogger decorates the base logger with the request path's correlation rule: the real id wins the context key unconditionally, and a different non-empty string claim survives beside it under the key suffixed "Claimed" — the claim frequently originates in an error context assembled from request data, so the suffix says exactly what it is. Console processes use NewProcessLogger, whose caller is trusted. */
 func NewRequestLogger(logger loggingcontract.Logger, requestId string, contextKey string) loggingcontract.Logger {
+    return newCorrelationLogger(logger, requestId, contextKey, "Claimed", false)
+}
+
+/* NewProcessLogger decorates the base logger with the console path's correlation rule: the generated id wins the context key on every record, so the correlation never has holes, and a caller's own value under the key is preserved verbatim — any type, not only strings — under the key suffixed "Provided". The console caller is the process's own code, not a client that can forge, so what it wrote is legitimate data displaced by the correlation, not a claim to be suspected. */
+func NewProcessLogger(logger loggingcontract.Logger, processId string, contextKey string) loggingcontract.Logger {
+    return newCorrelationLogger(logger, processId, contextKey, "Provided", true)
+}
+
+func newCorrelationLogger(
+    logger loggingcontract.Logger,
+    correlationId string,
+    contextKey string,
+    preservedKeySuffix string,
+    preserveAnyValue bool,
+) loggingcontract.Logger {
     if true == internal.IsNilInterface(logger) {
         exception.Panic(
             exception.NewError("base logger is not provided for request logger", nil, nil),
@@ -19,14 +35,16 @@ func NewRequestLogger(logger loggingcontract.Logger, requestId string, contextKe
         )
     }
 
-    if "" == requestId {
+    if "" == correlationId {
         return logger
     }
 
     return &requestLogger{
-        base:       logger,
-        requestId:  requestId,
-        contextKey: contextKey,
+        base:               logger,
+        requestId:          correlationId,
+        contextKey:         contextKey,
+        preservedKeySuffix: preservedKeySuffix,
+        preserveAnyValue:   preserveAnyValue,
     }
 }
 
@@ -34,6 +52,9 @@ type requestLogger struct {
     base       loggingcontract.Logger
     requestId  string
     contextKey string
+    /* the two knobs the constructors set: the suffix under which a caller's value survives, and whether it survives whatever its type — the request path keeps only non-empty string claims, because everything else there is request-derived noise, while the console path preserves verbatim what its trusted caller wrote */
+    preservedKeySuffix string
+    preserveAnyValue   bool
 }
 
 func (instance *requestLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
@@ -70,7 +91,7 @@ func (instance *requestLogger) Closed() bool {
     return closedChecker.Closed()
 }
 
-/* mergeContextWithRequestId writes the real request id under the context key unconditionally: the id this logger was built with is the one trustworthy correlation there is, and a value already sitting under the key frequently originates in an error context assembled from request data — letting it win let whatever the client wrote forge the correlation of the record. A different non-empty claim is kept beside the real id under the key suffixed "Claimed", so nothing the caller said is lost, and the operator sees both the truth and the claim. */
+/* mergeContextWithRequestId writes the real correlation id under the context key unconditionally: the id this logger was built with is the one trustworthy correlation there is, and a value already sitting under the key would otherwise break the chain every reader of the log greps by. What happens to that value is the constructor's policy: on the request path a different non-empty string claim survives under "...Claimed" — letting it win would let whatever the client wrote forge the correlation of the record — while on the console path the caller's value survives verbatim under "...Provided", whatever its type, because the console caller is trusted and its data is displaced, not suspected. */
 func (instance *requestLogger) mergeContextWithRequestId(context loggingcontract.Context, requestId string) map[string]any {
     if "" == requestId {
         return context
@@ -86,8 +107,12 @@ func (instance *requestLogger) mergeContextWithRequestId(context loggingcontract
     }
 
     if existingValue, exists := mergedContext[instance.contextKey]; true == exists {
-        if stringValue, ok := existingValue.(string); true == ok && "" != stringValue && requestId != stringValue {
-            mergedContext[instance.contextKey+"Claimed"] = stringValue
+        if true == instance.preserveAnyValue {
+            if requestId != existingValue {
+                mergedContext[instance.contextKey+instance.preservedKeySuffix] = existingValue
+            }
+        } else if stringValue, ok := existingValue.(string); true == ok && "" != stringValue && requestId != stringValue {
+            mergedContext[instance.contextKey+instance.preservedKeySuffix] = stringValue
         }
     }
 

@@ -4,7 +4,9 @@ import (
     "context"
     "errors"
     "os"
+    "sync"
     "testing"
+    "time"
 
     urfavecli "github.com/urfave/cli/v3"
 
@@ -12,8 +14,11 @@ import (
     clicontract "github.com/precision-soft/melody/cli/contract"
     "github.com/precision-soft/melody/cli/output"
     "github.com/precision-soft/melody/config"
+    containercontract "github.com/precision-soft/melody/container/contract"
     "github.com/precision-soft/melody/exception"
     "github.com/precision-soft/melody/internal/testhelper"
+    "github.com/precision-soft/melody/logging"
+    loggingcontract "github.com/precision-soft/melody/logging/contract"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
@@ -374,4 +379,181 @@ func TestApplicationRegisterCliCommand_RefusesATypedNilCommand(t *testing.T) {
         },
         "cli command may not be nil",
     )
+}
+
+type processContextProbeCliCommand struct {
+    seenProcessId   string
+    seenStartedAt   time.Time
+    accessorAnswers bool
+}
+
+func (instance *processContextProbeCliCommand) Name() string {
+    return "probe:process-context"
+}
+
+func (instance *processContextProbeCliCommand) Description() string {
+    return "captures the process context the run scope carries"
+}
+
+func (instance *processContextProbeCliCommand) Flags() []clicontract.Flag {
+    return nil
+}
+
+func (instance *processContextProbeCliCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+    processContext := ProcessContextMustFromResolver(runtimeInstance.Scope())
+
+    instance.seenProcessId = processContext.ProcessId()
+    instance.seenStartedAt = processContext.StartedAt()
+    instance.accessorAnswers = nil != ProcessContextFromResolver(runtimeInstance.Scope())
+
+    return nil
+}
+
+/* the console counterpart of the request context the http kernel installs: the run's identity is resolvable from the run scope, instead of being computed for the logger and thrown away */
+func TestRunCli_InstallsTheProcessContextIntoTheRunScope(t *testing.T) {
+    applicationInstance := NewApplication(
+        testhelper.NewEmbeddedEnvFs(),
+        testhelper.NewEmbeddedStaticFs(),
+    )
+
+    probeCommand := &processContextProbeCliCommand{}
+    applicationInstance.RegisterCliCommand(probeCommand)
+
+    applicationInstance.Boot()
+
+    originalArguments := os.Args
+    os.Args = []string{"probe", "probe:process-context"}
+    defer func() { os.Args = originalArguments }()
+
+    if runErr := applicationInstance.runCli(context.Background()); nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    if "" == probeCommand.seenProcessId {
+        t.Fatalf("expected the run scope to carry a process context with a generated id")
+    }
+
+    if true == probeCommand.seenStartedAt.IsZero() {
+        t.Fatalf("expected the process context to carry the run's start moment")
+    }
+
+    if false == probeCommand.accessorAnswers {
+        t.Fatalf("expected the tolerant accessor to answer the installed context")
+    }
+}
+
+type contextCapturingCliLogger struct {
+    mutex    sync.Mutex
+    contexts []map[string]any
+    messages []string
+}
+
+func (instance *contextCapturingCliLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.messages = append(instance.messages, message)
+    instance.contexts = append(instance.contexts, context)
+}
+
+func (instance *contextCapturingCliLogger) Debug(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelDebug, message, context)
+}
+
+func (instance *contextCapturingCliLogger) Info(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelInfo, message, context)
+}
+
+func (instance *contextCapturingCliLogger) Warning(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelWarning, message, context)
+}
+
+func (instance *contextCapturingCliLogger) Error(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelError, message, context)
+}
+
+func (instance *contextCapturingCliLogger) Emergency(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelEmergency, message, context)
+}
+
+func (instance *contextCapturingCliLogger) contextOfMessage(message string) (map[string]any, bool) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    for index, recordedMessage := range instance.messages {
+        if message == recordedMessage {
+            return instance.contexts[index], true
+        }
+    }
+
+    return nil, false
+}
+
+type providedKeyProbeCliCommand struct{}
+
+func (instance *providedKeyProbeCliCommand) Name() string {
+    return "probe:provided-key"
+}
+
+func (instance *providedKeyProbeCliCommand) Description() string {
+    return "logs its own value under the correlation key"
+}
+
+func (instance *providedKeyProbeCliCommand) Flags() []clicontract.Flag {
+    return nil
+}
+
+func (instance *providedKeyProbeCliCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+    logger := logging.LoggerMustFromRuntime(runtimeInstance)
+
+    logger.Info("probe record with a caller process id", loggingcontract.Context{"processId": "caller-owned"})
+
+    return nil
+}
+
+/* the console decorator is the trusted-caller one: the generated id keeps the correlation whole on every record, and what the command wrote under the key survives verbatim beside it, under the neutral suffix rather than the request path's accusation */
+func TestRunCli_TheRunLoggerPreservesACallerProcessIdUnderProvided(t *testing.T) {
+    baseLogger := &contextCapturingCliLogger{}
+
+    applicationInstance := NewApplication(
+        testhelper.NewEmbeddedEnvFs(),
+        testhelper.NewEmbeddedStaticFs(),
+    )
+
+    applicationInstance.RegisterService(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return baseLogger, nil
+        },
+    )
+
+    applicationInstance.RegisterCliCommand(&providedKeyProbeCliCommand{})
+
+    applicationInstance.Boot()
+
+    originalArguments := os.Args
+    os.Args = []string{"probe", "probe:provided-key"}
+    defer func() { os.Args = originalArguments }()
+
+    if runErr := applicationInstance.runCli(context.Background()); nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    recordContext, recorded := baseLogger.contextOfMessage("probe record with a caller process id")
+    if false == recorded {
+        t.Fatalf("expected the probe record to reach the base logger")
+    }
+
+    generatedId, hasGeneratedId := recordContext["processId"].(string)
+    if false == hasGeneratedId || "" == generatedId || "caller-owned" == generatedId {
+        t.Fatalf("expected the generated id to win the correlation key, got %v", recordContext["processId"])
+    }
+
+    if "caller-owned" != recordContext["processIdProvided"] {
+        t.Fatalf("expected the caller's value verbatim under the provided key, got %v", recordContext["processIdProvided"])
+    }
+
+    if _, hasClaim := recordContext["processIdClaimed"]; true == hasClaim {
+        t.Fatalf("expected the console path to write no claimed key, got %v", recordContext["processIdClaimed"])
+    }
 }
