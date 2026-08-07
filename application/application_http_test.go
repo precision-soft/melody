@@ -40,6 +40,19 @@ func TestApplicationRegisterHttpRoute_AppendsRegistrarBeforeBoot(t *testing.T) {
     }
 }
 
+/* the queue this door feeds drains before the module phases run: a registrar queued from inside a module boot hook would never execute — a route silently absent — so the door refuses for the boot window and points at the hook made for module routes */
+func TestApplicationRegisterHttpRoute_RefusesDuringTheBootWindow(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        (&Application{booting: true}).RegisterHttpRoute(
+            nethttp.MethodGet,
+            "/late",
+            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                return nil, nil
+            },
+        )
+    }, "may not register http routes from inside a module boot hook")
+}
+
 func TestApplicationRegisterHttpRoute_PanicsAfterBoot(t *testing.T) {
     applicationInstance := NewApplication(
         testhelper.NewEmbeddedEnvFs(),

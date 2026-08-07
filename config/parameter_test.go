@@ -114,7 +114,7 @@ func TestParameter_Float_RejectsUnparsableAndUnsetValues(t *testing.T) {
     }
 }
 
-/* @info parameters routinely hold inline credentials, so a failed conversion must identify the parameter by its environment key alone; embedding the offending value would carry the secret into logs through the exception cause-context chain */
+/* parameters routinely hold inline credentials, so a failed conversion must identify the parameter by its environment key alone; embedding the offending value would carry the secret into logs through the exception cause-context chain */
 func TestParameter_ConversionErrorsOmitTheRawValue(t *testing.T) {
     secretValue := "P4ssPhrase"
 
@@ -145,7 +145,7 @@ func TestParameter_ConversionErrorsOmitTheRawValue(t *testing.T) {
     }
 }
 
-/* @info Resolve rewrites every parameter's value, while a service handed the *Parameter reads it through the accessors without ever touching the configuration. The write was covered by the configuration lock and the read by nothing, which is two locks around one field — the race detector reported the write at the resolve loop against the read in Value(). */
+/* Resolve rewrites every parameter's value, while a service handed the *Parameter reads it through the accessors without ever touching the configuration. The write was covered by the configuration lock and the read by nothing, which is two locks around one field — the race detector reported the write at the resolve loop against the read in Value(). */
 func TestParameter_ValueDoesNotRaceResolve(t *testing.T) {
     configuration, newConfigurationErr := NewConfiguration(
         &Environment{
@@ -195,7 +195,7 @@ func TestParameter_ValueDoesNotRaceResolve(t *testing.T) {
     waitGroup.Wait()
 }
 
-/* @info a secret parameter's conversion failure withholds the cause: the strconv text quotes the value it refused, which is the right diagnostic for a pool size and the wrong log line for a credential; an ordinary parameter keeps the full cause */
+/* a secret parameter's conversion failure withholds the cause: the strconv text quotes the value it refused, which is the right diagnostic for a pool size and the wrong log line for a credential; an ordinary parameter keeps the full cause */
 func TestParameter_SecretConversionWithholdsTheValue(t *testing.T) {
     secretParameter := NewParameter("APP_TOKEN", "sk_live_51H", "sk_live_51H", false)
     secretParameter.isSecret.Store(true)
@@ -227,7 +227,48 @@ func TestParameter_SecretConversionWithholdsTheValue(t *testing.T) {
     }
 }
 
-/* @info MustString is the accessor wiring code reaches for when a missing string is a boot failure, so its refusal has to name what it refused: the environment key, the registration name of a runtime parameter that has no key, and the type it actually found — the value itself stays out, the way every other conversion diagnostic here does. */
+/* a deferred parameter still holds its raw template, and every accessor funnels through loadValue: the read refuses loudly instead of serving %app.user% as though it were the value, and the refusal names the parameter the way every diagnostic here does */
+func TestParameter_ReadingADeferredParameterRefusesLoudly(t *testing.T) {
+    parameter := NewParameter("APP_GREETING", "%app.user%", "%app.user%", false)
+    parameter.deferred.Store(true)
+
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected the accessor to refuse a deferred parameter")
+        }
+
+        recoveredErr, isException := recoveredValue.(*exception.Error)
+        if false == isException {
+            t.Fatalf("expected an exception error, got %T", recoveredValue)
+        }
+
+        if false == strings.Contains(recoveredErr.Error(), "deferred to boot") {
+            t.Fatalf("unexpected refusal message: %q", recoveredErr.Error())
+        }
+
+        if "APP_GREETING" != recoveredErr.Context()["environmentKey"] {
+            t.Fatalf("expected the refusal to name the environment key, got %#v", recoveredErr.Context()["environmentKey"])
+        }
+    }()
+
+    _ = parameter.String()
+}
+
+/* the settled side of the deferral: once the boot resolution stores a value and clears the flag, the accessors answer as they always did */
+func TestParameter_ASettledDeferredParameterReadsNormally(t *testing.T) {
+    parameter := NewParameter("APP_GREETING", "%app.user%", "%app.user%", false)
+    parameter.deferred.Store(true)
+
+    parameter.storeValue("hello operator")
+    parameter.deferred.Store(false)
+
+    if "hello operator" != parameter.String() {
+        t.Fatalf("unexpected value %q", parameter.String())
+    }
+}
+
+/* MustString is the accessor wiring code reaches for when a missing string is a boot failure, so its refusal has to name what it refused: the environment key, the registration name of a runtime parameter that has no key, and the type it actually found — the value itself stays out, the way every other conversion diagnostic here does. */
 func TestParameter_MustString_PanicRefusalNamesTheParameterAndTheTypeItFound(t *testing.T) {
     parameter := NewParameter("APP_POOL_SIZE", 12, 12, false)
     parameter.name = "app.pool.size"
@@ -269,7 +310,7 @@ func TestParameter_MustString_PanicRefusalNamesTheParameterAndTheTypeItFound(t *
     _ = parameter.MustString()
 }
 
-/* @info a parameter that really holds a string is handed back by MustString without any refusal — the panic above is the refusal path, not the ordinary one */
+/* a parameter that really holds a string is handed back by MustString without any refusal — the panic above is the refusal path, not the ordinary one */
 func TestParameter_MustString_ReturnsTheStoredString(t *testing.T) {
     parameter := NewParameter("APP_NAME", "melody", "melody", false)
 
@@ -278,7 +319,7 @@ func TestParameter_MustString_ReturnsTheStoredString(t *testing.T) {
     }
 }
 
-/* @info a runtime parameter has no environment key, and passing the empty key into the shared parsers put a nameless parameterName inside the cause of an error whose outer context names the parameter — the operator reading the cause chain concluded the parameter was anonymous */
+/* a runtime parameter has no environment key, and passing the empty key into the shared parsers put a nameless parameterName inside the cause of an error whose outer context names the parameter — the operator reading the cause chain concluded the parameter was anonymous */
 func TestParameter_ConversionCauseNamesTheRuntimeParameter(t *testing.T) {
     parameter := NewParameter("", "not-a-duration", "not-a-duration", false)
     parameter.name = "app.timeout"
@@ -303,7 +344,7 @@ func TestParameter_ConversionCauseNamesTheRuntimeParameter(t *testing.T) {
     }
 }
 
-/* @info Bool reads a native bool as itself and a string through the shared parser, and refuses everything else by name: a parameter that decides whether a feature is on must never answer false because it happened to hold a number, and the value of a secret never reaches the diagnostic */
+/* Bool reads a native bool as itself and a string through the shared parser, and refuses everything else by name: a parameter that decides whether a feature is on must never answer false because it happened to hold a number, and the value of a secret never reaches the diagnostic */
 func TestParameter_Bool_ReadsBothShapesAndRefusesTheRest(t *testing.T) {
     nativeParameter := NewParameter("APP_FEATURE", true, true, false)
 

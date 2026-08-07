@@ -29,12 +29,14 @@ type Parameter struct {
     environmentValue any
     /* the registration name, for the parameters that have no environment key: a runtime parameter identified in an error only by its empty environmentKey was anonymous — "cannot convert" named nothing an operator could find */
     name string
-    /* @important valueMutex guards value on its own, because the configuration lock does not reach the readers: a service handed the *Parameter reads it through the accessors below without ever touching the configuration, while Resolve rewrites every parameter under the configuration write lock. Two different locks around the same field are no lock at all, so the write side goes through storeValue and every read through loadValue. */
+    /* valueMutex guards value on its own, because the configuration lock does not reach the readers: a service handed the *Parameter reads it through the accessors below without ever touching the configuration, while Resolve rewrites every parameter under the configuration write lock. Two different locks around the same field are no lock at all, so the write side goes through storeValue and every read through loadValue. */
     valueMutex sync.RWMutex
     value      any
     isDefault  bool
-    /* @important atomic because MarkSecret may mark a parameter under the configuration lock while a consumer that already holds the pointer asks IsSecret without it */
+    /* atomic because MarkSecret may mark a parameter under the configuration lock while a consumer that already holds the pointer asks IsSecret without it */
     isSecret atomic.Bool
+    /* deferred marks a parameter whose template referenced a name that was not defined while the constructor resolved placeholders: the composition root registers its parameters between construction and boot, so the tolerant constructor pass leaves such a parameter for the boot resolution to settle in one order-independent batch. Atomic because the boot resolution clears the flag under the configuration write lock while a consumer that already holds the pointer reads through loadValue without it. */
+    deferred atomic.Bool
 }
 
 func (instance *Parameter) diagnosticContext() map[string]any {
@@ -68,6 +70,17 @@ func (instance *Parameter) conversionCause(causeErr error) error {
 }
 
 func (instance *Parameter) loadValue() any {
+    /* a deferred parameter still holds its raw template: handing that out would serve %app.user% as though it were the value, so every accessor refuses loudly instead. The window is construction to boot — the boot resolution either settles the reference and clears the flag, or fails the boot naming it. */
+    if true == instance.deferred.Load() {
+        exception.Panic(
+            exception.NewError(
+                "cannot read a parameter whose resolution was deferred to boot; its value references a parameter that was not defined at construction, and the boot resolution has not run yet",
+                instance.diagnosticContext(),
+                nil,
+            ),
+        )
+    }
+
     instance.valueMutex.RLock()
     defer instance.valueMutex.RUnlock()
 

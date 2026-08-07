@@ -23,12 +23,16 @@ import (
 type RouteRegistrar func(kernelInstance kernelcontract.Kernel)
 
 type Application struct {
-    booted                bool
+    booted bool
+    /* raised for the boot window so the module doors can refuse a registration arriving from inside a module boot hook: the phase loops iterate a snapshot of the module list, so a module registered mid-boot would receive only the hooks of whatever phases had not run yet — a half-booted module reporting a successful boot */
+    booting               bool
     configuration         configcontract.Configuration
     runtimeFlags          *RuntimeFlags
-    kernel                kernelcontract.Kernel
-    embeddedPublicFiles   fs.FS
-    modules               []applicationcontract.Module
+    kernel              kernelcontract.Kernel
+    embeddedPublicFiles fs.FS
+    modules             []applicationcontract.Module
+    /* the identity set behind the module dedup: one instance reached through two providers boots once. Keyed by the interface value and populated lazily, because tests legitimately assemble a bare Application without the constructor. */
+    registeredModuleInstances map[applicationcontract.Module]struct{}
     cliCommands           []clicontract.Command
     httpRouteRegistrars   []RouteRegistrar
     httpMiddlewares       *HttpMiddleware
@@ -47,6 +51,8 @@ func (instance *Application) Boot() kernelcontract.Kernel {
     if true == instance.booted {
         return instance.kernel
     }
+
+    instance.booting = true
 
     defer instance.logOnRecoverAndExit()
 
@@ -80,6 +86,12 @@ func (instance *Application) Boot() kernelcontract.Kernel {
 
     instance.ensureRuntimeDirectories()
 
+    /* armed before the first route can register and disarmed only after the aggregated report has had its chance to raise, so every duplicate route of the whole boot lands in that report instead of panicking one at a time */
+    instance.armRouteCollisionRecorder()
+
+    /* the application's own routes register before any module's: where a root route and a module route meet at dispatch, the router breaks the tie on registration order, and the composition root wrote its route against the application, not against whichever module happens to boot with it */
+    instance.bootHttp()
+
     instance.bootModulesPostConfigurationResolve()
 
     instance.bootContainer()
@@ -90,11 +102,12 @@ func (instance *Application) Boot() kernelcontract.Kernel {
 
     instance.panicOnBootCollisions()
 
-    instance.bootHttp()
+    instance.disarmRouteCollisionRecorder()
 
     instance.warnUnappliedSecretMarks()
 
     instance.booted = true
+    instance.booting = false
 
     return instance.kernel
 }

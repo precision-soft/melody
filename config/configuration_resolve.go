@@ -1,14 +1,23 @@
 package config
 
 import (
+    "errors"
     "fmt"
     "strings"
 
     "github.com/precision-soft/melody/exception"
 )
 
+/* errUndefinedParameterReference travels as the cause of the undefined-parameter error so the constructor's tolerant pass can recognize exactly this failure by identity: the composition root registers its parameters between construction and boot, so a template referencing one of them is not an error there yet — every other resolution failure still is. */
+var errUndefinedParameterReference = errors.New("undefined parameter key")
+
+/* Resolve resolves every parameter's template in one order-independent batch and settles the ones the constructor's tolerant pass deferred; a reference that is still undefined here is the error that pass postponed. */
 func (instance *Configuration) Resolve() error {
-    /* Resolve iterates and mutates the shared parameter map, so it holds the write lock the runtime accessors read under; the body reaches parameters only through the lock-free getInternalParameter, never a locking accessor, so the lock is not re-entered. Each parameter's value is written through storeValue, since a consumer holding the pointer reads it through the parameter's own lock and never through this one. */
+    return instance.resolveAll(false)
+}
+
+func (instance *Configuration) resolveAll(deferUnresolvedReferences bool) error {
+    /* the resolution iterates and mutates the shared parameter map, so it holds the write lock the runtime accessors read under; the body reaches parameters only through the lock-free getInternalParameter, never a locking accessor, so the lock is not re-entered. Each parameter's value is written through storeValue, since a consumer holding the pointer reads it through the parameter's own lock and never through this one. */
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -48,6 +57,15 @@ func (instance *Configuration) Resolve() error {
             make(map[string]bool),
         )
         if nil != resolveTemplateErr {
+            /* only the undefined-reference failure is deferrable, recognized by the sentinel cause, and only outside the reserved namespace: a kernel.* parameter is registered by melody itself before this pass, so an undefined reference in one is a settled error no later registration repairs — deferring it would move the failure from the constructor to whichever kernel view reads it next */
+            if true == deferUnresolvedReferences &&
+                false == instance.isReserved(name) &&
+                true == errors.Is(resolveTemplateErr, errUndefinedParameterReference) {
+                parameter.deferred.Store(true)
+
+                continue
+            }
+
             return exception.NewError(
                 "failed to resolve parameter",
                 map[string]any{
@@ -58,6 +76,7 @@ func (instance *Configuration) Resolve() error {
         }
 
         parameter.storeValue(value)
+        parameter.deferred.Store(false)
     }
 
     instance.resolved = true
@@ -198,7 +217,7 @@ func (instance *Configuration) resolveEnvironmentPlaceholder(
     }
 
     if innerEnd >= len(fragment) {
-        /* @important only a span spelled in key-grammar characters is carried into the error context: the fragment may hold arbitrary pasted text — a credential typed where the key belongs — and that must not reach the logs */
+        /* only a span spelled in key-grammar characters is carried into the error context: the fragment may hold arbitrary pasted text — a credential typed where the key belongs — and that must not reach the logs */
         reportedPlaceholder := "%env(<redacted>"
         if true == isKeyGrammarText(fragment[len("%env("):]) {
             reportedPlaceholder = fragment
@@ -222,7 +241,7 @@ func (instance *Configuration) resolveEnvironmentPlaceholder(
 
     submatches := envPlaceholderPattern.FindStringSubmatch(candidate)
     if nil == submatches || candidate != submatches[0] {
-        /* @important only a candidate spelled in key-grammar characters is carried into the error context: the bounded span may hold arbitrary pasted text — a credential typed where the key belongs — and that must not reach the logs */
+        /* only a candidate spelled in key-grammar characters is carried into the error context: the bounded span may hold arbitrary pasted text — a credential typed where the key belongs — and that must not reach the logs */
         reportedPlaceholder := "%env(<redacted>)%"
         if true == isKeyGrammarText(candidate[len("%env("):len(candidate)-len(")%")]) {
             reportedPlaceholder = candidate
@@ -284,7 +303,7 @@ func (instance *Configuration) resolveEnvironmentPlaceholder(
     }
 
     if false == hasDefaultProcessor {
-        /* @important do not embed the raw parameter value here: it commonly holds inline credentials (e.g. a DSN with a password) that would then reach logs unredacted via the exception cause-context chain; the environment key alone identifies the offending placeholder */
+        /* do not embed the raw parameter value here: it commonly holds inline credentials (e.g. a DSN with a password) that would then reach logs unredacted via the exception cause-context chain; the environment key alone identifies the offending placeholder */
         return "", 0, exception.NewError(
             "undefined environment key in template",
             map[string]any{
@@ -320,20 +339,20 @@ func (instance *Configuration) resolveParameterReference(
 ) (string, error) {
     referencedParameter := instance.getInternalParameter(parameterKey)
     if nil == referencedParameter {
-        /* @important do not embed the raw parameter value here: it commonly holds inline credentials (e.g. a DSN with a password) that would then reach logs unredacted via the exception cause-context chain; the parameter key alone identifies the offending placeholder */
+        /* do not embed the raw parameter value here: it commonly holds inline credentials (e.g. a DSN with a password) that would then reach logs unredacted via the exception cause-context chain; the parameter key alone identifies the offending placeholder. The sentinel cause is what lets the constructor's tolerant pass defer exactly this failure. */
         return "", exception.NewError(
             "undefined parameter key in template; a value that contains a literal percent rather than a reference must double it (a password written as pa%%ss%%word resolves to pa%ss%word)",
             map[string]any{
                 "parameterKey": parameterKey,
                 "parameter":    currentKey,
             },
-            nil,
+            errUndefinedParameterReference,
         )
     }
 
     environmentValueString, ok := referencedParameter.environmentValue.(string)
     if false == ok {
-        /* @important do not embed the raw value here either: a non-string parameter is not guaranteed non-secret — a signing key registered as bytes is exactly what a template would reference — so only its type identifies it */
+        /* do not embed the raw value here either: a non-string parameter is not guaranteed non-secret — a signing key registered as bytes is exactly what a template would reference — so only its type identifies it */
         return "", exception.NewError(
             "parameter environment value must be string for template resolution",
             map[string]any{
@@ -361,6 +380,7 @@ func (instance *Configuration) resolveParameterReference(
 
     if false == instance.resolved {
         referencedParameter.storeValue(resolvedReferencedValue)
+        referencedParameter.deferred.Store(false)
     }
 
     if true == referencedParameter.isSecret.Load() {

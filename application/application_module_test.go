@@ -43,6 +43,30 @@ func (instance selfReferencingModuleProvider) Modules() []applicationcontract.Mo
     return []applicationcontract.Module{instance}
 }
 
+/* bareModuleProvider carries no module identity of its own, so it exercises the children-only path through RegisterModuleProvider */
+type bareModuleProvider struct {
+    children []applicationcontract.Module
+}
+
+func (instance bareModuleProvider) Modules() []applicationcontract.Module {
+    return instance.children
+}
+
+/* mintingModuleProvider yields a freshly named child on every expansion, so instance identity can never break the cycle and only the depth guard is left to stop it */
+type mintingModuleProvider struct {
+    fakeModule
+}
+
+func (instance mintingModuleProvider) Modules() []applicationcontract.Module {
+    return []applicationcontract.Module{mintingModuleProvider{fakeModule{name: instance.name + "+"}}}
+}
+
+/* uncomparableModule cannot be a map key, so it exercises the branch that keeps the pre-deduplication behavior instead of letting the identity set panic at insertion */
+type uncomparableModule struct {
+    fakeModule
+    tags []string
+}
+
 func assertModuleNames(t *testing.T, modules []applicationcontract.Module, expected []string) {
     t.Helper()
 
@@ -95,22 +119,38 @@ func TestRegisterModule_ExpandsNestedProviders(t *testing.T) {
     assertModuleNames(t, instance.modules, []string{"outer", "inner", "leaf"})
 }
 
-func TestRegisterModule_PanicsOnProviderCycleInsteadOfStackOverflow(t *testing.T) {
+/* the provider hands over the same instance it is, so identity breaks the cycle before the depth guard is ever needed: the module registers once and the expansion simply stops */
+func TestRegisterModule_ASelfReferencingProviderRegistersOnce(t *testing.T) {
     instance := &Application{}
-
-    defer func() {
-        recovered := recover()
-        if nil == recovered {
-            t.Fatal("expected a panic on a cyclic module provider, got none")
-        }
-    }()
 
     instance.RegisterModule(selfReferencingModuleProvider{fakeModule: fakeModule{name: "cyclic"}})
 
-    t.Fatal("RegisterModule returned without guarding a module provider cycle")
+    assertModuleNames(t, instance.modules, []string{"cyclic"})
+}
+
+/* a cycle of ever-fresh instances is invisible to the identity set, and without the depth guard the expansion recurses until the stack dies */
+func TestRegisterModule_PanicsOnProviderCycleOfDistinctInstances(t *testing.T) {
+    instance := &Application{}
+
+    testhelper.AssertPanicsWithError(t, func() {
+        instance.RegisterModule(mintingModuleProvider{fakeModule{name: "minting"}})
+    }, "module provider expansion exceeded maximum depth")
 }
 
 func TestRegisterModuleProvider_RegistersChildrenWithoutProvider(t *testing.T) {
+    instance := &Application{}
+
+    provider := bareModuleProvider{
+        children: []applicationcontract.Module{fakeModule{name: "child-a"}, fakeModule{name: "child-b"}},
+    }
+
+    instance.RegisterModuleProvider(provider)
+
+    assertModuleNames(t, instance.modules, []string{"child-a", "child-b"})
+}
+
+/* a provider that is itself a module boots as that module: this door used to keep only the children and silently drop the provider's own hooks, so the two registration doors registered different applications from the same value */
+func TestRegisterModuleProvider_AProviderThatIsAModuleBootsAsThatModule(t *testing.T) {
     instance := &Application{}
 
     provider := fakeModuleProvider{
@@ -120,7 +160,52 @@ func TestRegisterModuleProvider_RegistersChildrenWithoutProvider(t *testing.T) {
 
     instance.RegisterModuleProvider(provider)
 
-    assertModuleNames(t, instance.modules, []string{"child-a", "child-b"})
+    assertModuleNames(t, instance.modules, []string{"provider", "child-a", "child-b"})
+}
+
+/* one instance reached through two providers used to boot twice — the loud half was a duplicate service name, the silent half its listeners and middlewares attached twice */
+func TestRegisterModule_TheSameInstanceThroughTwoProvidersBootsOnce(t *testing.T) {
+    instance := &Application{}
+
+    sharedInstance := &hookRecordingModule{fakeModule: fakeModule{name: "shared"}}
+
+    instance.RegisterModuleProvider(bareModuleProvider{children: []applicationcontract.Module{sharedInstance}})
+    instance.RegisterModuleProvider(bareModuleProvider{children: []applicationcontract.Module{sharedInstance}})
+
+    assertModuleNames(t, instance.modules, []string{"shared"})
+}
+
+/* identity is the interface value, not the label: two distinct instances sharing a name stay two modules */
+func TestRegisterModule_TwoDistinctInstancesSharingANameStayTwoModules(t *testing.T) {
+    instance := &Application{}
+
+    instance.RegisterModule(&hookRecordingModule{fakeModule: fakeModule{name: "twin"}})
+    instance.RegisterModule(&hookRecordingModule{fakeModule: fakeModule{name: "twin"}})
+
+    assertModuleNames(t, instance.modules, []string{"twin", "twin"})
+}
+
+/* an instance of an uncomparable type cannot enter the identity set; the guard keeps it on the pre-deduplication path instead of letting the map insertion panic */
+func TestRegisterModule_AnUncomparableModuleKeepsThePreDeduplicationBehavior(t *testing.T) {
+    instance := &Application{}
+
+    moduleValue := uncomparableModule{fakeModule: fakeModule{name: "uncomparable"}, tags: []string{"tag"}}
+
+    instance.RegisterModule(moduleValue)
+    instance.RegisterModule(moduleValue)
+
+    assertModuleNames(t, instance.modules, []string{"uncomparable", "uncomparable"})
+}
+
+/* both module doors close for the boot window: the phase loops iterate a snapshot of the module list, so a module registered from inside a boot hook would boot by whatever fraction of the lifecycle had not run yet and report success */
+func TestModuleDoors_RefuseRegistrationDuringTheBootWindow(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        (&Application{booting: true}).RegisterModule(fakeModule{name: "late"})
+    }, "may not register a module from inside a module boot hook")
+
+    testhelper.AssertPanicsWithError(t, func() {
+        (&Application{booting: true}).RegisterModuleProvider(bareModuleProvider{})
+    }, "may not register a module from inside a module boot hook")
 }
 
 /* the module doors close at boot and refuse a nil, because a module registered after the boot phases have run is registered into nothing: its hooks are never called, and the application starts missing whatever the module was supposed to wire */
@@ -261,6 +346,56 @@ func TestBootModulesPostConfigurationResolve_RunsEveryLaterHook(t *testing.T) {
 
     if 1 != len(applicationInstance.cliCommands) {
         t.Fatalf("expected the command the module returned to be registered, got %d", len(applicationInstance.cliCommands))
+    }
+}
+
+/* orderRecordingModule writes each hook call into a shared log, so a test can read the grouping the contracts document */
+type orderRecordingModule struct {
+    fakeModule
+    log *[]string
+}
+
+func (instance orderRecordingModule) RegisterEventSubscribers(kernelInstance kernelcontract.Kernel) {
+    *instance.log = append(*instance.log, instance.name+":events")
+}
+
+func (instance orderRecordingModule) RegisterHttpMiddlewares(
+    kernelInstance kernelcontract.Kernel,
+    registrar applicationcontract.HttpMiddlewareRegistrar,
+) {
+    *instance.log = append(*instance.log, instance.name+":middlewares")
+}
+
+func (instance orderRecordingModule) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel) {
+    *instance.log = append(*instance.log, instance.name+":routes")
+}
+
+func (instance orderRecordingModule) RegisterCliCommands(kernelInstance kernelcontract.Kernel) []clicontract.Command {
+    *instance.log = append(*instance.log, instance.name+":cli")
+
+    return nil
+}
+
+/* the second phase runs one loop per hook, and the contracts document exactly that granularity: every module's instance of one hook runs before any module's next hook, in registration order inside each group — a module may rely on every sibling's listeners existing before any middleware registers */
+func TestBootModulesPostConfigurationResolve_RunsEachHookAcrossEveryModuleBeforeTheNextHook(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+
+    log := make([]string, 0, 8)
+    applicationInstance.RegisterModule(orderRecordingModule{fakeModule: fakeModule{name: "a"}, log: &log})
+    applicationInstance.RegisterModule(orderRecordingModule{fakeModule: fakeModule{name: "b"}, log: &log})
+
+    applicationInstance.bootModulesPostConfigurationResolve()
+
+    expected := []string{"a:events", "b:events", "a:middlewares", "b:middlewares", "a:routes", "b:routes", "a:cli", "b:cli"}
+
+    if len(expected) != len(log) {
+        t.Fatalf("expected %d hook calls, got %d: %v", len(expected), len(log), log)
+    }
+
+    for index := range expected {
+        if expected[index] != log[index] {
+            t.Fatalf("expected hook call %d to be %q, got %q in %v", index, expected[index], log[index], log)
+        }
     }
 }
 

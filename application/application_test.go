@@ -2,6 +2,7 @@ package application
 
 import (
     "context"
+    nethttp "net/http"
     "os"
     "os/exec"
     "path/filepath"
@@ -13,7 +14,9 @@ import (
     "github.com/precision-soft/melody/container"
     containercontract "github.com/precision-soft/melody/container/contract"
     "github.com/precision-soft/melody/exception"
+    httpcontract "github.com/precision-soft/melody/http/contract"
     "github.com/precision-soft/melody/internal/testhelper"
+    kernelcontract "github.com/precision-soft/melody/kernel/contract"
     "github.com/precision-soft/melody/logging"
     loggingcontract "github.com/precision-soft/melody/logging/contract"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
@@ -23,6 +26,43 @@ func TestAssertPanics_UsesRecover(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
         exception.Panic(exception.NewError("test", nil, nil))
     }, "test")
+}
+
+func applicationBootRouteHandler() httpcontract.Handler {
+    return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return nil, nil
+    }
+}
+
+/* dynamicRouteModule registers the parameterized route that used to shadow the root's static one */
+type dynamicRouteModule struct {
+    fakeModule
+}
+
+func (instance dynamicRouteModule) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel) {
+    kernelInstance.HttpRouter().Handle(nethttp.MethodGet, "/users/:id", applicationBootRouteHandler())
+}
+
+/* the application's own routes register before any module's: /users/me written by the composition root used to be dispatched as the module's /users/:id with id="me", because the module phase registered first and the router breaks a priority tie on registration order */
+func TestBoot_TheRootsRoutesRegisterBeforeAnyModules(t *testing.T) {
+    applicationInstance := NewApplication(
+        testhelper.NewEmbeddedEnvFs(),
+        testhelper.NewEmbeddedStaticFs(),
+    )
+
+    applicationInstance.RegisterHttpRoute(nethttp.MethodGet, "/users/me", applicationBootRouteHandler())
+    applicationInstance.RegisterModule(dynamicRouteModule{fakeModule{name: "dynamic-route"}})
+
+    kernelInstance := applicationInstance.Boot()
+
+    matchResult, matched := kernelInstance.HttpRouter().Match(nethttp.MethodGet, "/users/me", "", "")
+    if false == matched {
+        t.Fatal("expected /users/me to match a route")
+    }
+
+    if identifier, hasIdentifier := matchResult.Params["id"]; true == hasIdentifier {
+        t.Fatalf("expected the root's static route to win the dispatch, but the module's /users/:id matched with id=%q", identifier)
+    }
 }
 
 /* servingProbeApplicationCommand reports what the configuration answers while the command is running, which is the only moment the question means anything: the marker is set between boot and dispatch and nothing else in the process observes the transition. */

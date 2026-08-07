@@ -17,6 +17,7 @@ import (
     "github.com/precision-soft/melody/session"
 )
 
+/* RegisterHttpRoute queues one of the application's own routes. The queue drains before any module's RegisterHttpRoutes runs, so where a root route and a module route meet at dispatch, the root route wins the registration-order tie-break: the composition root wrote its route against the application, not against whichever module boots beside it. */
 func (instance *Application) RegisterHttpRoute(
     method string,
     pattern string,
@@ -24,6 +25,17 @@ func (instance *Application) RegisterHttpRoute(
 ) {
     if true == instance.booted {
         exception.Panic(exception.NewError("may not register http routes after boot", nil, nil))
+    }
+
+    /* the queue drains early in the boot, before the module phases: a registrar queued from inside a module boot hook would never run — a route silently absent — so the door refuses during the boot window; a module registers its routes through RegisterHttpRoutes, on the hook made for them */
+    if true == instance.booting {
+        exception.Panic(
+            exception.NewError(
+                "may not register http routes from inside a module boot hook; a module registers routes through RegisterHttpRoutes",
+                nil,
+                nil,
+            ),
+        )
     }
 
     instance.httpRouteRegistrars = append(
