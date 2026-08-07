@@ -104,17 +104,27 @@ func enrichContextWithCause(exceptionValue *exception.Error) exceptioncontract.C
         return context
     }
 
+    _, hasCause := context["cause"]
+    _, hasCauseChain := context["causeChain"]
+
     causeChain := exception.BuildCauseChain(causeErr, causeChainMaxDepth)
     if 0 < len(causeChain) {
-        context["cause"] = causeChain[0]
-        context["causeChain"] = causeChain
-    } else {
+        if false == hasCause {
+            context["cause"] = causeChain[0]
+        }
+        if false == hasCauseChain {
+            context["causeChain"] = causeChain
+        }
+    } else if false == hasCause {
         context["cause"] = causeErr.Error()
     }
 
-    causeContextChain := exception.BuildCauseContextChain(causeErr, causeChainMaxDepth)
-    if 0 < len(causeContextChain) {
-        context["causeContextChain"] = causeContextChain
+    _, hasCauseContextChain := context["causeContextChain"]
+    if false == hasCauseContextChain {
+        causeContextChain := exception.BuildCauseContextChain(causeErr, causeChainMaxDepth)
+        if 0 < len(causeContextChain) {
+            context["causeContextChain"] = causeContextChain
+        }
     }
 
     return context
@@ -136,15 +146,25 @@ func enrichForeignContextWithCause(err error) exceptioncontract.Context {
         return context
     }
 
+    _, hasCause := context["cause"]
+    _, hasCauseChain := context["causeChain"]
+
     causeChain := exception.BuildCauseChain(causeErr, causeChainMaxDepth)
     if 0 < len(causeChain) {
-        context["cause"] = causeChain[0]
-        context["causeChain"] = causeChain
+        if false == hasCause {
+            context["cause"] = causeChain[0]
+        }
+        if false == hasCauseChain {
+            context["causeChain"] = causeChain
+        }
     }
 
-    causeContextChain := exception.BuildCauseContextChain(causeErr, causeChainMaxDepth)
-    if 0 < len(causeContextChain) {
-        context["causeContextChain"] = causeContextChain
+    _, hasCauseContextChain := context["causeContextChain"]
+    if false == hasCauseContextChain {
+        causeContextChain := exception.BuildCauseContextChain(causeErr, causeChainMaxDepth)
+        if 0 < len(causeContextChain) {
+            context["causeContextChain"] = causeContextChain
+        }
     }
 
     return context

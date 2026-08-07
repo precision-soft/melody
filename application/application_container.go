@@ -3,6 +3,7 @@ package application
 import (
     "errors"
     "os"
+    "path/filepath"
 
     applicationcontract "github.com/precision-soft/melody/application/contract"
     "github.com/precision-soft/melody/cache"
@@ -111,16 +112,21 @@ func (instance *Application) bootContainer() {
     kernelInstance := instance.kernel
     configuration := instance.configuration
 
-    instance.RegisterService(
-        logging.ServiceLogger,
-        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
-            return newContainerLogger(
-                configuration.Kernel().LogPath(),
-                configuration.Kernel().LogLevel(),
-                instance.moduleConfigurations,
-            ), nil
-        },
-    )
+    serviceContainer := kernelInstance.ServiceContainer()
+
+    /* gated like the cache, session and firewall registrations below: the logger was the one default service the application or a module could never substitute, because its second registration was a guaranteed boot collision */
+    if false == serviceContainer.Has(logging.ServiceLogger) {
+        instance.RegisterService(
+            logging.ServiceLogger,
+            func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+                return newContainerLogger(
+                    resolveRuntimePath(configuration.Kernel().ProjectDir(), configuration.Kernel().LogPath()),
+                    configuration.Kernel().LogLevel(),
+                    instance.moduleConfigurations,
+                ), nil
+            },
+        )
+    }
 
     instance.RegisterService(
         config.ServiceConfig,
@@ -198,6 +204,18 @@ func (instance *Application) bootContainer() {
     if nil != httpSecurityErr {
         exception.Panic(exception.FromError(httpSecurityErr))
     }
+
+    /* the logger is resolved once, eagerly, whoever registered it: its provider is the one whose failure bootLogger otherwise swallows — the container recovers the provider panic into an error, the fallback answers the emergency logger, and the boot reported success for a process whose next logger resolution could only panic, attributed to the run instead of to the configuration that broke it. Failing here names the boot step that owns the failure, and the container memoizes the built logger, so nothing opens the log file a second time. */
+    _, loggerProbeErr := logging.LoggerFromContainer(serviceContainer)
+    if nil != loggerProbeErr {
+        exception.Panic(
+            exception.NewError(
+                "the configured logger cannot be built",
+                nil,
+                loggerProbeErr,
+            ),
+        )
+    }
 }
 
 /* newContainerLogger builds the logger the container serves. The module configuration is read before the descriptor is acquired, because it panics on a configuration registered under the supported name with a type that does not implement the interface: a file opened above that would be left with no owner at all — the container stores only what a provider returned, so nothing would ever close it, and a creation failure is not memoized, so each later resolution opens another one. */
@@ -211,6 +229,20 @@ func newContainerLogger(
     writer := os.Stdout
 
     if "" != logPath {
+        /* the directory is guaranteed the way ensureRuntimeDirectories guarantees the logs directory: only the default log path lives inside it, and an operator-supplied MELODY_LOG_PATH pointing anywhere else had no owner to create its parent */
+        mkdirErr := os.MkdirAll(filepath.Dir(logPath), 0o755)
+        if nil != mkdirErr {
+            exception.Panic(
+                exception.NewError(
+                    "failed to create the log directory",
+                    exceptioncontract.Context{
+                        "path": logPath,
+                    },
+                    mkdirErr,
+                ),
+            )
+        }
+
         file, openFileErr := os.OpenFile(
             logPath,
             os.O_CREATE|os.O_APPEND|os.O_WRONLY,

@@ -1,6 +1,7 @@
 package http
 
 import (
+    "context"
     "errors"
     "io"
     "net/http/httptest"
@@ -8,11 +9,16 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/clock"
+    "github.com/precision-soft/melody/container"
     "github.com/precision-soft/melody/event"
     "github.com/precision-soft/melody/exception"
     httpcontract "github.com/precision-soft/melody/http/contract"
     "github.com/precision-soft/melody/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/kernel/contract"
+    "github.com/precision-soft/melody/logging"
+    loggingcontract "github.com/precision-soft/melody/logging/contract"
+    "github.com/precision-soft/melody/runtime"
+    runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
 func TestExceptionListener_HtmlResponse_EscapesXss(t *testing.T) {
@@ -426,5 +432,232 @@ func TestExceptionListener_AnswersATypedNilHttpExceptionWithoutDereferencingIt(t
 
     if 500 != response.StatusCode() {
         t.Fatalf("expected the generic 500 a typed nil carries no status for, got %d", response.StatusCode())
+    }
+}
+
+type exceptionListenerCaptureLogger struct {
+    errorCalls   int
+    warningCalls int
+    lastMessage  string
+    lastContext  map[string]any
+}
+
+func (instance *exceptionListenerCaptureLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+    if loggingcontract.LevelError == level {
+        instance.errorCalls++
+    }
+    if loggingcontract.LevelWarning == level {
+        instance.warningCalls++
+    }
+    instance.lastMessage = message
+    instance.lastContext = context
+}
+
+func (instance *exceptionListenerCaptureLogger) Debug(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelDebug, message, context)
+}
+
+func (instance *exceptionListenerCaptureLogger) Info(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelInfo, message, context)
+}
+
+func (instance *exceptionListenerCaptureLogger) Warning(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelWarning, message, context)
+}
+
+func (instance *exceptionListenerCaptureLogger) Error(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelError, message, context)
+}
+
+func (instance *exceptionListenerCaptureLogger) Emergency(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelEmergency, message, context)
+}
+
+var _ loggingcontract.Logger = (*exceptionListenerCaptureLogger)(nil)
+
+func newExceptionListenerTestRuntimeWithLogger(logger loggingcontract.Logger) runtimecontract.Runtime {
+    serviceContainer := container.NewContainer()
+    scope := serviceContainer.NewScope()
+
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger)
+
+    return runtime.New(context.Background(), scope, serviceContainer)
+}
+
+func TestExceptionListener_UnmarkedError_LogsOneRecordAndMarksIt(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := event.NewEventDispatcher(clockInstance)
+    capture := &exceptionListenerCaptureLogger{}
+    runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
+
+    RegisterKernelExceptionListener(dispatcher, false)
+
+    err := exception.NewError("first failure", nil, nil)
+
+    request := httptest.NewRequest("GET", "/orders/7", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, err)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if 1 != capture.errorCalls {
+        t.Fatalf("expected exactly one record for an unmarked error, got %d", capture.errorCalls)
+    }
+
+    if false == exception.IsAlreadyLogged(err) {
+        t.Fatalf("expected the listener to mark the error it logged")
+    }
+
+    if nil == exceptionEvent.Response() {
+        t.Fatalf("expected a response to be set")
+    }
+}
+
+func TestExceptionListener_AlreadyLoggedError_WritesNoSecondRecord(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := event.NewEventDispatcher(clockInstance)
+    capture := &exceptionListenerCaptureLogger{}
+    runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
+
+    RegisterKernelExceptionListener(dispatcher, false)
+
+    err := exception.NewError("logged upstream", nil, nil)
+    _ = exception.MarkLogged(err)
+
+    request := httptest.NewRequest("GET", "/orders/7", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, err)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if 0 != capture.errorCalls {
+        t.Fatalf("expected no second record for an already-logged error, got %d", capture.errorCalls)
+    }
+
+    if nil == exceptionEvent.Response() {
+        t.Fatalf("expected the response to be built even when the record is suppressed")
+    }
+}
+
+func TestExceptionListener_AlreadyLoggedError_AttachesRequestCoordinatesWithoutOverwriting(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := event.NewEventDispatcher(clockInstance)
+    capture := &exceptionListenerCaptureLogger{}
+    runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
+
+    RegisterKernelExceptionListener(dispatcher, false)
+
+    err := exception.NewError(
+        "logged upstream",
+        map[string]any{
+            "method": "UPSTREAM",
+        },
+        nil,
+    )
+    _ = exception.MarkLogged(err)
+
+    request := httptest.NewRequest("DELETE", "/orders/7", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, err)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    attachedContext := err.Context()
+
+    if "/orders/7" != attachedContext["path"] {
+        t.Fatalf("expected the path to be attached to the already-logged error, got %v", attachedContext["path"])
+    }
+
+    if "test" != attachedContext["requestId"] {
+        t.Fatalf("expected the request id to be attached to the already-logged error, got %v", attachedContext["requestId"])
+    }
+
+    if "UPSTREAM" != attachedContext["method"] {
+        t.Fatalf("expected the caller's own method value to be kept, got %v", attachedContext["method"])
+    }
+}
+
+func TestExceptionListener_AlreadyLoggedErrorWithoutARequest_AttachesNoEmptyCoordinates(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := event.NewEventDispatcher(clockInstance)
+    capture := &exceptionListenerCaptureLogger{}
+    runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
+
+    RegisterKernelExceptionListener(dispatcher, false)
+
+    err := exception.NewError("logged upstream", nil, nil)
+    _ = exception.MarkLogged(err)
+
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, nil, err)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    attachedContext := err.Context()
+
+    for _, key := range []string{"requestId", "method", "path"} {
+        if _, exists := attachedContext[key]; true == exists {
+            t.Fatalf("expected no empty %s coordinate to be attached, got %v", key, attachedContext[key])
+        }
+    }
+}
+
+func TestExceptionListener_ADeliberate4xxIsRecordedAtWarning(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := event.NewEventDispatcher(clockInstance)
+    capture := &exceptionListenerCaptureLogger{}
+    runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
+
+    RegisterKernelExceptionListener(dispatcher, false)
+
+    request := httptest.NewRequest("GET", "/orders/7", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, exception.NewHttpException(404, "order not found"))
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if 1 != capture.warningCalls || 0 != capture.errorCalls {
+        t.Fatalf("expected one warning record and no error record for a 4xx, got %d warning / %d error", capture.warningCalls, capture.errorCalls)
+    }
+}
+
+func TestExceptionListener_A5xxKeepsTheErrorLevel(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := event.NewEventDispatcher(clockInstance)
+    capture := &exceptionListenerCaptureLogger{}
+    runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
+
+    RegisterKernelExceptionListener(dispatcher, false)
+
+    request := httptest.NewRequest("GET", "/orders/7", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, exception.NewHttpException(502, "upstream failed"))
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if 1 != capture.errorCalls || 0 != capture.warningCalls {
+        t.Fatalf("expected one error record and no warning record for a 5xx, got %d error / %d warning", capture.errorCalls, capture.warningCalls)
     }
 }

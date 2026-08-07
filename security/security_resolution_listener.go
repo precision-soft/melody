@@ -67,12 +67,32 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
             if nil != resolveErr {
                 setSecurityContextOnRuntime(runtimeInstance, firewall, NewAnonymousToken())
 
+                /* normalized before the record is written so the logged mark has a link to live on: a token source is free to return a plain error, and a mark that does not stick would have the kernel exception listener file the same failure a second time */
+                resolveErr = exception.FromError(resolveErr)
+
                 logger := logging.LoggerFromRuntime(runtimeInstance)
                 if nil != logger {
+                    method := ""
+                    path := ""
+                    if nil != requestEvent.Request().HttpRequest() {
+                        method = requestEvent.Request().HttpRequest().Method
+                        if nil != requestEvent.Request().HttpRequest().URL {
+                            path = requestEvent.Request().HttpRequest().URL.Path
+                        }
+                    }
+
                     logger.Error(
                         "security token source resolution failed",
-                        exception.LogContext(resolveErr),
+                        exception.LogContext(
+                            resolveErr,
+                            exceptioncontract.Context{
+                                "method": method,
+                                "path":   path,
+                            },
+                        ),
                     )
+
+                    _ = exception.MarkLogged(resolveErr)
                 }
 
                 exceptionEvent := http.NewKernelExceptionEvent(runtimeInstance, requestEvent.Request(), resolveErr)

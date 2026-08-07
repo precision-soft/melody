@@ -681,3 +681,44 @@ func TestResolveExitLogger_AnswersTheEmergencyLoggerForATypedNilKernel(t *testin
         t.Fatalf("expected a logger for a typed-nil kernel")
     }
 }
+
+func TestResolveExitLogger_FallsBackToTheConfiguredDestinationWhenTheContainerCannotAnswer(t *testing.T) {
+    applicationInstance := NewApplication(
+        testhelper.NewEmbeddedEnvFs(),
+        testhelper.NewEmbeddedStaticFs(),
+    )
+
+    /* deliberately unbooted: the logger service does not exist yet, which is the window every boot failure dies in */
+    logger := applicationInstance.resolveExitLogger()
+
+    if logging.EmergencyLogger() == logger {
+        t.Fatalf("expected the configured-destination fallback, not the emergency logger")
+    }
+
+    marker := "exit fallback probe " + t.Name()
+    logger.Emergency(marker, nil)
+
+    logPath := resolveRuntimePath(
+        applicationInstance.configuration.Kernel().ProjectDir(),
+        applicationInstance.configuration.Kernel().LogPath(),
+    )
+
+    content, readErr := os.ReadFile(logPath)
+    if nil != readErr {
+        t.Fatalf("expected the configured log destination to exist, got %v", readErr)
+    }
+
+    if false == strings.Contains(string(content), marker) {
+        t.Fatalf("expected the record on the configured destination %s", logPath)
+    }
+}
+
+func TestResolveExitLogger_AnswersTheEmergencyLoggerWhenNothingIsConfigured(t *testing.T) {
+    applicationInstance := &Application{}
+
+    logger := applicationInstance.resolveExitLogger()
+
+    if logging.EmergencyLogger() != logger {
+        t.Fatalf("expected the emergency logger for an application holding no configuration, got %T", logger)
+    }
+}

@@ -1,6 +1,7 @@
 package application
 
 import (
+    "errors"
     "os"
     "path/filepath"
     "testing"
@@ -20,6 +21,7 @@ import (
     httpcontract "github.com/precision-soft/melody/http/contract"
     "github.com/precision-soft/melody/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/kernel/contract"
+    "github.com/precision-soft/melody/logging"
     loggingcontract "github.com/precision-soft/melody/logging/contract"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
     "github.com/precision-soft/melody/security"
@@ -452,5 +454,67 @@ func TestNewContainerLogger_OpensTheLogFileWhenEverythingItNeedsIsSound(t *testi
 
     if _, statErr := os.Stat(logPath); nil != statErr {
         t.Fatalf("expected the log file to be created, got %v", statErr)
+    }
+}
+
+func TestBootContainer_TheApplicationsOwnLoggerIsSubstitutedNotCollided(t *testing.T) {
+    applicationInstance := NewApplication(
+        testhelper.NewEmbeddedEnvFs(),
+        testhelper.NewEmbeddedStaticFs(),
+    )
+
+    ownLogger := logging.NewNopLogger()
+
+    applicationInstance.RegisterService(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return ownLogger, nil
+        },
+    )
+
+    kernelInstance := applicationInstance.Boot()
+
+    resolved, resolveErr := logging.LoggerFromContainer(kernelInstance.ServiceContainer())
+    if nil != resolveErr {
+        t.Fatalf("unexpected resolve error: %v", resolveErr)
+    }
+
+    if ownLogger != resolved {
+        t.Fatalf("expected the application's own logger to be served, got %T", resolved)
+    }
+}
+
+func TestBootContainer_AFailingLoggerProviderFailsTheBoot(t *testing.T) {
+    applicationInstance := NewApplication(
+        testhelper.NewEmbeddedEnvFs(),
+        testhelper.NewEmbeddedStaticFs(),
+    )
+
+    applicationInstance.RegisterService(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return nil, errors.New("logger backend unavailable")
+        },
+    )
+
+    testhelper.AssertPanicsWithError(t, func() {
+        applicationInstance.bootContainer()
+    }, "the configured logger cannot be built")
+}
+
+func TestNewContainerLogger_CreatesTheLogDirectory(t *testing.T) {
+    logPath := filepath.Join(t.TempDir(), "nested", "deep", "app.log")
+
+    logger := newContainerLogger(logPath, loggingcontract.LevelDebug, nil)
+
+    logger.Emergency("directory created", nil)
+
+    fileInfo, statErr := os.Stat(logPath)
+    if nil != statErr {
+        t.Fatalf("expected the log file inside the created directory, got %v", statErr)
+    }
+
+    if 0 == fileInfo.Size() {
+        t.Fatalf("expected the record inside the created file")
     }
 }

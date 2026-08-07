@@ -343,27 +343,51 @@ func (instance *Application) logOnRecoverAndExit() {
     logging.LogOnRecoverAndExitAfter(instance.resolveExitLogger(), recoveredValue, 1, instance.Close)
 }
 
-/* resolveExitLogger picks the logger the final fatal record is written through: the configured container logger while it still writes, the emergency logger otherwise. The container keeps serving built instances after Close, so liveness has to be asked of the logger itself — a file-backed logger a teardown already closed silently drops every write, and preferring it would lose the one record that explains the exit. The kernel guard covers an Application assembled without NewApplication: the one handler that must not panic answers with the emergency logger instead of dereferencing nil. */
+/* resolveExitLogger picks the logger the final fatal record is written through: the configured container logger while it still writes, a last-resort logger opened on the configured destination when the container cannot answer — a boot that died before the logger service existed, a teardown that already closed it — and the emergency logger when even that destination is unusable. The container keeps serving built instances after Close, so liveness has to be asked of the logger itself — a file-backed logger a teardown already closed silently drops every write, and preferring it would lose the one record that explains the exit. The kernel guard covers an Application assembled without NewApplication: the one handler that must not panic answers with the emergency logger instead of dereferencing nil. */
 func (instance *Application) resolveExitLogger() loggingcontract.Logger {
     logger := logging.EmergencyLogger()
 
     /* read through the interface, like the logger clause below: this resolver is evaluated as an argument, so it runs before the exit handler's own per-step shield begins, and a nil receiver here would replace the panic being reported with a bare traceback that runs neither the teardown nor os.Exit */
     if true == internal.IsNilInterface(instance.kernel) {
-        return logger
+        return instance.exitFileLogger(logger)
     }
 
     containerLogger, loggerErr := logging.LoggerFromContainer(instance.kernel.ServiceContainer())
     if nil != loggerErr || nil == containerLogger || true == internal.IsNilInterface(containerLogger) {
         /* the typed-nil clause is latent defense: the container refuses a provider-returned or overridden typed nil with an error today, but one that did slip through a future resolution path would pass the plain comparison and answer the Closed probe below with a nil receiver — a panic in the one handler that must not panic, in place of the emergency fallback this resolver exists to provide */
-        return logger
+        return instance.exitFileLogger(logger)
     }
 
     closedChecker, isChecker := containerLogger.(interface{ Closed() bool })
     if true == isChecker && true == closedChecker.Closed() {
-        return logger
+        return instance.exitFileLogger(logger)
     }
 
     return containerLogger
+}
+
+/* exitFileLogger builds the last-resort logger for a process that is dying without a live container logger, on the destination the configuration names, so a deployment that reads var/log sees why the process ended instead of a boot failure that left no trace outside stderr. It is best-effort by construction: it runs as an argument to the exit handler, before the per-step shield begins, so any failure on the way — a configuration never built, an unopenable path, a module configuration that panics — answers the emergency logger instead of raising. The kernel view is built with the configuration itself, so the destination is readable for every failure after construction, resolved and created the way the container provider resolves and creates it. The descriptor is deliberately surrendered to os.Exit: the process ends before anything could close it. */
+func (instance *Application) exitFileLogger(emergencyLogger loggingcontract.Logger) (logger loggingcontract.Logger) {
+    logger = emergencyLogger
+
+    defer func() {
+        _ = recover()
+    }()
+
+    if nil == instance.configuration {
+        return logger
+    }
+
+    kernelView := instance.configuration.Kernel()
+    if nil == kernelView {
+        return logger
+    }
+
+    return newContainerLogger(
+        resolveRuntimePath(kernelView.ProjectDir(), kernelView.LogPath()),
+        kernelView.LogLevel(),
+        instance.moduleConfigurations,
+    )
 }
 
 /* applicationExit terminates the process when the teardown of a normally-returning Run reports a failure; tests replace it to observe the exit code without stopping the test binary, the way signalContextExit is replaced */

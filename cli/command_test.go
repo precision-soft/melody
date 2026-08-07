@@ -457,23 +457,25 @@ func TestRegister_ActionEmitsTheBannerInTableFormat(t *testing.T) {
     }
 }
 
-type closeFailingContainer struct {
+type closeCountingContainer struct {
     containercontract.Container
-    closeErr error
+    closeCalls int
 }
 
-func (instance *closeFailingContainer) Close() error {
-    return instance.closeErr
+func (instance *closeCountingContainer) Close() error {
+    instance.closeCalls++
+
+    return instance.Container.Close()
 }
 
-func newCloseFailingRuntime(closeErr error) *testRuntime {
+func newCloseCountingRuntime() *testRuntime {
     serviceContainer := container.NewContainer()
     scope := serviceContainer.NewScope()
 
     return &testRuntime{
         contextValue:   context.Background(),
         scopeValue:     scope,
-        containerValue: &closeFailingContainer{Container: serviceContainer, closeErr: closeErr},
+        containerValue: &closeCountingContainer{Container: serviceContainer},
     }
 }
 
@@ -587,11 +589,11 @@ func TestRegister_ActionKeepsTheJsonDocumentAloneWhenTheEnvelopeCarriesAnError(t
     }
 }
 
-func TestRegister_ActionReportsTheShutdownFailuresAlongsideTheCommandExitCode(t *testing.T) {
-    closeErr := errors.New("container close failed")
+func TestRegister_ActionLeavesTheContainerToTheExitOwnerOnTheLinearFailurePath(t *testing.T) {
+    runtimeInstance := newCloseCountingRuntime()
 
     written, runErr := runRegisteredCommandWithRuntime(
-        newCloseFailingRuntime(closeErr),
+        runtimeInstance,
         newEnvelopeErrorCommand(),
         []string{"--format=json"},
     )
@@ -607,16 +609,11 @@ func TestRegister_ActionReportsTheShutdownFailuresAlongsideTheCommandExitCode(t 
     }
 
     if true == reportedErr.AlreadyLogged() {
-        t.Fatalf("the aggregate must stay loggable so the shutdown failures reach the log")
+        t.Fatalf("the failure must stay loggable so the exit path writes it to the application log")
     }
 
-    failures, hasFailures := reportedErr.Context()["failures"]
-    if false == hasFailures {
-        t.Fatalf("expected the exit error to carry the shutdown failures, got %v", reportedErr.Context())
-    }
-
-    if false == strings.Contains(fmt.Sprintf("%v", failures), "container close failed") {
-        t.Fatalf("expected the container close failure to be reported, got %v", failures)
+    if 0 != runtimeInstance.containerValue.(*closeCountingContainer).closeCalls {
+        t.Fatalf("expected the container to be left open for the exit owner, got %d close calls", runtimeInstance.containerValue.(*closeCountingContainer).closeCalls)
     }
 
     document := map[string]any{}
@@ -625,8 +622,8 @@ func TestRegister_ActionReportsTheShutdownFailuresAlongsideTheCommandExitCode(t 
     }
 }
 
-func TestRegister_ActionReportsTheShutdownFailuresWhenTheCommandItselfSucceeds(t *testing.T) {
-    closeErr := errors.New("container close failed")
+func TestRegister_ActionLeavesTheContainerOpenWhenTheCommandSucceeds(t *testing.T) {
+    runtimeInstance := newCloseCountingRuntime()
 
     command := &testCommand{
         nameValue:        "hello",
@@ -638,16 +635,16 @@ func TestRegister_ActionReportsTheShutdownFailuresWhenTheCommandItselfSucceeds(t
     }
 
     _, runErr := runRegisteredCommandWithRuntime(
-        newCloseFailingRuntime(closeErr),
+        runtimeInstance,
         command,
         []string{"--format=json"},
     )
-    if nil == runErr {
-        t.Fatalf("expected a shutdown failure to surface")
+    if nil != runErr {
+        t.Fatalf("expected no error for a succeeding command, got %v", runErr)
     }
 
-    if false == strings.Contains(runErr.Error(), "failed to shutdown cli") {
-        t.Fatalf("expected the shutdown aggregate, got %q", runErr.Error())
+    if 0 != runtimeInstance.containerValue.(*closeCountingContainer).closeCalls {
+        t.Fatalf("expected the container to be left open for the application teardown, got %d close calls", runtimeInstance.containerValue.(*closeCountingContainer).closeCalls)
     }
 }
 

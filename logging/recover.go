@@ -149,6 +149,11 @@ func LogOnRecoverAndExitAfter(
         })
     }
 
+    /* the certificate is the destination twin of the stderr echo below, and the one record no operator threshold can drop: the detailed record above is written at the error's own level, which a threshold silently discards — the writer still marks it as logged, so the suppression is invisible even to this handler — and a process whose log file says nothing about its own death is what this line closes. It is written always, because it says something the detailed record does not: that the process is exiting, and with what code. */
+    runExitStepShielded("logging the exit certificate", func() {
+        writeExitCertificate(logger, err, resolvedExitCode)
+    })
+
     if nil != beforeExit {
         runExitStepShielded("running the before-exit hook", func() {
             beforeExit()
@@ -273,6 +278,23 @@ func resolveRecoveredExit(
     }
 
     return err, exitCode, false == alreadyLogged
+}
+
+/* writeExitCertificate writes the record that says the process is exiting and why, at emergency level, so it passes every threshold a deployment configures — the level exists for exactly this record: the system is about to be unusable. The error travels in the context rather than as the record's own subject, because the record's subject is the exit. */
+func writeExitCertificate(logger loggingcontract.Logger, err *exception.Error, exitCode int) {
+    if nil == logger || true == internal.IsNilInterface(logger) {
+        return
+    }
+
+    logger.Emergency(
+        "process exiting after unrecovered error",
+        exception.LogContext(
+            err,
+            map[string]any{
+                "exitCode": exitCode,
+            },
+        ),
+    )
 }
 
 /* isAlreadyLoggedValue answers whether a recovered panic payload already carries the logged mark. A payload that is not an error carries none; everything else goes to exception.IsAlreadyLogged, so the recover helpers read the mark at the depth MarkLogged writes it. */

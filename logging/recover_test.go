@@ -1,6 +1,7 @@
 package logging
 
 import (
+    "bytes"
     "errors"
     "io"
     "os"
@@ -896,5 +897,81 @@ func TestRunExitStepShielded_ReportsNothingForAStepThatReturns(t *testing.T) {
 
     if "" != string(output) {
         t.Fatalf("expected no stderr line for a step that returned, got %q", string(output))
+    }
+}
+
+func TestWriteExitCertificate_WritesAnEmergencyRecordWithTheExitCode(t *testing.T) {
+    capture := &captureLogger{}
+
+    err := exception.NewError("fatal failure", nil, nil)
+    _ = exception.MarkLogged(err)
+
+    writeExitCertificate(capture, err, 3)
+
+    if 1 != capture.calls {
+        t.Fatalf("expected one record, got %d", capture.calls)
+    }
+
+    if loggingcontract.LevelEmergency != capture.lastLevel {
+        t.Fatalf("expected the certificate at emergency level, got %s", capture.lastLevel)
+    }
+
+    if "process exiting after unrecovered error" != capture.lastMessage {
+        t.Fatalf("unexpected certificate message %q", capture.lastMessage)
+    }
+
+    if 3 != capture.lastContext["exitCode"] {
+        t.Fatalf("expected the exit code on the certificate, got %v", capture.lastContext["exitCode"])
+    }
+
+    if "fatal failure" != capture.lastContext["error"] {
+        t.Fatalf("expected the error on the certificate, got %v", capture.lastContext["error"])
+    }
+}
+
+func TestWriteExitCertificate_PassesAnEmergencyOnlyThreshold(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    logger := NewJsonLogger(buffer, loggingcontract.LevelEmergency)
+
+    writeExitCertificate(logger, exception.NewError("fatal failure", nil, nil), 1)
+
+    if false == strings.Contains(buffer.String(), "process exiting after unrecovered error") {
+        t.Fatalf("expected the certificate to pass the emergency threshold, got %q", buffer.String())
+    }
+}
+
+/* the marker tells a re-executed test binary that it is the child taking the exit whose certificate is asserted */
+const exitCertificateProbeMarker = "MELODY_EXIT_CERTIFICATE_PROBE"
+
+func TestLogOnRecoverAndExitAfter_WritesTheCertificateForAnAlreadyLoggedError(t *testing.T) {
+    if "1" == os.Getenv(exitCertificateProbeMarker) {
+        err := exception.NewError("boom", nil, nil)
+        LogError(EmergencyLogger(), err)
+        err.MarkAsLogged()
+
+        LogOnRecoverAndExit(EmergencyLogger(), err, 7)
+
+        return
+    }
+
+    command := exec.Command(
+        os.Args[0],
+        "-test.run=^TestLogOnRecoverAndExitAfter_WritesTheCertificateForAnAlreadyLoggedError$",
+    )
+    command.Env = append(os.Environ(), exitCertificateProbeMarker+"=1")
+
+    output, runErr := command.CombinedOutput()
+
+    var exitErr *exec.ExitError
+    if false == errors.As(runErr, &exitErr) {
+        t.Fatalf("expected the child to exit non-zero, got %v with output %q", runErr, string(output))
+    }
+
+    if 7 != exitErr.ExitCode() {
+        t.Fatalf("expected exit code 7, got %d with output %q", exitErr.ExitCode(), string(output))
+    }
+
+    if false == strings.Contains(string(output), "process exiting after unrecovered error") {
+        t.Fatalf("expected the exit certificate for an already-logged error, got %q", string(output))
     }
 }

@@ -205,7 +205,7 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
                     printGreenFullLine(writer)
                 }()
 
-                /* the finish banner reads commandErr, and a panic in the command leaves the linear path that assigns it: without this the unwinding ran the banner defer over a nil commandErr and printed [finished] [success] for a command that died. The panic itself is re-raised unchanged — an *exception.ExitError keeps its exit code — and the closes are deliberately NOT performed here on this path: the scope is closed by the caller's defer and the container by the recover handler that owns the exit, after it resolved the logger; closing the container here would hand that handler a closed logger and downgrade the fatal record to the emergency fallback. */
+                /* the finish banner reads commandErr, and a panic in the command leaves the linear path that assigns it: without this the unwinding ran the banner defer over a nil commandErr and printed [finished] [success] for a command that died. The panic itself is re-raised unchanged — an *exception.ExitError keeps its exit code — and the closes are deliberately NOT performed here on this path: the scope is closed by the caller's defer, and the container — on every path — by the recover handler that owns the exit, after it resolved the logger; closing the container here would hand that handler a closed logger and downgrade the fatal record to the emergency fallback. */
                 defer func() {
                     recoveredValue := recover()
                     if nil == recoveredValue {
@@ -228,22 +228,10 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
 
                 closeErrorByName := map[string]error{}
 
+                /* the container is deliberately not closed here, on either outcome — the reading the panic path above already had is the linear path's too: the recover handler that owns the process exit resolves the final record's logger through the container and closes it between the record and os.Exit, so a close here would downgrade a failed command's final record to the stderr fallback. The scope stays this action's to close, and its failure this action's to report. */
                 scopeCloseErr := normalizeCliError(runtimeInstance.Scope().Close())
                 if nil != scopeCloseErr {
                     closeErrorByName["scope"] = scopeCloseErr
-                }
-
-                /* asking before closing mirrors the application teardown: a repeated Close answers the first teardown's memoized error, so a command that already closed the container itself would have its one failure presented again as a fresh shutdown incident */
-                containerInstance := runtimeInstance.Container()
-
-                containerAlreadyClosed := false
-                if closedChecker, isChecker := containerInstance.(interface{ IsClosed() bool }); true == isChecker {
-                    containerAlreadyClosed = closedChecker.IsClosed()
-                }
-
-                containerCloseErr := normalizeCliError(containerInstance.Close())
-                if nil != containerCloseErr && false == containerAlreadyClosed {
-                    closeErrorByName["container"] = containerCloseErr
                 }
 
                 aggregatedErr := aggregateCliErrors(runErr, closeErrorByName)

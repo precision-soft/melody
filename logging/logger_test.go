@@ -166,7 +166,6 @@ func (instance *typedNilProbeError) Error() string {
     return instance.message
 }
 
-/* @info a typed nil boxed in the error interface is the nil its producer meant: the entry guard used to compare against the untyped nil alone, so the value walked on and dereferenced — Level() through the errors.As extraction for an exception, Error() on the generic path for anything else — inside the function whose whole job is to record a failure */
 func TestLogError_TypedNilError_DoesNothing(t *testing.T) {
     capture := &captureLogger{}
 
@@ -178,7 +177,6 @@ func TestLogError_TypedNilError_DoesNothing(t *testing.T) {
     }
 }
 
-/* @info a typed nil found mid-chain matched the errors.As extraction and handed a nil receiver to Level(); the record now anchors on the wrapper itself and the nil link contributes nothing */
 func TestLogError_TypedNilExceptionInTheChain_LogsTheWrapper(t *testing.T) {
     wrapper := fmt.Errorf("wrapper failed: %w", error((*exception.Error)(nil)))
 
@@ -198,7 +196,6 @@ func TestLogError_TypedNilExceptionInTheChain_LogsTheWrapper(t *testing.T) {
     }
 }
 
-/* @info a typed-nil logger passed the plain nil comparison and the first method call dereferenced the nil receiver; the fallback the untyped nil already took is the right answer for both */
 func TestLogError_TypedNilLogger_FallsBackToTheProcessLogger(t *testing.T) {
     var buffer bytes.Buffer
 
@@ -215,7 +212,6 @@ func TestLogError_TypedNilLogger_FallsBackToTheProcessLogger(t *testing.T) {
     }
 }
 
-/* @info the mark is read at the depth exception.MarkLogged writes it — the nearest AlreadyLogged implementer in the chain. The reader used to search for the nearest *exception.Error instead, so marking a wrapping http exception was invisible here and the one failure produced two records. */
 func TestLogError_ReadsTheMarkAtTheDepthMarkLoggedWrites(t *testing.T) {
     inner := exception.NewError("inner", nil, nil)
     outer := exception.NewHttpExceptionWithCause(500, "outer", inner)
@@ -230,7 +226,6 @@ func TestLogError_ReadsTheMarkAtTheDepthMarkLoggedWrites(t *testing.T) {
     }
 }
 
-/* @info the record anchors on the error the caller handed over: the http exception wrapping a low-severity exception used to be logged as that inner exception — its message, its info level — which dropped the wrapper's framing and filed the whole record below an info-filtering logger's threshold */
 func TestLogError_AnchorsOnTheTopError(t *testing.T) {
     inner := exception.NewInfo("cache miss", nil, nil)
     outer := exception.NewHttpExceptionWithCause(500, "failed to answer the request", inner)
@@ -260,7 +255,6 @@ func TestLogError_AnchorsOnTheTopError(t *testing.T) {
     }
 }
 
-/* @info the already-logged check used to sit behind the nil-logger fallback, so an error already recorded through a real logger was printed a second time whenever no logger was at hand */
 func TestLogError_AlreadyLogged_NilLogger_PrintsNothing(t *testing.T) {
     var buffer bytes.Buffer
 
@@ -301,7 +295,6 @@ func TestLogError_ForeignErrorCarriesProviderContextAndCauseChain(t *testing.T) 
     }
 }
 
-/* @info BuildCauseChain refuses a typed-nil cause at the entry and returns an empty chain, which routed the walk into the branch that renders the cause directly — the only input that ever reached it — where Error() dereferenced the nil receiver */
 func TestEnrichContextWithCause_TypedNilCause_AddsNoCause(t *testing.T) {
     exceptionValue := exception.NewError("msg", nil, (*exception.Error)(nil))
 
@@ -313,7 +306,6 @@ func TestEnrichContextWithCause_TypedNilCause_AddsNoCause(t *testing.T) {
     }
 }
 
-/* @info the nil-logger fallback is the path a record takes before the container exists — a boot failure — and the context is the whole diagnostic: the branch that prints it had never been entered, so nothing said the fallback carries more than the message */
 func TestLogError_NilLogger_PrintsTheEnrichedContext(t *testing.T) {
     var buffer bytes.Buffer
 
@@ -347,7 +339,6 @@ func TestLogError_NilLogger_PrintsTheEnrichedContext(t *testing.T) {
     }
 }
 
-/* @info the same fallback for an error that is not an exception: it is filed at error level under its full message, with the context of the nearest provider in its chain — the branch that prints that context had never been entered either */
 func TestLogError_NilLogger_ForeignErrorPrintsItsProviderContext(t *testing.T) {
     var buffer bytes.Buffer
 
@@ -372,7 +363,6 @@ func TestLogError_NilLogger_ForeignErrorPrintsItsProviderContext(t *testing.T) {
     }
 }
 
-/* @info a foreign error whose chain carries contexts contributes them as the cause context chain, exactly as an exception's own enrichment does; the two enrichments are written twice and can drift apart */
 func TestLogError_ForeignErrorCarriesTheCauseContextChain(t *testing.T) {
     inner := exception.NewError("inner", map[string]any{"userId": 5}, nil)
 
@@ -430,3 +420,117 @@ func (instance *captureLogger) Emergency(message string, context loggingcontract
 }
 
 var _ loggingcontract.Logger = (*captureLogger)(nil)
+
+func TestLogError_KeepsCallerSetCauseKeysOnAnException(t *testing.T) {
+    capture := &captureLogger{}
+
+    causeErr := exception.NewError(
+        "driver: connection refused",
+        map[string]any{
+            "driverKey": "driverValue",
+        },
+        nil,
+    )
+    err := exception.NewError(
+        "query failed",
+        map[string]any{
+            "cause":             "caller cause",
+            "causeChain":        []string{"caller chain"},
+            "causeContextChain": "caller context chain",
+        },
+        causeErr,
+    )
+
+    LogError(capture, err)
+
+    if 1 != capture.calls {
+        t.Fatalf("expected one record, got %d", capture.calls)
+    }
+
+    if "caller cause" != capture.lastContext["cause"] {
+        t.Fatalf("expected the caller's cause value to be kept, got %v", capture.lastContext["cause"])
+    }
+
+    chain, isStringSlice := capture.lastContext["causeChain"].([]string)
+    if false == isStringSlice || 1 != len(chain) || "caller chain" != chain[0] {
+        t.Fatalf("expected the caller's cause chain to be kept, got %v", capture.lastContext["causeChain"])
+    }
+
+    if "caller context chain" != capture.lastContext["causeContextChain"] {
+        t.Fatalf("expected the caller's cause context chain to be kept, got %v", capture.lastContext["causeContextChain"])
+    }
+}
+
+func TestLogError_ComputesTheMissingCauseKeyBesideACallerSetOne(t *testing.T) {
+    capture := &captureLogger{}
+
+    causeErr := errors.New("driver: connection refused")
+    err := exception.NewError(
+        "query failed",
+        map[string]any{
+            "cause": "caller cause",
+        },
+        causeErr,
+    )
+
+    LogError(capture, err)
+
+    if "caller cause" != capture.lastContext["cause"] {
+        t.Fatalf("expected the caller's cause value to be kept, got %v", capture.lastContext["cause"])
+    }
+
+    chain, isStringSlice := capture.lastContext["causeChain"].([]string)
+    if false == isStringSlice || 1 != len(chain) || "driver: connection refused" != chain[0] {
+        t.Fatalf("expected the computed cause chain beside the kept cause, got %v", capture.lastContext["causeChain"])
+    }
+}
+
+type foreignCauseKeyError struct {
+    message string
+    context loggingcontract.Context
+    wrapped error
+}
+
+func (instance *foreignCauseKeyError) Error() string { return instance.message }
+
+func (instance *foreignCauseKeyError) Context() loggingcontract.Context { return instance.context }
+
+func (instance *foreignCauseKeyError) Unwrap() error { return instance.wrapped }
+
+func TestLogError_KeepsCallerSetCauseKeysOnAForeignError(t *testing.T) {
+    capture := &captureLogger{}
+
+    err := &foreignCauseKeyError{
+        message: "outer failure",
+        context: loggingcontract.Context{
+            "cause":             "caller cause",
+            "causeContextChain": "caller context chain",
+        },
+        wrapped: exception.NewError(
+            "inner failure",
+            map[string]any{
+                "innerKey": "innerValue",
+            },
+            nil,
+        ),
+    }
+
+    LogError(capture, err)
+
+    if 1 != capture.calls {
+        t.Fatalf("expected one record, got %d", capture.calls)
+    }
+
+    if "caller cause" != capture.lastContext["cause"] {
+        t.Fatalf("expected the caller's cause value to be kept, got %v", capture.lastContext["cause"])
+    }
+
+    chain, isStringSlice := capture.lastContext["causeChain"].([]string)
+    if false == isStringSlice || 1 != len(chain) || "inner failure" != chain[0] {
+        t.Fatalf("expected the computed cause chain beside the kept cause, got %v", capture.lastContext["causeChain"])
+    }
+
+    if "caller context chain" != capture.lastContext["causeContextChain"] {
+        t.Fatalf("expected the caller's cause context chain to be kept, got %v", capture.lastContext["causeContextChain"])
+    }
+}
