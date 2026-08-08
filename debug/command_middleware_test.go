@@ -9,6 +9,7 @@ import (
     "github.com/precision-soft/melody/container"
     "github.com/precision-soft/melody/exception"
     httpcontract "github.com/precision-soft/melody/http/contract"
+    middlewarepipeline "github.com/precision-soft/melody/http/middleware/pipeline"
 )
 
 type middlewareCommandTestEnvelope struct {
@@ -24,9 +25,18 @@ type middlewareCommandTestEnvelope struct {
 }
 
 func newMiddlewareTestCommand(middlewareCount int) *MiddlewareCommand {
+    descriptions := make([]middlewarepipeline.MiddlewareDescription, 0, middlewareCount)
     middleware := make([]httpcontract.Middleware, 0, middlewareCount)
 
     for index := 0; index < middlewareCount; index++ {
+        descriptions = append(
+            descriptions,
+            middlewarepipeline.MiddlewareDescription{
+                Name:     fmt.Sprintf("middleware.%02d", index),
+                Priority: 0,
+            },
+        )
+
         middleware = append(
             middleware,
             func(next httpcontract.Handler) httpcontract.Handler {
@@ -36,8 +46,11 @@ func newMiddlewareTestCommand(middlewareCount int) *MiddlewareCommand {
     }
 
     return NewMiddlewareCommand(
-        func() []httpcontract.Middleware {
-            return middleware
+        func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
+            return descriptions, nil, nil
+        },
+        func() ([]httpcontract.Middleware, error) {
+            return middleware, nil
         },
     )
 }
@@ -283,28 +296,41 @@ func TestMiddlewareCommand_WalksEveryItemExactlyOnceWhenPagingDescending(t *test
     }
 }
 
-/* @info the provider itself is guarded, not only the values it returns: a nil handed to the constructor surfaced as a bare nil-function call far from the wiring mistake */
 func TestNewMiddlewareCommand_NilProvider_Panics(t *testing.T) {
-    defer func() {
-        recoveredValue := recover()
-        if nil == recoveredValue {
-            t.Fatalf("expected a panic for a nil provider")
-        }
+    assertNilProviderPanics := func(expectedMessage string, construct func()) {
+        defer func() {
+            recoveredValue := recover()
+            if nil == recoveredValue {
+                t.Fatalf("expected a panic for a nil provider")
+            }
 
-        recoveredError, ok := recoveredValue.(*exception.Error)
-        if false == ok || nil == recoveredError {
-            t.Fatalf("expected the panic to carry an *exception.Error, got %v", recoveredValue)
-        }
+            recoveredError, ok := recoveredValue.(*exception.Error)
+            if false == ok || nil == recoveredError {
+                t.Fatalf("expected the panic to carry an *exception.Error, got %v", recoveredValue)
+            }
 
-        if "middleware command created with nil middleware provider" != recoveredError.Message() {
-            t.Fatalf("unexpected message %q", recoveredError.Message())
-        }
-    }()
+            if expectedMessage != recoveredError.Message() {
+                t.Fatalf("unexpected message %q", recoveredError.Message())
+            }
+        }()
 
-    NewMiddlewareCommand(nil)
+        construct()
+    }
+
+    assertNilProviderPanics("middleware command created with nil description provider", func() {
+        NewMiddlewareCommand(nil, func() ([]httpcontract.Middleware, error) { return nil, nil })
+    })
+
+    assertNilProviderPanics("middleware command created with nil build provider", func() {
+        NewMiddlewareCommand(
+            func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
+                return nil, nil, nil
+            },
+            nil,
+        )
+    })
 }
 
-/* @info the zero-value command is constructible outside the constructor; the refusal must reach the report as a named error instead of a nil-function call reaching the recover */
 func TestMiddlewareCommand_ZeroValueProvider_ReturnsANamedError(t *testing.T) {
     _, runErr := runDebugCommand(
         &MiddlewareCommand{},
@@ -318,5 +344,131 @@ func TestMiddlewareCommand_ZeroValueProvider_ReturnsANamedError(t *testing.T) {
 
     if false == strings.Contains(runErr.Error(), "middleware provider is nil") {
         t.Fatalf("expected the named refusal, got %v", runErr)
+    }
+}
+
+/* the default listing is a description: nothing is built, so the command has no side effect in the console process that asks — the build is the explicit flag's to run */
+func TestMiddlewareCommand_DefaultListingRunsNoBuild(t *testing.T) {
+    buildRuns := 0
+
+    command := NewMiddlewareCommand(
+        func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
+            return []middlewarepipeline.MiddlewareDescription{
+                {Name: "static", Priority: -1000, FunctionName: "example/static.Middleware"},
+            }, nil, nil
+        },
+        func() ([]httpcontract.Middleware, error) {
+            buildRuns = buildRuns + 1
+
+            return nil, nil
+        },
+    )
+
+    rendered, runErr := runDebugCommand(command, newMiddlewareTestRuntime(), []string{"--format=table", "--table-width=400"})
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    if 0 != buildRuns {
+        t.Fatalf("expected the default listing to run no build, ran %d times", buildRuns)
+    }
+
+    row := debugTableBlockRow(rendered, "MIDDLEWARE")
+    if 1 != len(row) {
+        t.Fatalf("expected one row, got %d in %q", len(row), rendered)
+    }
+
+    if "static" != row[0][1] || "-1000" != row[0][2] || "example/static.Middleware" != row[0][3] || "active" != row[0][4] {
+        t.Fatalf("expected the description columns, got %v", row[0])
+    }
+
+    _, buildRunErr := runDebugCommand(command, newMiddlewareTestRuntime(), []string{"--format=json", "--build"})
+    if nil != buildRunErr {
+        t.Fatalf("expected no error, got %v", buildRunErr)
+    }
+
+    if 1 != buildRuns {
+        t.Fatalf("expected --build to run the build once, ran %d times", buildRuns)
+    }
+}
+
+/* an inactive definition is part of the answer: the reason a middleware is off is exactly what the operator lists the pipeline to learn */
+func TestMiddlewareCommand_ListsTheInactiveEntriesWithTheirReason(t *testing.T) {
+    command := NewMiddlewareCommand(
+        func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
+            report := middlewarepipeline.NewMiddlewareBuildReport(
+                "http",
+                "prod",
+                []string{},
+                []*middlewarepipeline.InactiveMiddleware{
+                    middlewarepipeline.NewInactiveMiddleware("profiler", "enabled for environments [dev]"),
+                },
+                nil,
+                false,
+            )
+
+            return []middlewarepipeline.MiddlewareDescription{{Name: "static", Priority: -1000}}, report, nil
+        },
+        func() ([]httpcontract.Middleware, error) {
+            return nil, nil
+        },
+    )
+
+    rendered, runErr := runDebugCommand(command, newMiddlewareTestRuntime(), []string{"--format=table", "--table-width=400"})
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    row := debugTableBlockRow(rendered, "MIDDLEWARE")
+    if 2 != len(row) {
+        t.Fatalf("expected an active and an inactive row, got %d in %q", len(row), rendered)
+    }
+
+    if "profiler" != row[1][1] || "inactive" != row[1][4] || "enabled for environments [dev]" != row[1][5] {
+        t.Fatalf("expected the inactive row with its reason, got %v", row[1])
+    }
+}
+
+/* a factory that panics under --build answers as a rendered failure: the command that asks about the chain must survive the chain's worst answer */
+func TestMiddlewareCommand_BuildRecoversAPanickingFactory(t *testing.T) {
+    command := NewMiddlewareCommand(
+        func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
+            return nil, nil, nil
+        },
+        func() ([]httpcontract.Middleware, error) {
+            panic("factory exploded")
+        },
+    )
+
+    rendered, runErr := runDebugCommand(command, newMiddlewareTestRuntime(), []string{"--format=json", "--build"})
+
+    if nil == runErr {
+        t.Fatalf("expected the rendered failure to carry an error, got nil")
+    }
+
+    if false == strings.Contains(rendered, "middleware build panicked") || false == strings.Contains(rendered, "factory exploded") {
+        t.Fatalf("expected the recovered panic in the envelope, got %q", rendered)
+    }
+}
+
+/* a pipeline that cannot be assembled — a cycle, a missing reference — refuses the description with the same error the build answers, rendered instead of thrown */
+func TestMiddlewareCommand_RendersTheDescriptionRefusal(t *testing.T) {
+    command := NewMiddlewareCommand(
+        func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
+            return nil, nil, exception.NewError("middleware pipeline has a cycle", nil, nil)
+        },
+        func() ([]httpcontract.Middleware, error) {
+            return nil, nil
+        },
+    )
+
+    rendered, runErr := runDebugCommand(command, newMiddlewareTestRuntime(), []string{"--format=json"})
+
+    if nil == runErr {
+        t.Fatalf("expected the refusal to carry an error, got nil")
+    }
+
+    if false == strings.Contains(rendered, "debug.describeFailed") || false == strings.Contains(rendered, "middleware pipeline has a cycle") {
+        t.Fatalf("expected the refusal in the envelope, got %q", rendered)
     }
 }

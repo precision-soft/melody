@@ -639,10 +639,12 @@ func TestKernelHasErrorHandler_ReadsTheHasDoor(t *testing.T) {
     }
 }
 
-/* the gate is proven through runHttp itself: after the run the exception listener either answers a
-kernel.exception dispatch or leaves it unanswered, which is the observable difference between the
-listener registered and skipped. */
-func TestRunHttp_SkipsTheExceptionListenerWhenAnErrorHandlerIsInstalled(t *testing.T) {
+/* the gate is proven through the boot-end registration itself: after it the exception listener
+either answers a kernel.exception dispatch or leaves it unanswered, which is the observable
+difference between the listener registered and skipped. The handler is installed BEFORE the
+registration runs, because that is the contract — an error handler installed by boot takes the
+listener's place. */
+func TestRegisterKernelHttpListeners_SkipsTheExceptionListenerWhenAnErrorHandlerIsInstalled(t *testing.T) {
     applicationInstance := newCacheWarningTestApplication(t, config.ModeHttp, logging.NewNopLogger())
 
     applicationInstance.kernel.HttpKernel().SetErrorHandler(
@@ -650,6 +652,62 @@ func TestRunHttp_SkipsTheExceptionListenerWhenAnErrorHandlerIsInstalled(t *testi
             return nil
         },
     )
+
+    applicationInstance.registerKernelHttpListeners()
+
+    runtimeInstance := runtime.New(
+        context.Background(),
+        applicationInstance.kernel.ServiceContainer().NewScope(),
+        applicationInstance.kernel.ServiceContainer(),
+    )
+
+    exceptionEvent := http.NewKernelExceptionEvent(
+        runtimeInstance,
+        testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/fail"),
+        exception.NewError("boot gate failure", nil, nil),
+    )
+
+    _, dispatchErr := applicationInstance.kernel.EventDispatcher().DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if nil != exceptionEvent.Response() {
+        t.Fatalf("expected the framework exception listener to be skipped when a handler is installed")
+    }
+}
+
+func TestRegisterKernelHttpListeners_RegistersTheExceptionListenerWithoutAnErrorHandler(t *testing.T) {
+    applicationInstance := newCacheWarningTestApplication(t, config.ModeHttp, logging.NewNopLogger())
+
+    applicationInstance.registerKernelHttpListeners()
+
+    runtimeInstance := runtime.New(
+        context.Background(),
+        applicationInstance.kernel.ServiceContainer().NewScope(),
+        applicationInstance.kernel.ServiceContainer(),
+    )
+
+    exceptionEvent := http.NewKernelExceptionEvent(
+        runtimeInstance,
+        testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/fail"),
+        exception.NewError("boot gate failure", nil, nil),
+    )
+
+    _, dispatchErr := applicationInstance.kernel.EventDispatcher().DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if nil == exceptionEvent.Response() {
+        t.Fatalf("expected the framework exception listener to answer without a handler installed")
+    }
+}
+
+/* the contrast half of the move: running the http server registers nothing — the listeners belong
+to Boot, in every process shape, so what the server runs is exactly what the console inspects */
+func TestRunHttp_RegistersNoKernelListeners(t *testing.T) {
+    applicationInstance := newCacheWarningTestApplication(t, config.ModeHttp, logging.NewNopLogger())
 
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
@@ -676,38 +734,6 @@ func TestRunHttp_SkipsTheExceptionListenerWhenAnErrorHandlerIsInstalled(t *testi
     }
 
     if nil != exceptionEvent.Response() {
-        t.Fatalf("expected the framework exception listener to be skipped when a handler is installed")
-    }
-}
-
-func TestRunHttp_RegistersTheExceptionListenerWithoutAnErrorHandler(t *testing.T) {
-    applicationInstance := newCacheWarningTestApplication(t, config.ModeHttp, logging.NewNopLogger())
-
-    cancelledContext, cancel := context.WithCancel(context.Background())
-    cancel()
-
-    if runErr := applicationInstance.runHttp(cancelledContext); nil != runErr {
-        t.Fatalf("unexpected run http error: %v", runErr)
-    }
-
-    runtimeInstance := runtime.New(
-        context.Background(),
-        applicationInstance.kernel.ServiceContainer().NewScope(),
-        applicationInstance.kernel.ServiceContainer(),
-    )
-
-    exceptionEvent := http.NewKernelExceptionEvent(
-        runtimeInstance,
-        testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/fail"),
-        exception.NewError("run http gate failure", nil, nil),
-    )
-
-    _, dispatchErr := applicationInstance.kernel.EventDispatcher().DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
-    if nil != dispatchErr {
-        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
-    }
-
-    if nil == exceptionEvent.Response() {
-        t.Fatalf("expected the framework exception listener to answer without a handler installed")
+        t.Fatalf("expected runHttp to register no listener; the boot-end registration owns them")
     }
 }

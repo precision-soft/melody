@@ -1,6 +1,7 @@
 package container
 
 import (
+    "fmt"
     "reflect"
     "sort"
     "strings"
@@ -30,6 +31,9 @@ func NewContainer() containercontract.Container {
         scopedTypeProviders:               make(map[reflect.Type]providerAny),
         scopedTypeRegistrationNamesByType: make(map[reflect.Type][]string),
         scopedReplacesContainerService:    make(map[string]bool),
+
+        providerServiceTypeByName:       make(map[string]reflect.Type),
+        scopedProviderServiceTypeByName: make(map[string]reflect.Type),
     }
 }
 
@@ -55,6 +59,9 @@ type container struct {
     scopedTypeProviders               map[reflect.Type]providerAny
     scopedTypeRegistrationNamesByType map[reflect.Type][]string
     scopedReplacesContainerService    map[string]bool
+    /* the declared return type of each provider, kept beside it for introspection: the wrapped provider erases the signature, and a description without a type would send the operator to build a service the listing exists not to build */
+    providerServiceTypeByName       map[string]reflect.Type
+    scopedProviderServiceTypeByName map[string]reflect.Type
     /* the published plan every new scope is bound to by reference. A registration clears it and the next scope rebuilds it, so creating a scope costs one atomic load once boot has settled. */
     scopePlanPointer atomic.Pointer[scopePlan]
     isClosed         bool
@@ -346,6 +353,61 @@ func (instance *container) Names() []string {
     return serviceNames
 }
 
+/* ServiceDescriptions answers what the container can say WITHOUT running a provider: every name either lifetime knows — the container's own registrations and the scoped ones Names() cannot see — with the type read from the built instance when one exists and from the provider's declared return type otherwise. The instances map is walked beside the providers although every override requires a registration, so a name only ever built or replaced stays described through the same door. It is what the introspection command lists through, so listing a container stops meaning building it. */
+func (instance *container) ServiceDescriptions() []containercontract.ServiceDescription {
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
+
+    descriptions := make([]containercontract.ServiceDescription, 0, len(instance.providers)+len(instance.instances)+len(instance.scopedProviders))
+
+    containerNames := make(map[string]struct{}, len(instance.providers)+len(instance.instances))
+    for serviceName := range instance.providers {
+        containerNames[serviceName] = struct{}{}
+    }
+    for serviceName := range instance.instances {
+        containerNames[serviceName] = struct{}{}
+    }
+
+    for serviceName := range containerNames {
+        description := containercontract.ServiceDescription{
+            Name:     serviceName,
+            Lifetime: containercontract.ServiceLifetimeContainer,
+        }
+
+        if builtInstance, isBuilt := instance.instances[serviceName]; true == isBuilt {
+            description.IsBuilt = true
+            description.TypeName = fmt.Sprintf("%T", builtInstance)
+        } else if declaredType, hasDeclaredType := instance.providerServiceTypeByName[serviceName]; true == hasDeclaredType {
+            description.TypeName = declaredType.String()
+        }
+
+        descriptions = append(descriptions, description)
+    }
+
+    for serviceName := range instance.scopedProviders {
+        description := containercontract.ServiceDescription{
+            Name:     serviceName,
+            Lifetime: containercontract.ServiceLifetimeScoped,
+        }
+
+        if declaredType, hasDeclaredType := instance.scopedProviderServiceTypeByName[serviceName]; true == hasDeclaredType {
+            description.TypeName = declaredType.String()
+        }
+
+        descriptions = append(descriptions, description)
+    }
+
+    sort.Slice(descriptions, func(leftIndex int, rightIndex int) bool {
+        if descriptions[leftIndex].Lifetime != descriptions[rightIndex].Lifetime {
+            return descriptions[leftIndex].Lifetime < descriptions[rightIndex].Lifetime
+        }
+
+        return descriptions[leftIndex].Name < descriptions[rightIndex].Name
+    })
+
+    return descriptions
+}
+
 func (instance *container) registerDependencyLocked(dependentKey string, dependencyKey string) {
     if "" == dependentKey || "" == dependencyKey {
         return
@@ -415,6 +477,9 @@ func (instance *container) register(
     }
 
     instance.providers[serviceName] = provider
+    if nil != serviceType {
+        instance.providerServiceTypeByName[serviceName] = serviceType
+    }
 
     if true == registerOption.AlsoRegisterType {
         registerTypeErr := instance.registerType(
@@ -425,6 +490,7 @@ func (instance *container) register(
         )
         if nil != registerTypeErr {
             delete(instance.providers, serviceName)
+            delete(instance.providerServiceTypeByName, serviceName)
             return registerTypeErr
         }
     }

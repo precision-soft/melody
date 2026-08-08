@@ -275,20 +275,28 @@ func (instance *Configuration) MarkSecret(name string) bool {
     return true
 }
 
-/* propagateSecretMarkLocked marks every parameter whose raw template directly reads the named one — through %env(NAME)%, through the default processor's fallback, or through a %NAME% reference. A match inside doubled-percent escaped text over-marks, which errs toward redacting more, never less. Chained derivations (a template reading a template that reads the secret) are marked when their own direct source is marked; the transitive closure in one call is a v3 extension. */
+/* propagateSecretMarkLocked marks every parameter whose raw template reads the named one — through %env(NAME)%, through the default processor's fallback, or through a %NAME% reference — and follows the marking to a fixpoint: a reader of a freshly marked name is scanned in turn, so a derivation chain is covered whole however late the mark arrives. A match inside doubled-percent escaped text over-marks, which errs toward redacting more, never less. */
 func (instance *Configuration) propagateSecretMarkLocked(markedName string) {
-    for _, parameter := range instance.parameters {
-        if true == parameter.isSecret.Load() {
-            continue
-        }
+    markedNames := []string{markedName}
 
-        templateValue, isString := parameter.environmentValue.(string)
-        if false == isString {
-            continue
-        }
+    for 0 < len(markedNames) {
+        currentName := markedNames[0]
+        markedNames = markedNames[1:]
 
-        if true == templateReadsName(templateValue, markedName) {
-            parameter.isSecret.Store(true)
+        for name, parameter := range instance.parameters {
+            if true == parameter.isSecret.Load() {
+                continue
+            }
+
+            templateValue, isString := parameter.environmentValue.(string)
+            if false == isString {
+                continue
+            }
+
+            if true == templateReadsName(templateValue, currentName) {
+                parameter.isSecret.Store(true)
+                markedNames = append(markedNames, name)
+            }
         }
     }
 }

@@ -48,7 +48,7 @@ func (instance *container) RegisterScoped(
         )
     }
 
-    /* @important the override path refuses to substitute a protected "service." name, and a scoped registration of the same name — with Replacing() — would perform exactly that substitution inside every scope, where the kernel resolves through. The protected namespace is the framework's, at both lifetimes. */
+    /* the override path refuses to substitute a protected "service." name, and a scoped registration of the same name — with Replacing() — would perform exactly that substitution inside every scope, where the kernel resolves through. The protected namespace is the framework's, at both lifetimes. */
     if true == strings.HasPrefix(serviceName, "service.") {
         return exception.NewError(
             "service is protected and cannot be registered as a scoped service",
@@ -124,6 +124,9 @@ func (instance *container) registerScoped(
     }
 
     instance.scopedProviders[serviceName] = provider
+    if nil != serviceType {
+        instance.scopedProviderServiceTypeByName[serviceName] = serviceType
+    }
 
     if true == registerOption.ReplacesContainerService {
         instance.scopedReplacesContainerService[serviceName] = true
@@ -139,6 +142,7 @@ func (instance *container) registerScoped(
         )
         if nil != registerScopedTypeErr {
             delete(instance.scopedProviders, serviceName)
+            delete(instance.scopedProviderServiceTypeByName, serviceName)
             delete(instance.scopedReplacesContainerService, serviceName)
 
             return registerScopedTypeErr

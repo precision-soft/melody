@@ -822,3 +822,35 @@ func (instance *ExampleHttpMiddlewareModule) RegisterHttpMiddlewares(
 **Symptom.** An invocation already passing `--limit` or `--offset` received the full list and now receives a window; with `--verbose`, `debug:events` also narrows its listeners block to the windowed events. `--order=desc` was accepted and ignored before, so an invocation that passed it now gets different output.
 
 **Remedy.** Nothing for a client that paged with `offset += limit` — it now walks each item exactly once instead of re-reading the whole list on every page. A consumer that passed `--limit` while expecting everything must drop the flag.
+
+### Debug: `NewMiddlewareCommand` takes a description provider and a build provider
+
+**What changed.** `debug:middleware` describes the pipeline by default — selection, ordering and the function names captured at registration, no factory run — and builds the real chain only under the new `--build` flag, with a recover that renders a failing or panicking factory as a `debug.buildFailed` envelope instead of a dead process. The constructor therefore takes the two channels: `debug.NewMiddlewareCommand(descriptionProvider, buildProvider)`, typed `MiddlewareDescriptionProvider` and `MiddlewareBuildProvider`.
+
+**Symptom.** An out-of-tree caller of `debug.NewMiddlewareCommand` with the old single chain provider stops compiling.
+
+**Remedy.** Hand the two providers. For a pipeline assembled through `pipeline.Builder`, `Describe` answers the description half without building and `Build` remains the build half; a framework-booted application wires both automatically.
+
+### Debug: `debug:container` lists without building; `--build` is the sweep
+
+**What changed.** The bare listing runs no provider — names, lifetimes, built state and declared types, grouped into container and scoped blocks — where it used to resolve every windowed service, opening every pool and client of the application from a console command. The full diagnostic sweep — every service built, failures with cause chains — moved behind `--build`; `debug:container <name>` still builds, and a scoped name now resolves through the run's own scope instead of answering `debug.notFound`.
+
+**Symptom.** A consumer of the bare listing's json no longer receives `typeName`-with-error items — the items carry `name`, `lifetime`, `isBuilt`, `typeName` — and a table consumer sees two blocks. A pipeline that used the bare listing as a health sweep no longer probes anything.
+
+**Remedy.** Pass `--build` where the sweep was the point; keep the bare listing where the question was "what is registered".
+
+### Application: the kernel's default listeners register at the end of `Boot`
+
+**What changed.** The profiler (debug mode), the response normalizer, the terminate access log and the exception listener (when no error handler was installed by boot) register at the end of `Boot` in every process shape, not inside the http run. They are inert where no kernel event is dispatched, and `debug:events` now shows them in a console process.
+
+**Symptom.** A kernel event dispatched between boot and the http run — or from a console process — now reaches the default listeners; `debug:events` output grew the kernel listeners it used to miss.
+
+**Remedy.** Nothing for the ordinary application. A process that dispatched kernel events manually before `runHttp` and relied on nothing listening must account for the listeners existing from `Boot` on.
+
+### Debug: `debug:version` no longer reports melody's version as the application's
+
+**What changed.** The framework wiring stops filling the `application` row with `melody`'s own build version; the row reads the process-wide declaration made through `cli/output.SetApplicationVersion` and prints `<unknown>` without one.
+
+**Symptom.** The `application` row prints `<unknown>` where it printed the framework version.
+
+**Remedy.** Call `output.SetApplicationVersion(version)` once in the composition root's main, with the version the application keeps wherever it keeps it — its own ldflags variable or its environment.

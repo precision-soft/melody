@@ -89,9 +89,12 @@ func (instance *Application) bootHttp() {
     }
 }
 
-func (instance *Application) runHttp(
-    ctx context.Context,
-) error {
+/* registerKernelHttpListeners wires the kernel's default listeners at the end of Boot, in every
+process shape: the listeners are inert in a console that never dispatches a kernel event, and a
+dispatcher inspected there answers with the same set the serving process runs — the introspection
+command used to report an empty dispatcher for a correctly wired application. The conditions are
+boot-final by contract: an error handler is installed by boot, and debug mode is configuration. */
+func (instance *Application) registerKernelHttpListeners() {
     eventDispatcher := instance.kernel.EventDispatcher()
 
     if true == instance.kernel.DebugMode() {
@@ -101,17 +104,22 @@ func (instance *Application) runHttp(
     http.RegisterKernelResponseNormalizerListener(eventDispatcher)
     http.RegisterKernelTerminateAccessLogListener(eventDispatcher)
 
+    /* the framework exception listener answers every kernel.exception dispatch, so with it
+    registered an error handler the application installed at boot could never run — the kernel
+    consults the handler only when the dispatch produced no response. A handler installed by boot
+    therefore takes the listener's place; without one the listener renders exactly as before. */
+    if false == kernelHasErrorHandler(instance.kernel.HttpKernel()) {
+        http.RegisterKernelExceptionListener(eventDispatcher, instance.kernel.DebugMode())
+    }
+}
+
+func (instance *Application) runHttp(
+    ctx context.Context,
+) error {
     configuration := instance.configuration
 
     httpKernel := instance.kernel.HttpKernel()
 
-    /* the framework exception listener answers every kernel.exception dispatch, so with it
-    registered an error handler the application installed at boot could never run — the kernel
-    consults the handler only when the dispatch produced no response. A handler installed by now
-    therefore takes the listener's place; without one the listener renders exactly as before. */
-    if false == kernelHasErrorHandler(httpKernel) {
-        http.RegisterKernelExceptionListener(eventDispatcher, instance.kernel.DebugMode())
-    }
     httpKernel.Use(
         instance.httpMiddlewares.all(instance.kernel)...,
     )

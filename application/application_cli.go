@@ -18,10 +18,12 @@ import (
     "github.com/precision-soft/melody/exception"
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
     httpcontract "github.com/precision-soft/melody/http/contract"
+    middlewarepipeline "github.com/precision-soft/melody/http/middleware/pipeline"
     "github.com/precision-soft/melody/internal"
+    kernelcontract "github.com/precision-soft/melody/kernel/contract"
     "github.com/precision-soft/melody/logging"
     "github.com/precision-soft/melody/runtime"
-    "github.com/precision-soft/melody/version"
+    "github.com/precision-soft/melody/security"
 )
 
 type commandSuggestion struct {
@@ -86,16 +88,50 @@ func (instance *Application) bootCli() {
             debugCommands,
             &debug.ContainerCommand{},
             &debug.ParameterCommand{},
-            &debug.EventCommand{},
-            debug.NewMiddlewareCommand(func() []httpcontract.Middleware {
-                return instance.httpMiddlewares.all(instance.kernel)
-            }),
-            &debug.VersionCommand{ApplicationVersion: version.BuildVersion()},
+            debug.NewEventCommand(instance.securityDeferredListeners),
+            debug.NewMiddlewareCommand(
+                func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
+                    return instance.httpMiddlewares.describe(instance.kernel)
+                },
+                func() ([]httpcontract.Middleware, error) {
+                    return instance.httpMiddlewares.buildForInspection(instance.kernel)
+                },
+            ),
+            /* the application slot stays empty on purpose: the application's own version arrives through output.SetApplicationVersion, and melody's version filled in here made debug:version print the framework version twice — an application that never declared its version reads <unknown> instead of a lie */
+            &debug.VersionCommand{},
         )
     }
 
     for _, commandInstance := range debugCommands {
         instance.RegisterCliCommand(commandInstance)
+    }
+}
+
+/* securityDeferredListeners feeds the declaration channel of debug:events with what only the serving process wires: the security pair stays http-only by design, so a console dispatcher can never show it and the command says so instead of rendering an absence. A process without a compiled security configuration declares nothing, and the serving process itself declares nothing either — there the pair is registered for real and the dispatcher answers. */
+func (instance *Application) securityDeferredListeners() []debug.DeferredListener {
+    if nil == instance.securityConfiguration {
+        return nil
+    }
+
+    if config.ModeHttp == instance.runtimeFlags.Mode() {
+        return nil
+    }
+
+    deferredNote := "registered only in the http serving process"
+
+    return []debug.DeferredListener{
+        {
+            EventName:    kernelcontract.EventKernelRequest,
+            Priority:     security.KernelFirewallListenerPriority,
+            ListenerName: "security resolution listener",
+            Note:         deferredNote,
+        },
+        {
+            EventName:    kernelcontract.EventKernelRequest,
+            Priority:     security.KernelAccessControlListenerPriority,
+            ListenerName: "security access control listener",
+            Note:         deferredNote,
+        },
     }
 }
 

@@ -351,3 +351,155 @@ func TestRouterCommand_OmitsTheShownCountWhenNothingIsWindowedAway(t *testing.T)
         t.Fatalf("expected no shown count for an unwindowed list, got %q", rendered)
     }
 }
+
+/* the dispatch picks the higher priority and breaks ties on the lower registration order; without these two columns two overlapping routes rendered as identical rows and the command could not answer which one answers */
+func TestRouterCommand_RendersThePriorityAndTheRegistrationOrder(t *testing.T) {
+    router := http.NewRouter()
+
+    handler := func(
+        runtimeInstance runtimecontract.Runtime,
+        writer nethttp.ResponseWriter,
+        request httpcontract.Request,
+    ) (httpcontract.Response, error) {
+        return nil, nil
+    }
+
+    router.HandleWithOptions(
+        "/overlap",
+        handler,
+        http.NewRouteOptions("", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
+    )
+    router.HandleWithOptions(
+        "/overlap",
+        handler,
+        http.NewRouteOptions("", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 10, nil),
+    )
+
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(
+        http.ServiceRouter,
+        func(resolver containercontract.Resolver) (httpcontract.Router, error) {
+            return router, nil
+        },
+    )
+
+    rendered, runErr := runDebugCommand(
+        &RouterCommand{},
+        newTestRuntime(serviceContainer),
+        []string{"--format=table", "--table-width=400"},
+    )
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    row := debugTableBlockRow(rendered, "ROUTES")
+    if 2 != len(row) {
+        t.Fatalf("expected two rows, got %d in %q", len(row), rendered)
+    }
+
+    if fmt.Sprintf("%v", row[0]) == fmt.Sprintf("%v", row[1]) {
+        t.Fatalf("expected the overlapping routes to render distinguishably, got %v twice", row[0])
+    }
+
+    if "0" != row[0][3] || "10" != row[1][3] {
+        t.Fatalf("expected the priority column, got %q and %q", row[0][3], row[1][3])
+    }
+
+    if "1" != row[0][4] || "2" != row[1][4] {
+        t.Fatalf("expected the registration order column, got %q and %q", row[0][4], row[1][4])
+    }
+}
+
+/* the machine document carries every discriminator the introspection exposes, and the verbose table folds them into columns; a json consumer used to see six fields for a ten-field definition */
+func TestRouterCommand_CarriesTheDiscriminatorsInJsonAndVerboseTable(t *testing.T) {
+    router := http.NewRouter()
+
+    handler := func(
+        runtimeInstance runtimecontract.Runtime,
+        writer nethttp.ResponseWriter,
+        request httpcontract.Request,
+    ) (httpcontract.Response, error) {
+        return nil, nil
+    }
+
+    router.HandleWithOptions(
+        "/detail/:id",
+        handler,
+        http.NewRouteOptions(
+            "detail.route",
+            []string{nethttp.MethodGet},
+            "",
+            nil,
+            map[string]string{"id": "[0-9]+"},
+            map[string]string{"id": "1"},
+            nil,
+            5,
+            map[string]any{"section": "catalog"},
+        ),
+    )
+
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(
+        http.ServiceRouter,
+        func(resolver containercontract.Resolver) (httpcontract.Router, error) {
+            return router, nil
+        },
+    )
+
+    rendered, runErr := runDebugCommand(
+        &RouterCommand{},
+        newTestRuntime(serviceContainer),
+        []string{"--format=json"},
+    )
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    envelope := struct {
+        Data struct {
+            Items []struct {
+                Priority     int               `json:"priority"`
+                Order        int               `json:"order"`
+                Requirements map[string]string `json:"requirements"`
+                Defaults     map[string]string `json:"defaults"`
+                Attributes   map[string]any    `json:"attributes"`
+            } `json:"items"`
+        } `json:"data"`
+    }{}
+
+    if decodeErr := json.Unmarshal([]byte(rendered), &envelope); nil != decodeErr {
+        t.Fatalf("failed to decode the envelope: %v, rendered %q", decodeErr, rendered)
+    }
+
+    if 1 != len(envelope.Data.Items) {
+        t.Fatalf("expected one item, got %d", len(envelope.Data.Items))
+    }
+
+    item := envelope.Data.Items[0]
+    if 5 != item.Priority || 1 != item.Order {
+        t.Fatalf("expected priority 5 and order 1, got %d and %d", item.Priority, item.Order)
+    }
+
+    /* the requirement travels as the compiled anchor form, and the attributes carry the framework's own underscore-prefixed entries beside the caller's */
+    if "" == item.Requirements["id"] || "1" != item.Defaults["id"] || "catalog" != item.Attributes["section"] {
+        t.Fatalf("expected the discriminator maps to travel, got %+v", item)
+    }
+
+    verboseRendered, verboseErr := runDebugCommand(
+        &RouterCommand{},
+        newTestRuntime(serviceContainer),
+        []string{"--format=table", "--table-width=400", "--verbose"},
+    )
+    if nil != verboseErr {
+        t.Fatalf("expected no error, got %v", verboseErr)
+    }
+
+    verboseRow := debugTableBlockRow(verboseRendered, "ROUTES")
+    if 1 != len(verboseRow) {
+        t.Fatalf("expected one verbose row, got %d in %q", len(verboseRow), verboseRendered)
+    }
+
+    if false == strings.HasPrefix(verboseRow[0][8], "id=") || "id=1" != verboseRow[0][9] || false == strings.Contains(verboseRow[0][10], "section=catalog") {
+        t.Fatalf("expected the compact discriminator cells, got %v", verboseRow[0])
+    }
+}

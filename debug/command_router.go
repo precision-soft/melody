@@ -53,7 +53,7 @@ func (instance *RouterCommand) Run(
 
     items := make([]routeListItem, 0, len(routes))
 
-    for _, routeDefinition := range routes {
+    for index, routeDefinition := range routes {
         methods := strings.Join(routeDefinition.Methods(), ",")
         if "" == methods {
             methods = "ANY"
@@ -85,9 +85,15 @@ func (instance *RouterCommand) Run(
                 Methods: methods,
                 Pattern: routeDefinition.Pattern(),
                 Name:    name,
-                Host:    host,
-                Schemes: schemes,
-                Locales: locales,
+                /* the two discriminators the dispatch actually uses: the higher priority wins, and among equals the lower registration order does — without them two overlapping routes rendered identically and the command could not answer which one answers */
+                Priority:     routeDefinition.Priority(),
+                Order:        index + 1,
+                Host:         host,
+                Schemes:      schemes,
+                Locales:      locales,
+                Requirements: routeDefinition.Requirements(),
+                Defaults:     routeDefinition.Defaults(),
+                Attributes:   routeDefinition.Attributes(),
             },
         )
     }
@@ -126,20 +132,38 @@ func (instance *RouterCommand) Run(
 
         builder.AddSummaryLine(summary)
 
+        columns := []string{"methods", "pattern", "name", "priority", "order", "host", "schemes", "locales"}
+        if true == option.Verbose {
+            columns = append(columns, "requirements", "defaults", "attributes")
+        }
+
         block := builder.AddBlock(
             "ROUTES",
-            []string{"methods", "pattern", "name", "host", "schemes", "locales"},
+            columns,
         )
 
         for _, item := range items {
-            block.AddRow(
+            cells := []string{
                 item.Methods,
                 item.Pattern,
                 item.Name,
+                fmt.Sprintf("%d", item.Priority),
+                fmt.Sprintf("%d", item.Order),
                 item.Host,
                 item.Schemes,
                 item.Locales,
-            )
+            }
+
+            if true == option.Verbose {
+                cells = append(
+                    cells,
+                    renderCompactStringMap(item.Requirements),
+                    renderCompactStringMap(item.Defaults),
+                    renderCompactAnyMap(item.Attributes),
+                )
+            }
+
+            block.AddRow(cells...)
         }
 
         envelope.Table = builder.Build()
@@ -158,12 +182,51 @@ func (instance *RouterCommand) Run(
 }
 
 type routeListItem struct {
-    Methods string `json:"methods"`
-    Pattern string `json:"pattern"`
-    Name    string `json:"name"`
-    Host    string `json:"host"`
-    Schemes string `json:"schemes"`
-    Locales string `json:"locales"`
+    Methods      string            `json:"methods"`
+    Pattern      string            `json:"pattern"`
+    Name         string            `json:"name"`
+    Priority     int               `json:"priority"`
+    Order        int               `json:"order"`
+    Host         string            `json:"host"`
+    Schemes      string            `json:"schemes"`
+    Locales      string            `json:"locales"`
+    Requirements map[string]string `json:"requirements"`
+    Defaults     map[string]string `json:"defaults"`
+    Attributes   map[string]any    `json:"attributes"`
+}
+
+/* renderCompactStringMap folds a discriminator map into one sorted k=v cell, so the verbose table stays one row per route */
+func renderCompactStringMap(values map[string]string) string {
+    if 0 == len(values) {
+        return "-"
+    }
+
+    keys := make([]string, 0, len(values))
+    for key := range values {
+        keys = append(keys, key)
+    }
+
+    sort.Strings(keys)
+
+    pairs := make([]string, 0, len(keys))
+    for _, key := range keys {
+        pairs = append(pairs, key+"="+values[key])
+    }
+
+    return strings.Join(pairs, ",")
+}
+
+func renderCompactAnyMap(values map[string]any) string {
+    if 0 == len(values) {
+        return "-"
+    }
+
+    stringValues := make(map[string]string, len(values))
+    for key, value := range values {
+        stringValues[key] = fmt.Sprintf("%v", value)
+    }
+
+    return renderCompactStringMap(stringValues)
 }
 
 var _ clicontract.Command = (*RouterCommand)(nil)

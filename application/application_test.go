@@ -13,6 +13,7 @@ import (
     "github.com/precision-soft/melody/config"
     "github.com/precision-soft/melody/container"
     containercontract "github.com/precision-soft/melody/container/contract"
+    eventcontract "github.com/precision-soft/melody/event/contract"
     "github.com/precision-soft/melody/exception"
     httpcontract "github.com/precision-soft/melody/http/contract"
     "github.com/precision-soft/melody/internal/testhelper"
@@ -760,5 +761,37 @@ func TestResolveExitLogger_AnswersTheEmergencyLoggerWhenNothingIsConfigured(t *t
 
     if logging.EmergencyLogger() != logger {
         t.Fatalf("expected the emergency logger for an application holding no configuration, got %T", logger)
+    }
+}
+
+/* the kernel's default listeners belong to Boot, in every process shape: the console's dispatcher answers introspection with the set the serving process runs, where it used to answer an empty list for a correctly wired application */
+func TestBoot_RegistersTheKernelListenersInEveryProcessShape(t *testing.T) {
+    applicationInstance := NewApplication(
+        testhelper.NewEmbeddedEnvFs(),
+        testhelper.NewEmbeddedStaticFs(),
+    )
+
+    applicationInstance.Boot()
+
+    inspector, ok := applicationInstance.kernel.EventDispatcher().(eventcontract.EventDispatcherInspector)
+    if false == ok {
+        t.Fatalf("expected the dispatcher to support inspection")
+    }
+
+    listenerCountByEvent := map[string]int{}
+    for _, registeredEvent := range inspector.RegisteredEvents() {
+        listenerCountByEvent[registeredEvent.EventName] = len(registeredEvent.Listeners)
+    }
+
+    if 0 == listenerCountByEvent[kernelcontract.EventKernelException] {
+        t.Fatal("expected the exception listener after boot")
+    }
+
+    if 0 == listenerCountByEvent[kernelcontract.EventKernelResponse] {
+        t.Fatal("expected the response normalizer after boot")
+    }
+
+    if 0 == listenerCountByEvent[kernelcontract.EventKernelTerminate] {
+        t.Fatal("expected the access-log listener after boot")
     }
 }

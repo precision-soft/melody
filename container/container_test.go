@@ -815,3 +815,69 @@ func TestContainerOverride_RefusesAValueTheRegisteredTypeCannotHold(t *testing.T
         t.Fatalf("expected the assignability refusal, got %q", overrideErr.Error())
     }
 }
+
+/* the descriptions are what lets an introspection command list a container without building it: both lifetimes answer, and no provider runs while they do */
+func TestServiceDescriptions_DescribesBothLifetimesWithoutBuilding(t *testing.T) {
+    buildCount := 0
+
+    instance := NewContainer()
+
+    instance.MustRegister(
+        "described.container",
+        func(resolver containercontract.Resolver) (string, error) {
+            buildCount = buildCount + 1
+
+            return "built value", nil
+        },
+    )
+
+    instance.MustRegisterScoped(
+        "described.scoped",
+        func(resolver containercontract.Resolver) (int, error) {
+            buildCount = buildCount + 1
+
+            return 7, nil
+        },
+    )
+
+    reporter, ok := instance.(interface {
+        ServiceDescriptions() []containercontract.ServiceDescription
+    })
+    if false == ok {
+        t.Fatalf("expected the container to describe its registrations")
+    }
+
+    descriptionByName := map[string]containercontract.ServiceDescription{}
+    for _, description := range reporter.ServiceDescriptions() {
+        descriptionByName[description.Name] = description
+    }
+
+    if 0 != buildCount {
+        t.Fatalf("expected the descriptions to run no provider, ran %d times", buildCount)
+    }
+
+    containerDescription, exists := descriptionByName["described.container"]
+    if false == exists || containercontract.ServiceLifetimeContainer != containerDescription.Lifetime {
+        t.Fatalf("expected the container-lifetime description, got %+v", containerDescription)
+    }
+    if true == containerDescription.IsBuilt || "string" != containerDescription.TypeName {
+        t.Fatalf("expected the unbuilt declared type, got %+v", containerDescription)
+    }
+
+    scopedDescription, exists := descriptionByName["described.scoped"]
+    if false == exists || containercontract.ServiceLifetimeScoped != scopedDescription.Lifetime || "int" != scopedDescription.TypeName {
+        t.Fatalf("expected the scoped description with its declared type, got %+v", scopedDescription)
+    }
+
+    if _, getErr := instance.Get("described.container"); nil != getErr {
+        t.Fatalf("unexpected build error: %v", getErr)
+    }
+
+    for _, description := range reporter.ServiceDescriptions() {
+        if "described.container" == description.Name {
+            if false == description.IsBuilt || "string" != description.TypeName {
+                t.Fatalf("expected the built service to be described as built, got %+v", description)
+            }
+        }
+    }
+}

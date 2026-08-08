@@ -14,8 +14,20 @@ import (
     clicontract "github.com/precision-soft/melody/cli/contract"
     containercontract "github.com/precision-soft/melody/container/contract"
     httpcontract "github.com/precision-soft/melody/http/contract"
+    middlewarepipeline "github.com/precision-soft/melody/http/middleware/pipeline"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
+
+func newTestMiddlewareCommandWithEmptyProviders() *MiddlewareCommand {
+    return NewMiddlewareCommand(
+        func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
+            return nil, nil, nil
+        },
+        func() ([]httpcontract.Middleware, error) {
+            return nil, nil
+        },
+    )
+}
 
 func newTestRuntime(serviceContainer containercontract.Container) *testRuntime {
     return &testRuntime{
@@ -141,7 +153,7 @@ func isDebugTableSeparatorRow(cell []string) bool {
     return true
 }
 
-/* @info the name is what an operator types and the description is what `melody list` prints beside it; both are read from these accessors by the cli registrar, and an empty description leaves a command undiscoverable in the only place it is advertised */
+/* the name is what an operator types and the description is what `melody list` prints beside it; both are read from these accessors by the cli registrar, and an empty description leaves a command undiscoverable in the only place it is advertised */
 func TestDebugCommands_CarryTheirNameAndDescription(t *testing.T) {
     commandList := []struct {
         command      clicontract.Command
@@ -151,7 +163,7 @@ func TestDebugCommands_CarryTheirNameAndDescription(t *testing.T) {
         {&EventCommand{}, "debug:events"},
         {&RouterCommand{}, "debug:router"},
         {&ParameterCommand{}, "debug:parameters"},
-        {NewMiddlewareCommand(func() []httpcontract.Middleware { return nil }), "debug:middleware"},
+        {newTestMiddlewareCommandWithEmptyProviders(), "debug:middleware"},
         {&VersionCommand{}, "debug:version"},
     }
 

@@ -33,8 +33,95 @@ func (instance *Builder) Build(
     kernelInstance kernelcontract.Kernel,
     group string,
 ) ([]httpcontract.Middleware, *MiddlewareBuildReport, error) {
-    environment := kernelInstance.Environment()
+    ordered, report, selectionErr := instance.selectAndOrder(kernelInstance.Environment(), group)
+    if nil != selectionErr {
+        return nil, report, selectionErr
+    }
 
+    middlewares := make([]httpcontract.Middleware, 0, len(ordered))
+    for _, definition := range ordered {
+        if "" == definition.name {
+            continue
+        }
+
+        if nil == definition.factory {
+            return nil, nil, exception.NewError(
+                "middleware factory is nil",
+                exceptioncontract.Context{
+                    "middlewareName": definition.name,
+                },
+                nil,
+            )
+        }
+
+        middlewareValue, factoryErr := definition.factory(kernelInstance)
+        if nil != factoryErr {
+            return nil, nil, exception.NewError(
+                "could not build middleware",
+                exceptioncontract.Context{
+                    "middlewareName": definition.name,
+                },
+                factoryErr,
+            )
+        }
+
+        if nil == middlewareValue {
+            continue
+        }
+
+        middlewares = append(middlewares, middlewareValue)
+        report.SetSelectedNames(append(report.SelectedNames(), definition.name))
+    }
+
+    return middlewares, report, nil
+}
+
+/* MiddlewareDescription is one pipeline entry as the selection and the ordering see it, with no factory run: the definition name, the priority, and the function captured at registration — the middleware itself for a direct registration, the factory for a deferred one. */
+type MiddlewareDescription struct {
+    Name         string
+    Priority     int
+    FunctionName string
+}
+
+/* Describe answers what Build would run WITHOUT running it: the same selection, gating and ordering — refused for the same cycles and missing references — but no factory is invoked, so describing a pipeline has no side effect in the process that asks. */
+func (instance *Builder) Describe(
+    environment string,
+    group string,
+) ([]MiddlewareDescription, *MiddlewareBuildReport, error) {
+    ordered, report, selectionErr := instance.selectAndOrder(environment, group)
+    if nil != selectionErr {
+        return nil, report, selectionErr
+    }
+
+    descriptions := make([]MiddlewareDescription, 0, len(ordered))
+    selectedNames := make([]string, 0, len(ordered))
+
+    for _, definition := range ordered {
+        if "" == definition.name {
+            continue
+        }
+
+        descriptions = append(
+            descriptions,
+            MiddlewareDescription{
+                Name:         definition.name,
+                Priority:     definition.priority,
+                FunctionName: definition.functionName,
+            },
+        )
+        selectedNames = append(selectedNames, definition.name)
+    }
+
+    report.SetSelectedNames(selectedNames)
+
+    return descriptions, report, nil
+}
+
+/* selectAndOrder is the half of Build every question about the pipeline shares: which definitions the environment and the group admit, and in what order — with the same refusals Build answers with */
+func (instance *Builder) selectAndOrder(
+    environment string,
+    group string,
+) ([]*HttpMiddlewareDefinition, *MiddlewareBuildReport, error) {
     report := &MiddlewareBuildReport{
         requestedGroup: group,
         kernelEnv:      environment,
@@ -74,42 +161,7 @@ func (instance *Builder) Build(
         )
     }
 
-    middlewares := make([]httpcontract.Middleware, 0, len(ordered))
-    for _, definition := range ordered {
-        if "" == definition.name {
-            continue
-        }
-
-        if nil == definition.factory {
-            return nil, nil, exception.NewError(
-                "middleware factory is nil",
-                exceptioncontract.Context{
-                    "middlewareName": definition.name,
-                },
-                nil,
-            )
-        }
-
-        middlewareValue, factoryErr := definition.factory(kernelInstance)
-        if nil != factoryErr {
-            return nil, nil, exception.NewError(
-                "could not build middleware",
-                exceptioncontract.Context{
-                    "middlewareName": definition.name,
-                },
-                factoryErr,
-            )
-        }
-
-        if nil == middlewareValue {
-            continue
-        }
-
-        middlewares = append(middlewares, middlewareValue)
-        report.SetSelectedNames(append(report.SelectedNames(), definition.name))
-    }
-
-    return middlewares, report, nil
+    return ordered, report, nil
 }
 
 func (instance *Builder) selectDefinitions(

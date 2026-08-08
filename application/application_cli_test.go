@@ -15,11 +15,14 @@ import (
     "github.com/precision-soft/melody/cli/output"
     "github.com/precision-soft/melody/config"
     containercontract "github.com/precision-soft/melody/container/contract"
+    "github.com/precision-soft/melody/debug"
     "github.com/precision-soft/melody/exception"
     "github.com/precision-soft/melody/internal/testhelper"
+    kernelcontract "github.com/precision-soft/melody/kernel/contract"
     "github.com/precision-soft/melody/logging"
     loggingcontract "github.com/precision-soft/melody/logging/contract"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
+    "github.com/precision-soft/melody/security"
 )
 
 func exitCodedProbeCommand() *clicontract.CommandContext {
@@ -555,5 +558,61 @@ func TestRunCli_TheRunLoggerPreservesACallerProcessIdUnderProvided(t *testing.T)
 
     if _, hasClaim := recordContext["processIdClaimed"]; true == hasClaim {
         t.Fatalf("expected the console path to write no claimed key, got %v", recordContext["processIdClaimed"])
+    }
+}
+
+/* the declaration channel of debug:events answers only for the process that cannot see the pair: no compiled security means nothing to declare, and the serving process declares nothing because there the listeners are registered for real */
+func TestSecurityDeferredListeners_DeclaresThePairForAConsoleProcessAlone(t *testing.T) {
+    unconfiguredApplication := &Application{
+        runtimeFlags: NewRuntimeFlags(config.ModeCli),
+    }
+
+    if 0 != len(unconfiguredApplication.securityDeferredListeners()) {
+        t.Fatalf("expected no declaration without a compiled security configuration")
+    }
+
+    servingApplication := newSecurityWiringApplication(t, config.ModeHttp)
+    if 0 != len(servingApplication.securityDeferredListeners()) {
+        t.Fatalf("expected the serving process to declare nothing; it registers the pair for real")
+    }
+
+    consoleApplication := newSecurityWiringApplication(t, config.ModeCli)
+
+    declared := consoleApplication.securityDeferredListeners()
+    if 2 != len(declared) {
+        t.Fatalf("expected the console process to declare the two security listeners, got %d", len(declared))
+    }
+
+    if kernelcontract.EventKernelRequest != declared[0].EventName || kernelcontract.EventKernelRequest != declared[1].EventName {
+        t.Fatalf("expected both declarations on %s, got %+v", kernelcontract.EventKernelRequest, declared)
+    }
+
+    if security.KernelFirewallListenerPriority != declared[0].Priority || security.KernelAccessControlListenerPriority != declared[1].Priority {
+        t.Fatalf("expected the real registration priorities on the declarations, got %+v", declared)
+    }
+}
+
+/* the application slot of debug:version stays empty in the wiring: the application's version arrives through output.SetApplicationVersion or not at all, and melody's own version filled in here made the command print the framework version twice */
+func TestBootCli_LeavesTheDebugVersionApplicationSlotEmpty(t *testing.T) {
+    applicationInstance := NewApplication(
+        testhelper.NewEmbeddedEnvFs(),
+        testhelper.NewEmbeddedStaticFs(),
+    )
+
+    applicationInstance.Boot()
+
+    versionCommand := (*debug.VersionCommand)(nil)
+    for _, command := range applicationInstance.cliCommands {
+        if candidate, isVersion := command.(*debug.VersionCommand); true == isVersion {
+            versionCommand = candidate
+        }
+    }
+
+    if nil == versionCommand {
+        t.Fatal("expected bootCli to register debug:version in the dev environment")
+    }
+
+    if "" != versionCommand.ApplicationVersion {
+        t.Fatalf("expected the wiring to leave the application slot empty, got %q", versionCommand.ApplicationVersion)
     }
 }

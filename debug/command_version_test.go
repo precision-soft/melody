@@ -5,11 +5,11 @@ import (
     "strings"
     "testing"
 
+    "github.com/precision-soft/melody/cli/output"
     "github.com/precision-soft/melody/container"
     melodyversion "github.com/precision-soft/melody/version"
 )
 
-/* @info the whole command had never been run by a test, in either format. It is the one an operator runs first when a deployment misbehaves, and the three versions it prints — the application's, the framework's and the runtime's — are the answer to "what is actually installed there" */
 func TestVersionCommand_TableFormat_PrintsTheThreeVersions(t *testing.T) {
     rendered, runErr := runDebugCommand(
         &VersionCommand{ApplicationVersion: "1.2.3"},
@@ -37,7 +37,6 @@ func TestVersionCommand_TableFormat_PrintsTheThreeVersions(t *testing.T) {
     }
 }
 
-/* @info an application that never called SetApplicationVersion is the ordinary case for a fresh deployment, and the row must say so rather than printing an empty cell that reads as "no application" */
 func TestVersionCommand_TableFormat_NamesAnUnknownApplicationVersion(t *testing.T) {
     rendered, runErr := runDebugCommand(
         &VersionCommand{},
@@ -51,9 +50,44 @@ func TestVersionCommand_TableFormat_NamesAnUnknownApplicationVersion(t *testing.
     if false == strings.Contains(rendered, "<unknown>") {
         t.Fatalf("expected the unknown placeholder, got %q", rendered)
     }
+
+    if true == strings.Contains(rendered, "| application | "+melodyversion.BuildVersion()) {
+        t.Fatalf("expected the application row to stop borrowing melody's version, got %q", rendered)
+    }
 }
 
-/* @info the json format is what a deployment pipeline reads, so the three versions must travel as data rather than only as a rendered table */
+/* the application row reads the process-wide declaration the composition root makes through output.SetApplicationVersion; an explicit value on the command still wins over it */
+func TestVersionCommand_ReadsTheProcessWideApplicationVersion(t *testing.T) {
+    output.SetApplicationVersion("7.7.7-declared")
+    defer output.SetApplicationVersion("")
+
+    rendered, runErr := runDebugCommand(
+        &VersionCommand{},
+        newTestRuntime(container.NewContainer()),
+        []string{},
+    )
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    if false == strings.Contains(rendered, "7.7.7-declared") {
+        t.Fatalf("expected the declared application version, got %q", rendered)
+    }
+
+    explicitRendered, explicitErr := runDebugCommand(
+        &VersionCommand{ApplicationVersion: "8.8.8-explicit"},
+        newTestRuntime(container.NewContainer()),
+        []string{},
+    )
+    if nil != explicitErr {
+        t.Fatalf("expected no error, got %v", explicitErr)
+    }
+
+    if false == strings.Contains(explicitRendered, "8.8.8-explicit") {
+        t.Fatalf("expected the explicit value to win over the declaration, got %q", explicitRendered)
+    }
+}
+
 func TestVersionCommand_JsonFormat_CarriesTheThreeVersionsAsData(t *testing.T) {
     rendered, runErr := runDebugCommand(
         &VersionCommand{ApplicationVersion: "1.2.3"},

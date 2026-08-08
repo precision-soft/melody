@@ -13,7 +13,25 @@ import (
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
+/* DeferredListener declares a listener the SERVING process wires and this process does not: the composition root knows which registrations are gated on the process shape, and the command renders them beside the dispatcher's own so an operator asking "is access control wired?" is not answered with an absence that means "not in this process". */
+type DeferredListener struct {
+    EventName    string `json:"eventName"`
+    Priority     int    `json:"priority"`
+    ListenerName string `json:"listenerName"`
+    Note         string `json:"note"`
+}
+
+type DeferredListenerProvider func() []DeferredListener
+
+/* NewEventCommand builds the command with the declaration channel; the zero-value command stays valid and simply declares nothing */
+func NewEventCommand(deferredListenerProvider DeferredListenerProvider) *EventCommand {
+    return &EventCommand{
+        deferredListenerProvider: deferredListenerProvider,
+    }
+}
+
 type EventCommand struct {
+    deferredListenerProvider DeferredListenerProvider
 }
 
 func (instance *EventCommand) Name() string {
@@ -177,15 +195,14 @@ func (instance *EventCommand) Run(
         if true == option.Verbose {
             verboseBlock := builder.AddBlock(
                 "LISTENERS",
-                []string{"event", "priority", "required", "source", "owner", "listener"},
+                []string{"event", "order", "priority", "required", "source", "owner", "listener"},
             )
 
             for _, registeredEvent := range selectSortedRegisteredEvents(registeredEvents, items) {
                 verboseBlock.AddRow(output.TableRowSeparatorToken)
 
-                sortedListeners := sortRegisteredListeners(registeredEvent.Listeners)
-
-                for index, listener := range sortedListeners {
+                /* the rows keep the dispatcher's own slice order — which IS the dispatch order, held sorted at insertion — so the verbose detail and the priorities column above it read the same run; re-sorting here once inverted listeners that share a priority, because the id was compared as text */
+                for index, listener := range registeredEvent.Listeners {
                     eventCell := ""
                     if 0 == index {
                         eventCell = registeredEvent.EventName
@@ -193,6 +210,7 @@ func (instance *EventCommand) Run(
 
                     verboseBlock.AddRow(
                         eventCell,
+                        fmt.Sprintf("%d", index+1),
                         fmt.Sprintf("%d", listener.Priority),
                         renderRequiredListenerMark(listener),
                         listener.Source,
@@ -202,6 +220,23 @@ func (instance *EventCommand) Run(
                 }
 
                 verboseBlock.AddRow(output.TableRowSeparatorToken)
+            }
+        }
+
+        deferredListeners := instance.deferredListeners()
+        if 0 < len(deferredListeners) {
+            deferredBlock := builder.AddBlock(
+                "SERVING-PROCESS LISTENERS",
+                []string{"event", "priority", "listener", "note"},
+            )
+
+            for _, deferredListener := range deferredListeners {
+                deferredBlock.AddRow(
+                    deferredListener.EventName,
+                    fmt.Sprintf("%d", deferredListener.Priority),
+                    deferredListener.ListenerName,
+                    deferredListener.Note,
+                )
             }
         }
 
@@ -217,8 +252,9 @@ func (instance *EventCommand) Run(
         if true == option.Verbose {
             /* the listener detail — including the required and may-skip marks that say whether the fail-closed guarantee is armed — existed only in the table format, so a machine consumer of the json document could never learn it at any verbosity */
             envelope.Data = eventListVerbosePayload{
-                Events:    eventsPayload,
-                Listeners: collectListenerListItems(registeredEvents, items),
+                Events:                  eventsPayload,
+                Listeners:               collectListenerListItems(registeredEvents, items),
+                ServingProcessListeners: instance.deferredListeners(),
             }
         } else {
             envelope.Data = eventsPayload
@@ -260,42 +296,7 @@ func selectSortedRegisteredEvents(
     return sortedRegisteredEvents
 }
 
-func sortRegisteredListeners(listeners []eventcontract.RegisteredListener) []eventcontract.RegisteredListener {
-    sortedListeners := make([]eventcontract.RegisteredListener, 0, len(listeners))
-    for _, listener := range listeners {
-        sortedListeners = append(sortedListeners, listener)
-    }
-
-    sort.Slice(
-        sortedListeners,
-        func(leftIndex int, rightIndex int) bool {
-            leftListener := sortedListeners[leftIndex]
-            rightListener := sortedListeners[rightIndex]
-
-            if leftListener.Priority != rightListener.Priority {
-                return leftListener.Priority > rightListener.Priority
-            }
-
-            if leftListener.Source != rightListener.Source {
-                return leftListener.Source < rightListener.Source
-            }
-
-            if leftListener.Owner != rightListener.Owner {
-                return leftListener.Owner < rightListener.Owner
-            }
-
-            if leftListener.ListenerId != rightListener.ListenerId {
-                return leftListener.ListenerId < rightListener.ListenerId
-            }
-
-            return leftListener.ListenerName < rightListener.ListenerName
-        },
-    )
-
-    return sortedListeners
-}
-
-/* collectListenerListItems flattens the windowed listener detail for the json document, in the order the table prints it. */
+/* collectListenerListItems flattens the windowed listener detail for the json document, in the order the table prints it — the dispatcher's own dispatch order, carried by the order field. */
 func collectListenerListItems(
     registeredEvents []eventcontract.RegisteredEvent,
     items []eventListItem,
@@ -303,11 +304,12 @@ func collectListenerListItems(
     listenerItems := make([]eventListenerListItem, 0, len(items))
 
     for _, registeredEvent := range selectSortedRegisteredEvents(registeredEvents, items) {
-        for _, listener := range sortRegisteredListeners(registeredEvent.Listeners) {
+        for index, listener := range registeredEvent.Listeners {
             listenerItems = append(
                 listenerItems,
                 eventListenerListItem{
                     EventName:                registeredEvent.EventName,
+                    Order:                    index + 1,
                     Priority:                 listener.Priority,
                     Required:                 listener.Required,
                     MaySkipRequiredListeners: listener.MaySkipRequiredListeners,
@@ -349,6 +351,7 @@ type eventListItem struct {
 
 type eventListenerListItem struct {
     EventName                string `json:"eventName"`
+    Order                    int    `json:"order"`
     Priority                 int    `json:"priority"`
     Required                 bool   `json:"required"`
     MaySkipRequiredListeners bool   `json:"maySkipRequiredListeners"`
@@ -358,8 +361,17 @@ type eventListenerListItem struct {
 }
 
 type eventListVerbosePayload struct {
-    Events    output.ListPayload[eventListItem] `json:"events"`
-    Listeners []eventListenerListItem           `json:"listeners"`
+    Events                  output.ListPayload[eventListItem] `json:"events"`
+    Listeners               []eventListenerListItem           `json:"listeners"`
+    ServingProcessListeners []DeferredListener                `json:"servingProcessListeners,omitempty"`
+}
+
+func (instance *EventCommand) deferredListeners() []DeferredListener {
+    if nil == instance.deferredListenerProvider {
+        return nil
+    }
+
+    return instance.deferredListenerProvider()
 }
 
 var _ clicontract.Command = (*EventCommand)(nil)

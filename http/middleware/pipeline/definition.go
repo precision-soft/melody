@@ -17,6 +17,13 @@ type HttpMiddlewareDefinition struct {
     factory             HttpMiddlewareFactory
     replaceExisting     bool
     allowDuplicates     bool
+    /* the function behind the definition, captured at registration so a description needs no factory run; empty when the registrar did not declare it */
+    functionName string
+}
+
+/* SetFunctionName records the function a description names for this definition — the registered middleware itself, or the factory that will build it — captured at registration precisely so that listing the pipeline never has to run it */
+func (instance *HttpMiddlewareDefinition) SetFunctionName(functionName string) {
+    instance.functionName = functionName
 }
 
 func NewHttpMiddlewareDefinition(

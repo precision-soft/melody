@@ -104,6 +104,8 @@ func (instance *Application) Boot() kernelcontract.Kernel {
 
     instance.disarmRouteCollisionRecorder()
 
+    instance.registerKernelHttpListeners()
+
     instance.warnUnappliedSecretMarks()
 
     instance.booted = true

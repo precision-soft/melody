@@ -386,7 +386,7 @@ func (instance *debugTestSubscriber) SubscribedEvents() map[string][]eventcontra
     }
 }
 
-/* @info the summary total counts distinct subscribers across the dispatcher: summing the per-event counts reported one subscriber on two events as two subscribers */
+/* the summary total counts distinct subscribers across the dispatcher: summing the per-event counts reported one subscriber on two events as two subscribers */
 func TestEventCommand_CountsASubscriberOnceAcrossEvents(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
     dispatcher.AddSubscriber(&debugTestSubscriber{})
@@ -413,7 +413,7 @@ func TestEventCommand_CountsASubscriberOnceAcrossEvents(t *testing.T) {
     }
 }
 
-/* @info the listener detail — including the required and may-skip marks — must be reachable in the machine format: it existed only in the table, so a json consumer could never learn whether the fail-closed guarantee is armed */
+/* the listener detail — including the required and may-skip marks — must be reachable in the machine format: it existed only in the table, so a json consumer could never learn whether the fail-closed guarantee is armed */
 func TestEventCommand_CarriesTheListenerDetailInTheVerboseJsonFormat(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
 
@@ -476,7 +476,7 @@ func TestEventCommand_CarriesTheListenerDetailInTheVerboseJsonFormat(t *testing.
     }
 }
 
-/* @info without --verbose the json document keeps its previous list shape */
+/* without --verbose the json document keeps its previous list shape */
 func TestEventCommand_KeepsThePlainJsonShapeWithoutVerbose(t *testing.T) {
     rendered, runErr := runDebugCommand(
         &EventCommand{},
@@ -546,7 +546,7 @@ func newRuntimeWithDispatcherWithoutInspection() *testRuntime {
     return newTestRuntime(serviceContainer)
 }
 
-/* @info a dispatcher that does not implement the inspection contract cannot be listed, and the command says so through a warning instead of failing or printing an empty list that reads as "no listeners are registered" — the difference matters because the answer decides whether an operator goes looking for a wiring mistake */
+/* a dispatcher that does not implement the inspection contract cannot be listed, and the command says so through a warning instead of failing or printing an empty list that reads as "no listeners are registered" — the difference matters because the answer decides whether an operator goes looking for a wiring mistake */
 func TestEventCommand_DispatcherWithoutInspection_WarnsInsteadOfReportingNoEvents(t *testing.T) {
     rendered, runErr := runDebugCommand(
         &EventCommand{},
@@ -576,7 +576,7 @@ func TestEventCommand_DispatcherWithoutInspection_WarnsInsteadOfReportingNoEvent
     }
 }
 
-/* @info the same refusal in the table format prints the empty summary rather than a table of nothing */
+/* the same refusal in the table format prints the empty summary rather than a table of nothing */
 func TestEventCommand_DispatcherWithoutInspection_PrintsTheEmptySummaryInTheTableFormat(t *testing.T) {
     rendered, runErr := runDebugCommand(
         &EventCommand{},
@@ -596,49 +596,71 @@ func TestEventCommand_DispatcherWithoutInspection_PrintsTheEmptySummaryInTheTabl
     }
 }
 
-/* @info the listener order is the dispatch order, and every tiebreak below the priority exists so that two runs of the command print the same table: registration order is not stable across boots, so a tiebreak that never fires would leave the report shuffling under the operator */
-func TestSortRegisteredListeners_OrdersByPriorityThenSourceOwnerIdAndName(t *testing.T) {
-    listeners := []eventcontract.RegisteredListener{
-        {Priority: 0, Source: "subscriber", Owner: "b", ListenerId: "2", ListenerName: "z"},
-        {Priority: 0, Source: "listener", Owner: "b", ListenerId: "2", ListenerName: "a"},
-        {Priority: 0, Source: "listener", Owner: "a", ListenerId: "9", ListenerName: "a"},
-        {Priority: 0, Source: "listener", Owner: "a", ListenerId: "1", ListenerName: "b"},
-        {Priority: 0, Source: "listener", Owner: "a", ListenerId: "1", ListenerName: "a"},
-        {Priority: 10, Source: "subscriber", Owner: "z", ListenerId: "99", ListenerName: "z"},
-    }
+/* the verbose block guarantees the DISPATCH order — the dispatcher's own slice, held sorted at insertion — carried by the order column; the re-sort it replaced compared the listener id as text, so among eleven listeners of one priority the tenth printed second, and the two halves of one output contradicted each other */
+func TestEventCommand_VerboseListsListenersInDispatchOrder(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
 
-    sorted := sortRegisteredListeners(listeners)
-
-    expectedOrderList := []eventcontract.RegisteredListener{
-        {Priority: 10, Source: "subscriber", Owner: "z", ListenerId: "99", ListenerName: "z"},
-        {Priority: 0, Source: "listener", Owner: "a", ListenerId: "1", ListenerName: "a"},
-        {Priority: 0, Source: "listener", Owner: "a", ListenerId: "1", ListenerName: "b"},
-        {Priority: 0, Source: "listener", Owner: "a", ListenerId: "9", ListenerName: "a"},
-        {Priority: 0, Source: "listener", Owner: "b", ListenerId: "2", ListenerName: "a"},
-        {Priority: 0, Source: "subscriber", Owner: "b", ListenerId: "2", ListenerName: "z"},
-    }
-
-    for index, listener := range sorted {
-        if expectedOrderList[index] != listener {
-            t.Fatalf("unexpected order at %d: %+v in %+v", index, listener, sorted)
+    /* eleven same-priority listeners reach two-digit ids — the range the text comparison used to invert — and the paired A,A,B,B rhythm is what makes that inversion visible: a strictly alternating sequence happens to survive the "1,10,11,2..." permutation unchanged */
+    registrationPattern := []string{"A", "A", "B", "B", "A", "A", "B", "B", "A", "B", "A"}
+    for _, mark := range registrationPattern {
+        if "A" == mark {
+            dispatcher.AddListener("event.order", eventOrderProbeListenerAlpha, 0)
+        } else {
+            dispatcher.AddListener("event.order", eventOrderProbeListenerBeta, 0)
         }
     }
 
-    if "1" != sorted[1].ListenerId || "a" != sorted[1].Owner {
-        t.Fatalf("expected the lowest owner and id first among equals, got %+v", sorted[1])
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(
+        event.ServiceEventDispatcher,
+        func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {
+            return dispatcher, nil
+        },
+    )
+
+    rendered, runErr := runDebugCommand(
+        &EventCommand{},
+        newTestRuntime(serviceContainer),
+        []string{"--format=table", "--table-width=400", "--verbose"},
+    )
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
     }
 
-    if "subscriber" != sorted[len(sorted)-1].Source {
-        t.Fatalf("expected the subscriber source to sort after the listener source, got %+v", sorted[len(sorted)-1])
+    row := debugTableBlockRow(rendered, "LISTENERS")
+    if 11 != len(row) {
+        t.Fatalf("expected eleven listener rows, got %d in %q", len(row), rendered)
     }
 
-    /* the input must not be reordered under the caller: the report reads the dispatcher's own slice */
-    if "subscriber" != listeners[0].Source || 0 != listeners[0].Priority {
-        t.Fatalf("expected the caller's slice to keep its order, got %+v", listeners[0])
+    /* the registration pattern, by suffix: rows must repeat it verbatim — a re-sort of the two-digit ids would shuffle exactly this sequence */
+    expectedSuffixes := []string{"Alpha", "Alpha", "Beta", "Beta", "Alpha", "Alpha", "Beta", "Beta", "Alpha", "Beta", "Alpha"}
+
+    for index, cell := range row {
+        if fmt.Sprintf("%d", index+1) != cell[1] {
+            t.Fatalf("expected the order column to carry the dispatch rank, got %q at row %d", cell[1], index)
+        }
+
+        if false == strings.HasSuffix(cell[6], expectedSuffixes[index]) {
+            t.Fatalf("expected row %d to carry the listener registered %s, got %q", index, expectedSuffixes[index], cell[6])
+        }
     }
 }
 
-/* @info the column answers whether the fail-closed dispatch guarantee is armed for a listener, and the four combinations say four different things; collapsing any two of them makes an unarmed guarantee look exactly like an armed one */
+func eventOrderProbeListenerAlpha(
+    runtimeInstance runtimecontract.Runtime,
+    eventInstance eventcontract.Event,
+) error {
+    return nil
+}
+
+func eventOrderProbeListenerBeta(
+    runtimeInstance runtimecontract.Runtime,
+    eventInstance eventcontract.Event,
+) error {
+    return nil
+}
+
+/* the column answers whether the fail-closed dispatch guarantee is armed for a listener, and the four combinations say four different things; collapsing any two of them makes an unarmed guarantee look exactly like an armed one */
 func TestRenderRequiredListenerMark_TellsTheFourCombinationsApart(t *testing.T) {
     expectedList := []struct {
         required bool
@@ -666,5 +688,58 @@ func TestRenderRequiredListenerMark_TellsTheFourCombinationsApart(t *testing.T) 
                 rendered,
             )
         }
+    }
+}
+
+/* the declared block is what keeps the command honest about the listeners only the serving process wires: without it an operator asking "is access control wired?" reads an absence that actually means "not in this process" */
+func TestEventCommand_RendersTheDeclaredServingProcessListeners(t *testing.T) {
+    command := NewEventCommand(func() []DeferredListener {
+        return []DeferredListener{
+            {EventName: "kernel.request", Priority: 50, ListenerName: "security resolution listener", Note: "registered only in the http serving process"},
+        }
+    })
+
+    rendered, runErr := runDebugCommand(
+        command,
+        newEventTestRuntime(1),
+        []string{"--format=table", "--table-width=400"},
+    )
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    row := debugTableBlockRow(rendered, "SERVING-PROCESS LISTENERS")
+    if 1 != len(row) {
+        t.Fatalf("expected the declared block, got %d rows in %q", len(row), rendered)
+    }
+
+    if "kernel.request" != row[0][0] || "50" != row[0][1] || "security resolution listener" != row[0][2] {
+        t.Fatalf("expected the declaration columns, got %v", row[0])
+    }
+
+    verboseRendered, verboseErr := runDebugCommand(
+        command,
+        newEventTestRuntime(1),
+        []string{"--format=json", "--verbose"},
+    )
+    if nil != verboseErr {
+        t.Fatalf("expected no error, got %v", verboseErr)
+    }
+
+    if false == strings.Contains(verboseRendered, "servingProcessListeners") {
+        t.Fatalf("expected the declaration in the verbose json document, got %q", verboseRendered)
+    }
+
+    bareRendered, bareErr := runDebugCommand(
+        &EventCommand{},
+        newEventTestRuntime(1),
+        []string{"--format=table", "--table-width=400"},
+    )
+    if nil != bareErr {
+        t.Fatalf("expected no error, got %v", bareErr)
+    }
+
+    if true == strings.Contains(bareRendered, "SERVING-PROCESS LISTENERS") {
+        t.Fatalf("expected the zero-value command to declare nothing, got %q", bareRendered)
     }
 }
