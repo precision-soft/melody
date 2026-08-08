@@ -335,7 +335,11 @@ func (instance *Application) registerHttpSession() {
             func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
                 storage := session.SessionStorageMustFromResolver(resolver)
 
-                return session.NewManager(storage, instance.configuration.Http().SessionTtl()), nil
+                return session.NewManagerWithTombstoneRetention(
+                    storage,
+                    instance.configuration.Http().SessionTtl(),
+                    instance.configuration.Http().SessionTombstoneRetention(),
+                ), nil
             },
         )
     }

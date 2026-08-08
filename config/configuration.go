@@ -473,6 +473,17 @@ func (instance *Configuration) buildHttpConfiguration() error {
         )
     }
 
+    sessionTombstoneRetention, sessionTombstoneRetentionErr := instance.MustGet(KernelHttpSessionTombstoneRetention).Duration()
+    if nil != sessionTombstoneRetentionErr {
+        return exception.NewError(
+            "invalid environment value",
+            exceptioncontract.Context{
+                "environmentKey": HttpSessionTombstoneRetentionKey,
+            },
+            sessionTombstoneRetentionErr,
+        )
+    }
+
     shutdownTimeout, shutdownTimeoutErr := instance.MustGet(KernelHttpShutdownTimeout).Duration()
     if nil != shutdownTimeoutErr {
         return exception.NewError(
@@ -494,6 +505,7 @@ func (instance *Configuration) buildHttpConfiguration() error {
         staticCacheMaxAge,
         staticExcludedPaths,
         sessionTtl,
+        sessionTombstoneRetention,
         shutdownTimeout,
     )
     if nil != newHttpConfigurationErr {

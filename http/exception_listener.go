@@ -2,15 +2,11 @@ package http
 
 import (
     "errors"
-    "fmt"
-    "html"
     nethttp "net/http"
-    "time"
 
     eventcontract "github.com/precision-soft/melody/event/contract"
     "github.com/precision-soft/melody/exception"
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
-    httpcontract "github.com/precision-soft/melody/http/contract"
     kernelcontract "github.com/precision-soft/melody/kernel/contract"
     "github.com/precision-soft/melody/logging"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
@@ -97,64 +93,31 @@ func RegisterKernelExceptionListener(eventDispatcher eventcontract.EventDispatch
                 message = exceptionEvent.Err().Error()
             }
 
-            response := (httpcontract.Response)(nil)
+            payloadExtras := map[string]any{}
 
-            if true == PrefersHtml(exceptionEvent.Request()) {
-                requestId := ""
-                if nil != exceptionEvent.Request() && nil != exceptionEvent.Request().RequestContext() {
-                    requestId = exceptionEvent.Request().RequestContext().RequestId()
-                }
-
-                htmlBody := "<!doctype html><html><head><meta charset=\"utf-8\"><title>Melody Error</title></head><body>" +
-                    "<h1>Error</h1>" +
-                    "<p>Status: " + fmt.Sprintf("%d", statusCode) + "</p>" +
-                    "<p>Message: " + html.EscapeString(message) + "</p>" +
-                    "<p>Request-Id: " + html.EscapeString(requestId) + "</p>" +
-                    "</body></html>"
-
-                response = HtmlResponse(statusCode, htmlBody)
-            } else {
-                payload := map[string]any{
-                    "error": message,
-                    "time":  time.Now().Format(time.RFC3339),
-                }
-
-                /* the errors context key is the public half of an http exception's context: BindJsonAndValidate attaches the per-field validation errors under it, and without this the detail the validator computed reached neither the client nor, structured, anything else */
-                if contextHttpException := exception.AsHttpException(exceptionEvent.Err()); nil != contextHttpException {
-                    if errorsValue, exists := contextHttpException.Context()["errors"]; true == exists {
-                        payload["errors"] = errorsValue
-                    }
-                }
-
-                if true == debugMode {
-                    var melodyError *exception.Error
-                    melodyErrorFound := errors.As(exceptionEvent.Err(), &melodyError)
-                    if true == melodyErrorFound && nil != melodyError {
-                        payload["context"] = melodyError.Context()
-
-                        causeErr := melodyError.CauseErr()
-                        if nil != causeErr {
-                            payload["cause"] = causeErr.Error()
-                        }
-                    }
-                }
-
-                jsonResponse, jsonErr := JsonResponse(statusCode, payload)
-                if nil == jsonErr {
-                    response = jsonResponse
-                } else {
-                    response = JsonErrorResponse(statusCode, message)
+            /* the errors context key is the public half of an http exception's context: BindJsonAndValidate attaches the per-field validation errors under it, and without this the detail the validator computed reached neither the client nor, structured, anything else */
+            if nil != httpException {
+                if errorsValue, exists := httpException.Context()["errors"]; true == exists {
+                    payloadExtras["errors"] = errorsValue
                 }
             }
 
-            if nil != exceptionEvent.Request() && nil != exceptionEvent.Request().RequestContext() {
-                requestId := exceptionEvent.Request().RequestContext().RequestId()
-                if "" != requestId && "" == response.Headers().Get(HeaderRequestId) {
-                    response.Headers().Set(HeaderRequestId, requestId)
+            if true == debugMode {
+                var melodyError *exception.Error
+                melodyErrorFound := errors.As(exceptionEvent.Err(), &melodyError)
+                if true == melodyErrorFound && nil != melodyError {
+                    payloadExtras["context"] = melodyError.Context()
+
+                    causeErr := melodyError.CauseErr()
+                    if nil != causeErr {
+                        payloadExtras["cause"] = causeErr.Error()
+                    }
                 }
             }
 
-            exceptionEvent.SetResponse(response)
+            exceptionEvent.SetResponse(
+                renderErrorResponse(runtimeInstance, exceptionEvent.Request(), statusCode, message, payloadExtras),
+            )
 
             return nil
         },

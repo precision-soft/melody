@@ -64,6 +64,23 @@ func (instance *Application) RegisterHttpMiddlewareFactories(
     instance.httpMiddlewares.UseFactories(factories...)
 }
 
+/* errorHandlerReporter is the door through which the composition root asks a kernel whether the
+application installed its own error handler — a Has door like the logger's, so a replacement kernel
+that does not implement it keeps the framework exception listener unconditionally, exactly the
+behavior it has today. */
+type errorHandlerReporter interface {
+    HasErrorHandler() bool
+}
+
+func kernelHasErrorHandler(httpKernel httpcontract.Kernel) bool {
+    reporter, ok := httpKernel.(errorHandlerReporter)
+    if false == ok {
+        return false
+    }
+
+    return reporter.HasErrorHandler()
+}
+
 func (instance *Application) bootHttp() {
     kernelInstance := instance.kernel
 
@@ -83,11 +100,18 @@ func (instance *Application) runHttp(
 
     http.RegisterKernelResponseNormalizerListener(eventDispatcher)
     http.RegisterKernelTerminateAccessLogListener(eventDispatcher)
-    http.RegisterKernelExceptionListener(eventDispatcher, instance.kernel.DebugMode())
 
     configuration := instance.configuration
 
     httpKernel := instance.kernel.HttpKernel()
+
+    /* the framework exception listener answers every kernel.exception dispatch, so with it
+    registered an error handler the application installed at boot could never run — the kernel
+    consults the handler only when the dispatch produced no response. A handler installed by now
+    therefore takes the listener's place; without one the listener renders exactly as before. */
+    if false == kernelHasErrorHandler(httpKernel) {
+        http.RegisterKernelExceptionListener(eventDispatcher, instance.kernel.DebugMode())
+    }
     httpKernel.Use(
         instance.httpMiddlewares.all(instance.kernel)...,
     )

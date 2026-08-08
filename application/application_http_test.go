@@ -13,11 +13,13 @@ import (
     "github.com/precision-soft/melody/config"
     containercontract "github.com/precision-soft/melody/container/contract"
     "github.com/precision-soft/melody/exception"
+    "github.com/precision-soft/melody/http"
     httpcontract "github.com/precision-soft/melody/http/contract"
     "github.com/precision-soft/melody/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/kernel/contract"
     "github.com/precision-soft/melody/logging"
     loggingcontract "github.com/precision-soft/melody/logging/contract"
+    "github.com/precision-soft/melody/runtime"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
@@ -592,5 +594,120 @@ func TestAwaitHttpServerEnd_TreatsServerClosedAsACleanShutdown(t *testing.T) {
     endErr := awaitHttpServerEnd(cancelledContext, &nethttp.Server{}, errorChannel, &warningRecordingLogger{}, time.Second)
     if nil != endErr {
         t.Fatalf("expected a clean shutdown for the server's own closed signal, got: %v", endErr)
+    }
+}
+
+type errorHandlerlessKernel struct{}
+
+func (instance *errorHandlerlessKernel) Use(middlewares ...httpcontract.Middleware) {}
+
+func (instance *errorHandlerlessKernel) SetNotFoundHandler(handler httpcontract.Handler) {}
+
+func (instance *errorHandlerlessKernel) SetErrorHandler(handler httpcontract.ErrorHandler) {}
+
+func (instance *errorHandlerlessKernel) SetForwardedHeadersPolicy(policy httpcontract.ForwardedHeadersPolicy) {
+}
+
+func (instance *errorHandlerlessKernel) SetSessionCookiePolicy(policy httpcontract.SessionCookiePolicy) {
+}
+
+func (instance *errorHandlerlessKernel) ServeHttp(serviceContainer containercontract.Container) nethttp.Handler {
+    return nil
+}
+
+var _ httpcontract.Kernel = (*errorHandlerlessKernel)(nil)
+
+func TestKernelHasErrorHandler_ReadsTheHasDoor(t *testing.T) {
+    bareKernel := http.NewKernel(http.NewRouter())
+
+    if true == kernelHasErrorHandler(bareKernel) {
+        t.Fatalf("expected no error handler on a fresh kernel")
+    }
+
+    bareKernel.SetErrorHandler(
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request, err error) httpcontract.Response {
+            return nil
+        },
+    )
+
+    if false == kernelHasErrorHandler(bareKernel) {
+        t.Fatalf("expected the installed error handler to be reported")
+    }
+
+    if true == kernelHasErrorHandler(&errorHandlerlessKernel{}) {
+        t.Fatalf("expected a kernel without the door to be read as having no handler")
+    }
+}
+
+/* the gate is proven through runHttp itself: after the run the exception listener either answers a
+kernel.exception dispatch or leaves it unanswered, which is the observable difference between the
+listener registered and skipped. */
+func TestRunHttp_SkipsTheExceptionListenerWhenAnErrorHandlerIsInstalled(t *testing.T) {
+    applicationInstance := newCacheWarningTestApplication(t, config.ModeHttp, logging.NewNopLogger())
+
+    applicationInstance.kernel.HttpKernel().SetErrorHandler(
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request, err error) httpcontract.Response {
+            return nil
+        },
+    )
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if runErr := applicationInstance.runHttp(cancelledContext); nil != runErr {
+        t.Fatalf("unexpected run http error: %v", runErr)
+    }
+
+    runtimeInstance := runtime.New(
+        context.Background(),
+        applicationInstance.kernel.ServiceContainer().NewScope(),
+        applicationInstance.kernel.ServiceContainer(),
+    )
+
+    exceptionEvent := http.NewKernelExceptionEvent(
+        runtimeInstance,
+        testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/fail"),
+        exception.NewError("run http gate failure", nil, nil),
+    )
+
+    _, dispatchErr := applicationInstance.kernel.EventDispatcher().DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if nil != exceptionEvent.Response() {
+        t.Fatalf("expected the framework exception listener to be skipped when a handler is installed")
+    }
+}
+
+func TestRunHttp_RegistersTheExceptionListenerWithoutAnErrorHandler(t *testing.T) {
+    applicationInstance := newCacheWarningTestApplication(t, config.ModeHttp, logging.NewNopLogger())
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if runErr := applicationInstance.runHttp(cancelledContext); nil != runErr {
+        t.Fatalf("unexpected run http error: %v", runErr)
+    }
+
+    runtimeInstance := runtime.New(
+        context.Background(),
+        applicationInstance.kernel.ServiceContainer().NewScope(),
+        applicationInstance.kernel.ServiceContainer(),
+    )
+
+    exceptionEvent := http.NewKernelExceptionEvent(
+        runtimeInstance,
+        testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/fail"),
+        exception.NewError("run http gate failure", nil, nil),
+    )
+
+    _, dispatchErr := applicationInstance.kernel.EventDispatcher().DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if nil == exceptionEvent.Response() {
+        t.Fatalf("expected the framework exception listener to answer without a handler installed")
     }
 }

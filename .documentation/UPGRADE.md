@@ -517,6 +517,44 @@ if 0 > ttl {
 }
 ```
 
+### Behavioural: `Session.Get` hands out a copy
+
+**What changed.** [`session.Session.Get`](../session/session.go) returns a copy at the depth `All` copies at. The live nested value it used to hand out, mutated in place, changed the session without passing through `Set`: `modified` stayed false, `SaveSession` skipped the write and reported success, and the mutation silently never persisted.
+
+**Symptom.** Code that mutated the map or slice returned by `Get` and relied on the live session object changing underneath — within the same request only, since the mutation never reached the storage — now works on its own copy.
+
+**Remedy.** Read, mutate the copy, `Set` it back — the pattern that was always the correct one is unaffected:
+
+```go
+profile := sessionInstance.Get("profile").(map[string]any)
+profile["role"] = "admin"
+sessionInstance.Set("profile", profile)
+```
+
+### Behavioural: the static file server copies its configuration at construction
+
+**What changed.** [`static.NewFileServer`](../http/static/file_server.go) copies the `FileServerConfig` it is given — struct and both lists — and applies its defaults to the copy. It used to retain the caller's pointer, write `index.html` and `3600` into the caller's own struct, and read the exclusion lists live, so `SetExcludedPathList`/`SetAllowedDotPrefixList` called after construction raced the in-flight requests reading them with no lock.
+
+**Symptom.** A setter called after `NewFileServer` no longer affects the server already built, and the caller's config struct keeps its zero values after construction.
+
+**Remedy.** Configure before constructing — the order the framework's own wiring always used. A deployment that genuinely reconfigures at runtime builds a new server from the updated config and swaps it where it is consulted.
+
+### Behavioural: an installed error handler takes the exception listener's place
+
+**What changed.** The application registers the framework exception listener only when [`Kernel.SetErrorHandler`](../http/kernel.go) installed nothing by boot. The listener answers every kernel.exception dispatch and the kernel consults the handler only when the dispatch produced no response, so an installed handler could never run.
+
+**Symptom.** An application that had installed an error handler — dead code until now — finds it answering its error responses, and the listener's rendering (negotiation, the request-id header, the validation errors payload, the warning-versus-error log grading) replaced by the handler's own.
+
+**Remedy.** None for the ordinary application. One that installed a handler experimentally and prefers the framework rendering removes the `SetErrorHandler` call; one that keeps its handler and wants a detail of the framework rendering back renders it through the same door the framework uses, a kernel.exception listener at a priority above `-1000`.
+
+### Behavioural: error bodies negotiate their representation, and `X-Request-Id` arrives once
+
+**What changed.** Every default error rendering — the exception listener and the kernel's six fallback paths — goes through one renderer that honours the accept header the way the success path does, with one deliberate asymmetry: an accept header that refuses every available media type keeps the error's own status over the default json body instead of answering `406`, because a `401` masked as not-acceptable hides the refusal from the client that has to react to it. And [`WriteToHttpResponseWriter`](../http/response_writer.go) now gives a header key named by the response to the response — the writer's values for it are replaced, not appended to — which is what ends the `X-Request-Id` duplicate on every error response.
+
+**Symptom.** With a non-json serializer registered, a client that negotiated it receives error bodies in that representation where it always received json. Error responses carry `X-Request-Id` once where they carried it twice. The kernel's own fallback html page gained the status and request-id lines the listener's page always had.
+
+**Remedy.** None for a client reading the fields; a client that hardcoded the error content type sends an accept header for it, or none at all.
+
 ### Compile-level: `container/contract.ScopeManager` and `container/contract.Scope` gained `RegisterScoped`
 
 **What changed.** A scope is now a registrar of its own. [`container/contract.ScopeManager`](../container/contract/scope.go) declares `RegisterScoped(serviceName string, provider any, options ...RegisterOption) error` and `MustRegisterScoped(...)`, which declare a service whose lifetime is one scope — one http request, one command run — built lazily on the first resolution through a scope and closed when that scope closes. [`container/contract.Scope`](../container/contract/scope.go) declares the same two verbs through [`ScopedRegistrar`](../container/contract/scoped_registrar.go), for adding a service to one live scope.
@@ -604,6 +642,20 @@ See [Versioning policy for breaking changes](#versioning-policy-for-breaking-cha
 ```go
 func (instance *CustomHttpConfiguration) StaticExcludedPaths() []string {
 	return append([]string{}, instance.staticExcludedPaths...)
+}
+```
+
+### Compile-level: `config/contract.HttpConfiguration` gained `SessionTombstoneRetention`
+
+**What changed.** [`config/contract.HttpConfiguration`](../config/contract/http.go) declares `SessionTombstoneRetention() time.Duration`, how long a deleted session id keeps refusing a write-back. The framework's own implementation reads it from `MELODY_HTTP_SESSION_TOMBSTONE_RETENTION` (`kernel.http.session_tombstone_retention`), five minutes by default — the constant the window used to be — and refuses zero and negative at boot, because a window that refuses nothing is not a shorter window but a disarmed logout defence.
+
+**Symptom.** A type of your own implementing `config/contract.HttpConfiguration` no longer satisfies the interface, and the assignment fails to compile with `missing method SessionTombstoneRetention`.
+
+**Remedy.** Implement it. Returning `config.DefaultSessionTombstoneRetention` keeps the behaviour the interface had without the method:
+
+```go
+func (instance *CustomHttpConfiguration) SessionTombstoneRetention() time.Duration {
+	return config.DefaultSessionTombstoneRetention
 }
 ```
 

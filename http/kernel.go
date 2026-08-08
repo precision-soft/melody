@@ -2,7 +2,6 @@ package http
 
 import (
     "errors"
-    "html"
     nethttp "net/http"
     "runtime/debug"
     "sort"
@@ -82,8 +81,20 @@ func (instance *Kernel) SetNotFoundHandler(handler httpcontract.Handler) {
     instance.notFoundHandler = handler
 }
 
+/* SetErrorHandler installs the application's own error rendering, and it is read at boot: the
+application registers the framework exception listener only when no handler is installed by then,
+because that listener answers every kernel.exception dispatch first and a handler behind it can
+never run. An installed handler therefore takes over what the listener did — negotiation, the
+request-id header, the validation errors payload — and when it returns nil the kernel's own default
+rendering answers instead. */
 func (instance *Kernel) SetErrorHandler(handler httpcontract.ErrorHandler) {
     instance.errorHandler = handler
+}
+
+/* HasErrorHandler reports whether the application installed an error handler; the composition root
+reads it before deciding to register the framework exception listener. */
+func (instance *Kernel) HasErrorHandler() bool {
+    return nil != instance.errorHandler
 }
 
 func (instance *Kernel) SetForwardedHeadersPolicy(policy httpcontract.ForwardedHeadersPolicy) {
@@ -354,20 +365,14 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             }
 
             if nil == exceptionEvent.Response() {
-                statusCode := nethttp.StatusInternalServerError
                 message := "internal server error"
                 if true == debugMode {
                     message = recoveredErr.Error()
                 }
 
-                if true == PrefersHtml(melodyRequest) {
-                    exceptionEvent.SetResponse(HtmlResponse(
-                        statusCode,
-                        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Melody Error</title></head><body><h1>Error</h1><p>"+html.EscapeString(message)+"</p></body></html>",
-                    ))
-                } else {
-                    exceptionEvent.SetResponse(JsonErrorResponse(statusCode, message))
-                }
+                exceptionEvent.SetResponse(
+                    renderErrorResponse(runtimeInstance, melodyRequest, nethttp.StatusInternalServerError, message, nil),
+                )
             }
 
             /* the response built before the panic may own an open file (FileResponse/ServeReader) and is about to lose its only reference, so it is closed unless the exception handler chose to keep it */
@@ -444,17 +449,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 message = "payload too large"
             }
 
-            var refusalResponse httpcontract.Response
-            if true == PrefersHtml(melodyRequest) {
-                refusalResponse = HtmlResponse(
-                    statusCode,
-                    "<!doctype html><html><head><meta charset=\"utf-8\"><title>Melody Error</title></head><body><h1>Error</h1><p>"+html.EscapeString(message)+"</p></body></html>",
-                )
-            } else {
-                refusalResponse = JsonErrorResponse(statusCode, message)
-            }
-
-            finalResponse = refusalResponse
+            finalResponse = renderErrorResponse(runtimeInstance, melodyRequest, statusCode, message, nil)
 
             kernelResponseEvent := NewKernelResponseEvent(melodyRequest, finalResponse)
             _, eventKernelResponseErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelResponse, kernelResponseEvent)
@@ -497,14 +492,9 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             /* the response the stopping listener produced is replaced below and reaches no writer, so a file-backed body would be leaked */
             closeDiscardedResponseBody(kernelRequestEvent.Response(), requestLogger)
 
-            if true == PrefersHtml(melodyRequest) {
-                kernelRequestEvent.SetResponse(HtmlResponse(
-                    statusCode,
-                    "<!doctype html><html><head><meta charset=\"utf-8\"><title>Melody Error</title></head><body><h1>Error</h1><p>"+html.EscapeString(message)+"</p></body></html>",
-                ))
-            } else {
-                kernelRequestEvent.SetResponse(JsonErrorResponse(statusCode, message))
-            }
+            kernelRequestEvent.SetResponse(
+                renderErrorResponse(runtimeInstance, melodyRequest, statusCode, message, nil),
+            )
         }
 
         if nil != kernelRequestEvent.Response() {
@@ -626,20 +616,14 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                         }
 
                         if nil == kernelExceptionEvent.Response() {
-                            statusCode := nethttp.StatusInternalServerError
                             message := "internal server error"
                             if true == debugMode {
                                 message = err.Error()
                             }
 
-                            if true == PrefersHtml(request) {
-                                kernelExceptionEvent.SetResponse(HtmlResponse(
-                                    statusCode,
-                                    "<!doctype html><html><head><meta charset=\"utf-8\"><title>Melody Error</title></head><body><h1>Error</h1><p>"+html.EscapeString(message)+"</p></body></html>",
-                                ))
-                            } else {
-                                kernelExceptionEvent.SetResponse(JsonErrorResponse(statusCode, message))
-                            }
+                            kernelExceptionEvent.SetResponse(
+                                renderErrorResponse(runtimeInstance, request, nethttp.StatusInternalServerError, message, nil),
+                            )
                         }
 
                         if nil != response && response != kernelExceptionEvent.Response() {
@@ -672,14 +656,9 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
             closeDiscardedResponseBody(kernelControllerEvent.Response(), requestLogger)
 
-            if true == PrefersHtml(melodyRequest) {
-                kernelControllerEvent.SetResponse(HtmlResponse(
-                    statusCode,
-                    "<!doctype html><html><head><meta charset=\"utf-8\"><title>Melody Error</title></head><body><h1>Error</h1><p>"+html.EscapeString(message)+"</p></body></html>",
-                ))
-            } else {
-                kernelControllerEvent.SetResponse(JsonErrorResponse(statusCode, message))
-            }
+            kernelControllerEvent.SetResponse(
+                renderErrorResponse(runtimeInstance, melodyRequest, statusCode, message, nil),
+            )
         }
 
         if nil != kernelControllerEvent.Response() {
@@ -746,20 +725,14 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             }
 
             if nil == kernelExceptionEvent.Response() {
-                statusCode := nethttp.StatusInternalServerError
                 message := "internal server error"
                 if true == debugMode {
                     message = finalHandlerErr.Error()
                 }
 
-                if true == PrefersHtml(melodyRequest) {
-                    kernelExceptionEvent.SetResponse(HtmlResponse(
-                        statusCode,
-                        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Melody Error</title></head><body><h1>Error</h1><p>"+html.EscapeString(message)+"</p></body></html>",
-                    ))
-                } else {
-                    kernelExceptionEvent.SetResponse(JsonErrorResponse(statusCode, message))
-                }
+                kernelExceptionEvent.SetResponse(
+                    renderErrorResponse(runtimeInstance, melodyRequest, nethttp.StatusInternalServerError, message, nil),
+                )
             }
 
             if nil != response && response != kernelExceptionEvent.Response() {

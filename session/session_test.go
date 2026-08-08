@@ -108,7 +108,6 @@ func TestSession_String_ReturnsEmptyWhenMissing(t *testing.T) {
     }
 }
 
-/* @info String answers the empty string for a value that is not one, rather than rendering it: the accessor exists so a handler can read a stored name without asserting, and handing back the rendering of an int or a map would put a value into a page that no writer ever stored as text */
 func TestSession_String_ReturnsEmptyForAValueThatIsNotAString(t *testing.T) {
     storage := NewInMemoryStorage()
     defer storage.Close()
@@ -130,7 +129,6 @@ func TestSession_String_ReturnsEmptyForAValueThatIsNotAString(t *testing.T) {
 
 var _ sessioncontract.Session = (*Session)(nil)
 
-/* @info Clear ends the session and the ending latches: a later Set puts the value back and still marks the session modified, but it cannot make the session look live again. Without the latch a logout handler that clears the session, followed by anything writing to the same object — a middleware or an event listener leaving a farewell message — had the response path take the save branch instead of the delete branch, so the values were overwritten while the pre-logout id stayed alive in the storage and was re-issued under the same cookie. */
 func TestSession_Clear_IsNotUndoneByALaterSet(t *testing.T) {
     storage := NewInMemoryStorage()
     manager := NewManager(storage, 30*time.Minute)
@@ -156,7 +154,6 @@ func TestSession_Clear_IsNotUndoneByALaterSet(t *testing.T) {
     }
 }
 
-/* @info The response path reads the latch through IsCleared, so a cleared session followed by a write is deleted rather than saved back under the id the client already holds. */
 func TestSession_ClearedSessionIsDeletedRatherThanSavedAfterALaterSet(t *testing.T) {
     storage := NewInMemoryStorage()
     manager := NewManager(storage, 30*time.Minute)
@@ -182,7 +179,6 @@ func TestSession_ClearedSessionIsDeletedRatherThanSavedAfterALaterSet(t *testing
     }
 }
 
-/* @info All hands out a copy that reaches all the way down, the depth both storages already copy at. A copy of only the top level would hand back the very map a nested value holds: mutating it would change the live session without passing through Set, so the session would not be marked modified and the change would never be persisted — and once the response path has handed the same value to the storage, a caller still holding it races the copy the storage makes. */
 func TestSession_AllReturnsACopyThatReachesNestedValues(t *testing.T) {
     instance := &Session{
         id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -222,5 +218,41 @@ func TestSession_AllReturnsACopyThatReachesNestedValues(t *testing.T) {
 
     if "a" != liveSlice[0] {
         t.Fatalf("expected the live nested slice to be untouched, got %v", liveSlice[0])
+    }
+}
+
+func TestSession_GetHandsOutACopyAtTheDepthAllCopiesAt(t *testing.T) {
+    instance := &Session{
+        id: "cccccccccccccccccccccccccccccccc",
+        values: map[string]any{
+            "profile": map[string]any{"role": "user"},
+            "tags":    []any{"a"},
+        },
+    }
+
+    nested, ok := instance.Get("profile").(map[string]any)
+    if false == ok {
+        t.Fatalf("expected the nested map")
+    }
+    nested["role"] = "admin"
+
+    nestedSlice, ok := instance.Get("tags").([]any)
+    if false == ok {
+        t.Fatalf("expected the nested slice")
+    }
+    nestedSlice[0] = "b"
+
+    if true == instance.IsModified() {
+        t.Fatalf("expected a mutation of the copy to leave the session unmarked")
+    }
+
+    second, ok := instance.Get("profile").(map[string]any)
+    if false == ok || "user" != second["role"] {
+        t.Fatalf("expected the live session to be untouched by a write to the returned copy, got %v", second)
+    }
+
+    secondSlice, ok := instance.Get("tags").([]any)
+    if false == ok || "a" != secondSlice[0] {
+        t.Fatalf("expected the live nested slice to be untouched, got %v", secondSlice)
     }
 }

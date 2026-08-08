@@ -23,6 +23,10 @@ func (instance *Session) Id() string {
     return instance.id
 }
 
+/* Get hands out a copy at the depth All copies at, for the same reason All does: the live nested
+value, mutated in place, would change the session without passing through Set — the session would
+not be marked modified, SaveSession would skip the write and report success, and the mutation would
+silently never persist. Read, mutate the copy, Set it back. */
 func (instance *Session) Get(key string) any {
     instance.mutex.RLock()
     value, exists := instance.values[key]
@@ -32,7 +36,7 @@ func (instance *Session) Get(key string) any {
         return nil
     }
 
-    return value
+    return internal.CopyAnyValue(value)
 }
 
 func (instance *Session) String(key string) string {

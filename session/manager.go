@@ -13,33 +13,55 @@ import (
 /* ErrSessionDeleted is the cause carried by the error SaveSession returns for a session that was deleted while the request holding it was still running. It says the session ended, not that the storage failed, and the two need different answers: the response path expires the browser cookie and serves the handler's response, where a storage outage suppresses the cookie and answers 500. */
 var ErrSessionDeleted = errors.New("session was deleted")
 
-/* TombstoneRetention is how long a deleted session id is remembered so a request that loaded that session before it was deleted cannot write it back. It has to cover the longest a request can still be holding a snapshot taken before the delete — the lifetime of an in-flight request, not the lifetime of a session — so it is measured in minutes rather than hours, and what it costs is one entry per deletion within the window. */
+/* TombstoneRetention is the default for how long a deleted session id is remembered so a request that loaded that session before it was deleted cannot write it back. It has to cover the longest a request can still be holding a snapshot taken before the delete — the lifetime of an in-flight request, not the lifetime of a session — and nothing in the chain bounds that lifetime: the server's socket timeouts cut the connection, not the handler goroutine, so a request that outlives the window can save the deleted session back. A deployment whose slowest legitimate request exceeds five minutes sizes the window to match, through MELODY_HTTP_SESSION_TOMBSTONE_RETENTION on the framework path or NewManagerWithTombstoneRetention when wiring the manager by hand; what the window costs is one remembered entry per deletion inside it, and the record lives in this manager, per process. */
 const TombstoneRetention = 5 * time.Minute
 
 type Manager struct {
-    storage      sessioncontract.Storage
-    ttl          time.Duration
-    ownsStorage  bool
-    mutex        sync.Mutex
-    deletedAtById map[string]time.Time
+    storage            sessioncontract.Storage
+    ttl                time.Duration
+    ownsStorage        bool
+    tombstoneRetention time.Duration
+    mutex              sync.Mutex
+    deletedAtById      map[string]time.Time
 }
 
 /* NewManager takes a storage it does not own: Close leaves it open, because a storage handed in was built by someone else and is closed by whoever built it. That is the same rule NewFileStorageFromFile follows for an injected file handle, and it is what the container path needs — the storage is a registered service the container closes itself, so a manager that closed it too would close it twice, which a storage wrapping a connection typically reports as a failure on the second call and turns a clean shutdown into a reported one. Use NewManagerOwningStorage to get the cascade back. */
 func NewManager(storage sessioncontract.Storage, ttl time.Duration) *Manager {
-    return newManager(storage, ttl, false)
+    return newManager(storage, ttl, false, TombstoneRetention)
+}
+
+/* NewManagerWithTombstoneRetention sizes the write-back refusal window to the deployment instead of the default: the window has to cover the longest a request can still be holding a session snapshot loaded before a delete, and only the deployment knows its slowest legitimate request. Only a positive window can refuse anything — zero or negative would disarm the logout defence entirely, so they are refused here the way the negative ttl is, rather than carried silently. */
+func NewManagerWithTombstoneRetention(
+    storage sessioncontract.Storage,
+    ttl time.Duration,
+    tombstoneRetention time.Duration,
+) *Manager {
+    if 0 >= tombstoneRetention {
+        exception.Panic(
+            exception.NewError(
+                "session tombstone retention must be positive",
+                map[string]any{
+                    "tombstoneRetention": tombstoneRetention.String(),
+                },
+                nil,
+            ),
+        )
+    }
+
+    return newManager(storage, ttl, false, tombstoneRetention)
 }
 
 /* NewManagerOwningStorage takes a storage it closes when it is closed itself, for the caller that builds both by hand and wants one Close to end both. Do not use it for a storage that is also registered as a service: the container closes every service it created, so the storage would be closed once by this manager and once by the container. */
 func NewManagerOwningStorage(storage sessioncontract.Storage, ttl time.Duration) *Manager {
-    return newManager(storage, ttl, true)
+    return newManager(storage, ttl, true, TombstoneRetention)
 }
 
-func newManager(storage sessioncontract.Storage, ttl time.Duration, ownsStorage bool) *Manager {
+func newManager(storage sessioncontract.Storage, ttl time.Duration, ownsStorage bool, tombstoneRetention time.Duration) *Manager {
     if true == internal.IsNilInterface(storage) {
         exception.Panic(exception.NewError("session storage is nil", nil, nil))
     }
 
-    /* @important a negative ttl is refused here rather than carried into the storages, where `0 < ttl` is false for it and the entry is stored with no expiry at all — a lifetime that reads as "already lapsed" would produce the immortal session instead, the exact opposite of what it asks for, and silently. The configuration path already refuses it (config.validateSessionTtl); this is the same guard for callers that wire the manager themselves. Zero keeps its meaning of no expiry. */
+    /* a negative ttl is refused here rather than carried into the storages, where `0 < ttl` is false for it and the entry is stored with no expiry at all — a lifetime that reads as "already lapsed" would produce the immortal session instead, the exact opposite of what it asks for, and silently. The configuration path already refuses it (config.validateSessionTtl); this is the same guard for callers that wire the manager themselves. Zero keeps its meaning of no expiry. */
     if 0 > ttl {
         exception.Panic(
             exception.NewError(
@@ -53,10 +75,11 @@ func newManager(storage sessioncontract.Storage, ttl time.Duration, ownsStorage 
     }
 
     return &Manager{
-        storage:       storage,
-        ttl:           ttl,
-        ownsStorage:   ownsStorage,
-        deletedAtById: make(map[string]time.Time),
+        storage:            storage,
+        ttl:                ttl,
+        ownsStorage:        ownsStorage,
+        tombstoneRetention: tombstoneRetention,
+        deletedAtById:      make(map[string]time.Time),
     }
 }
 
@@ -121,7 +144,7 @@ func (instance *Manager) RegenerateSession(sessionInstance sessioncontract.Sessi
         return nil, deleteErr
     }
 
-    /* @important the rotated-away session is cleared, and Clear latches: a caller that rotates and then keeps writing to the ORIGINAL object cannot make it look live again, so the response path cannot save the just-deleted id back and re-issue it as the cookie — which would undo the rotation and hand a pre-login, plantable id the authenticated identity. That latch is also the fail-safe for a caller that forgets to publish the rotated session: the response path emits the clearing cookie and the client is logged out cleanly instead of presenting an id that no longer exists. It is applied only once the entry is gone, so a failed delete leaves the caller a session it can keep using. A foreign Session implementation is cleared through its own Clear, which may or may not latch. */
+    /* the rotated-away session is cleared, and Clear latches: a caller that rotates and then keeps writing to the ORIGINAL object cannot make it look live again, so the response path cannot save the just-deleted id back and re-issue it as the cookie — which would undo the rotation and hand a pre-login, plantable id the authenticated identity. That latch is also the fail-safe for a caller that forgets to publish the rotated session: the response path emits the clearing cookie and the client is logged out cleanly instead of presenting an id that no longer exists. It is applied only once the entry is gone, so a failed delete leaves the caller a session it can keep using. A foreign Session implementation is cleared through its own Clear, which may or may not latch. */
     sessionInstance.Clear()
 
     return &Session{
@@ -133,7 +156,7 @@ func (instance *Manager) RegenerateSession(sessionInstance sessioncontract.Sessi
 }
 
 func (instance *Manager) SaveSession(sessionInstance sessioncontract.Session) error {
-    /* @important the guard is IsNilInterface and not `nil ==`, the same as RegenerateSession: a typed nil session — the zero value of a *Session variable a caller left unassigned — is not equal to nil once it is carried in the interface, so a bare comparison lets it through and IsCleared below dereferences it. That panic replaces a returned error the caller can act on, and on the response path it happens inside the recovery defer, where a second panic escapes ServeHttp with no response at all. */
+    /* the guard is IsNilInterface and not `nil ==`, the same as RegenerateSession: a typed nil session — the zero value of a *Session variable a caller left unassigned — is not equal to nil once it is carried in the interface, so a bare comparison lets it through and IsCleared below dereferences it. That panic replaces a returned error the caller can act on, and on the response path it happens inside the recovery defer, where a second panic escapes ServeHttp with no response at all. */
     if true == internal.IsNilInterface(sessionInstance) {
         return exception.NewError("session is nil in save session", nil, nil)
     }
@@ -146,7 +169,7 @@ func (instance *Manager) SaveSession(sessionInstance sessioncontract.Session) er
         return nil
     }
 
-    /* @important the id is held to the same standard the load and delete paths hold it to. Accepting an id those two refuse would store an entry Session can never read back and DeleteSession can never remove: the save path would report success, the entry would sit in the storage until the process ends, and the clear path would then log a delete failure the manager itself manufactured. */
+    /* the id is held to the same standard the load and delete paths hold it to. Accepting an id those two refuse would store an entry Session can never read back and DeleteSession can never remove: the save path would report success, the entry would sit in the storage until the process ends, and the clear path would then log a delete failure the manager itself manufactured. */
     sessionId := sessionInstance.Id()
     if false == isValidSessionId(sessionId) {
         return exception.NewError(
@@ -160,7 +183,7 @@ func (instance *Manager) SaveSession(sessionInstance sessioncontract.Session) er
 
     values := sessionInstance.All()
 
-    /* @important a session deleted while this request was in flight is not written back. Storage.Save is a blind upsert, so without this a request that loaded the session before a logout deleted it re-creates the entry when its own handler finishes — with the identity intact and the cookie re-issued — and the window is as long as a request takes, which is long enough for someone holding a stolen cookie to keep a revoked session alive by repeating a slow one.
+    /* a session deleted while this request was in flight is not written back. Storage.Save is a blind upsert, so without this a request that loaded the session before a logout deleted it re-creates the entry when its own handler finishes — with the identity intact and the cookie re-issued — and the window is as long as a request takes, which is long enough for someone holding a stolen cookie to keep a revoked session alive by repeating a slow one.
 
     The check and the write are one critical section, and that is the whole point: testing the record and then writing outside the lock leaves the same race in miniature, where a delete lands between the two and the write that follows it resurrects the session anyway. Both storages melody ships already serialise every operation on a single mutex of their own, so for them this adds no contention that was not already there. */
     instance.mutex.Lock()
@@ -216,7 +239,7 @@ func (instance *Manager) buryTombstoneLocked(sessionId string) {
 
     /* pruning rides on the burial, so the record holds only what was deleted inside the retention window and nothing has to sweep it on a timer */
     for buriedId, deletedAt := range instance.deletedAtById {
-        if TombstoneRetention <= now.Sub(deletedAt) {
+        if instance.tombstoneRetention <= now.Sub(deletedAt) {
             delete(instance.deletedAtById, buriedId)
         }
     }
@@ -237,7 +260,7 @@ func (instance *Manager) isTombstonedLocked(sessionId string) bool {
         return false
     }
 
-    return TombstoneRetention > time.Since(deletedAt)
+    return instance.tombstoneRetention > time.Since(deletedAt)
 }
 
 func (instance *Manager) uniqueSessionId() string {

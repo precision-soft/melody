@@ -1,6 +1,7 @@
 package http
 
 import (
+    nethttp "net/http"
     "net/http/httptest"
     "strings"
     "testing"
@@ -98,5 +99,28 @@ func TestWriteToHttpResponseWriter_ReadsATypedNilResponseAsAbsent(t *testing.T) 
 
     if 200 != recorder.Code || "" != recorder.Body.String() {
         t.Fatalf("expected nothing written, got status %d body %q", recorder.Code, recorder.Body.String())
+    }
+}
+
+func TestWriteToHttpResponseWriter_ResponseOwnedKeyReplacesTheWriterValue(t *testing.T) {
+    recorder := httptest.NewRecorder()
+    recorder.Header().Set(HeaderRequestId, "writer-id")
+    recorder.Header().Set("X-Writer-Only", "kept")
+
+    response := TextResponse(nethttp.StatusOK, "body")
+    response.Headers().Set(HeaderRequestId, "response-id")
+
+    writeErr := WriteToHttpResponseWriter(nil, nil, recorder, response)
+    if nil != writeErr {
+        t.Fatalf("unexpected write error: %v", writeErr)
+    }
+
+    requestIdValues := recorder.Result().Header.Values(HeaderRequestId)
+    if 1 != len(requestIdValues) || "response-id" != requestIdValues[0] {
+        t.Fatalf("expected the response to own the key it names, got %v", requestIdValues)
+    }
+
+    if "kept" != recorder.Result().Header.Get("X-Writer-Only") {
+        t.Fatalf("expected a key the response does not name to keep the writer's value")
     }
 }

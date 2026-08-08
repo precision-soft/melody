@@ -51,17 +51,21 @@ func NewFileServer(options *Options) *FileServer {
         exception.Panic(exception.NewError("file system may not be nil for the file server", nil, nil))
     }
 
-    config := options.fileServerConfig
+    /* the configuration is copied here — struct and both lists — so the server is immutable once
+    built: the defaults below land on the copy instead of being written into the caller's struct,
+    and a setter called after construction configures the next server rather than racing the
+    in-flight requests of this one, which read these fields with no lock. */
+    configCopy := *options.fileServerConfig
+    configCopy.allowedDotPrefixList = append([]string{}, options.fileServerConfig.allowedDotPrefixList...)
+    configCopy.excludedPathList = append([]string{}, options.fileServerConfig.excludedPathList...)
+    config := &configCopy
 
     if "" == config.indexFile {
         config.indexFile = "index.html"
     }
 
-    enableCache := config.enableCache
-    cacheMaxAge := config.cacheMaxAge
-    if true == enableCache && 0 >= cacheMaxAge {
-        cacheMaxAge = 3600
-        config.cacheMaxAge = cacheMaxAge
+    if true == config.enableCache && 0 >= config.cacheMaxAge {
+        config.cacheMaxAge = 3600
     }
 
     return &FileServer{

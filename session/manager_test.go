@@ -47,7 +47,6 @@ func (instance *probeFailingStorage) Close() error {
     return nil
 }
 
-/* @info the minting probes each candidate against the storage and gives up after a bounded number of attempts rather than looping forever. A storage that reports every id as taken is what a broken Load looks like from here, and answering with a colliding id would hand a caller the session of whoever already holds it. */
 func TestManager_NewSession_PanicsWhenEveryCandidateIdIsAlreadyTaken(t *testing.T) {
     manager := NewManager(&nilMapStorage{}, time.Minute)
 
@@ -56,7 +55,6 @@ func TestManager_NewSession_PanicsWhenEveryCandidateIdIsAlreadyTaken(t *testing.
     }, "could not generate unique session id")
 }
 
-/* @info a storage that cannot answer the existence probe stops the minting: continuing would hand out an id checked against nothing, and the caller would learn about the outage only when the session failed to save. */
 func TestManager_NewSession_PanicsWhenTheStorageProbeFails(t *testing.T) {
     manager := NewManager(&probeFailingStorage{}, time.Minute)
 
@@ -84,7 +82,6 @@ func (instance *deleteFailingStorage) Close() error {
     return nil
 }
 
-/* @info a storage that cannot answer a load is not a missing session: answering nil would log the holder of a perfectly good cookie out on a transient outage, so the failure travels up as a panic the request recovery turns into a 500 */
 func TestManager_Session_PanicsWhenTheStorageCannotAnswer(t *testing.T) {
     manager := NewManager(&probeFailingStorage{}, time.Minute)
 
@@ -93,7 +90,6 @@ func TestManager_Session_PanicsWhenTheStorageCannotAnswer(t *testing.T) {
     }, "the probe storage is unavailable")
 }
 
-/* @info a stored session with no values at all is still a session: the storage answers "it exists, with nothing in it", and handing back a session over a nil map would panic on the first write instead */
 func TestManager_Session_AcceptsAStoredSessionWithNoValues(t *testing.T) {
     manager := NewManager(&nilMapStorage{}, time.Minute)
 
@@ -109,7 +105,6 @@ func TestManager_Session_AcceptsAStoredSessionWithNoValues(t *testing.T) {
     }
 }
 
-/* @info a rotation whose delete fails leaves the caller the session it still has: the fresh id was minted but nothing points at it, and clearing the original here would log the user out over a storage hiccup while the previous id stays alive in the storage */
 func TestManager_RegenerateSession_KeepsTheOriginalWhenTheDeleteFails(t *testing.T) {
     manager := NewManager(&deleteFailingStorage{}, time.Minute)
 
@@ -475,7 +470,6 @@ func TestManager_RegenerateSession_AbandonmentSurvivesALaterWriteToTheOriginal(t
     }
 }
 
-/* @info A typed nil session — the zero value of a *Session variable, carried in the interface — is not equal to nil, so a `nil ==` guard lets it through and the first method call on it dereferences nil. SaveSession must refuse it the way RegenerateSession already does, with an error the caller can act on rather than a panic. */
 func TestManager_SaveSessionRefusesATypedNilSession(t *testing.T) {
     manager := NewManager(NewInMemoryStorage(), time.Minute)
 
@@ -491,7 +485,6 @@ func TestManager_SaveSessionRefusesATypedNilSession(t *testing.T) {
     }
 }
 
-/* @info The save path holds the session id to the same standard the load and delete paths hold it to. An id those two refuse would be stored under a key Session can never read back and DeleteSession can never remove, so the save would report success over an entry that is unreachable for the rest of the process — and the later clear would log a delete failure the manager itself manufactured. */
 func TestManager_SaveSessionRefusesAnIdTheDeletePathWouldRefuse(t *testing.T) {
     storage := NewInMemoryStorage()
     manager := NewManager(storage, time.Minute)
@@ -508,7 +501,6 @@ func TestManager_SaveSessionRefusesAnIdTheDeletePathWouldRefuse(t *testing.T) {
     }
 }
 
-/* @info A negative lifetime reads as "already lapsed", but both storages test `0 < ttl` and store an entry with no expiry at all when it is false — so the value that asks for the shortest possible session would produce the one that never ends. The constructor refuses it instead, the same answer the configuration path gives; zero keeps its meaning of no expiry. */
 func TestNewManager_RefusesANegativeTtl(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
@@ -519,7 +511,6 @@ func TestNewManager_RefusesANegativeTtl(t *testing.T) {
     )
 }
 
-/* @info Zero stays a supported choice and must not be caught by the guard above. */
 func TestNewManager_AcceptsAZeroTtlAsNoExpiry(t *testing.T) {
     manager := NewManager(NewInMemoryStorage(), 0)
     if nil == manager {
@@ -544,7 +535,6 @@ func (instance *foreignIdSession) All() map[string]any  { return map[string]any{
 func (instance *foreignIdSession) IsModified() bool     { return instance.modified }
 func (instance *foreignIdSession) IsCleared() bool      { return instance.cleared }
 
-/* @info A session deleted while a request was in flight must not be written back. Storage.Save is a blind upsert, so without the tombstone a request that loaded the session before a logout deleted it re-creates the entry when its own handler finishes, with the identity intact — and the window is as long as a request takes, which is long enough for someone holding a stolen cookie to keep a revoked session alive by repeating a slow one. */
 func TestManager_ADeletedSessionCannotBeSavedBackByAnInFlightRequest(t *testing.T) {
     storage := NewInMemoryStorage()
     manager := NewManager(storage, time.Minute)
@@ -589,7 +579,6 @@ func TestManager_ADeletedSessionCannotBeSavedBackByAnInFlightRequest(t *testing.
     }
 }
 
-/* @info A rotated-away id is buried for the same reason a deleted one is: a request holding the session under the previous id would otherwise write it back and re-create the very id the rotation exists to retire. */
 func TestManager_ARotatedAwayIdCannotBeSavedBackByAnInFlightRequest(t *testing.T) {
     storage := NewInMemoryStorage()
     manager := NewManager(storage, time.Minute)
@@ -623,7 +612,6 @@ func TestManager_ARotatedAwayIdCannotBeSavedBackByAnInFlightRequest(t *testing.T
     }
 }
 
-/* @info The tombstone map is bounded by the retention window, not by the number of sessions ever deleted: each burial prunes the entries that have outlived it, so nothing has to sweep the map on a timer. */
 func TestManager_TombstonesArePrunedByTheRetentionWindow(t *testing.T) {
     manager := NewManager(NewInMemoryStorage(), time.Minute)
 
@@ -658,7 +646,6 @@ func TestManager_TombstonesArePrunedByTheRetentionWindow(t *testing.T) {
     }
 }
 
-/* @info A manager built by NewManager does not own the storage it was handed, so closing it leaves the storage open — the storage is a service the container closes itself, and closing it twice is what a storage wrapping a connection reports as a failure on the second call. NewManagerOwningStorage is the constructor for the caller that built both by hand and wants one Close to end both. */
 func TestManager_ClosePassesThroughOnlyForAnOwnedStorage(t *testing.T) {
     injected := &closeCountingStorage{}
     if nil != NewManager(injected, time.Minute).Close() {
@@ -699,7 +686,6 @@ func (instance *closeCountingStorage) Close() error {
     return nil
 }
 
-/* @info The manager became shared mutable state when it started remembering deleted ids, so the paths that read and write that record run concurrently here: saves, deletes and rotations against overlapping ids, alongside the storage's own cleanup. Run under -race. */
 func TestManager_ConcurrentSavesDeletesAndRotationsAreRaceFree(t *testing.T) {
     storage := NewInMemoryStorageWithCleanupInterval(time.Millisecond)
     defer storage.Close()
@@ -761,7 +747,6 @@ func TestManager_ConcurrentSavesDeletesAndRotationsAreRaceFree(t *testing.T) {
     }
 }
 
-/* @info Close racing Load and Save must answer, not corrupt: after Close every operation reports the storage closed and none of them touches the map the stopped cleanup goroutine used to walk. Run under -race. */
 func TestInMemoryStorage_CloseConcurrentWithLoadAndSaveIsRaceFree(t *testing.T) {
     storage := NewInMemoryStorageWithCleanupInterval(time.Millisecond)
 
@@ -822,7 +807,6 @@ func (instance *blockingSaveStorage) Delete(sessionId string) error {
 
 func (instance *blockingSaveStorage) Close() error { return instance.inner.Close() }
 
-/* @info The tombstone is only worth anything if the record is read and the storage written inside one critical section. Reading it and then writing outside the lock leaves the same resurrection in miniature: a delete lands between the two and the write that follows re-creates the session. This sequences that interleaving deterministically — a save is held open inside the storage while a delete is attempted — so the test fails for any arrangement where the delete can get in between. */
 func TestManager_ADeleteCannotInterleaveBetweenTheTombstoneCheckAndTheWrite(t *testing.T) {
     inner := NewInMemoryStorage()
     defer inner.Close()
@@ -865,5 +849,39 @@ func TestManager_ADeleteCannotInterleaveBetweenTheTombstoneCheckAndTheWrite(t *t
 
     if _, exists, _ := inner.Load(sessionId); true == exists {
         t.Fatalf("expected the deleted session to stay deleted: a delete interleaved between the tombstone check and the write, and the write resurrected it")
+    }
+}
+
+func TestNewManagerWithTombstoneRetention_RefusesANonPositiveRetention(t *testing.T) {
+    for _, invalidRetention := range []time.Duration{0, -time.Second} {
+        testhelper.AssertPanicsWithError(
+            t,
+            func() {
+                NewManagerWithTombstoneRetention(NewInMemoryStorage(), time.Minute, invalidRetention)
+            },
+            "session tombstone retention must be positive",
+        )
+    }
+}
+
+func TestNewManagerWithTombstoneRetention_SizesTheRefusalWindow(t *testing.T) {
+    manager := NewManagerWithTombstoneRetention(NewInMemoryStorage(), time.Minute, time.Hour)
+
+    buriedId := "dddddddddddddddddddddddddddddddd"
+
+    manager.mutex.Lock()
+    manager.deletedAtById[buriedId] = time.Now().Add(-TombstoneRetention - time.Minute)
+    manager.mutex.Unlock()
+
+    if false == manager.isTombstoned(buriedId) {
+        t.Fatalf("expected a burial older than the default window to still refuse under the sized one")
+    }
+
+    manager.mutex.Lock()
+    manager.deletedAtById[buriedId] = time.Now().Add(-time.Hour - time.Minute)
+    manager.mutex.Unlock()
+
+    if true == manager.isTombstoned(buriedId) {
+        t.Fatalf("expected a burial older than the sized window to have lapsed")
     }
 }

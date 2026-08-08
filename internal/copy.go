@@ -2,7 +2,7 @@ package internal
 
 import "reflect"
 
-/* @important maxCopyDepth bounds the deep-copy recursion as a safety net for genuinely deep (non-shared) data: a value that legitimately nests past this bound is returned as-is from there on rather than overflowing the goroutine stack — a fatal error that no deferred recover() can catch and which takes down the whole process. Cycles and shared substructure no longer reach this bound at all: the visited map closes a cycle onto its own copy and reuses the copy of a node reached through a second edge, so the traversal is linear in the number of distinct nodes where the depth-only form was exponential — a 28-level value whose every node was reachable through two edges never finished copying, with the caller's lock held the whole time. */
+/* maxCopyDepth bounds the deep-copy recursion as a safety net for genuinely deep (non-shared) data: a value that legitimately nests past this bound is returned as-is from there on rather than overflowing the goroutine stack — a fatal error that no deferred recover() can catch and which takes down the whole process. Cycles and shared substructure no longer reach this bound at all: the visited map closes a cycle onto its own copy and reuses the copy of a node reached through a second edge, so the traversal is linear in the number of distinct nodes where the depth-only form was exponential — a 28-level value whose every node was reachable through two edges never finished copying, with the caller's lock held the whole time. */
 const maxCopyDepth = 10000
 
 /* visitedKey identifies a container node across the two edges that may reach it: maps are identified by their pointer alone, slices by their backing array pointer AND length, because two slices of one array with different lengths are two different nodes — memoizing on the pointer alone would hand the copy of one to a reader of the other. */
@@ -33,6 +33,13 @@ func CopyAnyMap(source map[string]any) map[string]any {
 
 func CopyAnySlice(source []any) []any {
     return copyAnySliceAtDepth(source, 0, map[visitedKey]any{})
+}
+
+/* CopyAnyValue copies one value at the same depth CopyAnyMap copies a whole map: maps and slices
+are descended into, everything else — a pointer, a struct, a channel — is returned as-is, which is
+the documented boundary of what a copied container may safely carry. */
+func CopyAnyValue(value any) any {
+    return copyAnyValueAtDepth(value, 0, map[visitedKey]any{})
 }
 
 func copyAnyMapAtDepth(source map[string]any, depth int, visited map[visitedKey]any) map[string]any {
@@ -81,7 +88,7 @@ func copyAnySliceAtDepth(source []any, depth int, visited map[visitedKey]any) []
     return make([]any, 0)
 }
 
-/* @important at maxCopyDepth the value is returned as-is (a shallow alias) rather than copied further; realistic data (JSON-derived) is far shallower, and the shapes that used to ride the recursion to this bound — cycles, shared substructure — are resolved by the visited map before depth ever matters. */
+/* at maxCopyDepth the value is returned as-is (a shallow alias) rather than copied further; realistic data (JSON-derived) is far shallower, and the shapes that used to ride the recursion to this bound — cycles, shared substructure — are resolved by the visited map before depth ever matters. */
 func copyAnyValueAtDepth(value any, depth int, visited map[visitedKey]any) any {
     if depth >= maxCopyDepth {
         return value

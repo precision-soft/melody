@@ -2,6 +2,7 @@ package http
 
 import (
     "context"
+    "io"
     nethttp "net/http"
     "net/http/httptest"
     "strings"
@@ -32,7 +33,6 @@ func TestNormalizeResultToResponse_TypedNilResponseBecomesNilInterface(t *testin
     }
 }
 
-/* @info the accept header is list-typed, so its repeated lines are one header: reading only the first line dropped whatever the client sent on the second — here the refusal of json would be honoured while the acceptance of text/plain vanished, answering 406 to a client that named an available type */
 func TestNormalizeResultToResponse_JoinsRepeatedAcceptLines(t *testing.T) {
     serviceContainer := container.NewContainer()
 
@@ -78,8 +78,6 @@ func TestNormalizeResultToResponse_JoinsRepeatedAcceptLines(t *testing.T) {
     }
 }
 
-/* @info WrapResultHandler is the adapter that lets a handler return a plain value — a struct, a string, a slice of bytes — and had never been entered. It normalizes through the same path the kernel uses, so a wrapper that skipped the normalization would hand the kernel a value it cannot write, and one that swallowed the error would answer 200 for a handler that failed. */
-
 func TestWrapResultHandler_NormalizesAPlainStringResult(t *testing.T) {
     handler := WrapResultHandler(
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (any, error) {
@@ -101,8 +99,6 @@ func TestWrapResultHandler_NormalizesAPlainStringResult(t *testing.T) {
     }
 }
 
-/* @info a handler that fails returns its error untouched and no response at all: normalizing an error into a response here would take the failure away from the exception listener, which is the one place a status and a log record are decided together. */
-
 func TestWrapResultHandler_ReturnsTheHandlerErrorWithoutAResponse(t *testing.T) {
     failure := exception.NewHttpException(nethttp.StatusTeapot, "short and stout")
 
@@ -123,8 +119,6 @@ func TestWrapResultHandler_ReturnsTheHandlerErrorWithoutAResponse(t *testing.T) 
     }
 }
 
-/* @info a handler returning nothing produces no response, which is what lets the kernel synthesize its own empty answer and still dispatch the response event over it. */
-
 func TestWrapResultHandler_ANilResultProducesNoResponse(t *testing.T) {
     handler := WrapResultHandler(
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (any, error) {
@@ -141,8 +135,6 @@ func TestWrapResultHandler_ANilResultProducesNoResponse(t *testing.T) {
         t.Fatalf("expected no response for a handler that returned nothing, got: %v", response)
     }
 }
-
-/* @info a handler that already built a response has it passed through rather than re-normalized, so a status the handler chose survives the wrapper. */
 
 func TestWrapResultHandler_PassesAResponseThrough(t *testing.T) {
     built := NewResponse(nethttp.StatusCreated, []byte("created"))
@@ -169,4 +161,64 @@ func TestWrapResultHandler_PassesAResponseThrough(t *testing.T) {
 
 func newResultHandlerRequest() httpcontract.Request {
     return testhelper.NewHttpTestRequestFromHttpRequest(httptest.NewRequest(nethttp.MethodGet, "/articles", nil))
+}
+
+type contractOnlyResponse struct {
+    statusCode int
+    headers    nethttp.Header
+    bodyReader io.Reader
+}
+
+func (instance *contractOnlyResponse) StatusCode() int {
+    return instance.statusCode
+}
+
+func (instance *contractOnlyResponse) SetStatusCode(statusCode int) {
+    instance.statusCode = statusCode
+}
+
+func (instance *contractOnlyResponse) Headers() nethttp.Header {
+    return instance.headers
+}
+
+func (instance *contractOnlyResponse) SetHeaders(headers nethttp.Header) {
+    instance.headers = headers
+}
+
+func (instance *contractOnlyResponse) BodyReader() io.Reader {
+    return instance.bodyReader
+}
+
+func (instance *contractOnlyResponse) SetBodyReader(reader io.Reader) {
+    instance.bodyReader = reader
+}
+
+var _ httpcontract.Response = (*contractOnlyResponse)(nil)
+
+func TestNormalizeResultToResponse_ServesACallerResponseImplementation(t *testing.T) {
+    custom := &contractOnlyResponse{
+        statusCode: nethttp.StatusCreated,
+        headers:    nethttp.Header{"X-Custom": []string{"yes"}},
+        bodyReader: strings.NewReader("custom-body"),
+    }
+
+    normalized, err := NormalizeResultToResponse(nil, nil, custom)
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if httpcontract.Response(custom) != normalized {
+        t.Fatalf("expected the caller's response implementation to be served by identity")
+    }
+}
+
+func TestNormalizeResultToResponse_TypedNilContractResponseBecomesNilInterface(t *testing.T) {
+    normalized, err := NormalizeResultToResponse(nil, nil, (*contractOnlyResponse)(nil))
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if nil != normalized {
+        t.Fatalf("expected a typed nil contract response to normalize to the nil interface")
+    }
 }

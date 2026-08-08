@@ -1262,7 +1262,15 @@ func TestFileServer_Embedded_RetrievesTheAllowedDotPrefixOnly(t *testing.T) {
 
     config.SetAllowedDotPrefixList(nil)
 
-    _, _, _, servedAfterClearing := server.Serve(
+    clearedServer := NewFileServer(
+        NewOptions(
+            config,
+            "",
+            fileSystem,
+        ),
+    )
+
+    _, _, _, servedAfterClearing := clearedServer.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/.well-known/acme-challenge/token"),
         logging.NewNopLogger(),
     )
@@ -2915,4 +2923,88 @@ func recordedContains(messages []string, expected string) bool {
     }
 
     return false
+}
+
+func TestNewFileServer_CopiesTheConfigurationAndLeavesTheCallersUntouched(t *testing.T) {
+    fileSystem := fstest.MapFS{
+        "a.txt": &fstest.MapFile{
+            Data: []byte("a"),
+        },
+    }
+
+    config := NewFileServerConfig(
+        ModeEmbedded,
+        "",
+        "",
+        "",
+        true,
+        0,
+        false,
+    )
+
+    server := NewFileServer(
+        NewOptions(
+            config,
+            "",
+            fileSystem,
+        ),
+    )
+
+    if "" != config.indexFile {
+        t.Fatalf("expected the caller's config to keep its empty index file, got %q", config.indexFile)
+    }
+
+    if 0 != config.cacheMaxAge {
+        t.Fatalf("expected the caller's config to keep its zero cache max age, got %d", config.cacheMaxAge)
+    }
+
+    _, headers, _, served := server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt"),
+        logging.NewNopLogger(),
+    )
+
+    if false == served {
+        t.Fatalf("expected the file to be served")
+    }
+
+    if false == strings.Contains(headers.Get("Cache-Control"), "max-age=3600") {
+        t.Fatalf("expected the default cache max age to land on the server's own copy, got %q", headers.Get("Cache-Control"))
+    }
+}
+
+func TestFileServer_SetterAfterConstructionDoesNotReachTheBuiltServer(t *testing.T) {
+    fileSystem := fstest.MapFS{
+        "a.txt": &fstest.MapFile{
+            Data: []byte("a"),
+        },
+    }
+
+    config := NewFileServerConfig(
+        ModeEmbedded,
+        "",
+        "",
+        "",
+        false,
+        0,
+        false,
+    )
+
+    server := NewFileServer(
+        NewOptions(
+            config,
+            "",
+            fileSystem,
+        ),
+    )
+
+    config.SetExcludedPathList([]string{"/a.txt"})
+
+    _, _, _, served := server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt"),
+        logging.NewNopLogger(),
+    )
+
+    if false == served {
+        t.Fatalf("expected the built server to keep serving under its construction-time configuration")
+    }
 }

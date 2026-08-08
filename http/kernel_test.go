@@ -2255,3 +2255,60 @@ func TestKernel_AFailingListenerResponseIsDroppedWhenARequiredListenerSitsBehind
         t.Fatalf("expected the failing listener's body to be dropped, got %q", recorder.Body.String())
     }
 }
+
+func TestKernel_HasErrorHandlerReportsInstallation(t *testing.T) {
+    kernel := NewKernel(NewRouter())
+
+    if true == kernel.HasErrorHandler() {
+        t.Fatalf("expected no error handler on a fresh kernel")
+    }
+
+    kernel.SetErrorHandler(
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request, err error) httpcontract.Response {
+            return nil
+        },
+    )
+
+    if false == kernel.HasErrorHandler() {
+        t.Fatalf("expected the installed error handler to be reported")
+    }
+}
+
+func TestKernel_ErrorResponseCarriesTheRequestIdOnce(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/fail",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return nil, exception.NewError("kernel test failure", nil, nil)
+        },
+    )
+    router.Handle(
+        nethttp.MethodGet,
+        "/ok",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(nethttp.StatusOK, "ok"), nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainer()
+    RegisterKernelExceptionListener(event.EventDispatcherMustFromContainer(serviceContainer), false)
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    errorRecorder := httptest.NewRecorder()
+    handler.ServeHTTP(errorRecorder, httptest.NewRequest(nethttp.MethodGet, "/fail", nil))
+
+    errorValues := errorRecorder.Result().Header.Values(HeaderRequestId)
+    if 1 != len(errorValues) || "" == errorValues[0] {
+        t.Fatalf("expected exactly one request id on the error response, got %v", errorValues)
+    }
+
+    successRecorder := httptest.NewRecorder()
+    handler.ServeHTTP(successRecorder, httptest.NewRequest(nethttp.MethodGet, "/ok", nil))
+
+    successValues := successRecorder.Result().Header.Values(HeaderRequestId)
+    if 1 != len(successValues) || "" == successValues[0] {
+        t.Fatalf("expected exactly one request id on the success response, got %v", successValues)
+    }
+}

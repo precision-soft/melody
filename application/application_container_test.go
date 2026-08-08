@@ -525,3 +525,58 @@ func TestNewContainerLogger_CreatesTheLogDirectory(t *testing.T) {
         t.Fatalf("expected the record inside the created file")
     }
 }
+
+/* the configured window must travel from the environment key through the configuration into the
+manager: only a lapsed 300ms window explains a deleted session accepting a write-back 400ms later,
+where the five-minute default would still refuse it. */
+func TestApplicationRegisterHttpSession_HandsTheConfiguredTombstoneRetentionToTheManager(t *testing.T) {
+    environment, environmentErr := config.NewEnvironment(
+        &mapEnvironmentSource{
+            values: map[string]string{
+                config.HttpSessionTombstoneRetentionKey: "300ms",
+            },
+        },
+    )
+    if nil != environmentErr {
+        t.Fatalf("unexpected environment error: %v", environmentErr)
+    }
+
+    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+    if nil != configurationErr {
+        t.Fatalf("unexpected configuration error: %v", configurationErr)
+    }
+
+    applicationInstance := &Application{
+        configuration:        configuration,
+        runtimeFlags:         NewRuntimeFlags(config.ModeHttp),
+        kernel:               newTestKernel(),
+        moduleConfigurations: make(map[string]any),
+    }
+
+    applicationInstance.registerHttpSession()
+
+    manager := session.SessionMustFromContainer(applicationInstance.kernel.ServiceContainer())
+
+    sessionInstance := manager.NewSession()
+    sessionInstance.Set("identity", "alice")
+    if saveErr := manager.SaveSession(sessionInstance); nil != saveErr {
+        t.Fatalf("unexpected save error: %v", saveErr)
+    }
+
+    inFlightView := manager.Session(sessionInstance.Id())
+    if nil == inFlightView {
+        t.Fatalf("expected the session to load")
+    }
+
+    if deleteErr := manager.DeleteSession(sessionInstance.Id()); nil != deleteErr {
+        t.Fatalf("unexpected delete error: %v", deleteErr)
+    }
+
+    time.Sleep(400 * time.Millisecond)
+
+    inFlightView.Set("lastSeen", "now")
+
+    if saveErr := manager.SaveSession(inFlightView); nil != saveErr {
+        t.Fatalf("expected the configured 300ms window to have lapsed, got %v", saveErr)
+    }
+}

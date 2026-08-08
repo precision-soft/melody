@@ -21,5 +21,7 @@ type HttpConfiguration interface {
 
     SessionTtl() time.Duration
 
+    SessionTombstoneRetention() time.Duration
+
     ShutdownTimeout() time.Duration
 }

@@ -256,7 +256,6 @@ func TestRouter_ParamExtraction(t *testing.T) {
     }
 }
 
-/* @info A requirement is a whitelist for one path segment. Anchors bind looser than alternation, so concatenating "^" and "$" onto "en|de|fr" yields (^en)|(de)|(fr$) — which accepts "aden", "frfr" and any string ending in "fr". The requirement must be wrapped in a non-capturing group so the anchors apply to the whole alternation. */
 func TestRouter_RequirementWithAlternationMatchesTheWholeSegment(t *testing.T) {
     router := NewRouter()
 
@@ -301,7 +300,6 @@ func TestRouter_RequirementWithAlternationMatchesTheWholeSegment(t *testing.T) {
     }
 }
 
-/* @info The catch-all branch assigned the joined remainder to the wildcard without consulting the route's requirements, while the single-segment and named-parameter branches enforced theirs — a whitelist that silently failed open on ":path...". */
 func TestRouter_RequirementIsEnforcedOnCatchAllWildcard(t *testing.T) {
     router := NewRouter()
 
@@ -338,7 +336,6 @@ func TestRouter_RequirementIsEnforcedOnCatchAllWildcard(t *testing.T) {
     }
 }
 
-/* @info a request path that differs from the route only by whitespace must not reach the handler: a proxy or firewall rule matching the exact path never sees a match, so an alias here is an authorization bypass in front of the application */
 func TestRouter_Match_WhitespacePaddedRequestPathDoesNotAliasTheRoute(t *testing.T) {
     router := NewRouter()
 
@@ -361,7 +358,6 @@ func TestRouter_Match_WhitespacePaddedRequestPathDoesNotAliasTheRoute(t *testing
     }
 }
 
-/* @info an empty segment must not satisfy a named parameter: the handler cannot tell an empty bound value from a supplied one, so an empty identifier reaches whatever the handler does with it */
 func TestRouter_Match_EmptySegmentDoesNotSatisfyNamedParameter(t *testing.T) {
     router := NewRouter()
 
@@ -714,8 +710,6 @@ func TestRouter_AllowHeaderRespectsMethodPolicy(t *testing.T) {
     }
 }
 
-/* @info the controller registrations are the reflection-based front door — an application declares a controller whose arguments the container fills — and neither of the two on Router had been entered. A registration that dropped the method would answer every verb, and one that dropped the name would leave the route unreachable to the url generator with nothing to say so. */
-
 func TestRouter_HandleControllerRegistersTheControllerUnderItsMethod(t *testing.T) {
     router := NewRouter()
 
@@ -781,8 +775,6 @@ func TestRouter_HandleNamedControllerRegistersTheNameTheGeneratorResolves(t *tes
     }
 }
 
-/* @info a controller that is not a function is refused where it is declared rather than at the first request that reaches the route: a boot that accepted it would fail on the request path, inside the kernel's recovery, as a 500 naming nothing about the wiring. */
-
 func TestRouter_HandleControllerRefusesSomethingThatIsNotAFunction(t *testing.T) {
     defer func() {
         if nil == recover() {
@@ -792,8 +784,6 @@ func TestRouter_HandleControllerRefusesSomethingThatIsNotAFunction(t *testing.T)
 
     NewRouter().HandleController(nethttp.MethodGet, "/articles", "not a function")
 }
-
-/* @info RouteRegistry() is what an application uses to reach the listing through the router it holds; it has to be the very registry the router registers into, otherwise a listing reports an empty routing table for a running application. */
 
 func TestRouter_RouteRegistryIsTheOneItRegistersInto(t *testing.T) {
     routeRegistry := NewRouteRegistry()
@@ -807,5 +797,40 @@ func TestRouter_RouteRegistryIsTheOneItRegistersInto(t *testing.T) {
 
     if 1 != len(router.RouteRegistry().RouteDefinitions()) {
         t.Fatalf("expected the registration to be visible through the reported registry")
+    }
+}
+
+func TestRouter_MatchHandsOutACopyOfTheRouteAttributes(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/aliased",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(nethttp.StatusOK, "ok"), nil
+        },
+    )
+
+    firstResult, matched := router.Match(nethttp.MethodGet, "/aliased", "", "http")
+    if false == matched || nil == firstResult {
+        t.Fatalf("expected a match")
+    }
+
+    firstMethods, ok := firstResult.RouteAttributes[RouteAttributeMethods].([]string)
+    if false == ok || 0 == len(firstMethods) {
+        t.Fatalf("expected the methods attribute")
+    }
+
+    firstMethods[0] = "HACKED"
+    firstResult.RouteAttributes["injected"] = "yes"
+
+    secondResult, _ := router.Match(nethttp.MethodGet, "/aliased", "", "http")
+
+    secondMethods, ok := secondResult.RouteAttributes[RouteAttributeMethods].([]string)
+    if false == ok || nethttp.MethodGet != secondMethods[0] {
+        t.Fatalf("expected the registry slice to be untouched by the caller's mutation, got %v", secondMethods)
+    }
+
+    if _, exists := secondResult.RouteAttributes["injected"]; true == exists {
+        t.Fatalf("expected the registry map to be untouched by the caller's mutation")
     }
 }
