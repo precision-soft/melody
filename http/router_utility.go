@@ -170,12 +170,37 @@ func wrapControllerWithContainer(
 }
 
 func wrapWithMiddlewares(handler httpcontract.Handler, middlewares []httpcontract.Middleware) httpcontract.Handler {
+    return wrapWithMiddlewaresRecording(handler, middlewares, nil)
+}
+
+/* wrapWithMiddlewaresRecording interleaves a recording shim under every middleware layer: the response each layer's next() returns is published to the recorder as the stack unwinds, so when an outer middleware panics after its next() returned, the kernel's recovery defer can still see — and close — the response that was in flight. Without the shim nothing holds that response: the kernel assigns it only after the whole chain has returned. A nil recorder builds the plain chain. */
+func wrapWithMiddlewaresRecording(
+    handler httpcontract.Handler,
+    middlewares []httpcontract.Middleware,
+    recordReturnedResponse func(httpcontract.Response),
+) httpcontract.Handler {
     wrapped := handler
     for index := len(middlewares) - 1; 0 <= index; index-- {
+        if nil != recordReturnedResponse {
+            wrapped = recordResponseAfterHandler(wrapped, recordReturnedResponse)
+        }
+
         wrapped = middlewares[index](wrapped)
     }
 
     return wrapped
+}
+
+func recordResponseAfterHandler(
+    handler httpcontract.Handler,
+    recordReturnedResponse func(httpcontract.Response),
+) httpcontract.Handler {
+    return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        response, err := handler(runtimeInstance, writer, request)
+        recordReturnedResponse(response)
+
+        return response, err
+    }
 }
 
 func splitPath(value string) []string {
@@ -207,6 +232,7 @@ func splitNormalizedPath(value string) []string {
     return strings.Split(normalizedPath, "/")
 }
 
+/* writeResponse persists the session, emits the session cookie and writes the response, and returns the response it actually wrote: a session-storage outage on the save path replaces the caller's response with an empty 500, and the caller publishes the returned value — the terminate event and the access log then report the status the client received rather than the response the handler produced. The replacement is a fresh response, so headers a kernel.response listener set on the original do not survive onto it, and the session cookie is suppressed deliberately. */
 func writeResponse(
     runtimeInstance runtimecontract.Runtime,
     request httpcontract.Request,
@@ -216,7 +242,7 @@ func writeResponse(
     sessionInstance sessioncontract.Session,
     forwardedHeadersPolicy httpcontract.ForwardedHeadersPolicy,
     sessionCookiePolicy httpcontract.SessionCookiePolicy,
-) {
+) httpcontract.Response {
     if true == internal.IsNilInterface(response) {
         response = &Response{
             statusCode: nethttp.StatusNoContent,
@@ -326,7 +352,7 @@ func writeResponse(
     /* a handler that streamed its own response (for example Server-Sent Events) has already committed the headers; whether it then returned no response or failed after committing, skip writing so we do not emit a superfluous WriteHeader over the in-flight stream. */
     if true == responseIsDiscarded {
         closeDiscardedResponseBody(response, logging.LoggerFromRuntime(runtimeInstance))
-        return
+        return response
     }
 
     err := WriteToHttpResponseWriter(runtimeInstance, request, writer, response)
@@ -340,6 +366,8 @@ func writeResponse(
             )
         }
     }
+
+    return response
 }
 
 /* republishedSession prefers the session a handler published on the request over the one the kernel captured before routing, so rotating the session id (the session-fixation defence) reaches the store and the Set-Cookie. */

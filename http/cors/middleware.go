@@ -8,6 +8,7 @@ import (
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
+/* Middleware decorates the handler path: it answers a preflight and applies the response headers for responses produced inside the middleware chain. A response produced by an event listener — a security refusal, an error page — never enters the chain, so this door never sees it, and a preflight to a path access control protects is refused before the chain is built. An application that needs those covered registers the listener doors through RegisterListeners. */
 func Middleware(service *Service) httpcontract.Middleware {
     if nil == service {
         service = DefaultService()
@@ -34,7 +35,7 @@ func Middleware(service *Service) httpcontract.Middleware {
                 response.SetHeaders(make(nethttp.Header))
             }
 
-            /* @important emitted on every path so a shared cache cannot serve an origin-less body to an allowed origin */
+            /* emitted on every path so a shared cache cannot serve an origin-less body to an allowed origin */
             addVaryOrigin(response.Headers())
 
             if true == allowOrigin {

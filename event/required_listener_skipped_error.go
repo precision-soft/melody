@@ -21,6 +21,20 @@ func NewRequiredListenerSkippedError(eventName string, stoppedByListenerName str
     }
 }
 
+/* NewRequiredListenerSkippedErrorWithCause reports the same refusal for a dispatch that ABORTED on a failing listener while a listener marked required was still behind it: a listener that fails ends the dispatch exactly as decisively as one that stops propagation, so the required listener never ran. The failure that ended the dispatch travels as the cause, so the diagnostic of the listener that actually broke is not lost behind the refusal. */
+func NewRequiredListenerSkippedErrorWithCause(eventName string, failedListenerName string, cause error) *RequiredListenerSkippedError {
+    return &RequiredListenerSkippedError{
+        exceptionErr: exception.NewError(
+            "event dispatch failed before a required listener ran",
+            exceptioncontract.Context{
+                "eventName":      eventName,
+                "failedListener": failedListenerName,
+            },
+            cause,
+        ),
+    }
+}
+
 type RequiredListenerSkippedError struct {
     exceptionErr *exception.Error
 }

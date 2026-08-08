@@ -73,6 +73,7 @@ type Kernel struct {
     options         KernelOptions
 }
 
+/* Use appends middlewares to the chain the kernel builds around the matched handler. The chain decorates the handler path only: a response produced by an event listener — a security refusal, an error page — is dispatched through kernel.response and written before the chain is built, so cross-cutting response decoration belongs to kernel.response listeners; the cors package pairs its two doors that way. */
 func (instance *Kernel) Use(middlewares ...httpcontract.Middleware) {
     instance.middlewares = append(instance.middlewares, middlewares...)
 }
@@ -271,6 +272,9 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
         finalResponse := (httpcontract.Response)(nil)
 
+        /* the last response the middleware chain had in flight, published by the recording shim under every layer; the recovery defer reads it for the window in which the chain has answered but finalResponse has not been assigned yet */
+        chainResponse := (httpcontract.Response)(nil)
+
         eventDispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
 
         var sessionManager sessioncontract.Manager
@@ -371,6 +375,11 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 closeDiscardedResponseBody(panickedResponse, requestLogger)
             }
 
+            /* an outer middleware that panicked after its next() returned unwound the stack before finalResponse was assigned, so the response the chain produced is held only by the recording shim; it is closed here. On the panic paths where finalResponse was already assigned the discard above owns the close — closing the recorded response there too would close a body a wrapping middleware may share with the response being served. */
+            if nil == panickedResponse && nil != chainResponse && chainResponse != exceptionEvent.Response() {
+                closeDiscardedResponseBody(chainResponse, requestLogger)
+            }
+
             finalResponse = exceptionEvent.Response()
 
             kernelResponseEvent := NewKernelResponseEvent(melodyRequest, finalResponse)
@@ -387,7 +396,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             }
 
             finalResponse = kernelResponseEvent.Response()
-            writeResponse(
+            finalResponse = writeResponse(
                 runtimeInstance,
                 melodyRequest,
                 writer,
@@ -457,7 +466,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             }
 
             finalResponse = kernelResponseEvent.Response()
-            writeResponse(
+            finalResponse = writeResponse(
                 runtimeInstance,
                 melodyRequest,
                 writer,
@@ -511,7 +520,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             }
 
             finalResponse = kernelResponseEvent.Response()
-            writeResponse(
+            finalResponse = writeResponse(
                 runtimeInstance,
                 melodyRequest,
                 writer,
@@ -686,7 +695,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             }
 
             finalResponse = kernelResponseEvent.Response()
-            writeResponse(
+            finalResponse = writeResponse(
                 runtimeInstance,
                 melodyRequest,
                 writer,
@@ -704,7 +713,9 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             []httpcontract.Middleware{},
             instance.middlewares...,
         )
-        finalHandler := instance.buildHandler(baseHandler, middlewaresSnapshot)
+        finalHandler := instance.buildHandler(baseHandler, middlewaresSnapshot, func(response httpcontract.Response) {
+            chainResponse = response
+        })
 
         response, finalHandlerErr := finalHandler(runtimeInstance, writer, melodyRequest)
 
@@ -778,7 +789,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         }
 
         finalResponse = kernelResponseEvent.Response()
-        writeResponse(
+        finalResponse = writeResponse(
             runtimeInstance,
             melodyRequest,
             writer,
@@ -874,8 +885,12 @@ func (instance *Kernel) logEventDispatchError(
     _ = exception.MarkLogged(dispatchErr)
 }
 
-func (instance *Kernel) buildHandler(handler httpcontract.Handler, middlewares []httpcontract.Middleware) httpcontract.Handler {
-    return wrapWithMiddlewares(handler, middlewares)
+func (instance *Kernel) buildHandler(
+    handler httpcontract.Handler,
+    middlewares []httpcontract.Middleware,
+    recordChainResponse func(httpcontract.Response),
+) httpcontract.Handler {
+    return wrapWithMiddlewaresRecording(handler, middlewares, recordChainResponse)
 }
 
 var _ httpcontract.Kernel = (*Kernel)(nil)

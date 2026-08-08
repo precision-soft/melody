@@ -1260,3 +1260,62 @@ func TestWriteResponse_ReadsATypedNilResponseAsTheEmptyDefault(t *testing.T) {
         t.Fatalf("expected %d, got %d", nethttp.StatusNoContent, recorder.Code)
     }
 }
+
+func TestWriteResponse_ReturnsTheReplacedFiveHundredOnASaveOutage(t *testing.T) {
+    netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
+    netRequest.RemoteAddr = "127.0.0.1:1234"
+
+    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+
+    response := TextResponse(nethttp.StatusOK, "welcome")
+    writer := httptest.NewRecorder()
+
+    sessionManager := &stubSessionManager{
+        saveErr: exception.NewError("storage is unreachable", nil, nil),
+    }
+    sessionInstance := &stubSession{id: "session-123", isModified: true}
+
+    writtenResponse := writeResponse(
+        nil,
+        melodyRequest,
+        writer,
+        response,
+        sessionManager,
+        sessionInstance,
+        httpcontract.ForwardedHeadersPolicy{},
+        httpcontract.SessionCookiePolicy{Path: "/"},
+    )
+
+    if nil == writtenResponse || nethttp.StatusInternalServerError != writtenResponse.StatusCode() {
+        t.Fatalf("expected the returned response to be the replaced 500, got %#v", writtenResponse)
+    }
+
+    if response == writtenResponse {
+        t.Fatalf("expected the returned response to differ from the replaced original")
+    }
+}
+
+func TestWriteResponse_ReturnsTheCallersResponseWhenNothingReplacedIt(t *testing.T) {
+    netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
+    netRequest.RemoteAddr = "127.0.0.1:1234"
+
+    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+
+    response := TextResponse(nethttp.StatusOK, "welcome")
+    writer := httptest.NewRecorder()
+
+    writtenResponse := writeResponse(
+        nil,
+        melodyRequest,
+        writer,
+        response,
+        nil,
+        nil,
+        httpcontract.ForwardedHeadersPolicy{},
+        httpcontract.SessionCookiePolicy{Path: "/"},
+    )
+
+    if response != writtenResponse {
+        t.Fatalf("expected the caller's response back, got %#v", writtenResponse)
+    }
+}

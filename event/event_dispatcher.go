@@ -216,14 +216,14 @@ func (instance *EventDispatcher) AddSubscriber(subscriber eventcontract.EventSub
         "add a subscriber",
     )
 
-    /* @important every subscribed event is validated before a single listener is registered: validating while registering left a subscriber whose second event was malformed half-installed, with the listeners of the first one live and firing under a subscriber the caller was told had been refused */
+    /* every subscribed event is validated before a single listener is registered: validating while registering left a subscriber whose second event was malformed half-installed, with the listeners of the first one live and firing under a subscriber the caller was told had been refused */
     plannedList := planSubscriberRegistrations(subscriber)
 
     instance.mutex.Lock()
     _, alreadyRegistered := instance.subscriberRegistrations[subscriberIdentityValue]
     instance.mutex.Unlock()
 
-    /* @important a subscriber that carries no fields occupies no memory, and every zero-size allocation in Go answers one address, so two instances of such a type are one identity here and nothing in the value can ever tell them apart. Refusing the second registration is what keeps the ambiguity out of the dispatcher: left in, a later RemoveSubscriber for either instance takes both instances' listeners down and reports a plausible count for it. */
+    /* a subscriber that carries no fields occupies no memory, and every zero-size allocation in Go answers one address, so two instances of such a type are one identity here and nothing in the value can ever tell them apart. Refusing the second registration is what keeps the ambiguity out of the dispatcher: left in, a later RemoveSubscriber for either instance takes both instances' listeners down and reports a plausible count for it. */
     if true == alreadyRegistered {
         exception.Panic(
             exception.NewError(
@@ -467,7 +467,7 @@ func (instance *EventDispatcher) dispatch(runtimeInstance runtimecontract.Runtim
     stoppedByListenerMaySkip := false
 
     for listenerIndex = 0; listenerIndex < len(listenerList); listenerIndex++ {
-        /* @important the propagation test opens the iteration rather than closing it: tested only after a listener ran, an event that arrived already stopped — the object a previous dispatch returned — still ran the first listener and then had that listener named as the one that stopped it, while the required listeners behind it were skipped under a stopper that had stopped nothing */
+        /* the propagation test opens the iteration rather than closing it: tested only after a listener ran, an event that arrived already stopped — the object a previous dispatch returned — still ran the first listener and then had that listener named as the one that stopped it, while the required listeners behind it were skipped under a stopper that had stopped nothing */
         if true == eventValue.IsPropagationStopped() {
             break
         }
@@ -503,17 +503,19 @@ func (instance *EventDispatcher) dispatch(runtimeInstance runtimecontract.Runtim
             logger,
         )
         if nil != err {
-            /* @important a listener that stops propagation and fails in the same call skipped the listeners behind it exactly as decisively as one that only stopped, and returning its own failure first hid that: the required listeners were never scanned, so the caller learned that a listener had failed but not that access control had been skipped */
-            if true == eventValue.IsPropagationStopped() {
-                requiredErr := refuseSkippedRequiredListeners(
-                    eventName,
-                    listenerList[listenerIndex+1:],
-                    listenerName,
-                    entry.maySkipRequiredListeners,
-                )
-                if nil != requiredErr {
+            /* a listener that fails ends the dispatch exactly as decisively as one that stops propagation: the listeners behind it — a required access-control listener among them — never ran. Returning the listener's own failure first would hide that, so the skip is reported ahead of it: with the stop's own refusal where the listener also stopped propagation, and carrying the failure as the cause where the failure alone ended the dispatch — a listener that failed while also producing a response would otherwise have that response served with access control never consulted. */
+            requiredErr := refuseSkippedRequiredListeners(
+                eventName,
+                listenerList[listenerIndex+1:],
+                listenerName,
+                entry.maySkipRequiredListeners,
+            )
+            if nil != requiredErr {
+                if true == eventValue.IsPropagationStopped() {
                     return eventValue, requiredErr
                 }
+
+                return eventValue, NewRequiredListenerSkippedErrorWithCause(eventName, listenerName, err)
             }
 
             return eventValue, err
@@ -659,7 +661,7 @@ func (instance *EventDispatcher) callListenerSafely(
         durationMs,
     )
 
-    /* @important the failure travels unlogged and unmarked. The record written here carried the listener's identity and duration but never the error, and marking the wrapper as logged then suppressed the caller's own record — the http kernel's, which renders the cause chain — so the reason a request failed closed existed on the returned value and in no log at all. The context rides on the error, so the caller's single record still names the listener. */
+    /* the failure travels unlogged and unmarked. The record written here carried the listener's identity and duration but never the error, and marking the wrapper as logged then suppressed the caller's own record — the http kernel's, which renders the cause chain — so the reason a request failed closed existed on the returned value and in no log at all. The context rides on the error, so the caller's single record still names the listener. */
     return exception.NewError(
         "event listener returned error",
         exceptionContext,

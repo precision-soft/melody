@@ -2068,3 +2068,190 @@ func TestKernel_ServeHttpClosesTheChainResponseWhenTheErrorLogPanics(t *testing.
         t.Fatalf("expected the response the chain produced to be closed by the recovery, it was never seen")
     }
 }
+
+type failingSaveSessionManager struct {
+    inner sessioncontract.Manager
+}
+
+func (instance *failingSaveSessionManager) Session(sessionId string) sessioncontract.Session {
+    return instance.inner.Session(sessionId)
+}
+
+func (instance *failingSaveSessionManager) NewSession() sessioncontract.Session {
+    return instance.inner.NewSession()
+}
+
+func (instance *failingSaveSessionManager) RegenerateSession(sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
+    return instance.inner.RegenerateSession(sessionInstance)
+}
+
+func (instance *failingSaveSessionManager) SaveSession(sessionInstance sessioncontract.Session) error {
+    return exception.NewError("session backend is down", nil, nil)
+}
+
+func (instance *failingSaveSessionManager) DeleteSession(sessionId string) error {
+    return instance.inner.DeleteSession(sessionId)
+}
+
+func (instance *failingSaveSessionManager) Close() error {
+    return instance.inner.Close()
+}
+
+func TestKernel_ASessionSaveOutageReachesTerminateAsTheFiveHundredTheClientReceived(t *testing.T) {
+    manager := &failingSaveSessionManager{
+        inner: session.NewManager(session.NewInMemoryStorage(), 30*time.Minute),
+    }
+
+    serviceContainer := newHttpTestContainerWithSessionManager(manager)
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/login",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            sessionValue, exists := request.Attributes().Get(RequestAttributeSession)
+            if false == exists {
+                t.Fatalf("expected the kernel to publish a session on the request")
+            }
+
+            sessionInstance := sessionValue.(sessioncontract.Session)
+            sessionInstance.Set("identity", "someone")
+
+            return TextResponse(nethttp.StatusOK, "welcome"), nil
+        },
+    )
+
+    terminateStatus := -1
+    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher.AddListener(
+        kernelcontract.EventKernelTerminate,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            terminateEvent, ok := eventValue.Payload().(*KernelTerminateEvent)
+            if false == ok || nil == terminateEvent.Response() {
+                return nil
+            }
+
+            terminateStatus = terminateEvent.Response().StatusCode()
+
+            return nil
+        },
+        0,
+    )
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    recorder := httptest.NewRecorder()
+    handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/login", nil))
+
+    if nethttp.StatusInternalServerError != recorder.Code {
+        t.Fatalf("expected the save outage to answer the client 500, got %d", recorder.Code)
+    }
+
+    if nethttp.StatusInternalServerError != terminateStatus {
+        t.Fatalf("expected kernel.terminate to see the 500 the client received, got %d", terminateStatus)
+    }
+}
+
+func TestKernel_AnOuterMiddlewarePanicAfterNextClosesTheChainResponse(t *testing.T) {
+    bodyReader := &closeRecordingReadCloser{}
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/stream",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            response := EmptyResponse(nethttp.StatusOK)
+            response.SetBodyReader(bodyReader)
+
+            return response, nil
+        },
+    )
+
+    panickingOuterMiddleware := func(next httpcontract.Handler) httpcontract.Handler {
+        return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            response, nextErr := next(runtimeInstance, writer, request)
+            _ = response
+            _ = nextErr
+
+            panic(exception.NewError("outer middleware failed after the handler answered", nil, nil))
+        }
+    }
+
+    kernelInstance := NewKernel(router)
+    kernelInstance.Use(panickingOuterMiddleware)
+    handler := kernelInstance.ServeHttp(newHttpTestContainer())
+
+    recorder := httptest.NewRecorder()
+    handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/stream", nil))
+
+    if nethttp.StatusInternalServerError != recorder.Code {
+        t.Fatalf("expected the panic to answer 500, got %d", recorder.Code)
+    }
+
+    if 1 != bodyReader.closeCount {
+        t.Fatalf("expected the recovery defer to close the chain response exactly once, got %d", bodyReader.closeCount)
+    }
+}
+
+func TestKernel_AFailingListenerResponseIsDroppedWhenARequiredListenerSitsBehindIt(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/cached",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(nethttp.StatusOK, "handled"), nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainer()
+    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+
+    dispatcher.AddListener(
+        kernelcontract.EventKernelRequest,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            requestEvent, ok := eventValue.Payload().(*KernelRequestEvent)
+            if false == ok {
+                return nil
+            }
+
+            requestEvent.SetResponse(TextResponse(nethttp.StatusOK, "cached"))
+
+            return exception.NewError("cache refresh failed", nil, nil)
+        },
+        100,
+    )
+
+    accessControlRan := false
+    accessControlRegistration := dispatcher.AddListener(
+        kernelcontract.EventKernelRequest,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            accessControlRan = true
+
+            return nil
+        },
+        20,
+    )
+
+    registrar, ok := dispatcher.(eventcontract.RequiredListenerRegistrar)
+    if false == ok {
+        t.Fatalf("expected the dispatcher to support required listeners")
+    }
+    registrar.MarkListenerRequired(accessControlRegistration)
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    recorder := httptest.NewRecorder()
+    handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/cached", nil))
+
+    if true == accessControlRan {
+        t.Fatalf("expected the dispatcher abort to keep the required listener from running")
+    }
+
+    if nethttp.StatusInternalServerError != recorder.Code {
+        t.Fatalf("expected the failing listener's response to be dropped for the fail-closed 500, got %d", recorder.Code)
+    }
+
+    if true == strings.Contains(recorder.Body.String(), "cached") {
+        t.Fatalf("expected the failing listener's body to be dropped, got %q", recorder.Body.String())
+    }
+}
