@@ -188,11 +188,11 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 ### Debug: `NewMiddlewareCommand` refuses a nil provider
 
-**What changed.** `NewMiddlewareCommand(nil)` panics at construction; a zero-value `MiddlewareCommand` run without a provider returns a named error through the report instead of a nil-function call.
+**What changed.** `NewMiddlewareCommand(descriptionProvider, buildProvider)` panics at construction when either provider is nil; a zero-value `MiddlewareCommand` run without providers returns a named error through the report instead of a nil-function call.
 
 **Symptom.** Wiring that handed a nil provider panics at registration time instead of when the command runs.
 
-**Remedy.** Pass a provider; return an empty slice from it when there is nothing to list.
+**Remedy.** Pass both providers; return empty results from them when there is nothing to list.
 
 ### Event: a skipped required listener refuses the response the stopping listener produced
 
@@ -404,7 +404,7 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 ### Application: the http timeout override interfaces are removed
 
-**What changed.** `HttpTimeoutConfiguration` and `HttpShutdownConfiguration` are deleted from the application package. Nothing implemented them and nothing could: the configuration the application consults is always the one it builds itself, so the overrides were unreachable through any api. The server limits are the fixed defaults — read 15s, read-header 5s, write 30s, idle 60s, max header 1 MiB, shutdown 5s.
+**What changed.** `HttpTimeoutConfiguration` and `HttpShutdownConfiguration` are deleted from the application package. Nothing implemented them and nothing could: the configuration the application consults is always the one it builds itself, so the overrides were unreachable through any api. The server limits are the fixed defaults — read 15s, read-header 5s, write 30s, idle 60s, max header 1 MiB; the shutdown timeout alone is configurable through `MELODY_HTTP_SHUTDOWN_TIMEOUT` (`kernel.http.shutdown_timeout`), five seconds by default.
 
 **Symptom.** Code referencing either interface — an implementation written in the hope it would be picked up, a type assertion — no longer compiles.
 
@@ -688,6 +688,20 @@ func (instance *CustomHttpConfiguration) StaticExcludedPaths() []string {
 ```go
 func (instance *CustomHttpConfiguration) SessionTombstoneRetention() time.Duration {
 	return config.DefaultSessionTombstoneRetention
+}
+```
+
+### Compile-level: `config/contract.HttpConfiguration` gained `ShutdownTimeout`
+
+**What changed.** [`config/contract.HttpConfiguration`](../config/contract/http.go) declares `ShutdownTimeout() time.Duration`, how long a stopping http server waits for the requests it has already admitted before cutting them. The framework's own implementation reads it from `MELODY_HTTP_SHUTDOWN_TIMEOUT` (`kernel.http.shutdown_timeout`), five seconds by default — the constant the wait used to be — and refuses zero and negative at boot, because only a positive value can describe a wait.
+
+**Symptom.** A type of your own implementing `config/contract.HttpConfiguration` no longer satisfies the interface, and the assignment fails to compile with `missing method ShutdownTimeout`.
+
+**Remedy.** Implement it. Returning `config.DefaultHttpShutdownTimeout` keeps the behaviour the interface had without the method:
+
+```go
+func (instance *CustomHttpConfiguration) ShutdownTimeout() time.Duration {
+	return config.DefaultHttpShutdownTimeout
 }
 ```
 

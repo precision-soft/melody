@@ -39,6 +39,8 @@ type EventDispatcher struct {
     subscriberRegistrations map[subscriberIdentity][]subscriberRegistration
     clock                   clockcontract.Clock
     nextListenerId          uint64
+    /* subscriberMutex serializes whole subscriber installations and removals against each other; it is always taken before mutex and never inside it. The per-listener mutex keeps each individual step consistent, but a subscriber spans several of them: without this outer section, two concurrent AddSubscriber calls for one identity both pass the duplicate refusal and install every listener twice, and a RemoveSubscriber interleaved with an AddSubscriber removes the half already installed while the rest keeps arriving under a record the remover was just told is gone. */
+    subscriberMutex sync.Mutex
 }
 
 func (instance *EventDispatcher) AddListener(
@@ -219,6 +221,9 @@ func (instance *EventDispatcher) AddSubscriber(subscriber eventcontract.EventSub
     /* every subscribed event is validated before a single listener is registered: validating while registering left a subscriber whose second event was malformed half-installed, with the listeners of the first one live and firing under a subscriber the caller was told had been refused */
     plannedList := planSubscriberRegistrations(subscriber)
 
+    instance.subscriberMutex.Lock()
+    defer instance.subscriberMutex.Unlock()
+
     instance.mutex.Lock()
     _, alreadyRegistered := instance.subscriberRegistrations[subscriberIdentityValue]
     instance.mutex.Unlock()
@@ -261,6 +266,9 @@ func (instance *EventDispatcher) RemoveSubscriber(subscriber eventcontract.Event
         subscriber,
         "remove a subscriber",
     )
+
+    instance.subscriberMutex.Lock()
+    defer instance.subscriberMutex.Unlock()
 
     instance.mutex.Lock()
     registrationList := instance.subscriberRegistrations[subscriberIdentityValue]

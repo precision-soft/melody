@@ -233,6 +233,10 @@ func (instance *Provider) resolvedPoolConfig() *PoolConfig {
         resolved.MaxIdleConnections = defaultConfig.MaxIdleConnections
     }
 
+    if true == instance.tunedForMigration {
+        return resolved
+    }
+
     if 0 >= resolved.ConnectionMaxLifetime {
         resolved.ConnectionMaxLifetime = defaultConfig.ConnectionMaxLifetime
     }

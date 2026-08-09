@@ -5,6 +5,7 @@ import (
     "math"
     nethttp "net/http"
     "net/http/httptest"
+    "strings"
     "testing"
     "time"
 
@@ -540,7 +541,7 @@ func TestSlidingWindowLimiter_MaxKeysDeniesUnseenKeyWhenFull(t *testing.T) {
     }
 }
 
-/* @info the ceiling prune walks the whole map, so running it for every unseen key would make a full limiter cost O(tracked keys) per request under the lock all traffic shares; it runs at most once per window, and the reclaim it defers lands on the next walk */
+/* the ceiling prune walks the whole map, so running it for every unseen key would make a full limiter cost O(tracked keys) per request under the lock all traffic shares; it runs at most once per window, and the reclaim it defers lands on the next walk */
 func TestTokenBucketLimiter_CeilingPruneRunsAtMostOncePerWindow(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
     limiter := NewTokenBucketLimiterWithClock(frozenClock, 5, time.Minute)
@@ -571,7 +572,7 @@ func TestTokenBucketLimiter_CeilingPruneRunsAtMostOncePerWindow(t *testing.T) {
     }
 }
 
-/* @info the sliding window limiter carries the same ceiling walk and the same once-per-window gate */
+/* the sliding window limiter carries the same ceiling walk and the same once-per-window gate */
 func TestSlidingWindowLimiter_CeilingPruneRunsAtMostOncePerWindow(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
     limiter := NewSlidingWindowLimiterWithClock(frozenClock, 5, time.Minute)
@@ -687,7 +688,7 @@ func TestRateLimitMiddleware_HonorsFailurePolicyAllowanceOnStoreError(t *testing
     }
 }
 
-/* @info the non-positive guard is load-bearing: without it a configuration-sourced zero sets the ceiling to zero, the map-full check trips on the very first request and every request is denied for the process lifetime */
+/* the non-positive guard is load-bearing: without it a configuration-sourced zero sets the ceiling to zero, the map-full check trips on the very first request and every request is denied for the process lifetime */
 func TestTokenBucketLimiter_NonPositiveMaxKeysIsIgnored(t *testing.T) {
     limiter := NewTokenBucketLimiter(10, time.Minute)
 
@@ -728,7 +729,7 @@ func TestSlidingWindowLimiter_NonPositiveMaxKeysIsIgnored(t *testing.T) {
     }
 }
 
-/* @info the limiter is a fixed window, not a token bucket: the allowance is restored whole at the edge, so an instant straddling it admits up to twice the rate. Locked deliberately — SlidingWindowLimiter is the strict-invariant option. */
+/* the limiter is a fixed window, not a token bucket: the allowance is restored whole at the edge, so an instant straddling it admits up to twice the rate. Locked deliberately — SlidingWindowLimiter is the strict-invariant option. */
 func TestFixedWindowLimiter_RestoresTheWholeAllowanceAtTheWindowEdge(t *testing.T) {
     clockInstance := clock.NewFrozenClock(time.Unix(0, 0).UTC())
     limiter := NewFixedWindowLimiterWithClock(clockInstance, 100, time.Minute)
@@ -762,7 +763,7 @@ func TestFixedWindowLimiter_RestoresTheWholeAllowanceAtTheWindowEdge(t *testing.
     }
 }
 
-/* @info the strict alternative on the same traffic shape: half the allowance spent at the start and half just before the edge. The fixed window restores everything at the edge, so 150 requests land inside one trailing window; the sliding window only frees what actually aged out. */
+/* the strict alternative on the same traffic shape: half the allowance spent at the start and half just before the edge. The fixed window restores everything at the edge, so 150 requests land inside one trailing window; the sliding window only frees what actually aged out. */
 func TestSlidingWindowLimiter_HoldsTheRateWhereTheFixedWindowDoesNot(t *testing.T) {
     spendHalfThenCountAtEdge := func(allow func(string) bool, advance func(time.Duration)) int {
         for index := 0; index < 50; index++ {
@@ -808,7 +809,7 @@ func TestSlidingWindowLimiter_HoldsTheRateWhereTheFixedWindowDoesNot(t *testing.
     }
 }
 
-/* @info the deprecated spelling must keep working: it is a type alias plus two forwarding constructors, so an application on the old name is unaffected */
+/* the deprecated spelling must keep working: it is a type alias plus two forwarding constructors, so an application on the old name is unaffected */
 func TestTokenBucketLimiter_DeprecatedAliasStillConstructsTheFixedWindowLimiter(t *testing.T) {
     var limiter *FixedWindowLimiter = NewTokenBucketLimiter(2, time.Minute)
 
@@ -943,7 +944,7 @@ func TestRateLimitWithResolver_NilResolverKeepsTheDirectPeer(t *testing.T) {
     }
 }
 
-/* @info a window past the midpoint of the duration range must not wrap the idle-prune threshold negative: the cleanup would then delete every bucket and refill a budget the window promised to hold */
+/* a window past the midpoint of the duration range must not wrap the idle-prune threshold negative: the cleanup would then delete every bucket and refill a budget the window promised to hold */
 
 func TestFixedWindowLimiter_MaxDurationWindowSurvivesIdlePrune(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
@@ -975,7 +976,7 @@ func TestSlidingWindowLimiter_MaxDurationWindowSurvivesIdlePrune(t *testing.T) {
     }
 }
 
-/* @info SimpleRateLimit is one of the three helpers an application actually calls, and no test entered it. Its documented semantics are the direct peer — the resolver cannot be set afterwards because the helper builds its config internally — so two clients behind one proxy sharing a budget is the correct behaviour here, and the sentence that says so needs a test that fails if the helper starts reading a forwarded header. */
+/* SimpleRateLimit is one of the three helpers an application actually calls, and no test entered it. Its documented semantics are the direct peer — the resolver cannot be set afterwards because the helper builds its config internally — so two clients behind one proxy sharing a budget is the correct behaviour here, and the sentence that says so needs a test that fails if the helper starts reading a forwarded header. */
 
 func TestSimpleRateLimit_ChargesTheDirectPeer(t *testing.T) {
     handler := SimpleRateLimit(1)(allowingNext())
@@ -991,7 +992,7 @@ func TestSimpleRateLimit_ChargesTheDirectPeer(t *testing.T) {
     }
 }
 
-/* @info a budget the helper hands out has to be a budget: the refusal is the 429 the framework spells as TooManyRequests, not a bare error a handler might mistake for a store failure. */
+/* a budget the helper hands out has to be a budget: the refusal is the 429 the framework spells as TooManyRequests, not a bare error a handler might mistake for a store failure. */
 
 func TestSimpleRateLimit_RefusesWithTooManyRequests(t *testing.T) {
     handler := SimpleRateLimit(1)(allowingNext())
@@ -1022,7 +1023,7 @@ func TestSimpleRateLimit_RefusesWithTooManyRequests(t *testing.T) {
     }
 }
 
-/* @info UserRateLimit keys on the identity rather than the address, which is the whole point of it: one user must carry one budget across every address they arrive from, and two users sharing an address must not share one. Neither direction had a test on the helper itself. */
+/* UserRateLimit keys on the identity rather than the address, which is the whole point of it: one user must carry one budget across every address they arrive from, and two users sharing an address must not share one. Neither direction had a test on the helper itself. */
 
 func TestUserRateLimit_KeysOnTheIdentityRatherThanTheAddress(t *testing.T) {
     identity := "alice"
@@ -1048,7 +1049,7 @@ func TestUserRateLimit_KeysOnTheIdentityRatherThanTheAddress(t *testing.T) {
     }
 }
 
-/* @info a request carrying no identity falls back to the address. Without the fallback every anonymous request would key on one empty identity and share a single budget — the first unauthenticated client to arrive would spend it for everyone, which turns the limiter into a denial of service against the traffic it is most needed for. */
+/* a request carrying no identity falls back to the address. Without the fallback every anonymous request would key on one empty identity and share a single budget — the first unauthenticated client to arrive would spend it for everyone, which turns the limiter into a denial of service against the traffic it is most needed for. */
 
 func TestUserRateLimit_FallsBackToTheAddressWhenAnonymous(t *testing.T) {
     anonymous := func(request httpcontract.Request) string { return "" }
@@ -1071,7 +1072,7 @@ func TestUserRateLimit_FallsBackToTheAddressWhenAnonymous(t *testing.T) {
     }
 }
 
-/* @info the resolver accessor is what makes SetClientIpResolver verifiable from outside; it had no test at all, so a setter that stored nowhere would have read as working through every path that only exercises the default. */
+/* the resolver accessor is what makes SetClientIpResolver verifiable from outside; it had no test at all, so a setter that stored nowhere would have read as working through every path that only exercises the default. */
 
 func TestRateLimitConfig_ClientIpResolverAccessorReportsWhatWasSet(t *testing.T) {
     config := NewRateLimitConfig(NewFixedWindowLimiter(1, time.Minute), nil, nil)
@@ -1096,4 +1097,60 @@ func TestRateLimitConfig_ClientIpResolverAccessorReportsWhatWasSet(t *testing.T)
     if nil != config.ClientIpResolver() {
         t.Fatalf("expected the accessor to report the resolver being cleared")
     }
+}
+
+/* a limit handler that produces neither response nor error still refused the request, the reading the listener door gives: passed through, the nil response would be normalized into an empty 204 and the refused request served as success. */
+func TestRateLimitMiddleware_AnswersTheSilentLimitHandlerWith429(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewTokenBucketLimiterWithClock(frozenClock, 1, time.Minute)
+
+    silentHandler := func(request httpcontract.Request) (httpcontract.Response, error) {
+        return nil, nil
+    }
+
+    config := NewRateLimitConfig(limiter, nil, silentHandler)
+    middleware := RateLimitMiddleware(config)
+
+    next := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return http.TextResponse(200, "ok"), nil
+    }
+
+    handler := middleware(next)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    if _, firstErr := handler(nil, httptest.NewRecorder(), melodyRequest); nil != firstErr {
+        t.Fatalf("unexpected error on the allowed request: %v", firstErr)
+    }
+
+    response, err := handler(nil, httptest.NewRecorder(), melodyRequest)
+    if nil != err {
+        t.Fatalf("unexpected error on the refused request: %v", err)
+    }
+
+    if nil == response {
+        t.Fatal("expected the refused request to be answered rather than passed through as nil")
+    }
+
+    if nethttp.StatusTooManyRequests != response.StatusCode() {
+        t.Fatalf("expected 429, got %d", response.StatusCode())
+    }
+}
+
+/* the nil configuration is refused by name, the answer the listener door gives for the same wiring mistake, instead of an invalid-memory-address panic at boot. */
+func TestRateLimitMiddleware_RefusesANilConfigByName(t *testing.T) {
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatal("expected the nil configuration to be refused with a panic")
+        }
+
+        panicErr, isError := recovered.(error)
+        if false == isError || false == strings.Contains(panicErr.Error(), "limiter is required for rate limit middleware") {
+            t.Fatalf("expected the named refusal, got %v", recovered)
+        }
+    }()
+
+    _ = RateLimitMiddleware(nil)
 }

@@ -27,15 +27,10 @@ func TestRouteGroup_PanicsWhenRouterIsNil(t *testing.T) {
     )
 }
 
-func TestRouteGroup_PanicsWhenOptionsIsNil(t *testing.T) {
+/* nil options read as the default options, the router's own answer for the same input: the group was the one registration surface that refused what its sibling accepts. The route carries the group's prefix and answers every method, exactly what the defaults mean. */
+func TestRouteGroup_NilOptionsReadAsTheDefaultOptions(t *testing.T) {
     router := NewRouter()
     group := router.Group("/api")
-
-    defer func() {
-        if nil == recover() {
-            t.Fatalf("expected panic")
-        }
-    }()
 
     group.HandleWithOptions(
         "/x",
@@ -44,6 +39,18 @@ func TestRouteGroup_PanicsWhenOptionsIsNil(t *testing.T) {
         },
         nil,
     )
+
+    if _, matched := router.Match(nethttp.MethodGet, "/api/x", "", ""); false == matched {
+        t.Fatal("expected the grouped route to answer under the group prefix")
+    }
+
+    if _, matched := router.Match(nethttp.MethodPost, "/api/x", "", ""); false == matched {
+        t.Fatal("expected the default options to answer every method")
+    }
+
+    if _, matched := router.Match(nethttp.MethodGet, "/x", "", ""); true == matched {
+        t.Fatal("expected the route to exist only under the group prefix")
+    }
 }
 
 func TestRouteGroup_JoinsPathAndPrefixesName(t *testing.T) {

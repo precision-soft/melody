@@ -476,3 +476,35 @@ func TestLazy_NilResolverSurfacesAsAnErrorAtFirstUse(t *testing.T) {
         t.Fatalf("unexpected refusal message: %q", resolveErr.Error())
     }
 }
+
+/* the type-keyed door dresses its failure the way the name-keyed twin does: a melody error travels out whole with the type written into its context in place, and a foreign error is wrapped naming the type, so the operator reading either record learns which resolution failed. */
+func TestFromResolverByType_EnrichesTheFailureLikeTheNameKeyedTwin(t *testing.T) {
+    melodyErr := exception.NewError("service creation failed", nil, nil)
+
+    _, enrichedErr := FromResolverByType[*resolverTestService](&melodyErrorResolver{err: melodyErr})
+    if enrichedErr != melodyErr {
+        t.Fatalf("expected the melody error to travel out whole, got %v", enrichedErr)
+    }
+
+    serviceType, exists := melodyErr.Context()["serviceType"]
+    if false == exists || "" == serviceType {
+        t.Fatalf("expected the failure context to carry the service type, got %v", melodyErr.Context())
+    }
+
+    _, wrappedErr := FromResolverByType[*resolverTestService](&resolverTestResolver{
+        servicesByName: map[string]any{},
+        servicesByType: map[reflect.Type]any{},
+    })
+    if nil == wrappedErr {
+        t.Fatal("expected the foreign failure to be reported")
+    }
+
+    var wrappedMelodyErr *exception.Error
+    if false == errors.As(wrappedErr, &wrappedMelodyErr) || nil == wrappedMelodyErr {
+        t.Fatalf("expected the foreign failure to be wrapped, got %v", wrappedErr)
+    }
+
+    if _, typeExists := wrappedMelodyErr.Context()["serviceType"]; false == typeExists {
+        t.Fatalf("expected the wrapper to name the service type, got %v", wrappedMelodyErr.Context())
+    }
+}

@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- README — the per-command overrides table states the runner's real defaults: a `Timeout` left at zero means no deadline at all, not the one hour the table claimed (an hour is a suggestion in the prose, not a default), and an abandoned command is reaped one `GracefulTimeout` after the deadline — five minutes by default, not five seconds — with the `GracefulTimeout` override now carrying its own row. An operator relying on the documented one-hour bound in fact had no bound at all
 - `runner_command.go` — an entry routed to another crontab file (`EntryConfig.DestinationFile`) joins the construction refusal beside its siblings `Command` and `Instances`: such an entry addresses an external scheduler, and accepted by the runner as well it executed twice — in-process and in the generated crontab — whenever both were live. **Breaking** at boot for a configuration that silently double-ran until now
 - `generate_command.go` — a `melody.cron.heartbeat.enabled` value that does not hold a boolean fails generation instead of being read as "not enabled". The conversion error was discarded, so a typo produced a crontab with no liveness line and a success message, leaving a misspelled opt-in indistinguishable from never having asked for one — while every other configuration mistake on this command (missing output path, missing user, bad schedule) is a hard error. **Breaking** at runtime for a configuration carrying a malformed value.
 

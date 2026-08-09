@@ -379,6 +379,19 @@ func (instance *HttpClient) RequestStreamWithContext(
         return nil, err
     }
 
+    /* the explicit cap is judged before anything is dialled, the rule the buffered path states: read after the exchange, a POST that had already committed its side effect answered with an error phrased as though nothing had been sent, and a caller retrying on it duplicated the operation */
+    if true == requestConfig.hasExplicitMaxResponseBodyBytes() && 0 >= requestConfig.MaxResponseBodyBytes() {
+        return nil, exception.NewError(
+            "invalid max response body bytes",
+            exceptioncontract.Context{
+                "maxResponseBodyBytes": requestConfig.MaxResponseBodyBytes(),
+                "method":               method,
+                "url":                  sanitizeUrlForDiagnostics(urlString),
+            },
+            nil,
+        )
+    }
+
     requestInstance, err := instance.buildRequest(method, urlString, requestConfig)
     if nil != err {
         return nil, err
@@ -397,19 +410,6 @@ func (instance *HttpClient) RequestStreamWithContext(
 
     if true == requestConfig.hasExplicitMaxResponseBodyBytes() {
         maxResponseBodyBytes := requestConfig.MaxResponseBodyBytes()
-        if 0 >= maxResponseBodyBytes {
-            _ = response.Body.Close()
-
-            return nil, exception.NewError(
-                "invalid max response body bytes",
-                exceptioncontract.Context{
-                    "maxResponseBodyBytes": maxResponseBodyBytes,
-                    "method":               method,
-                    "url":                  sanitizeUrlForDiagnostics(urlString),
-                },
-                nil,
-            )
-        }
 
         body = newLimitedStreamBody(
             response.Body,

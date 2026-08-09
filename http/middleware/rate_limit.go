@@ -12,6 +12,7 @@ import (
     clockcontract "github.com/precision-soft/melody/clock/contract"
     "github.com/precision-soft/melody/exception"
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
+    "github.com/precision-soft/melody/http"
     httpcontract "github.com/precision-soft/melody/http/contract"
     "github.com/precision-soft/melody/internal"
     "github.com/precision-soft/melody/logging"
@@ -120,7 +121,7 @@ func (instance *FixedWindowLimiter) Allow(key string) bool {
         instance.buckets[key] = bucket
     }
 
-    /* @important the window is fixed, not a token bucket: the allowance is restored whole at the edge rather than proportionally to elapsed time, so up to twice the rate can pass across an instant straddling it. SlidingWindowLimiter holds the rate over every trailing window. */
+    /* the window is fixed, not a token bucket: the allowance is restored whole at the edge rather than proportionally to elapsed time, so up to twice the rate can pass across an instant straddling it. SlidingWindowLimiter holds the rate over every trailing window. */
     elapsed := now.Sub(bucket.lastRefill)
 
     if instance.window <= elapsed {
@@ -419,7 +420,7 @@ func (instance *RateLimitConfig) clientIp(request httpcontract.Request) string {
 }
 
 func RateLimitMiddleware(config *RateLimitConfig) httpcontract.Middleware {
-    if nil == config.Limiter() {
+    if nil == config || nil == config.Limiter() {
         exception.Panic(
             exception.NewError("limiter is required for rate limit middleware", nil, nil),
         )
@@ -458,7 +459,17 @@ func RateLimitMiddleware(config *RateLimitConfig) httpcontract.Middleware {
             }
 
             if false == allowed {
-                return config.OnLimitExceeded()(request)
+                response, limitErr := config.OnLimitExceeded()(request)
+                if nil != limitErr {
+                    return response, limitErr
+                }
+
+                /* a limit handler that produced neither response nor error still refused the request, the reading the listener door gives the same outcome: passed through, the nil response would be normalized into an empty 204 and the refused request served as success */
+                if true == internal.IsNilInterface(response) {
+                    return http.JsonErrorResponse(nethttp.StatusTooManyRequests, "too many requests"), nil
+                }
+
+                return response, nil
             }
 
             return next(runtimeInstance, writer, request)

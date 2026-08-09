@@ -773,3 +773,20 @@ func TestProviderOpenContextCancelsTheRetrySleep(t *testing.T) {
         t.Fatalf("expected the cancellation to cut the retry sleep, took %v", elapsed)
     }
 }
+
+/* the diagnostic context of a failed connection carries the pool sizing and the deadlines that governed the attempt, the pgsql sibling's shape, so the operator reading the record does not see only the address that refused. */
+func TestToConnectionContextCarriesThePoolAndTimeoutConfiguration(t *testing.T) {
+    provider := &Provider{}
+
+    connectionContext := provider.toConnectionContext(
+        NewConnectionConfig("host", "3306", "database", "user", "password"),
+        DefaultPoolConfig(),
+        DefaultTimeoutConfig(),
+    )
+
+    for _, key := range []string{"connection", "poolConfig", "timeoutConfig"} {
+        if _, exists := connectionContext[key]; false == exists {
+            t.Fatalf("expected the connection context to carry %q, got %v", key, connectionContext)
+        }
+    }
+}

@@ -1778,3 +1778,71 @@ func TestEventDispatcher_FailingListenerAfterTheRequiredListenerRan_ReportsItsOw
         t.Fatalf("expected the listener's own failure, got: %v", err)
     }
 }
+
+/* a subscriber installation is atomic against its twin and against its removal: without the outer subscriber section, two concurrent registrations of one identity both pass the duplicate refusal and every listener fires twice. The rounds make the interleaving overwhelmingly likely to occur at least once, and the race detector reads the same window directly. */
+func TestEventDispatcher_ConcurrentSubscriberRegistrationStaysAtomic(t *testing.T) {
+    for round := 0; 100 > round; round++ {
+        dispatcher, clockInstance := testNewEventDispatcher()
+
+        calls := 0
+
+        subscriber := &testSubscriber{
+            events: map[string][]eventcontract.SubscribedEvent{
+                "e": {
+                    NewSubscribedEvent(
+                        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                            calls++
+                            return nil
+                        },
+                        10,
+                    ),
+                },
+            },
+        }
+
+        panicCount := 0
+
+        var panicMutex sync.Mutex
+        var registrations sync.WaitGroup
+
+        /* the gate releases both registrations at once: started bare, the first goroutine often finishes before the second begins and the interleaving under test never occurs */
+        start := make(chan struct{})
+
+        for attempt := 0; 4 > attempt; attempt++ {
+            registrations.Add(1)
+
+            go func() {
+                defer registrations.Done()
+                defer func() {
+                    if recovered := recover(); nil != recovered {
+                        panicMutex.Lock()
+                        panicCount++
+                        panicMutex.Unlock()
+                    }
+                }()
+
+                <-start
+
+                dispatcher.AddSubscriber(subscriber)
+            }()
+        }
+
+        close(start)
+        registrations.Wait()
+
+        if 3 != panicCount {
+            t.Fatalf("round %d: expected exactly three duplicate refusals, got %d", round, panicCount)
+        }
+
+        runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
+
+        _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+        if nil != err {
+            t.Fatalf("round %d: unexpected error: %v", round, err)
+        }
+
+        if 1 != calls {
+            t.Fatalf("round %d: expected the listener to be installed exactly once, got %d calls", round, calls)
+        }
+    }
+}

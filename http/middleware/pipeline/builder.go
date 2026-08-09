@@ -101,6 +101,17 @@ func (instance *Builder) Describe(
             continue
         }
 
+        /* the nil-factory refusal is Build's own third refusal, mirrored here so a described pipeline is one the serving boot accepts: without it the listing reports as healthy a definition the build refuses */
+        if nil == definition.factory {
+            return nil, report, exception.NewError(
+                "middleware factory is nil",
+                exceptioncontract.Context{
+                    "middlewareName": definition.name,
+                },
+                nil,
+            )
+        }
+
         descriptions = append(
             descriptions,
             MiddlewareDescription{

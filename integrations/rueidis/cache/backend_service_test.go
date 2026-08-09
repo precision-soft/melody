@@ -225,3 +225,25 @@ func TestBackendFromRuntime_BindsTheRequestContextToTheRegisteredService(t *test
         t.Fatal("the answered backend must carry the runtime's context")
     }
 }
+
+/* the service's Close reaches the handles WithContext minted: the runtime door mints one per request over the same client, and a handle that ignored the close would quietly keep serving through a client whose owner already ended this backend — the exact scenario the closed flag exists to surface. The sibling-backend half of the contract — a backend built directly over the same client stays open — is pinned by TestBackendService_CloseRefusesLaterCallsAndLeavesTheClientOpen. */
+func TestBackendService_CloseReachesTheWithContextHandles(t *testing.T) {
+    service := liveService(t)
+
+    before := service.WithContext(context.Background())
+
+    if closeErr := service.Close(); nil != closeErr {
+        t.Fatalf("Close: %v", closeErr)
+    }
+
+    _, _, getErr := before.Get("any")
+    if nil == getErr || false == strings.Contains(getErr.Error(), "cache backend is closed") {
+        t.Fatalf("expected the handle minted before the close to refuse after it, got %v", getErr)
+    }
+
+    after := service.WithContext(context.Background())
+    setErr := after.Set("any", []byte("payload"), time.Minute)
+    if nil == setErr || false == strings.Contains(setErr.Error(), "cache backend is closed") {
+        t.Fatalf("expected the handle minted after the close to refuse, got %v", setErr)
+    }
+}

@@ -25,6 +25,7 @@ func nonNegativeIntValidator(flagName string) func(value int) error {
     }
 }
 
+/* StandardFlags returns the flag set every melody command accepts. Quiet defaults to true on purpose: a command's essential output — the document, table or summary the command exists to produce — is never gated on quiet, so the flag governs only headers and decoration, and the default keeps a scripted invocation clean without asking for it. */
 func StandardFlags() []clicontract.Flag {
     return []clicontract.Flag{
         &clicontract.StringFlag{
@@ -89,6 +90,7 @@ func StandardFlags() []clicontract.Flag {
     }
 }
 
+/* DebugFlags returns StandardFlags with quiet defaulting to false: an introspection command exists to be read by a person, so the headers and context quiet suppresses are part of its answer. */
 func DebugFlags() []clicontract.Flag {
     flags := StandardFlags()
 

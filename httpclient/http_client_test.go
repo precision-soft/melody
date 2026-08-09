@@ -1619,8 +1619,8 @@ func TestHttpClient_StripsCookieAndProxyAuthorizationOnCrossOriginRedirect(t *te
     }
 }
 
-/* @info the streaming path reads the cap AFTER the exchange, unlike the buffered one which refuses before anything is dialled — a difference the buffered test asserts by counting zero server hits. The asymmetry is real and this test records it: a streaming request with an invalid cap has already committed its side effect when it fails, so a caller retrying on that error repeats the operation. The body is closed on the way out, which is what keeps the connection from being pinned by the refusal. */
-func TestHttpClient_StreamWithAnInvalidCapFailsOnlyAfterTheRequestWasSent(t *testing.T) {
+/* the streaming path judges the explicit cap before anything is dialled, the rule the buffered path always held and asserts by counting zero server hits: refused after the exchange, a POST that had already committed its side effect answered with an error phrased as though nothing had been sent, and a caller retrying on it duplicated the operation. */
+func TestHttpClient_StreamRefusesAnInvalidCapBeforeTheRequestIsSent(t *testing.T) {
     serverHits := 0
 
     server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -1634,7 +1634,7 @@ func TestHttpClient_StreamWithAnInvalidCapFailsOnlyAfterTheRequestWasSent(t *tes
     client := NewDefaultHttpClient()
     defer client.Close()
 
-    _, requestErr := client.RequestStream(http.MethodGet, server.URL, WithMaxResponseBodyBytes(0))
+    _, requestErr := client.RequestStream(http.MethodPost, server.URL, WithMaxResponseBodyBytes(0))
     if nil == requestErr {
         t.Fatalf("expected the invalid cap to be refused on the streaming path")
     }
@@ -1643,8 +1643,8 @@ func TestHttpClient_StreamWithAnInvalidCapFailsOnlyAfterTheRequestWasSent(t *tes
         t.Fatalf("unexpected refusal message: %q", requestErr.Error())
     }
 
-    if 1 != serverHits {
-        t.Fatalf("expected the streaming refusal to arrive after the request was sent, got %d server hits", serverHits)
+    if 0 != serverHits {
+        t.Fatalf("expected the streaming refusal to arrive before the request is sent, got %d server hits", serverHits)
     }
 }
 

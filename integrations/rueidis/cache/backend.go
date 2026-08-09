@@ -89,6 +89,8 @@ type Backend struct {
     deleteBatch    int
     commandTimeout time.Duration
     closed         atomic.Bool
+    /* ownerClosed is the closed flag of the backend this handle was derived from, nil on a backend built directly: a context-bound handle minted by WithContext lives exactly as long as its owner, so the owner's Close must reach it — otherwise the refuse-after-Close guarantee would hold only for the one stored instance while the runtime door mints a fresh, open handle per request. A sibling backend built over the same client stays independent on purpose; the client belongs to whoever built it. */
+    ownerClosed *atomic.Bool
 }
 
 /* operationContext bounds an operation dispatched without a caller context: the constructor's context plus the command timeout when one is configured, the constructor's context alone otherwise. */
@@ -100,9 +102,17 @@ func (instance *Backend) operationContext() (context.Context, context.CancelFunc
     return instance.ctx, func() {}
 }
 
-/* refuseWhenClosed answers the refusal every operation gives after Close, the answer the in-memory backend behind the same contract gives: a teardown-ordering bug surfaces immediately instead of quietly serving through a client whose owner already ended this backend. */
+/* refuseWhenClosed answers the refusal every operation gives after Close, the answer the in-memory backend behind the same contract gives: a teardown-ordering bug surfaces immediately instead of quietly serving through a client whose owner already ended this backend. A derived handle also reads its owner's flag, so the owner's Close reaches every handle WithContext minted from it. */
 func (instance *Backend) refuseWhenClosed() error {
     if true == instance.closed.Load() {
+        return exception.NewError(
+            "cache backend is closed",
+            nil,
+            nil,
+        )
+    }
+
+    if nil != instance.ownerClosed && true == instance.ownerClosed.Load() {
         return exception.NewError(
             "cache backend is closed",
             nil,

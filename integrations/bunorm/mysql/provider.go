@@ -13,6 +13,7 @@ import (
     "github.com/precision-soft/melody/config"
     containercontract "github.com/precision-soft/melody/container/contract"
     "github.com/precision-soft/melody/exception"
+    exceptioncontract "github.com/precision-soft/melody/exception/contract"
     "github.com/precision-soft/melody/integrations/bunorm"
     "github.com/precision-soft/melody/logging"
     "github.com/uptrace/bun"
@@ -401,12 +402,25 @@ func (instance *Provider) open(resolver containercontract.Resolver) (*bun.DB, er
 
         return nil, exception.NewError(
             "database connection failed",
-            connectionConfig.SafeContext(),
+            instance.toConnectionContext(connectionConfig, poolConfig, timeoutConfig),
             pingErr,
         )
     }
 
     return database, nil
+}
+
+/* toConnectionContext is the diagnostic context of a failed connection, the pgsql sibling's shape: the operator reading the record sees the pool sizing and the deadlines that governed the attempt, not only the address that refused. */
+func (instance *Provider) toConnectionContext(
+    connectionConfig *ConnectionConfig,
+    poolConfig *PoolConfig,
+    timeoutConfig *TimeoutConfig,
+) exceptioncontract.Context {
+    return map[string]any{
+        "connection":    connectionConfig.SafeContext(),
+        "poolConfig":    poolConfig,
+        "timeoutConfig": timeoutConfig,
+    }
 }
 
 func (instance *Provider) computeBackoffDelay(attempt uint32) time.Duration {

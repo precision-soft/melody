@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- `provider.go` — the connection-failure record carries the pool sizing and the deadlines that governed the attempt, the pgsql sibling's diagnostic shape; it named only the address that refused, so the same outage read differently depending on which provider reported it
 - `provider.go` — every non-positive field of `PoolConfig` and `TimeoutConfig` falls back to the constructor default, the way the retry configuration already did. A zero reaches the provider far more often from an environment key nobody set than from a caller who means "no limit": on `database/sql` a zero maximum is an UNLIMITED pool and a zero lifetime means connections that are never recycled, while on this driver a zero read or write deadline means no deadline at all — so the zero-value configuration disarmed exactly the protections the nil configuration installs, and a negative one put the deadline in the past, failing every dial instantly with an i/o timeout no network event caused. **Behavioural**: a configuration that relied on zero meaning "unlimited" now receives the documented defaults; the migration connection keeps its deliberately lifted deadlines and disabled recycling
 - `provider.go` — transient-error detection recognises a connection abort through explicit markers for both spellings its platforms give it (`software caused connection abort` and `established connection was aborted`), aligning with the pgsql provider
 

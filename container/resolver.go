@@ -109,7 +109,24 @@ func FromResolverByType[T any](resolver containercontract.Resolver) (T, error) {
     }
     if nil != getByTypeErr {
         var zero T
-        return zero, getByTypeErr
+
+        var melodyErr *exception.Error
+        isMelodyErr := errors.As(getByTypeErr, &melodyErr)
+
+        /* the failure is dressed the way the name-keyed twin dresses it: the original error travels out whole with the type written into its context in place, and a foreign error is wrapped naming the type — a rebuilt copy would shed the log level, the already-logged mark, the capture stack and every wrapper above it */
+        if true == isMelodyErr && nil != melodyErr {
+            melodyErr.SetContextValue("serviceType", canonicalTargetType.String())
+
+            return zero, getByTypeErr
+        }
+
+        return zero, exception.NewError(
+            "service not registered in resolver",
+            map[string]any{
+                "serviceType": canonicalTargetType.String(),
+            },
+            getByTypeErr,
+        )
     }
 
     typedValue, ok := value.(T)

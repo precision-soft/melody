@@ -51,6 +51,7 @@ type BackendService struct {
     backend *Backend
 }
 
+/* WithContext binds a fresh handle to the given context over the same client and configuration. The handle shares the service's closed state: it is minted per call — the runtime door mints one per request — and a handle that ignored the service's Close would quietly keep serving through a client whose owner already ended this backend, on exactly the path everything goes through. */
 func (instance *BackendService) WithContext(ctx context.Context) *Backend {
     if nil == ctx {
         return instance.backend
@@ -68,6 +69,8 @@ func (instance *BackendService) WithContext(ctx context.Context) *Backend {
     if nil != err {
         exception.Panic(exception.FromError(err))
     }
+
+    backend.ownerClosed = &instance.backend.closed
 
     return backend
 }

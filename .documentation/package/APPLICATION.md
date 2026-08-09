@@ -68,13 +68,16 @@ package main
 import (
 	"context"
 	"io/fs"
+	nethttp "net/http"
 
 	"github.com/precision-soft/melody/application"
 	applicationcontract "github.com/precision-soft/melody/application/contract"
+	"github.com/precision-soft/melody/http"
 	httpcontract "github.com/precision-soft/melody/http/contract"
 	kernelcontract "github.com/precision-soft/melody/kernel/contract"
 	"github.com/precision-soft/melody/logging"
 	loggingcontract "github.com/precision-soft/melody/logging/contract"
+	runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
 type demoModule struct{}
@@ -127,21 +130,18 @@ func (instance *demoModule) RegisterHttpRoutes(kernelInstance kernelcontract.Ker
 
 	router.HandleNamed(
 		"health",
-		httpcontract.MethodGet,
+		nethttp.MethodGet,
 		"/health",
-		func(kernelInstance kernelcontract.Kernel) httpcontract.Handler {
-			_ = kernelInstance
-
-			return func(writer httpcontract.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-				_ = writer
-				_ = request
-
-				return httpcontract.NewStaticResponse(
-					"ok",
-					200,
-				), nil
-			}
-		}(kernelInstance),
+		func(
+			_ runtimecontract.Runtime,
+			_ nethttp.ResponseWriter,
+			_ httpcontract.Request,
+		) (httpcontract.Response, error) {
+			return http.TextResponse(
+				200,
+				"ok",
+			), nil
+		},
 	)
 }
 
@@ -164,15 +164,16 @@ func buildApplication(embeddedPublicFiles fs.FS, embeddedConfigFiles fs.FS) *app
 	 */
 
 	app.RegisterHttpRoute(
-		httpcontract.MethodGet,
+		nethttp.MethodGet,
 		"/ping",
-		func(writer httpcontract.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-			_ = writer
-			_ = request
-
-			return httpcontract.NewStaticResponse(
-				"pong",
+		func(
+			_ runtimecontract.Runtime,
+			_ nethttp.ResponseWriter,
+			_ httpcontract.Request,
+		) (httpcontract.Response, error) {
+			return http.TextResponse(
 				200,
+				"pong",
 			), nil
 		},
 	)
@@ -253,7 +254,7 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 
 ### Boot refusals and the process exit
 
-Boot fails fast where serving would be the widening: an **http** process whose `.env` artifacts contributed **no keys at all** refuses to boot rather than serve on development defaults (a cli process stays permissive — a command takes its configuration with it when it exits). The http server limits are fixed defaults in this major — read 15s, read-header 5s, write 30s, idle 60s, max header 1 MiB, shutdown 5s — with no override surface.
+Boot fails fast where serving would be the widening: an **http** process whose `.env` artifacts contributed **no keys at all** refuses to boot rather than serve on development defaults (a cli process stays permissive — a command takes its configuration with it when it exits). The http server limits are fixed defaults in this major — read 15s, read-header 5s, write 30s, idle 60s, max header 1 MiB — with no override surface; the shutdown timeout alone is configurable through `MELODY_HTTP_SHUTDOWN_TIMEOUT` (`kernel.http.shutdown_timeout`), defaulting to 5s.
 
 On the way out, the record that explains a dying process is written **before** the teardown, through a logger that still writes: the exit handler refuses a container logger the teardown already closed and falls back to the emergency logger. A teardown failure that `Run`'s own close discovers turns into exit 1, symmetric with the cli path, which folds close failures into the command's result.
 

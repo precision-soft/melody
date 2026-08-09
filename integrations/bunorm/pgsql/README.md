@@ -21,7 +21,7 @@ Common parameter names:
 - `DB_USER`
 - `DB_PASSWORD`
 
-Pool, timeout and retry defaults can be overridden via the chainable [`WithPoolConfig`](./provider.go), [`WithTimeoutConfig`](./provider.go) and [`WithRetryConfig`](./provider.go) methods (or up front through [`NewProviderWithConfig`](./provider.go)) using [`PoolConfig`](./pool_config.go), [`TimeoutConfig`](./timeout_config.go) and [`RetryConfig`](./retry_config.go). [`TimeoutConfig`](./timeout_config.go) carries the **connect timeout only** — unlike the MySQL provider it has no read/write timeouts, because `pgdriver` exposes no separate read/write deadlines.
+Pool, timeout and retry defaults can be overridden via the chainable [`WithPoolConfig`](./provider.go), [`WithTimeoutConfig`](./provider.go) and [`WithRetryConfig`](./provider.go) methods (or up front through [`NewProviderWithConfig`](./provider.go)) using [`PoolConfig`](./pool_config.go), [`TimeoutConfig`](./timeout_config.go) and [`RetryConfig`](./retry_config.go). [`TimeoutConfig`](./timeout_config.go) names every deadline the driver applies — [`NewTimeoutConfig`](./timeout_config.go) takes the connect, read and write timeouts — because without explicit read and write deadlines `pgdriver` applies its own defaults, 10 seconds per read and 5 per write, which cut long statements with nothing in this configuration to mention they exist. For statements that must outlive even the configured deadlines, [`OpenForMigration`](./provider.go) opens a dedicated connection with the read and write deadlines lifted, which is what the migration commands run on.
 
 ### Defaults
 
@@ -34,6 +34,8 @@ Applied when the matching config is not set ([`DefaultPoolConfig`](./pool_config
 | `PoolConfig`    | `ConnectionMaxLifetime` | `5m`    |
 | `PoolConfig`    | `ConnectionMaxIdleTime` | `1m`    |
 | `TimeoutConfig` | `ConnectTimeout`        | `5s`    |
+| `TimeoutConfig` | `ReadTimeout`           | `30s`   |
+| `TimeoutConfig` | `WriteTimeout`          | `30s`   |
 | `RetryConfig`   | `MaxAttempts`           | `3`     |
 | `RetryConfig`   | `InitialDelay`          | `500ms` |
 | `RetryConfig`   | `MaxDelay`              | `5s`    |

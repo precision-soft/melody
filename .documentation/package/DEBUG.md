@@ -20,7 +20,9 @@ The commands are intended for diagnostics and local debugging (container service
 
 `debug:parameters` reports a `secret` column: a parameter declared as holding a credential (see [CONFIG](CONFIG.md#secret-parameters)) renders its value as `********` — or `(empty)` when it carries none, including a nil value — with the length withheld, while an ordinary parameter prints in the clear.
 
-`debug:container` reports why a failing service failed, not only that it did: the causes below the resolution error render as `caused by` lines in the table views, as `errorCauseChain` in the json items, and on the envelope error's cause details. The error context is read through the `ContextProvider` contract, so an `HttpException` or a userland context-bearing error contributes its context too. The rendered context is redacted by key name — keys containing `trace` or `stack` are dropped, case-insensitively — which is a diagnostic-noise filter, deliberately not a credential filter: an error context has no secret declaration the way parameters do, so keeping credentials out of error contexts is the producer's responsibility. The context json is truncated to the table-cell width only in the table format; the json document always carries it whole.
+`debug:container` and `debug:middleware` describe by default and build only on request. The bare `debug:container` listing runs no provider: it reports names, lifetimes, built state and the provider's declared return type from the registration records, and the resolve sweep that builds services sits behind `--build`; naming a single service still resolves it. The bare `debug:middleware` listing describes the pipeline — the selection and ordering the build would run, with the inactive entries carrying their reasons — and only `--build` runs the real factories, under a recover so a panicking factory renders as a failure with its cause instead of killing the command.
+
+`debug:container` reports why a failing service failed, not only that it did: the causes below the resolution error render as `caused by` lines in the table views, as `errorCauseChain` in the json items, and on the envelope error's cause details. The error context is read through the `ContextProvider` contract, so an `HttpException` or a userland context-bearing error contributes its context too. The rendered context is redacted by key name — keys containing `trace` or `stack` are dropped, case-insensitively, while full verbosity (`-vvv`, verbosity level three and above) keeps the whole context — which is a diagnostic-noise filter, deliberately not a credential filter: an error context has no secret declaration the way parameters do, so keeping credentials out of error contexts is the producer's responsibility. The context json is truncated to the table-cell width only in the table format; the json document always carries it whole.
 
 `debug:events --format=json --verbose` carries the per-listener detail — priority, source, owner and the required / may-skip marks — under `data.listeners`, beside the event list under `data.events`; without `--verbose` the json `data` stays the plain list payload. The table summary's `SUBSCRIBERS` total counts distinct subscribers across the whole dispatcher, while the per-event column counts them per event.
 
@@ -49,8 +51,9 @@ Three behaviours apply to every command on this page:
 
 ### Constructors and helpers
 
-- [`NewMiddlewareCommand(middlewareProvider MiddlewareProvider) *MiddlewareCommand`](../../debug/command_middleware.go) — panics on a nil provider; return an empty slice from the provider when there is nothing to list
-- [`MiddlewareProvider`](../../debug/command_middleware.go)
+- [`NewMiddlewareCommand(descriptionProvider MiddlewareDescriptionProvider, buildProvider MiddlewareBuildProvider) *MiddlewareCommand`](../../debug/command_middleware.go) — panics on a nil provider; return empty results from the providers when there is nothing to list
+- [`MiddlewareDescriptionProvider`](../../debug/command_middleware.go)
+- [`MiddlewareBuildProvider`](../../debug/command_middleware.go)
 
 ## Usage
 
@@ -66,6 +69,7 @@ import (
     "github.com/precision-soft/melody/debug"
     "github.com/precision-soft/melody/exception"
     httpcontract "github.com/precision-soft/melody/http/contract"
+    middlewarepipeline "github.com/precision-soft/melody/http/middleware/pipeline"
     "github.com/precision-soft/melody/runtime"
 )
 
@@ -95,8 +99,11 @@ func main() {
     cli.Register(
         commandContext,
         debug.NewMiddlewareCommand(
-            func() []httpcontract.Middleware {
-                return []httpcontract.Middleware{}
+            func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
+                return []middlewarepipeline.MiddlewareDescription{}, nil, nil
+            },
+            func() ([]httpcontract.Middleware, error) {
+                return []httpcontract.Middleware{}, nil
             },
         ),
         runtimeInstance,

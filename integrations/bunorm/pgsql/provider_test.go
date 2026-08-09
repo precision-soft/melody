@@ -769,3 +769,25 @@ func TestProviderDefaultReadDeadlineAllowsAnElevenSecondQuery(t *testing.T) {
         t.Fatalf("expected the default read deadline to allow a legitimately long query, got %v", queryErr)
     }
 }
+
+/* the pool half of the migration derivation survives the normalization the way the timeout half does: re-armed to the request defaults, the dedicated migration connections would be recycled mid-run — the cut OpenForMigration exists to prevent, by another name. */
+func TestResolvedPoolConfigKeepsTheMigrationLifetimesLifted(t *testing.T) {
+    provider := &Provider{
+        poolConfig:        migrationPoolConfig(),
+        tunedForMigration: true,
+    }
+
+    resolved := provider.resolvedPoolConfig()
+
+    if 0 != resolved.ConnectionMaxLifetime {
+        t.Fatalf("expected the migration connection lifetime to stay lifted, got %v", resolved.ConnectionMaxLifetime)
+    }
+
+    if 0 != resolved.ConnectionMaxIdleTime {
+        t.Fatalf("expected the migration idle time to stay lifted, got %v", resolved.ConnectionMaxIdleTime)
+    }
+
+    if 2 != resolved.MaxOpenConnections || 1 != resolved.MaxIdleConnections {
+        t.Fatalf("expected the migration pool sizing to survive, got %d/%d", resolved.MaxOpenConnections, resolved.MaxIdleConnections)
+    }
+}

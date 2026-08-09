@@ -1163,3 +1163,28 @@ func TestInMemoryBackend_RefusesTheContractKeyGrammar(t *testing.T) {
         t.Fatal("expected the spaced key to be refused by Many")
     }
 }
+
+/* the refusal order is part of the shared contract, the redis backend's order: the closed answer wins over the key judgment, and a batch write judges the ttl before its keys, so a call that is wrong in more than one way is refused with the same answer whichever implementation it hit. */
+func TestInMemoryBackend_RefusalOrderMatchesTheRedisBackend(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    closed := NewInMemoryBackend(10, time.Hour, clockInstance)
+    if closeErr := closed.Close(); nil != closeErr {
+        t.Fatalf("Close: %v", closeErr)
+    }
+
+    _, _, getErr := closed.Get("")
+    if nil == getErr || false == strings.Contains(getErr.Error(), "cache backend is closed") {
+        t.Fatalf("expected the closed refusal to win over the key judgment, got %v", getErr)
+    }
+
+    open := NewInMemoryBackend(10, time.Hour, clockInstance)
+    defer func() {
+        _ = open.Close()
+    }()
+
+    setErr := open.SetMultiple(map[string][]byte{"bad key": []byte("payload")}, -time.Second)
+    if nil == setErr || false == strings.Contains(setErr.Error(), "ttl") {
+        t.Fatalf("expected the batch ttl judgment to precede the key judgment, got %v", setErr)
+    }
+}

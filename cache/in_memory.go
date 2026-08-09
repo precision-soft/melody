@@ -167,16 +167,17 @@ func refuseEmptyKeyList(keys []string) error {
 }
 
 func (instance *InMemoryBackend) Get(key string) ([]byte, bool, error) {
-    if keyErr := validateKey(key); nil != keyErr {
-        return nil, false, keyErr
-    }
-
     now := instance.clock.Now()
 
     instance.mutex.RLock()
     if true == instance.closed {
         instance.mutex.RUnlock()
         return nil, false, closedBackendError()
+    }
+
+    if keyErr := validateKey(key); nil != keyErr {
+        instance.mutex.RUnlock()
+        return nil, false, keyErr
     }
 
     entry, exists := instance.entries[key]
@@ -209,16 +210,17 @@ func (instance *InMemoryBackend) Get(key string) ([]byte, bool, error) {
 }
 
 func (instance *InMemoryBackend) Has(key string) (bool, error) {
-    if keyErr := validateKey(key); nil != keyErr {
-        return false, keyErr
-    }
-
     now := instance.clock.Now()
 
     instance.mutex.RLock()
     if true == instance.closed {
         instance.mutex.RUnlock()
         return false, closedBackendError()
+    }
+
+    if keyErr := validateKey(key); nil != keyErr {
+        instance.mutex.RUnlock()
+        return false, keyErr
     }
 
     entry, exists := instance.entries[key]
@@ -241,14 +243,6 @@ func (instance *InMemoryBackend) Set(
     payload []byte,
     ttl time.Duration,
 ) error {
-    if keyErr := validateKey(key); nil != keyErr {
-        return keyErr
-    }
-
-    if 0 > ttl {
-        return negativeTtlError(ttl)
-    }
-
     now := instance.clock.Now()
 
     instance.mutex.Lock()
@@ -256,6 +250,14 @@ func (instance *InMemoryBackend) Set(
 
     if true == instance.closed {
         return closedBackendError()
+    }
+
+    if keyErr := validateKey(key); nil != keyErr {
+        return keyErr
+    }
+
+    if 0 > ttl {
+        return negativeTtlError(ttl)
     }
 
     instance.saveLocked(
@@ -269,15 +271,15 @@ func (instance *InMemoryBackend) Set(
 }
 
 func (instance *InMemoryBackend) Delete(key string) error {
-    if keyErr := validateKey(key); nil != keyErr {
-        return keyErr
-    }
-
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
     if true == instance.closed {
         return closedBackendError()
+    }
+
+    if keyErr := validateKey(key); nil != keyErr {
+        return keyErr
     }
 
     instance.deleteLocked(key)
@@ -300,10 +302,6 @@ func (instance *InMemoryBackend) Clear() error {
 }
 
 func (instance *InMemoryBackend) Many(keys []string) (map[string][]byte, error) {
-    if refuseErr := refuseEmptyKeyList(keys); nil != refuseErr {
-        return nil, refuseErr
-    }
-
     now := instance.clock.Now()
 
     result := make(map[string][]byte, len(keys))
@@ -317,6 +315,11 @@ func (instance *InMemoryBackend) Many(keys []string) (map[string][]byte, error) 
     if true == instance.closed {
         instance.mutex.RUnlock()
         return nil, closedBackendError()
+    }
+
+    if refuseErr := refuseEmptyKeyList(keys); nil != refuseErr {
+        instance.mutex.RUnlock()
+        return nil, refuseErr
     }
 
     for _, key := range keys {
@@ -364,16 +367,6 @@ func (instance *InMemoryBackend) Many(keys []string) (map[string][]byte, error) 
 }
 
 func (instance *InMemoryBackend) SetMultiple(items map[string][]byte, ttl time.Duration) error {
-    for key := range items {
-        if keyErr := validateKey(key); nil != keyErr {
-            return keyErr
-        }
-    }
-
-    if 0 > ttl {
-        return negativeTtlError(ttl)
-    }
-
     now := instance.clock.Now()
 
     instance.mutex.Lock()
@@ -381,6 +374,17 @@ func (instance *InMemoryBackend) SetMultiple(items map[string][]byte, ttl time.D
 
     if true == instance.closed {
         return closedBackendError()
+    }
+
+    /* the ttl is judged before the keys, the order the redis backend judges them in: a batch carrying both a malformed key and an invalid ttl is refused with the same answer on both implementations */
+    if 0 > ttl {
+        return negativeTtlError(ttl)
+    }
+
+    for key := range items {
+        if keyErr := validateKey(key); nil != keyErr {
+            return keyErr
+        }
     }
 
     for key, payload := range items {
@@ -396,15 +400,15 @@ func (instance *InMemoryBackend) SetMultiple(items map[string][]byte, ttl time.D
 }
 
 func (instance *InMemoryBackend) DeleteMultiple(keys []string) error {
-    if refuseErr := refuseEmptyKeyList(keys); nil != refuseErr {
-        return refuseErr
-    }
-
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
     if true == instance.closed {
         return closedBackendError()
+    }
+
+    if refuseErr := refuseEmptyKeyList(keys); nil != refuseErr {
+        return refuseErr
     }
 
     for _, key := range keys {
@@ -456,10 +460,6 @@ func (instance *InMemoryBackend) incrementValue(
     key string,
     delta int64,
 ) (int64, error) {
-    if keyErr := validateKey(key); nil != keyErr {
-        return 0, keyErr
-    }
-
     now := instance.clock.Now()
 
     instance.mutex.Lock()
@@ -467,6 +467,10 @@ func (instance *InMemoryBackend) incrementValue(
 
     if true == instance.closed {
         return 0, closedBackendError()
+    }
+
+    if keyErr := validateKey(key); nil != keyErr {
+        return 0, keyErr
     }
 
     entry, exists := instance.getEntryLocked(key, now)

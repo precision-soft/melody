@@ -101,7 +101,7 @@ func runWithScopedLogger(
 	)
 
 	processId := logging.GenerateProcessId()
-	loggerWithProcessId := logging.NewRequestLogger(
+	loggerWithProcessId := logging.NewProcessLogger(
 		baseLogger,
 		processId,
 		"processId",
@@ -172,7 +172,8 @@ Implemented in:
 - [`NewDefaultLogger()`](../../logging/default_logger.go)
 - [`NewDefaultLoggerWithLabels(labels loggingcontract.LevelLabels)`](../../logging/default_logger.go)
 - [`NewNopLogger()`](../../logging/nop_logger.go)
-- [`NewRequestLogger(logger loggingcontract.Logger, requestId string, contextKey string)`](../../logging/request_logger.go)
+- [`NewRequestLogger(logger loggingcontract.Logger, requestId string, contextKey string)`](../../logging/request_logger.go) — the http path's correlation rule: the real id wins the context key, and a different non-empty string claim survives beside it under the key suffixed `Claimed`
+- [`NewProcessLogger(logger loggingcontract.Logger, processId string, contextKey string)`](../../logging/request_logger.go) — the console path's correlation rule, for a trusted caller: the generated id wins the context key, and a caller's own value — any type — is preserved verbatim under the key suffixed `Provided`
 - [`NewLoggingConfiguration(labels loggingcontract.LevelLabels)`](../../logging/logging_config.go)
 
 #### Utilities

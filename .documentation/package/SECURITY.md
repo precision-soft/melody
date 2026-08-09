@@ -55,7 +55,7 @@ When a firewall defines both global and local access control, `security/config` 
 
 The package defines the firewall manager service id:
 
-- [`security.ServiceFirewallManager`](../../security/service_resolver.go) (`"service.security.firewallManager"`)
+- [`security.ServiceFirewallManager`](../../security/service_resolver.go) (`"service.security.firewall_manager"`)
 
 Resolution helpers:
 
