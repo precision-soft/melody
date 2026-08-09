@@ -11,7 +11,9 @@ import (
     "sync"
     "time"
 
+    "github.com/precision-soft/melody/application"
     clicontract "github.com/precision-soft/melody/cli/contract"
+    "github.com/precision-soft/melody/cli/output"
     "github.com/precision-soft/melody/exception"
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
     "github.com/precision-soft/melody/logging"
@@ -54,7 +56,7 @@ type RunnerCommand struct {
     userIgnoredCommands []string
 }
 
-/* NewRunnerCommand resolves every scheduled command name against the supplied commands and parses each schedule up front under the given day-combination dialect (the zero value is the crontab default); an entry naming a command that was not supplied, or carrying a malformed schedule, is a wiring error and panics at construction so it surfaces at boot rather than at the first tick, and a value naming no known RunnerDialect panics the same way with ErrUnknownRunnerDialect. The runner only supports name-scheduled single-instance entries, so an entry carrying a custom argv (EntryConfig.Command) or more than one instance (EntryConfig.Instances) also panics at construction: such entries belong to an external scheduler produced by the generator and would otherwise run without their configured shape. Two supplied commands sharing one name panic with ErrDuplicateRunnerCommand — resolving the collision silently would drop one of them (an exclusivity wrapper over its wrapped command, most likely) and schedule the survivor unnoticed. A command whose Flags() returns the same flag instances on every call panics with ErrSharedRunnerCommandFlags: the runner dispatches overlapping invocations of one command, the cli library writes parse state into the flag instances, and shared instances would race. An entry that names a system user (EntryConfig.User) stays runnable — in-process every job runs as the process user, so the runner keeps the entry and Run logs one warning naming the affected commands, letting the one Configuration keep driving both the generated manifests and the runner. */
+/* NewRunnerCommand resolves every scheduled command name against the supplied commands and parses each schedule up front under the given day-combination dialect (the zero value is the crontab default); an entry naming a command that was not supplied, or carrying a malformed schedule, is a wiring error and panics at construction so it surfaces at boot rather than at the first tick, and a value naming no known RunnerDialect panics the same way with ErrUnknownRunnerDialect. The runner only supports name-scheduled single-instance entries, so an entry carrying a custom argv (EntryConfig.Command), more than one instance (EntryConfig.Instances) or a routed crontab file (EntryConfig.DestinationFile) also panics at construction: such entries belong to an external scheduler produced by the generator, and the routed one would otherwise run twice — in-process and in the generated crontab — whenever both are live. Two supplied commands sharing one name panic with ErrDuplicateRunnerCommand — resolving the collision silently would drop one of them (an exclusivity wrapper over its wrapped command, most likely) and schedule the survivor unnoticed. A command whose Flags() returns the same flag instances on every call panics with ErrSharedRunnerCommandFlags: the runner dispatches overlapping invocations of one command, the cli library writes parse state into the flag instances, and shared instances would race. An entry that names a system user (EntryConfig.User) stays runnable — in-process every job runs as the process user, so the runner keeps the entry and Run logs one warning naming the affected commands, letting the one Configuration keep driving both the generated manifests and the runner. */
 func NewRunnerCommand(configuration *Configuration, dialect RunnerDialect, commands ...clicontract.Command) *RunnerCommand {
     if nil == configuration {
         configuration = NewConfiguration()
@@ -125,6 +127,19 @@ func NewRunnerCommand(configuration *Configuration, dialect RunnerDialect, comma
                     exceptioncontract.Context{
                         "commandName": scheduled.CommandName,
                         "instances":   scheduled.Config.Instances,
+                    },
+                    ErrUnsupportedRunnerEntry,
+                ),
+            )
+        }
+
+        if nil != scheduled.Config && "" != scheduled.Config.DestinationFile {
+            exception.Panic(
+                exception.NewError(
+                    "cron: the in-process runner supports only name-scheduled single-instance entries; the entry routes to another crontab file (EntryConfig.DestinationFile), which addresses an external scheduler — run here as well, it would execute twice whenever the generated manifests are live",
+                    exceptioncontract.Context{
+                        "commandName":     scheduled.CommandName,
+                        "destinationFile": scheduled.Config.DestinationFile,
                     },
                     ErrUnsupportedRunnerEntry,
                 ),
@@ -245,13 +260,17 @@ func (instance *RunnerCommand) Description() string {
     return "Run the cron Configuration in-process, invoking each scheduled command when it is due"
 }
 
+/* the standard flags join the runner's own because the framework rewrites -v/-vv into --verbosity for every command: without them, the runner was among the only melody commands to die on the framework's own convention with "flag provided but not defined". The runner writes nothing to the command output itself — its reporting is the log — so accepting and validating the posture is the whole of honouring it. */
 func (instance *RunnerCommand) Flags() []clicontract.Flag {
-    return []clicontract.Flag{
-        &clicontract.BoolFlag{
-            Name:  flagNameOnce,
-            Usage: "evaluate every schedule once against the current time, run the commands that are due, and exit instead of running the scheduler loop",
+    return output.MergeFlags(
+        output.StandardFlags(),
+        []clicontract.Flag{
+            &clicontract.BoolFlag{
+                Name:  flagNameOnce,
+                Usage: "evaluate every schedule once against the current time, run the commands that are due, and exit instead of running the scheduler loop",
+            },
         },
-    }
+    )
 }
 
 func (instance *RunnerCommand) Run(
@@ -333,6 +352,7 @@ func (instance *RunnerCommand) dispatchDue(
 
     var failureMutex sync.Mutex
     failedCommands := make([]string, 0)
+    failures := make([]error, 0)
 
     for _, entry := range instance.entries {
         if true == entry.fixedTime && false == runFixedTime {
@@ -357,12 +377,16 @@ func (instance *RunnerCommand) dispatchDue(
             if invokeErr := instance.invoke(runtimeInstance, launchedEntry); nil != invokeErr {
                 failureMutex.Lock()
                 failedCommands = append(failedCommands, launchedEntry.commandName)
+                failures = append(failures, invokeErr)
                 failureMutex.Unlock()
 
                 if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
                     logger.Error(
                         "cron runner command failed",
-                        map[string]any{"commandName": launchedEntry.commandName, "error": invokeErr.Error()},
+                        exception.LogContext(
+                            invokeErr,
+                            exceptioncontract.Context{"commandName": launchedEntry.commandName},
+                        ),
                     )
                 }
             }
@@ -378,7 +402,7 @@ func (instance *RunnerCommand) dispatchDue(
                 exceptioncontract.Context{
                     "commands": strings.Join(failedCommands, ", "),
                 },
-                nil,
+                errors.Join(failures...),
             )
         }
 
@@ -475,6 +499,19 @@ func (instance *RunnerCommand) invoke(runtimeInstance runtimecontract.Runtime, e
         }
     }()
 
+    /* each run gets the console identity the cli entry point installs into its own scope, because the child scope is a sibling and inherits nothing: a fresh ProcessContext under a per-run id — overlapping runs of one entry stay distinguishable — and a logger derived from the run's own, so the job's records carry the runner's processId AND the run's cronRunId. Without these, a command reading the documented console doors works launched by hand and fails under the scheduler. */
+    runId := logging.GenerateProcessId()
+    if runLogger := logging.LoggerFromRuntime(runtimeInstance); nil != runLogger {
+        childScope.MustOverrideProtectedInstance(
+            logging.ServiceLogger,
+            logging.NewProcessLogger(runLogger, runId, "cronRunId"),
+        )
+    }
+    childScope.MustOverrideProtectedInstance(
+        application.ServiceProcessContext,
+        application.NewProcessContext(runId, time.Now()),
+    )
+
     childRuntime := runtime.New(childContext, childScope, runtimeInstance.Container())
 
     commandContext := &clicontract.CommandContext{
@@ -483,7 +520,7 @@ func (instance *RunnerCommand) invoke(runtimeInstance runtimecontract.Runtime, e
         Writer:    os.Stdout,
         ErrWriter: os.Stderr,
         Action: func(actionContext context.Context, actionCommandContext *clicontract.CommandContext) error {
-            return entry.command.Run(childRuntime, actionCommandContext)
+            return normalizeScheduledRunError(entry.command.Run(childRuntime, actionCommandContext))
         },
         ExitErrHandler: func(handlerContext context.Context, handlerCommandContext *clicontract.CommandContext, handlerErr error) {
         },
@@ -589,6 +626,31 @@ func runScheduledCommand(
     }()
 
     return commandContext.Run(ctx, []string{entry.commandName})
+}
+
+/* normalizeScheduledRunError reads the command's result through the interface the way the cli entry point does before rendering: a command that returns its failure through a concrete error pointer hands back a typed nil boxed into a non-nil interface, and the runner would read it as the failure it is not — on the dispatch goroutine, which deliberately carries no recover, so the first Error() call on the nil receiver would take the scheduler down with every entry it drives. */
+func normalizeScheduledRunError(err error) error {
+    if true == isNilInterface(err) {
+        return nil
+    }
+
+    return err
+}
+
+/* isNilInterface duplicates the framework's internal helper, which an integration module may not import. */
+func isNilInterface(value any) bool {
+    if nil == value {
+        return true
+    }
+
+    reflected := reflect.ValueOf(value)
+
+    switch reflected.Kind() {
+    case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func, reflect.Interface:
+        return reflected.IsNil()
+    default:
+        return false
+    }
 }
 
 /* timeoutError reports a run the deadline cut short. The abandoned form is the louder one, and deliberately so: that command is still running, against a cancelled context and a closed scope, and it no longer counts towards the shutdown wait — a state an operator has to be able to read out of a log line rather than infer from a memory graph. */

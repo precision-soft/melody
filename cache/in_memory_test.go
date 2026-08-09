@@ -3,6 +3,7 @@ package cache
 import (
     "fmt"
     "math"
+    "strings"
     "sync"
     "testing"
     "time"
@@ -96,7 +97,6 @@ func TestInMemoryBackend_LruEviction(t *testing.T) {
     }
 }
 
-/* @info the empty key is refused on every operation: the in-memory backend accepted it as a real key while the redis reference refuses it, so every caller whose key came up empty silently shared one entry until the deployment switched backends */
 func TestInMemoryBackend_RefusesEmptyKey(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -144,7 +144,6 @@ func TestInMemoryBackend_RefusesEmptyKey(t *testing.T) {
     }
 }
 
-/* @info a closed backend refuses every operation instead of serving a map whose cleanup goroutine is gone: an entry written after Close would never be reclaimed by anything but a read that happens to name it, and the two answers a caller could get from a closed cache have to be the same on every backend */
 func TestInMemoryBackend_RefusesOperationsAfterClose(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -203,7 +202,6 @@ func TestInMemoryBackend_RefusesOperationsAfterClose(t *testing.T) {
     }
 }
 
-/* @info a negative ttl is refused instead of storing an immortal entry: a ttl computed from an already-passed deadline meant "as good as expired" and the silent branch it fell on meant the exact opposite; zero keeps its documented meaning of no expiry */
 func TestInMemoryBackend_RefusesNegativeTtl(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -223,7 +221,6 @@ func TestInMemoryBackend_RefusesNegativeTtl(t *testing.T) {
     }
 }
 
-/* @info a negative item ceiling is refused at construction: it silently meant "unbounded", so a bound computed wrong out of a configuration disarmed eviction while the operator believed the cache capped */
 func TestNewInMemoryBackend_PanicsOnNegativeMaxItems(t *testing.T) {
     defer func() {
         recoveredValue := recover()
@@ -237,7 +234,6 @@ func TestNewInMemoryBackend_PanicsOnNegativeMaxItems(t *testing.T) {
     _ = NewInMemoryBackend(-1, time.Hour, clockInstance)
 }
 
-/* @info an existing payload that is empty or blank is refused the way a textual one is, instead of being silently adopted as a zero counter and overwritten — the redis reference answers INCRBY on it with an error, and GetCounter already refused the very same value */
 func TestInMemoryBackend_IncrementRefusesEmptyPayload(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -525,7 +521,6 @@ func TestInMemoryBackend_IncrementOnFreshKeyHasNoExpiry(t *testing.T) {
     }
 }
 
-/* @info the sweep walks a snapshot of the keys in chunks and releases the lock between them; a map larger than one chunk must still be swept whole, and the sweep must terminate */
 func TestInMemoryBackend_CleanupExpired_SweepsBeyondOneChunk(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -557,7 +552,6 @@ func TestInMemoryBackend_CleanupExpired_SweepsBeyondOneChunk(t *testing.T) {
     }
 }
 
-/* @info eviction probes a bounded number of least-recently-used entries for an expired victim before falling back to the least recently used one; an unbounded search made every insert into a full cache pay a whole-list scan under the exclusive lock */
 func TestInMemoryBackend_Eviction_PrefersAnExpiredVictimWithinTheProbeWindow(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -609,7 +603,6 @@ func (instance *cacheTestClock) NewTicker(interval time.Duration) clockcontract.
     }
 }
 
-/* @info a non-positive cleanup interval is a configuration that resolved to nothing, and it becomes the one-minute default rather than a ticker built on zero — time.NewTicker panics on a non-positive duration, so without this the whole backend would die inside the goroutine started by its own constructor, where no caller can recover it. */
 func TestNewInMemoryBackend_ANonPositiveCleanupIntervalBecomesTheDefault(t *testing.T) {
     for _, refusedInterval := range []time.Duration{0, -time.Second, -time.Hour} {
         backend := NewInMemoryBackend(10, refusedInterval, &cacheTestClock{now: time.Unix(10, 0)})
@@ -631,7 +624,6 @@ func TestNewInMemoryBackend_ANonPositiveCleanupIntervalBecomesTheDefault(t *test
     }
 }
 
-/* @info the clock is refused at construction, through the interface, because every read and every expiry decision dereferences it: a nil clock would panic inside Get on the request path, and a typed-nil one would pass a plain comparison to do the same. */
 func TestNewInMemoryBackend_RefusesANilClock(t *testing.T) {
     assertInMemoryPanic(t, "clock is nil", func() {
         _ = NewInMemoryBackend(10, time.Hour, nil)
@@ -643,7 +635,6 @@ func TestNewInMemoryBackend_RefusesANilClock(t *testing.T) {
     })
 }
 
-/* @info a negative bound is refused rather than silently disarming eviction: zero already means "unbounded" on purpose, so a bound computed wrong — a subtraction that went below zero — would read as the deliberate unbounded setting and the cache would grow without limit. */
 func TestNewInMemoryBackend_RefusesANegativeMaxItems(t *testing.T) {
     assertInMemoryPanic(t, "cache max items is negative", func() {
         _ = NewInMemoryBackend(-1, time.Hour, &cacheTestClock{now: time.Unix(10, 0)})
@@ -674,7 +665,6 @@ func assertInMemoryPanic(t *testing.T, expectedMessage string, callback func()) 
     callback()
 }
 
-/* @info Has answers the three shapes apart: a key that was never written, one whose ttl has lapsed, and a live one. Only the live answer was pinned, so a Has that reported true for a lapsed entry — the shape that makes a "set only if absent" caller skip the write forever — would have kept the suite green. */
 func TestInMemoryBackend_HasSeparatesAbsentFromLapsedFromLive(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -712,7 +702,6 @@ func TestInMemoryBackend_HasSeparatesAbsentFromLapsedFromLive(t *testing.T) {
     }
 }
 
-/* @info Many skips what it cannot serve and says so by omission rather than by an error or a nil entry, and a request in which nothing at all is found still answers an empty map — the early return that avoids taking the exclusive lock for zero work. A caller ranging over the result must see the absent keys missing, not present with a nil payload. */
 func TestInMemoryBackend_ManySkipsTheKeysItCannotServe(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -752,7 +741,6 @@ func TestInMemoryBackend_ManySkipsTheKeysItCannotServe(t *testing.T) {
     }
 }
 
-/* @info deleting a key that is not there is a no-op, not a failure and not a list corruption: DeleteMultiple over a partly-evicted set reaches this on every key the eviction already took, and a branch that fell through would remove a list element belonging to somebody else. */
 func TestInMemoryBackend_DeletingAnAbsentKeyIsANoOp(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -781,7 +769,6 @@ func TestInMemoryBackend_DeletingAnAbsentKeyIsANoOp(t *testing.T) {
     }
 }
 
-/* @info the instant of expiry belongs to the lapsed side. The boundary is the one value a ttl actually describes — an entry written with a two-second ttl at t is gone at t+2, not alive for one more read — and the two comparisons that decide it, After and Equal, answer differently only here. */
 func TestInMemoryBackend_TheExactInstantOfExpiryIsAlreadyLapsed(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -807,7 +794,6 @@ func TestInMemoryBackend_TheExactInstantOfExpiryIsAlreadyLapsed(t *testing.T) {
     }
 }
 
-/* @info the counter arithmetic is bounded on both sides. Only the overflow half was pinned, so a decrement walking past the smallest int64 — the shape a "remaining quota" counter reaches when the quota was never replenished — would have wrapped around to a large positive number and read as an enormous remaining allowance. */
 func TestInMemoryBackend_DecrementIsRefusedRatherThanWrappingPastTheSmallestInt64(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -841,7 +827,6 @@ func TestInMemoryBackend_DecrementIsRefusedRatherThanWrappingPastTheSmallestInt6
     }
 }
 
-/* @info an increment on a key that lapsed between writes starts from zero rather than from the lapsed value: getEntryLocked reclaims it on the way past, which is what keeps a rate-limit counter with a window ttl from carrying the previous window's count into the new one. */
 func TestInMemoryBackend_IncrementStartsOverOnceTheCounterHasLapsed(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -868,7 +853,6 @@ func TestInMemoryBackend_IncrementStartsOverOnceTheCounterHasLapsed(t *testing.T
     }
 }
 
-/* @info the periodic sweep is driven by the ticker the constructor started, not only by the direct call every other test makes. The tick branch of the loop had never been entered by anything: a loop that selected only on the stop channel would leave every lapsed entry in the map until a reader happened to name it, which is precisely the leak the sweep exists to prevent — and Close would still work, so the suite would stay green. */
 func TestInMemoryBackend_TheTickerDrivesTheSweep(t *testing.T) {
     clockInstance := newCacheTickableTestClock(time.Unix(10, 0))
 
@@ -949,7 +933,6 @@ func (instance *cacheTickableTestClock) NewTicker(interval time.Duration) clockc
 
 var _ clockcontract.Clock = (*cacheTickableTestClock)(nil)
 
-/* @info the eviction walk carries four defences against a recency list that no longer agrees with the entry map. None is reachable through the public API — every mutation of the two happens under the same exclusive lock, so the invariant holds — and they are pinned here white-box, by corrupting the pair by hand, because the alternative is deleting guards whose whole job is to keep a corruption from becoming an eviction of somebody else's entry or a nil dereference on the write path. Each is entered on its own: a list element that is not a key at all, a key the map has already lost, the same two reached after the bounded probe gave up, and a list that the walk emptied on its way. */
 func TestInMemoryBackend_EvictionToleratesARecencyListThatLostAgreementWithTheMap(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -1048,7 +1031,6 @@ func TestInMemoryBackend_EvictionToleratesARecencyListThatLostAgreementWithTheMa
     })
 }
 
-/* @info an entry whose item is absent counts as lapsed rather than as live. Every caller checks nil == entry.item before asking, so the branch is defence rather than a path — but the answer it gives is the safe one: reading a live verdict off an entry with no item would send the reader on to dereference it. */
 func TestInMemoryBackend_AnEntryWithoutAnItemCountsAsLapsed(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -1060,7 +1042,6 @@ func TestInMemoryBackend_AnEntryWithoutAnItemCountsAsLapsed(t *testing.T) {
     }
 }
 
-/* @info the expiring delete tolerates a key that is no longer there. The sweep collects the keys under the lock, releases it between chunks and then deletes — a key the caller deleted meanwhile arrives here absent, which is the ordinary outcome of the chunking that keeps the sweep from stalling every concurrent read, not an error. */
 func TestInMemoryBackend_TheExpiringDeleteToleratesAKeyThatIsAlreadyGone(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -1082,7 +1063,6 @@ func TestInMemoryBackend_TheExpiringDeleteToleratesAKeyThatIsAlreadyGone(t *test
     }
 }
 
-/* @info Get and Many read under the shared lock and then take the exclusive one to touch the recency list, so between the two sections another caller can delete or replace the entry they just served. Both re-check what they find there rather than trusting the first look, and the re-check is what keeps a concurrent delete from touching a list element that is no longer in the map. The branches are reachable only through that interleaving, so this drives it under load; it is the -race lane's test, not a coverage claim. */
 func TestInMemoryBackend_ReadsToleratePlacementChangingUnderThem(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -1143,5 +1123,43 @@ func TestInMemoryBackend_ReadsToleratePlacementChangingUnderThem(t *testing.T) {
 
     if entryCount != elementCount {
         t.Fatalf("expected the map and the recency list to agree, got %d entries and %d elements", entryCount, elementCount)
+    }
+}
+
+/* the key grammar is the contract's, enforced identically by every implementation: a caller must not be able to tell the backends apart by which keys they refuse. */
+func TestInMemoryBackend_RefusesTheContractKeyGrammar(t *testing.T) {
+    backend := NewInMemoryBackend(
+        10,
+        time.Hour,
+        &cacheTestClock{now: time.Unix(10, 0)},
+    )
+    defer backend.Close()
+
+    longKey := strings.Repeat("k", 1025)
+
+    for name, key := range map[string]string{
+        "spaces":   "user profile:alice",
+        "newlines": "user\nprofile",
+        "too long": longKey,
+    } {
+        if setErr := backend.Set(key, []byte("payload"), time.Minute); nil == setErr {
+            t.Fatalf("expected the %s key to be refused by Set", name)
+        }
+
+        if _, _, getErr := backend.Get(key); nil == getErr {
+            t.Fatalf("expected the %s key to be refused by Get", name)
+        }
+
+        if _, incrementErr := backend.Increment(key, 1); nil == incrementErr {
+            t.Fatalf("expected the %s key to be refused by Increment", name)
+        }
+    }
+
+    if setMultipleErr := backend.SetMultiple(map[string][]byte{"a b": []byte("x")}, time.Minute); nil == setMultipleErr {
+        t.Fatal("expected the spaced key to be refused by SetMultiple")
+    }
+
+    if _, manyErr := backend.Many([]string{"good", "with space"}); nil == manyErr {
+        t.Fatal("expected the spaced key to be refused by Many")
     }
 }

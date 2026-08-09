@@ -91,6 +91,9 @@ type Provider struct {
     postBuildHook PostBuildHook
     insecure      bool
     tlsConfig     *tls.Config
+
+    /* tunedForMigration marks the derived provider OpenForMigration dials with: its deliberate zero read and write deadlines mean "lifted", and the normalization that protects every other caller from an unset environment key must not re-arm them. */
+    tunedForMigration bool
 }
 
 func (instance *Provider) WithPoolConfig(poolConfig *PoolConfig) *Provider {
@@ -112,11 +115,66 @@ func (instance *Provider) WithRetryConfig(retryConfig *RetryConfig) *Provider {
 }
 
 func (instance *Provider) Open(resolver containercontract.Resolver) (*bun.DB, error) {
+    return instance.OpenContext(context.Background(), resolver)
+}
+
+/* OpenContext opens under the caller's context: the retry sleeps watch it alongside the clock, so a shutdown that cancels the context reaches a retry loop in flight instead of sleeping through the whole retry budget. A nil context reads as context.Background(), which is exactly Open. */
+func (instance *Provider) OpenContext(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error) {
+    if nil == ctx {
+        ctx = context.Background()
+    }
+
     if nil == instance.retryConfig {
         return instance.open(resolver)
     }
 
-    return instance.openWithRetry(resolver)
+    return instance.openWithRetry(ctx, resolver)
+}
+
+/* OpenForMigration opens the same database with the driver deadlines lifted: ReadTimeout and WriteTimeout are per-operation socket deadlines baked into the connector, sized for request traffic, and a DDL statement that legitimately runs past them — an ALTER TABLE adding constraints on a large table, a long CREATE INDEX — is cut mid-statement with an i/o timeout. The connect timeout stays armed (a down database must still fail fast), the pool is kept to the two connections a sequential migration run needs, and no connection is recycled mid-run — a lifetime rotation under a running statement is the same cut by another name. */
+func (instance *Provider) OpenForMigration(resolver containercontract.Resolver) (*bun.DB, error) {
+    return instance.migrationProvider().Open(resolver)
+}
+
+/* migrationProvider derives the provider OpenForMigration dials with: the same parameters, hook and retry policy, over the migration pool and the lifted deadlines. */
+func (instance *Provider) migrationProvider() *Provider {
+    return &Provider{
+        hostParameterName:     instance.hostParameterName,
+        portParameterName:     instance.portParameterName,
+        databaseParameterName: instance.databaseParameterName,
+        userParameterName:     instance.userParameterName,
+        passwordParameterName: instance.passwordParameterName,
+        poolConfig:            migrationPoolConfig(),
+        timeoutConfig:         migrationTimeoutConfig(instance.timeoutConfig),
+        retryConfig:           instance.retryConfig,
+        postBuildHook:         instance.postBuildHook,
+        insecure:              instance.insecure,
+        tlsConfig:             instance.tlsConfig,
+        tunedForMigration:     true,
+    }
+}
+
+/* migrationTimeoutConfig lifts the read and write deadlines and keeps the connect timeout of the configuration it derives from. */
+func migrationTimeoutConfig(baseConfig *TimeoutConfig) *TimeoutConfig {
+    connectTimeout := DefaultTimeoutConfig().ConnectTimeout
+    if nil != baseConfig {
+        connectTimeout = baseConfig.ConnectTimeout
+    }
+
+    return &TimeoutConfig{
+        ConnectTimeout: connectTimeout,
+        ReadTimeout:    0,
+        WriteTimeout:   0,
+    }
+}
+
+func migrationPoolConfig() *PoolConfig {
+    return &PoolConfig{
+        MaxOpenConnections:    2,
+        MaxIdleConnections:    1,
+        ConnectionMaxLifetime: 0,
+        ConnectionMaxIdleTime: 0,
+    }
 }
 
 /* resolvedTimeoutConfig answers the configuration the connector is built from, with every non-positive field replaced by the constructor default. A zero reaches here far more often from an environment key nobody set than from a caller who means "no deadline", and the guards below read a non-positive connect timeout as no deadline at all — so the unset key would disarm the very protection the nil configuration arms, and a negative one would put the deadline in the past. */
@@ -129,10 +187,24 @@ func (instance *Provider) resolvedTimeoutConfig() *TimeoutConfig {
 
     resolved := &TimeoutConfig{
         ConnectTimeout: instance.timeoutConfig.ConnectTimeout,
+        ReadTimeout:    instance.timeoutConfig.ReadTimeout,
+        WriteTimeout:   instance.timeoutConfig.WriteTimeout,
     }
 
     if 0 >= resolved.ConnectTimeout {
         resolved.ConnectTimeout = defaultConfig.ConnectTimeout
+    }
+
+    if true == instance.tunedForMigration {
+        return resolved
+    }
+
+    if 0 >= resolved.ReadTimeout {
+        resolved.ReadTimeout = defaultConfig.ReadTimeout
+    }
+
+    if 0 >= resolved.WriteTimeout {
+        resolved.WriteTimeout = defaultConfig.WriteTimeout
     }
 
     return resolved
@@ -172,7 +244,7 @@ func (instance *Provider) resolvedPoolConfig() *PoolConfig {
     return resolved
 }
 
-func (instance *Provider) openWithRetry(resolver containercontract.Resolver) (*bun.DB, error) {
+func (instance *Provider) openWithRetry(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error) {
     logger, loggerErr := logging.LoggerFromResolver(resolver)
     if nil != loggerErr {
         logger = logging.EmergencyLogger()
@@ -202,28 +274,30 @@ func (instance *Provider) openWithRetry(resolver containercontract.Resolver) (*b
         }
 
         if false == instance.isTransientError(openErr) {
+            /* the terminal record is the log of this failure: it is written in full and the returned error carries the mark, so the exit handler and the http exception path do not write the same outage a second time */
+            terminalErr := exception.FromError(openErr)
             logger.Error(
                 "database connection failed with non-transient error",
-                map[string]interface{}{
-                    "attempt": attempt,
-                    "error":   openErr.Error(),
-                },
+                exception.LogContext(
+                    terminalErr,
+                    map[string]any{"attempt": attempt},
+                ),
             )
 
-            return nil, openErr
+            return nil, exception.MarkLogged(terminalErr)
         }
 
         if attempt >= maxAttempts {
+            terminalErr := exception.FromError(openErr)
             logger.Error(
                 "database connection failed after max retry attempts",
-                map[string]interface{}{
-                    "attempt":     attempt,
-                    "maxAttempts": maxAttempts,
-                    "error":       openErr.Error(),
-                },
+                exception.LogContext(
+                    terminalErr,
+                    map[string]any{"attempt": attempt, "maxAttempts": maxAttempts},
+                ),
             )
 
-            return nil, openErr
+            return nil, exception.MarkLogged(terminalErr)
         }
 
         delay := instance.computeBackoffDelay(attempt)
@@ -238,12 +312,27 @@ func (instance *Provider) openWithRetry(resolver containercontract.Resolver) (*b
             },
         )
 
-        time.Sleep(delay)
+        /* the sleep watches the caller's context alongside the clock: a shutdown signal arriving mid-retry would otherwise sleep through the whole remaining budget, and the second signal exits with no teardown at all */
+        delayTimer := time.NewTimer(delay)
+        select {
+        case <-ctx.Done():
+            delayTimer.Stop()
+
+            return nil, exception.NewError(
+                "database connection retry cancelled by the caller's context",
+                map[string]any{"attempt": attempt, "error": openErr.Error()},
+                ctx.Err(),
+            )
+        case <-delayTimer.C:
+        }
     }
 }
 
 func (instance *Provider) open(resolver containercontract.Resolver) (*bun.DB, error) {
     configuration := config.ConfigMustFromResolver(resolver)
+
+    /* the provider is the component told authoritatively which parameter holds the credential, so it arms the framework's own redaction for it — the introspection output masks the password and every template derived from it, without the application repeating the knowledge */
+    configuration.MarkSecret(instance.passwordParameterName)
 
     host := configuration.MustGet(instance.hostParameterName).MustString()
     port := configuration.MustGet(instance.portParameterName).MustString()
@@ -258,11 +347,15 @@ func (instance *Provider) open(resolver containercontract.Resolver) (*bun.DB, er
 
     address := fmt.Sprintf("%s:%s", host, port)
 
+    /* every deadline the driver applies is named here, none governs invisibly: without these three, pgdriver's own defaults — 5s dial, 10s per read, 5s per write — silently cap the configured connect timeout and cut every legitimately long query. A zero read or write deadline survives only on the migration derivation, where it deliberately means "lifted". */
     connectorOptions := []pgdriver.Option{
         pgdriver.WithAddr(address),
         pgdriver.WithDatabase(databaseName),
         pgdriver.WithUser(user),
         pgdriver.WithPassword(password),
+        pgdriver.WithDialTimeout(timeoutConfig.ConnectTimeout),
+        pgdriver.WithReadTimeout(timeoutConfig.ReadTimeout),
+        pgdriver.WithWriteTimeout(timeoutConfig.WriteTimeout),
     }
 
     if nil != instance.tlsConfig {
@@ -271,7 +364,7 @@ func (instance *Provider) open(resolver containercontract.Resolver) (*bun.DB, er
         /* pgdriver.WithInsecure(true) disables TLS entirely */
         connectorOptions = append(connectorOptions, pgdriver.WithInsecure(true))
     } else {
-        /* @important do NOT hand this case to pgdriver.WithInsecure(false): despite the name, pgdriver implements it as tls.Config{InsecureSkipVerify: true} — TLS is negotiated but the server certificate is never checked, so the default connection is trivially machine-in-the-middled. Build a verifying config instead: the system roots, and the configured host as the name to verify against. Callers that genuinely want an unverified session pass WithTlsConfig or WithInsecure(true) explicitly. */
+        /* do NOT hand this case to pgdriver.WithInsecure(false): despite the name, pgdriver implements it as tls.Config{InsecureSkipVerify: true} — TLS is negotiated but the server certificate is never checked, so the default connection is trivially machine-in-the-middled. Build a verifying config instead: the system roots, and the configured host as the name to verify against. Callers that genuinely want an unverified session pass WithTlsConfig or WithInsecure(true) explicitly. */
         connectorOptions = append(connectorOptions, pgdriver.WithTLSConfig(&tls.Config{
             ServerName: host,
             MinVersion: tls.VersionTLS12,
@@ -446,4 +539,8 @@ func (instance *Provider) isTransientError(inputErr error) bool {
     return false
 }
 
-var _ bunorm.Provider = (*Provider)(nil)
+var (
+    _ bunorm.Provider          = (*Provider)(nil)
+    _ bunorm.MigrationProvider = (*Provider)(nil)
+    _ bunorm.ContextOpener     = (*Provider)(nil)
+)

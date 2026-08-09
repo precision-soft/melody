@@ -881,3 +881,16 @@ func TestServiceDescriptions_DescribesBothLifetimesWithoutBuilding(t *testing.T)
         }
     }
 }
+
+func TestContainer_ContainerAnswersItself(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    carrier, isCarrier := serviceContainer.(containercontract.ContainerCarrier)
+    if false == isCarrier {
+        t.Fatal("expected the container to satisfy ContainerCarrier")
+    }
+
+    if serviceContainer != carrier.Container() {
+        t.Fatal("expected the container to answer itself")
+    }
+}

@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `Provider.OpenForMigration` — the provider implements `bunorm.MigrationProvider`, the door its mysql sibling already had: the same database with the driver deadlines lifted, a two-connection pool and no mid-run recycling. Without it the migrate commands fell back to the request pool, where pgdriver's own default read deadline — 10 seconds, configured by nothing in this package — cut any DDL statement that legitimately ran past it, measured with an 11-second statement dying at 10.004s with an i/o timeout
+- `Provider.OpenContext` — the provider implements `bunorm.ContextOpener`: the retry sleeps watch the caller's context alongside the clock, so a shutdown that cancels it reaches a retry loop in flight instead of sleeping through the whole remaining budget
+
+### Changed
+
+- `TimeoutConfig` names every deadline the driver applies — `ReadTimeout` and `WriteTimeout` join `ConnectTimeout` — and the connector receives all three, the dial included: the configured connect timeout never reached the dial, which ran under pgdriver's internal 5-second default whatever the operator set, and the read/write deadlines governed invisibly at the driver's 10s/5s with no field in this package to even mention they existed. The defaults mirror the mysql sibling at 30s/30s. **Breaking** at compile time: `NewTimeoutConfig` takes the three durations, the mysql signature. **Behavioural change**: the effective read and write deadlines move from the driver's invisible 10s/5s to the documented 30s/30s
+- `Provider.Open` marks the configured password parameter secret through the configuration's own `MarkSecret` — the component told authoritatively which parameter holds the credential arms the framework's redaction for it
+- the terminal failure record of the retry loop is the log of that failure: written in full through the exception context, and the returned error carries the already-logged mark, so the exit handler no longer writes the same outage a second time
+
 ### Fixed
 
 - `provider.go` — every non-positive field of `PoolConfig` and `TimeoutConfig` falls back to the constructor default, the way the retry configuration already did. A zero reaches the provider far more often from an environment key nobody set than from a caller who means "no limit": on `database/sql` a zero maximum is an UNLIMITED pool and a zero lifetime means connections that are never recycled, and a non-positive connect timeout left the startup ping with no deadline of its own. **Behavioural**: a configuration that relied on zero meaning "unlimited" now receives the documented defaults

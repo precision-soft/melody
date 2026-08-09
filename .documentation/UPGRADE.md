@@ -18,6 +18,38 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Cache: the key grammar is the contract's, on both backends
+
+**What changed.** `cachecontract.Backend` now states the key grammar — non-empty, no spaces, no newlines, at most 1024 bytes — and the in-memory backend enforces it with the same refusals the redis backend always answered. The two implementations of one promise refused different keys.
+
+**Symptom.** A key carrying a space or a newline — typically built from user input — now fails every operation against the in-memory backend with `cache key contains spaces`/`cache key contains newlines`, where it silently worked in development and failed only in production.
+
+**Remedy.** Sanitize the key at the call site (hash it, or strip the whitespace). The refusal names the key.
+
+### pgsql: every driver deadline is named, configured and lifted for migrations
+
+**What changed.** `pgsql.TimeoutConfig` carries `ReadTimeout` and `WriteTimeout` beside `ConnectTimeout`, the connector receives all three (the dial included), and the provider implements `bunorm.MigrationProvider`. Until now the dial ran under pgdriver's internal 5s default whatever `ConnectTimeout` said, every query ran under invisible 10s read / 5s write deadlines, and `db:migrate` ran on the request pool — an 11-second DDL statement died at 10.004s, measured.
+
+**Symptom.** `pgsql.NewTimeoutConfig(connect)` no longer compiles — the constructor takes the three durations, the mysql signature. Behaviourally, the effective read/write deadlines move from 10s/5s to the documented 30s/30s.
+
+**Remedy.** `NewTimeoutConfig(connect, 0, 0)` keeps the connect timeout and takes the 30s/30s defaults; name tighter deadlines where request traffic needs them. Migrations need nothing: `db:migrate` now prefers the dedicated lifted connection automatically.
+
+### rueidis: a wrong-typed credential refuses the boot, an empty prefix refuses the wipe, a closed backend refuses the call
+
+**What changed.** The provider reads user and password through `MustString`, so a wrong-typed credential panics at boot naming the parameter instead of silently connecting with no credential at all. `ClearByPrefixCtx("")` is refused like the empty key everywhere else, instead of wiping the whole namespace. `Backend.Close`/`BackendService.Close` mark the backend closed and later operations refuse — the in-memory backend's answer — while the shared client stays open.
+
+**Symptom.** A boot that connected with a silently-empty password now panics `cannot convert parameter value to string` naming the parameter. A caller using `ClearByPrefix("")` as a synonym of `Clear` now receives `cache key is empty`. An operation after `Close` now receives `cache backend is closed`.
+
+**Remedy.** Register the credential as a string; call `Clear` where the whole namespace is meant; order teardown so nothing uses a backend after closing it — the wrapped client, if shared, is unaffected.
+
+### cron: an entry routed to another crontab file refuses the in-process runner
+
+**What changed.** `EntryConfig.DestinationFile` joins `Command` and `Instances` in `NewRunnerCommand`'s construction refusal: an entry routed to another crontab addresses an external scheduler, and accepted by the runner as well it executed twice whenever the generated manifests were live.
+
+**Symptom.** A boot that used to succeed panics with `cron: the in-process runner supports only name-scheduled single-instance entries; the entry routes to another crontab file`.
+
+**Remedy.** Keep the routed entry out of the runner's `Configuration` (schedule it only for the generator), or drop its `DestinationFile` if in-process execution is the intent.
+
 ### Security: a typed nil is refused where a nil is refused
 
 **What changed.** An interface holding a nil pointer is not equal to nil, so a typed-nil matcher, token source, login handler, logout handler, rule, authenticator, decision voter or wrapped token passed the eager validation at the definition site, passed `Compile`, and was first dereferenced on the request path — inside no recovery, taking the process down on a wiring mistake that had two chances to be caught at boot. Both validation walls now use the reflective check the rest of the framework uses. A stateless firewall handed a typed-nil login handler reads it as the absent handler it is, rather than refusing the firewall as contradictory.

@@ -17,12 +17,24 @@ func NewBackendService(
     scanCount int,
     deleteBatch int,
 ) (*BackendService, error) {
-    backend, err := NewBackend(
+    return NewBackendServiceWithCommandTimeout(client, prefix, scanCount, deleteBatch, 0)
+}
+
+/* NewBackendServiceWithCommandTimeout additionally bounds every contract call: the cachecontract.Backend methods carry no context, so without a bound a request-path read against a store that accepts connections but stops answering hangs the handler. A non-positive value reads as unbounded, the exact behaviour of NewBackendService. */
+func NewBackendServiceWithCommandTimeout(
+    client rueidis.Client,
+    prefix string,
+    scanCount int,
+    deleteBatch int,
+    commandTimeout time.Duration,
+) (*BackendService, error) {
+    backend, err := NewBackendWithCommandTimeout(
         client,
         context.Background(),
         prefix,
         scanCount,
         deleteBatch,
+        commandTimeout,
     )
     if nil != err {
         return nil, err
@@ -44,12 +56,13 @@ func (instance *BackendService) WithContext(ctx context.Context) *Backend {
         return instance.backend
     }
 
-    backend, err := NewBackend(
+    backend, err := NewBackendWithCommandTimeout(
         instance.client,
         ctx,
         instance.backend.prefix,
         instance.backend.scanCount,
         instance.backend.deleteBatch,
+        instance.backend.commandTimeout,
     )
 
     if nil != err {
@@ -113,6 +126,7 @@ func (instance *BackendService) Close() error {
 
 var _ cachecontract.Backend = (*BackendService)(nil)
 
+/* BackendFromRuntime PANICS when the service is absent, despite carrying no Must in its name: it wraps the framework's MustFromRuntime, and the signature has no error slot to answer through. The naming stays for compatibility; treat it as the Must door it is. */
 func BackendFromRuntime(runtimeInstance runtimecontract.Runtime, serviceName string) *Backend {
     return runtime.MustFromRuntime[*BackendService](runtimeInstance, serviceName).WithContext(runtimeInstance.Context())
 }

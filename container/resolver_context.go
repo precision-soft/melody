@@ -137,7 +137,7 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
 
         /* an installed override answers before anything is built, which is what keeps overriding a mechanism of its own rather than a competitor of registration */
         if true == exists {
-            /* @important the edge is recorded even though nothing is built: a scoped dependent resolving a scoped service the scope ALREADY holds depends on it exactly as hard as the resolution that built it, and without the edge the teardown falls back to closing the two in name order — the graph guarantee would hold only for whichever resolution happened to come first. */
+            /* the edge is recorded even though nothing is built: a scoped dependent resolving a scoped service the scope ALREADY holds depends on it exactly as hard as the resolution that built it, and without the edge the teardown falls back to closing the two in name order — the graph guarantee would hold only for whichever resolution happened to come first. */
             if "" != parentKey && true == isScopedNodeKey(parentKey) && true == isScopedNodeKey(nodeKey) {
                 instance.containerInstance.mutex.Lock()
                 registerScopedDependencyLocked(instance.scopeInstance, parentKey, nodeKey)
@@ -171,7 +171,7 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
         )
     }
 
-    /* @important snapshot the provider under the container mutex before serviceWithCreationGuardLocked releases it; the create closure runs unlocked, so reading the providers map there would race concurrent Register writes. */
+    /* snapshot the provider under the container mutex before serviceWithCreationGuardLocked releases it; the create closure runs unlocked, so reading the providers map there would race concurrent Register writes. */
     provider, providerExists := instance.containerInstance.providers[serviceName]
 
     return instance.containerInstance.serviceWithCreationGuardLocked(
@@ -334,7 +334,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
         }
 
         if true == exists {
-            /* @important mirror Get: an already-held scoped instance is depended on as hard as one built by this resolution */
+            /* mirror Get: an already-held scoped instance is depended on as hard as one built by this resolution */
             if "" != parentKey && true == isScopedNodeKey(parentKey) && true == isScopedNodeKey(nodeKey) {
                 instance.containerInstance.mutex.Lock()
                 registerScopedDependencyLocked(instance.scopeInstance, parentKey, nodeKey)
@@ -435,7 +435,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
             return value, nil
         }
 
-        /* @important snapshot the provider under the container mutex before serviceWithCreationGuardLocked releases it; the create closure runs unlocked, so reading the providers map there would race concurrent Register writes. */
+        /* snapshot the provider under the container mutex before serviceWithCreationGuardLocked releases it; the create closure runs unlocked, so reading the providers map there would race concurrent Register writes. */
         provider, providerExists := instance.containerInstance.providers[serviceName]
 
         return instance.containerInstance.serviceWithCreationGuardLocked(
@@ -489,7 +489,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
         )
     }
 
-    /* @important snapshot the provider under the container mutex before serviceWithCreationGuardLocked releases it; the create closure runs unlocked, so reading the typeProviders map there would race concurrent Register writes. */
+    /* snapshot the provider under the container mutex before serviceWithCreationGuardLocked releases it; the create closure runs unlocked, so reading the typeProviders map there would race concurrent Register writes. */
     provider, providerExists := instance.containerInstance.typeProviders[canonicalTargetType]
 
     return instance.containerInstance.serviceWithCreationGuardLocked(
@@ -565,7 +565,7 @@ func (instance *resolverContext) MustGetByType(targetType reflect.Type) any {
     return value
 }
 
-/* @important Has answers under the same suspension Get enforces: a container-owned provider asking about a scope-only name used to hear "yes" from the very entries its Get would refuse, and an existence check that disagrees with the resolution it gates turns into a wiring decision made on one request's substitutes — or a Has-then-MustGet panic. */
+/* Has answers under the same suspension Get enforces: a container-owned provider asking about a scope-only name used to hear "yes" from the very entries its Get would refuse, and an existence check that disagrees with the resolution it gates turns into a wiring decision made on one request's substitutes — or a Has-then-MustGet panic. */
 func (instance *resolverContext) Has(serviceName string) bool {
     if true == instance.scopeVisible() {
         return instance.scopeInstance.Has(serviceName)
@@ -625,4 +625,16 @@ func (instance *resolverContext) stackStringWithRepeat(repeatedKey string) strin
     return strings.Join(parts, " -> ")
 }
 
-var _ containercontract.Resolver = (*resolverContext)(nil)
+/* Container answers the container behind this resolution, the door a process-lifetime service uses to replay deferred work after this context's own resolution has ended. */
+func (instance *resolverContext) Container() containercontract.Container {
+    if nil == instance.containerInstance {
+        return nil
+    }
+
+    return instance.containerInstance
+}
+
+var (
+    _ containercontract.Resolver         = (*resolverContext)(nil)
+    _ containercontract.ContainerCarrier = (*resolverContext)(nil)
+)

@@ -35,7 +35,15 @@ func liveBackend(t *testing.T) (*Backend, rueidis.Client) {
     }
 
     t.Cleanup(func() {
-        if clearErr := backend.Clear(); nil != clearErr {
+        /* the cleanup clears through its own backend: a test that closed the one under test would otherwise leave its keys behind, since a closed backend refuses Clear like every other operation */
+        cleaner, cleanerErr := NewBackend(client, context.Background(), prefix, 0, 0)
+        if nil != cleanerErr {
+            t.Logf("could not build the cleanup backend: %v", cleanerErr)
+
+            return
+        }
+
+        if clearErr := cleaner.Clear(); nil != clearErr {
             t.Logf("could not clear the test prefix: %v", clearErr)
         }
     })

@@ -1,6 +1,8 @@
 package cron
 
 import (
+    "encoding/json"
+    "context"
     "fmt"
     "os"
     "path/filepath"
@@ -8,7 +10,13 @@ import (
     "testing"
 
     clicontract "github.com/precision-soft/melody/cli/contract"
+    "github.com/precision-soft/melody/cli/output"
+    melodyconfig "github.com/precision-soft/melody/config"
+    configcontract "github.com/precision-soft/melody/config/contract"
+    "github.com/precision-soft/melody/container"
+    containercontract "github.com/precision-soft/melody/container/contract"
     "github.com/precision-soft/melody/exception"
+    "github.com/precision-soft/melody/runtime"
 )
 
 func TestNewGenerateCommandIdentity(t *testing.T) {
@@ -22,9 +30,11 @@ func TestNewGenerateCommandIdentity(t *testing.T) {
         t.Fatalf("Description() should not be empty")
     }
 
+    /* the command carries its 8 own flags plus the standard set every melody command accepts — without the standard set, the framework's -v/-vv rewrite into --verbosity killed exactly this command with "flag provided but not defined" */
     flags := command.Flags()
-    if 8 != len(flags) {
-        t.Fatalf("expected 8 flags, got %d", len(flags))
+    expectedFlagCount := 8 + len(output.StandardFlags())
+    if expectedFlagCount != len(flags) {
+        t.Fatalf("expected %d flags (8 own + the standard set), got %d", expectedFlagCount, len(flags))
     }
 }
 
@@ -2241,5 +2251,134 @@ func TestRun_RefusesAMalformedHeartbeatOptIn(t *testing.T) {
 
     if ParameterHeartbeatAutoEnabled != reported.Context()["parameter"] {
         t.Fatalf("the refusal must name the parameter, got %v", reported.Context()["parameter"])
+    }
+}
+
+type generateTestEnvironmentSource struct {
+    values map[string]string
+}
+
+func (instance *generateTestEnvironmentSource) Load() (map[string]string, error) {
+    copied := make(map[string]string, len(instance.values))
+    for key, value := range instance.values {
+        copied[key] = value
+    }
+
+    return copied, nil
+}
+
+func newGenerateTestConfiguration(t *testing.T) configcontract.Configuration {
+    t.Helper()
+
+    environment, environmentErr := melodyconfig.NewEnvironment(
+        &generateTestEnvironmentSource{
+            values: map[string]string{
+                melodyconfig.EnvKey: melodyconfig.EnvDevelopment,
+            },
+        },
+    )
+    if nil != environmentErr {
+        t.Fatalf("environment: %v", environmentErr)
+    }
+
+    configuration, configurationErr := melodyconfig.NewConfiguration(environment, t.TempDir())
+    if nil != configurationErr {
+        t.Fatalf("configuration: %v", configurationErr)
+    }
+
+    return configuration
+}
+
+func TestGenerateCommand_ConfigurationResolvesThroughTheRunScope(t *testing.T) {
+    containerConfiguration := newGenerateTestConfiguration(t)
+    scopeConfiguration := newGenerateTestConfiguration(t)
+
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(
+        melodyconfig.ServiceConfig,
+        func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
+            return containerConfiguration, nil
+        },
+    )
+
+    scope := serviceContainer.NewScope()
+    defer func() {
+        _ = scope.Close()
+    }()
+    scope.MustOverrideProtectedInstance(melodyconfig.ServiceConfig, scopeConfiguration)
+
+    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+
+    resolved, resolveErr := configurationFromRuntime(runtimeInstance)
+    if nil != resolveErr {
+        t.Fatalf("resolve: %v", resolveErr)
+    }
+
+    if scopeConfiguration != resolved {
+        t.Fatal("expected the generator to honour the run scope's configuration, not the container's")
+    }
+}
+
+/* the framework rewrites -v/-vv into --verbosity for every command; the standard flags make the generator survive its own framework's convention. */
+func TestGenerateCommand_AcceptsTheStandardVerbosityFlag(t *testing.T) {
+    tempDir := t.TempDir()
+
+    _, runErr := runGenerateCommand(
+        t,
+        []clicontract.Command{newFakeCommandWithSchedule("report:daily", &testSchedule{Minute: "0"})},
+        []string{
+            "--out", filepath.Join(tempDir, "crontab"),
+            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "deploy",
+            "--verbosity=1",
+        },
+    )
+    if nil != runErr {
+        t.Fatalf("expected the standard verbosity flag to be accepted, got %v", runErr)
+    }
+}
+
+/* under --format=json the generator's summary is the one machine-readable document. */
+func TestGenerateCommand_JsonFormatRendersOneDocument(t *testing.T) {
+    tempDir := t.TempDir()
+
+    stdout, runErr := runGenerateCommand(
+        t,
+        []clicontract.Command{newFakeCommandWithSchedule("report:daily", &testSchedule{Minute: "0"})},
+        []string{
+            "--out", filepath.Join(tempDir, "crontab"),
+            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "deploy",
+            "--format=json",
+        },
+    )
+    if nil != runErr {
+        t.Fatalf("run: %v", runErr)
+    }
+
+    var document map[string]any
+    if unmarshalErr := json.Unmarshal([]byte(stdout), &document); nil != unmarshalErr {
+        t.Fatalf("the output is not one json document: %v; got %q", unmarshalErr, stdout)
+    }
+
+    meta, hasMeta := document["meta"].(map[string]any)
+    if false == hasMeta {
+        t.Fatalf("the document carries no meta, got %q", stdout)
+    }
+
+    if "melody:cron:generate" != meta["command"] {
+        t.Fatalf("meta.command = %v", meta["command"])
+    }
+
+    data, hasData := document["data"].(map[string]any)
+    if false == hasData {
+        t.Fatalf("the document carries no data, got %q", stdout)
+    }
+
+    writes, hasWrites := data["writes"].([]any)
+    if false == hasWrites || 0 == len(writes) {
+        t.Fatalf("expected the write summary inside the document, got %v", data)
     }
 }

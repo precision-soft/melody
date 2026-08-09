@@ -6,6 +6,7 @@ import (
     "io"
     "os"
     "strings"
+    "sync/atomic"
 
     "github.com/precision-soft/melody/cli"
     "github.com/uptrace/bun"
@@ -28,8 +29,24 @@ func DefaultRunnerOption() RunnerOption {
     }
 }
 
+/* processRunnerOption is the process default RunQueries reads when a migration does not pass its own option: a generated migration's signature is fixed by bun as (ctx, db) and cannot receive the parsed flags any other way, so without this door a --no-color run carried escape codes from exactly the per-query lines the flag was passed to clean. */
+var processRunnerOption atomic.Pointer[RunnerOption]
+
+/* SetDefaultRunnerOption installs the process default RunQueries uses when the migration does not pass its own option; the migrate commands call it from their parsed flags before running the migrator. */
+func SetDefaultRunnerOption(option RunnerOption) {
+    processRunnerOption.Store(&option)
+}
+
+func resolveDefaultRunnerOption() RunnerOption {
+    if stored := processRunnerOption.Load(); nil != stored {
+        return *stored
+    }
+
+    return DefaultRunnerOption()
+}
+
 func RunQueries(ctx context.Context, db *bun.DB, direction string, migrationName string, queries []Query) error {
-    return RunQueriesWithOption(ctx, db, direction, migrationName, queries, DefaultRunnerOption())
+    return RunQueriesWithOption(ctx, db, direction, migrationName, queries, resolveDefaultRunnerOption())
 }
 
 func RunQueriesWithOption(ctx context.Context, db *bun.DB, direction string, migrationName string, queries []Query, option RunnerOption) error {

@@ -1405,3 +1405,21 @@ func TestScope_OverridePropagationCoversTheScopeOwnRegistrations(t *testing.T) {
         t.Fatalf("expected the override to outrank the built own-registration instance on the type key")
     }
 }
+
+func TestScope_ContainerAnswersTheContainerAndNilAfterClose(t *testing.T) {
+    serviceContainer := NewContainer()
+    scopeInstance := serviceContainer.NewScope().(*scope)
+
+    carried := scopeInstance.Container()
+    if serviceContainer != carried {
+        t.Fatalf("expected the scope to answer the container it layers over, got %v", carried)
+    }
+
+    if closeErr := scopeInstance.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    if nil != scopeInstance.Container() {
+        t.Fatal("expected a closed scope to answer nil")
+    }
+}

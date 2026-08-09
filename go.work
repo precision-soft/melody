@@ -24,6 +24,7 @@ use (
 	./integrations/bunorm/v3
 
 	./integrations/cron
+	./integrations/cron/.example
 	./integrations/cron/v2
 	./integrations/cron/v3
 

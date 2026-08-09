@@ -292,3 +292,45 @@ func TestResolveConnectTimeout_ANonPositiveValueTakesTheDefaultRatherThanRemovin
         t.Fatal("a configured connect timeout must govern")
     }
 }
+
+/* the credentials read through MustString, the bunorm convention: a wrong-typed password panics at boot naming the parameter, where String() folded it to "" and connected with no credential at all. */
+func TestProviderOpen_RefusesAWrongTypedCredentialLoudly(t *testing.T) {
+    serviceContainer := container.NewContainer()
+
+    serviceContainer.MustRegister(
+        config.ServiceConfig,
+        func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
+            environment, environmentErr := config.NewEnvironment(
+                &testEnvironmentSource{
+                    values: map[string]string{
+                        config.EnvKey: config.EnvDevelopment,
+                    },
+                },
+            )
+            if nil != environmentErr {
+                return nil, environmentErr
+            }
+
+            configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+            if nil != configurationErr {
+                return nil, configurationErr
+            }
+
+            configuration.RegisterRuntime(testAddressParameterName, "127.0.0.1:1")
+            configuration.RegisterRuntime(testUserParameterName, "")
+            configuration.RegisterRuntime(testPasswordParameterName, 12345)
+
+            return configuration, nil
+        },
+    )
+
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatal("expected the int-typed password to panic loudly")
+        }
+    }()
+
+    _, openErr := newTestProvider().Open(serviceContainer)
+    t.Fatalf("expected a panic, got error %v", openErr)
+}

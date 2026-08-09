@@ -8,8 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- under `--format=json` every command renders the one machine-readable document the declared flag always promised: the accumulated blocks as data, the side-reports as warnings, the failure inside the envelope's error. The flag was declared and validated by `StandardFlags` long before it was honoured — `db:status --format=json | jq` failed on the first byte of a plain-text table while the cli runner had already silenced its banner on the json promise
+- `SetDefaultRunnerOption` — the migrate and rollback commands install their parsed writer and colour posture as the process default `RunQueries` reads when a migration passes no option of its own: a generated migration's signature is fixed by bun as `(ctx, db)` and cannot receive the parsed flags any other way, so a `--no-color` run carried escape codes from exactly the per-query lines the flag was passed to clean. Under json the per-query progress is discarded — the document is the only byte the command may emit
 - the migrate and rollback commands prefer the dedicated migration connection when the registry's provider implements `bunorm.MigrationProvider`, and fall back to the ordinary pool otherwise: the request pool carries driver deadlines sized for requests, and a DDL statement that legitimately runs past them is cut mid-statement. The verbose manager label says which connection the run rides — "(dedicated migration connection)"
 - the verbose DATABASE block is answered for PostgreSQL too, through `current_database()`, `inet_server_addr()`, `inet_server_port()`, `current_user` and `version()`. It was a MySQL-only facility, so on a pgsql-backed manager the operator's confirmation of which database a migration was about to touch was silently absent rather than reported as unavailable. A connection over a unix socket, the one a local migration is most likely to use, reports its host as `<local socket>`
+
+### Changed
+
+- the commands no longer pre-print the failure they return: the cli runner's `[error]` line and the full log record already report it, and the third copy of the same message on the same console said nothing new. The deliberate exception stays — an unlock failure beside a failed migration is still printed, because the return keeps the migration's error and would lose it
 
 ### Fixed
 

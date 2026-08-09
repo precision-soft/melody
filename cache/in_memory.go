@@ -86,13 +86,56 @@ type InMemoryBackend struct {
     clock               clockcontract.Clock
 }
 
-/* @important a closed backend refuses every operation. Serving one would be worse than the error: the cleanup goroutine is stopped by then, so an entry saved after Close is never reclaimed by anything but a read that happens to name it — the map grows for the rest of the process while Close has already reported the backend gone. */
+/* a closed backend refuses every operation. Serving one would be worse than the error: the cleanup goroutine is stopped by then, so an entry saved after Close is never reclaimed by anything but a read that happens to name it — the map grows for the rest of the process while Close has already reported the backend gone. */
 func closedBackendError() error {
     return exception.NewError(
         "cache backend is closed",
         nil,
         nil,
     )
+}
+
+const inMemoryBackendMaxKeyLength = 1024
+
+/* validateKey enforces the key grammar the Backend contract states — non-empty, no spaces, no newlines, at most 1024 bytes — with the exact refusals the redis backend answers, so a caller cannot tell the implementations apart by which keys they refuse: a key that works in development against this backend works in production against the store, and the malformed one fails identically in both. */
+func validateKey(key string) error {
+    if "" == key {
+        return emptyKeyError()
+    }
+
+    if true == strings.Contains(key, " ") {
+        return exception.NewError(
+            "cache key contains spaces",
+            exceptioncontract.Context{
+                "key": key,
+            },
+            nil,
+        )
+    }
+
+    if true == strings.Contains(key, "\n") {
+        return exception.NewError(
+            "cache key contains newlines",
+            exceptioncontract.Context{
+                "key": key,
+            },
+            nil,
+        )
+    }
+
+    if inMemoryBackendMaxKeyLength < len(key) {
+        return exception.NewError(
+            "cache key is too long",
+            exceptioncontract.Context{
+                "key":          key,
+                "maxKeyLength": inMemoryBackendMaxKeyLength,
+                "keyLength":    len(key),
+            },
+            nil,
+        )
+    }
+
+    return nil
 }
 
 func emptyKeyError() error {
@@ -115,8 +158,8 @@ func negativeTtlError(ttl time.Duration) error {
 
 func refuseEmptyKeyList(keys []string) error {
     for _, key := range keys {
-        if "" == key {
-            return emptyKeyError()
+        if keyErr := validateKey(key); nil != keyErr {
+            return keyErr
         }
     }
 
@@ -124,8 +167,8 @@ func refuseEmptyKeyList(keys []string) error {
 }
 
 func (instance *InMemoryBackend) Get(key string) ([]byte, bool, error) {
-    if "" == key {
-        return nil, false, emptyKeyError()
+    if keyErr := validateKey(key); nil != keyErr {
+        return nil, false, keyErr
     }
 
     now := instance.clock.Now()
@@ -166,8 +209,8 @@ func (instance *InMemoryBackend) Get(key string) ([]byte, bool, error) {
 }
 
 func (instance *InMemoryBackend) Has(key string) (bool, error) {
-    if "" == key {
-        return false, emptyKeyError()
+    if keyErr := validateKey(key); nil != keyErr {
+        return false, keyErr
     }
 
     now := instance.clock.Now()
@@ -198,8 +241,8 @@ func (instance *InMemoryBackend) Set(
     payload []byte,
     ttl time.Duration,
 ) error {
-    if "" == key {
-        return emptyKeyError()
+    if keyErr := validateKey(key); nil != keyErr {
+        return keyErr
     }
 
     if 0 > ttl {
@@ -226,8 +269,8 @@ func (instance *InMemoryBackend) Set(
 }
 
 func (instance *InMemoryBackend) Delete(key string) error {
-    if "" == key {
-        return emptyKeyError()
+    if keyErr := validateKey(key); nil != keyErr {
+        return keyErr
     }
 
     instance.mutex.Lock()
@@ -322,8 +365,8 @@ func (instance *InMemoryBackend) Many(keys []string) (map[string][]byte, error) 
 
 func (instance *InMemoryBackend) SetMultiple(items map[string][]byte, ttl time.Duration) error {
     for key := range items {
-        if "" == key {
-            return emptyKeyError()
+        if keyErr := validateKey(key); nil != keyErr {
+            return keyErr
         }
     }
 
@@ -413,8 +456,8 @@ func (instance *InMemoryBackend) incrementValue(
     key string,
     delta int64,
 ) (int64, error) {
-    if "" == key {
-        return 0, emptyKeyError()
+    if keyErr := validateKey(key); nil != keyErr {
+        return 0, keyErr
     }
 
     now := instance.clock.Now()
@@ -498,7 +541,7 @@ const cleanupChunkSize = 1024
 
 const evictionProbeLimit = 8
 
-/* @important the sweep takes the keys once and then expires them in chunks, releasing the lock between chunks: Get takes the same exclusive lock to touch the recency list, so a single whole-map pass under one lock stalls every concurrent request for as long as the map is large. A key deleted meanwhile is simply not found. */
+/* the sweep takes the keys once and then expires them in chunks, releasing the lock between chunks: Get takes the same exclusive lock to touch the recency list, so a single whole-map pass under one lock stalls every concurrent request for as long as the map is large. A key deleted meanwhile is simply not found. */
 func (instance *InMemoryBackend) cleanupExpired() {
     now := instance.clock.Now()
 
@@ -610,7 +653,7 @@ func (instance *InMemoryBackend) saveItemLocked(
     }
 }
 
-/* @important the walk toward the front is bounded: it looks for an expired victim before falling back to the least recently used one, and an unbounded search would make every insert into a full cache pay a whole-list scan under the exclusive lock. Expired entries are reclaimed anyway, lazily by the readers and periodically by the sweep. */
+/* the walk toward the front is bounded: it looks for an expired victim before falling back to the least recently used one, and an unbounded search would make every insert into a full cache pay a whole-list scan under the exclusive lock. Expired entries are reclaimed anyway, lazily by the readers and periodically by the sweep. */
 func (instance *InMemoryBackend) evictOneLocked(now time.Time) {
     probed := 0
     for element := instance.lruList.Back(); nil != element && evictionProbeLimit > probed; element = element.Prev() {

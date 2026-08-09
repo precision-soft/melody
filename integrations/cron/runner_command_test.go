@@ -6,14 +6,19 @@ import (
     "fmt"
     "math"
     "strings"
+    "sync"
     "sync/atomic"
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/application"
     clicontract "github.com/precision-soft/melody/cli/contract"
+    "github.com/precision-soft/melody/cli/output"
     "github.com/precision-soft/melody/container"
     containercontract "github.com/precision-soft/melody/container/contract"
     "github.com/precision-soft/melody/exception"
+    "github.com/precision-soft/melody/logging"
+    loggingcontract "github.com/precision-soft/melody/logging/contract"
     "github.com/precision-soft/melody/runtime"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
     urfavecli "github.com/urfave/cli/v3"
@@ -1932,5 +1937,294 @@ func TestResolveAbandonedRun_ADeadlineExceededAnswerCarriesBothFailures(t *testi
 
     if true == strings.Contains(resolved.Error(), "abandoned") {
         t.Fatalf("a command that answered is cancelled, not abandoned, got %v", resolved)
+    }
+}
+
+type typedNilErrorCommand struct {
+    commandName string
+}
+
+func (instance *typedNilErrorCommand) Name() string {
+    return instance.commandName
+}
+
+func (instance *typedNilErrorCommand) Description() string {
+    return "typed nil error command"
+}
+
+func (instance *typedNilErrorCommand) Flags() []clicontract.Flag {
+    return nil
+}
+
+func (instance *typedNilErrorCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+    var failure *exception.Error
+
+    return failure
+}
+
+func TestRunnerCommand_InvokeNormalizesATypedNilCommandError(t *testing.T) {
+    job := &typedNilErrorCommand{commandName: "job:top"}
+
+    configuration := NewConfiguration().
+        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+
+    invokeErr := runner.invoke(newRunnerTestRuntime(context.Background()), runner.entries[0])
+    if nil != invokeErr {
+        t.Fatalf("expected the typed-nil command error to normalize to success, got %v", invokeErr)
+    }
+}
+
+type capturingRunnerLogger struct {
+    mutex   sync.Mutex
+    entries []capturedRunnerRecord
+}
+
+type capturedRunnerRecord struct {
+    message string
+    context map[string]any
+}
+
+func (instance *capturingRunnerLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+    instance.entries = append(instance.entries, capturedRunnerRecord{message: message, context: context})
+}
+
+func (instance *capturingRunnerLogger) Debug(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelDebug, message, context)
+}
+
+func (instance *capturingRunnerLogger) Info(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelInfo, message, context)
+}
+
+func (instance *capturingRunnerLogger) Warning(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelWarning, message, context)
+}
+
+func (instance *capturingRunnerLogger) Error(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelError, message, context)
+}
+
+func (instance *capturingRunnerLogger) Emergency(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelEmergency, message, context)
+}
+
+func (instance *capturingRunnerLogger) recordByMessageProbe(message string) (capturedRunnerRecord, bool) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    for _, entry := range instance.entries {
+        if message == entry.message {
+            return entry, true
+        }
+    }
+
+    return capturedRunnerRecord{}, false
+}
+
+func (instance *capturingRunnerLogger) recordByContextValue(key string, value string) (capturedRunnerRecord, bool) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    for _, entry := range instance.entries {
+        if "cron runner command failed" != entry.message {
+            continue
+        }
+
+        if value == entry.context[key] {
+            return entry, true
+        }
+    }
+
+    return capturedRunnerRecord{}, false
+}
+
+func TestRunnerCommand_DispatchFailureRecordCarriesTheExceptionContext(t *testing.T) {
+    panickingJob := &panickingCommand{commandName: "job:panicking"}
+    /* a plain error carries no exception context of its own, so the record's commandName can come only from the dispatch site — the panicking sibling's failure already names the command inside its exception context and cannot prove that half */
+    plainJob := &recordingCommand{commandName: "job:plain", runErr: errors.New("plain failure")}
+
+    configuration := NewConfiguration().
+        Schedule("job:panicking", &EntryConfig{Schedule: &Schedule{Minute: "0"}}).
+        Schedule("job:plain", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, panickingJob, plainJob)
+
+    captured := &capturingRunnerLogger{}
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return captured, nil
+        },
+    )
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
+    if runErr := runner.runDue(runtimeInstance, at); nil == runErr {
+        t.Fatal("expected the panicking job to fail the run")
+    }
+
+    panickingRecord, panickingFound := captured.recordByContextValue("commandName", "job:panicking")
+    if false == panickingFound {
+        t.Fatal("expected a failure record naming the panicking job")
+    }
+
+    if _, hasPanicValue := panickingRecord.context["panicValue"]; false == hasPanicValue {
+        t.Fatalf("expected the record to carry the panic value from the failure's exception context, got keys %v", panickingRecord.context)
+    }
+
+    if _, plainFound := captured.recordByContextValue("commandName", "job:plain"); false == plainFound {
+        t.Fatal("expected the plain failure's record to name its command through the dispatch site's own context")
+    }
+}
+
+func TestRunnerCommand_OnceAggregateCarriesTheFailuresAsCause(t *testing.T) {
+    sentinel := errors.New("job failure sentinel")
+    job := &recordingCommand{commandName: "job:top", runErr: sentinel}
+
+    configuration := NewConfiguration().
+        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+
+    at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
+    runErr := runner.runDue(newRunnerTestRuntime(context.Background()), at)
+    if nil == runErr {
+        t.Fatal("expected the failing job to fail the run")
+    }
+
+    if false == errors.Is(runErr, sentinel) {
+        t.Fatalf("expected the aggregate to carry the command's own failure as its cause, got %v", runErr)
+    }
+}
+
+func TestRunnerCommand_DestinationFileEntryPanicsAtConstruction(t *testing.T) {
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatal("expected a panic for an entry routed to another crontab file")
+        }
+
+        recoveredErr, isError := recovered.(error)
+        if false == isError {
+            t.Fatalf("expected the panic value to be an error, got %T", recovered)
+        }
+
+        if false == errors.Is(recoveredErr, ErrUnsupportedRunnerEntry) {
+            t.Fatalf("expected ErrUnsupportedRunnerEntry, got %v", recoveredErr)
+        }
+    }()
+
+    job := newRecordingCommand("job:routed")
+
+    configuration := NewConfiguration().
+        Schedule("job:routed", &EntryConfig{
+            Schedule:        &Schedule{Minute: "0"},
+            DestinationFile: "other.crontab",
+        })
+
+    NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+}
+
+type identityProbeCommand struct {
+    commandName     string
+    observedRunId   string
+    processResolved bool
+}
+
+func (instance *identityProbeCommand) Name() string {
+    return instance.commandName
+}
+
+func (instance *identityProbeCommand) Description() string {
+    return "identity probe command"
+}
+
+func (instance *identityProbeCommand) Flags() []clicontract.Flag {
+    return nil
+}
+
+func (instance *identityProbeCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+    logging.LoggerFromRuntime(runtimeInstance).Info("job line", nil)
+
+    processContext := application.ProcessContextFromResolver(runtimeInstance.Scope())
+    if nil != processContext {
+        instance.processResolved = true
+        instance.observedRunId = processContext.ProcessId()
+    }
+
+    return nil
+}
+
+/* the child scope carries the console identity the cli entry point installs into its own: a fresh per-run ProcessContext and a logger that keeps the runner's processId while adding the run's cronRunId. */
+func TestRunnerCommand_InvokeInstallsThePerRunIdentity(t *testing.T) {
+    job := &identityProbeCommand{commandName: "job:identity"}
+
+    configuration := NewConfiguration().
+        Schedule("job:identity", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+
+    captured := &capturingRunnerLogger{}
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return captured, nil
+        },
+    )
+
+    parentScope := serviceContainer.NewScope()
+    defer func() {
+        _ = parentScope.Close()
+    }()
+    parentScope.MustOverrideProtectedInstance(
+        logging.ServiceLogger,
+        logging.NewProcessLogger(captured, "proc-1", "processId"),
+    )
+    parentScope.MustOverrideProtectedInstance(
+        application.ServiceProcessContext,
+        application.NewProcessContext("proc-1", time.Now()),
+    )
+
+    runtimeInstance := runtime.New(context.Background(), parentScope, serviceContainer)
+
+    if invokeErr := runner.invoke(runtimeInstance, runner.entries[0]); nil != invokeErr {
+        t.Fatalf("invoke: %v", invokeErr)
+    }
+
+    if false == job.processResolved {
+        t.Fatal("expected the job to resolve a ProcessContext through the documented console door")
+    }
+
+    if "proc-1" == job.observedRunId || "" == job.observedRunId {
+        t.Fatalf("expected a fresh per-run id, got %q", job.observedRunId)
+    }
+
+    record, found := captured.recordByMessageProbe("job line")
+    if false == found {
+        t.Fatal("expected the job's record to be captured")
+    }
+
+    if "proc-1" != record.context["processId"] {
+        t.Fatalf("expected the job's record to keep the runner's processId, got %v", record.context["processId"])
+    }
+
+    if job.observedRunId != record.context["cronRunId"] {
+        t.Fatalf("expected the job's record to carry the run's id, got %v", record.context["cronRunId"])
+    }
+}
+
+/* the runner accepts the standard flags every melody command carries, so the framework's -v rewrite no longer kills it at parse. */
+func TestRunnerCommand_CarriesTheStandardFlags(t *testing.T) {
+    runner := NewRunnerCommand(NewConfiguration(), RunnerDialectCrontab)
+
+    expectedFlagCount := 1 + len(output.StandardFlags())
+    if expectedFlagCount != len(runner.Flags()) {
+        t.Fatalf("expected %d flags (--once + the standard set), got %d", expectedFlagCount, len(runner.Flags()))
     }
 }

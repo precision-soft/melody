@@ -492,6 +492,16 @@ func (instance *scope) Closed() bool {
     return nil == instance.container.Load()
 }
 
+/* Container answers the container this scope layers over, nil once the scope is closed. It lives on the concrete scope rather than the contract, like Closed: a process-lifetime service that defers work past its own construction replays it through the container behind its resolver — the lock-guarded, process-lifetime half — not through the resolution context that built it, and asks for the door through the ContainerCarrier assertion. */
+func (instance *scope) Container() containercontract.Container {
+    containerInstance := instance.container.Load()
+    if nil == containerInstance {
+        return nil
+    }
+
+    return containerInstance
+}
+
 /* Close ends the request the scope stands for and closes the services the scope itself built. Only those: an override was installed from outside and belongs to whoever installed it, and a singleton reached through the scope belongs to the root container, which closes it when the process ends — closing either here would tear down, once per request, something the next request still needs. What the scope built is exactly what a service which read one of those entries turned into, so it holds that request and has nobody else to close it. */
 func (instance *scope) Close() error {
     /* the dependency graph lives on the scope but is guarded by the CONTAINER mutex, because the resolver writes it with that lock held and never takes the scope's for it. The snapshot is therefore taken container first, scope second — the one order the two locks are ever taken in. A creation racing this Close either has its edge in the snapshot or does not, and a missing edge degrades to the descending-name order; that is the same window the created instances themselves already have. */
@@ -801,4 +811,7 @@ func (instance *scope) storeCreatedInstance(
     return value, false, nil
 }
 
-var _ containercontract.Scope = (*scope)(nil)
+var (
+    _ containercontract.Scope            = (*scope)(nil)
+    _ containercontract.ContainerCarrier = (*scope)(nil)
+)

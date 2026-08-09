@@ -1,6 +1,8 @@
 package migrate
 
 import (
+    "time"
+
     "strconv"
 
     clicontract "github.com/precision-soft/melody/cli/contract"
@@ -40,21 +42,25 @@ func (instance *MigrateCommand) Run(runtimeInstance runtimecontract.Runtime, com
     option := instance.base.optionFromCommand(commandContext)
     outputInstance := newCommandOutput(commandContext.Writer, option)
 
+    startedAt := time.Now()
+    defer func() {
+        runErr = outputInstance.finish(instance.Name(), startedAt, runErr)
+    }()
+
+    SetDefaultRunnerOption(runnerOptionForCommand(commandContext.Writer, option))
+
     db, managerName, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext)
     if nil != dbErr {
-        outputInstance.printError(dbErr)
         return dbErr
     }
 
     migrator, migratorErr := instance.base.newMigrator(db)
     if nil != migratorErr {
-        outputInstance.printError(migratorErr)
         return migratorErr
     }
 
-    /* @important take the bun migration lock so two replicas running the migrate command during a rolling deploy cannot both compute the same pending set and double-apply a migration. */
+    /* take the bun migration lock so two replicas running the migrate command during a rolling deploy cannot both compute the same pending set and double-apply a migration. */
     if lockErr := migrator.Lock(runtimeInstance.Context()); nil != lockErr {
-        outputInstance.printError(lockErr)
         return lockErr
     }
     /* the unlock failure becomes the command's verdict only when the migration itself succeeded: a failed migration keeps its own error, with the unlock failure printed beside it */
@@ -68,7 +74,6 @@ func (instance *MigrateCommand) Run(runtimeInstance runtimecontract.Runtime, com
     if option.Verbose {
         identity, identityErr := fetchDatabaseIdentity(runtimeInstance.Context(), db)
         if nil != identityErr {
-            outputInstance.printError(identityErr)
             return identityErr
         }
         if nil != identity {
@@ -79,7 +84,6 @@ func (instance *MigrateCommand) Run(runtimeInstance runtimecontract.Runtime, com
 
     group, migrateErr := migrator.Migrate(runtimeInstance.Context())
     if nil != migrateErr {
-        outputInstance.printError(migrateErr)
         return migrateErr
     }
 

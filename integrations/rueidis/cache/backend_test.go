@@ -815,15 +815,119 @@ func TestSetMultipleCtx_AFailureNamesOneOfTheKeys(t *testing.T) {
     }
 }
 
-/* Close does not close the client the provider owns, so the backend is still usable after it — which is what tells a no-op apart from a close that happened to be silent. */
-func TestClose_LeavesTheProviderOwnedClientUsable(t *testing.T) {
-    backend, _ := liveBackend(t)
+/* Close ends THIS backend and leaves the shared client alone: every later operation refuses — the answer the in-memory backend behind the same contract gives, so a teardown-ordering bug reads identically whichever backend is wired — while a second backend over the same client keeps working, which is what proves the client itself was not closed. */
+func TestClose_RefusesLaterOperationsAndLeavesTheSharedClientOpen(t *testing.T) {
+    backend, client := liveBackend(t)
 
     if closeErr := backend.Close(); nil != closeErr {
         t.Fatalf("Close: %v", closeErr)
     }
 
-    if setErr := backend.Set("after-close", []byte("payload"), time.Minute); nil != setErr {
-        t.Fatalf("the backend does not own the client, so it stays usable after Close: %v", setErr)
+    setErr := backend.Set("after-close", []byte("payload"), time.Minute)
+    if nil == setErr {
+        t.Fatal("expected the closed backend to refuse")
+    }
+
+    if false == strings.Contains(setErr.Error(), "cache backend is closed") {
+        t.Fatalf("expected the in-memory backend's refusal, got %v", setErr)
+    }
+
+    sibling, siblingErr := NewBackend(client, context.Background(), "melody:test:"+t.Name()+":sibling:", 0, 0)
+    if nil != siblingErr {
+        t.Fatalf("sibling backend: %v", siblingErr)
+    }
+    t.Cleanup(func() {
+        _ = sibling.Clear()
+    })
+
+    if siblingSetErr := sibling.Set("after-close", []byte("payload"), time.Minute); nil != siblingSetErr {
+        t.Fatalf("the shared client must stay open for its other borrowers, got %v", siblingSetErr)
+    }
+}
+
+/* the empty prefix is refused like the empty key everywhere else: a prefix assembled at run time that comes out empty must not select the whole namespace. */
+func TestClearByPrefix_RefusesTheEmptyPrefix(t *testing.T) {
+    backend, _ := liveBackend(t)
+
+    ctx := context.Background()
+
+    if setErr := backend.SetCtx(ctx, "tenant:1:a", []byte("x"), time.Minute); nil != setErr {
+        t.Fatalf("set: %v", setErr)
+    }
+    if setErr := backend.SetCtx(ctx, "other:b", []byte("y"), time.Minute); nil != setErr {
+        t.Fatalf("set: %v", setErr)
+    }
+
+    clearErr := backend.ClearByPrefixCtx(ctx, "")
+    if nil == clearErr {
+        t.Fatal("expected the empty prefix to be refused")
+    }
+
+    if false == strings.Contains(clearErr.Error(), "cache key is empty") {
+        t.Fatalf("expected the empty-key refusal, got %v", clearErr)
+    }
+
+    hasTenant, _ := backend.HasCtx(ctx, "tenant:1:a")
+    hasOther, _ := backend.HasCtx(ctx, "other:b")
+    if false == hasTenant || false == hasOther {
+        t.Fatalf("expected the namespace to survive the refused wipe (tenant=%v other=%v)", hasTenant, hasOther)
+    }
+}
+
+/* the ttl is judged before the empty early-return, the order the in-memory backend judges it in. */
+func TestSetMultiple_RefusesANegativeTtlEvenForAnEmptyBatch(t *testing.T) {
+    backend, _ := liveBackend(t)
+
+    setErr := backend.SetMultipleCtx(context.Background(), map[string][]byte{}, -time.Second)
+    if nil == setErr {
+        t.Fatal("expected the negative ttl to be refused for the empty batch too")
+    }
+
+    if false == strings.Contains(setErr.Error(), "cache ttl is negative") {
+        t.Fatalf("expected the negative ttl refusal, got %v", setErr)
+    }
+}
+
+/* the counter refusal names the key it happened on, the way the in-memory backend's does. */
+func TestIncrement_WrapsTheStoreRefusalWithTheKey(t *testing.T) {
+    backend, _ := liveBackend(t)
+
+    ctx := context.Background()
+
+    if setErr := backend.SetCtx(ctx, "counter", []byte("not-a-number"), time.Minute); nil != setErr {
+        t.Fatalf("set: %v", setErr)
+    }
+
+    _, incrementErr := backend.IncrementCtx(ctx, "counter", 1)
+    if nil == incrementErr {
+        t.Fatal("expected the non-numeric payload to refuse the increment")
+    }
+
+    reported, isReported := incrementErr.(*exception.Error)
+    if false == isReported {
+        t.Fatalf("expected an exception error naming the key, got %T: %v", incrementErr, incrementErr)
+    }
+
+    if "counter" != reported.Context()["key"] {
+        t.Fatalf("expected the refusal to name the key, got %v", reported.Context()["key"])
+    }
+}
+
+/* the configured command timeout bounds the contract calls, which carry no context of their own. */
+func TestCommandTimeout_BoundsTheContractCalls(t *testing.T) {
+    _, client := liveBackend(t)
+
+    bounded, boundedErr := NewBackendWithCommandTimeout(client, context.Background(), "melody:test:"+t.Name()+":", 0, 0, time.Nanosecond)
+    if nil != boundedErr {
+        t.Fatalf("backend: %v", boundedErr)
+    }
+
+    _, _, getErr := bounded.Get("any")
+    if nil == getErr {
+        t.Fatal("expected the one-nanosecond bound to cut the call")
+    }
+
+    if false == strings.Contains(getErr.Error(), "context deadline exceeded") {
+        t.Fatalf("expected the deadline to be the cause, got %v", getErr)
     }
 }

@@ -589,4 +589,12 @@ func (instance *container) recordTypeIdentityKeyLocked(serviceName string, canon
 
 type providerAny func(resolver containercontract.Resolver) (any, error)
 
-var _ containercontract.Container = (*container)(nil)
+/* Container answers the container itself, so a caller holding the container directly as its resolver satisfies the same ContainerCarrier door a scope or a resolution context answers. */
+func (instance *container) Container() containercontract.Container {
+    return instance
+}
+
+var (
+    _ containercontract.Container        = (*container)(nil)
+    _ containercontract.ContainerCarrier = (*container)(nil)
+)

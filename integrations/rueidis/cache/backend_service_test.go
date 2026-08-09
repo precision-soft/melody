@@ -2,6 +2,7 @@ package cache
 
 import (
     "context"
+    "strings"
     "time"
 
     "github.com/precision-soft/melody/container"
@@ -53,7 +54,15 @@ func liveService(t *testing.T) *BackendService {
     }
 
     t.Cleanup(func() {
-        if clearErr := service.Clear(); nil != clearErr {
+        /* the cleanup clears through its own backend: a test that closed the service under test would otherwise leave its keys behind, since a closed backend refuses Clear like every other operation */
+        cleaner, cleanerErr := NewBackend(client, context.Background(), "melody:test:service:"+t.Name()+":", 0, 0)
+        if nil != cleanerErr {
+            t.Logf("could not build the cleanup backend: %v", cleanerErr)
+
+            return
+        }
+
+        if clearErr := cleaner.Clear(); nil != clearErr {
             t.Logf("could not clear the test prefix: %v", clearErr)
         }
     })
@@ -138,16 +147,33 @@ func TestBackendService_DelegatesEveryOperationToItsBackend(t *testing.T) {
     }
 }
 
-/* Close is a no-op because the provider owns the client: the service must stay usable after it, which is what tells a no-op apart from a close that happened to be silent. */
-func TestBackendService_CloseLeavesTheCallerOwnedClientUsable(t *testing.T) {
+/* Close ends the service and leaves the provider-owned client alone: every later call refuses — the in-memory backend's answer behind the same contract — while the client keeps serving its other borrowers, proven through a sibling backend over it. */
+func TestBackendService_CloseRefusesLaterCallsAndLeavesTheClientOpen(t *testing.T) {
     service := liveService(t)
 
     if closeErr := service.Close(); nil != closeErr {
         t.Fatalf("Close: %v", closeErr)
     }
 
-    if setErr := service.Set("after-close", []byte("payload"), time.Minute); nil != setErr {
-        t.Fatalf("the client is owned by the provider, so the service stays usable after Close: %v", setErr)
+    setErr := service.Set("after-close", []byte("payload"), time.Minute)
+    if nil == setErr {
+        t.Fatal("expected the closed service to refuse")
+    }
+
+    if false == strings.Contains(setErr.Error(), "cache backend is closed") {
+        t.Fatalf("expected the in-memory backend's refusal, got %v", setErr)
+    }
+
+    sibling, siblingErr := NewBackend(service.client, context.Background(), "melody:test:service:"+t.Name()+":sibling:", 0, 0)
+    if nil != siblingErr {
+        t.Fatalf("sibling backend: %v", siblingErr)
+    }
+    t.Cleanup(func() {
+        _ = sibling.Clear()
+    })
+
+    if siblingSetErr := sibling.Set("after-close", []byte("payload"), time.Minute); nil != siblingSetErr {
+        t.Fatalf("the provider-owned client must stay open, got %v", siblingSetErr)
     }
 }
 

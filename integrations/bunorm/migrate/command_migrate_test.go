@@ -103,8 +103,9 @@ func TestMigrateCommand_LockFailureAbortsWithoutMigratingOrUnlocking(t *testing.
         t.Fatalf("a never-acquired lock was released: %v", recorder.recordedQueries())
     }
 
-    if false == strings.Contains(rendered, "ERROR:") {
-        t.Fatalf("lock failure was not printed to the command output: %q", rendered)
+    /* the command no longer pre-prints the failure it returns: the cli runner's [error] line and the full log record already report it, and the third copy on the same console said nothing new */
+    if true == strings.Contains(rendered, "ERROR:") {
+        t.Fatalf("the returned failure must not be pre-printed by the command, got: %q", rendered)
     }
 }
 
@@ -137,7 +138,6 @@ func TestMigrateCommand_NoPendingMigrationsWarns(t *testing.T) {
     }
 }
 
-/* @info a lock row that survives a failed release refuses every later migration on every replica; the printed line alone reaches nobody's pipeline, so the failure must become the exit code — while a migration that itself failed keeps its own error as the verdict, with the unlock failure printed beside it */
 func TestMigrateCommand_FailedUnlockFailsTheCommand(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.execHook = func(query string) error {
@@ -169,7 +169,6 @@ func TestMigrateCommand_FailedUnlockFailsTheCommand(t *testing.T) {
     }
 }
 
-/* @info the failed migration keeps its own error as the verdict even when the unlock beneath it also fails: the fold only fills an empty verdict, it never replaces one */
 func TestMigrateCommand_FailedMigrationKeepsItsErrorOverAFailedUnlock(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.execHook = func(query string) error {

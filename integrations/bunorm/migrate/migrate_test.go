@@ -224,8 +224,6 @@ func TestFormatQueryForLog(t *testing.T) {
     }
 }
 
-/* @info migration command harness */
-
 type fakeDatabaseProvider struct {
     database *bun.DB
 }
@@ -342,8 +340,6 @@ func isUnlockDelete(query string) bool {
 func isMigrationStatusSelect(query string) bool {
     return strings.HasPrefix(query, "SELECT") && strings.Contains(query, "bun_migrations")
 }
-
-/* @info fake bun database */
 
 /*
 queryRecorder captures every statement sent to the fake driver so tests can
@@ -556,7 +552,6 @@ var (
     _ schema.Dialect        = (*fakeDialect)(nil)
 )
 
-/* @info an empty set is almost always a builder that produced nothing rather than a migration with nothing to do, and the migrator marks the migration applied on success — burying it, since an applied migration never runs again. The run still succeeds, so the caller decides; what it must not do is read like the queries ran */
 func TestRunQueriesWithOption_EmptySetWarnsInsteadOfReportingSuccess(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     buffer := &bytes.Buffer{}
@@ -584,5 +579,28 @@ func TestRunQueriesWithOption_EmptySetWarnsInsteadOfReportingSuccess(t *testing.
 
     if 0 != len(recorder.recordedQueries()) {
         t.Fatalf("expected no statement to reach the database, got %v", recorder.recordedQueries())
+    }
+}
+
+/* RunQueries reads the installed process default when the migration passes no option of its own: the parsed --no-color posture reaches the per-query lines whose signature bun fixes at (ctx, db). */
+func TestRunQueries_ReadsTheInstalledProcessDefault(t *testing.T) {
+    t.Cleanup(func() {
+        processRunnerOption.Store(nil)
+    })
+
+    var buffer bytes.Buffer
+    SetDefaultRunnerOption(RunnerOption{Writer: &buffer, NoColor: true})
+
+    if runErr := RunQueries(context.Background(), nil, "up", "20240101000000_probe", nil); nil != runErr {
+        t.Fatalf("run: %v", runErr)
+    }
+
+    rendered := buffer.String()
+    if "" == rendered {
+        t.Fatal("expected the empty-set warning on the installed writer")
+    }
+
+    if true == strings.Contains(rendered, "\x1b[") {
+        t.Fatalf("expected the installed no-color posture to strip the escape codes, got %q", rendered)
     }
 }

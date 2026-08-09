@@ -5,6 +5,7 @@ import (
     "sort"
     "strconv"
     "strings"
+    "sync/atomic"
     "time"
 
     cachecontract "github.com/precision-soft/melody/cache/contract"
@@ -25,6 +26,18 @@ func NewBackend(
     prefix string,
     scanCount int,
     deleteBatch int,
+) (*Backend, error) {
+    return NewBackendWithCommandTimeout(client, ctx, prefix, scanCount, deleteBatch, 0)
+}
+
+/* NewBackendWithCommandTimeout additionally bounds every operation dispatched without a caller context: the ctx-less half of the contract methods otherwise runs unbounded against a store that accepts connections but stops answering — the same case the rate limiter in the parent package bounds with its own call timeout. A non-positive value reads as unbounded, the exact behaviour of NewBackend. */
+func NewBackendWithCommandTimeout(
+    client rueidis.Client,
+    ctx context.Context,
+    prefix string,
+    scanCount int,
+    deleteBatch int,
+    commandTimeout time.Duration,
 ) (*Backend, error) {
     if nil == client {
         return nil, exception.NewError(
@@ -53,24 +66,58 @@ func NewBackend(
         normalizedDeleteBatch = rueidisBackendDefaultDeleteBatch
     }
 
+    normalizedCommandTimeout := commandTimeout
+    if 0 >= normalizedCommandTimeout {
+        normalizedCommandTimeout = 0
+    }
+
     return &Backend{
-        client:      client,
-        ctx:         ctx,
-        prefix:      normalizedPrefix,
-        scanCount:   normalizedScanCount,
-        deleteBatch: normalizedDeleteBatch,
+        client:         client,
+        ctx:            ctx,
+        prefix:         normalizedPrefix,
+        scanCount:      normalizedScanCount,
+        deleteBatch:    normalizedDeleteBatch,
+        commandTimeout: normalizedCommandTimeout,
     }, nil
 }
 
 type Backend struct {
-    client      rueidis.Client
-    ctx         context.Context
-    prefix      string
-    scanCount   int
-    deleteBatch int
+    client         rueidis.Client
+    ctx            context.Context
+    prefix         string
+    scanCount      int
+    deleteBatch    int
+    commandTimeout time.Duration
+    closed         atomic.Bool
+}
+
+/* operationContext bounds an operation dispatched without a caller context: the constructor's context plus the command timeout when one is configured, the constructor's context alone otherwise. */
+func (instance *Backend) operationContext() (context.Context, context.CancelFunc) {
+    if 0 < instance.commandTimeout {
+        return context.WithTimeout(instance.ctx, instance.commandTimeout)
+    }
+
+    return instance.ctx, func() {}
+}
+
+/* refuseWhenClosed answers the refusal every operation gives after Close, the answer the in-memory backend behind the same contract gives: a teardown-ordering bug surfaces immediately instead of quietly serving through a client whose owner already ended this backend. */
+func (instance *Backend) refuseWhenClosed() error {
+    if true == instance.closed.Load() {
+        return exception.NewError(
+            "cache backend is closed",
+            nil,
+            nil,
+        )
+    }
+
+    return nil
 }
 
 func (instance *Backend) GetCtx(ctx context.Context, key string) ([]byte, bool, error) {
+    if closedErr := instance.refuseWhenClosed(); nil != closedErr {
+        return nil, false, closedErr
+    }
+
     normalizedKey, normalizeErr := instance.normalizeKey(key)
     if nil != normalizeErr {
         return nil, false, normalizeErr
@@ -98,10 +145,17 @@ func (instance *Backend) GetCtx(ctx context.Context, key string) ([]byte, bool, 
 
 /* Deprecated: prefer GetCtx, which takes ctx per call. */
 func (instance *Backend) Get(key string) ([]byte, bool, error) {
-    return instance.GetCtx(instance.ctx, key)
+    ctx, cancel := instance.operationContext()
+    defer cancel()
+
+    return instance.GetCtx(ctx, key)
 }
 
 func (instance *Backend) SetCtx(ctx context.Context, key string, payload []byte, ttl time.Duration) error {
+    if closedErr := instance.refuseWhenClosed(); nil != closedErr {
+        return closedErr
+    }
+
     normalizedKey, normalizeErr := instance.normalizeKey(key)
     if nil != normalizeErr {
         return normalizeErr
@@ -126,10 +180,17 @@ func (instance *Backend) SetCtx(ctx context.Context, key string, payload []byte,
 
 /* Deprecated: prefer SetCtx, which takes ctx per call. */
 func (instance *Backend) Set(key string, payload []byte, ttl time.Duration) error {
-    return instance.SetCtx(instance.ctx, key, payload, ttl)
+    ctx, cancel := instance.operationContext()
+    defer cancel()
+
+    return instance.SetCtx(ctx, key, payload, ttl)
 }
 
 func (instance *Backend) DeleteCtx(ctx context.Context, key string) error {
+    if closedErr := instance.refuseWhenClosed(); nil != closedErr {
+        return closedErr
+    }
+
     normalizedKey, normalizeErr := instance.normalizeKey(key)
     if nil != normalizeErr {
         return normalizeErr
@@ -143,10 +204,17 @@ func (instance *Backend) DeleteCtx(ctx context.Context, key string) error {
 
 /* Deprecated: prefer DeleteCtx, which takes ctx per call. */
 func (instance *Backend) Delete(key string) error {
-    return instance.DeleteCtx(instance.ctx, key)
+    ctx, cancel := instance.operationContext()
+    defer cancel()
+
+    return instance.DeleteCtx(ctx, key)
 }
 
 func (instance *Backend) HasCtx(ctx context.Context, key string) (bool, error) {
+    if closedErr := instance.refuseWhenClosed(); nil != closedErr {
+        return false, closedErr
+    }
+
     normalizedKey, normalizeErr := instance.normalizeKey(key)
     if nil != normalizeErr {
         return false, normalizeErr
@@ -170,10 +238,17 @@ func (instance *Backend) HasCtx(ctx context.Context, key string) (bool, error) {
 
 /* Deprecated: prefer HasCtx, which takes ctx per call. */
 func (instance *Backend) Has(key string) (bool, error) {
-    return instance.HasCtx(instance.ctx, key)
+    ctx, cancel := instance.operationContext()
+    defer cancel()
+
+    return instance.HasCtx(ctx, key)
 }
 
 func (instance *Backend) ClearCtx(ctx context.Context) error {
+    if closedErr := instance.refuseWhenClosed(); nil != closedErr {
+        return closedErr
+    }
+
     pattern := escapeRedisGlobMeta(instance.prefix) + "*"
     keys, scanErr := instance.scanKeys(ctx, pattern)
     if nil != scanErr {
@@ -189,12 +264,16 @@ func (instance *Backend) ClearCtx(ctx context.Context) error {
 
 /* Deprecated: prefer ClearCtx, which takes ctx per call. */
 func (instance *Backend) Clear() error {
-    return instance.ClearCtx(instance.ctx)
+    ctx, cancel := instance.operationContext()
+    defer cancel()
+
+    return instance.ClearCtx(ctx)
 }
 
+/* ClearByPrefixCtx refuses the empty prefix the way every other operation refuses the empty key: a prefix assembled at run time that comes out empty — "tenant:" + an unresolved id — would otherwise select the whole namespace, and wiping everything is the one outcome a prefixed delete exists to prevent. A caller that means the whole namespace has ClearCtx, which says so. */
 func (instance *Backend) ClearByPrefixCtx(ctx context.Context, prefix string) error {
-    if "" == prefix {
-        return instance.ClearCtx(ctx)
+    if closedErr := instance.refuseWhenClosed(); nil != closedErr {
+        return closedErr
     }
 
     normalizedPrefix, normalizeErr := instance.normalizeKey(prefix)
@@ -217,10 +296,17 @@ func (instance *Backend) ClearByPrefixCtx(ctx context.Context, prefix string) er
 
 /* Deprecated: prefer ClearByPrefixCtx, which takes ctx per call. */
 func (instance *Backend) ClearByPrefix(prefix string) error {
-    return instance.ClearByPrefixCtx(instance.ctx, prefix)
+    ctx, cancel := instance.operationContext()
+    defer cancel()
+
+    return instance.ClearByPrefixCtx(ctx, prefix)
 }
 
 func (instance *Backend) ManyCtx(ctx context.Context, keys []string) (map[string][]byte, error) {
+    if closedErr := instance.refuseWhenClosed(); nil != closedErr {
+        return nil, closedErr
+    }
+
     result := make(map[string][]byte, len(keys))
     if 0 == len(keys) {
         return result, nil
@@ -271,16 +357,24 @@ func (instance *Backend) ManyCtx(ctx context.Context, keys []string) (map[string
 
 /* Deprecated: prefer ManyCtx, which takes ctx per call. */
 func (instance *Backend) Many(keys []string) (map[string][]byte, error) {
-    return instance.ManyCtx(instance.ctx, keys)
+    ctx, cancel := instance.operationContext()
+    defer cancel()
+
+    return instance.ManyCtx(ctx, keys)
 }
 
 func (instance *Backend) SetMultipleCtx(ctx context.Context, items map[string][]byte, ttl time.Duration) error {
-    if 0 == len(items) {
-        return nil
+    if closedErr := instance.refuseWhenClosed(); nil != closedErr {
+        return closedErr
     }
 
+    /* the ttl is judged before the empty early-return, the order the in-memory backend judges it in: an already-invalid ttl is refused whether or not this particular batch happens to be empty */
     if 0 > ttl {
         return negativeTtlError(ttl)
+    }
+
+    if 0 == len(items) {
+        return nil
     }
 
     /* the keys are carried alongside the commands because a failing response is identified by position only: the map iterates in a random order, so without this the same two bad items would report a different one on every call, and the caller would learn that a batch failed without learning which of its entries did not land. */
@@ -321,10 +415,17 @@ func (instance *Backend) SetMultipleCtx(ctx context.Context, items map[string][]
 
 /* Deprecated: prefer SetMultipleCtx, which takes ctx per call. */
 func (instance *Backend) SetMultiple(items map[string][]byte, ttl time.Duration) error {
-    return instance.SetMultipleCtx(instance.ctx, items, ttl)
+    ctx, cancel := instance.operationContext()
+    defer cancel()
+
+    return instance.SetMultipleCtx(ctx, items, ttl)
 }
 
 func (instance *Backend) DeleteMultipleCtx(ctx context.Context, keys []string) error {
+    if closedErr := instance.refuseWhenClosed(); nil != closedErr {
+        return closedErr
+    }
+
     if 0 == len(keys) {
         return nil
     }
@@ -348,10 +449,17 @@ func (instance *Backend) DeleteMultipleCtx(ctx context.Context, keys []string) e
 
 /* Deprecated: prefer DeleteMultipleCtx, which takes ctx per call. */
 func (instance *Backend) DeleteMultiple(keys []string) error {
-    return instance.DeleteMultipleCtx(instance.ctx, keys)
+    ctx, cancel := instance.operationContext()
+    defer cancel()
+
+    return instance.DeleteMultipleCtx(ctx, keys)
 }
 
 func (instance *Backend) IncrementCtx(ctx context.Context, key string, delta int64) (int64, error) {
+    if closedErr := instance.refuseWhenClosed(); nil != closedErr {
+        return 0, closedErr
+    }
+
     normalizedKey, normalizeErr := instance.normalizeKey(key)
     if nil != normalizeErr {
         return 0, normalizeErr
@@ -362,12 +470,12 @@ func (instance *Backend) IncrementCtx(ctx context.Context, key string, delta int
         instance.client.B().Incrby().Key(normalizedKey).Increment(delta).Build(),
     )
     if err := response.Error(); nil != err {
-        return 0, err
+        return 0, counterError(key, err)
     }
 
     value, err := response.AsInt64()
     if nil != err {
-        return 0, err
+        return 0, counterError(key, err)
     }
 
     return value, nil
@@ -375,10 +483,17 @@ func (instance *Backend) IncrementCtx(ctx context.Context, key string, delta int
 
 /* Deprecated: prefer IncrementCtx, which takes ctx per call. */
 func (instance *Backend) Increment(key string, delta int64) (int64, error) {
-    return instance.IncrementCtx(instance.ctx, key, delta)
+    ctx, cancel := instance.operationContext()
+    defer cancel()
+
+    return instance.IncrementCtx(ctx, key, delta)
 }
 
 func (instance *Backend) DecrementCtx(ctx context.Context, key string, delta int64) (int64, error) {
+    if closedErr := instance.refuseWhenClosed(); nil != closedErr {
+        return 0, closedErr
+    }
+
     normalizedKey, normalizeErr := instance.normalizeKey(key)
     if nil != normalizeErr {
         return 0, normalizeErr
@@ -389,12 +504,12 @@ func (instance *Backend) DecrementCtx(ctx context.Context, key string, delta int
         instance.client.B().Decrby().Key(normalizedKey).Decrement(delta).Build(),
     )
     if err := response.Error(); nil != err {
-        return 0, err
+        return 0, counterError(key, err)
     }
 
     value, err := response.AsInt64()
     if nil != err {
-        return 0, err
+        return 0, counterError(key, err)
     }
 
     return value, nil
@@ -402,11 +517,28 @@ func (instance *Backend) DecrementCtx(ctx context.Context, key string, delta int
 
 /* Deprecated: prefer DecrementCtx, which takes ctx per call. */
 func (instance *Backend) Decrement(key string, delta int64) (int64, error) {
-    return instance.DecrementCtx(instance.ctx, key, delta)
+    ctx, cancel := instance.operationContext()
+    defer cancel()
+
+    return instance.DecrementCtx(ctx, key, delta)
 }
 
+/* Close marks the backend closed and refuses every later operation, the answer the in-memory backend behind the same contract gives. The shared client itself belongs to the composition root and is deliberately not closed here — see the Connection wrapper in the parent package for the value the container's teardown closes. */
 func (instance *Backend) Close() error {
+    instance.closed.Store(true)
+
     return nil
+}
+
+/* counterError wraps a counter refusal with the key it happened on: the raw store error names neither, and the counter path is the one a caller most often logs verbatim. */
+func counterError(key string, causeErr error) error {
+    return exception.NewError(
+        "cache counter operation failed",
+        exceptioncontract.Context{
+            "key": key,
+        },
+        causeErr,
+    )
 }
 
 /* negativeTtlError refuses the already-lapsed duration the in-memory backend refuses too. Without it a negative ttl falls into the branch that writes no expiry at all, so the one value the caller meant to be unreadable is the one value stored forever. Zero keeps meaning no expiry, as both backends document. */

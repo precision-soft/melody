@@ -1,6 +1,8 @@
 package migrate
 
 import (
+    "time"
+
     "strconv"
 
     clicontract "github.com/precision-soft/melody/cli/contract"
@@ -32,26 +34,28 @@ func (instance *StatusCommand) Flags() []clicontract.Flag {
     )
 }
 
-func (instance *StatusCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *StatusCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) (runErr error) {
     option := instance.base.optionFromCommand(commandContext)
     outputInstance := newCommandOutput(commandContext.Writer, option)
 
+    startedAt := time.Now()
+    defer func() {
+        runErr = outputInstance.finish(instance.Name(), startedAt, runErr)
+    }()
+
     db, managerName, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext)
     if nil != dbErr {
-        outputInstance.printError(dbErr)
         return dbErr
     }
 
     migrator, migratorErr := instance.base.newMigrator(db)
     if nil != migratorErr {
-        outputInstance.printError(migratorErr)
         return migratorErr
     }
 
     if option.Verbose {
         identity, identityErr := fetchDatabaseIdentity(runtimeInstance.Context(), db)
         if nil != identityErr {
-            outputInstance.printError(identityErr)
             return identityErr
         }
         if nil != identity {
@@ -62,7 +66,6 @@ func (instance *StatusCommand) Run(runtimeInstance runtimecontract.Runtime, comm
 
     items, statusErr := migrator.MigrationsWithStatus(runtimeInstance.Context())
     if nil != statusErr {
-        outputInstance.printError(statusErr)
         return statusErr
     }
 

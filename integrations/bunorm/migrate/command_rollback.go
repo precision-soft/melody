@@ -1,6 +1,8 @@
 package migrate
 
 import (
+    "time"
+
     clicontract "github.com/precision-soft/melody/cli/contract"
     "github.com/precision-soft/melody/cli/output"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
@@ -34,21 +36,25 @@ func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, co
     option := instance.base.optionFromCommand(commandContext)
     outputInstance := newCommandOutput(commandContext.Writer, option)
 
+    startedAt := time.Now()
+    defer func() {
+        runErr = outputInstance.finish(instance.Name(), startedAt, runErr)
+    }()
+
+    SetDefaultRunnerOption(runnerOptionForCommand(commandContext.Writer, option))
+
     db, managerName, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext)
     if nil != dbErr {
-        outputInstance.printError(dbErr)
         return dbErr
     }
 
     migrator, migratorErr := instance.base.newMigrator(db)
     if nil != migratorErr {
-        outputInstance.printError(migratorErr)
         return migratorErr
     }
 
-    /* @important take the bun migration lock so two replicas rolling back concurrently cannot both act on the same applied group. */
+    /* take the bun migration lock so two replicas rolling back concurrently cannot both act on the same applied group. */
     if lockErr := migrator.Lock(runtimeInstance.Context()); nil != lockErr {
-        outputInstance.printError(lockErr)
         return lockErr
     }
     /* the unlock failure becomes the command's verdict only when the rollback itself succeeded: a failed rollback keeps its own error, with the unlock failure printed beside it */
@@ -62,7 +68,6 @@ func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, co
     if option.Verbose {
         identity, identityErr := fetchDatabaseIdentity(runtimeInstance.Context(), db)
         if nil != identityErr {
-            outputInstance.printError(identityErr)
             return identityErr
         }
         if nil != identity {
@@ -73,7 +78,6 @@ func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, co
 
     group, rollbackErr := migrator.Rollback(runtimeInstance.Context())
     if nil != rollbackErr {
-        outputInstance.printError(rollbackErr)
         return rollbackErr
     }
 

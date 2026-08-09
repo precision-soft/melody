@@ -22,7 +22,6 @@ type resolverRaceRegisteredThree struct{}
 type resolverRaceRegisteredFour struct{}
 type resolverRaceRegisteredFive struct{}
 
-/* @info Get's create closure reads the providers map after serviceWithCreationGuardLocked releases the container mutex, racing Register's map writes (fatal concurrent map read/write). The provider must be snapshotted under the lock so this holds under -race. */
 func TestResolverContext_GetSnapshotsProviderUnderTheLock(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -71,7 +70,6 @@ func TestResolverContext_GetSnapshotsProviderUnderTheLock(t *testing.T) {
     waitGroup.Wait()
 }
 
-/* @info GetByType's type-branch create closure reads the typeProviders map after the container mutex is released, racing RegisterType's map writes. The provider must be snapshotted under the lock so this holds under -race. */
 func TestResolverContext_GetByTypeSnapshotsTypeProviderUnderTheLock(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -155,7 +153,6 @@ type suspensionHasProbe struct {
     value string
 }
 
-/* @info Has answers under the suspension Get enforces. A container-owned provider asking about a scope-only name used to hear "yes" from the very entries its Get refuses — the Has-then-MustGet idiom panicked, and a process-lifetime service could shape its wiring on one request's substitutes. */
 func TestResolverContext_HasHonorsScopeSuspension(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -212,7 +209,6 @@ type resolverContextMustDependent struct {
     dependency *resolverContextMustProbe
 }
 
-/* @info the panicking doors of the resolver a PROVIDER is handed had never been executed by anything: the container's own MustGet delegates to its Get rather than to these, so a provider that reaches for a missing dependency with MustGet was relying on a path nothing had ever entered. The message has to be the resolver's own, because that is what tells a reader the failure happened while building another service rather than at the call site that asked for it. */
 func TestResolverContext_MustGet_AnswersInsideAProviderAndNamesItsOwnFailure(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -271,7 +267,6 @@ func TestResolverContext_MustGet_AnswersInsideAProviderAndNamesItsOwnFailure(t *
     }
 }
 
-/* @info the by-type panicking door of a provider's resolver carries a message of its own, and it must not be the by-name one: the two doors fail for different reasons and a boot log has only the message to tell them apart. */
 func TestResolverContext_MustGetByType_AnswersInsideAProviderAndNamesItsOwnFailure(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -340,7 +335,6 @@ func renderedCauseChain(err error) string {
     return rendered
 }
 
-/* @info an empty name reaching the resolver is a configuration value that resolved away, and it has to be named as that rather than reported as a service nobody declared — the two send a reader to different places. */
 func TestResolverContext_Get_EmptyNameRefused(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -354,7 +348,6 @@ func TestResolverContext_Get_EmptyNameRefused(t *testing.T) {
     }
 }
 
-/* @info the by-type door refuses a nil type before it canonicalises it, which is what keeps the failure a described error rather than a nil dereference inside reflect — the scope twin of this guard has been pinned since the container session, the container one had not. */
 func TestResolverContext_GetByType_NilTypeRefused(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -365,5 +358,32 @@ func TestResolverContext_GetByType_NilTypeRefused(t *testing.T) {
 
     if "service type is required in get by type" != getByTypeErr.Error() {
         t.Fatalf("unexpected refusal message: %q", getByTypeErr.Error())
+    }
+}
+
+func TestResolverContext_CarriesTheContainerThroughTheCarrierDoor(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var carried containercontract.Container
+    serviceContainer.MustRegister(
+        "probe.carrier",
+        func(resolver containercontract.Resolver) (string, error) {
+            carrier, isCarrier := resolver.(containercontract.ContainerCarrier)
+            if false == isCarrier {
+                return "", nil
+            }
+
+            carried = carrier.Container()
+
+            return "built", nil
+        },
+    )
+
+    if _, resolveErr := serviceContainer.Get("probe.carrier"); nil != resolveErr {
+        t.Fatalf("resolve: %v", resolveErr)
+    }
+
+    if serviceContainer != carried {
+        t.Fatalf("expected the provider's resolver to carry the container, got %v", carried)
     }
 }

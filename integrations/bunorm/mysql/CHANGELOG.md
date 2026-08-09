@@ -8,7 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- `Provider.OpenContext` — the provider implements `bunorm.ContextOpener`: the retry sleeps watch the caller's context alongside the clock, so a shutdown that cancels it reaches a retry loop in flight instead of sleeping through the whole remaining budget, and the cancellation is reported with the last attempt's own failure as context
 - `Provider.OpenForMigration` — the provider implements `bunorm.MigrationProvider` and opens the same database with the driver deadlines lifted: `ReadTimeout` and `WriteTimeout` are per-connection settings baked into the connector, sized for request traffic, and a DDL statement that legitimately runs past them is cut mid-statement with "invalid connection", outside any transaction MySQL would roll back. The connect timeout stays armed, the pool is kept to the two connections a sequential migration run needs, and no connection is recycled mid-run — a lifetime rotation under a running statement is the same cut by another name
+
+### Changed
+
+- `Provider.Open` marks the configured password parameter secret through the configuration's own `MarkSecret` — the component told authoritatively which parameter holds the credential arms the framework's redaction for it, so the introspection output masks the password and every template derived from it without the application repeating the knowledge
+- the terminal failure record of the retry loop is the log of that failure: it is written in full through the exception context and the returned error carries the already-logged mark, so the exit handler no longer writes the same outage a second time. An alert counting error records saw one outage twice on the SQL providers and once on redis
 
 ### Fixed
 

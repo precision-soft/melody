@@ -1,6 +1,8 @@
 package migrate
 
 import (
+    "time"
+
     "errors"
 
     clicontract "github.com/precision-soft/melody/cli/contract"
@@ -29,32 +31,33 @@ func (instance *CreateCommand) Flags() []clicontract.Flag {
     return output.MergeFlags(output.StandardFlags(), []clicontract.Flag{instance.base.managerFlag()})
 }
 
-func (instance *CreateCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *CreateCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) (runErr error) {
     option := instance.base.optionFromCommand(commandContext)
     outputInstance := newCommandOutput(commandContext.Writer, option)
+
+    startedAt := time.Now()
+    defer func() {
+        runErr = outputInstance.finish(instance.Name(), startedAt, runErr)
+    }()
 
     migrationName := commandContext.Args().First()
     if "" == migrationName {
         err := errors.New("migration name is required (usage: db:create <name>)")
-        outputInstance.printError(err)
         return err
     }
 
     db, managerName, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext)
     if nil != dbErr {
-        outputInstance.printError(dbErr)
         return dbErr
     }
 
     migrator, migratorErr := instance.base.newMigrator(db)
     if nil != migratorErr {
-        outputInstance.printError(migratorErr)
         return migratorErr
     }
 
     files, createErr := migrator.CreateGoMigration(runtimeInstance.Context(), migrationName)
     if nil != createErr {
-        outputInstance.printError(createErr)
         return createErr
     }
 

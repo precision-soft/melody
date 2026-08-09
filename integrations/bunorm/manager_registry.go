@@ -1,6 +1,7 @@
 package bunorm
 
 import (
+    "context"
     "fmt"
     "reflect"
     "sync"
@@ -12,7 +13,10 @@ import (
 )
 
 type ManagerRegistry struct {
-    resolver containercontract.Resolver
+    /* openResolver is what the lazy opens replay through, long after the construction-time resolution has ended: the container behind the given resolver when it can name one through the ContainerCarrier door, the resolver as handed otherwise — correct exactly when the caller handed the container itself. A resolution context must not be replayed: it is single-threaded, it dies with its scope, and a definition first dialed after that scope closed would fail "scope is closed" forever over a healthy configuration. */
+    openResolver containercontract.Resolver
+    /* openContext bounds the lazy opens of providers that implement ContextOpener, so a shutdown that cancels it reaches a retry loop in flight instead of sleeping through the whole retry budget. */
+    openContext context.Context
 
     providerDefinitionByName      map[string]ProviderDefinition
     defaultProviderDefinitionName string
@@ -36,9 +40,19 @@ type managerOpen struct {
     openError error
 }
 
+/* NewManagerRegistry builds a container-level registry over lazily-dialed pools. Container-level deliberately: a *bun.DB is a connection pool — the process-lifetime shape of database/sql — and per-unit work takes a transaction or a Conn from the pool, not a pool per scope. The lazy opens replay through the container behind the given resolver (asked via the ContainerCarrier door), never through the resolution context that built the registry. */
 func NewManagerRegistry(resolver containercontract.Resolver, providerDefinitions ...ProviderDefinition) (*ManagerRegistry, error) {
+    return NewManagerRegistryWithContext(context.Background(), resolver, providerDefinitions...)
+}
+
+/* NewManagerRegistryWithContext additionally binds the registry to the given context: a provider that implements ContextOpener has its lazy opens run under it, so a shutdown that cancels the context reaches a dial or a retry sleep in flight. A nil context reads as context.Background(), the exact behaviour of NewManagerRegistry. */
+func NewManagerRegistryWithContext(ctx context.Context, resolver containercontract.Resolver, providerDefinitions ...ProviderDefinition) (*ManagerRegistry, error) {
     if true == isNilInterface(resolver) {
         return nil, ErrResolverIsRequired
+    }
+
+    if nil == ctx {
+        ctx = context.Background()
     }
 
     if 0 == len(providerDefinitions) {
@@ -78,8 +92,16 @@ func NewManagerRegistry(resolver containercontract.Resolver, providerDefinitions
         defaultProviderDefinitionName = providerDefinitions[0].Name
     }
 
+    openResolver := resolver
+    if carrier, isCarrier := resolver.(containercontract.ContainerCarrier); true == isCarrier {
+        if carried := carrier.Container(); false == isNilInterface(carried) {
+            openResolver = carried
+        }
+    }
+
     return &ManagerRegistry{
-        resolver:                      resolver,
+        openResolver:                  openResolver,
+        openContext:                   ctx,
         providerDefinitionByName:      providerDefinitionByName,
         defaultProviderDefinitionName: defaultProviderDefinitionName,
         managers:                      make(map[string]*Manager),
@@ -146,7 +168,7 @@ func (instance *ManagerRegistry) MigrationDatabase(name string) (*bun.DB, bool, 
     /* the dial runs outside the registry-wide lock for the same reason Manager's does: a down database must not serialize cache hits or a concurrent Close. Migrations run from a sequential cli command, so no coalescing machinery is warranted — a concurrent duplicate open is resolved below by closing the loser. */
     instance.lock.Unlock()
 
-    database, openErr := migrationProvider.OpenForMigration(instance.resolver)
+    database, openErr := migrationProvider.OpenForMigration(instance.openResolver)
     if nil != openErr {
         if nil != database {
             _ = database.Close()
@@ -281,9 +303,9 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
             panic(recovered)
         }
     }()
-    database, openErr := providerDefinition.Provider.Open(instance.resolver)
+    database, openErr := instance.openProviderDatabase(providerDefinition.Provider)
 
-    /* @important the publish runs in a closure with a deferred unlock: it calls into the freshly opened database, and a panic there would otherwise unwind with the lock held, whereupon the recovery defer above re-acquires the same non-reentrant mutex and wedges the whole registry with no waiter ever released */
+    /* the publish runs in a closure with a deferred unlock: it calls into the freshly opened database, and a panic there would otherwise unwind with the lock held, whereupon the recovery defer above re-acquires the same non-reentrant mutex and wedges the whole registry with no waiter ever released */
     func() {
         instance.lock.Lock()
         defer instance.lock.Unlock()
@@ -330,6 +352,15 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
     close(pendingOpen.done)
 
     return pendingOpen.manager, pendingOpen.openError
+}
+
+/* openProviderDatabase runs one provider open, under the registry's context when the provider can honour one. */
+func (instance *ManagerRegistry) openProviderDatabase(provider Provider) (*bun.DB, error) {
+    if contextOpener, isContextOpener := provider.(ContextOpener); true == isContextOpener {
+        return contextOpener.OpenContext(instance.openContext, instance.openResolver)
+    }
+
+    return provider.Open(instance.openResolver)
 }
 
 func (instance *ManagerRegistry) MustManager(name string) *Manager {

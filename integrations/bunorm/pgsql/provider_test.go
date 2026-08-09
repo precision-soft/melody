@@ -16,8 +16,6 @@ import (
     "github.com/uptrace/bun/driver/pgdriver"
 )
 
-/* @info test stubs: the root-line provider resolves its connection parameters from a container resolver, so the tests stub the resolver and the configuration service */
-
 type stubParameter struct {
     value string
 }
@@ -67,7 +65,8 @@ func (instance *stubParameter) Duration() (time.Duration, error) {
 }
 
 type stubConfiguration struct {
-    parameters map[string]string
+    parameters    map[string]string
+    markedSecrets []string
 }
 
 func (instance *stubConfiguration) Get(name string) configcontract.Parameter {
@@ -90,7 +89,9 @@ func (instance *stubConfiguration) RegisterRuntimeSecret(name string, value any)
 }
 
 func (instance *stubConfiguration) MarkSecret(name string) bool {
-    return false
+    instance.markedSecrets = append(instance.markedSecrets, name)
+
+    return true
 }
 
 func (instance *stubConfiguration) Resolve() error {
@@ -180,8 +181,6 @@ func newTestProvider(providerOptions ...ProviderOption) *Provider {
     )
 }
 
-/* @info provider construction and option resolution */
-
 func TestNewProviderStoresParameterNames(t *testing.T) {
     provider := newTestProvider()
 
@@ -235,7 +234,7 @@ func TestNewProviderWithConfigStoresConfigs(t *testing.T) {
 
 func TestProviderBuilderMethodsSetConfigs(t *testing.T) {
     poolConfig := NewPoolConfig(10, 2, time.Minute, time.Second)
-    timeoutConfig := NewTimeoutConfig(time.Second)
+    timeoutConfig := NewTimeoutConfig(time.Second, 0, 0)
     retryConfig := NewRetryConfig(4, time.Millisecond, time.Second, 3.0)
 
     provider := newTestProvider().
@@ -253,8 +252,6 @@ func TestProviderBuilderMethodsSetConfigs(t *testing.T) {
         t.Fatalf("expected WithRetryConfig to set the retry config")
     }
 }
-
-/* @info Open resolves the configuration parameters and aborts on a post-build hook error before dialing */
 
 func TestProviderOpenResolvesConfigParametersAndAbortsOnPostBuildHookError(t *testing.T) {
     hookErr := errors.New("hook rejected the connector")
@@ -300,11 +297,9 @@ func TestProviderOpenResolvesConfigParametersAndAbortsOnPostBuildHookError(t *te
     }
 }
 
-/* @info openWithRetry must fall back to the emergency logger when the resolver has no logger service instead of panicking on the warning path */
-
 func TestProviderOpenWithRetryAndNoLoggerServiceDoesNotPanic(t *testing.T) {
     provider := newTestProvider(WithInsecure(true)).
-        WithTimeoutConfig(NewTimeoutConfig(100 * time.Millisecond)).
+        WithTimeoutConfig(NewTimeoutConfig(100*time.Millisecond, 0, 0)).
         WithRetryConfig(NewRetryConfig(2, time.Millisecond, 5*time.Millisecond, 2.0))
 
     resolver := newStubResolver("127.0.0.1", "1", "melody_unreachable", "melody", "melody")
@@ -335,7 +330,7 @@ func TestProviderOpenWithZeroConnectTimeoutConnects(t *testing.T) {
     )
 
     provider := newTestProvider(WithInsecure(true)).
-        WithTimeoutConfig(NewTimeoutConfig(0))
+        WithTimeoutConfig(NewTimeoutConfig(0, 0, 0))
 
     database, openErr := provider.Open(resolver)
     if nil != openErr {
@@ -343,10 +338,6 @@ func TestProviderOpenWithZeroConnectTimeoutConnects(t *testing.T) {
     }
     defer database.Close()
 }
-
-/* @info retry backoff and transient-error classification */
-
-/* @info test errors for the transient classification */
 
 type stubTimeoutError struct {
     message string
@@ -560,7 +551,6 @@ func TestIsTransientErrorTraversesWrappedErrors(t *testing.T) {
     }
 }
 
-/* @info NaN fails every comparison, so a NaN multiplier would slip through a `1 > x` clamp, poison the float-space growth and convert to a negative duration — an immediate re-dial storm; the not-at-least-1 clamp resolves it to the default. */
 func TestComputeBackoffDelayNaNMultiplierFallsBackToDefault(t *testing.T) {
     provider := newTestProvider().
         WithRetryConfig(NewRetryConfig(3, -time.Second, -time.Second, math.NaN()))
@@ -574,7 +564,6 @@ func TestComputeBackoffDelayNaNMultiplierFallsBackToDefault(t *testing.T) {
     }
 }
 
-/* @info a zero arrives here far more often from an environment key nobody set than from a caller who means "no deadline", and the guards read a non-positive connect timeout as no deadline at all — so the zero-value configuration would disarm the protection the nil one arms */
 func TestResolvedTimeoutConfig_NonPositiveConnectTimeoutFallsBackToTheDefault(t *testing.T) {
     defaultConfig := DefaultTimeoutConfig()
 
@@ -586,16 +575,15 @@ func TestResolvedTimeoutConfig_NonPositiveConnectTimeoutFallsBackToTheDefault(t 
         t.Fatalf("expected the default for a zero-value configuration")
     }
 
-    if defaultConfig.ConnectTimeout != (&Provider{timeoutConfig: NewTimeoutConfig(-1)}).resolvedTimeoutConfig().ConnectTimeout {
+    if defaultConfig.ConnectTimeout != (&Provider{timeoutConfig: NewTimeoutConfig(-1, 0, 0)}).resolvedTimeoutConfig().ConnectTimeout {
         t.Fatalf("expected the default for a negative connect timeout")
     }
 
-    if 7*time.Second != (&Provider{timeoutConfig: NewTimeoutConfig(7 * time.Second)}).resolvedTimeoutConfig().ConnectTimeout {
+    if 7*time.Second != (&Provider{timeoutConfig: NewTimeoutConfig(7*time.Second, 0, 0)}).resolvedTimeoutConfig().ConnectTimeout {
         t.Fatalf("expected the configured connect timeout to survive")
     }
 }
 
-/* @info on database/sql a zero maximum means an UNLIMITED pool and a zero lifetime means connections that are never recycled, so a pool assembled from unset environment keys would remove the bounds the nil configuration installs */
 func TestResolvedPoolConfig_NonPositiveFieldsFallBackToTheDefaults(t *testing.T) {
     defaultConfig := DefaultPoolConfig()
 
@@ -620,5 +608,164 @@ func TestResolvedPoolConfig_NonPositiveFieldsFallBackToTheDefaults(t *testing.T)
 
     if defaultConfig.MaxOpenConnections != (&Provider{}).resolvedPoolConfig().MaxOpenConnections {
         t.Fatalf("expected the defaults for a nil pool configuration")
+    }
+}
+
+func TestResolvedTimeoutConfigNormalizesNonPositiveReadAndWriteDeadlines(t *testing.T) {
+    provider := &Provider{timeoutConfig: NewTimeoutConfig(time.Second, 0, -1)}
+
+    resolved := provider.resolvedTimeoutConfig()
+
+    if DefaultTimeoutConfig().ReadTimeout != resolved.ReadTimeout {
+        t.Fatalf("expected the zero read deadline to take the default, got %v", resolved.ReadTimeout)
+    }
+
+    if DefaultTimeoutConfig().WriteTimeout != resolved.WriteTimeout {
+        t.Fatalf("expected the negative write deadline to take the default, got %v", resolved.WriteTimeout)
+    }
+}
+
+func TestResolvedTimeoutConfigKeepsTheLiftedDeadlinesForMigration(t *testing.T) {
+    provider := &Provider{
+        timeoutConfig:     migrationTimeoutConfig(NewTimeoutConfig(7*time.Second, 0, 0)),
+        tunedForMigration: true,
+    }
+
+    resolved := provider.resolvedTimeoutConfig()
+
+    if 0 != resolved.ReadTimeout {
+        t.Fatalf("expected the migration read deadline to stay lifted, got %v", resolved.ReadTimeout)
+    }
+
+    if 0 != resolved.WriteTimeout {
+        t.Fatalf("expected the migration write deadline to stay lifted, got %v", resolved.WriteTimeout)
+    }
+
+    if 7*time.Second != resolved.ConnectTimeout {
+        t.Fatalf("expected the derived connect timeout to survive, got %v", resolved.ConnectTimeout)
+    }
+}
+
+func TestMigrationProviderDerivesTheMigrationShape(t *testing.T) {
+    base := newTestProvider(WithInsecure(true)).
+        WithTimeoutConfig(NewTimeoutConfig(9*time.Second, 0, 0)).
+        WithRetryConfig(NewRetryConfig(2, time.Millisecond, 5*time.Millisecond, 2.0))
+
+    derived := base.migrationProvider()
+
+    if false == derived.tunedForMigration {
+        t.Fatal("expected the derived provider to carry the migration mark")
+    }
+
+    if 2 != derived.poolConfig.MaxOpenConnections || 1 != derived.poolConfig.MaxIdleConnections {
+        t.Fatalf("expected the sequential migration pool, got %+v", derived.poolConfig)
+    }
+
+    if 0 != derived.poolConfig.ConnectionMaxLifetime || 0 != derived.poolConfig.ConnectionMaxIdleTime {
+        t.Fatalf("expected no connection recycling mid-run, got %+v", derived.poolConfig)
+    }
+
+    if 0 != derived.timeoutConfig.ReadTimeout || 0 != derived.timeoutConfig.WriteTimeout {
+        t.Fatalf("expected the lifted deadlines, got %+v", derived.timeoutConfig)
+    }
+
+    if 9*time.Second != derived.timeoutConfig.ConnectTimeout {
+        t.Fatalf("expected the connect timeout to survive the derivation, got %v", derived.timeoutConfig.ConnectTimeout)
+    }
+
+    if false == derived.insecure {
+        t.Fatal("expected the tls posture to survive the derivation")
+    }
+
+    if base.retryConfig != derived.retryConfig {
+        t.Fatal("expected the retry policy to survive the derivation")
+    }
+}
+
+func TestProviderOpenMarksThePasswordParameterSecret(t *testing.T) {
+    resolver := newStubResolver("127.0.0.1", "1", "melody_unreachable", "melody", "melody")
+
+    provider := newTestProvider(WithInsecure(true)).
+        WithTimeoutConfig(NewTimeoutConfig(50*time.Millisecond, 0, 0))
+
+    database, openErr := provider.Open(resolver)
+    if nil != database {
+        _ = database.Close()
+    }
+    if nil == openErr {
+        t.Fatal("expected the unreachable open to fail")
+    }
+
+    marked := false
+    for _, name := range resolver.configuration.(*stubConfiguration).markedSecrets {
+        if "database.password" == name {
+            marked = true
+        }
+    }
+
+    if false == marked {
+        t.Fatalf("expected the provider to mark its password parameter secret, marked %v", resolver.configuration.(*stubConfiguration).markedSecrets)
+    }
+}
+
+func TestProviderOpenContextCancelsTheRetrySleep(t *testing.T) {
+    resolver := newStubResolver("127.0.0.1", "1", "melody_unreachable", "melody", "melody")
+
+    provider := newTestProvider(WithInsecure(true)).
+        WithTimeoutConfig(NewTimeoutConfig(50*time.Millisecond, 0, 0)).
+        WithRetryConfig(NewRetryConfig(5, 2*time.Second, 2*time.Second, 1.0))
+
+    ctx, cancel := context.WithCancel(context.Background())
+    go func() {
+        time.Sleep(100 * time.Millisecond)
+        cancel()
+    }()
+
+    start := time.Now()
+    database, openErr := provider.OpenContext(ctx, resolver)
+    elapsed := time.Since(start)
+
+    if nil != database {
+        _ = database.Close()
+        t.Fatal("expected no database from a cancelled open")
+    }
+
+    if nil == openErr {
+        t.Fatal("expected the cancelled open to fail")
+    }
+
+    if false == errors.Is(openErr, context.Canceled) {
+        t.Fatalf("expected the cancellation to be the cause, got %v", openErr)
+    }
+
+    if elapsed > time.Second {
+        t.Fatalf("expected the cancellation to cut the retry sleep, took %v", elapsed)
+    }
+}
+
+func TestProviderDefaultReadDeadlineAllowsAnElevenSecondQuery(t *testing.T) {
+    host := os.Getenv("PGSQL_HOST")
+    if "" == host {
+        t.Skip("PGSQL_HOST not set; skipping pgsql provider integration test")
+    }
+
+    resolver := newStubResolver(
+        host,
+        os.Getenv("PGSQL_PORT"),
+        os.Getenv("PGSQL_DATABASE"),
+        os.Getenv("PGSQL_USER"),
+        os.Getenv("PGSQL_PASSWORD"),
+    )
+
+    provider := newTestProvider(WithInsecure(true))
+
+    database, openErr := provider.Open(resolver)
+    if nil != openErr {
+        t.Fatalf("open: %v", openErr)
+    }
+    defer database.Close()
+
+    if _, queryErr := database.ExecContext(context.Background(), "SELECT pg_sleep(11)"); nil != queryErr {
+        t.Fatalf("expected the default read deadline to allow a legitimately long query, got %v", queryErr)
     }
 }

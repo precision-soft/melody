@@ -64,7 +64,7 @@ func WithRateLimiterCallTimeout(timeout time.Duration) RateLimiterOption {
     }
 }
 
-/* NewRateLimiter returns a Redis-backed fixed-window limiter shared by every application instance, implementing both httpcontract.RateLimiter and httpcontract.RuntimeRateLimiter — the distributed drop-in for the in-process middleware limiters. The counter is atomic (one Lua round trip), so N instances enforce one shared limit; note the fixed window admits up to 2x the limit across a window edge. Store failures follow the configured failure mode and default to FailureModeClosed. */
+/* NewRateLimiter returns a Redis-backed fixed-window limiter shared by every application instance, implementing both httpcontract.RateLimiter and httpcontract.RuntimeRateLimiter — the distributed drop-in for the in-process middleware limiters. The counter is atomic (one Lua round trip), so N instances enforce one shared limit; note the fixed window admits up to 2x the limit across a window edge. Store failures follow the configured failure mode and default to FailureModeClosed. Construction is deliberately stricter than the in-process middleware limiter it drops in for: the middleware clamps a non-positive rate or window to a safe value, while this panics at boot — a distributed limit disarmed by an unset environment key would be disarmed on every instance at once, and the boot is where that reads loudest. */
 func NewRateLimiter(
     client rueidis.Client,
     limit int,

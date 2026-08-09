@@ -18,6 +18,7 @@ import (
     "github.com/uptrace/bun/dialect/feature"
     "github.com/uptrace/bun/schema"
 
+    "github.com/precision-soft/melody/container"
     containercontract "github.com/precision-soft/melody/container/contract"
     "github.com/precision-soft/melody/exception"
 )
@@ -601,7 +602,6 @@ func TestManagerRegistry_MigrationDatabasePrefersTheCapability(t *testing.T) {
     }
 }
 
-/* @info a provider without the capability keeps the old behaviour: the ordinary pooled connection, reported as not dedicated */
 func TestManagerRegistry_MigrationDatabaseFallsBackWithoutTheCapability(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
         &fakeResolver{},
@@ -628,7 +628,6 @@ func TestManagerRegistry_MigrationDatabaseFallsBackWithoutTheCapability(t *testi
     }
 }
 
-/* @info the dedicated migration database belongs to the registry: Close ends it beside the managers, so a lifted-deadline connection never outlives the shutdown */
 func TestManagerRegistry_CloseClosesTheMigrationDatabase(t *testing.T) {
     migrationDatabase, migrationCloseSignal := newCloseRaceDatabase()
 
@@ -664,7 +663,6 @@ func TestManagerRegistry_CloseClosesTheMigrationDatabase(t *testing.T) {
     }
 }
 
-/* @info a typed nil passes a plain nil comparison and then panics on first use, far from the wiring mistake that produced it; the constructor is the place that can still name the mistake */
 func TestNewManagerRegistry_ErrorsWhenResolverIsTypedNil(t *testing.T) {
     var typedNilResolver *fakeResolver
 
@@ -701,7 +699,6 @@ func (instance *nilPairProvider) Open(resolver containercontract.Resolver) (*bun
     return nil, nil
 }
 
-/* @info a provider answering neither a database nor an error must be refused, not memoized as a manager wrapping nil that panics at the first query; the refusal is not memoized either, so a repaired provider is retried */
 func TestManagerRegistry_RefusesProviderReturningNeitherDatabaseNorError(t *testing.T) {
     provider := &nilPairProvider{}
 
@@ -741,7 +738,6 @@ func (instance *databaseBesideErrorProvider) Open(resolver containercontract.Res
     return instance.database, instance.openErr
 }
 
-/* @info the Provider contract does not promise a nil database beside a non-nil error; the registry is the last holder of that pool, so it must close it instead of leaking it */
 func TestManagerRegistry_ClosesTheDatabaseAProviderReturnsBesideAnError(t *testing.T) {
     database, databaseClosed := newCloseRaceDatabase()
     providerErr := errors.New("open failed after the pool was assembled")
@@ -800,7 +796,6 @@ func (instance *pinnedDatabaseProvider) Open(resolver containercontract.Resolver
     return instance.database, nil
 }
 
-/* @info teardown diagnostics must name every pool that failed to close: the caller receives one error, so without the aggregation the failures past the first leave no trace anywhere */
 func TestManagerRegistry_CloseNamesEveryDatabaseThatFailedToClose(t *testing.T) {
     alphaErr := errors.New("alpha close refused")
     betaErr := errors.New("beta close refused")
@@ -842,7 +837,6 @@ func TestManagerRegistry_CloseNamesEveryDatabaseThatFailedToClose(t *testing.T) 
     }
 }
 
-/* @info a single failed close keeps its own error untouched: the aggregation exists for the failures that would otherwise vanish, not to re-wrap a lone one */
 func TestManagerRegistry_CloseKeepsALoneCloseFailureUntouched(t *testing.T) {
     alphaErr := errors.New("alpha close refused")
 
@@ -898,7 +892,6 @@ func (instance *configurableMigrationProvider) OpenForMigration(resolver contain
 
 var _ MigrationProvider = (*configurableMigrationProvider)(nil)
 
-/* @info the twin of the Manager-path refusal, proved on its own line: a capability answering neither a database nor an error must be refused, not cached as a nil migration connection */
 func TestManagerRegistry_MigrationDatabaseRefusesProviderReturningNeitherDatabaseNorError(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
         &fakeResolver{},
@@ -918,7 +911,6 @@ func TestManagerRegistry_MigrationDatabaseRefusesProviderReturningNeitherDatabas
     }
 }
 
-/* @info the twin of the Manager-path handover close, proved on its own line: the registry is the last holder of a pool handed over beside an error */
 func TestManagerRegistry_MigrationDatabaseClosesTheDatabaseReturnedBesideAnError(t *testing.T) {
     database, databaseClosed := newCloseRaceDatabase()
     providerErr := errors.New("migration open failed after the pool was assembled")
@@ -943,7 +935,6 @@ func TestManagerRegistry_MigrationDatabaseClosesTheDatabaseReturnedBesideAnError
     }
 }
 
-/* @info the twin of the Manager-path close race, proved on its own line: a Close landing while a migration open is in flight must close the fresh pool and refuse, not cache a connection the shutdown already missed */
 func TestManagerRegistry_CloseDuringInFlightMigrationOpenClosesDatabaseAndRefuses(t *testing.T) {
     database, databaseClosed := newCloseRaceDatabase()
 
@@ -1042,7 +1033,6 @@ func (instance *erroringProvider) Open(resolver containercontract.Resolver) (*bu
     return nil, instance.openErr
 }
 
-/* @info the fallback path hands the ordinary open's failure through unchanged */
 func TestManagerRegistry_MigrationDatabaseFallbackPropagatesTheOpenFailure(t *testing.T) {
     openRefused := errors.New("open refused")
 
@@ -1063,7 +1053,6 @@ func TestManagerRegistry_MigrationDatabaseFallbackPropagatesTheOpenFailure(t *te
     }
 }
 
-/* @info Close ends every pool it memoized without emptying the map, so a cache hit after it would hand back a manager over a dead pool with a NIL error, while the open path refuses the same call by name — the refusal now stands at the entry, ahead of the cache, so one registry gives one answer */
 func TestManagerRegistry_RefusesACachedManagerAfterClose(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
         &fakeResolver{},
@@ -1091,7 +1080,6 @@ func TestManagerRegistry_RefusesACachedManagerAfterClose(t *testing.T) {
     }
 }
 
-/* @info the entry refusal also spares the dial: a name never opened used to be dialed in full — with the retry sleeps of a database the same shutdown just stopped — before the publish step refused it */
 func TestManagerRegistry_RefusesAnUnopenedNameAfterCloseWithoutDialing(t *testing.T) {
     provider := &fakeProvider{}
 
@@ -1113,5 +1101,166 @@ func TestManagerRegistry_RefusesAnUnopenedNameAfterCloseWithoutDialing(t *testin
 
     if 0 != provider.openCount {
         t.Fatalf("expected no dial after Close, got %d", provider.openCount)
+    }
+}
+
+type resolvingStubProvider struct {
+    sentinel error
+}
+
+func (instance *resolvingStubProvider) Open(resolver containercontract.Resolver) (*bun.DB, error) {
+    if _, getErr := resolver.Get("probe.config"); nil != getErr {
+        return nil, getErr
+    }
+
+    return nil, instance.sentinel
+}
+
+func TestManagerRegistry_LateDialReplaysThroughTheContainerNotTheDeadScope(t *testing.T) {
+    sentinel := errors.New("the open resolver still answers")
+
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(
+        "probe.config",
+        func(resolver containercontract.Resolver) (string, error) {
+            return "the-config", nil
+        },
+    )
+    serviceContainer.MustRegister(
+        "probe.registry",
+        func(resolver containercontract.Resolver) (*ManagerRegistry, error) {
+            return NewManagerRegistry(
+                resolver,
+                ProviderDefinition{Name: "late", Provider: &resolvingStubProvider{sentinel: sentinel}, IsDefault: true},
+            )
+        },
+    )
+
+    scope := serviceContainer.NewScope()
+
+    resolved, resolveErr := scope.Get("probe.registry")
+    if nil != resolveErr {
+        t.Fatalf("resolve: %v", resolveErr)
+    }
+    registry := resolved.(*ManagerRegistry)
+
+    if closeErr := scope.Close(); nil != closeErr {
+        t.Fatalf("scope close: %v", closeErr)
+    }
+
+    _, managerErr := registry.Manager("late")
+    if false == errors.Is(managerErr, sentinel) {
+        t.Fatalf("expected the late dial to resolve through the container after the originating scope closed, got %v", managerErr)
+    }
+}
+
+func TestManagerRegistry_ConcurrentFirstDialsShareNoResolutionContext(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(
+        "probe.config",
+        func(resolver containercontract.Resolver) (string, error) {
+            return "the-config", nil
+        },
+    )
+
+    sentinel := errors.New("opened")
+    serviceContainer.MustRegister(
+        "probe.registry",
+        func(resolver containercontract.Resolver) (*ManagerRegistry, error) {
+            return NewManagerRegistry(
+                resolver,
+                ProviderDefinition{Name: "a", Provider: &resolvingStubProvider{sentinel: sentinel}, IsDefault: true},
+                ProviderDefinition{Name: "b", Provider: &resolvingStubProvider{sentinel: sentinel}},
+            )
+        },
+    )
+
+    resolved, resolveErr := serviceContainer.Get("probe.registry")
+    if nil != resolveErr {
+        t.Fatalf("resolve: %v", resolveErr)
+    }
+    registry := resolved.(*ManagerRegistry)
+
+    var waitGroup sync.WaitGroup
+    for _, name := range []string{"a", "b"} {
+        waitGroup.Add(1)
+        go func(definitionName string) {
+            defer waitGroup.Done()
+
+            _, managerErr := registry.Manager(definitionName)
+            if false == errors.Is(managerErr, sentinel) {
+                t.Errorf("expected the concurrent dial of %q to resolve, got %v", definitionName, managerErr)
+            }
+        }(name)
+    }
+    waitGroup.Wait()
+}
+
+type contextRecordingProvider struct {
+    observed context.Context
+    sentinel error
+}
+
+func (instance *contextRecordingProvider) Open(resolver containercontract.Resolver) (*bun.DB, error) {
+    return nil, errors.New("the plain open must not run for a context opener")
+}
+
+func (instance *contextRecordingProvider) OpenContext(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error) {
+    instance.observed = ctx
+
+    return nil, instance.sentinel
+}
+
+type registryProbeContextKey struct{}
+
+func TestManagerRegistry_PrefersTheContextOpenerWithTheConstructionContext(t *testing.T) {
+    ctx := context.WithValue(context.Background(), registryProbeContextKey{}, "bound")
+    provider := &contextRecordingProvider{sentinel: errors.New("opened")}
+
+    registry, registryErr := NewManagerRegistryWithContext(
+        ctx,
+        &fakeResolver{},
+        ProviderDefinition{Name: "a", Provider: provider, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry: %v", registryErr)
+    }
+
+    _, managerErr := registry.Manager("a")
+    if false == errors.Is(managerErr, provider.sentinel) {
+        t.Fatalf("expected OpenContext to have answered, got %v", managerErr)
+    }
+
+    if nil == provider.observed {
+        t.Fatal("expected the construction context to reach OpenContext")
+    }
+
+    if "bound" != provider.observed.Value(registryProbeContextKey{}) {
+        t.Fatal("expected the exact construction context to reach OpenContext")
+    }
+}
+
+func TestNewManagerRegistry_BindsABackgroundContextForContextOpeners(t *testing.T) {
+    provider := &contextRecordingProvider{sentinel: errors.New("opened")}
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeResolver{},
+        ProviderDefinition{Name: "a", Provider: provider, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry: %v", registryErr)
+    }
+
+    _, managerErr := registry.Manager("a")
+    if false == errors.Is(managerErr, provider.sentinel) {
+        t.Fatalf("expected OpenContext to have answered, got %v", managerErr)
+    }
+
+    if nil == provider.observed {
+        t.Fatal("expected a context to reach OpenContext")
+    }
+
+    if nil != provider.observed.Err() {
+        t.Fatalf("expected a live background context, got %v", provider.observed.Err())
     }
 }

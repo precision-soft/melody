@@ -7,13 +7,15 @@ import (
     "path/filepath"
     "sort"
     "strings"
+    "time"
 
     clicontract "github.com/precision-soft/melody/cli/contract"
+    "github.com/precision-soft/melody/cli/output"
     melodyconfig "github.com/precision-soft/melody/config"
     configcontract "github.com/precision-soft/melody/config/contract"
-    "github.com/precision-soft/melody/container"
     "github.com/precision-soft/melody/exception"
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
+    "github.com/precision-soft/melody/runtime"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
@@ -65,6 +67,11 @@ func (instance *GenerateCommand) Description() string {
 }
 
 func (instance *GenerateCommand) Flags() []clicontract.Flag {
+    return output.MergeFlags(output.StandardFlags(), instance.ownFlags())
+}
+
+/* ownFlags keeps the generator's flags apart from the standard set every melody command carries: the framework rewrites -v/-vv into --verbosity for every command, so a command without the standard flags dies on the framework's own convention with "flag provided but not defined". */
+func (instance *GenerateCommand) ownFlags() []clicontract.Flag {
     return []clicontract.Flag{
         &clicontract.StringFlag{
             Name:  flagNameOutput,
@@ -151,6 +158,9 @@ func (instance *GenerateCommand) runWithConfiguration(
     commandContext *clicontract.CommandContext,
     configuration configcontract.Configuration,
 ) error {
+    startedAt := time.Now()
+    option := output.NormalizeOption(output.ParseOptionFromCommand(commandContext))
+
     options, resolveErr := instance.resolveRunOptions(commandContext, configuration)
     if nil != resolveErr {
         return resolveErr
@@ -161,7 +171,7 @@ func (instance *GenerateCommand) runWithConfiguration(
         return collectErr
     }
 
-    return instance.writeDestinations(commandContext, options, entries)
+    return instance.writeDestinations(commandContext, option, startedAt, options, entries)
 }
 
 func (instance *GenerateCommand) resolveRunOptions(
@@ -317,21 +327,32 @@ func (instance *GenerateCommand) collectScheduledEntries(options *runOptions) ([
     return entries, nil
 }
 
+type destinationWrite struct {
+    Destination   string `json:"destination"`
+    Entries       int    `json:"entries"`
+    HeartbeatOnly bool   `json:"heartbeatOnly"`
+}
+
 func (instance *GenerateCommand) writeDestinations(
     commandContext *clicontract.CommandContext,
+    option output.Option,
+    startedAt time.Time,
     options *runOptions,
     entries []Entry,
 ) error {
-    writer := commandContext.Writer
-
     entriesByDestination, groupErr := groupEntriesByDestination(entries, options.outputPath)
     if nil != groupErr {
         return groupErr
     }
 
     if 0 == len(entriesByDestination) && false == options.heartbeatEnabled {
-        _, _ = fmt.Fprintln(writer, "the cron Configuration is empty and no --heartbeat-path or --heartbeat-command was provided; nothing to write")
-        return nil
+        return instance.reportWrites(
+            commandContext,
+            option,
+            startedAt,
+            nil,
+            "the cron Configuration is empty and no --heartbeat-path or --heartbeat-command was provided; nothing to write",
+        )
     }
 
     if 0 == len(entriesByDestination) && true == options.heartbeatEnabled {
@@ -353,6 +374,7 @@ func (instance *GenerateCommand) writeDestinations(
         return heartbeatDestinationsErr
     }
 
+    writes := make([]destinationWrite, 0, len(destinationPaths))
     for _, destination := range destinationPaths {
         destinationEntries := entriesByDestination[destination]
 
@@ -387,10 +409,51 @@ func (instance *GenerateCommand) writeDestinations(
             return writeErr
         }
 
-        if 0 == len(destinationEntries) && true == options.heartbeatEnabled {
-            _, _ = fmt.Fprintf(writer, "wrote heartbeat-only crontab to %s\n", destination)
+        writes = append(writes, destinationWrite{
+            Destination:   destination,
+            Entries:       len(destinationEntries),
+            HeartbeatOnly: 0 == len(destinationEntries) && true == options.heartbeatEnabled,
+        })
+    }
+
+    return instance.reportWrites(commandContext, option, startedAt, writes, "")
+}
+
+/* reportWrites is the generator's one report door: the written summary as text lines, or as the single machine-readable document under --format=json. The summary is essential output — the command's whole visible result — so --quiet, which suppresses headers and non-essential output, does not silence it. */
+func (instance *GenerateCommand) reportWrites(
+    commandContext *clicontract.CommandContext,
+    option output.Option,
+    startedAt time.Time,
+    writes []destinationWrite,
+    emptyMessage string,
+) error {
+    if output.FormatJson == option.Format {
+        meta := output.NewMeta(instance.Name(), nil, option, startedAt, time.Since(startedAt), output.Version{})
+        envelope := output.NewEnvelope(meta)
+
+        if nil == writes {
+            writes = []destinationWrite{}
+        }
+        envelope.Data = map[string]any{"writes": writes}
+
+        if "" != emptyMessage {
+            envelope.Warnings = append(envelope.Warnings, output.NewWarning("cron.nothingToWrite", emptyMessage, nil))
+        }
+
+        return output.Render(commandContext.Writer, envelope, option)
+    }
+
+    if "" != emptyMessage {
+        _, _ = fmt.Fprintln(commandContext.Writer, emptyMessage)
+
+        return nil
+    }
+
+    for _, write := range writes {
+        if true == write.HeartbeatOnly {
+            _, _ = fmt.Fprintf(commandContext.Writer, "wrote heartbeat-only crontab to %s\n", write.Destination)
         } else {
-            _, _ = fmt.Fprintf(writer, "wrote %d entries to %s\n", len(destinationEntries), destination)
+            _, _ = fmt.Fprintf(commandContext.Writer, "wrote %d entries to %s\n", write.Entries, write.Destination)
         }
     }
 
@@ -763,13 +826,14 @@ func resolveEntryLogPath(
     return joined, nil
 }
 
+/* configurationFromRuntime resolves through the run's scope with the container as the fallback, the way every other command on this seam reads its services: a scope-level substitution of the configuration is honoured here exactly as the framework's own runtime door honours it. */
 func configurationFromRuntime(runtimeInstance runtimecontract.Runtime) (configcontract.Configuration, error) {
-    configuration, fromContainerErr := container.FromResolver[configcontract.Configuration](runtimeInstance.Container(), melodyconfig.ServiceConfig)
-    if nil != fromContainerErr {
+    configuration, fromRuntimeErr := runtime.FromRuntime[configcontract.Configuration](runtimeInstance, melodyconfig.ServiceConfig)
+    if nil != fromRuntimeErr {
         return nil, exception.NewError(
-            "cron: could not resolve the configuration service from the container",
+            "cron: could not resolve the configuration service from the runtime",
             exceptioncontract.Context{"service": melodyconfig.ServiceConfig},
-            fromContainerErr,
+            fromRuntimeErr,
         )
     }
 

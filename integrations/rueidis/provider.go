@@ -65,9 +65,13 @@ func (instance *Provider) WithTimeoutConfig(timeoutConfig *TimeoutConfig) *Provi
 func (instance *Provider) Open(resolver containercontract.Resolver) (rueidis.Client, error) {
     configuration := config.ConfigMustFromResolver(resolver)
 
+    /* the provider is the component told authoritatively which parameter holds the credential, so it arms the framework's own redaction for it — the introspection output masks the password and every template derived from it, without the application repeating the knowledge */
+    configuration.MarkSecret(instance.passwordParameterName)
+
+    /* all three parameters read through MustString, the convention of the bunorm siblings: a credential registered with the wrong type panics at boot naming the parameter and the type, where String() would fold it to "" and connect with no credential at all — green against a passwordless store, "redis connection failed" pointing at the network against a secured one */
     address := configuration.MustGet(instance.addressParameterName).MustString()
-    user := configuration.MustGet(instance.userParameterName).String()
-    password := configuration.MustGet(instance.passwordParameterName).String()
+    user := configuration.MustGet(instance.userParameterName).MustString()
+    password := configuration.MustGet(instance.passwordParameterName).MustString()
 
     connectionConfig := NewConnectionConfig(address, user, password)
 

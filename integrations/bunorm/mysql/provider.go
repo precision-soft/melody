@@ -178,11 +178,20 @@ func (instance *Provider) WithRetryConfig(retryConfig *RetryConfig) *Provider {
 }
 
 func (instance *Provider) Open(resolver containercontract.Resolver) (*bun.DB, error) {
+    return instance.OpenContext(context.Background(), resolver)
+}
+
+/* OpenContext opens under the caller's context: the retry sleeps watch it alongside the clock, so a shutdown that cancels the context reaches a retry loop in flight instead of sleeping through the whole retry budget. A nil context reads as context.Background(), which is exactly Open. */
+func (instance *Provider) OpenContext(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error) {
+    if nil == ctx {
+        ctx = context.Background()
+    }
+
     if nil == instance.retryConfig {
         return instance.open(resolver)
     }
 
-    return instance.openWithRetry(resolver)
+    return instance.openWithRetry(ctx, resolver)
 }
 
 /* OpenForMigration opens the same database with the driver deadlines lifted: ReadTimeout and WriteTimeout are per-connection settings baked into the connector, sized for request traffic, and a DDL statement that legitimately runs past them — an ALTER TABLE adding constraints on a large table — is cut mid-statement with "invalid connection", outside any transaction MySQL would roll back. The connect timeout stays armed (a down database must still fail fast), the pool is kept to the two connections a sequential migration run needs, and no connection is recycled mid-run — a lifetime rotation under a running statement is the same cut by another name. */
@@ -229,7 +238,7 @@ func migrationPoolConfig() *PoolConfig {
     }
 }
 
-func (instance *Provider) openWithRetry(resolver containercontract.Resolver) (*bun.DB, error) {
+func (instance *Provider) openWithRetry(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error) {
     logger, loggerErr := logging.LoggerFromResolver(resolver)
     if nil != loggerErr {
         logger = logging.EmergencyLogger()
@@ -259,28 +268,30 @@ func (instance *Provider) openWithRetry(resolver containercontract.Resolver) (*b
         }
 
         if false == instance.isTransientError(openErr) {
+            /* the terminal record is the log of this failure: it is written in full and the returned error carries the mark, so the exit handler and the http exception path do not write the same outage a second time */
+            terminalErr := exception.FromError(openErr)
             logger.Error(
                 "database connection failed with non-transient error",
-                map[string]interface{}{
-                    "attempt": attempt,
-                    "error":   openErr.Error(),
-                },
+                exception.LogContext(
+                    terminalErr,
+                    map[string]any{"attempt": attempt},
+                ),
             )
 
-            return nil, openErr
+            return nil, exception.MarkLogged(terminalErr)
         }
 
         if attempt >= maxAttempts {
+            terminalErr := exception.FromError(openErr)
             logger.Error(
                 "database connection failed after max retry attempts",
-                map[string]interface{}{
-                    "attempt":     attempt,
-                    "maxAttempts": maxAttempts,
-                    "error":       openErr.Error(),
-                },
+                exception.LogContext(
+                    terminalErr,
+                    map[string]any{"attempt": attempt, "maxAttempts": maxAttempts},
+                ),
             )
 
-            return nil, openErr
+            return nil, exception.MarkLogged(terminalErr)
         }
 
         delay := instance.computeBackoffDelay(attempt)
@@ -295,12 +306,27 @@ func (instance *Provider) openWithRetry(resolver containercontract.Resolver) (*b
             },
         )
 
-        time.Sleep(delay)
+        /* the sleep watches the caller's context alongside the clock: a shutdown signal arriving mid-retry would otherwise sleep through the whole remaining budget, and the second signal exits with no teardown at all */
+        delayTimer := time.NewTimer(delay)
+        select {
+        case <-ctx.Done():
+            delayTimer.Stop()
+
+            return nil, exception.NewError(
+                "database connection retry cancelled by the caller's context",
+                map[string]any{"attempt": attempt, "error": openErr.Error()},
+                ctx.Err(),
+            )
+        case <-delayTimer.C:
+        }
     }
 }
 
 func (instance *Provider) open(resolver containercontract.Resolver) (*bun.DB, error) {
     configuration := config.ConfigMustFromResolver(resolver)
+
+    /* the provider is the component told authoritatively which parameter holds the credential, so it arms the framework's own redaction for it — the introspection output masks the password and every template derived from it, without the application repeating the knowledge */
+    configuration.MarkSecret(instance.passwordParameterName)
 
     host := configuration.MustGet(instance.hostParameterName).MustString()
     port := configuration.MustGet(instance.portParameterName).MustString()
@@ -487,4 +513,5 @@ func (instance *Provider) isTransientError(inputErr error) bool {
 var (
     _ bunorm.Provider          = (*Provider)(nil)
     _ bunorm.MigrationProvider = (*Provider)(nil)
+    _ bunorm.ContextOpener     = (*Provider)(nil)
 )
