@@ -659,7 +659,7 @@ func TestRunnerCommand_InvokeReportsChildScopeCloseError(t *testing.T) {
         failingScopeContainer{Container: serviceContainer, scopeCloseErr: scopeCloseErr},
     )
 
-    invokeErr := runner.invoke(runtimeInstance, runner.entries[0])
+    _, invokeErr := runner.invoke(runtimeInstance, runner.entries[0])
     if nil == invokeErr {
         t.Fatal("expected the child scope close error to surface from invoke")
     }
@@ -1585,7 +1585,7 @@ func TestRunnerCommand_TimeoutCancelsACommandThatWatchesItsContext(t *testing.T)
     at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
 
     started := time.Now()
-    invokeErr := runner.invoke(newRunnerTestRuntime(context.Background()), runner.entries[0])
+    _, invokeErr := runner.invoke(newRunnerTestRuntime(context.Background()), runner.entries[0])
     elapsed := time.Since(started)
 
     if nil == invokeErr {
@@ -1637,7 +1637,7 @@ func TestRunnerCommand_WedgedCommandIsAbandonedAndItsScopeReleased(t *testing.T)
 
     completed := make(chan error, 1)
     go func() {
-        completed <- runner.invoke(runtimeInstance, runner.entries[0])
+        completed <- invokeDiscardingRunId(runner, runtimeInstance, runner.entries[0])
     }()
 
     var invokeErr error
@@ -1770,7 +1770,7 @@ func TestRunnerCommand_AnEntrysGracefulWindowGovernsWhenItIsAbandoned(t *testing
 
     completed := make(chan error, 1)
     go func() {
-        completed <- runner.invoke(runtimeInstance, runner.entries[0])
+        completed <- invokeDiscardingRunId(runner, runtimeInstance, runner.entries[0])
     }()
 
     var invokeErr error
@@ -1819,7 +1819,7 @@ func TestRunnerCommand_AnEntryWhoseWindowsCannotBeSummedStillRunsToCompletion(t 
 
     completed := make(chan error, 1)
     go func() {
-        completed <- runner.invoke(newRunnerTestRuntime(context.Background()), runner.entries[0])
+        completed <- invokeDiscardingRunId(runner, newRunnerTestRuntime(context.Background()), runner.entries[0])
     }()
 
     select {
@@ -1851,7 +1851,7 @@ func TestRunnerCommand_TheAbandonErrorNamesTheWindowTheRunWasActuallyGiven(t *te
 
     completed := make(chan error, 1)
     go func() {
-        completed <- runner.invoke(newRunnerTestRuntime(context.Background()), runner.entries[0])
+        completed <- invokeDiscardingRunId(runner, newRunnerTestRuntime(context.Background()), runner.entries[0])
     }()
 
     var invokeErr error
@@ -1884,6 +1884,7 @@ func TestResolveAbandonedRun_ACommandThatAlreadyAnsweredReportsItsOwnOutcome(t *
     resolved := runner.resolveAbandonedRun(
         newRunnerTestRuntime(context.Background()),
         entry,
+        "test-run-id",
         context.Background(),
         completed,
     )
@@ -1904,6 +1905,7 @@ func TestResolveAbandonedRun_ACommandStillRunningIsReportedAbandoned(t *testing.
     resolved := runner.resolveAbandonedRun(
         newRunnerTestRuntime(context.Background()),
         entry,
+        "test-run-id",
         context.Background(),
         make(chan error, 1),
     )
@@ -1929,7 +1931,7 @@ func TestResolveAbandonedRun_ADeadlineExceededAnswerCarriesBothFailures(t *testi
     completed := make(chan error, 1)
     completed <- commandErr
 
-    resolved := runner.resolveAbandonedRun(newRunnerTestRuntime(context.Background()), entry, lapsedContext, completed)
+    resolved := runner.resolveAbandonedRun(newRunnerTestRuntime(context.Background()), entry, "test-run-id", lapsedContext, completed)
 
     if false == errors.Is(resolved, commandErr) || false == errors.Is(resolved, ErrCommandTimeout) {
         t.Fatalf("expected both the timeout and the command's own failure, got %v", resolved)
@@ -1970,7 +1972,7 @@ func TestRunnerCommand_InvokeNormalizesATypedNilCommandError(t *testing.T) {
 
     runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
 
-    invokeErr := runner.invoke(newRunnerTestRuntime(context.Background()), runner.entries[0])
+    _, invokeErr := runner.invoke(newRunnerTestRuntime(context.Background()), runner.entries[0])
     if nil != invokeErr {
         t.Fatalf("expected the typed-nil command error to normalize to success, got %v", invokeErr)
     }
@@ -2193,7 +2195,7 @@ func TestRunnerCommand_InvokeInstallsThePerRunIdentity(t *testing.T) {
 
     runtimeInstance := runtime.New(context.Background(), parentScope, serviceContainer)
 
-    if invokeErr := runner.invoke(runtimeInstance, runner.entries[0]); nil != invokeErr {
+    if _, invokeErr := runner.invoke(runtimeInstance, runner.entries[0]); nil != invokeErr {
         t.Fatalf("invoke: %v", invokeErr)
     }
 
@@ -2226,5 +2228,60 @@ func TestRunnerCommand_CarriesTheStandardFlags(t *testing.T) {
     expectedFlagCount := 1 + len(output.StandardFlags())
     if expectedFlagCount != len(runner.Flags()) {
         t.Fatalf("expected %d flags (--once + the standard set), got %d", expectedFlagCount, len(runner.Flags()))
+    }
+}
+
+/* invokeDiscardingRunId adapts invoke's two-value answer to the single error the completion channels of these tests carry; the runId's presence on the records has its own test. */
+func invokeDiscardingRunId(runner *RunnerCommand, runtimeInstance runtimecontract.Runtime, entry *scheduledRunEntry) error {
+    _, invokeErr := runner.invoke(runtimeInstance, entry)
+
+    return invokeErr
+}
+
+/* the classification that keeps a clean shutdown out of the failure aggregate: only the parent's cancellation qualifies, and a deadline the entry asked for stays a failure whatever the shutdown is doing. */
+func TestIsShutdownCancellation_OnlyTheParentsCancellationQualifies(t *testing.T) {
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+    cancelledRuntime := newRunnerTestRuntime(cancelledContext)
+    liveRuntime := newRunnerTestRuntime(context.Background())
+
+    if false == isShutdownCancellation(cancelledRuntime, context.Canceled) {
+        t.Fatal("expected the parent's cancellation to classify as the shutdown reaching the run")
+    }
+
+    if true == isShutdownCancellation(liveRuntime, context.Canceled) {
+        t.Fatal("expected a cancellation under a live runner to stay a failure")
+    }
+
+    if true == isShutdownCancellation(cancelledRuntime, context.DeadlineExceeded) {
+        t.Fatal("expected the entry's own deadline to stay a failure under shutdown")
+    }
+
+    /* the portant input for the deadline clause: a run both cancelled and deadline-cut answers a join carrying both flavors, and the deadline half must keep it a failure — on the bare DeadlineExceeded the clause is shadowed by the Canceled test above it */
+    if true == isShutdownCancellation(cancelledRuntime, errors.Join(context.DeadlineExceeded, context.Canceled)) {
+        t.Fatal("expected a deadline-cut run to stay a failure even when the shutdown's cancellation rides the same join")
+    }
+
+    if true == isShutdownCancellation(cancelledRuntime, errors.New("job broke")) {
+        t.Fatal("expected an ordinary failure to stay one under shutdown")
+    }
+}
+
+/* the run's id is minted first and returned beside the outcome, so the runner's records about the run carry the cronRunId the run's own records carry. */
+func TestInvoke_AnswersTheRunIdBesideTheOutcome(t *testing.T) {
+    job := newRecordingCommand("job:runid")
+
+    configuration := NewConfiguration().
+        Schedule("job:runid", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+
+    runId, invokeErr := runner.invoke(newRunnerTestRuntime(context.Background()), runner.entries[0])
+    if nil != invokeErr {
+        t.Fatalf("expected the run to succeed, got %v", invokeErr)
+    }
+
+    if "" == runId {
+        t.Fatal("expected a non-empty run id beside the outcome")
     }
 }

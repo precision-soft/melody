@@ -988,3 +988,51 @@ func (instance *ExampleHttpMiddlewareModule) RegisterHttpMiddlewares(
 **Symptom.** The `application` row prints `<unknown>` where it printed the framework version.
 
 **Remedy.** Call `output.SetApplicationVersion(version)` once in the composition root's main, with the version the application keeps wherever it keeps it — its own ldflags variable or its environment.
+
+### Http: one record per handler failure, at the level of its status class
+
+**What changed.** The kernel's handler-error writers read and set the already-logged mark and record a deliberate 4xx at warning, so a handler failure files one record instead of two; a handler returning its request context's own cancellation is recorded once at warning as `request cancelled by client`; a response-write failure the client caused is `failed to write response; client disconnected` at warning; the access-control listener's three direct 401 branches file one warning naming the refusal reason; and the static file server's two per-request exits drop from info to debug.
+
+**Symptom.** Dashboards counting error records see handler failures once instead of twice and 4xx refusals at warning; log queries matching `controller handler error` no longer match client disconnects; a 401 now leaves an `authorization refused` warning; the two static info messages disappear from info-level journals.
+
+**Remedy.** Point alerting at the level that means what it says: error is now a server fault, warning a refusal or a client-caused condition. Update any query that keyed on the duplicated record or the old levels.
+
+### Http: the access log reports the status a stream actually carried
+
+**What changed.** For a handler that committed its own response, the terminate event and the access log report the status code recorded on the connection instead of the synthetic response the kernel substituted; a streamed source that fails before its first byte now answers the rendered 500 instead of an implicit empty 200.
+
+**Symptom.** Streaming routes stop logging `statusCode=204`; a panic mid-stream logs the committed 200 instead of the never-written 500; clients of a failing stream receive 500.
+
+**Remedy.** Update status-distribution queries over the access log for streaming routes; they now read the wire's truth.
+
+### Ownership: configuration handed across a boundary stays what was handed
+
+**What changed.** `Kernel.SetForwardedHeadersPolicy`, `NewForwardedClientIpResolver`, `CompressionMiddleware`, `NewHttpMiddlewareDefinition`, `MiddlewareBuildReport.SetInactive`, `httpclient.RequestOptions.Headers`/`Query` and cron's `Configuration.Schedule`/`Entries` copy what crosses the boundary, in whichever direction it crosses.
+
+**Symptom.** Code that mutated a slice, map or struct after handing it over — or wrote through a getter's returned map — no longer changes the receiver's behaviour; `CompressionMiddleware` no longer rewrites the caller's config with normalized values.
+
+**Remedy.** Mutate before handing over, or use the setters that exist for the purpose; read normalized values from behaviour, not from the caller's own object.
+
+### Middleware: nil configurations read as defaults where defaults exist
+
+**What changed.** `CompressionMiddleware(nil)` builds over `DefaultCompressionConfig()` and the deprecated `CorsMiddleware(nil)` over the default cors service, the reading their siblings give the same absence; `static.NewFileServer(nil)` refuses by name, because its default would be a live file server over `public`.
+
+**Symptom.** A nil that used to panic with a raw dereference now serves defaults (compression, cors) or panics naming the rule (static).
+
+**Remedy.** Nothing, unless a boot script keyed on the raw panic text.
+
+### bunorm: the empty migrate module refuses the boot
+
+**What changed.** `migrate.NewModule(migrate.ModuleConfig{})` — neither `Migrations` nor `Contexts` — is refused at command registration with `bunorm migrate module requires migrations or contexts`.
+
+**Symptom.** An application that registered the empty module booted with no migration commands; it now fails the boot naming the rule.
+
+**Remedy.** Pass the migrations the module exists to register, or remove the registration.
+
+### Cron: a clean shutdown is not a job failure
+
+**What changed.** A run the runner's own shutdown cancelled is recorded at warning as `cron: scheduled command cancelled by shutdown` and excluded from the failure aggregate; the runner's failure and abandon records carry the run's `cronRunId`.
+
+**Symptom.** `melody:cron:run --once` interrupted by SIGTERM exits 0 with a warning instead of non-zero with an error record; alerting keyed on `cron runner command failed` stops firing on deploys.
+
+**Remedy.** Key deploy-time alerting on the new warning if the old signal was load-bearing; genuine failures keep the error record, now attributable by `cronRunId`.

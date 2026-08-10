@@ -145,3 +145,94 @@ func TestRecordingResponseWriter_APanickingDelegateLeavesTheCommitFlagFalse(t *t
         t.Fatalf("expected a delegate that panicked before committing to leave the flag false; a lying flag made the recovery skip its 500 and the client received an implicit empty 200")
     }
 }
+
+/* the guard of the ReadFrom convention: a source that fails before the first byte has committed nothing, and a flag raised anyway classified exactly that failure as a committed stream — the recovery skipped its 500 and the client received an implicit empty 200. */
+func TestRecordingResponseWriter_ReadFromLeavesTheCommitFlagFalseWhenTheSourceFailsBeforeTheFirstByte(t *testing.T) {
+    recorder := httptest.NewRecorder()
+    writer := newRecordingResponseWriter(recorder)
+
+    _, readFromErr := writer.ReadFrom(&failingAtFirstByteReader{})
+    if nil == readFromErr {
+        t.Fatal("expected the failing source's error to propagate")
+    }
+
+    if true == writer.HeadersWritten() {
+        t.Fatal("expected a copy that moved no byte to record no commit")
+    }
+
+    if 0 != writer.CommittedStatusCode() {
+        t.Fatalf("expected no committed status, got %d", writer.CommittedStatusCode())
+    }
+}
+
+type failingAtFirstByteReader struct{}
+
+func (instance *failingAtFirstByteReader) Read(buffer []byte) (int, error) {
+    return 0, nethttp.ErrBodyReadAfterClose
+}
+
+func TestRecordingResponseWriter_CommittedStatusCodeAnswersTheExplicitStatus(t *testing.T) {
+    writer := newRecordingResponseWriter(httptest.NewRecorder())
+
+    writer.WriteHeader(nethttp.StatusTeapot)
+
+    if nethttp.StatusTeapot != writer.CommittedStatusCode() {
+        t.Fatalf("expected the explicitly written status, got %d", writer.CommittedStatusCode())
+    }
+}
+
+/* the first byte commits net/http's implicit 200; the recorder answers it so the access log can name the status the wire actually carries for a handler that streamed without an explicit WriteHeader. */
+func TestRecordingResponseWriter_CommittedStatusCodeAnswersTheImplicitTwoHundredOnFirstWrite(t *testing.T) {
+    writer := newRecordingResponseWriter(httptest.NewRecorder())
+
+    _, writeErr := writer.Write([]byte("body"))
+    if nil != writeErr {
+        t.Fatalf("expected the write to succeed, got %v", writeErr)
+    }
+
+    if nethttp.StatusOK != writer.CommittedStatusCode() {
+        t.Fatalf("expected the implicit 200, got %d", writer.CommittedStatusCode())
+    }
+}
+
+/* Flush records the commit after the delegate returns, the convention every commit recording in the type follows: a delegate that panics mid-flush has not proven a commit, and the flag must not say otherwise. */
+func TestRecordingResponseWriter_APanickingFlushLeavesTheCommitFlagFalse(t *testing.T) {
+    writer := newRecordingResponseWriter(&panickingFlushWriter{httptest.NewRecorder()})
+
+    func() {
+        defer func() { _ = recover() }()
+        writer.Flush()
+    }()
+
+    if true == writer.HeadersWritten() {
+        t.Fatal("expected a flush that panicked before committing to leave the flag false")
+    }
+}
+
+type panickingFlushWriter struct {
+    *httptest.ResponseRecorder
+}
+
+func (instance *panickingFlushWriter) Flush() {
+    panic("flush died before committing")
+}
+
+/* the public door refuses the out-of-range status by name instead of letting the delegate panic deep inside the response path: this signature promises an error return, and an external caller's arithmetic mistake deserved that error, not a connection reset. */
+func TestWriteToHttpResponseWriter_RefusesAStatusOutsideTheWritableRangeByName(t *testing.T) {
+    recorder := httptest.NewRecorder()
+
+    response := NewResponse(1000, []byte("body"))
+
+    writeErr := WriteToHttpResponseWriter(nil, nil, recorder, response)
+    if nil == writeErr {
+        t.Fatal("expected the out-of-range status to be refused")
+    }
+
+    if false == strings.Contains(writeErr.Error(), "status code is out of range") {
+        t.Fatalf("expected the refusal to name the rule, got %q", writeErr.Error())
+    }
+
+    if 0 != recorder.Body.Len() {
+        t.Fatalf("expected nothing written to the delegate, got %d bytes", recorder.Body.Len())
+    }
+}

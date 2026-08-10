@@ -975,3 +975,33 @@ func TestLogOnRecoverAndExitAfter_WritesTheCertificateForAnAlreadyLoggedError(t 
         t.Fatalf("expected the exit certificate for an already-logged error, got %q", string(output))
     }
 }
+
+/* the resolve step runs under its own shield, honouring the comment beside the other steps: a recovered value whose Error() panics used to unwind into main and the process died with the Go runtime's exit code 2 — no record, no certificate, no teardown. The shield answers a generic record under the caller's own code. */
+func TestResolveRecoveredExitShielded_AnswersTheCallersCodeWhenTheValueItselfPanics(t *testing.T) {
+    err, resolvedExitCode, needsLogging := resolveRecoveredExitShielded(&panickingResolveError{}, 3)
+
+    if nil == err {
+        t.Fatal("expected a generic record for the unresolvable value")
+    }
+
+    if 3 != resolvedExitCode {
+        t.Fatalf("expected the caller's exit code, got %d", resolvedExitCode)
+    }
+
+    if false == needsLogging {
+        t.Fatal("expected the generic record to be logged")
+    }
+
+    if false == strings.Contains(err.Error(), "could not be resolved") {
+        t.Fatalf("expected the record to name the failure, got %q", err.Error())
+    }
+}
+
+type panickingResolveError struct{}
+
+func (instance *panickingResolveError) Error() string {
+    var m map[string]string
+    m["boom"] = "boom"
+
+    return "unreachable"
+}

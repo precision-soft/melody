@@ -4,6 +4,7 @@ import (
     "errors"
     "fmt"
     "math"
+    "strings"
     "testing"
 
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
@@ -820,4 +821,40 @@ func TestIsAlreadyLogged_TypedNilCarriesNoMarkAndDoesNotPanic(t *testing.T) {
     if true == IsAlreadyLogged(exitAsError) {
         t.Fatalf("expected a typed nil exit error to carry no mark")
     }
+}
+
+/* LogContext runs inside recovery defers: a value whose Error() panics — often on the very nil field that made it panic-worthy — must cost its text, never the record or the connection. */
+func TestLogContext_ContainsAPanickingErrorMessage(t *testing.T) {
+    logContext := LogContext(&panickingTextError{})
+
+    errorText, isString := logContext["error"].(string)
+    if false == isString {
+        t.Fatalf("expected the error text to render, got %T", logContext["error"])
+    }
+
+    if false == strings.Contains(errorText, "error message panicked") {
+        t.Fatalf("expected the contained panic note, got %q", errorText)
+    }
+}
+
+/* the cause chain renders every link's text under the same containment: a panicking cause buried in the chain took the whole record down from inside the recovery that was writing it. */
+func TestBuildCauseChain_ContainsAPanickingLink(t *testing.T) {
+    chain := BuildCauseChain(&panickingTextError{}, 8)
+
+    if 1 != len(chain) {
+        t.Fatalf("expected one rendered link, got %d", len(chain))
+    }
+
+    if false == strings.Contains(chain[0], "error message panicked") {
+        t.Fatalf("expected the contained panic note, got %q", chain[0])
+    }
+}
+
+type panickingTextError struct{}
+
+func (instance *panickingTextError) Error() string {
+    var m map[string]string
+    m["boom"] = "boom"
+
+    return "unreachable"
 }

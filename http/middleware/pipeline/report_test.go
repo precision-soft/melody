@@ -140,9 +140,8 @@ func TestMiddlewareBuildReport_NilListsStayNil(t *testing.T) {
     }
 }
 
-/* @info SetInactive is the one setter on this type that does NOT copy, while SetSelectedNames and SetMissingReference both do and Inactive() copies on the way out. The asymmetry is pinned here rather than assumed: a caller that keeps the slice it passed can still rewrite the inactive list of a report the diagnostics already hold. */
-
-func TestMiddlewareBuildReport_SetInactiveAliasesTheCallersSlice(t *testing.T) {
+/* SetInactive copies like every sibling accessor of this report: a caller that keeps the slice it passed can no longer rewrite the inactive list of a report the diagnostics already hold — the asymmetry this test used to pin. */
+func TestMiddlewareBuildReport_SetInactiveCopiesTheCallersSlice(t *testing.T) {
     report := NewMiddlewareBuildReport("web", "dev", nil, nil, nil, false)
 
     supplied := []*InactiveMiddleware{
@@ -153,7 +152,7 @@ func TestMiddlewareBuildReport_SetInactiveAliasesTheCallersSlice(t *testing.T) {
 
     supplied[0] = NewInactiveMiddleware("rewritten", "rewritten")
 
-    if "rewritten" != report.Inactive()[0].Name() {
-        t.Fatalf("expected SetInactive to alias the caller's slice, matching the behaviour as it stands today")
+    if "compression" != report.Inactive()[0].Name() {
+        t.Fatalf("expected SetInactive to copy the caller's slice, got %q", report.Inactive()[0].Name())
     }
 }

@@ -131,3 +131,30 @@ func TestRequestOptions_WithHeadersAndWithQueryParamsReadTheCallersMapWhenApplie
         t.Fatalf("expected the singular option to have captured its value when it was built, got %q", options.Headers()["X-Single"])
     }
 }
+
+/* the getters hand out copies: a write through the returned map used to bypass the canonicalization SetHeader enforces, and the request-time winner between the planted spelling and the canonical one was chosen by map iteration — in what is often a credential header. */
+func TestRequestOptions_HeadersHandsOutACopy(t *testing.T) {
+    options := NewRequestOptions()
+    options.SetHeader("X-Api-Key", "canonical")
+
+    options.Headers()["x-api-key"] = "planted"
+
+    if 1 != len(options.Headers()) {
+        t.Fatalf("expected the planted spelling to land on the copy only, got %v", options.Headers())
+    }
+
+    if "canonical" != options.Headers()["X-Api-Key"] {
+        t.Fatalf("expected the canonical entry untouched, got %q", options.Headers()["X-Api-Key"])
+    }
+}
+
+func TestRequestOptions_QueryHandsOutACopy(t *testing.T) {
+    options := NewRequestOptions()
+    options.SetQuery("page", "1")
+
+    options.Query()["page"] = "2"
+
+    if "1" != options.Query()["page"] {
+        t.Fatalf("expected the stored parameter untouched, got %q", options.Query()["page"])
+    }
+}

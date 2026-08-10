@@ -791,3 +791,30 @@ func TestResolvedPoolConfigKeepsTheMigrationLifetimesLifted(t *testing.T) {
         t.Fatalf("expected the migration pool sizing to survive, got %d/%d", resolved.MaxOpenConnections, resolved.MaxIdleConnections)
     }
 }
+
+/* the mysql mirror of the same rule, measured on the cancellation arriving MID-dial: the ping derives its budget from the caller's context, so a cancellation at two hundred milliseconds ends a ten-second dial right there — through a Background-derived ping it waited the whole connect budget out. The already-cancelled entry refusal is the other layer of the same rule; on this driver the derived ping shadows it for every at-entry input, which is why the in-flight cancellation is the input that proves the derivation. */
+func TestOpenContext_ACancellationMidDialReachesTheAttemptInFlight(t *testing.T) {
+    provider := newTestProvider().
+        WithTimeoutConfig(NewTimeoutConfig(10*time.Second, 10*time.Second, 10*time.Second))
+
+    resolver := newStubResolver("203.0.113.1", "5432", "melody", "melody", "melody")
+
+    midFlightContext, cancel := context.WithCancel(context.Background())
+    go func() {
+        time.Sleep(200 * time.Millisecond)
+        cancel()
+    }()
+    defer cancel()
+
+    started := time.Now()
+    _, openErr := provider.OpenContext(midFlightContext, resolver)
+    elapsed := time.Since(started)
+
+    if nil == openErr {
+        t.Fatal("expected the cancelled open to fail")
+    }
+
+    if 2*time.Second < elapsed {
+        t.Fatalf("expected the mid-dial cancellation to reach the attempt, waited %v", elapsed)
+    }
+}

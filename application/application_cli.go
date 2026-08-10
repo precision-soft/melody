@@ -144,6 +144,8 @@ func (instance *Application) runCli(ctx context.Context) error {
     logger := logging.LoggerMustFromContainer(serviceContainer)
 
     scope := serviceContainer.NewScope()
+
+    /* a last-resort net for a panic between the scope's creation and the action dispatch: on every run that reaches the action, the action itself closes the scope and reports a teardown failure beside the command's own error — through the run's returned error, into the exit owner's record — so this second close answers nil and the branch below stays silent. */
     defer func() {
         scopeCloseErr := scope.Close()
         if nil != scopeCloseErr {

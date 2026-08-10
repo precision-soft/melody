@@ -25,6 +25,13 @@ type FileServer struct {
 }
 
 func NewFileServer(options *Options) *FileServer {
+    /* nil options are refused by name rather than read as a default: every sibling door that normalizes an absent configuration falls back to inert defaults, but the default here would be a live file server over the "public" directory — a nil that is almost always a wiring mistake would start serving files nobody asked served. */
+    if nil == options {
+        exception.Panic(
+            exception.NewError("options are required for the static file server", nil, nil),
+        )
+    }
+
     fileSystem := options.fileSystem
 
     if ModeFilesystem == options.fileServerConfig.mode {
@@ -147,7 +154,8 @@ func (instance *FileServer) Serve(
     method := request.HttpRequest().Method
 
     if false == isRetrievalMethod(method) {
-        logger.Info(
+        /* debug, not info: with the middleware registered globally this fires for every POST and PUT in the application — the per-request noise the logging comment on logOpenFailure exists to keep out of the journal */
+        logger.Debug(
             "static serve method not eligible",
             loggingcontract.Context{
                 "method": method,
@@ -185,7 +193,8 @@ func (instance *FileServer) Serve(
                 requestPath = "/"
             }
         } else {
-            logger.Info(
+            /* debug, not info: every request outside the mounted prefix takes this exit, so anything louder files one record per ordinary api request and the operator filters the message out — the reasoning logOpenFailure states for the ordinary miss */
+            logger.Debug(
                 "static serve strip prefix mismatch",
                 loggingcontract.Context{
                     "path":        requestPath,
@@ -457,7 +466,8 @@ func (instance *FileServer) serveForStreaming(
     method := request.HttpRequest().Method
 
     if false == isRetrievalMethod(method) {
-        logger.Info(
+        /* debug, not info: with the middleware registered globally this fires for every POST and PUT in the application — the per-request noise the logging comment on logOpenFailure exists to keep out of the journal */
+        logger.Debug(
             "static serve method not eligible",
             loggingcontract.Context{
                 "method": method,
@@ -495,7 +505,8 @@ func (instance *FileServer) serveForStreaming(
                 requestPath = "/"
             }
         } else {
-            logger.Info(
+            /* debug, not info: every request outside the mounted prefix takes this exit, so anything louder files one record per ordinary api request and the operator filters the message out — the reasoning logOpenFailure states for the ordinary miss */
+            logger.Debug(
                 "static serve strip prefix mismatch",
                 loggingcontract.Context{
                     "path":        requestPath,

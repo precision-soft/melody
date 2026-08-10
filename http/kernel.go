@@ -1,6 +1,7 @@
 package http
 
 import (
+    "context"
     "errors"
     nethttp "net/http"
     "runtime/debug"
@@ -97,12 +98,22 @@ func (instance *Kernel) HasErrorHandler() bool {
     return nil != instance.errorHandler
 }
 
+/* SetForwardedHeadersPolicy copies the trusted proxy list instead of retaining the caller's slice: every request's proxy-trust decision — whether X-Forwarded-Proto is believed, which sets the session cookie's Secure attribute — reads this list, and a caller reusing its slice after the call would rewrite the trust decision mid-serving, as an unsynchronized write racing every request goroutine. Every sibling configuration door copies its caller lists for the same reason. */
 func (instance *Kernel) SetForwardedHeadersPolicy(policy httpcontract.ForwardedHeadersPolicy) {
+    policy.TrustedProxyList = copyStringList(policy.TrustedProxyList)
     instance.options.ForwardedHeadersPolicy = policy
 }
 
 func (instance *Kernel) SetSessionCookiePolicy(policy httpcontract.SessionCookiePolicy) {
     instance.options.SessionCookiePolicy = policy
+}
+
+func copyStringList(values []string) []string {
+    if nil == values {
+        return nil
+    }
+
+    return append(make([]string, 0, len(values)), values...)
 }
 
 func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) nethttp.Handler {
@@ -367,7 +378,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             if nil == exceptionEvent.Response() {
                 message := "internal server error"
                 if true == debugMode {
-                    message = recoveredErr.Error()
+                    message = debugErrorMessage(recoveredErr)
                 }
 
                 exceptionEvent.SetResponse(
@@ -486,7 +497,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             statusCode := nethttp.StatusInternalServerError
             message := "internal server error"
             if true == debugMode {
-                message = eventKernelRequestErr.Error()
+                message = debugErrorMessage(eventKernelRequestErr)
             }
 
             /* the response the stopping listener produced is replaced below and reaches no writer, so a file-backed body would be leaked */
@@ -593,15 +604,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 if nil != instance.notFoundHandler {
                     response, err := instance.notFoundHandler(runtimeInstance, writer, request)
                     if nil != err {
-                        requestLogger.Error(
-                            "not found handler error",
-                            exception.LogContext(
-                                err,
-                                exceptioncontract.Context{
-                                    "path": request.HttpRequest().URL.Path,
-                                },
-                            ),
-                        )
+                        logHandlerError(requestLogger, "not found handler error", err, request.HttpRequest())
 
                         kernelExceptionEvent := NewKernelExceptionEvent(runtimeInstance, request, err)
                         instance.dispatchEventKernelException(kernelExceptionEvent, runtimeInstance, requestLogger, eventDispatcher)
@@ -618,7 +621,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                         if nil == kernelExceptionEvent.Response() {
                             message := "internal server error"
                             if true == debugMode {
-                                message = err.Error()
+                                message = debugErrorMessage(err)
                             }
 
                             kernelExceptionEvent.SetResponse(
@@ -651,7 +654,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             statusCode := nethttp.StatusInternalServerError
             message := "internal server error"
             if true == debugMode {
-                message = eventKernelControllerErr.Error()
+                message = debugErrorMessage(eventKernelControllerErr)
             }
 
             closeDiscardedResponseBody(kernelControllerEvent.Response(), requestLogger)
@@ -702,15 +705,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         finalResponse = response
 
         if nil != finalHandlerErr {
-            requestLogger.Error(
-                "controller handler error",
-                exception.LogContext(
-                    finalHandlerErr,
-                    exceptioncontract.Context{
-                        "path": request.URL.Path,
-                    },
-                ),
-            )
+            logHandlerError(requestLogger, "controller handler error", finalHandlerErr, request)
 
             kernelExceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, finalHandlerErr)
             instance.dispatchEventKernelException(kernelExceptionEvent, runtimeInstance, requestLogger, eventDispatcher)
@@ -727,7 +722,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             if nil == kernelExceptionEvent.Response() {
                 message := "internal server error"
                 if true == debugMode {
-                    message = finalHandlerErr.Error()
+                    message = debugErrorMessage(finalHandlerErr)
                 }
 
                 kernelExceptionEvent.SetResponse(
@@ -834,6 +829,42 @@ func (instance *Kernel) requestIdLogger(
     }
 
     return requestLogger, requestId, nil
+}
+
+/* logHandlerError files the one record for a handler-returned failure, under the discipline the panic recovery and the exception listener already share: an error something upstream already logged is not filed again, a deliberate 4xx is a refusal recorded at warning, a client's own cancellation is named for what it is, and everything else keeps the error level. The record marks the error, so the exception listener attaches its request coordinates to it instead of filing the same failure a second time — without the mark every handler failure produced two records, the first at error even for a routine 404 or 429.
+
+A handler that honours its context and returns the request context's own cancellation is reporting the client's disconnect, not a fault of its own: recorded at error it paged the operator for every abandoned slow request, in a record that read exactly like a genuine handler failure. */
+func logHandlerError(requestLogger loggingcontract.Logger, message string, handlerErr error, httpRequest *nethttp.Request) {
+    if true == exception.IsAlreadyLogged(handlerErr) {
+        return
+    }
+
+    path := ""
+    if nil != httpRequest && nil != httpRequest.URL {
+        path = httpRequest.URL.Path
+    }
+
+    logContext := exception.LogContext(
+        handlerErr,
+        exceptioncontract.Context{
+            "path": path,
+        },
+    )
+
+    clientCancelled := true == errors.Is(handlerErr, context.Canceled) &&
+        nil != httpRequest && nil != httpRequest.Context().Err()
+
+    httpException := exception.AsHttpException(handlerErr)
+
+    if true == clientCancelled {
+        requestLogger.Warning("request cancelled by client", logContext)
+    } else if nil != httpException && nethttp.StatusInternalServerError > httpException.StatusCode() {
+        requestLogger.Warning(message, logContext)
+    } else {
+        requestLogger.Error(message, logContext)
+    }
+
+    _ = exception.MarkLogged(handlerErr)
 }
 
 func (instance *Kernel) logEventDispatchError(

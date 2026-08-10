@@ -173,3 +173,29 @@ func TestRenderErrorResponse_BaseKeysWinACollisionWithTheExtras(t *testing.T) {
         t.Fatalf("expected the extra key to be carried, got %v", payload["detail"])
     }
 }
+
+/* the renderer is consulted from inside the recovery defer: an application serializer that panics on the error payload must cost its representation, never the response — the contained panic degrades to the json fallback under the door's own "an error response always exists". */
+func TestSerializeErrorPayloadSafely_ContainsAPanickingSerializer(t *testing.T) {
+    _, serializeErr := serializeErrorPayloadSafely(&panickingSerializer{}, map[string]any{"error": "boom"})
+    if nil == serializeErr {
+        t.Fatal("expected the contained panic to answer as the error the caller degrades on")
+    }
+
+    if false == strings.Contains(serializeErr.Error(), "serialization panicked") {
+        t.Fatalf("expected the error to name the contained panic, got %q", serializeErr.Error())
+    }
+}
+
+type panickingSerializer struct{}
+
+func (instance *panickingSerializer) Serialize(value any) ([]byte, error) {
+    panic("serializer died on the error payload")
+}
+
+func (instance *panickingSerializer) Deserialize(payload []byte, target any) error {
+    return nil
+}
+
+func (instance *panickingSerializer) ContentType() string {
+    return "application/x-panic"
+}

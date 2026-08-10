@@ -182,14 +182,14 @@ func (instance *Provider) Open(resolver containercontract.Resolver) (*bun.DB, er
     return instance.OpenContext(context.Background(), resolver)
 }
 
-/* OpenContext opens under the caller's context: the retry sleeps watch it alongside the clock, so a shutdown that cancels the context reaches a retry loop in flight instead of sleeping through the whole retry budget. A nil context reads as context.Background(), which is exactly Open. */
+/* OpenContext opens under the caller's context: an already-cancelled context is refused before the attempt, the retry sleeps watch it alongside the clock, and the configuration hook and the boot ping derive their budgets from it. The one step outside its reach is the dialect handshake bun performs at construction, which queries the server under no caller context and is bounded by the connect timeout alone — so a cancellation arriving mid-attempt is honoured at the next cancellable step rather than instantly. A nil context reads as context.Background(), which is exactly Open. */
 func (instance *Provider) OpenContext(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error) {
     if nil == ctx {
         ctx = context.Background()
     }
 
     if nil == instance.retryConfig {
-        return instance.open(resolver)
+        return instance.open(ctx, resolver)
     }
 
     return instance.openWithRetry(ctx, resolver)
@@ -254,7 +254,7 @@ func (instance *Provider) openWithRetry(ctx context.Context, resolver containerc
     for {
         attempt = attempt + 1
 
-        database, openErr := instance.open(resolver)
+        database, openErr := instance.open(ctx, resolver)
         if nil == openErr {
             if 1 < attempt {
                 logger.Info(
@@ -323,7 +323,16 @@ func (instance *Provider) openWithRetry(ctx context.Context, resolver containerc
     }
 }
 
-func (instance *Provider) open(resolver containercontract.Resolver) (*bun.DB, error) {
+func (instance *Provider) open(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error) {
+    /* an already-cancelled context is refused before the attempt: the dialect handshake bun performs at construction queries the server outside any caller context, bounded by the connect timeout alone, so without this refusal a shutdown-cancelled lazy open still paid one full dial against a database that no longer matters. */
+    if ctxErr := ctx.Err(); nil != ctxErr {
+        return nil, exception.NewError(
+            "database open cancelled before the attempt",
+            nil,
+            ctxErr,
+        )
+    }
+
     configuration := config.ConfigMustFromResolver(resolver)
 
     /* the provider is the component told authoritatively which parameter holds the credential, so it arms the framework's own redaction for it — the introspection output masks the password and every template derived from it, without the application repeating the knowledge */
@@ -354,10 +363,10 @@ func (instance *Provider) open(resolver containercontract.Resolver) (*bun.DB, er
     driverConfig.WriteTimeout = timeoutConfig.WriteTimeout
 
     if nil != instance.postBuildHook {
-        hookContext := context.Background()
+        hookContext := ctx
         hookCancel := func() {}
         if 0 < timeoutConfig.ConnectTimeout {
-            hookContext, hookCancel = context.WithTimeout(context.Background(), timeoutConfig.ConnectTimeout)
+            hookContext, hookCancel = context.WithTimeout(ctx, timeoutConfig.ConnectTimeout)
         }
         defer hookCancel()
 
@@ -389,10 +398,10 @@ func (instance *Provider) open(resolver containercontract.Resolver) (*bun.DB, er
 
     database := bun.NewDB(sqlDatabase, mysqldialect.New())
 
-    pingContext := context.Background()
+    pingContext := ctx
     pingCancel := func() {}
     if 0 < timeoutConfig.ConnectTimeout {
-        pingContext, pingCancel = context.WithTimeout(context.Background(), timeoutConfig.ConnectTimeout)
+        pingContext, pingCancel = context.WithTimeout(ctx, timeoutConfig.ConnectTimeout)
     }
     defer pingCancel()
 

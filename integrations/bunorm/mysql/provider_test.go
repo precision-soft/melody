@@ -790,3 +790,26 @@ func TestToConnectionContextCarriesThePoolAndTimeoutConfiguration(t *testing.T) 
         }
     }
 }
+
+/* the hook and the ping derive their budgets from the caller's context: an already-cancelled OpenContext must fail at the attempt in flight instead of waiting a full connect budget out against an unreachable host. */
+func TestOpenContext_ACancelledContextReachesTheAttemptInFlight(t *testing.T) {
+    provider := newTestProvider().
+        WithTimeoutConfig(NewTimeoutConfig(10*time.Second, 10*time.Second, 10*time.Second))
+
+    resolver := newStubResolver("203.0.113.1", "3306", "melody", "melody", "melody")
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    started := time.Now()
+    _, openErr := provider.OpenContext(cancelledContext, resolver)
+    elapsed := time.Since(started)
+
+    if nil == openErr {
+        t.Fatal("expected the cancelled open to fail")
+    }
+
+    if 2*time.Second < elapsed {
+        t.Fatalf("expected the cancellation to reach the attempt in flight, waited %v", elapsed)
+    }
+}

@@ -1529,6 +1529,7 @@ type levelRecordingLogger struct {
     loggingcontract.Logger
     warningMessages []string
     debugMessages   []string
+    infoMessages    []string
 }
 
 func (instance *levelRecordingLogger) Warning(message string, context exceptioncontract.Context) {
@@ -3047,4 +3048,101 @@ func TestFileServer_SetterAfterConstructionDoesNotReachTheBuiltServer(t *testing
     if false == served {
         t.Fatalf("expected the built server to keep serving under its construction-time configuration")
     }
+}
+
+func (instance *levelRecordingLogger) Info(message string, context exceptioncontract.Context) {
+    instance.infoMessages = append(instance.infoMessages, message)
+}
+
+/* the non-retrieval method is ordinary control flow for a globally mounted middleware — every POST in the application takes this exit — and is recorded at debug, the level logOpenFailure's own comment reserves for the per-request ordinary case; at info it doubled the journal of every api request. Both textual halves answer alike. */
+func TestFileServer_ANonRetrievalMethodIsRecordedAtDebugOnTheStreamingHalf(t *testing.T) {
+    logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
+
+    server := newRefusingFileServer(fs.ErrNotExist)
+
+    _, _, _, _, served := server.serveForStreaming(
+        testhelper.NewHttpTestRequest(http.MethodPost, "http://example.com/app.css"),
+        logger,
+    )
+
+    if true == served {
+        t.Fatal("expected the non-retrieval method not to be served")
+    }
+
+    if 0 != len(logger.infoMessages) {
+        t.Fatalf("expected no info record for the ordinary exit, got %v", logger.infoMessages)
+    }
+
+    if 1 != len(logger.debugMessages) || "static serve method not eligible" != logger.debugMessages[0] {
+        t.Fatalf("expected the debug record naming the exit, got %v", logger.debugMessages)
+    }
+}
+
+func TestFileServer_ANonRetrievalMethodIsRecordedAtDebugOnTheBufferedHalf(t *testing.T) {
+    logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
+
+    server := newRefusingFileServer(fs.ErrNotExist)
+
+    _, _, _, served := server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodPost, "http://example.com/app.css"),
+        logger,
+    )
+
+    if true == served {
+        t.Fatal("expected the non-retrieval method not to be served")
+    }
+
+    if 0 != len(logger.infoMessages) {
+        t.Fatalf("expected no info record for the ordinary exit, got %v", logger.infoMessages)
+    }
+
+    if 1 != len(logger.debugMessages) || "static serve method not eligible" != logger.debugMessages[0] {
+        t.Fatalf("expected the debug record naming the exit, got %v", logger.debugMessages)
+    }
+}
+
+/* every request outside the mounted prefix takes the mismatch exit, so it is recorded at debug for the reason the ordinary miss is. */
+func TestFileServer_AStripPrefixMismatchIsRecordedAtDebug(t *testing.T) {
+    logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
+
+    server := &FileServer{
+        config: NewFileServerConfig(
+            ModeFilesystem,
+            "/does-not-matter",
+            "index.html",
+            "/assets",
+            false,
+            0,
+            false,
+        ),
+        fileSystem: &refusingFileSystem{openErr: fs.ErrNotExist},
+    }
+
+    _, _, _, _, served := server.serveForStreaming(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/api/orders"),
+        logger,
+    )
+
+    if true == served {
+        t.Fatal("expected the out-of-prefix path not to be served")
+    }
+
+    if 0 != len(logger.infoMessages) {
+        t.Fatalf("expected no info record for the ordinary exit, got %v", logger.infoMessages)
+    }
+
+    if 1 != len(logger.debugMessages) || "static serve strip prefix mismatch" != logger.debugMessages[0] {
+        t.Fatalf("expected the debug record naming the exit, got %v", logger.debugMessages)
+    }
+}
+
+/* nil options are refused by name: the default here would be a live file server over "public", and a wiring mistake must not start serving files nobody asked served. */
+func TestNewFileServer_RefusesNilOptionsByName(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            NewFileServer(nil)
+        },
+        "options are required for the static file server",
+    )
 }

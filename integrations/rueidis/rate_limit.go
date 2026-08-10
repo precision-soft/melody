@@ -2,6 +2,7 @@ package rueidis
 
 import (
     "context"
+    "errors"
     "strconv"
     "time"
 
@@ -153,6 +154,15 @@ func (instance *RateLimiter) allow(callContext context.Context, key string) (boo
 
     count, resultErr := result.AsInt64()
     if nil != resultErr {
+        /* the caller's own cancellation is not a store failure: a client that disconnected while the round trip was in flight surfaces here as the context's cancellation, and labelled a store failure it read as a redis outage against a perfectly healthy store. The failure-mode answer applies either way — the request is already gone — but the error names what actually happened. The call-timeout deadline stays a store failure: that budget exists to catch the store being slow. */
+        if true == errors.Is(resultErr, context.Canceled) {
+            return FailureModeOpen == instance.failureMode, exception.NewError(
+                "redis rate limiter call cancelled by the caller",
+                map[string]any{"key": key, "failureMode": string(instance.failureMode)},
+                resultErr,
+            )
+        }
+
         return FailureModeOpen == instance.failureMode, exception.NewError(
             "redis rate limiter store failure",
             map[string]any{"key": key, "failureMode": string(instance.failureMode)},

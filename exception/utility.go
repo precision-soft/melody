@@ -2,6 +2,7 @@ package exception
 
 import (
     "errors"
+    "fmt"
     "reflect"
 
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
@@ -47,7 +48,7 @@ func LogContext(err error, extra ...exceptioncontract.Context) exceptioncontract
     }
 
     context := exceptioncontract.Context{
-        "error": err.Error(),
+        "error": renderErrorText(err),
     }
 
     var provider exceptioncontract.ContextProvider
@@ -78,7 +79,7 @@ func LogContext(err error, extra ...exceptioncontract.Context) exceptioncontract
                     context["causeChain"] = causeChain
                 }
             } else if false == hasCause {
-                context["cause"] = causeErr.Error()
+                context["cause"] = renderErrorText(causeErr)
             }
         }
 
@@ -160,6 +161,20 @@ func FromErrorWithLevelAndContext(err error, level loggingcontract.Level, contex
     return newWithLevel(err.Error(), mergedContext, err, level)
 }
 
+/* renderErrorText produces the loggable text of an error under a recover: LogContext runs inside recovery defers, where a value whose Error() panics — often on the very nil field that made it panic-worthy in the first place — would raise a second panic past the recovery that is reporting the first, and the connection was reset with the original failure reaching no record at all. The container teardown's close-error rendering makes the same trade for the same reason. */
+func renderErrorText(err error) (text string) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            return
+        }
+
+        text = fmt.Sprintf("error message panicked: %v", recoveredValue)
+    }()
+
+    return err.Error()
+}
+
 /* MarkLogged marks the nearest AlreadyLogged implementer in the chain — the depth IsAlreadyLogged reads the mark back from — and returns the error unchanged. */
 func MarkLogged(err error) error {
     if nil == err || true == isNilInterfaceValue(err) {
@@ -211,7 +226,7 @@ func BuildCauseChain(causeErr error, maxDepth int) []string {
     }
 
     if 0 >= maxDepth {
-        return []string{causeErr.Error()}
+        return []string{renderErrorText(causeErr)}
     }
 
     capacity := maxDepth
@@ -228,7 +243,7 @@ func BuildCauseChain(causeErr error, maxDepth int) []string {
             break
         }
 
-        chain = append(chain, current.Error())
+        chain = append(chain, renderErrorText(current))
         current = errors.Unwrap(current)
     }
 

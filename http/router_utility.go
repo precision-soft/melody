@@ -2,6 +2,7 @@ package http
 
 import (
     "errors"
+    "fmt"
     "io"
     "io/fs"
     "net"
@@ -9,6 +10,7 @@ import (
     "net/netip"
     "reflect"
     "strings"
+    "syscall"
 
     "github.com/precision-soft/melody/exception"
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
@@ -370,22 +372,72 @@ func writeResponse(
     /* a handler that streamed its own response (for example Server-Sent Events) has already committed the headers; whether it then returned no response or failed after committing, skip writing so we do not emit a superfluous WriteHeader over the in-flight stream. */
     if true == responseIsDiscarded {
         closeDiscardedResponseBody(response, logging.LoggerFromRuntime(runtimeInstance))
+
+        /* the returned response feeds the terminate event and the access log, and for a stream the truth lives on the connection, not in the synthetic response the kernel substituted: without this the journal recorded 204 for every streamed 200 and a rendered-but-never-written 500 for a panic mid-stream, so status-distribution queries over the access log were wrong for every streaming route. A hijacked connection records no status and keeps the substitute. */
+        if statusRecorder, isStatusRecorder := writer.(committedStatusRecorder); true == isStatusRecorder {
+            if committedStatus := statusRecorder.CommittedStatusCode(); 0 < committedStatus && committedStatus != response.StatusCode() {
+                return EmptyResponse(committedStatus)
+            }
+        }
+
         return response
     }
 
     err := WriteToHttpResponseWriter(runtimeInstance, request, writer, response)
     if nil != err {
-        /* the headers (and part of the body) may already be committed by the failed write, so a panic cannot produce a better response — and on the panic-recovery path it would escape ServeHttp and reset the connection; log and return instead */
+        /* the headers (and part of the body) may already be committed by the failed write, so a panic cannot produce a better response — and on the panic-recovery path it would escape ServeHttp and reset the connection; log and return instead. A client that walked away mid-write is the routine case and is recorded at warning: net/http suppresses this class entirely, and at error every impatient download paged the operator. The record carries the method and path either way, so it can name the route it happened on. */
         logger := logging.LoggerFromRuntime(runtimeInstance)
         if nil != logger {
-            logger.Error(
-                "failed to write response",
-                exception.LogContext(err),
-            )
+            writeLogContext := exceptioncontract.Context{}
+            if nil != request && nil != request.HttpRequest() {
+                writeLogContext["method"] = request.HttpRequest().Method
+                writeLogContext["path"] = request.HttpRequest().URL.Path
+            }
+
+            if true == isClientAbortWriteError(request, err) {
+                logger.Warning(
+                    "failed to write response; client disconnected",
+                    exception.LogContext(err, writeLogContext),
+                )
+            } else {
+                logger.Error(
+                    "failed to write response",
+                    exception.LogContext(err, writeLogContext),
+                )
+            }
         }
     }
 
     return response
+}
+
+/* closeResponseBodySafely contains a Close that panics: closeDiscardedResponseBody runs inside the kernel's recovery defer, where a body whose Close dereferences the state the panic invalidated would raise a second panic past the recovery and reset the connection with nothing served — the failure is worth a record, never the response. */
+func closeResponseBodySafely(closer io.Closer) (closeErr error) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            return
+        }
+
+        closeErr = exception.NewError(
+            "response body close panicked",
+            exceptioncontract.Context{
+                "value": fmt.Sprintf("%v", recoveredValue),
+            },
+            nil,
+        )
+    }()
+
+    return closer.Close()
+}
+
+/* isClientAbortWriteError classifies a response-write failure the client caused rather than the server: the request context net/http cancels the moment the peer disconnects, and the broken-pipe and connection-reset errors a write to a gone peer answers with. Everything else stays a server-side write failure. */
+func isClientAbortWriteError(request httpcontract.Request, err error) bool {
+    if nil != request && nil != request.HttpRequest() && nil != request.HttpRequest().Context().Err() {
+        return true
+    }
+
+    return true == errors.Is(err, syscall.EPIPE) || true == errors.Is(err, syscall.ECONNRESET)
 }
 
 /* republishedSession prefers the session a handler published on the request over the one the kernel captured before routing, so rotating the session id (the session-fixation defence) reaches the store and the Set-Cookie. */
@@ -511,7 +563,7 @@ func closeDiscardedResponseBody(response httpcontract.Response, logger loggingco
         return
     }
 
-    closeErr := closer.Close()
+    closeErr := closeResponseBodySafely(closer)
     if nil == closeErr || nil == logger {
         return
     }
@@ -537,6 +589,7 @@ func detectScheme(request *nethttp.Request) string {
     )
 }
 
+/* detectSchemeWithForwardedHeadersPolicy believes X-Forwarded-Proto only when the direct peer is a trusted proxy, and then reads the leftmost entry — the scheme the client-facing hop received. That convention is only as trustworthy as the edge's handling of the header: a trusted edge must SET X-Forwarded-Proto, overwriting whatever arrived, because an edge that merely appends leaves the client's own spelling leftmost and the client then chooses the scheme — the Secure attribute of every cookie this response sets included. The X-Forwarded-For reader can walk its chain right-to-left skipping trusted addresses; the proto entries carry no addresses to skip by, so overwrite-at-the-edge is the deployment's half of this contract. */
 func detectSchemeWithForwardedHeadersPolicy(request *nethttp.Request, policy httpcontract.ForwardedHeadersPolicy) string {
     if nil == request {
         return "http"

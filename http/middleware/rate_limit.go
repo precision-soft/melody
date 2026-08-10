@@ -1,6 +1,8 @@
 package middleware
 
 import (
+    "context"
+    "errors"
     "fmt"
     "math"
     "net"
@@ -445,13 +447,20 @@ func RateLimitMiddleware(config *RateLimitConfig) httpcontract.Middleware {
                 var allowErr error
                 allowed, allowErr = runtimeLimiter.AllowWithRuntime(runtimeInstance, key)
                 if nil != allowErr {
-                    /* the returned allowed value already reflects the limiter's failure policy; the middleware only reports the store failure */
+                    /* the returned allowed value already reflects the limiter's failure policy; the middleware only reports the store failure. A failure that is the caller's own cancellation — the client disconnected while the limiter's round trip was in flight — is recorded at warning under its own name, because at error it read as a store outage and paged the operator for a client hanging up. */
                     logger := logging.LoggerFromRuntime(runtimeInstance)
                     if nil != logger {
-                        logger.Error(
-                            "rate limiter store failure",
-                            exception.LogContext(allowErr, exceptioncontract.Context{"key": key}),
-                        )
+                        if true == errors.Is(allowErr, context.Canceled) {
+                            logger.Warning(
+                                "rate limiter call cancelled",
+                                exception.LogContext(allowErr, exceptioncontract.Context{"key": key}),
+                            )
+                        } else {
+                            logger.Error(
+                                "rate limiter store failure",
+                                exception.LogContext(allowErr, exceptioncontract.Context{"key": key}),
+                            )
+                        }
                     }
                 }
             } else {

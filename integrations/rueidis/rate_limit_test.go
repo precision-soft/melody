@@ -3,6 +3,7 @@ package rueidis
 import (
     "context"
     "os"
+    "strings"
     "testing"
     "time"
 
@@ -233,5 +234,24 @@ func TestRateLimiter_PositiveCallTimeoutIsKept(t *testing.T) {
 
     if 750*time.Millisecond != instance.callTimeout {
         t.Fatalf("expected a positive call timeout to be kept, got %v", instance.callTimeout)
+    }
+}
+
+/* the caller's own cancellation is named apart from a store failure: labelled a store failure it read as a redis outage against a healthy store, and the operator chased an outage that was a client hanging up. */
+func TestRateLimiter_TheCallersCancellationIsNotAStoreFailure(t *testing.T) {
+    client := rateLimiterTestClient(t)
+
+    limiter := NewRateLimiter(client, 5, time.Minute)
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    _, allowErr := limiter.allow(cancelledContext, "cancel-classification")
+    if nil == allowErr {
+        t.Fatal("expected the cancelled call to fail")
+    }
+
+    if false == strings.Contains(allowErr.Error(), "cancelled by the caller") {
+        t.Fatalf("expected the cancellation named apart from a store failure, got %q", allowErr.Error())
     }
 }

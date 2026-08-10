@@ -46,7 +46,7 @@ func NewManagerRegistry(resolver containercontract.Resolver, providerDefinitions
     return NewManagerRegistryWithContext(context.Background(), resolver, providerDefinitions...)
 }
 
-/* NewManagerRegistryWithContext additionally binds the registry to the given context: a provider that implements ContextOpener has its lazy opens run under it, so a shutdown that cancels the context reaches a dial or a retry sleep in flight. A nil context reads as context.Background(), the exact behaviour of NewManagerRegistry. */
+/* NewManagerRegistryWithContext additionally binds the registry to the given context: a provider that implements ContextOpener has its lazy opens run under it, so a shutdown that cancels the context refuses an open not yet started, reaches the attempt's cancellable steps — the configuration hook, the boot ping, a retry sleep — in flight, and pays at most the dialect handshake bun bounds by the connect timeout. A nil context reads as context.Background(), the exact behaviour of NewManagerRegistry. */
 func NewManagerRegistryWithContext(ctx context.Context, resolver containercontract.Resolver, providerDefinitions ...ProviderDefinition) (*ManagerRegistry, error) {
     if true == isNilInterface(resolver) {
         return nil, ErrResolverIsRequired

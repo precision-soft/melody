@@ -214,3 +214,19 @@ func TestForwardedClientIpResolver_BracketedAndBareIpv6KeyTheSameClient(t *testi
         t.Fatalf("a ported ipv6 hop must key the same bucket as its bare form: %q vs %q", ported, bare)
     }
 }
+
+/* the closure reads the trusted list on every request: retained live, a caller reusing its slice rewrote the trust decision mid-serving — the same rule Kernel.SetForwardedHeadersPolicy applies to the same list. */
+func TestForwardedClientIpResolver_CopiesTheTrustedProxyListAtConstruction(t *testing.T) {
+    trustedProxyList := []string{"10.0.0.0/8"}
+    resolver := NewForwardedClientIpResolver(httpcontract.ForwardedHeadersPolicy{
+        TrustForwardedHeaders: true,
+        TrustedProxyList:      trustedProxyList,
+    })
+
+    trustedProxyList[0] = "192.0.2.0/24"
+
+    clientIp := resolver(forwardedRequest("10.0.0.1:4711", "203.0.113.9"))
+    if "203.0.113.9" != clientIp {
+        t.Fatalf("expected the construction-time trusted list to keep deciding, got %q", clientIp)
+    }
+}

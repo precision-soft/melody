@@ -81,3 +81,26 @@ func TestNewInactiveMiddleware_CarriesBothHalvesOfTheExplanation(t *testing.T) {
         t.Fatalf("unexpected reason: %q", inactive.Reason())
     }
 }
+
+/* the constraint lists are copied at construction: a registrant reusing its slice across definitions — or mutating it after registration — silently rewrote the ordering constraints the pipeline was registered under. */
+func TestNewHttpMiddlewareDefinition_CopiesTheConstraintLists(t *testing.T) {
+    before := []string{"cors"}
+
+    definition := NewHttpMiddlewareDefinition(
+        "candidate",
+        0,
+        before,
+        nil,
+        nil,
+        nil,
+        nil,
+        false,
+        false,
+    )
+
+    before[0] = "session"
+
+    if "cors" != definition.before[0] {
+        t.Fatalf("expected the registered constraint untouched, got %q", definition.before[0])
+    }
+}

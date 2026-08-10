@@ -6,6 +6,7 @@ import (
     containercontract "github.com/precision-soft/melody/container/contract"
 )
 
+/* ForwardedHeadersPolicy decides whether forwarded headers from the direct peer are believed. The doors that accept it — Kernel.SetForwardedHeadersPolicy, the forwarded client-ip resolver — copy TrustedProxyList rather than retain the caller's slice, so the trust decision every request reads cannot be rewritten from outside after the hand-over. X-Forwarded-Proto is honoured by its leftmost entry, which is only trustworthy when the trusted edge SETS the header, overwriting whatever the client sent; an edge that appends leaves the client's spelling leftmost and the client then chooses the scheme. */
 type ForwardedHeadersPolicy struct {
     TrustForwardedHeaders bool
     TrustedProxyList      []string

@@ -2,6 +2,7 @@ package cache
 
 import (
     "container/list"
+    "sort"
     "strconv"
     "strings"
     "sync"
@@ -381,7 +382,14 @@ func (instance *InMemoryBackend) SetMultiple(items map[string][]byte, ttl time.D
         return negativeTtlError(ttl)
     }
 
+    /* the keys are validated in sorted order, not map order: a batch carrying two malformed keys used to name a different one on every call, and the same wrong batch must answer the same refusal every time — the rule the redis backend's batch reporting already follows */
+    keys := make([]string, 0, len(items))
     for key := range items {
+        keys = append(keys, key)
+    }
+    sort.Strings(keys)
+
+    for _, key := range keys {
         if keyErr := validateKey(key); nil != keyErr {
             return keyErr
         }

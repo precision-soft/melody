@@ -374,18 +374,40 @@ func (instance *RunnerCommand) dispatchDue(
             defer instance.inFlight.Done()
             defer launched.Done()
 
-            if invokeErr := instance.invoke(runtimeInstance, launchedEntry); nil != invokeErr {
+            if runId, invokeErr := instance.invoke(runtimeInstance, launchedEntry); nil != invokeErr {
+                /* a command that watched its context and unwound when the shutdown cancelled it did exactly what the runner's own GoDoc asks of it: that is the clean stop, not a job failure. Counted as one, every SIGTERM with a job in flight filed an error record and failed the --once run, indistinguishable from a genuinely broken job — so the parent's cancellation is recorded at warning, named, and kept out of the failure aggregate. A deadline the entry asked for stays a failure. */
+                if true == isShutdownCancellation(runtimeInstance, invokeErr) {
+                    if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
+                        logger.Warning(
+                            "cron: scheduled command cancelled by shutdown",
+                            exception.LogContext(
+                                invokeErr,
+                                exceptioncontract.Context{
+                                    "commandName": launchedEntry.commandName,
+                                    "cronRunId":   runId,
+                                },
+                            ),
+                        )
+                    }
+
+                    return
+                }
+
                 failureMutex.Lock()
                 failedCommands = append(failedCommands, launchedEntry.commandName)
                 failures = append(failures, invokeErr)
                 failureMutex.Unlock()
 
+                /* the record carries the cronRunId the run's own records carry: the id is minted precisely so overlapping runs of one entry stay distinguishable, and a failure record tied to neither stream defeated it at the one moment it matters */
                 if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
                     logger.Error(
                         "cron runner command failed",
                         exception.LogContext(
                             invokeErr,
-                            exceptioncontract.Context{"commandName": launchedEntry.commandName},
+                            exceptioncontract.Context{
+                                "commandName": launchedEntry.commandName,
+                                "cronRunId":   runId,
+                            },
                         ),
                     )
                 }
@@ -479,7 +501,10 @@ func reconcileWallClock(previousTarget time.Time, current time.Time) ([]minuteEv
 The command runs on its own goroutine, which is what lets the deadline be enforced against a command that never looks at its context. The escalation is deliberate and has three steps. The deadline cancels the command's context — a signal, not a kill. A command that watches it unwinds inside the graceful window and has its own error reported together with the timeout, which is the path essentially every command takes. Only a command that ignores the cancellation reaches the third step: once the window lapses the run is abandoned, the failure is reported at warning naming the entry and how long it overran, the scope is closed under it, and it stops counting towards the shutdown wait.
 
 That last step is a kill and is described as one. Closing the scope gives the resources back — the pools, the handles, everything the run built — and the alternative is the leak this exists to stop, one scope and one goroutine per matching minute until the process ends. It is not free of consequence: a scope.Get from the closed scope returns an error, but scope.MustGet panics, and the recover here covers only the goroutine this runner started. A command that hands work to a goroutine of its own and resolves from the scope there can therefore take the process down. That is why the window before the kill is measured in minutes rather than seconds, and why a command whose unwind is legitimately slow should name its own with EntryConfig.GracefulTimeout rather than rely on the default. */
-func (instance *RunnerCommand) invoke(runtimeInstance runtimecontract.Runtime, entry *scheduledRunEntry) (invokeErr error) {
+func (instance *RunnerCommand) invoke(runtimeInstance runtimecontract.Runtime, entry *scheduledRunEntry) (runId string, invokeErr error) {
+    /* the run's id is minted first and returned beside the outcome, so the runner's own records about this run — the failure line, the abandon warning — carry the same cronRunId the run's records carry */
+    runId = logging.GenerateProcessId()
+
     childContext, cancel := commandContextOf(runtimeInstance.Context(), entry.timeout)
     defer cancel()
 
@@ -499,8 +524,7 @@ func (instance *RunnerCommand) invoke(runtimeInstance runtimecontract.Runtime, e
         }
     }()
 
-    /* each run gets the console identity the cli entry point installs into its own scope, because the child scope is a sibling and inherits nothing: a fresh ProcessContext under a per-run id — overlapping runs of one entry stay distinguishable — and a logger derived from the run's own, so the job's records carry the runner's processId AND the run's cronRunId. Without these, a command reading the documented console doors works launched by hand and fails under the scheduler. */
-    runId := logging.GenerateProcessId()
+    /* each run gets the console identity the cli entry point installs into its own scope, because the child scope is a sibling and inherits nothing: a fresh ProcessContext under the per-run id minted above — overlapping runs of one entry stay distinguishable — and a logger derived from the run's own, so the job's records carry the runner's processId AND the run's cronRunId. Without these, a command reading the documented console doors works launched by hand and fails under the scheduler. */
     if runLogger := logging.LoggerFromRuntime(runtimeInstance); nil != runLogger {
         childScope.MustOverrideProtectedInstance(
             logging.ServiceLogger,
@@ -544,19 +568,29 @@ func (instance *RunnerCommand) invoke(runtimeInstance runtimecontract.Runtime, e
     case runErr := <-completed:
         /* a command that returned nil finished its work, whatever the clock did in the same instant; only a failure is attributed to the deadline */
         if nil != runErr && true == errors.Is(childContext.Err(), context.DeadlineExceeded) {
-            return errors.Join(instance.timeoutError(entry, false), runErr)
+            return runId, errors.Join(instance.timeoutError(entry, false), runErr)
         }
 
-        return runErr
+        return runId, runErr
     case <-abandon:
-        return instance.resolveAbandonedRun(runtimeInstance, entry, childContext, completed)
+        return runId, instance.resolveAbandonedRun(runtimeInstance, entry, runId, childContext, completed)
     }
+}
+
+/* isShutdownCancellation classifies a run's failure as the runner's own shutdown reaching it: the runner's context is cancelled and the outcome is the cancellation, not an entry deadline. Only the parent's cancellation qualifies — a deadline the entry asked for stays a failure whatever the shutdown is doing. */
+func isShutdownCancellation(runtimeInstance runtimecontract.Runtime, invokeErr error) bool {
+    if nil == runtimeInstance.Context().Err() {
+        return false
+    }
+
+    return true == errors.Is(invokeErr, context.Canceled) && false == errors.Is(invokeErr, context.DeadlineExceeded)
 }
 
 /* resolveAbandonedRun answers a run whose abandon window lapsed. It reads the completion channel one last time before announcing the kill, because the outer select picks at random between two ready cases: a command that returned in the same instant the timer fired has already done its work, and without this read its outcome would be discarded and the scope reported as closed under running code — by nothing but scheduling luck. The window cannot be produced from the outside, which is why the branch is a function: a test hands it a channel that already carries the answer. */
 func (instance *RunnerCommand) resolveAbandonedRun(
     runtimeInstance runtimecontract.Runtime,
     entry *scheduledRunEntry,
+    runId string,
     childContext context.Context,
     completed <-chan error,
 ) error {
@@ -576,6 +610,7 @@ func (instance *RunnerCommand) resolveAbandonedRun(
             "cron: scheduled command ignored its cancelled context for the whole graceful window and is being abandoned; its container scope is closed under it while it may still be running",
             exceptioncontract.Context{
                 "commandName":     entry.commandName,
+                "cronRunId":       runId,
                 "timeout":         entry.timeout.String(),
                 "gracefulTimeout": instance.gracefulTimeoutOf(entry).String(),
             },

@@ -139,7 +139,7 @@ func LogOnRecoverAndExitAfter(
         return
     }
 
-    err, resolvedExitCode, needsLogging := resolveRecoveredExit(recovered, exitCode)
+    err, resolvedExitCode, needsLogging := resolveRecoveredExitShielded(recovered, exitCode)
 
     /* every step between the recovery and the exit runs under its own recover: this is the last handler of the process, so a second panic must cost only its own step, never the resolved exit code, the stderr echo or os.Exit itself */
     if true == needsLogging {
@@ -198,6 +198,28 @@ func runExitStepShielded(stepName string, step func()) {
 }
 
 /* resolveRecoveredExit normalizes a recovered value into the error the exit reports, the exit code the process takes, and whether that error still needs logging. An ExitError carries its own code; one holding no error value is given an error naming the anomaly instead of dereferencing nil inside the one handler that must not panic. A typed-nil exception is the value someone panicked with and is normalized as a plain panic value under the caller's code. */
+/* resolveRecoveredExitShielded contains a recovered value whose own methods panic — an Error() dereferencing the very nil field that made it panic-worthy, an Unwrap misbehaving under the already-logged probe. The resolve was the one step of this handler that ran outside the per-step shields, against the claim of the comment beside them, and its panic unwound into main: the process died with the Go runtime's exit code 2 — no record, no certificate, no stderr echo, no before-exit teardown. A resolve that panics is answered with a generic record under the caller's own exit code, which is exactly what the caller wired for a failure nothing can identify. */
+func resolveRecoveredExitShielded(recovered any, exitCode int) (err *exception.Error, resolvedExitCode int, needsLogging bool) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            return
+        }
+
+        err = exception.NewEmergency(
+            "recovered panic value could not be resolved",
+            map[string]any{
+                "resolvePanic": fmt.Sprintf("%v", recoveredValue),
+            },
+            nil,
+        )
+        resolvedExitCode = exitCode
+        needsLogging = true
+    }()
+
+    return resolveRecoveredExit(recovered, exitCode)
+}
+
 func resolveRecoveredExit(
     recovered any,
     exitCode int,

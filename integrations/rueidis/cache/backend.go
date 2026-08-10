@@ -387,10 +387,18 @@ func (instance *Backend) SetMultipleCtx(ctx context.Context, items map[string][]
         return nil
     }
 
-    /* the keys are carried alongside the commands because a failing response is identified by position only: the map iterates in a random order, so without this the same two bad items would report a different one on every call, and the caller would learn that a batch failed without learning which of its entries did not land. */
+    /* the batch is walked over sorted keys, never map order: the validation refusal below names the first key it rejects, and a map-ordered walk named a different key for the same wrong batch on every call — the exact nondeterminism the response reporting further down already refuses. The keys are carried alongside the commands because a failing response is identified by position only. */
+    sortedKeys := make([]string, 0, len(items))
+    for key := range items {
+        sortedKeys = append(sortedKeys, key)
+    }
+    sort.Strings(sortedKeys)
+
     commandKeys := make([]string, 0, len(items))
     cmds := make(rueidis.Commands, 0, len(items))
-    for key, payload := range items {
+    for _, key := range sortedKeys {
+        payload := items[key]
+
         normalizedKey, normalizeErr := instance.normalizeKey(key)
         if nil != normalizeErr {
             return normalizeErr
@@ -737,7 +745,19 @@ func (instance *Backend) deleteKeysInBatches(ctx context.Context, keys []string)
 
         batch := keys[startIndex:endIndex]
         if batchErr := instance.firstDeleteFailure(rueidis.MDel(instance.client, ctx, batch)); nil != batchErr {
-            return batchErr
+            /* a multi-batch wipe that fails part-way is described at the operation's own extent, not the batch's: the batches before this one are irreversibly gone, and an error whose counts covered only the failing batch could not say whether the wipe destroyed nothing or nearly everything — a cancellation mid-clear left exactly that ambiguity. A single-batch operation keeps the batch report, whose counts already are the operation's. */
+            if len(keys) <= instance.deleteBatch {
+                return batchErr
+            }
+
+            return exception.NewError(
+                "cache clear failed part-way through its batches",
+                exceptioncontract.Context{
+                    "deletedBeforeFailure": startIndex,
+                    "requestedTotal":       len(keys),
+                },
+                batchErr,
+            )
         }
     }
 

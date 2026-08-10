@@ -289,7 +289,8 @@ func TestCompressionMiddleware_LevelAcceptsBestCompressionBound(t *testing.T) {
     }
 }
 
-func TestCompressionMiddleware_LevelBelowHuffmanOnlyFallsBackToDefault(t *testing.T) {
+/* The normalization lands on the middleware's private copy: the caller's own object keeps the value it was built with, and the served response proves the invalid level was replaced — a gzip writer over the raw invalid level could not produce the encoded body. */
+func TestCompressionMiddleware_LevelBelowHuffmanOnlyFallsBackToDefaultWithoutMutatingTheCallersConfig(t *testing.T) {
     config := NewCompressionConfig(
         gzip.HuffmanOnly-1,
         10,
@@ -297,14 +298,18 @@ func TestCompressionMiddleware_LevelBelowHuffmanOnlyFallsBackToDefault(t *testin
         nil,
     )
 
-    CompressionMiddleware(config)
+    resultResponse := serveCompressibleBodyThrough(t, config)
 
-    if gzip.DefaultCompression != config.Level() {
-        t.Fatalf("expected default level when below HuffmanOnly, got %d", config.Level())
+    if gzip.HuffmanOnly-1 != config.Level() {
+        t.Fatalf("expected the caller's config to keep its own level, got %d", config.Level())
+    }
+
+    if "gzip" != resultResponse.Headers().Get("Content-Encoding") {
+        t.Fatalf("expected the normalized private copy to still serve gzip, got %q", resultResponse.Headers().Get("Content-Encoding"))
     }
 }
 
-func TestCompressionMiddleware_LevelAboveBestCompressionFallsBackToDefault(t *testing.T) {
+func TestCompressionMiddleware_LevelAboveBestCompressionFallsBackToDefaultWithoutMutatingTheCallersConfig(t *testing.T) {
     config := NewCompressionConfig(
         gzip.BestCompression+1,
         10,
@@ -312,11 +317,52 @@ func TestCompressionMiddleware_LevelAboveBestCompressionFallsBackToDefault(t *te
         nil,
     )
 
-    CompressionMiddleware(config)
+    resultResponse := serveCompressibleBodyThrough(t, config)
 
-    if gzip.DefaultCompression != config.Level() {
-        t.Fatalf("expected default level when above BestCompression, got %d", config.Level())
+    if gzip.BestCompression+1 != config.Level() {
+        t.Fatalf("expected the caller's config to keep its own level, got %d", config.Level())
     }
+
+    if "gzip" != resultResponse.Headers().Get("Content-Encoding") {
+        t.Fatalf("expected the normalized private copy to still serve gzip, got %q", resultResponse.Headers().Get("Content-Encoding"))
+    }
+}
+
+/* serveCompressibleBodyThrough runs one gzip-accepting request with a large compressible body through the middleware built from config and answers the resulting response. */
+func serveCompressibleBodyThrough(t *testing.T, config *CompressionConfig) httpcontract.Response {
+    t.Helper()
+
+    middleware := CompressionMiddleware(config)
+
+    handler := middleware(
+        func(
+            runtimeInstance runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            response := &http.Response{}
+            response.SetStatusCode(200)
+            responseHeaders := make(nethttp.Header)
+            responseHeaders.Set("Content-Type", "text/plain")
+            response.SetHeaders(responseHeaders)
+            response.SetBodyReader(bytes.NewReader([]byte(strings.Repeat("hello world ", 200))))
+
+            return response, nil
+        },
+    )
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    request.Header.Set("Accept-Encoding", "gzip")
+
+    resultResponse, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
+    if nil != err {
+        t.Fatalf("expected nil error, got: %v", err)
+    }
+    if nil == resultResponse {
+        t.Fatalf("expected non-nil response")
+    }
+
+    return resultResponse
 }
 
 func TestCompressionMiddleware_AddsVaryAcceptEncodingWhenCompressing(t *testing.T) {
@@ -541,8 +587,9 @@ func TestCompressionMiddleware_NegativeMinSizeIsNormalized(t *testing.T) {
 
     middleware := CompressionMiddleware(config)
 
-    if 0 >= config.MinSize() {
-        t.Fatalf("expected a negative minimum size to be normalized, got %d", config.MinSize())
+    /* the caller's config keeps its own value; the request below succeeding is what proves the private copy was normalized, since the raw negative minimum made the peek arithmetic lie on every request */
+    if -1 != config.MinSize() {
+        t.Fatalf("expected the caller's config to keep its own minimum size, got %d", config.MinSize())
     }
 
     handler := middleware(
@@ -1032,5 +1079,43 @@ func TestCompressionMiddleware_TheGrowingPeekStillCompressesABodyAtTheThreshold(
     decompressed, readErr := io.ReadAll(gzipReader)
     if nil != readErr || payload != string(decompressed) {
         t.Fatalf("expected the grown peek to preserve every byte, len=%d err=%v", len(decompressed), readErr)
+    }
+}
+
+/* nil reads as the default configuration, the way the cors middleware and the route group read their absent options: the nil dereference answered a wiring shorthand with a raw panic. */
+func TestCompressionMiddleware_NilConfigReadsAsTheDefaultConfiguration(t *testing.T) {
+    resultResponse := func() httpcontract.Response {
+        middleware := CompressionMiddleware(nil)
+
+        handler := middleware(
+            func(
+                runtimeInstance runtimecontract.Runtime,
+                writer nethttp.ResponseWriter,
+                request httpcontract.Request,
+            ) (httpcontract.Response, error) {
+                response := &http.Response{}
+                response.SetStatusCode(200)
+                responseHeaders := make(nethttp.Header)
+                responseHeaders.Set("Content-Type", "text/plain")
+                response.SetHeaders(responseHeaders)
+                response.SetBodyReader(bytes.NewReader([]byte(strings.Repeat("hello world ", 200))))
+
+                return response, nil
+            },
+        )
+
+        request := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+        request.Header.Set("Accept-Encoding", "gzip")
+
+        resultResponse, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
+        if nil != err {
+            t.Fatalf("expected nil error, got: %v", err)
+        }
+
+        return resultResponse
+    }()
+
+    if "gzip" != resultResponse.Headers().Get("Content-Encoding") {
+        t.Fatalf("expected the default configuration to serve gzip, got %q", resultResponse.Headers().Get("Content-Encoding"))
     }
 }

@@ -3,6 +3,7 @@ package cache
 import (
     "context"
     "errors"
+    "fmt"
     "reflect"
     "strconv"
     "strings"
@@ -966,5 +967,61 @@ func TestFirstSetFailure_NamesTheSortedFirstKeyAndCountsTheRest(t *testing.T) {
 
     if nil != backend.firstSetFailure(map[string]error{}, 3) {
         t.Fatalf("expected an empty failure map to answer nil")
+    }
+}
+
+/* the validation refusal names the sorted-first malformed key, never a map-iteration choice — the nondeterminism the response reporting further down already refuses. Validation runs before anything is sent, so the batch leaves no trace. */
+func TestSetMultipleCtx_NamesTheSortedFirstMalformedKey(t *testing.T) {
+    backend, _ := liveBackend(t)
+
+    items := map[string][]byte{
+        "zz bad": []byte("z"),
+        "aa bad": []byte("a"),
+        "good":   []byte("g"),
+    }
+
+    for attempt := 0; attempt < 8; attempt++ {
+        setErr := backend.SetMultiple(items, 0)
+        if nil == setErr {
+            t.Fatal("expected the malformed keys to be refused")
+        }
+
+        namedKey := exception.LogContext(setErr)["key"]
+        if "aa bad" != namedKey {
+            t.Fatalf("expected the sorted-first malformed key named, got %v", namedKey)
+        }
+    }
+}
+
+/* a multi-batch wipe that fails part-way answers at the operation's extent — the batches before the failure are irreversibly gone, and the batch's own counts could not say how much of the namespace went with them. A single-batch operation keeps the batch report, whose counts already are the operation's. */
+func TestDeleteKeysInBatches_AMultiBatchFailureReportsTheOperationsExtent(t *testing.T) {
+    backend, _ := liveBackend(t)
+
+    keyCount := backend.deleteBatch + 10
+    keys := make([]string, 0, keyCount)
+    for index := 0; index < keyCount; index++ {
+        keys = append(keys, fmt.Sprintf("%sextent-%05d", backend.prefix, index))
+    }
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    deleteErr := backend.deleteKeysInBatches(cancelledContext, keys)
+    if nil == deleteErr {
+        t.Fatal("expected the cancelled batch walk to fail")
+    }
+
+    extent := exception.LogContext(deleteErr)
+    if nil == extent["deletedBeforeFailure"] || nil == extent["requestedTotal"] {
+        t.Fatalf("expected the operation-level extent on the error, got %v", extent)
+    }
+
+    singleBatchErr := backend.deleteKeysInBatches(cancelledContext, keys[:1])
+    if nil == singleBatchErr {
+        t.Fatal("expected the cancelled single batch to fail")
+    }
+
+    if nil != exception.LogContext(singleBatchErr)["deletedBeforeFailure"] {
+        t.Fatal("expected the single-batch operation to keep the batch report as its own")
     }
 }

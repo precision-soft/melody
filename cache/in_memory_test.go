@@ -9,6 +9,7 @@ import (
     "time"
 
     clockcontract "github.com/precision-soft/melody/clock/contract"
+    "github.com/precision-soft/melody/exception"
 )
 
 func TestInMemoryBackend_SetGet_HappyPath(t *testing.T) {
@@ -1217,5 +1218,29 @@ func TestInMemoryBackend_ANilPayloadReadsBackEmptyNonNil(t *testing.T) {
 
     if nil == payload || 0 != len(payload) {
         t.Fatalf("expected the stored nil to read back as an empty non-nil slice, the redis identity; got nil=%v len=%d", nil == payload, len(payload))
+    }
+}
+
+/* the batch refusal names the sorted-first malformed key, never a map-iteration choice: the same wrong batch answers the same refusal on every call — the rule the redis backend's batch reporting follows. */
+func TestInMemoryBackend_SetMultipleNamesTheSortedFirstMalformedKey(t *testing.T) {
+    backend := NewInMemoryBackend(10, time.Hour, &cacheTestClock{now: time.Unix(10, 0)})
+    defer backend.Close()
+
+    items := map[string][]byte{
+        "zz bad": []byte("z"),
+        "aa bad": []byte("a"),
+        "good":   []byte("g"),
+    }
+
+    for attempt := 0; attempt < 8; attempt++ {
+        setErr := backend.SetMultiple(items, 0)
+        if nil == setErr {
+            t.Fatal("expected the malformed keys to be refused")
+        }
+
+        namedKey := exception.LogContext(setErr)["key"]
+        if "aa bad" != namedKey {
+            t.Fatalf("expected the sorted-first malformed key named, got %v", namedKey)
+        }
     }
 }

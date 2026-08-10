@@ -111,6 +111,13 @@ func DefaultCompressionConfig() *CompressionConfig {
 }
 
 func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
+    /* nil reads as the default configuration, the way the cors middleware and the route group read their absent options — dereferencing it below answered a wiring shorthand with a raw panic where every sibling door answers the defaults. The non-nil configuration is copied before the normalization lands, so the caller's own object is not rewritten by construction — the static file server copies its options at construction for the same reason. */
+    if nil == config {
+        config = DefaultCompressionConfig()
+    } else {
+        config = NewCompressionConfig(config.level, config.minSize, config.excludedContentTypes, config.excludedPaths)
+    }
+
     if gzip.HuffmanOnly > config.Level() || gzip.BestCompression < config.Level() {
         config.SetLevel(gzip.DefaultCompression)
     }

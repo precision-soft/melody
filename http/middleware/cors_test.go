@@ -257,3 +257,11 @@ func TestCorsConfig_AllowOriginFuncIsReportedAndDecidesTheOrigin(t *testing.T) {
         t.Fatalf("expected the reported predicate to refuse an origin it does not name")
     }
 }
+
+/* the deprecated door reads nil as the default service, the reading its replacement gives the same absence; it used to die on the dereference. */
+func TestCorsMiddleware_NilConfigReadsAsTheDefaultService(t *testing.T) {
+    middleware := CorsMiddleware(nil)
+    if nil == middleware {
+        t.Fatal("expected a middleware for the nil config")
+    }
+}

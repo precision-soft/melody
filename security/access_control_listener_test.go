@@ -1,12 +1,17 @@
 package security
 
 import (
+    "context"
     "errors"
     "testing"
 
+    "github.com/precision-soft/melody/container"
     eventcontract "github.com/precision-soft/melody/event/contract"
     httpPkg "github.com/precision-soft/melody/http"
     httpcontract "github.com/precision-soft/melody/http/contract"
+    "github.com/precision-soft/melody/logging"
+    loggingcontract "github.com/precision-soft/melody/logging/contract"
+    "github.com/precision-soft/melody/runtime"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
     securitycontract "github.com/precision-soft/melody/security/contract"
 )
@@ -616,4 +621,55 @@ func TestAccessControlListener_WhenDeniedHandlerFails_KeepsDecisionAsCause(t *te
     if false == errors.Is(capturedErr, decisionSentinel) {
         t.Fatalf("expected the authorization decision to survive as the cause, got %v", capturedErr)
     }
+}
+
+/* the direct 401 leaves one warning naming its reason: it used to complete with no trace at all, while the byte-identical-looking 403 filed a warning — whether the token was absent, unauthenticated, or the security context missing entirely was indistinguishable from the journal. */
+func TestAccessControlListener_ADirect401LeavesOneWarningNamingItsReason(t *testing.T) {
+    kernel := newTestKernel()
+
+    capture := &refusalCaptureLogger{Logger: logging.NewNopLogger()}
+    scope := newTestScope()
+    if overrideErr := scope.OverrideInstance(logging.ServiceLogger, capture); nil != overrideErr {
+        t.Fatalf("could not install the capturing logger: %v", overrideErr)
+    }
+    runtimeInstance := runtime.New(context.Background(), scope, container.NewContainer())
+
+    registry := NewFirewallRegistry(
+        NewCompiledConfiguration(nil, NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN"))),
+    )
+
+    RegisterKernelAccessControlListener(kernel, registry)
+
+    requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, newSecurityTestRequest("GET", "/admin", nil, runtimeInstance))
+
+    _, dispatchErr := kernel.EventDispatcher().DispatchName(runtimeInstance, "kernel.request", requestEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected error: %v", dispatchErr)
+    }
+
+    if nil == requestEvent.Response() || 401 != requestEvent.Response().StatusCode() {
+        t.Fatal("expected the 401 response")
+    }
+
+    if 1 != len(capture.warningRecords) {
+        t.Fatalf("expected exactly one warning record, got %v", capture.warningRecords)
+    }
+
+    if "authorization refused" != capture.warningRecords[0].message || "missing_security_context" != capture.warningRecords[0].context["reason"] {
+        t.Fatalf("expected the refusal named with its reason, got %+v", capture.warningRecords[0])
+    }
+}
+
+type refusalRecord struct {
+    message string
+    context loggingcontract.Context
+}
+
+type refusalCaptureLogger struct {
+    loggingcontract.Logger
+    warningRecords []refusalRecord
+}
+
+func (instance *refusalCaptureLogger) Warning(message string, context loggingcontract.Context) {
+    instance.warningRecords = append(instance.warningRecords, refusalRecord{message: message, context: context})
 }

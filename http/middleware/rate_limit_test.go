@@ -1,6 +1,7 @@
 package middleware
 
 import (
+    "context"
     "fmt"
     "math"
     nethttp "net/http"
@@ -10,10 +11,14 @@ import (
     "time"
 
     "github.com/precision-soft/melody/clock"
+    "github.com/precision-soft/melody/container"
     "github.com/precision-soft/melody/exception"
     "github.com/precision-soft/melody/http"
     httpcontract "github.com/precision-soft/melody/http/contract"
     "github.com/precision-soft/melody/internal/testhelper"
+    "github.com/precision-soft/melody/logging"
+    loggingcontract "github.com/precision-soft/melody/logging/contract"
+    "github.com/precision-soft/melody/runtime"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
@@ -1176,4 +1181,61 @@ func TestRateLimitMiddleware_RefusesANilConfigByName(t *testing.T) {
     }()
 
     _ = RateLimitMiddleware(nil)
+}
+
+/* the middleware's record classifies the caller's cancellation apart from a store failure: at error every disconnect on a rate-limited route paged the operator for a healthy store. */
+func TestRateLimitMiddleware_ACancelledLimiterCallIsRecordedAtWarning(t *testing.T) {
+    capture := &rateLimitCaptureLogger{}
+
+    serviceContainer := container.NewContainer()
+    scope := serviceContainer.NewScope()
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture)
+    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+
+    config := NewRateLimitConfig(&cancellingRuntimeLimiter{}, nil, nil)
+    middleware := RateLimitMiddleware(config)
+
+    handler := middleware(
+        func(
+            innerRuntime runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            return nil, nil
+        },
+    )
+
+    request := testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/limited")
+    _, _ = handler(runtimeInstance, httptest.NewRecorder(), request)
+
+    if 1 != capture.warningCalls || 0 != capture.errorCalls {
+        t.Fatalf("expected one warning and no error for the cancelled call, got %d warnings %d errors", capture.warningCalls, capture.errorCalls)
+    }
+}
+
+type cancellingRuntimeLimiter struct{}
+
+func (instance *cancellingRuntimeLimiter) Allow(key string) bool {
+    return true
+}
+
+func (instance *cancellingRuntimeLimiter) Reset(key string) {
+}
+
+func (instance *cancellingRuntimeLimiter) AllowWithRuntime(runtimeInstance runtimecontract.Runtime, key string) (bool, error) {
+    return true, context.Canceled
+}
+
+type rateLimitCaptureLogger struct {
+    loggingcontract.Logger
+    warningCalls int
+    errorCalls   int
+}
+
+func (instance *rateLimitCaptureLogger) Warning(message string, context loggingcontract.Context) {
+    instance.warningCalls++
+}
+
+func (instance *rateLimitCaptureLogger) Error(message string, context loggingcontract.Context) {
+    instance.errorCalls++
 }

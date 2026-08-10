@@ -79,3 +79,43 @@ func TestSchedule_KeepsTwoEntriesThatShareOneCommandName(t *testing.T) {
         t.Fatal("the second registration must keep its own schedule")
     }
 }
+
+/* Schedule copies the caller's struct: the runner reads deadlines at every run and the generator re-reads fields at every generation, so post-registration mutation of the caller's own object must be inert. */
+func TestConfiguration_ScheduleCopiesTheCallersEntryConfig(t *testing.T) {
+    entryConfig := &EntryConfig{
+        Schedule: &Schedule{Minute: "5"},
+        Command:  []string{"app", "run"},
+        Timeout:  time.Minute,
+    }
+
+    configuration := NewConfiguration().Schedule("job:report", entryConfig)
+
+    entryConfig.Timeout = time.Hour
+    entryConfig.Schedule.Minute = "0"
+    entryConfig.Command[0] = "rewritten"
+
+    registered := configuration.Entries()[0].Config
+    if time.Minute != registered.Timeout {
+        t.Fatalf("expected the registered timeout untouched, got %v", registered.Timeout)
+    }
+
+    if "5" != registered.Schedule.Minute {
+        t.Fatalf("expected the registered schedule untouched, got %q", registered.Schedule.Minute)
+    }
+
+    if "app" != registered.Command[0] {
+        t.Fatalf("expected the registered command untouched, got %q", registered.Command[0])
+    }
+}
+
+/* Entries hands out a copy of the list, so a caller cannot reorder or extend the registry through the inspector. */
+func TestConfiguration_EntriesHandsOutACopyOfTheList(t *testing.T) {
+    configuration := NewConfiguration().Schedule("job:one", &EntryConfig{Schedule: &Schedule{Minute: "*"}})
+
+    entries := configuration.Entries()
+    entries[0] = nil
+
+    if nil == configuration.Entries()[0] {
+        t.Fatal("expected the registry's list untouched by mutation of the handed-out slice")
+    }
+}

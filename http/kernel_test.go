@@ -1,6 +1,7 @@
 package http
 
 import (
+    "context"
     "io"
     nethttp "net/http"
     "net/http/httptest"
@@ -2310,5 +2311,89 @@ func TestKernel_ErrorResponseCarriesTheRequestIdOnce(t *testing.T) {
     successValues := successRecorder.Result().Header.Values(HeaderRequestId)
     if 1 != len(successValues) || "" == successValues[0] {
         t.Fatalf("expected exactly one request id on the success response, got %v", successValues)
+    }
+}
+
+/* the discipline of the one record a handler failure files: an error something upstream already logged files nothing, a deliberate 4xx is a refusal at warning, a 5xx keeps error, the client's own cancellation is named for what it is — and every branch marks the error so the exception listener attaches coordinates instead of filing the failure a second time. */
+func TestLogHandlerError_ADeliberate4xxFilesOneWarningAndMarksTheError(t *testing.T) {
+    capture := &exceptionListenerCaptureLogger{}
+    handlerErr := exception.TooManyRequests("rate limit exceeded")
+
+    logHandlerError(capture, "controller handler error", handlerErr, httptest.NewRequest(nethttp.MethodGet, "/limited", nil))
+
+    if 1 != capture.warningCalls || 0 != capture.errorCalls {
+        t.Fatalf("expected one warning and no error, got %d warnings %d errors", capture.warningCalls, capture.errorCalls)
+    }
+
+    if false == exception.IsAlreadyLogged(handlerErr) {
+        t.Fatal("expected the record to mark the error, so the exception listener does not file it again")
+    }
+}
+
+func TestLogHandlerError_AServerFaultKeepsTheErrorLevel(t *testing.T) {
+    capture := &exceptionListenerCaptureLogger{}
+
+    logHandlerError(capture, "controller handler error", exception.NewError("boom", nil, nil), httptest.NewRequest(nethttp.MethodGet, "/broken", nil))
+
+    if 1 != capture.errorCalls || 0 != capture.warningCalls {
+        t.Fatalf("expected one error and no warning, got %d errors %d warnings", capture.errorCalls, capture.warningCalls)
+    }
+}
+
+func TestLogHandlerError_AnAlreadyLoggedErrorFilesNothing(t *testing.T) {
+    capture := &exceptionListenerCaptureLogger{}
+    handlerErr := exception.NewError("boom", nil, nil)
+    _ = exception.MarkLogged(handlerErr)
+
+    logHandlerError(capture, "controller handler error", handlerErr, httptest.NewRequest(nethttp.MethodGet, "/broken", nil))
+
+    if 0 != capture.errorCalls || 0 != capture.warningCalls {
+        t.Fatalf("expected no record for an already-logged failure, got %d errors %d warnings", capture.errorCalls, capture.warningCalls)
+    }
+}
+
+func TestLogHandlerError_TheRequestContextsOwnCancellationIsAWarningNamingTheClient(t *testing.T) {
+    capture := &exceptionListenerCaptureLogger{}
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+    request := httptest.NewRequest(nethttp.MethodGet, "/slow", nil).WithContext(cancelledContext)
+
+    logHandlerError(capture, "controller handler error", context.Canceled, request)
+
+    if 1 != capture.warningCalls || 0 != capture.errorCalls {
+        t.Fatalf("expected one warning and no error, got %d warnings %d errors", capture.warningCalls, capture.errorCalls)
+    }
+
+    if "request cancelled by client" != capture.lastMessage {
+        t.Fatalf("expected the record to name the client's disconnect, got %q", capture.lastMessage)
+    }
+}
+
+/* a cancellation returned while the request context is alive is NOT the client's disconnect — a handler bug cancelled something of its own — and stays at the error level a genuine fault carries. */
+func TestLogHandlerError_ACancellationWithALiveRequestContextStaysAnError(t *testing.T) {
+    capture := &exceptionListenerCaptureLogger{}
+
+    logHandlerError(capture, "controller handler error", context.Canceled, httptest.NewRequest(nethttp.MethodGet, "/slow", nil))
+
+    if 1 != capture.errorCalls || 0 != capture.warningCalls {
+        t.Fatalf("expected one error and no warning, got %d errors %d warnings", capture.errorCalls, capture.warningCalls)
+    }
+}
+
+/* the trusted proxy list decides every request's proxy trust; retained live, a caller reusing its slice rewrote the decision mid-serving as a data race. The setter copies. */
+func TestSetForwardedHeadersPolicy_CopiesTheTrustedProxyList(t *testing.T) {
+    kernel := NewKernel(NewRouter())
+
+    trustedProxyList := []string{"10.0.0.0/8"}
+    kernel.SetForwardedHeadersPolicy(httpcontract.ForwardedHeadersPolicy{
+        TrustForwardedHeaders: true,
+        TrustedProxyList:      trustedProxyList,
+    })
+
+    trustedProxyList[0] = "0.0.0.0/0"
+
+    if "10.0.0.0/8" != kernel.options.ForwardedHeadersPolicy.TrustedProxyList[0] {
+        t.Fatalf("expected the kernel to keep its own copy of the trusted list, got %q", kernel.options.ForwardedHeadersPolicy.TrustedProxyList[0])
     }
 }

@@ -8,10 +8,13 @@ import (
     "strings"
     "time"
 
+    "github.com/precision-soft/melody/exception"
+    exceptioncontract "github.com/precision-soft/melody/exception/contract"
     httpcontract "github.com/precision-soft/melody/http/contract"
     "github.com/precision-soft/melody/runtime"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
     "github.com/precision-soft/melody/serializer"
+    serializercontract "github.com/precision-soft/melody/serializer/contract"
 )
 
 /* renderErrorResponse builds the framework's error response, and it is the one door every default
@@ -92,7 +95,7 @@ func renderNegotiatedErrorPayload(
         return jsonErrorResponseFromPayload(statusCode, message, payload)
     }
 
-    serializedBytes, serializeErr := serializerInstance.Serialize(payload)
+    serializedBytes, serializeErr := serializeErrorPayloadSafely(serializerInstance, payload)
     if nil != serializeErr {
         return jsonErrorResponseFromPayload(statusCode, message, payload)
     }
@@ -142,4 +145,25 @@ func requestIdFromRequest(request httpcontract.Request) string {
     }
 
     return requestContext.RequestId()
+}
+
+/* serializeErrorPayloadSafely contains a serializer that panics: the renderer is consulted from inside the kernel's recovery defer, where an application serializer dying on the error payload would raise a second panic past the recovery and reset the connection — against the door's own promise that an error response always exists. A panic is answered as the error the caller already degrades on, and the json fallback serves the page. */
+func serializeErrorPayloadSafely(serializerInstance serializercontract.Serializer, payload any) (serializedBytes []byte, serializeErr error) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            return
+        }
+
+        serializedBytes = nil
+        serializeErr = exception.NewError(
+            "error payload serialization panicked",
+            exceptioncontract.Context{
+                "value": fmt.Sprintf("%v", recoveredValue),
+            },
+            nil,
+        )
+    }()
+
+    return serializerInstance.Serialize(payload)
 }

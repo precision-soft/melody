@@ -40,15 +40,36 @@ func NewConfiguration() *Configuration {
     }
 }
 
+/* Schedule copies the entry configuration instead of retaining the caller's pointer: the runner reads an entry's deadlines at every run and the generator re-reads its fields at every generation, so a caller mutating its own struct after registration changed validated behavior mid-process — an unsynchronized write racing the scheduler goroutine's reads. What was registered is what stays in force. */
 func (instance *Configuration) Schedule(commandName string, config *EntryConfig) *Configuration {
     instance.entries = append(instance.entries, &ScheduledCommand{
         CommandName: commandName,
-        Config:      config,
+        Config:      copyEntryConfig(config),
     })
 
     return instance
 }
 
+func copyEntryConfig(config *EntryConfig) *EntryConfig {
+    if nil == config {
+        return nil
+    }
+
+    copied := *config
+
+    if nil != config.Schedule {
+        copiedSchedule := *config.Schedule
+        copied.Schedule = &copiedSchedule
+    }
+
+    if nil != config.Command {
+        copied.Command = append(make([]string, 0, len(config.Command)), config.Command...)
+    }
+
+    return &copied
+}
+
+/* Entries hands out a copy of the list; the entries behind the pointers belong to the registration, private since Schedule copies what it is given. */
 func (instance *Configuration) Entries() []*ScheduledCommand {
-    return instance.entries
+    return append(make([]*ScheduledCommand, 0, len(instance.entries)), instance.entries...)
 }

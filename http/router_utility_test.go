@@ -8,6 +8,8 @@ import (
     "net/http/httptest"
     "reflect"
     "regexp"
+    "strings"
+    "syscall"
     "testing"
 
     containercontract "github.com/precision-soft/melody/container/contract"
@@ -1423,5 +1425,100 @@ func TestWriteResponse_RefusesTheOutOfRangeCodeBeforeTheDelegate(t *testing.T) {
 
     if nethttp.StatusInternalServerError != written.StatusCode() {
         t.Fatalf("expected the returned response to be the rendered 500, got %d", written.StatusCode())
+    }
+}
+
+/* the write-failure record's severity turns on who caused it: the request context net/http cancels on disconnect, and the broken-pipe family a write to a gone peer answers with, classify as the client's abort; everything else stays a server-side failure. */
+func TestIsClientAbortWriteError_ClassifiesTheBrokenPipeAndTheCancelledRequest(t *testing.T) {
+    liveRequest := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/download", nil), nil, nil, nil)
+
+    if false == isClientAbortWriteError(liveRequest, syscall.EPIPE) {
+        t.Fatal("expected a broken pipe to classify as the client's abort")
+    }
+
+    if false == isClientAbortWriteError(liveRequest, syscall.ECONNRESET) {
+        t.Fatal("expected a connection reset to classify as the client's abort")
+    }
+
+    if true == isClientAbortWriteError(liveRequest, errors.New("disk full")) {
+        t.Fatal("expected a server-side failure to stay one")
+    }
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+    cancelledRequest := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/download", nil).WithContext(cancelledContext), nil, nil, nil)
+
+    if false == isClientAbortWriteError(cancelledRequest, errors.New("any write failure")) {
+        t.Fatal("expected a cancelled request context to classify the write failure as the client's abort")
+    }
+}
+
+/* closeDiscardedResponseBody runs inside the kernel's recovery defer, where a body whose Close panics would raise a second panic past the recovery and reset the connection: the panic is contained into the error the caller already reports. */
+func TestCloseResponseBodySafely_ContainsAPanickingClose(t *testing.T) {
+    closeErr := closeResponseBodySafely(&panickingCloser{})
+    if nil == closeErr {
+        t.Fatal("expected the contained panic to answer as an error")
+    }
+
+    if false == strings.Contains(closeErr.Error(), "close panicked") {
+        t.Fatalf("expected the error to name the contained panic, got %q", closeErr.Error())
+    }
+}
+
+type panickingCloser struct{}
+
+func (instance *panickingCloser) Close() error {
+    panic("close died on the state the panic invalidated")
+}
+
+/* the response writeResponse returns feeds the terminate event and the access log; for a stream the handler committed itself, the truth lives on the connection — the journal recorded 204 for every streamed 200 and a rendered-but-never-written 500 for a panic mid-stream. */
+func TestWriteResponse_ADiscardedResponseReportsTheCommittedStatus(t *testing.T) {
+    netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/stream", nil)
+    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+
+    writer := newRecordingResponseWriter(httptest.NewRecorder())
+    writer.WriteHeader(nethttp.StatusOK)
+    _, _ = writer.Write([]byte("data: hello\n\n"))
+
+    reported := writeResponse(
+        nil,
+        melodyRequest,
+        writer,
+        EmptyResponse(nethttp.StatusNoContent),
+        nil,
+        nil,
+        httpcontract.ForwardedHeadersPolicy{},
+        httpcontract.SessionCookiePolicy{},
+    )
+
+    if nethttp.StatusOK != reported.StatusCode() {
+        t.Fatalf("expected the committed 200 reported to the access log, got %d", reported.StatusCode())
+    }
+}
+
+/* a hijacked connection records no status; the substitute stays, because inventing one would be a worse lie than the synthetic response. */
+func TestWriteResponse_AHijackedConnectionKeepsTheSubstituteStatus(t *testing.T) {
+    netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/upgrade", nil)
+    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+
+    writer := newRecordingResponseWriter(&hijackableResponseWriter{ResponseWriter: httptest.NewRecorder()})
+    _, _, hijackErr := writer.Hijack()
+    if nil != hijackErr {
+        t.Fatalf("expected the hijack to succeed, got %v", hijackErr)
+    }
+
+    reported := writeResponse(
+        nil,
+        melodyRequest,
+        writer,
+        EmptyResponse(nethttp.StatusNoContent),
+        nil,
+        nil,
+        httpcontract.ForwardedHeadersPolicy{},
+        httpcontract.SessionCookiePolicy{},
+    )
+
+    if nethttp.StatusNoContent != reported.StatusCode() {
+        t.Fatalf("expected the substitute kept for the statusless hijack, got %d", reported.StatusCode())
     }
 }

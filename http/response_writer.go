@@ -44,6 +44,17 @@ func WriteToHttpResponseWriter(
         statusCode = nethttp.StatusOK
     }
 
+    /* a status outside net/http's [100, 999] is refused by name before the delegate: this is a public door, and handing the code to WriteHeader panics deep inside the response path, turning a caller's arithmetic mistake into a connection reset instead of the error return this signature promises. The internal write path refuses the same range before rendering its 500. */
+    if 100 > statusCode || 999 < statusCode {
+        return exception.NewError(
+            "response status code is out of range",
+            map[string]any{
+                "statusCode": statusCode,
+            },
+            nil,
+        )
+    }
+
     responseWriter.WriteHeader(statusCode)
 
     bodyReader := response.BodyReader()
@@ -89,10 +100,16 @@ type sessionPersistenceRecorder interface {
     MarkSessionPersisted()
 }
 
+/* committedStatusRecorder reports the status code actually committed on the connection, so the terminate event and the access log can name the status the client received when a handler streamed its own response instead of the synthetic response the kernel substituted for it. Zero means no status was committed through the recorder — nothing was written, or the connection was hijacked and left http entirely. */
+type committedStatusRecorder interface {
+    CommittedStatusCode() int
+}
+
 /* recordingResponseWriter tracks whether the response headers were already committed, so the kernel can tell a handler that streamed its own response (for example a hand-rolled streaming or download handler) apart from one that returned no response and expects the default 204. */
 type recordingResponseWriter struct {
     nethttp.ResponseWriter
     wroteHeader      bool
+    statusCode       int
     sessionPersisted bool
 }
 
@@ -106,27 +123,41 @@ func newRecordingResponseWriter(responseWriter nethttp.ResponseWriter) *recordin
 func (instance *recordingResponseWriter) WriteHeader(statusCode int) {
     instance.ResponseWriter.WriteHeader(statusCode)
     instance.wroteHeader = true
+    instance.statusCode = statusCode
 }
 
 /* Write raises the flag after the delegate returns, error or not: a write the client disconnected under has still committed the implicit header. */
 func (instance *recordingResponseWriter) Write(data []byte) (int, error) {
     written, writeErr := instance.ResponseWriter.Write(data)
-    instance.wroteHeader = true
+    instance.recordImplicitCommit()
 
     return written, writeErr
 }
 
-/* Flush is forwarded so the wrapper keeps satisfying http.Flusher, which streaming handlers rely on; a flush commits the response, so it also records that the headers were written. */
+/* Flush is forwarded so the wrapper keeps satisfying http.Flusher, which streaming handlers rely on; a flush commits the response, so it also records that the headers were written — after the delegate returns, the convention every commit recording in this type follows. */
 func (instance *recordingResponseWriter) Flush() {
     flusher, isFlusher := instance.ResponseWriter.(nethttp.Flusher)
     if true == isFlusher {
-        instance.wroteHeader = true
         flusher.Flush()
+        instance.recordImplicitCommit()
+    }
+}
+
+/* recordImplicitCommit records a commit that reached the connection without an explicit WriteHeader: net/http writes an implicit 200 ahead of the first byte, so the recorded status is 200 unless an earlier explicit call already named one. */
+func (instance *recordingResponseWriter) recordImplicitCommit() {
+    instance.wroteHeader = true
+    if 0 == instance.statusCode {
+        instance.statusCode = nethttp.StatusOK
     }
 }
 
 func (instance *recordingResponseWriter) HeadersWritten() bool {
     return instance.wroteHeader
+}
+
+/* CommittedStatusCode answers the status the connection actually carries: the explicitly written one, or the implicit 200 recorded with the first byte. Zero means nothing was committed through this recorder — a hijacked connection included, whose bytes leave http entirely. */
+func (instance *recordingResponseWriter) CommittedStatusCode() int {
+    return instance.statusCode
 }
 
 /* SessionPersisted reports whether the session for this request was already persisted by an earlier writeResponse call, so a second call (for example the panic-recovery path re-entering writeResponse after the first write committed the session but then failed) does not save the session a second time. */
@@ -153,11 +184,17 @@ func (instance *recordingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, 
     return connection, readWriter, hijackErr
 }
 
-/* ReadFrom is forwarded so the wrapper keeps satisfying io.ReaderFrom, preserving the underlying writer's sendfile fast path for file responses. */
-func (instance *recordingResponseWriter) ReadFrom(reader io.Reader) (int64, error) {
-    instance.wroteHeader = true
+/* ReadFrom is forwarded so the wrapper keeps satisfying io.ReaderFrom, preserving the underlying writer's sendfile fast path for file responses. The commit is recorded only after the copy and only when a byte actually reached the delegate: a source that fails before the first byte has committed nothing, and a flag raised ahead of the copy classified exactly that failure as a committed stream, so the recovery skipped its 500 and the client received an implicit empty 200. The recording rides a defer so a source that panics mid-copy unwinds through it; the copy's own count is then still zero, and the recovery's rewrite over the partially committed stream is absorbed by the delegate's superfluous-WriteHeader guard. */
+func (instance *recordingResponseWriter) ReadFrom(reader io.Reader) (written int64, copyErr error) {
+    defer func() {
+        if 0 < written {
+            instance.recordImplicitCommit()
+        }
+    }()
 
-    return io.Copy(instance.ResponseWriter, reader)
+    written, copyErr = io.Copy(instance.ResponseWriter, reader)
+
+    return written, copyErr
 }
 
 /* Unwrap exposes the underlying writer so http.ResponseController can reach its flush/hijack/deadline support through the wrapper. http.Pusher is intentionally not forwarded: HTTP/2 server push is deprecated and disabled by mainstream browsers, so a handler probing the wrapper sees no push support rather than a capability that would have to fail in practice. */
