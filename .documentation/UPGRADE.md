@@ -18,6 +18,62 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Remember: an option assembled from the zero value reads unset fields as the defaults
+
+**What changed.** A `With` setter called on the exact zero-value `RememberOption` first reads the receiver as `NewDefaultRememberOption`, then applies its own field. Until now a zero option plus one setter carried `waitTimeout: 0`, so every cache miss answered "cache remember callback timed out" while the callback computed in the background, and setting cancelability alone silently disabled the stampede protection.
+
+**Symptom.** An option built as `(&RememberOption{}).WithStampedeProtectionEnabled(true)` now waits for the leader (the constructor's `-1`) instead of timing out instantly; one built with `WithCancelable(true)` alone keeps the protection on.
+
+**Remedy.** Nothing for the ordinary caller — the constructor path is unchanged. A caller who genuinely wants no waiting spells it `NewDefaultRememberOption().WithWaitTimeout(0)`, and one who wants the protection off spells it through the constructor too.
+
+### Container: a failing MustGet panics with the original error
+
+**What changed.** `MustGet` and `MustGetByType` — on the container and the resolver context — panic with the melody error the resolution produced, enriched in place with the service name or type, instead of wrapping it in a fresh `"failed to get service instance"` error. The wrapper shed the log level, the already-logged mark and the capture stack, so one logged provider failure filed a second record at the recovery site.
+
+**Symptom.** Code matching the panic value's message against `"failed to get service instance"`/`"failed to get service instance by type"` no longer matches; the message is the cause's own (for a missing registration, `"service is not registered"`/`"service type is not registered"`) and the name or type sits in the error context.
+
+**Remedy.** Match on the original failure or read the context keys `serviceName`/`type`; a foreign (non-melody) cause still arrives wrapped under the old message.
+
+### Rate limit: a nil user-id callback is refused at construction
+
+**What changed.** `UserRateLimit` and `UserRateLimitWithResolver` panic at construction when `getUserId` is nil, the way `RateLimitMiddleware` refuses its missing limiter. Accepted, the nil callback panicked on every request at serve time.
+
+**Symptom.** A wiring that passed nil — perhaps reading the anonymous-fallback GoDoc as "nil means always anonymous" — now fails at boot with `get user id callback is required for user rate limit middleware`.
+
+**Remedy.** Pass a callback; for a purely address-keyed budget use `IpRateLimit`/`IpRateLimitWithResolver`, which is what nil was being used to mean.
+
+### CORS: one default header list, and an empty list stays a preference
+
+**What changed.** `cors.NewService` reads a nil `AllowMethods`/`AllowHeaders` as the single default `DefaultService` grants — `Authorization` included — and keeps an explicitly empty list as the expressed preference, the reading `AllowOrigins` always had.
+
+**Symptom.** A config that set only origins now advertises `Authorization` on preflight (previously the fallback list lacked it, so an SPA sending it broke the moment origins were narrowed). A config that passed `[]string{}` for methods or headers now advertises none where it silently got the defaults.
+
+**Remedy.** A deployment that relied on the empty-slice-means-default reading passes nil (or omits the field); one that must not advertise `Authorization` names its header list explicitly.
+
+### Session: a sub-second positive ttl is refused by the manual constructor too
+
+**What changed.** `session.NewManager` and its siblings refuse a positive ttl below one second, the refusal `MELODY_HTTP_SESSION_TTL` validation has always given: such a lifetime stores no usable session — `SaveSession` reports success and the entry lapses before the client returns.
+
+**Symptom.** A hand-wired manager built with, say, `500*time.Millisecond` now panics at construction naming the rule; zero keeps meaning no expiry.
+
+**Remedy.** Use a lifetime of at least one second, or zero for no expiry.
+
+### Static files: an explicit cache max age of zero means always revalidate
+
+**What changed.** With the cache enabled, a max age of `0` — from `MELODY_STATIC_CACHE_MAX_AGE=0` or passed to `NewFileServerConfig` — now ships `Cache-Control: public, max-age=0` with the ETag/Last-Modified machinery intact. It used to be silently coerced to `3600`, an hour of freshness for the operator who asked for none; only a negative value now reads as unset and takes the default.
+
+**Symptom.** Deployments that set `0` expecting the default start serving `max-age=0`; clients revalidate every request (mostly answered `304`).
+
+**Remedy.** A deployment that wants the hour says `3600`; the value now means what it reads like.
+
+### Cron: a module with runner commands and no configuration refuses the boot
+
+**What changed.** `cron.NewModule`'s `RegisterCliCommands` panics when `RunnerCommands` are supplied without a `Configuration`/`ConfigurationFactory`, and when a factory returns nil. Until now the module silently registered nothing and the wiring error surfaced as "unknown command" at invocation.
+
+**Symptom.** A wiring that carried runner commands but never set the configuration now fails at boot naming the missing configuration.
+
+**Remedy.** Set `Configuration` (or a factory that returns one); a parameters-only module — no runner commands, no generator — keeps working without one.
+
 ### Cache: the key grammar is the contract's, on both backends
 
 **What changed.** `cachecontract.Backend` now states the key grammar — non-empty, no spaces, no newlines, at most 1024 bytes — and the in-memory backend enforces it with the same refusals the redis backend always answered. The two implementations of one promise refused different keys.

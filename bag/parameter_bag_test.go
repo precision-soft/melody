@@ -70,7 +70,7 @@ func TestNewParameterBagFromValuesDeepCopy(t *testing.T) {
     }
 }
 
-/* @info the request bags keep the single and the repeated key apart by type: one occurrence is the string it really is, a repeated key is a genuine slice, an empty key and an empty list are absent */
+/* the request bags keep the single and the repeated key apart by type: one occurrence is the string it really is, a repeated key is a genuine slice, an empty key and an empty list are absent */
 func TestNewParameterBagFromValues_SeparatesSingleFromRepeated(t *testing.T) {
     parameterBag := NewParameterBagFromValues(url.Values{
         "single":   {"melody"},
@@ -103,7 +103,7 @@ func TestNewParameterBagFromValues_SeparatesSingleFromRepeated(t *testing.T) {
     }
 }
 
-/* @info Remove takes the name out of the bag entirely: Get, Has and Count must all stop seeing it, and removing a name that was never there is not an error */
+/* Remove takes the name out of the bag entirely: Get, Has and Count must all stop seeing it, and removing a name that was never there is not an error */
 func TestParameterBag_Remove_TakesTheNameOutOfEveryReader(t *testing.T) {
     parameterBag := NewParameterBag()
     parameterBag.Set("kept", "value")
@@ -129,7 +129,7 @@ func TestParameterBag_Remove_TakesTheNameOutOfEveryReader(t *testing.T) {
     }
 }
 
-/* @info Count answers the number of names the bag holds, not the number of values stored under them: a repeated key appended twice is still one name */
+/* Count answers the number of names the bag holds, not the number of values stored under them: a repeated key appended twice is still one name */
 func TestParameterBag_Count_CountsNamesNotValues(t *testing.T) {
     parameterBag := NewParameterBag()
 
@@ -153,7 +153,36 @@ func TestParameterBag_Count_CountsNamesNotValues(t *testing.T) {
     }
 }
 
-/* @info All copies as deep as the bag's own writers go: a mutation on the returned slice or map must not write into the stored value behind the lock */
+/* All copies as deep as the bag's own writers go: a mutation on the returned slice or map must not write into the stored value behind the lock */
+func TestParameterBag_TheZeroValueAcceptsItsFirstWrite(t *testing.T) {
+    var bagInstance ParameterBag
+
+    if true == bagInstance.Has("key") {
+        t.Fatalf("expected the zero bag to hold nothing")
+    }
+
+    bagInstance.Set("key", "value")
+
+    value, exists := bagInstance.Get("key")
+    if false == exists || "value" != value {
+        t.Fatalf("expected the first write to land, got %#v (exists %v)", value, exists)
+    }
+}
+
+func TestParameterBag_TheZeroValueAcceptsItsFirstAppend(t *testing.T) {
+    var bagInstance ParameterBag
+
+    if appendErr := bagInstance.AppendString("key", "value"); nil != appendErr {
+        t.Fatalf("unexpected append error: %v", appendErr)
+    }
+
+    value, exists := bagInstance.Get("key")
+    values, isSlice := value.([]string)
+    if false == exists || false == isSlice || 1 != len(values) || "value" != values[0] {
+        t.Fatalf("expected the first append to land as a one-element slice, got %#v (exists %v)", value, exists)
+    }
+}
+
 func TestParameterBag_All_CopiesKnownShapesDeep(t *testing.T) {
     parameterBag := NewParameterBag()
     parameterBag.Set("slice", []string{"a", "b"})
@@ -175,7 +204,7 @@ func TestParameterBag_All_CopiesKnownShapesDeep(t *testing.T) {
     }
 }
 
-/* @info the concrete bag appends inside one critical section: two writers appending concurrently keep every value — the helper's contract fallback reads and writes under two separate locks, and that window loses appends without any error and without anything the race detector can see */
+/* the concrete bag appends inside one critical section: two writers appending concurrently keep every value — the helper's contract fallback reads and writes under two separate locks, and that window loses appends without any error and without anything the race detector can see */
 func TestParameterBag_AppendString_KeepsEveryConcurrentAppend(t *testing.T) {
     parameterBag := NewParameterBag()
 

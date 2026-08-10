@@ -16,7 +16,7 @@ type creationState struct {
     waitChannel     chan struct{}
     ownerContextId  uint64
     lastCreationErr error
-    /* @important the contexts blocked on waitChannel, recorded so the owner can drop their wait-graph edges the moment it finishes, under the same lock that closes the channel. A woken waiter clears its own edge only after re-acquiring the mutex, and in that window the edge is stale: the owner's next resolution reading it would report a circular dependency between two resolutions that share nothing but the lock they are queued on. */
+    /* the contexts blocked on waitChannel, recorded so the owner can drop their wait-graph edges the moment it finishes, under the same lock that closes the channel. A woken waiter clears its own edge only after re-acquiring the mutex, and in that window the edge is stale: the owner's next resolution reading it would report a circular dependency between two resolutions that share nothing but the lock they are queued on. */
     waiterContextIds []uint64
 }
 
@@ -83,6 +83,7 @@ func (instance *container) serviceWithCreationGuardLocked(
         currentState.waiterContextIds = append(currentState.waiterContextIds, resolver.contextId)
 
         instance.mutex.Unlock()
+        /* the receive is unconditional on purpose: the channel is closed on every exit of the creating call — return and panic alike, through the recover — so the wait ends exactly when the creation settles. The one assumption is the provider's, not this site's: a provider that neither returns nor panics parks its owner and every coalesced waiter alike, and Close does not release them, because failing the waiters open would hand out services from a teardown in progress. */
         <-currentState.waitChannel
         instance.mutex.Lock()
 
@@ -92,7 +93,7 @@ func (instance *container) serviceWithCreationGuardLocked(
         )
 
         if nil != currentState.lastCreationErr {
-            return nil, exception.NewError(
+            creationErr := exception.NewError(
                 "service creation failed",
                 map[string]any{
                     "creatingKey":       creatingKey,
@@ -101,6 +102,13 @@ func (instance *container) serviceWithCreationGuardLocked(
                 },
                 currentState.lastCreationErr,
             )
+
+            /* the wrapper inherits the already-logged mark of the failure it carries: the mark is read at the nearest implementer, so a fresh unmarked wrapper would shadow it and every coalesced waiter would file a full record for the one failure the owner already logged. */
+            if true == exception.IsAlreadyLogged(currentState.lastCreationErr) {
+                _ = exception.MarkLogged(creationErr)
+            }
+
+            return nil, creationErr
         }
 
         value, exists = lookup()
@@ -132,7 +140,7 @@ func (instance *container) serviceWithCreationGuardLocked(
     instance.mutex.Unlock()
 
     createdValue, err, debugInfo := func() (createdValue any, err error, debugInfo *providerDebugInfo) {
-        /* @important the restore is registered before the recovery below so it runs after it: a provider that panics unwinds through that recovery, and an inline restore would never be reached. The resolution that continues above this frame is still the caller's, and leaving it suspended would hide the scope from every scoped service further up the stack. */
+        /* the restore is registered before the recovery below so it runs after it: a provider that panics unwinds through that recovery, and an inline restore would never be reached. The resolution that continues above this frame is still the caller's, and leaving it suspended would hide the scope from every scoped service further up the stack. */
         outerScopeSuspended := resolver.scopeSuspended
         defer func() {
             resolver.scopeSuspended = outerScopeSuspended
@@ -150,7 +158,7 @@ func (instance *container) serviceWithCreationGuardLocked(
             var recoveredErr error
             recoveredErr, _ = recoveredValue.(error)
 
-            /* @important a panic value that is a TYPED-NIL error passes the assertion above as a non-nil interface whose Error() dereferences a nil receiver. This handler runs with the container mutex unlocked, so a second panic here would not merely lose the report: it would unwind through the caller's deferred Unlock as a fatal unlock-of-unlocked-mutex, with every waiter on this creation blocked forever. The typed nil is normalized away, and the context rendering below is contained on its own, so an error whose Error() panics costs its context and nothing else. */
+            /* a panic value that is a TYPED-NIL error passes the assertion above as a non-nil interface whose Error() dereferences a nil receiver. This handler runs with the container mutex unlocked, so a second panic here would not merely lose the report: it would unwind through the caller's deferred Unlock as a fatal unlock-of-unlocked-mutex, with every waiter on this creation blocked forever. The typed nil is normalized away, and the context rendering below is contained on its own, so an error whose Error() panics costs its context and nothing else. */
             if true == internal.IsNilInterface(recoveredErr) {
                 recoveredErr = nil
             }
@@ -269,7 +277,7 @@ func (instance *container) serviceWithCreationGuardLocked(
         )
     }
 
-    /* @important a value created while Close() ran would be stored after the close snapshot and leak un-closed; close it best-effort instead of storing it and fail the resolution. */
+    /* a value created while Close() ran would be stored after the close snapshot and leak un-closed; close it best-effort instead of storing it and fail the resolution. */
     if nil == err && true == instance.isClosed {
         instance.mutex.Unlock()
         closeValueAfterContainerClose(createdValue)
@@ -282,7 +290,7 @@ func (instance *container) serviceWithCreationGuardLocked(
         keptValue, overrideWins, keepErr := creation.store.keep(createdValue)
 
         if nil != keepErr {
-            /* @important the store refusing — the scope this value was built for closed while the provider ran — is the scope-side twin of the container-close race above, and it drops the value on the same floor: nothing else holds it, so it is closed best-effort before the resolution fails. */
+            /* the store refusing — the scope this value was built for closed while the provider ran — is the scope-side twin of the container-close race above, and it drops the value on the same floor: nothing else holds it, so it is closed best-effort before the resolution fails. */
             instance.mutex.Unlock()
             closeValueAfterContainerClose(createdValue)
             instance.mutex.Lock()
@@ -299,7 +307,7 @@ func (instance *container) serviceWithCreationGuardLocked(
 
     newState.lastCreationErr = err
 
-    /* @important the owner is done: every context recorded as waiting on this creation stops waiting the instant the channel below closes, and their edges are dropped here, under the lock that closes it. A waiter left to clear its own edge does so only after re-acquiring the mutex, and until then the stale edge reads as a cycle to any resolution this owner runs next. */
+    /* the owner is done: every context recorded as waiting on this creation stops waiting the instant the channel below closes, and their edges are dropped here, under the lock that closes it. A waiter left to clear its own edge does so only after re-acquiring the mutex, and until then the stale edge reads as a cycle to any resolution this owner runs next. */
     for _, waiterContextId := range newState.waiterContextIds {
         instance.clearResolverWaitLocked(waiterContextId, newState.ownerContextId)
     }
@@ -330,7 +338,7 @@ func closeValueAfterContainerClose(value any) {
         return
     }
 
-    /* @important the caller runs this with the container mutex unlocked and unwinds through a deferred unlock; a panicking Close() would otherwise abort the process on an unlocked mutex. */
+    /* the caller runs this with the container mutex unlocked and unwinds through a deferred unlock; a panicking Close() would otherwise abort the process on an unlocked mutex. */
     defer func() {
         _ = recover()
     }()

@@ -10,6 +10,7 @@ import (
     "testing"
 
     containercontract "github.com/precision-soft/melody/container/contract"
+    "github.com/precision-soft/melody/exception"
 )
 
 type resolverRaceProbeFirst struct{}
@@ -262,8 +263,16 @@ func TestResolverContext_MustGet_AnswersInsideAProviderAndNamesItsOwnFailure(t *
         t.Fatalf("expected the provider's missing dependency to fail the resolution")
     }
 
-    if false == strings.Contains(renderedCauseChain(brokenErr), "failed to get service instance") {
-        t.Fatalf("expected the resolver's own panic message in the cause chain, got %q", renderedCauseChain(brokenErr))
+    if false == strings.Contains(renderedCauseChain(brokenErr), "service is not registered") {
+        t.Fatalf("expected the original failure in the cause chain, got %q", renderedCauseChain(brokenErr))
+    }
+
+    if true == strings.Contains(renderedCauseChain(brokenErr), "failed to get service instance") {
+        t.Fatalf("expected no rebuilt wrapper in the cause chain, got %q", renderedCauseChain(brokenErr))
+    }
+
+    if "app.never.declared" != contextValueInChain(brokenErr, "serviceName") {
+        t.Fatalf("expected the service name written into the original failure's context, got chain %q", renderedCauseChain(brokenErr))
     }
 }
 
@@ -320,9 +329,72 @@ func TestResolverContext_MustGetByType_AnswersInsideAProviderAndNamesItsOwnFailu
         t.Fatalf("expected the provider's missing dependency to fail the resolution")
     }
 
-    if false == strings.Contains(renderedCauseChain(brokenErr), "failed to get service instance by type") {
-        t.Fatalf("expected the by-type panic message in the cause chain, got %q", renderedCauseChain(brokenErr))
+    if false == strings.Contains(renderedCauseChain(brokenErr), "service type is not registered") {
+        t.Fatalf("expected the original by-type failure in the cause chain, got %q", renderedCauseChain(brokenErr))
     }
+
+    if "" == contextValueInChain(brokenErr, "type") {
+        t.Fatalf("expected the type written into the original failure's context, got chain %q", renderedCauseChain(brokenErr))
+    }
+}
+
+func TestResolverContext_MustGet_KeepsTheAlreadyLoggedMarkOfTheFailure(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "app.logged.failure",
+        func(resolver containercontract.Resolver) (*resolverContextMustDependent, error) {
+            return nil, exception.MarkLogged(exception.NewError("the provider refused after logging", nil, nil))
+        },
+        WithoutTypeRegistration(),
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected the failing resolution to panic")
+        }
+
+        recoveredErr, isError := recoveredValue.(error)
+        if false == isError {
+            t.Fatalf("expected an error panic value, got %#v", recoveredValue)
+        }
+
+        if false == exception.IsAlreadyLogged(recoveredErr) {
+            t.Fatalf("expected the panic value to keep the already-logged mark of the provider's failure")
+        }
+
+        if "app.logged.failure" != contextValueInChain(recoveredErr, "serviceName") {
+            t.Fatalf("expected the service name written into the original failure's context, got %v", recoveredErr)
+        }
+    }()
+
+    _ = serviceContainer.MustGet("app.logged.failure")
+}
+
+/* contextValueInChain walks the wrap chain for the first melody error whose context carries key, because the original failure travels out whole and its coordinates live in its context, not in a wrapper's message. */
+func contextValueInChain(err error, key string) string {
+    for current := err; nil != current; current = errors.Unwrap(current) {
+        melodyErr, isMelodyErr := current.(*exception.Error)
+        if false == isMelodyErr || nil == melodyErr {
+            continue
+        }
+
+        value, exists := melodyErr.Context()[key]
+        if false == exists {
+            continue
+        }
+
+        stringValue, isString := value.(string)
+        if true == isString {
+            return stringValue
+        }
+    }
+
+    return ""
 }
 
 /* renderedCauseChain walks the whole chain because a provider panic is wrapped by the creation guard before it reaches the caller, and only the chain says what the provider itself refused. */

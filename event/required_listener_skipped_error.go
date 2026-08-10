@@ -21,6 +21,20 @@ func NewRequiredListenerSkippedError(eventName string, stoppedByListenerName str
     }
 }
 
+/* NewRequiredListenerSkippedErrorWithStoppedListenerFailure reports the stop's own refusal for a listener that FAILED while also stopping propagation with a required listener behind it. The refusal keeps the stop's message and context — the stop is the decision the caller reacts to — and the listener's failure travels as the cause: the failure was deliberately returned unlogged by the dispatch on the promise that the caller's record names it, and without the cause this was the one path on which it reached no log at all. */
+func NewRequiredListenerSkippedErrorWithStoppedListenerFailure(eventName string, stoppedByListenerName string, cause error) *RequiredListenerSkippedError {
+    return &RequiredListenerSkippedError{
+        exceptionErr: exception.NewError(
+            "event propagation stopped before a required listener ran",
+            exceptioncontract.Context{
+                "eventName":         eventName,
+                "stoppedByListener": stoppedByListenerName,
+            },
+            cause,
+        ),
+    }
+}
+
 /* NewRequiredListenerSkippedErrorWithCause reports the same refusal for a dispatch that ABORTED on a failing listener while a listener marked required was still behind it: a listener that fails ends the dispatch exactly as decisively as one that stops propagation, so the required listener never ran. The failure that ended the dispatch travels as the cause, so the diagnostic of the listener that actually broke is not lost behind the refusal. */
 func NewRequiredListenerSkippedErrorWithCause(eventName string, failedListenerName string, cause error) *RequiredListenerSkippedError {
     return &RequiredListenerSkippedError{

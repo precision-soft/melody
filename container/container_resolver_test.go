@@ -102,7 +102,7 @@ func (instance *panickingCloser) Close() error {
     panic("close exploded")
 }
 
-/* @info the discarded value's Close runs while the container mutex is unlocked and the caller unwinds through a deferred unlock, so a panic escaping it would abort the whole process on an unlocked mutex instead of failing this one resolution */
+/* the discarded value's Close runs while the container mutex is unlocked and the caller unwinds through a deferred unlock, so a panic escaping it would abort the whole process on an unlocked mutex instead of failing this one resolution */
 func TestResolve_DuringCloseContainsAPanickingCloseOfTheDiscardedValue(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -140,7 +140,7 @@ func TestResolve_DuringCloseContainsAPanickingCloseOfTheDiscardedValue(t *testin
     }
 }
 
-/* @info The created value being nil unconditionally replaced whatever the provider stage had reported, so resolving a name nobody registered failed with "service provider returned nil" — a symptom — and demoted the real "service is not registered" into the cause chain, where callers reading the message never see it. */
+/* The created value being nil unconditionally replaced whatever the provider stage had reported, so resolving a name nobody registered failed with "service provider returned nil" — a symptom — and demoted the real "service is not registered" into the cause chain, where callers reading the message never see it. */
 func TestServiceWithCreationGuard_MissingServiceReportsItsOwnFailure(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -154,7 +154,7 @@ func TestServiceWithCreationGuard_MissingServiceReportsItsOwnFailure(t *testing.
     }
 }
 
-/* @info A provider that genuinely returns (nil, nil) says nothing at all, so the generic report stays: it is the only thing that names the provider. */
+/* A provider that genuinely returns (nil, nil) says nothing at all, so the generic report stays: it is the only thing that names the provider. */
 func TestServiceWithCreationGuard_SilentNilProviderKeepsTheGenericReport(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -178,7 +178,7 @@ func TestServiceWithCreationGuard_SilentNilProviderKeepsTheGenericReport(t *test
     }
 }
 
-/* @info A provider that panics unwinds through the guard's recovery, so restoring scope visibility inline after the provider call would never run. The resolution that continues above the failed frame belongs to the caller, and leaving it suspended would hide the scope from every service resolved after the failure. */
+/* A provider that panics unwinds through the guard's recovery, so restoring scope visibility inline after the provider call would never run. The resolution that continues above the failed frame belongs to the caller, and leaving it suspended would hide the scope from every service resolved after the failure. */
 func TestServiceWithCreationGuard_RestoresScopeVisibilityAfterAPanickingProvider(t *testing.T) {
     serviceContainer := NewContainer().(*container)
 
@@ -249,7 +249,7 @@ func (instance *scopeCloseRaceService) wasClosed() bool {
     return instance.closed
 }
 
-/* @info a scoped service finishing after its scope closed is refused by the store, and the refused value is closed best-effort — the scope-side twin of the container-close race. Before the guard, the freshly built value was dropped unclosed: an error for the caller, a silent leak for the resource. */
+/* a scoped service finishing after its scope closed is refused by the store, and the refused value is closed best-effort — the scope-side twin of the container-close race. Before the guard, the freshly built value was dropped unclosed: an error for the caller, a silent leak for the resource. */
 func TestCreationGuard_ScopeClosedDuringCreation_ClosesBuiltValue(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -305,7 +305,7 @@ func (instance *typedNilPanicError) Error() string {
     return instance.detail
 }
 
-/* @info a provider panicking with a TYPED-NIL error passes the recovery's error assertion as a non-nil interface whose Error() dereferences a nil receiver. The recovery runs with the container mutex unlocked, so a second panic there used to escape as a fatal unlock-of-unlocked-mutex through the caller's deferred Unlock, with every waiter parked forever. The typed nil is normalized away, the resolution fails cleanly, and the error stays loggable. */
+/* a provider panicking with a TYPED-NIL error passes the recovery's error assertion as a non-nil interface whose Error() dereferences a nil receiver. The recovery runs with the container mutex unlocked, so a second panic there used to escape as a fatal unlock-of-unlocked-mutex through the caller's deferred Unlock, with every waiter parked forever. The typed nil is normalized away, the resolution fails cleanly, and the error stays loggable. */
 func TestCreationGuard_TypedNilPanicValue_FailsWithoutSecondPanic(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -342,7 +342,7 @@ func (instance *panickingPanicValueError) Error() string {
     panic("the error message gives up")
 }
 
-/* @info a provider panicking with an error whose Error() itself panics used to blow up the recovery handler while it rendered the context — the same unlocked-mutex escape as the typed nil, from a live receiver. The rendering is contained on its own: the report loses that context and nothing else. */
+/* a provider panicking with an error whose Error() itself panics used to blow up the recovery handler while it rendered the context — the same unlocked-mutex escape as the typed nil, from a live receiver. The rendering is contained on its own: the report loses that context and nothing else. */
 func TestCreationGuard_PanickingErrorMessage_FailsWithoutSecondPanic(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -362,7 +362,7 @@ func TestCreationGuard_PanickingErrorMessage_FailsWithoutSecondPanic(t *testing.
     }
 }
 
-/* @info the owner of a finished creation drops its waiters' wait-graph edges under the lock that wakes them. A woken waiter clears its own edge only after re-acquiring the mutex, and until then the stale edge read as a circular dependency to any resolution the owner ran next — a spurious refusal between two resolutions that shared nothing but the lock they queued on. The assertion runs while the guard's caller still holds the mutex, so the waiter provably has not cleaned up after itself yet. */
+/* the owner of a finished creation drops its waiters' wait-graph edges under the lock that wakes them. A woken waiter clears its own edge only after re-acquiring the mutex, and until then the stale edge read as a circular dependency to any resolution the owner ran next — a spurious refusal between two resolutions that shared nothing but the lock they queued on. The assertion runs while the guard's caller still holds the mutex, so the waiter provably has not cleaned up after itself yet. */
 func TestCreationGuard_OwnerClearsWaiterEdgesOnCompletion(t *testing.T) {
     serviceContainer := NewContainer().(*container)
 
@@ -485,7 +485,7 @@ func (instance *overrideRaceBuiltService) wasClosed() bool {
     return instance.closed
 }
 
-/* @info an override installed while the provider ran already occupies the slot and wins: an override answers before anything is built, and the creation blindly overwriting it revoked an installation its caller was told succeeded — while the type-keyed map kept the override, so name and type answered differently forever after. The built value that lost the race is closed. */
+/* an override installed while the provider ran already occupies the slot and wins: an override answers before anything is built, and the creation blindly overwriting it revoked an installation its caller was told succeeded — while the type-keyed map kept the override, so name and type answered differently forever after. The built value that lost the race is closed. */
 func TestCreationGuard_OverrideInstalledDuringCreationWins(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -580,7 +580,7 @@ func awaitCreationWaiter(t *testing.T, serviceContainer *container, serviceName 
     t.Fatalf("expected %d waiters on the creation of %q", waiterCount, serviceName)
 }
 
-/* @info a service the container memoizes is created once and handed to the owner AND to every goroutine that arrived while it was being built — so a creation that FAILED has to reach the waiters as a failure too. Nothing had ever entered that branch: a waiter released after a failed creation used to be proven only by the absence of a crash, and a branch that instead fell through to the lookup would have answered "service was not available after creation finished" and sent the reader looking for a missing registration rather than for the provider that refused. */
+/* a service the container memoizes is created once and handed to the owner AND to every goroutine that arrived while it was being built — so a creation that FAILED has to reach the waiters as a failure too. Nothing had ever entered that branch: a waiter released after a failed creation used to be proven only by the absence of a crash, and a branch that instead fell through to the lookup would have answered "service was not available after creation finished" and sent the reader looking for a missing registration rather than for the provider that refused. */
 func TestCreationGuard_AWaiterInheritsTheOwnersCreationFailure(t *testing.T) {
     serviceContainer := NewContainer().(*container)
 
@@ -635,9 +635,64 @@ func TestCreationGuard_AWaiterInheritsTheOwnersCreationFailure(t *testing.T) {
     if false == strings.Contains(renderedCauseChain(waiterErr), "the provider refused") {
         t.Fatalf("expected the owner's own failure to travel to the waiter, got %q", renderedCauseChain(waiterErr))
     }
+
+    if true == exception.IsAlreadyLogged(waiterErr) {
+        t.Fatalf("expected the wrapper of an unmarked failure to stay unmarked")
+    }
 }
 
-/* @info the resolution stack catches a cycle inside ONE resolver context, and this guard catches the other shape: two contexts each owning a creation the other is waiting on, which no stack can see because neither context ever repeats a key. Without it the two goroutines simply wait on each other's channel for the life of the process — a hang, with no report at all, at the moment the second request arrives. The deadlock is built deliberately, both owners established before either is released, so the detection is what ends it rather than a scheduling accident. */
+func TestCreationGuard_AWaiterInheritsTheAlreadyLoggedMarkOfTheOwnersFailure(t *testing.T) {
+    serviceContainer := NewContainer().(*container)
+
+    providerEntered := make(chan struct{})
+    releaseProvider := make(chan struct{})
+
+    registerErr := serviceContainer.Register(
+        "app.failing.logged",
+        func(resolver containercontract.Resolver) (*waitingResolverProbe, error) {
+            close(providerEntered)
+            <-releaseProvider
+
+            return nil, exception.MarkLogged(exception.NewError("the provider refused after logging", nil, nil))
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    ownerDone := make(chan error, 1)
+    go func() {
+        _, ownerErr := serviceContainer.Get("app.failing.logged")
+        ownerDone <- ownerErr
+    }()
+
+    <-providerEntered
+
+    waiterDone := make(chan error, 1)
+    go func() {
+        _, waiterErr := serviceContainer.Get("app.failing.logged")
+        waiterDone <- waiterErr
+    }()
+
+    awaitCreationWaiter(t, serviceContainer, "app.failing.logged", 1)
+
+    close(releaseProvider)
+
+    if ownerErr := <-ownerDone; nil == ownerErr {
+        t.Fatalf("expected the owner's resolution to fail")
+    }
+
+    waiterErr := <-waiterDone
+    if nil == waiterErr {
+        t.Fatalf("expected the waiter's resolution to fail with the owner's failure")
+    }
+
+    if false == exception.IsAlreadyLogged(waiterErr) {
+        t.Fatalf("expected the waiter's wrapper to inherit the already-logged mark of the failure it carries")
+    }
+}
+
+/* the resolution stack catches a cycle inside ONE resolver context, and this guard catches the other shape: two contexts each owning a creation the other is waiting on, which no stack can see because neither context ever repeats a key. Without it the two goroutines simply wait on each other's channel for the life of the process — a hang, with no report at all, at the moment the second request arrives. The deadlock is built deliberately, both owners established before either is released, so the detection is what ends it rather than a scheduling accident. */
 func TestCreationGuard_ACycleAcrossTwoConcurrentResolutionsIsReported(t *testing.T) {
     serviceContainer := NewContainer().(*container)
 

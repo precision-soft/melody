@@ -518,6 +518,23 @@ func TestNewManager_AcceptsAZeroTtlAsNoExpiry(t *testing.T) {
     }
 }
 
+func TestNewManager_RefusesASubSecondPositiveTtl(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            NewManager(NewInMemoryStorage(), 500*time.Millisecond)
+        },
+        "session ttl is positive but shorter than one second, which stores no usable session; use zero for no expiry",
+    )
+}
+
+func TestNewManager_AcceptsExactlyOneSecond(t *testing.T) {
+    manager := NewManager(NewInMemoryStorage(), time.Second)
+    if nil == manager {
+        t.Fatalf("expected a one-second ttl to be accepted")
+    }
+}
+
 type foreignIdSession struct {
     id       string
     modified bool

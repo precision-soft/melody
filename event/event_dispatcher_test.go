@@ -3,6 +3,7 @@ package event
 import (
     "context"
     "errors"
+    "strings"
     "sync"
     "sync/atomic"
     "testing"
@@ -387,6 +388,52 @@ func TestEventDispatcher_ListenerError_IsWrappedWithContext(t *testing.T) {
 
     if "e" != exceptionValue.Context()["eventName"] {
         t.Fatalf("expected eventName in context")
+    }
+}
+
+func TestEventDispatcher_TheWrapperInheritsTheAlreadyLoggedMarkOfTheListenerFailure(t *testing.T) {
+    dispatcher, clockInstance := testNewEventDispatcher()
+
+    _ = dispatcher.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            return exception.MarkLogged(exception.NewError("failed and already logged", nil, nil))
+        },
+        0,
+    )
+
+    runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
+
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    if nil == err {
+        t.Fatalf("expected error")
+    }
+
+    if false == exception.IsAlreadyLogged(err) {
+        t.Fatalf("expected the dispatch wrapper to inherit the mark of the failure it carries")
+    }
+}
+
+func TestEventDispatcher_TheWrapperOfAnUnmarkedFailureStaysUnmarked(t *testing.T) {
+    dispatcher, clockInstance := testNewEventDispatcher()
+
+    _ = dispatcher.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            return errors.New("failed and never logged")
+        },
+        0,
+    )
+
+    runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
+
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    if nil == err {
+        t.Fatalf("expected error")
+    }
+
+    if true == exception.IsAlreadyLogged(err) {
+        t.Fatalf("expected the wrapper of an unmarked failure to stay unmarked")
     }
 }
 
@@ -865,6 +912,16 @@ func TestEventDispatcher_StoppingListenerThatAlsoFails_StillReportsTheSkippedReq
 
     if _, ok := err.(*RequiredListenerSkippedError); false == ok {
         t.Fatalf("expected a RequiredListenerSkippedError, got: %T (%v)", err, err)
+    }
+
+    /* the stop's refusal carries the listener's own failure as its cause: returned unlogged on the promise that the caller's record names it, the failure otherwise reached no log at all on exactly this path */
+    chain := ""
+    for current := err; nil != current; current = errors.Unwrap(current) {
+        chain = chain + current.Error() + "\n"
+    }
+
+    if false == strings.Contains(chain, "the listener's own failure") {
+        t.Fatalf("expected the listener's failure in the refusal's cause chain, got %q", chain)
     }
 }
 

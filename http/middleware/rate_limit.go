@@ -541,6 +541,13 @@ func UserRateLimitWithResolver(
     getUserId KeyExtractor,
     clientIpResolver ClientIpResolver,
 ) httpcontract.Middleware {
+    /* refused at construction, the way the middleware constructor refuses its missing limiter: accepted here, the nil callback dies on the request path, once per request, inside a closure no caller can reach */
+    if nil == getUserId {
+        exception.Panic(
+            exception.NewError("get user id callback is required for user rate limit middleware", nil, nil),
+        )
+    }
+
     limiter := NewSlidingWindowLimiter(requestsPerMinute, time.Minute)
 
     config := NewRateLimitConfig(

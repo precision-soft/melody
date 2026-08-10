@@ -511,7 +511,7 @@ func (instance *EventDispatcher) dispatch(runtimeInstance runtimecontract.Runtim
             logger,
         )
         if nil != err {
-            /* a listener that fails ends the dispatch exactly as decisively as one that stops propagation: the listeners behind it — a required access-control listener among them — never ran. Returning the listener's own failure first would hide that, so the skip is reported ahead of it: with the stop's own refusal where the listener also stopped propagation, and carrying the failure as the cause where the failure alone ended the dispatch — a listener that failed while also producing a response would otherwise have that response served with access control never consulted. */
+            /* a listener that fails ends the dispatch exactly as decisively as one that stops propagation: the listeners behind it — a required access-control listener among them — never ran. Returning the listener's own failure first would hide that, so the skip is reported ahead of it, and the failure travels as the cause on both branches: with the stop's own refusal where the listener also stopped propagation, with the abort refusal where the failure alone ended the dispatch — a listener that failed while also producing a response would otherwise have that response served with access control never consulted, and the failure returned unlogged would reach no log at all behind a causeless refusal. */
             requiredErr := refuseSkippedRequiredListeners(
                 eventName,
                 listenerList[listenerIndex+1:],
@@ -520,7 +520,7 @@ func (instance *EventDispatcher) dispatch(runtimeInstance runtimecontract.Runtim
             )
             if nil != requiredErr {
                 if true == eventValue.IsPropagationStopped() {
-                    return eventValue, requiredErr
+                    return eventValue, NewRequiredListenerSkippedErrorWithStoppedListenerFailure(eventName, listenerName, err)
                 }
 
                 return eventValue, NewRequiredListenerSkippedErrorWithCause(eventName, listenerName, err)
@@ -669,12 +669,18 @@ func (instance *EventDispatcher) callListenerSafely(
         durationMs,
     )
 
-    /* the failure travels unlogged and unmarked. The record written here carried the listener's identity and duration but never the error, and marking the wrapper as logged then suppressed the caller's own record — the http kernel's, which renders the cause chain — so the reason a request failed closed existed on the returned value and in no log at all. The context rides on the error, so the caller's single record still names the listener. */
-    return exception.NewError(
+    /* the failure travels unlogged and unmarked by this site. The record written here carried the listener's identity and duration but never the error, and marking the wrapper as logged then suppressed the caller's own record — the http kernel's, which renders the cause chain — so the reason a request failed closed existed on the returned value and in no log at all. The context rides on the error, so the caller's single record still names the listener. A failure whose PRODUCER already logged and marked it is different: the mark is read at the nearest implementer, so the wrapper inherits it — a fresh unmarked wrapper would shadow the mark and the caller would file a second record for the one failure. */
+    wrapperErr := exception.NewError(
         "event listener returned error",
         exceptionContext,
         listenerErr,
     )
+
+    if true == exception.IsAlreadyLogged(listenerErr) {
+        _ = exception.MarkLogged(wrapperErr)
+    }
+
+    return wrapperErr
 }
 
 func recoveredValueIsAlreadyLogged(recoveredValue any) bool {

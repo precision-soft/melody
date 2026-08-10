@@ -11,6 +11,7 @@ import (
 
     "github.com/precision-soft/melody/exception"
     httpcontract "github.com/precision-soft/melody/http/contract"
+    "github.com/precision-soft/melody/internal"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
@@ -245,7 +246,9 @@ func acceptsGzip(acceptEncoding string) bool {
             continue
         }
 
+        /* an entry whose q parameter falls outside the RFC 7231 qvalue grammar is dropped whole, the rule every negotiating reader in this tree applies: a bare float parse let q=Inf switch the compression on and q=NaN switch it off, weights no grammar-conforming client can send */
         quality := 1.0
+        qualityValid := true
         for _, rawParam := range parts[1:] {
             /* the parameter name is case-insensitive, so a refusal spelled "Q=0" weighs the same as "q=0" */
             param := strings.ToLower(strings.TrimSpace(rawParam))
@@ -253,10 +256,18 @@ func acceptsGzip(acceptEncoding string) bool {
                 continue
             }
 
-            parsedQuality, parseErr := strconv.ParseFloat(strings.TrimSpace(param[2:]), 64)
-            if nil == parseErr {
-                quality = parsedQuality
+            parsedQuality, valid := internal.ParseQualityValue(strings.TrimSpace(param[2:]))
+            if false == valid {
+                qualityValid = false
+
+                continue
             }
+
+            quality = parsedQuality
+        }
+
+        if false == qualityValid {
+            continue
         }
 
         if "gzip" == codingName {

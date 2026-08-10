@@ -64,7 +64,8 @@ func NewFileServer(options *Options) *FileServer {
         config.indexFile = "index.html"
     }
 
-    if true == config.enableCache && 0 >= config.cacheMaxAge {
+    /* an explicit zero is honoured as max-age=0 — always revalidate, with the ETag and Last-Modified machinery intact — because the configuration door validates zero as a distinct choice; only a negative value reads as unset and takes the default. Coercing zero shipped an hour of freshness to the operator who asked for none. */
+    if true == config.enableCache && 0 > config.cacheMaxAge {
         config.cacheMaxAge = 3600
     }
 

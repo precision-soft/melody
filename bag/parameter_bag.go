@@ -50,6 +50,11 @@ func (instance *ParameterBag) Set(name string, value any) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
+    /* the zero value is constructible outside the constructors and carries a nil map; the first write allocates it instead of panicking on the assignment — the reads already answer the zero value, so the panic surfaced only after the bag looked functional */
+    if nil == instance.parameters {
+        instance.parameters = make(map[string]any)
+    }
+
     instance.parameters[name] = value
 }
 
@@ -113,6 +118,10 @@ func (instance *ParameterBag) All() map[string]any {
 func (instance *ParameterBag) AppendString(name string, value string) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
+
+    if nil == instance.parameters {
+        instance.parameters = make(map[string]any)
+    }
 
     currentValue, exists := instance.parameters[name]
     if false == exists || nil == currentValue {

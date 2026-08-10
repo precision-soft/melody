@@ -30,7 +30,7 @@ Applied when the matching config is not set ([`DefaultPoolConfig`](./pool_config
 | `RetryConfig`   | `MaxDelay`              | `5s`    |
 | `RetryConfig`   | `BackoffMultiplier`     | `2.0`   |
 
-Retrying is **opt-in**: without a `RetryConfig`, `Open` makes a single attempt. Only transient failures are retried; a non-transient error fails immediately. `ConnectTimeout` also bounds the initial `PingContext` and the post-build hook; a value of `0` leaves both unbounded.
+Retrying is **opt-in**: without a `RetryConfig`, `Open` makes a single attempt. Only transient failures are retried; a non-transient error fails immediately. `ConnectTimeout` also bounds the initial `PingContext` and the post-build hook; a non-positive value falls back to the 10s default before the connector is built, so the dial, ping and hook always run under a deadline.
 
 Notes
 

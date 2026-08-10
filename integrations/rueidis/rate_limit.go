@@ -53,7 +53,7 @@ func WithRateLimiterOnError(onError func(error)) RateLimiterOption {
     }
 }
 
-/* WithRateLimiterCallTimeout bounds the store round trip on both entry points: the plain Allow path, which carries no request context, and AllowWithRuntime, where it caps the runtime context so a request whose context has no deadline — melody's http kernel attaches none — still fails fast instead of hanging on an unresponsive store (the whole point of fail-closed on login/OTP routes). A non-positive timeout falls back to the default, following this package's zero-means-default convention, so a config-sourced unset value can never build an already-cancelled context that forces every call onto the store-failure path. */
+/* WithRateLimiterCallTimeout bounds the store round trip on both entry points: the plain Allow path, which carries no request context, and AllowWithRuntime, where it caps the runtime context so a request whose context has no deadline — melody's http kernel attaches none — still fails fast instead of hanging on an unresponsive store (the whole point of fail-closed on login/OTP routes). A non-positive timeout falls back to the default, the way this limiter's other options and the provider's connect timeout read theirs, so a config-sourced unset value can never build an already-cancelled context that forces every call onto the store-failure path. The cache subpackage deliberately reads its command timeout the other way — non-positive means unbounded — and says so on its own constructor. */
 func WithRateLimiterCallTimeout(timeout time.Duration) RateLimiterOption {
     return func(instance *RateLimiter) {
         if 0 >= timeout {

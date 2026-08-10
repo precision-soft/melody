@@ -82,7 +82,7 @@ func TestService_OriginAllowed_SchemeQualifiedSubdomainWildcard(t *testing.T) {
     }
 }
 
-/* @info a nil AllowOrigins expresses no preference and receives the permissive default; an EMPTY list is an expressed preference — no origin is allowed — so it denies instead of silently widening to the wildcard the moment an environment-derived list arrives empty */
+/* a nil AllowOrigins expresses no preference and receives the permissive default; an EMPTY list is an expressed preference — no origin is allowed — so it denies instead of silently widening to the wildcard the moment an environment-derived list arrives empty */
 func TestService_OriginAllowed_ExplicitlyEmptyOriginListDeniesEveryOrigin(t *testing.T) {
     service := NewService(Config{
         AllowOrigins: []string{},
@@ -199,6 +199,39 @@ func TestService_IsPreflight_RequiresOptionsMethod(t *testing.T) {
     }
 }
 
+func TestNewService_NilHeaderAndMethodListsTakeTheOneDefaultServiceGrants(t *testing.T) {
+    service := NewService(Config{AllowOrigins: []string{"https://app.example.com"}})
+    defaultService := DefaultService()
+
+    if defaultService.AllowHeadersString() != service.AllowHeadersString() {
+        t.Fatalf("expected the nil header list to take DefaultService's list, got %q vs %q", service.AllowHeadersString(), defaultService.AllowHeadersString())
+    }
+
+    if false == strings.Contains(service.AllowHeadersString(), "Authorization") {
+        t.Fatalf("expected the default header list to carry Authorization, got %q", service.AllowHeadersString())
+    }
+
+    if defaultService.AllowMethodsString() != service.AllowMethodsString() {
+        t.Fatalf("expected the nil method list to take DefaultService's list, got %q vs %q", service.AllowMethodsString(), defaultService.AllowMethodsString())
+    }
+}
+
+func TestNewService_AnEmptyMethodOrHeaderListStaysTheExpressedPreference(t *testing.T) {
+    service := NewService(Config{
+        AllowOrigins: []string{"https://app.example.com"},
+        AllowMethods: []string{},
+        AllowHeaders: []string{},
+    })
+
+    if "" != service.AllowMethodsString() {
+        t.Fatalf("expected the empty method list to stay empty, got %q", service.AllowMethodsString())
+    }
+
+    if "" != service.AllowHeadersString() {
+        t.Fatalf("expected the empty header list to stay empty, got %q", service.AllowHeadersString())
+    }
+}
+
 func TestService_NilAllowOriginsKeepsThePermissiveDefault(t *testing.T) {
     service := NewService(Config{})
 
@@ -220,7 +253,7 @@ func TestNewService_PanicsWhenCredentialsWithExplicitlyEmptyOrigins(t *testing.T
     })
 }
 
-/* @info the port is part of the origin: an allow entry without a port grants only the portless spelling, otherwise any service on another port of an allowed host inherits the grant — with the credentials the restrictive configurations pair with it */
+/* the port is part of the origin: an allow entry without a port grants only the portless spelling, otherwise any service on another port of an allowed host inherits the grant — with the credentials the restrictive configurations pair with it */
 
 func TestService_SchemelessEntryIsPortSignificant(t *testing.T) {
     service := NewService(Config{
@@ -280,7 +313,7 @@ func TestService_WildcardEntriesArePortSignificant(t *testing.T) {
     }
 }
 
-/* @info RestrictiveService is the one configuration in this package that pairs AllowCredentials with the caller's list, which is the pairing every guard in NewService exists to police — and until now no test entered it, so the whole restrictive policy was carried by a constructor nothing executed. */
+/* RestrictiveService is the one configuration in this package that pairs AllowCredentials with the caller's list, which is the pairing every guard in NewService exists to police — and until now no test entered it, so the whole restrictive policy was carried by a constructor nothing executed. */
 
 func TestRestrictiveService_PairsCredentialsWithTheNamedOrigins(t *testing.T) {
     service := RestrictiveService([]string{"https://app.example.com"})
@@ -302,7 +335,7 @@ func TestRestrictiveService_PairsCredentialsWithTheNamedOrigins(t *testing.T) {
     }
 }
 
-/* @info the restrictive policy is deliberately narrower than the default one: no PATCH and no OPTIONS among the methods it advertises, and only Content-Type and Authorization among the headers. A widening of either is a policy change, so the advertised strings are pinned rather than left to be read off the constructor. */
+/* the restrictive policy is deliberately narrower than the default one: no PATCH and no OPTIONS among the methods it advertises, and only Content-Type and Authorization among the headers. A widening of either is a policy change, so the advertised strings are pinned rather than left to be read off the constructor. */
 
 func TestRestrictiveService_AdvertisesANarrowerPolicyThanTheDefault(t *testing.T) {
     service := RestrictiveService([]string{"https://app.example.com"})
@@ -326,7 +359,7 @@ func TestRestrictiveService_AdvertisesANarrowerPolicyThanTheDefault(t *testing.T
     }
 }
 
-/* @info RestrictiveService(nil) is the shape a deployment reaches by handing it a list an environment variable failed to produce. A nil list takes the permissive default inside NewService, which turns the restrictive constructor into "*" plus credentials — the exact combination the browser refuses and the guard panics on. The refusal has to happen at boot, because a service built this way would otherwise carry a wildcard under a name that promises the opposite. */
+/* RestrictiveService(nil) is the shape a deployment reaches by handing it a list an environment variable failed to produce. A nil list takes the permissive default inside NewService, which turns the restrictive constructor into "*" plus credentials — the exact combination the browser refuses and the guard panics on. The refusal has to happen at boot, because a service built this way would otherwise carry a wildcard under a name that promises the opposite. */
 
 func TestRestrictiveService_RefusesToBootWithoutAnyOrigin(t *testing.T) {
     defer func() {
@@ -343,7 +376,7 @@ func TestRestrictiveService_RefusesToBootWithoutAnyOrigin(t *testing.T) {
     RestrictiveService(nil)
 }
 
-/* @info an explicitly empty list is the other half of the same mistake and takes the other branch: it is an expressed preference — no origin is allowed — so it never becomes the wildcard, and credentials with nothing to grant them to is refused by its own message. */
+/* an explicitly empty list is the other half of the same mistake and takes the other branch: it is an expressed preference — no origin is allowed — so it never becomes the wildcard, and credentials with nothing to grant them to is refused by its own message. */
 
 func TestRestrictiveService_RefusesToBootWithAnExplicitlyEmptyOriginList(t *testing.T) {
     defer func() {
@@ -360,7 +393,7 @@ func TestRestrictiveService_RefusesToBootWithAnExplicitlyEmptyOriginList(t *test
     RestrictiveService([]string{})
 }
 
-/* @info the four slice accessors hand out a copy. The service is a process-wide singleton read from every request goroutine, so a caller that mutated what it was handed would rewrite the policy of every request that follows — and OriginAllowed reads the very slice AllowOrigins returns. */
+/* the four slice accessors hand out a copy. The service is a process-wide singleton read from every request goroutine, so a caller that mutated what it was handed would rewrite the policy of every request that follows — and OriginAllowed reads the very slice AllowOrigins returns. */
 
 func TestService_SliceAccessorsHandOutACopy(t *testing.T) {
     service := NewService(Config{
@@ -396,7 +429,7 @@ func TestService_SliceAccessorsHandOutACopy(t *testing.T) {
     }
 }
 
-/* @info the joined strings are computed once at construction and are what reaches the wire, so they are asserted against the lists they were built from rather than against themselves. */
+/* the joined strings are computed once at construction and are what reaches the wire, so they are asserted against the lists they were built from rather than against themselves. */
 
 func TestService_AccessorsReportTheConfiguredPolicy(t *testing.T) {
     service := NewService(Config{

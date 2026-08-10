@@ -20,10 +20,17 @@ func NewDefaultRememberOption() *RememberOption {
     }
 }
 
+/* RememberOption starts from the constructor defaults wherever it is built: the fields are unexported, so outside this package the only writes are the With setters, and a setter called on the exact zero value first reads the receiver as NewDefaultRememberOption before applying its own field. Without that reading, a zero value plus one setter carried a waitTimeout of zero — every miss answered with a timeout while the callback computed in the background — and configuring cancelability alone silently disarmed the stampede protection the caller never asked to configure. A deliberate no-wait or protection-off option is spelled through the constructor: NewDefaultRememberOption().WithWaitTimeout(0). */
 type RememberOption struct {
     enableStampedeProtection bool
     waitTimeout              time.Duration
     isCancelable             bool
+}
+
+func (instance *RememberOption) normalizeZeroReceiver() {
+    if (RememberOption{}) == *instance {
+        *instance = *NewDefaultRememberOption()
+    }
 }
 
 func (instance *RememberOption) EnableStampedeProtection() bool {
@@ -31,6 +38,7 @@ func (instance *RememberOption) EnableStampedeProtection() bool {
 }
 
 func (instance *RememberOption) WithStampedeProtectionEnabled(enableStampedeProtection bool) *RememberOption {
+    instance.normalizeZeroReceiver()
     instance.enableStampedeProtection = enableStampedeProtection
     return instance
 }
@@ -40,6 +48,7 @@ func (instance *RememberOption) WaitTimeout() time.Duration {
 }
 
 func (instance *RememberOption) WithWaitTimeout(waitTimeout time.Duration) *RememberOption {
+    instance.normalizeZeroReceiver()
     instance.waitTimeout = waitTimeout
     return instance
 }
@@ -49,6 +58,7 @@ func (instance *RememberOption) IsCancelable() bool {
 }
 
 func (instance *RememberOption) WithCancelable(isCancelable bool) *RememberOption {
+    instance.normalizeZeroReceiver()
     instance.isCancelable = isCancelable
     return instance
 }
@@ -134,7 +144,7 @@ func rememberWithStampedeProtection(
 
     call, exists := shard.inFlightByKey[singleFlightKey]
 
-    /* @important a cancelable call whose waiters all timed out is already doomed to a cancellation error; a late joiner must not inherit that poison, so it replaces the entry and becomes a fresh leader. */
+    /* a cancelable call whose waiters all timed out is already doomed to a cancellation error; a late joiner must not inherit that poison, so it replaces the entry and becomes a fresh leader. */
     if true == exists && true == call.IsCanceled() {
         exists = false
     }

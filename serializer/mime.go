@@ -3,6 +3,8 @@ package serializer
 import (
     "sort"
     "strings"
+
+    "github.com/precision-soft/melody/internal"
 )
 
 const (
@@ -64,53 +66,7 @@ func splitOutsideQuotes(value string, separator byte) []string {
     return append(result, value[start:])
 }
 
-/* parseQualityValue validates value against the qvalue grammar of RFC 7231 — a zero with up to three decimal digits, or a one with up to three zero decimals — and reports anything outside it as invalid instead of guessing a weight for it. */
-func parseQualityValue(value string) (float64, bool) {
-    if "" == value {
-        return 0, false
-    }
-
-    integerPart := value[0]
-    if '0' != integerPart && '1' != integerPart {
-        return 0, false
-    }
-
-    decimals := value[1:]
-    if "" != decimals {
-        if '.' != decimals[0] {
-            return 0, false
-        }
-
-        decimals = decimals[1:]
-        if 3 < len(decimals) {
-            return 0, false
-        }
-    }
-
-    qualityValue := 0.0
-    if '1' == integerPart {
-        qualityValue = 1.0
-    }
-
-    scale := 0.1
-    for index := 0; index < len(decimals); index++ {
-        digit := decimals[index]
-        if digit < '0' || digit > '9' {
-            return 0, false
-        }
-
-        if '1' == integerPart && '0' != digit {
-            return 0, false
-        }
-
-        qualityValue += float64(digit-'0') * scale
-        scale = scale / 10
-    }
-
-    return qualityValue, true
-}
-
-/* @important a member whose q parameter falls outside the RFC 7231 qvalue grammar is dropped whole rather than rounded to a guess: the previous leniency scored an unparseable q as full acceptance, clamped a negative one into a refusal and let NaN through as a weight that no comparison could select or refuse, so the same malformed header could open, close or silently poison the negotiation depending on the spelling */
+/* a member whose q parameter falls outside the RFC 7231 qvalue grammar is dropped whole rather than rounded to a guess: the previous leniency scored an unparseable q as full acceptance, clamped a negative one into a refusal and let NaN through as a weight that no comparison could select or refuse, so the same malformed header could open, close or silently poison the negotiation depending on the spelling */
 func parseAcceptHeader(acceptHeader string) []acceptedMime {
     parts := splitOutsideQuotes(acceptHeader, ',')
     result := make([]acceptedMime, 0, len(parts))
@@ -147,7 +103,7 @@ func parseAcceptHeader(acceptHeader string) []acceptedMime {
                     value := strings.TrimSpace(keyValue[1])
 
                     if "q" == key {
-                        parsedValue, valid := parseQualityValue(value)
+                        parsedValue, valid := internal.ParseQualityValue(value)
                         if false == valid {
                             qualityInvalid = true
 
@@ -206,7 +162,7 @@ func matchWildcardSubtype(wildcardMime string, candidateMime string) bool {
     return true == strings.HasPrefix(candidateMime, prefix)
 }
 
-/* @important a q of 0 is a refusal, not an absence: it is kept in the parsed list so a candidate it covers can be excluded rather than falling through to the default */
+/* a q of 0 is a refusal, not an absence: it is kept in the parsed list so a candidate it covers can be excluded rather than falling through to the default */
 func acceptMatchSpecificity(acceptedMimeValue string, candidateMime string) int {
     acceptedMimeValue = normalizeMime(acceptedMimeValue)
     candidateMime = normalizeMime(candidateMime)

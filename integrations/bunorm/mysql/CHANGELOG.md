@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- README — the retry paragraph states what the code does with a zero `ConnectTimeout`: every non-positive value falls back to the 10s default before the connector is built, so the dial, ping and hook always run under a deadline — the claim that zero "leaves both unbounded" described a state `resolvedTimeoutConfig` cannot produce
 - `Provider.Open` marks the configured password parameter secret through the configuration's own `MarkSecret` — the component told authoritatively which parameter holds the credential arms the framework's redaction for it, so the introspection output masks the password and every template derived from it without the application repeating the knowledge
 - the terminal failure record of the retry loop is the log of that failure: it is written in full through the exception context and the returned error carries the already-logged mark, so the exit handler no longer writes the same outage a second time. An alert counting error records saw one outage twice on the SQL providers and once on redis
 

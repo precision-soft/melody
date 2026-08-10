@@ -45,7 +45,7 @@ Each binding depends on its respective melody module — `github.com/precision-s
 
 ## Configuration parameters
 
-The cascade for every flag is **CLI flag (explicitly set) → container parameter**. There are no hardcoded fallbacks inside the cron command itself; defaults live entirely in the parameter system.
+The cascade for every flag is **CLI flag (explicitly set) → container parameter**. Two flags carry a final fallback inside the command itself: `--template` falls back to the crontab dialect and `--binary` falls back to the running executable's own path (see the table below). Every other flag has no hardcoded fallback; those defaults live entirely in the parameter system.
 
 The parameter names are exposed as constants:
 
@@ -482,7 +482,7 @@ When no command declares a schedule and `--heartbeat-path` (after the cascade) i
 
 ## Footguns & caveats
 
-- The cron command has **no hardcoded fallback values**. Without either a CLI flag or a container parameter, `melody:cron:generate` errors out at run time with a message naming the missing flag/parameter. Use `RegisterDefaultParameters` for sensible defaults, or wire each parameter explicitly.
+- Outside `--template` (crontab dialect) and `--binary` (the running executable), the cron command has **no hardcoded fallback values**. Without either a CLI flag or a container parameter, `melody:cron:generate` errors out at run time for the remaining flags with a message naming the missing flag/parameter. Use `RegisterDefaultParameters` for sensible defaults, or wire each parameter explicitly.
 - `Render(...)` does **not** silently default empty users. Every `Entry` must carry a non-empty `User`, and a non-empty `Binary` **or** non-empty `Command`. `HeartbeatPath` and `HeartbeatCommand` both require a `HeartbeatUser`. `melody:cron:generate` resolves the user via the cascade before calling `Render`, but anyone calling `Render` directly is responsible for the same.
 - `Schedule.Expression()` auto-fills empty fields with `*` wildcards without mutating the receiver. Use `Schedule.Defaults()` if you also want the struct fields populated in place (nil-safe).
 - `Schedule.Defaults()` **mutates the receiver** (returning the same pointer with empty fields replaced by `*`); the name is "Defaults" in the sense of "apply defaults", not "return a copy with defaults". If you need an unchanged original, copy the struct before the call.

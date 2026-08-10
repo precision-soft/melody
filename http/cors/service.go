@@ -46,12 +46,13 @@ func NewService(config Config) *Service {
         allowOrigins = []string{"*"}
     }
 
-    if 0 == len(allowMethods) {
-        allowMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
+    /* methods and headers read nil and empty the way origins do — nil takes the default, an empty list stays the expressed preference — because one Config must not read the same spelling as "nobody" on one field and "everything" on its sibling. The defaults are the single lists DefaultService grants, Authorization included: two default header lists meant an SPA sending Authorization worked on the zero-configuration deployment and died at preflight the moment the operator narrowed only the origins. */
+    if nil == allowMethods {
+        allowMethods = defaultAllowMethodList()
     }
 
-    if 0 == len(allowHeaders) {
-        allowHeaders = []string{"Origin", "Content-Type", "Accept"}
+    if nil == allowHeaders {
+        allowHeaders = defaultAllowHeaderList()
     }
 
     if true == config.AllowCredentials && nil == config.AllowOriginFunc {
@@ -94,11 +95,21 @@ func NewService(config Config) *Service {
     }
 }
 
+/* defaultAllowMethodList is the one default the service grants wherever no method preference was expressed: DefaultService and the nil-list fallback of NewService hand out the same list, so narrowing an unrelated field never changes which methods a deployment accepts. */
+func defaultAllowMethodList() []string {
+    return []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
+}
+
+/* defaultAllowHeaderList is the one default header list, Authorization included, shared by DefaultService and the nil-list fallback of NewService. */
+func defaultAllowHeaderList() []string {
+    return []string{"Origin", "Content-Type", "Accept", "Authorization"}
+}
+
 func DefaultService() *Service {
     return NewService(Config{
         AllowOrigins:     []string{"*"},
-        AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-        AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
+        AllowMethods:     defaultAllowMethodList(),
+        AllowHeaders:     defaultAllowHeaderList(),
         ExposeHeaders:    []string{},
         AllowCredentials: false,
         MaxAge:           86400,

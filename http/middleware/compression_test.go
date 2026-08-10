@@ -75,7 +75,7 @@ func (instance *closeSignalReader) Close() error {
     return nil
 }
 
-/* @info When a middleware outer to compression panics after next() returned, the kernel dropped the pipe-backed response without closing it, so the gzip goroutine blocked forever in pipe.Write and its deferred close of the original body reader (and its descriptor) never ran; tying the pipe reader to request-context cancellation must release it. */
+/* When a middleware outer to compression panics after next() returned, the kernel dropped the pipe-backed response without closing it, so the gzip goroutine blocked forever in pipe.Write and its deferred close of the original body reader (and its descriptor) never ran; tying the pipe reader to request-context cancellation must release it. */
 func TestCompressionMiddleware_ReleasesGzipGoroutineWhenRequestUnwinds(t *testing.T) {
     config := NewCompressionConfig(6, 16, nil, nil)
     middleware := CompressionMiddleware(config)
@@ -507,7 +507,28 @@ func TestAcceptsGzip_Cases(t *testing.T) {
     }
 }
 
-/* @info Only a zero minimum size was normalized, so a negative one reached make([]byte, peekSize) and panicked on every request through the middleware. */
+func TestAcceptsGzip_DropsAnEntryWhoseQualityFallsOutsideTheGrammar(t *testing.T) {
+    cases := map[string]bool{
+        "gzip;q=Inf":         false,
+        "gzip;q=NaN":         false,
+        "gzip;q=5":           false,
+        "gzip;q=-1":          false,
+        "gzip;q=abc":         false,
+        "gzip;q=Inf, *":      true,
+        "*;q=NaN, gzip":      true,
+        "gzip;q=Inf, *;q=0":  false,
+        "gzip;q=0.5, br;q=x": true,
+    }
+
+    for input, expected := range cases {
+        got := acceptsGzip(input)
+        if expected != got {
+            t.Fatalf("acceptsGzip(%q) = %v, want %v", input, got, expected)
+        }
+    }
+}
+
+/* Only a zero minimum size was normalized, so a negative one reached make([]byte, peekSize) and panicked on every request through the middleware. */
 func TestCompressionMiddleware_NegativeMinSizeIsNormalized(t *testing.T) {
     config := NewCompressionConfig(
         6,
@@ -725,7 +746,7 @@ func TestCompressionMiddleware_StalledBodyReaderDoesNotSpin(t *testing.T) {
     }
 }
 
-/* @info the two exclusion setters are the supported way to re-aim a compression policy after the defaults were taken, and neither had a test. Each keeps a copy, so a caller that reuses the slice it passed cannot rewrite the policy of a running middleware, and each reads an explicit nil as "exclude nothing" rather than leaving the previous list in place. */
+/* the two exclusion setters are the supported way to re-aim a compression policy after the defaults were taken, and neither had a test. Each keeps a copy, so a caller that reuses the slice it passed cannot rewrite the policy of a running middleware, and each reads an explicit nil as "exclude nothing" rather than leaving the previous list in place. */
 
 func TestCompressionConfig_SetExcludedContentTypesKeepsACopyAndClearsOnNil(t *testing.T) {
     config := DefaultCompressionConfig()
@@ -779,7 +800,7 @@ func TestCompressionConfig_SetExcludedPathsKeepsACopyAndClearsOnNil(t *testing.T
     }
 }
 
-/* @info the shipped defaults are a policy, not an implementation detail: they decide what a deployment that configures nothing compresses. The media types are excluded because they are already compressed, and re-compressing them spends processor time to make the body larger. */
+/* the shipped defaults are a policy, not an implementation detail: they decide what a deployment that configures nothing compresses. The media types are excluded because they are already compressed, and re-compressing them spends processor time to make the body larger. */
 
 func TestDefaultCompressionConfig_ExcludesTheAlreadyCompressedMediaTypes(t *testing.T) {
     config := DefaultCompressionConfig()
@@ -807,7 +828,7 @@ func TestDefaultCompressionConfig_ExcludesTheAlreadyCompressedMediaTypes(t *test
     }
 }
 
-/* @info DefaultCompressionMiddleware is the one-call front door and had no test. It has to be the default configuration wired through — a middleware that compressed nothing, or one that ignored the shipped minimum size, would read as working on every response large enough to compress. */
+/* DefaultCompressionMiddleware is the one-call front door and had no test. It has to be the default configuration wired through — a middleware that compressed nothing, or one that ignored the shipped minimum size, would read as working on every response large enough to compress. */
 
 func TestDefaultCompressionMiddleware_CompressesAboveTheDefaultMinimumSize(t *testing.T) {
     middleware := DefaultCompressionMiddleware()

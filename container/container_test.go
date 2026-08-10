@@ -465,8 +465,17 @@ func TestContainer_MustGetByType_AnswersAndNamesItsOwnFailure(t *testing.T) {
             t.Fatalf("expected an error panic value, got %#v", recoveredValue)
         }
 
-        if "failed to get service instance by type" != recoveredErr.Error() {
+        if "service type is not registered" != recoveredErr.Error() {
             t.Fatalf("unexpected panic message: %q", recoveredErr.Error())
+        }
+
+        melodyErr, isMelodyErr := recoveredValue.(*exception.Error)
+        if false == isMelodyErr || nil == melodyErr {
+            t.Fatalf("expected the original melody error to travel out whole, got %#v", recoveredValue)
+        }
+
+        if "" == melodyErr.Context()["type"] {
+            t.Fatalf("expected the type written into the original failure's context, got %#v", melodyErr.Context())
         }
     }()
 

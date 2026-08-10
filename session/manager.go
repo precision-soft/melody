@@ -74,6 +74,19 @@ func newManager(storage sessioncontract.Storage, ttl time.Duration, ownsStorage 
         )
     }
 
+    /* the sub-second refusal of the configuration door (config.MinimumSessionTtl), for the same manual wirers: below one second the value is not a short session, it is a broken one — the storage purges every lapsed entry on the write that stores the new one, so SaveSession reports success and persists nothing, and no sub-second lifetime survives the response reaching the client anyway. Zero keeps its meaning of no expiry. */
+    if 0 < ttl && time.Second > ttl {
+        exception.Panic(
+            exception.NewError(
+                "session ttl is positive but shorter than one second, which stores no usable session; use zero for no expiry",
+                map[string]any{
+                    "ttl": ttl.String(),
+                },
+                nil,
+            ),
+        )
+    }
+
     return &Manager{
         storage:            storage,
         ttl:                ttl,

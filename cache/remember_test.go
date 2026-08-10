@@ -617,7 +617,7 @@ func TestRemember_CancelableGroupIsSeparatedFromNonCancelableGroup(t *testing.T)
     }
 }
 
-/* @info the guard reads through the interface: a typed-nil Cache is a non-nil interface that passed the plain comparison and panicked on the first method call, on the request path, in place of the error the refusal promises */
+/* the guard reads through the interface: a typed-nil Cache is a non-nil interface that passed the plain comparison and panicked on the first method call, on the request path, in place of the error the refusal promises */
 func TestRemember_RefusesATypedNilCache(t *testing.T) {
     var typedNilManager *Manager
 
@@ -638,7 +638,7 @@ func TestRemember_RefusesATypedNilCache(t *testing.T) {
     }
 }
 
-/* @info the zero-value option is constructible from outside the package and silently disarmed the stampede protection it never asked to configure; it reads as the constructor defaults instead, so the leader is joined rather than raced */
+/* the zero-value option is constructible from outside the package and silently disarmed the stampede protection it never asked to configure; it reads as the constructor defaults instead, so the leader is joined rather than raced */
 func TestRemember_ZeroValueOptionKeepsStampedeProtection(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -694,7 +694,55 @@ func TestRemember_ZeroValueOptionKeepsStampedeProtection(t *testing.T) {
     }
 }
 
-/* @info a payload the serializer cannot decode is a miss, not a failure: the callback recomputes and its Set overwrites the corrupt payload, so the key heals instead of staying poisoned until an expiry a ttl of zero postpones forever */
+func TestRememberOption_ASetterOnTheZeroValueStartsFromTheDefaults(t *testing.T) {
+    protectionOn := (&RememberOption{}).WithStampedeProtectionEnabled(true)
+    if -1 != protectionOn.WaitTimeout() {
+        t.Fatalf("expected the zero receiver to read as the defaults before the setter, got waitTimeout %v", protectionOn.WaitTimeout())
+    }
+
+    cancelable := (&RememberOption{}).WithCancelable(true)
+    if false == cancelable.EnableStampedeProtection() || -1 != cancelable.WaitTimeout() {
+        t.Fatalf("expected cancelability alone to leave the protection and the wait at their defaults, got %v/%v", cancelable.EnableStampedeProtection(), cancelable.WaitTimeout())
+    }
+
+    explicitNoWait := NewDefaultRememberOption().WithWaitTimeout(0)
+    if 0 != explicitNoWait.WaitTimeout() {
+        t.Fatalf("expected the constructor-built option to keep its explicit zero wait, got %v", explicitNoWait.WaitTimeout())
+    }
+
+    protectionOff := (&RememberOption{}).WithStampedeProtectionEnabled(false)
+    if true == protectionOff.EnableStampedeProtection() {
+        t.Fatalf("expected the deliberate protection-off setter to stay what it says")
+    }
+}
+
+func TestRemember_AZeroOptionPlusASetterAnswersTheMissWithTheValue(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    backend := NewInMemoryBackend(100, time.Hour, clockInstance)
+    defer backend.Close()
+
+    cacheManager := NewManager(backend, NewJsonSerializer())
+
+    value, err := Remember(
+        cacheManager,
+        "zero.option.plus.setter",
+        time.Minute,
+        func(ctx context.Context) (any, error) {
+            return "computed", nil
+        },
+        (&RememberOption{}).WithStampedeProtectionEnabled(true),
+    )
+    if nil != err {
+        t.Fatalf("expected the miss to answer the computed value, got error: %v", err)
+    }
+
+    if "computed" != value {
+        t.Fatalf("unexpected value: %#v", value)
+    }
+}
+
+/* a payload the serializer cannot decode is a miss, not a failure: the callback recomputes and its Set overwrites the corrupt payload, so the key heals instead of staying poisoned until an expiry a ttl of zero postpones forever */
 func TestRemember_RecomputesOverACorruptPayload(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -732,7 +780,7 @@ func TestRemember_RecomputesOverACorruptPayload(t *testing.T) {
     }
 }
 
-/* @info a typed-nil error from the callback reads as the success it means: boxed into a non-nil interface it was memoized as the flight's failure, handed to every waiter, and panicked the first one that rendered it */
+/* a typed-nil error from the callback reads as the success it means: boxed into a non-nil interface it was memoized as the flight's failure, handed to every waiter, and panicked the first one that rendered it */
 func TestRemember_CallbackTypedNilErrorIsSuccess(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -818,7 +866,7 @@ func (instance testValueKindCache) Close() error {
     return instance.inner.Close()
 }
 
-/* @info a value-kind Cache has no address to tell two instances apart, so it gets no coalescing at all: one shared flight would hand a caller the value computed for somebody else's cache, and losing the stampede optimization is the price of never losing the answer */
+/* a value-kind Cache has no address to tell two instances apart, so it gets no coalescing at all: one shared flight would hand a caller the value computed for somebody else's cache, and losing the stampede optimization is the price of never losing the answer */
 func TestRemember_ValueKindCacheDoesNotCoalesce(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -930,7 +978,7 @@ func (instance *testPanickingSetCache) Close() error {
     return instance.inner.Close()
 }
 
-/* @info the callback's own panics are recovered inside the safe wrapper, so what the leader's recover catches is the cache side, and the fabricated error says so instead of blaming a callback that never misbehaved */
+/* the callback's own panics are recovered inside the safe wrapper, so what the leader's recover catches is the cache side, and the fabricated error says so instead of blaming a callback that never misbehaved */
 func TestRemember_CacheSidePanicIsNotBlamedOnTheCallback(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -1029,7 +1077,7 @@ func (instance *testScriptedCache) Decrement(key string, delta int64) (int64, er
 
 func (instance *testScriptedCache) Close() error { return nil }
 
-/* @info a cache failure that is NOT a corrupt payload ends Remember there. The healing branch beside it — a payload the serializer cannot decode is a miss and the callback recomputes over it — was pinned; this one, the ordinary "the cache is down" answer, was not, so a Remember that swallowed a dead backend and recomputed on every single request would have looked exactly like a cache that never hits. */
+/* a cache failure that is NOT a corrupt payload ends Remember there. The healing branch beside it — a payload the serializer cannot decode is a miss and the callback recomputes over it — was pinned; this one, the ordinary "the cache is down" answer, was not, so a Remember that swallowed a dead backend and recomputed on every single request would have looked exactly like a cache that never hits. */
 func TestRemember_ACacheFailureThatIsNotACorruptPayloadEndsThere(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -1092,7 +1140,7 @@ func TestRemember_ACacheFailureThatIsNotACorruptPayloadEndsThere(t *testing.T) {
     }
 }
 
-/* @info the leader re-reads the key before computing, and a value that appeared meanwhile is served instead of recomputed — that re-read is the whole point of the single flight, and it had no test that made it FIND something. The scripted cache makes the caller miss and the leader hit, which is the real interleaving: another process wrote the key between the two reads. */
+/* the leader re-reads the key before computing, and a value that appeared meanwhile is served instead of recomputed — that re-read is the whole point of the single flight, and it had no test that made it FIND something. The scripted cache makes the caller miss and the leader hit, which is the real interleaving: another process wrote the key between the two reads. */
 func TestRemember_TheLeaderServesAValueThatAppearedBetweenTheTwoReads(t *testing.T) {
     scriptedCache := &testScriptedCache{
         getResults: []testScriptedGetResult{
@@ -1131,7 +1179,7 @@ func TestRemember_TheLeaderServesAValueThatAppearedBetweenTheTwoReads(t *testing
     }
 }
 
-/* @info a cache failure on the leader's re-read reaches every waiter as that failure, not as a recomputation: the leader completes the flight with the error, so the caller learns the cache is down instead of silently paying the callback on every request while believing it is cached. */
+/* a cache failure on the leader's re-read reaches every waiter as that failure, not as a recomputation: the leader completes the flight with the error, so the caller learns the cache is down instead of silently paying the callback on every request while believing it is cached. */
 func TestRemember_ACacheFailureOnTheLeaderReReadCompletesTheFlightWithIt(t *testing.T) {
     scriptedCache := &testScriptedCache{
         getResults: []testScriptedGetResult{
@@ -1166,7 +1214,7 @@ func TestRemember_ACacheFailureOnTheLeaderReReadCompletesTheFlightWithIt(t *test
     }
 }
 
-/* @info a write that fails after a successful computation is reported rather than swallowed. The value IS correct — the callback produced it — so a leader that answered it anyway would look right on this request and recompute on every following one, with the cache silently never filling; the caller has to learn the write failed. */
+/* a write that fails after a successful computation is reported rather than swallowed. The value IS correct — the callback produced it — so a leader that answered it anyway would look right on this request and recompute on every following one, with the cache silently never filling; the caller has to learn the write failed. */
 func TestRemember_AFailedWriteIsReportedRatherThanSwallowed(t *testing.T) {
     scriptedCache := &testScriptedCache{
         getResults: []testScriptedGetResult{
@@ -1195,7 +1243,7 @@ func TestRemember_AFailedWriteIsReportedRatherThanSwallowed(t *testing.T) {
     }
 }
 
-/* @info with stampede protection deliberately off there is no leader and no flight, so both of its error exits belong to the direct path and neither was entered: a callback that failed and a write that failed both have to reach the caller, or the protection-off setting would silently become "always recompute, never report". */
+/* with stampede protection deliberately off there is no leader and no flight, so both of its error exits belong to the direct path and neither was entered: a callback that failed and a write that failed both have to reach the caller, or the protection-off setting would silently become "always recompute, never report". */
 func TestRemember_WithoutStampedeProtectionBothFailuresReachTheCaller(t *testing.T) {
     option := NewDefaultRememberOption().WithStampedeProtectionEnabled(false)
 
@@ -1236,7 +1284,7 @@ func TestRemember_WithoutStampedeProtectionBothFailuresReachTheCaller(t *testing
     }
 }
 
-/* @info a callback that panics is turned into an error naming the callback, on BOTH paths — the flight's and the direct one — and the two messages differ on purpose: the leader's own recover blames the cache side, so a callback panic that fell through to it would send the reader looking at the backend. Without stampede protection there is no leader to catch it at all, and the panic would leave the caller's own goroutine. */
+/* a callback that panics is turned into an error naming the callback, on BOTH paths — the flight's and the direct one — and the two messages differ on purpose: the leader's own recover blames the cache side, so a callback panic that fell through to it would send the reader looking at the backend. Without stampede protection there is no leader to catch it at all, and the panic would leave the caller's own goroutine. */
 func TestRemember_ACallbackPanicIsReportedAsTheCallbacksOnBothPaths(t *testing.T) {
     for _, testCase := range []struct {
         name   string
@@ -1275,7 +1323,7 @@ func TestRemember_ACallbackPanicIsReportedAsTheCallbacksOnBothPaths(t *testing.T
     }
 }
 
-/* @info the last waiter of a cancelable flight cancels it, and the guard above that decision covers a call declared cancelable whose cancel function is absent. It is unreachable through Remember — the constructor builds the pair together — and stays as defense for a call assembled by hand: without it the last waiter leaving would dereference a nil function, inside a deferred call on the request path where the panic has no owner. */
+/* the last waiter of a cancelable flight cancels it, and the guard above that decision covers a call declared cancelable whose cancel function is absent. It is unreachable through Remember — the constructor builds the pair together — and stays as defense for a call assembled by hand: without it the last waiter leaving would dereference a nil function, inside a deferred call on the request path where the panic has no owner. */
 func TestRememberInFlightCall_RemoveWaiterToleratesAnAbsentCancelFunction(t *testing.T) {
     shard := getRememberInFlightShard("absent.cancel.function")
 

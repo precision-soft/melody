@@ -1023,6 +1023,29 @@ func TestSimpleRateLimit_RefusesWithTooManyRequests(t *testing.T) {
     }
 }
 
+func TestUserRateLimit_RefusesANilUserIdCallbackAtConstruction(t *testing.T) {
+    for _, build := range []func(){
+        func() { _ = UserRateLimit(1, nil) },
+        func() { _ = UserRateLimitWithResolver(1, nil, nil) },
+    } {
+        func() {
+            defer func() {
+                recovered := recover()
+                if nil == recovered {
+                    t.Fatal("expected the nil callback to be refused at construction")
+                }
+
+                recoveredErr, isError := recovered.(error)
+                if false == isError || false == strings.Contains(recoveredErr.Error(), "get user id callback is required") {
+                    t.Fatalf("expected the refusal to name the callback, got %#v", recovered)
+                }
+            }()
+
+            build()
+        }()
+    }
+}
+
 /* UserRateLimit keys on the identity rather than the address, which is the whole point of it: one user must carry one budget across every address they arrive from, and two users sharing an address must not share one. Neither direction had a test on the helper itself. */
 
 func TestUserRateLimit_KeysOnTheIdentityRatherThanTheAddress(t *testing.T) {

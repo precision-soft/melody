@@ -257,9 +257,17 @@ func (instance *resolverContext) lookupByType(canonicalTargetType reflect.Type) 
     }
 }
 
+/* MustGet panics with the failure the way FromResolver returns it: a melody error travels out whole with the service name written into its context in place, and only a foreign error is wrapped naming the service — a rebuilt copy would shed the log level, the already-logged mark, the capture stack and every wrapper above it, and the mark shed here made one logged provider failure file a second record at the recovery site. */
 func (instance *resolverContext) MustGet(serviceName string) any {
     value, getErr := instance.Get(serviceName)
     if nil != getErr {
+        melodyErr, isMelodyErr := getErr.(*exception.Error)
+        if true == isMelodyErr && nil != melodyErr {
+            melodyErr.SetContextValue("serviceName", serviceName)
+
+            exception.Panic(melodyErr)
+        }
+
         exception.Panic(
             exception.NewError(
                 "failed to get service instance",
@@ -543,12 +551,20 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
     )
 }
 
+/* MustGetByType panics with the failure the way FromResolverByType returns it: the melody error travels out whole with the type written into its context in place, and only a foreign error is wrapped naming the type. */
 func (instance *resolverContext) MustGetByType(targetType reflect.Type) any {
     value, getByTypeErr := instance.GetByType(targetType)
     if nil != getByTypeErr {
         typeString := ""
         if nil != targetType {
             typeString = targetType.String()
+        }
+
+        melodyErr, isMelodyErr := getByTypeErr.(*exception.Error)
+        if true == isMelodyErr && nil != melodyErr {
+            melodyErr.SetContextValue("type", typeString)
+
+            exception.Panic(melodyErr)
         }
 
         exception.Panic(

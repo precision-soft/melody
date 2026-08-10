@@ -113,7 +113,7 @@ func TestFileServer_Embedded_ServesFile(t *testing.T) {
     }
 }
 
-func TestFileServer_DefaultCacheMaxAge_AppliesWhenEnabledAndZero(t *testing.T) {
+func TestFileServer_ExplicitZeroCacheMaxAge_IsHonouredAsAlwaysRevalidate(t *testing.T) {
     fs := fstest.MapFS{
         "a.txt": &fstest.MapFile{
             Data:    []byte("a"),
@@ -156,8 +156,48 @@ func TestFileServer_DefaultCacheMaxAge_AppliesWhenEnabledAndZero(t *testing.T) {
         t.Fatalf("expected headers")
     }
 
+    if "public, max-age=0" != headers.Get("Cache-Control") {
+        t.Fatalf("expected the explicit zero to be honoured as max-age=0, got %q", headers.Get("Cache-Control"))
+    }
+}
+
+func TestFileServer_NegativeCacheMaxAge_TakesTheDefault(t *testing.T) {
+    fs := fstest.MapFS{
+        "a.txt": &fstest.MapFile{
+            Data:    []byte("a"),
+            ModTime: time.Now(),
+        },
+    }
+
+    config := NewFileServerConfig(
+        ModeEmbedded,
+        "",
+        "",
+        "",
+        true,
+        -1,
+        false,
+    )
+
+    server := NewFileServer(
+        NewOptions(
+            config,
+            "",
+            fs,
+        ),
+    )
+
+    _, headers, _, served := server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt"),
+        logging.NewNopLogger(),
+    )
+
+    if false == served {
+        t.Fatalf("expected served")
+    }
+
     if "public, max-age=3600" != headers.Get("Cache-Control") {
-        t.Fatalf("expected default cache-control max-age=3600")
+        t.Fatalf("expected the negative value to take the 3600 default, got %q", headers.Get("Cache-Control"))
     }
 }
 
@@ -2938,7 +2978,7 @@ func TestNewFileServer_CopiesTheConfigurationAndLeavesTheCallersUntouched(t *tes
         "",
         "",
         true,
-        0,
+        -1,
         false,
     )
 
@@ -2954,8 +2994,8 @@ func TestNewFileServer_CopiesTheConfigurationAndLeavesTheCallersUntouched(t *tes
         t.Fatalf("expected the caller's config to keep its empty index file, got %q", config.indexFile)
     }
 
-    if 0 != config.cacheMaxAge {
-        t.Fatalf("expected the caller's config to keep its zero cache max age, got %d", config.cacheMaxAge)
+    if -1 != config.cacheMaxAge {
+        t.Fatalf("expected the caller's config to keep its negative cache max age, got %d", config.cacheMaxAge)
     }
 
     _, headers, _, served := server.Serve(

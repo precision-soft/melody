@@ -1,10 +1,10 @@
 package http
 
 import (
-    "strconv"
     "strings"
 
     httpcontract "github.com/precision-soft/melody/http/contract"
+    "github.com/precision-soft/melody/internal"
 )
 
 func PrefersHtml(request httpcontract.Request) bool {
@@ -17,7 +17,8 @@ func PrefersHtml(request httpcontract.Request) bool {
         return false
     }
 
-    acceptHeader := httpRequest.Header.Get("Accept")
+    /* every line of a repeated Accept field is joined before parsing, the way the error renderer joins them for the serialized branch: the header is list-typed, and reading only the first line let the two readers of one error response see two different views of the client's preference */
+    acceptHeader := strings.Join(httpRequest.Header.Values("Accept"), ",")
     if "" == acceptHeader {
         return false
     }
@@ -65,19 +66,27 @@ func acceptQuality(acceptHeader string, mediaType string) (float64, int) {
             continue
         }
 
+        /* a member whose q parameter falls outside the RFC 7231 qvalue grammar is dropped whole, the serializer reader's rule: a bare float parse honoured q=Inf as an infinite weight and let q=NaN poison every comparison, so the two negotiators of one response disagreed on the same header */
         entryQuality := 1.0
+        entryQualityValid := true
         for _, parameter := range parameters[1:] {
             trimmed := strings.TrimSpace(parameter)
             if false == strings.HasPrefix(strings.ToLower(trimmed), "q=") {
                 continue
             }
 
-            parsed, parseErr := strconv.ParseFloat(strings.TrimSpace(trimmed[2:]), 64)
-            if nil != parseErr {
+            parsed, valid := internal.ParseQualityValue(strings.TrimSpace(trimmed[2:]))
+            if false == valid {
+                entryQualityValid = false
+
                 continue
             }
 
             entryQuality = parsed
+        }
+
+        if false == entryQualityValid {
+            continue
         }
 
         /* the most specific matching range supplies the weight: a more specific match replaces a less specific one outright (so a wildcard can never override an exact type's q, including an explicit q=0 refusal), and equal-specificity ties fall to the higher q */

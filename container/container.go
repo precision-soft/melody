@@ -75,21 +75,11 @@ func (instance *container) Get(serviceName string) (any, error) {
     return resolver.Get(serviceName)
 }
 
+/* MustGet delegates to the resolver context the way MustGetByType always has, so the two doors dress a failure identically: a melody error panics out whole with the service name written into its context, keeping the log level, the already-logged mark and the capture stack a rebuilt wrapper would shed. */
 func (instance *container) MustGet(serviceName string) any {
-    value, getErr := instance.Get(serviceName)
-    if nil != getErr {
-        exception.Panic(
-            exception.NewError(
-                "failed to get service instance",
-                map[string]any{
-                    "serviceName": serviceName,
-                },
-                getErr,
-            ),
-        )
-    }
+    resolver := newResolverContext(instance)
 
-    return value
+    return resolver.MustGet(serviceName)
 }
 
 func (instance *container) GetByType(targetType reflect.Type) (any, error) {
