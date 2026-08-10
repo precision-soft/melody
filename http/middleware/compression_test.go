@@ -8,9 +8,11 @@ import (
     "io"
     nethttp "net/http"
     "net/http/httptest"
+    "runtime"
     "strings"
     "sync"
     "testing"
+    "testing/iotest"
     "time"
 
     "github.com/precision-soft/melody/http"
@@ -883,5 +885,152 @@ func TestDefaultCompressionMiddleware_SkipsBelowTheDefaultMinimumSize(t *testing
 
     if "" != response.Headers().Get("Content-Encoding") {
         t.Fatalf("expected a body under the default minimum size to be left alone")
+    }
+}
+
+func TestCompressionMiddleware_JoinsEveryLineOfARepeatedAcceptEncodingField(t *testing.T) {
+    config := NewCompressionConfig(6, 16, nil, nil)
+    middleware := CompressionMiddleware(config)
+
+    handler := middleware(
+        func(
+            runtimeInstance runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            response := &http.Response{}
+            response.SetStatusCode(200)
+            responseHeaders := make(nethttp.Header)
+            responseHeaders.Set("Content-Type", "text/plain")
+            response.SetHeaders(responseHeaders)
+            response.SetBodyReader(strings.NewReader(strings.Repeat("a", 64)))
+
+            return response, nil
+        },
+    )
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    request.Header.Add("Accept-Encoding", "br")
+    request.Header.Add("Accept-Encoding", "gzip")
+
+    resultResponse, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
+    if nil != err {
+        t.Fatalf("expected nil error, got: %v", err)
+    }
+
+    if "gzip" != resultResponse.Headers().Get("Content-Encoding") {
+        t.Fatalf("expected the gzip named on the second field line to be honoured, got encoding %q", resultResponse.Headers().Get("Content-Encoding"))
+    }
+}
+
+func TestAcceptsGzip_ARepeatedCodingResolvesToItsHigherQuality(t *testing.T) {
+    if false == acceptsGzip("gzip;q=0.5, gzip;q=0") {
+        t.Fatalf("expected the higher q to win regardless of order")
+    }
+
+    if false == acceptsGzip("gzip;q=0, gzip;q=0.5") {
+        t.Fatalf("expected the reversed spelling to answer the same")
+    }
+
+    if true == acceptsGzip("gzip;q=0, gzip;q=0") {
+        t.Fatalf("expected a repeated refusal to stay a refusal")
+    }
+}
+
+func TestAcceptsGzip_QuotedSeparatorsStayInsideTheirParameter(t *testing.T) {
+    if false == acceptsGzip(`gzip;note="a,b";q=0.5`) {
+        t.Fatalf("expected the quoted comma to stay inside the parameter")
+    }
+}
+
+func TestCompressionMiddleware_AnOversizedMinSizeDoesNotAllocateItUpfront(t *testing.T) {
+    config := NewCompressionConfig(6, 1<<30, nil, nil)
+    middleware := CompressionMiddleware(config)
+
+    handler := middleware(
+        func(
+            runtimeInstance runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            response := &http.Response{}
+            response.SetStatusCode(200)
+            responseHeaders := make(nethttp.Header)
+            responseHeaders.Set("Content-Type", "text/plain")
+            response.SetHeaders(responseHeaders)
+            response.SetBodyReader(strings.NewReader("small"))
+
+            return response, nil
+        },
+    )
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    request.Header.Set("Accept-Encoding", "gzip")
+
+    var before runtime.MemStats
+    runtime.ReadMemStats(&before)
+
+    resultResponse, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
+    if nil != err {
+        t.Fatalf("expected nil error, got: %v", err)
+    }
+
+    body, readErr := io.ReadAll(resultResponse.BodyReader())
+    if nil != readErr || "small" != string(body) {
+        t.Fatalf("expected the under-threshold body unchanged, got %q err=%v", body, readErr)
+    }
+
+    var after runtime.MemStats
+    runtime.ReadMemStats(&after)
+
+    /* TotalAlloc is monotonic and precise: the upfront allocation this guard forbids was the full GiB threshold, three orders of magnitude above this bound */
+    if allocatedDelta := after.TotalAlloc - before.TotalAlloc; 100*1024*1024 < allocatedDelta {
+        t.Fatalf("expected the oversized threshold not to be allocated upfront, allocated %d bytes", allocatedDelta)
+    }
+}
+
+func TestCompressionMiddleware_TheGrowingPeekStillCompressesABodyAtTheThreshold(t *testing.T) {
+    config := NewCompressionConfig(6, 100000, nil, nil)
+    middleware := CompressionMiddleware(config)
+
+    payload := strings.Repeat("a", 100000)
+
+    handler := middleware(
+        func(
+            runtimeInstance runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            response := &http.Response{}
+            response.SetStatusCode(200)
+            responseHeaders := make(nethttp.Header)
+            responseHeaders.Set("Content-Type", "text/plain")
+            response.SetHeaders(responseHeaders)
+            response.SetBodyReader(iotest.OneByteReader(strings.NewReader(payload)))
+
+            return response, nil
+        },
+    )
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    request.Header.Set("Accept-Encoding", "gzip")
+
+    resultResponse, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
+    if nil != err {
+        t.Fatalf("expected nil error, got: %v", err)
+    }
+
+    if "gzip" != resultResponse.Headers().Get("Content-Encoding") {
+        t.Fatalf("expected the threshold body to be compressed, got encoding %q", resultResponse.Headers().Get("Content-Encoding"))
+    }
+
+    gzipReader, gzipErr := gzip.NewReader(resultResponse.BodyReader())
+    if nil != gzipErr {
+        t.Fatalf("gzip reader: %v", gzipErr)
+    }
+
+    decompressed, readErr := io.ReadAll(gzipReader)
+    if nil != readErr || payload != string(decompressed) {
+        t.Fatalf("expected the grown peek to preserve every byte, len=%d err=%v", len(decompressed), readErr)
     }
 }

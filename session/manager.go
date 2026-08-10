@@ -174,11 +174,14 @@ func (instance *Manager) SaveSession(sessionInstance sessioncontract.Session) er
         return exception.NewError("session is nil in save session", nil, nil)
     }
 
-    if true == sessionInstance.IsCleared() {
+    /* one snapshot pairs the branch decision with the values it acts on: reading the flags and the values through the individual accessors let a concurrent Clear land between the reads, and the save branch then wrote the emptied map — or the full pre-logout map — under an id the caller was just told is cleared. */
+    values, sessionModified, sessionCleared := sessionInstance.Snapshot()
+
+    if true == sessionCleared {
         return instance.DeleteSession(sessionInstance.Id())
     }
 
-    if false == sessionInstance.IsModified() {
+    if false == sessionModified {
         return nil
     }
 
@@ -193,8 +196,6 @@ func (instance *Manager) SaveSession(sessionInstance sessioncontract.Session) er
             nil,
         )
     }
-
-    values := sessionInstance.All()
 
     /* a session deleted while this request was in flight is not written back. Storage.Save is a blind upsert, so without this a request that loaded the session before a logout deleted it re-creates the entry when its own handler finishes — with the identity intact and the cookie re-issued — and the window is as long as a request takes, which is long enough for someone holding a stolen cookie to keep a revoked session alive by repeating a slow one.
 

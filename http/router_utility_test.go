@@ -72,6 +72,10 @@ func (instance *stubSession) IsModified() bool { return instance.isModified }
 
 func (instance *stubSession) IsCleared() bool { return instance.isCleared }
 
+func (instance *stubSession) Snapshot() (map[string]any, bool, bool) {
+    return instance.All(), instance.isModified, instance.isCleared
+}
+
 func TestIsRequestFromTrustedProxy_MatchesIpAndCidr(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "10.1.2.3:4567"
@@ -1317,5 +1321,107 @@ func TestWriteResponse_ReturnsTheCallersResponseWhenNothingReplacedIt(t *testing
 
     if response != writtenResponse {
         t.Fatalf("expected the caller's response back, got %#v", writtenResponse)
+    }
+}
+
+/* the divergent fake constructs the interleaving instead of awaiting it: its Snapshot answers a cleared session while the individual accessors still answer a live one, exactly the state a Clear landing mid-decision produces. The branch must follow the snapshot. */
+type snapshotDivergentSession struct {
+    stubSession
+}
+
+func (instance *snapshotDivergentSession) Snapshot() (map[string]any, bool, bool) {
+    return map[string]any{}, true, true
+}
+
+func TestWriteResponse_TheBranchDecisionFollowsTheSnapshotNotTheAccessors(t *testing.T) {
+    netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
+    netRequest.RemoteAddr = "127.0.0.1:1234"
+
+    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+
+    writer := httptest.NewRecorder()
+
+    sessionManager := &stubSessionManager{}
+    sessionInstance := &snapshotDivergentSession{
+        stubSession{
+            id:         "1234567890abcdef1234567890abcdef",
+            isModified: true,
+            isCleared:  false,
+        },
+    }
+
+    writeResponse(
+        nil,
+        melodyRequest,
+        writer,
+        EmptyResponse(nethttp.StatusOK),
+        sessionManager,
+        sessionInstance,
+        httpcontract.ForwardedHeadersPolicy{
+            TrustForwardedHeaders: false,
+            TrustedProxyList:      []string{},
+        },
+        httpcontract.SessionCookiePolicy{
+            Path:     "/",
+            Domain:   "",
+            SameSite: nethttp.SameSiteLaxMode,
+        },
+    )
+
+    if 1 != sessionManager.deleteCalled || 0 != sessionManager.saveCalled {
+        t.Fatalf("expected the snapshot's cleared flag to take the delete branch, got %d deletes and %d saves", sessionManager.deleteCalled, sessionManager.saveCalled)
+    }
+}
+
+func TestWriteResponse_AnOutOfRangeStatusCodeAnswersTheRenderedServerError(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/bad",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return EmptyResponse(99), nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainer()
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    server := httptest.NewServer(handler)
+    defer server.Close()
+
+    response, requestErr := nethttp.Get(server.URL + "/bad")
+    if nil != requestErr {
+        t.Fatalf("request failed: %v", requestErr)
+    }
+    defer func() { _ = response.Body.Close() }()
+
+    if nethttp.StatusInternalServerError != response.StatusCode {
+        t.Fatalf("expected the out-of-range status code to answer 500, got %d", response.StatusCode)
+    }
+}
+
+func TestWriteResponse_RefusesTheOutOfRangeCodeBeforeTheDelegate(t *testing.T) {
+    netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
+    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+
+    recorder := httptest.NewRecorder()
+
+    written := writeResponse(
+        nil,
+        melodyRequest,
+        recorder,
+        EmptyResponse(99),
+        nil,
+        nil,
+        httpcontract.ForwardedHeadersPolicy{},
+        httpcontract.SessionCookiePolicy{},
+    )
+
+    if nethttp.StatusInternalServerError != recorder.Code {
+        t.Fatalf("expected the refusal ahead of the delegate to write 500, got %d", recorder.Code)
+    }
+
+    if nethttp.StatusInternalServerError != written.StatusCode() {
+        t.Fatalf("expected the returned response to be the rendered 500, got %d", written.StatusCode())
     }
 }

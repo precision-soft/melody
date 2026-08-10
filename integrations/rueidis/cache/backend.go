@@ -407,20 +407,39 @@ func (instance *Backend) SetMultipleCtx(ctx context.Context, items map[string][]
         cmds = append(cmds, command)
     }
 
+    /* every failing response is collected before one is reported, the delete sibling's rule: returning on the first failure of a map-ordered walk named a different key for the same failing batch on every call, and hid that the entries after it also failed */
+    setErrors := make(map[string]error, len(commandKeys))
     for index, response := range instance.client.DoMulti(ctx, cmds...) {
         if err := response.Error(); nil != err {
-            return exception.NewError(
-                "cache set failed",
-                exceptioncontract.Context{
-                    "key":            commandKeys[index],
-                    "requestedCount": len(commandKeys),
-                },
-                err,
-            )
+            setErrors[commandKeys[index]] = err
         }
     }
 
-    return nil
+    return instance.firstSetFailure(setErrors, len(commandKeys))
+}
+
+/* firstSetFailure names the key that failed, chosen by sorting rather than by map iteration — the firstDeleteFailure convention — so two identical failures report identically, and the counts tell the caller how much of the batch they describe. */
+func (instance *Backend) firstSetFailure(setErrors map[string]error, requestedCount int) error {
+    if 0 == len(setErrors) {
+        return nil
+    }
+
+    failedKeys := make([]string, 0, len(setErrors))
+    for key := range setErrors {
+        failedKeys = append(failedKeys, key)
+    }
+
+    sort.Strings(failedKeys)
+
+    return exception.NewError(
+        "cache set failed",
+        exceptioncontract.Context{
+            "key":            failedKeys[0],
+            "failedKeyCount": len(failedKeys),
+            "requestedCount": requestedCount,
+        },
+        setErrors[failedKeys[0]],
+    )
 }
 
 /* Deprecated: prefer SetMultipleCtx, which takes ctx per call. */

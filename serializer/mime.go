@@ -29,46 +29,9 @@ type acceptedMime struct {
     qualityValue float64
 }
 
-/* splitOutsideQuotes splits value on separator while honouring quoted-string sections: a separator inside double quotes belongs to the parameter value it sits in, and a backslash escapes the character after it inside a quoted section, so a media range such as text/plain;version="1,2";q=0 stays one member instead of losing the refusal it carries. */
-func splitOutsideQuotes(value string, separator byte) []string {
-    result := make([]string, 0, 4)
-    insideQuotes := false
-    escaped := false
-    start := 0
-
-    for index := 0; index < len(value); index++ {
-        character := value[index]
-
-        if true == escaped {
-            escaped = false
-
-            continue
-        }
-
-        if true == insideQuotes && '\\' == character {
-            escaped = true
-
-            continue
-        }
-
-        if '"' == character {
-            insideQuotes = false == insideQuotes
-
-            continue
-        }
-
-        if separator == character && false == insideQuotes {
-            result = append(result, value[start:index])
-            start = index + 1
-        }
-    }
-
-    return append(result, value[start:])
-}
-
 /* a member whose q parameter falls outside the RFC 7231 qvalue grammar is dropped whole rather than rounded to a guess: the previous leniency scored an unparseable q as full acceptance, clamped a negative one into a refusal and let NaN through as a weight that no comparison could select or refuse, so the same malformed header could open, close or silently poison the negotiation depending on the spelling */
 func parseAcceptHeader(acceptHeader string) []acceptedMime {
-    parts := splitOutsideQuotes(acceptHeader, ',')
+    parts := internal.SplitOutsideQuotes(acceptHeader, ',')
     result := make([]acceptedMime, 0, len(parts))
 
     for _, part := range parts {
@@ -87,7 +50,7 @@ func parseAcceptHeader(acceptHeader string) []acceptedMime {
             parametersPart := strings.TrimSpace(part[parameterSeparatorIndex+1:])
 
             if "" != parametersPart {
-                parameters := splitOutsideQuotes(parametersPart, ';')
+                parameters := internal.SplitOutsideQuotes(parametersPart, ';')
                 for _, parameter := range parameters {
                     parameter = strings.TrimSpace(parameter)
                     if "" == parameter {

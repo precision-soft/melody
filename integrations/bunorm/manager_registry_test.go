@@ -1264,3 +1264,41 @@ func TestNewManagerRegistry_BindsABackgroundContextForContextOpeners(t *testing.
         t.Fatalf("expected a live background context, got %v", provider.observed.Err())
     }
 }
+
+func TestManagerRegistry_CloseCarriesTheSortedFirstFailureAsCause(t *testing.T) {
+    for iteration := 0; iteration < 20; iteration++ {
+        alphaErr := errors.New("alpha close refused")
+        zebraErr := errors.New("zebra close refused")
+
+        registry, registryErr := NewManagerRegistry(
+            &fakeResolver{},
+            ProviderDefinition{Name: "zebra", Provider: &pinnedDatabaseProvider{database: newFailClosingDatabase(zebraErr)}, IsDefault: true},
+            ProviderDefinition{Name: "alpha", Provider: &pinnedDatabaseProvider{database: newFailClosingDatabase(alphaErr)}},
+        )
+        if nil != registryErr {
+            t.Fatalf("registry error: %v", registryErr)
+        }
+
+        if _, managerErr := registry.Manager("zebra"); nil != managerErr {
+            t.Fatalf("manager error: %v", managerErr)
+        }
+        if _, managerErr := registry.Manager("alpha"); nil != managerErr {
+            t.Fatalf("manager error: %v", managerErr)
+        }
+
+        closeErr := registry.Close()
+        if false == errors.Is(closeErr, alphaErr) {
+            t.Fatalf("iteration %d: expected the sorted-first failure as the cause, got %v", iteration, closeErr)
+        }
+
+        var exceptionErr *exception.Error
+        if false == errors.As(closeErr, &exceptionErr) {
+            t.Fatalf("expected the aggregated exception error, got %v", closeErr)
+        }
+
+        namesString := fmt.Sprintf("%v", exceptionErr.Context()["names"])
+        if false == (strings.Index(namesString, "alpha") < strings.Index(namesString, "zebra")) {
+            t.Fatalf("iteration %d: expected the failed names sorted, got %v", iteration, namesString)
+        }
+    }
+}

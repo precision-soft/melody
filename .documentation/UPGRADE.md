@@ -18,6 +18,38 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Session: the contract gains an atomic Snapshot
+
+**What changed.** `session/contract.Session` carries `Snapshot() (values map[string]any, modified bool, cleared bool)` — the three answers read under one lock acquisition — and the response path decides between deleting and saving through it. Reading the flags and the values through the individual accessors let a `Clear` racing the response land between the reads and write the pre-logout state back under a live id.
+
+**Symptom.** An out-of-tree implementation of the `Session` contract stops compiling with "missing method Snapshot".
+
+**Remedy.** Implement `Snapshot` as one critical section over the same three answers the accessors give; a single-threaded implementation can simply return `instance.All(), instance.IsModified(), instance.IsCleared()`.
+
+### Remember: the computing call answers the stored shape
+
+**What changed.** `Remember` over a `cache.Manager` passes the callback's value through one local serializer round-trip before returning it, so the miss and every later hit answer the same shape.
+
+**Symptom.** A caller that type-asserted the miss return to the callback's own type — `value.(int)`, `value.(MyStruct)` — sees the assertion fail now on every call instead of only from the second call on: the value is the decoded generic form (`float64`, `map[string]any`), exactly what the hits always answered.
+
+**Remedy.** Decode the returned value the way the hit path always required — or, where the concrete type matters, re-fetch through a typed unmarshal of your own. The change turns a warm-path-only failure into a deterministic one, which is the fix.
+
+### Httpclient: two spellings of one header are refused
+
+**What changed.** Client-config and request-option header maps are canonicalized, and a map carrying two spellings that collapse onto one header — `x-api-key` beside `X-Api-Key` — is refused with a named panic at construction.
+
+**Symptom.** A configuration that carried both spellings — and was silently sending a per-request coin flip of the two values until now — fails at the constructor naming the collision.
+
+**Remedy.** Keep one spelling. Sequential `SetHeader` calls stay legal and last-write-wins on the canonical key.
+
+### Http: an out-of-range response status code answers 500
+
+**What changed.** A response status code outside `[100, 999]` is refused by name in the write path and the client receives the rendered 500; the header-commit flag is raised only after the delegate returns.
+
+**Symptom.** A handler bug that produced such a code — previously answered as an implicit empty 200 with an unrelated-looking panic in the log — now answers 500, with a log record naming the invalid code.
+
+**Remedy.** None: fix the handler the record now points at.
+
 ### Remember: an option assembled from the zero value reads unset fields as the defaults
 
 **What changed.** A `With` setter called on the exact zero-value `RememberOption` first reads the receiver as `NewDefaultRememberOption`, then applies its own field. Until now a zero option plus one setter carried `waitTimeout: 0`, so every cache miss answered "cache remember callback timed out" while the callback computed in the background, and setting cancelability alone silently disabled the stampede protection.

@@ -18,6 +18,7 @@ type routerCommandTestEnvelope struct {
     Data struct {
         Items []struct {
             Pattern string `json:"pattern"`
+            Order   int    `json:"order"`
         } `json:"items"`
         Total  int `json:"total"`
         Limit  int `json:"limit"`
@@ -501,5 +502,62 @@ func TestRouterCommand_CarriesTheDiscriminatorsInJsonAndVerboseTable(t *testing.
 
     if false == strings.HasPrefix(verboseRow[0][8], "id=") || "id=1" != verboseRow[0][9] || false == strings.Contains(verboseRow[0][10], "section=catalog") {
         t.Fatalf("expected the compact discriminator cells, got %v", verboseRow[0])
+    }
+}
+
+func TestRouterCommand_TiedPatternAndMethodsRowsKeepTheRegistrationOrder(t *testing.T) {
+    router := http.NewRouter()
+
+    for index := 0; index < 16; index++ {
+        router.HandleWithOptions(
+            "/tied",
+            func(
+                runtimeInstance runtimecontract.Runtime,
+                writer nethttp.ResponseWriter,
+                request httpcontract.Request,
+            ) (httpcontract.Response, error) {
+                return nil, nil
+            },
+            http.NewRouteOptions(
+                fmt.Sprintf("tied.%02d", index),
+                []string{nethttp.MethodGet},
+                fmt.Sprintf("host%02d.example.com", index),
+                nil,
+                nil,
+                nil,
+                nil,
+                0,
+                nil,
+            ),
+        )
+    }
+
+    serviceContainer := container.NewContainer()
+
+    serviceContainer.MustRegister(
+        http.ServiceRouter,
+        func(resolver containercontract.Resolver) (httpcontract.Router, error) {
+            return router, nil
+        },
+    )
+
+    rendered, runErr := runDebugCommand(
+        &RouterCommand{},
+        newTestRuntime(serviceContainer),
+        []string{"--format=json"},
+    )
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    envelope := decodeRouterCommandEnvelope(t, rendered)
+    if 16 != len(envelope.Data.Items) {
+        t.Fatalf("expected 16 rows, got %d", len(envelope.Data.Items))
+    }
+
+    for index, item := range envelope.Data.Items {
+        if index+1 != item.Order {
+            t.Fatalf("expected the tied rows in registration order, row %d carries order %d", index, item.Order)
+        }
     }
 }

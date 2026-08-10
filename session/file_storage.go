@@ -73,7 +73,7 @@ func NewFileStorageFromFile(fileInstance *os.File) (*FileStorage, error) {
     return storage, nil
 }
 
-/* @important recommended for dev only */
+/* FileStorage is recommended for development only. One reason is written here because it is invisible until the first redeploy: values are flushed as JSON and reloaded at construction, so a session survives a restart with its SHAPES changed — an int comes back float64, a struct comes back map[string]any, a time.Time comes back a string — while the same session read in-process keeps the types the handler stored. A type assertion on a session value therefore holds for the life of a process and starts failing after the first restart. */
 type FileStorage struct {
     mutex    sync.Mutex
     path     string
@@ -109,7 +109,7 @@ func (instance *FileStorage) Load(sessionId string) (map[string]any, bool, error
     if 0 != entry.ExpiresAt && time.Now().UnixNano() >= entry.ExpiresAt {
         /* the flush is what drops this entry: purgeExpiredLocked runs inside it against the same clock and the same predicate, so naming the session again here would only duplicate the removal.
 
-        @important its failure is deliberately not returned. The answer to this load — no such session — was settled before the flush was attempted, and the flush is housekeeping no caller asked for; handing back its error instead would make Manager.Session panic, so an expired cookie on a store that cannot be written would answer 500 where a client holding no cookie at all is served a fresh session. The purge has already taken the entry out of the map, so nothing serves it again; only the file still carries it, until the next write that succeeds. */
+        its failure is deliberately not returned. The answer to this load — no such session — was settled before the flush was attempted, and the flush is housekeeping no caller asked for; handing back its error instead would make Manager.Session panic, so an expired cookie on a store that cannot be written would answer 500 where a client holding no cookie at all is served a fresh session. The purge has already taken the entry out of the map, so nothing serves it again; only the file still carries it, until the next write that succeeds. */
         _ = instance.flushLocked()
 
         return nil, false, nil
@@ -125,7 +125,7 @@ func (instance *FileStorage) Save(sessionId string, data map[string]any, ttl tim
 
     expiresAt := int64(0)
     if 0 < ttl {
-        /* @important time.Time.UnixNano is only defined up to 2262-04-11 and wraps to a negative int64 past it; a caller using a very large ttl as a "never expire" value would otherwise land a negative ExpiresAt that Load and purgeExpiredLocked read as already lapsed and drop the session on the same Save, so saturate at the maximum representable instant the way InMemoryStorage keeps such sessions */
+        /* time.Time.UnixNano is only defined up to 2262-04-11 and wraps to a negative int64 past it; a caller using a very large ttl as a "never expire" value would otherwise land a negative ExpiresAt that Load and purgeExpiredLocked read as already lapsed and drop the session on the same Save, so saturate at the maximum representable instant the way InMemoryStorage keeps such sessions */
         expiration := time.Now().Add(ttl)
         if true == expiration.After(time.Unix(0, math.MaxInt64)) {
             expiresAt = math.MaxInt64
@@ -151,7 +151,7 @@ func (instance *FileStorage) Save(sessionId string, data map[string]any, ttl tim
 
     flushErr := instance.flushLocked()
     if nil != flushErr {
-        /* @important roll the in-memory entry back on a flush failure so a Save that returns an error is not observable through a later Load — the in-memory state must not diverge from what was persisted */
+        /* roll the in-memory entry back on a flush failure so a Save that returns an error is not observable through a later Load — the in-memory state must not diverge from what was persisted */
         if true == hadPrevious {
             instance.sessionById[sessionId] = previousEntry
         } else {
@@ -185,7 +185,7 @@ func (instance *FileStorage) Delete(sessionId string) error {
 
     flushErr := instance.flushLocked()
     if nil != flushErr {
-        /* @important restore the entry on a flush failure so a Delete that returns an error does not drop the session from the in-memory state while it is still persisted */
+        /* restore the entry on a flush failure so a Delete that returns an error does not drop the session from the in-memory state while it is still persisted */
         instance.sessionById[sessionId] = previousEntry
 
         return flushErr
@@ -364,7 +364,7 @@ func writeSessionFileAtomically(path string, snapshot map[string]fileSessionEntr
 }
 
 func writeSessionFileInPlace(fileInstance *os.File, snapshot map[string]fileSessionEntry) error {
-    /* @important encode into an in-memory buffer first so a failed encode (for example a session value that is not JSON-marshalable) never truncates the live file and destroys the previously-persisted sessions; the file is only seeked, truncated and rewritten once the encode has succeeded, mirroring the validate-before-commit guarantee of writeSessionFileAtomically */
+    /* encode into an in-memory buffer first so a failed encode (for example a session value that is not JSON-marshalable) never truncates the live file and destroys the previously-persisted sessions; the file is only seeked, truncated and rewritten once the encode has succeeded, mirroring the validate-before-commit guarantee of writeSessionFileAtomically */
     var buffer bytes.Buffer
 
     encoder := json.NewEncoder(&buffer)

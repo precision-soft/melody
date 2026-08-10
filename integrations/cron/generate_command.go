@@ -54,6 +54,7 @@ func NewGenerateCommand(configuration *Configuration) *GenerateCommand {
     return command
 }
 
+/* RegisterTemplate installs the template under its name, replacing an existing one silently: replacement by name is the door through which an application overrides a builtin dialect. Two application templates sharing a name resolve to the later registration, so a caller that must not replace anything checks the name first. */
 func (instance *GenerateCommand) RegisterTemplate(template Template) {
     instance.templates[template.Name()] = template
 }

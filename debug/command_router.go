@@ -98,11 +98,16 @@ func (instance *RouterCommand) Run(
         )
     }
 
+    /* the registration order makes the comparator total: two routes may share pattern and methods and still be distinct at dispatch — differing in host, priority or requirements — and under an unstable sort a partial comparator flips their rows between runs of the very command that exists to show which of them answers */
     sort.Slice(items, func(leftIndex int, rightIndex int) bool {
         left := items[leftIndex]
         right := items[rightIndex]
 
         if left.Pattern == right.Pattern {
+            if left.Methods == right.Methods {
+                return left.Order < right.Order
+            }
+
             return left.Methods < right.Methods
         }
 

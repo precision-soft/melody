@@ -62,6 +62,23 @@ func normalizeThirdPartyError(err error) error {
     return err
 }
 
+/* NormalizeStoredValue answers the shape a value stored through this manager reads back as: one serializer round-trip, run locally with no backend involved. Remember consults it so the computing call and the cached calls answer one shape — without it, a callback's int came back float64 and its struct came back a map, but only from the second call on. */
+func (instance *Manager) NormalizeStoredValue(value any) (any, error) {
+    payload, serializeErr := instance.serializer.Serialize(value)
+    serializeErr = normalizeThirdPartyError(serializeErr)
+    if nil != serializeErr {
+        return nil, serializeErr
+    }
+
+    normalized, deserializeErr := instance.serializer.Deserialize(payload)
+    deserializeErr = normalizeThirdPartyError(deserializeErr)
+    if nil != deserializeErr {
+        return nil, deserializeErr
+    }
+
+    return normalized, nil
+}
+
 func (instance *Manager) Get(key string) (any, bool, error) {
     payload, exists, getErr := instance.backend.Get(key)
     getErr = normalizeThirdPartyError(getErr)
@@ -113,7 +130,7 @@ func (instance *Manager) Clear() error {
     return normalizeThirdPartyError(instance.backend.Clear())
 }
 
-/* @important an entry whose payload does not deserialize is left out of the result the way an absent key is — Get answers the same entry with exists false — and the keys it happened under come back in a DeserializationError beside the values that did decode, so one corrupt entry no longer discards the whole answer and the error names its culprits deterministically. */
+/* an entry whose payload does not deserialize is left out of the result the way an absent key is — Get answers the same entry with exists false — and the keys it happened under come back in a DeserializationError beside the values that did decode, so one corrupt entry no longer discards the whole answer and the error names its culprits deterministically. */
 func (instance *Manager) Many(keys []string) (map[string]any, error) {
     payloadsByKey, manyErr := instance.backend.Many(keys)
     manyErr = normalizeThirdPartyError(manyErr)
@@ -181,7 +198,7 @@ func (instance *Manager) DeleteMultiple(keys []string) error {
     return normalizeThirdPartyError(instance.backend.DeleteMultiple(keys))
 }
 
-/* @important the counter operations are backend-native so a distributed backend keeps them atomic, which means they bypass the serializer and store the count as decimal text; a counter key must therefore be read with GetCounter rather than Get, and must not be mixed with Set on the same key */
+/* the counter operations are backend-native so a distributed backend keeps them atomic, which means they bypass the serializer and store the count as decimal text; a counter key must therefore be read with GetCounter rather than Get, and must not be mixed with Set on the same key */
 func (instance *Manager) Increment(key string, delta int64) (int64, error) {
     newValue, incrementErr := instance.backend.Increment(key, delta)
 

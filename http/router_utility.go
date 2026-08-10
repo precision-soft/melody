@@ -251,6 +251,21 @@ func writeResponse(
         }
     }
 
+    /* a status code outside net/http's [100, 999] is refused by name here and answered as the rendered 500, because handing it to WriteHeader panics inside the delegate — and that panic reached the client as an implicit empty 200: the recovery re-entered writeResponse, read the header-commit flag the failed WriteHeader had already raised, classified the response as a committed stream and skipped the write. Zero stays the write path's own "unset means 200". */
+    if statusCode := response.StatusCode(); 0 != statusCode && (100 > statusCode || 999 < statusCode) {
+        logger := logging.LoggerFromRuntime(runtimeInstance)
+        if nil != logger {
+            logger.Error(
+                "response status code is out of range; answering an internal server error",
+                loggingcontract.Context{
+                    "statusCode": statusCode,
+                },
+            )
+        }
+
+        response = renderErrorResponse(runtimeInstance, request, nethttp.StatusInternalServerError, "internal server error", nil)
+    }
+
     /* persist the session at most once per request: the panic-recovery path can re-enter writeResponse after the first call already committed the session but then failed while writing the body, and SaveSession does not reset the modified flag, so without this guard the session store would be written twice. The header-commit flag cannot gate this — a handler that streamed its own response still needs its session persisted on that first (already-committed) call. */
     persistenceRecorder, isPersistenceRecorder := writer.(sessionPersistenceRecorder)
     sessionAlreadyPersisted := true == isPersistenceRecorder && true == persistenceRecorder.SessionPersisted()
@@ -263,7 +278,10 @@ func writeResponse(
     if false == sessionAlreadyPersisted && false == internal.IsNilInterface(sessionManager) && false == internal.IsNilInterface(sessionInstance) {
         sessionPersistFailed := false
 
-        if true == sessionInstance.IsCleared() {
+        /* one snapshot decides both branches: reading the two flags through the individual accessors let a concurrent Clear land between them, and the cookie decision below then contradicted the persistence branch taken above it. */
+        _, sessionModified, sessionCleared := sessionInstance.Snapshot()
+
+        if true == sessionCleared {
             if err := sessionManager.DeleteSession(sessionInstance.Id()); nil != err {
                 /* a session-backend outage on logout must degrade to a logged error but STILL expire the browser cookie: clearing the cookie is independent of and strictly safer than the backend delete (it can only end a session, never resurrect an unpersisted one), so a failed DeleteSession must not leave the client holding a live session cookie while it is told it was logged out. Mark the persistence failed so MarkSessionPersisted is skipped, but emit the clearing cookie below regardless. (This differs from the save path, where a failed SaveSession MUST suppress the cookie so the browser is not pointed at a never-persisted session id.) */
                 sessionPersistFailed = true
@@ -283,7 +301,7 @@ func writeResponse(
             }
 
             SetCookie(response, cookie)
-        } else if true == sessionInstance.IsModified() {
+        } else if true == sessionModified {
             /* a discarded response carries no Set-Cookie, so storing a session the client does not already hold would write a row nothing can ever reference: a first-time visitor on a streamed response (Server-Sent Events commit the headers before the handler runs) would leave one unreachable session behind per reconnect. A session the request already names is stored as before, since it needs no cookie to be reachable — and the clear path above still destroys a session whatever the response does with it. */
             if true == responseIsDiscarded && false == requestNamesSession(request, sessionInstance.Id()) {
                 /* say so in the log. Suppressing the write is right — nothing could carry the id to the client — but a handler that rotated the session on a response it had already committed reaches here too, and for it the rotation has destroyed the previous entry while this drops the replacement: everything the session held is gone, from two calls that both reported success. Silence made that indistinguishable from the ordinary case this branch exists for, a first-time visitor on a stream who simply has no session worth storing. */

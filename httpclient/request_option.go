@@ -1,6 +1,7 @@
 package httpclient
 
 import (
+    "net/textproto"
     "time"
 
     httpclientcontract "github.com/precision-soft/melody/httpclient/contract"
@@ -64,12 +65,14 @@ func (instance *RequestOptions) hasExplicitMaxResponseBodyBytes() bool {
     return instance.explicitMaxResponseBodyBytes
 }
 
+/* SetHeader stores the key canonicalized, so two spellings of one header land on one entry deterministically — the last sequential write wins — instead of surviving as two map entries whose request-time winner map iteration chose. */
 func (instance *RequestOptions) SetHeader(key string, value string) {
-    instance.headers[key] = value
+    instance.headers[textproto.CanonicalMIMEHeaderKey(key)] = value
 }
 
+/* SetHeaders refuses a map carrying two spellings that collapse onto one header, the way the client config constructor does: inside one map there is no sequential order to make the survivor deterministic. */
 func (instance *RequestOptions) SetHeaders(headers map[string]string) {
-    for key, value := range headers {
+    for key, value := range canonicalHeaderMap(headers) {
         instance.headers[key] = value
     }
 }

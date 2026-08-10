@@ -8,6 +8,7 @@ import (
     securitycontract "github.com/precision-soft/melody/security/contract"
 )
 
+/* AccessControlMergeStrategy orders the merged rule LIST — it does not decide which rule answers a request. The matcher resolves by category first (an exact path beats every prefix, a longer prefix beats a shorter one, every prefix beats every regex, the empty-prefix fallback answers last), so a local /admin prefix rule is still beaten by a global /admin/reports rule under localFirst. List position decides only what the categories leave tied: which of two equal-length prefixes, which regex, which exact duplicate and which fallback wins. A rule that must beat a longer or more exact sibling needs a more specific path, not an earlier position. */
 type AccessControlMergeStrategy string
 
 const (
@@ -200,7 +201,7 @@ func (instance *Builder) addFirewall(
     )
 
     if "" == string(override.mergeStrategy) {
-        /* @important the zero value of the exported override struct must inherit the global access control the same way NewFirewallOverrideConfiguration does: an override that reaches here unconfigured carries no local access control, and without inheritance the firewall compiles an empty non-nil access control that never falls back to the global policy, opening every route behind the firewall */
+        /* the zero value of the exported override struct must inherit the global access control the same way NewFirewallOverrideConfiguration does: an override that reaches here unconfigured carries no local access control, and without inheritance the firewall compiles an empty non-nil access control that never falls back to the global policy, opening every route behind the firewall */
         override.mergeStrategy = AccessControlMergeLocalFirst
         override.inheritGlobalAccessControl = true
     }

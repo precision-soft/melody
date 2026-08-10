@@ -102,15 +102,18 @@ func newRecordingResponseWriter(responseWriter nethttp.ResponseWriter) *recordin
     }
 }
 
+/* WriteHeader raises the commit flag only after the delegate returns: the delegate panics on a status code outside [100, 999] before anything reaches the connection, and a flag raised first recorded a commit that never happened — the recovery then read the response as a committed stream, skipped writing its 500, and the client received an implicit empty 200 for a handler bug. */
 func (instance *recordingResponseWriter) WriteHeader(statusCode int) {
-    instance.wroteHeader = true
     instance.ResponseWriter.WriteHeader(statusCode)
+    instance.wroteHeader = true
 }
 
+/* Write raises the flag after the delegate returns, error or not: a write the client disconnected under has still committed the implicit header. */
 func (instance *recordingResponseWriter) Write(data []byte) (int, error) {
+    written, writeErr := instance.ResponseWriter.Write(data)
     instance.wroteHeader = true
 
-    return instance.ResponseWriter.Write(data)
+    return written, writeErr
 }
 
 /* Flush is forwarded so the wrapper keeps satisfying http.Flusher, which streaming handlers rely on; a flush commits the response, so it also records that the headers were written. */

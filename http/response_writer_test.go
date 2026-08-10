@@ -124,3 +124,24 @@ func TestWriteToHttpResponseWriter_ResponseOwnedKeyReplacesTheWriterValue(t *tes
         t.Fatalf("expected a key the response does not name to keep the writer's value")
     }
 }
+
+type panickingHeaderWriter struct {
+    nethttp.ResponseWriter
+}
+
+func (instance *panickingHeaderWriter) WriteHeader(statusCode int) {
+    panic("invalid WriteHeader code")
+}
+
+func TestRecordingResponseWriter_APanickingDelegateLeavesTheCommitFlagFalse(t *testing.T) {
+    recording := newRecordingResponseWriter(&panickingHeaderWriter{httptest.NewRecorder()})
+
+    func() {
+        defer func() { _ = recover() }()
+        recording.WriteHeader(99)
+    }()
+
+    if true == recording.HeadersWritten() {
+        t.Fatalf("expected a delegate that panicked before committing to leave the flag false; a lying flag made the recovery skip its 500 and the client received an implicit empty 200")
+    }
+}

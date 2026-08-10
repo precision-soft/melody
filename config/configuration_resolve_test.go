@@ -902,3 +902,31 @@ func TestResolveTemplate_NonStringReferenceErrorOmitsTheValue(t *testing.T) {
         t.Fatalf("expected the secret bytes to stay out of the rendered context")
     }
 }
+
+func TestResolveAll_TwoBrokenTemplatesFailOnTheSortedFirstParameterEveryTime(t *testing.T) {
+    for iteration := 0; iteration < 30; iteration++ {
+        configuration := &Configuration{
+            environment: &Environment{
+                values: map[string]string{},
+            },
+            parameters: ParameterMap{
+                "zulu.broken":  NewParameter("ZULU_BROKEN", "%missing.one%", nil, false),
+                "alpha.broken": NewParameter("ALPHA_BROKEN", "%missing.two%", nil, false),
+            },
+        }
+
+        resolveErr := configuration.resolveAll(false)
+        if nil == resolveErr {
+            t.Fatalf("expected the broken templates to be refused")
+        }
+
+        melodyErr, isMelodyErr := resolveErr.(*exception.Error)
+        if false == isMelodyErr {
+            t.Fatalf("expected a melody error, got %T", resolveErr)
+        }
+
+        if "alpha.broken" != melodyErr.Context()["parameter"] {
+            t.Fatalf("iteration %d: expected the failure to name the sorted-first parameter, got %v", iteration, melodyErr.Context()["parameter"])
+        }
+    }
+}

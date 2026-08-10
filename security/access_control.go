@@ -194,6 +194,7 @@ func (instance *AccessControl) Rules() []AccessControlRule {
     return append([]AccessControlRule{}, instance.rules...)
 }
 
+/* Match resolves by category before position: an exact rule beats every prefix rule, a longer prefix beats a shorter one regardless of registration order, every prefix beats every regex, and the empty-prefix fallback answers only when nothing else did. Position in the rule list — what the merge strategies order — breaks only the ties inside a category: equal-length prefixes, regexes, exact duplicates and fallbacks each resolve to the first registered. */
 func (instance *AccessControl) Match(path string) ([]string, bool) {
     matchedIndex, matched := instance.matchRuleIndex(path)
     if false == matched {

@@ -51,8 +51,9 @@ func acceptQuality(acceptHeader string, mediaType string) (float64, int) {
     slashIndex := strings.IndexByte(mediaType, '/')
     typeWildcard := mediaType[:slashIndex+1] + "*"
 
-    for entryIndex, entry := range strings.Split(acceptHeader, ",") {
-        parameters := strings.Split(entry, ";")
+    /* members and parameters split outside quoted sections, the serializer reader's grammar: a bare split cuts through a quoted parameter value, so text/html;p="a,b";q=0 lost the refusal it carries for this reader while the serialized branch honoured it */
+    for entryIndex, entry := range internal.SplitOutsideQuotes(acceptHeader, ',') {
+        parameters := internal.SplitOutsideQuotes(entry, ';')
         mediaRange := strings.ToLower(strings.TrimSpace(parameters[0]))
 
         entrySpecificity := -1

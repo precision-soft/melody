@@ -256,3 +256,34 @@ func TestSession_GetHandsOutACopyAtTheDepthAllCopiesAt(t *testing.T) {
         t.Fatalf("expected the live nested slice to be untouched, got %v", secondSlice)
     }
 }
+
+func TestSession_SnapshotPairsTheFlagsWithTheValues(t *testing.T) {
+    sessionInstance := &Session{
+        id:     "1234567890abcdef1234567890abcdef",
+        values: map[string]any{},
+    }
+    sessionInstance.Set("user", "alice")
+
+    values, modified, cleared := sessionInstance.Snapshot()
+    if false == modified || true == cleared {
+        t.Fatalf("expected a modified live session, got modified=%v cleared=%v", modified, cleared)
+    }
+    if "alice" != values["user"] {
+        t.Fatalf("expected the snapshot to carry the values, got %#v", values)
+    }
+
+    values["user"] = "mallory"
+    if "alice" != sessionInstance.Get("user") {
+        t.Fatalf("expected the snapshot to hand out a copy")
+    }
+
+    sessionInstance.Clear()
+
+    values, modified, cleared = sessionInstance.Snapshot()
+    if false == modified || false == cleared {
+        t.Fatalf("expected the cleared latch in the snapshot, got modified=%v cleared=%v", modified, cleared)
+    }
+    if 0 != len(values) {
+        t.Fatalf("expected the cleared snapshot to pair the flag with the emptied values, got %#v", values)
+    }
+}

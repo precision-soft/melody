@@ -154,7 +154,12 @@ func (instance *MiddlewareCommand) populateDescription(
     if nil != report {
         inactive := report.Inactive()
 
+        /* the reason makes the comparator total: same-name inactive entries are the normal case — a duplicate definition skipped beside an environment mismatch of the same name — and under an unstable sort a name-only comparator flips their rows between runs */
         sort.Slice(inactive, func(leftIndex int, rightIndex int) bool {
+            if inactive[leftIndex].Name() == inactive[rightIndex].Name() {
+                return inactive[leftIndex].Reason() < inactive[rightIndex].Reason()
+            }
+
             return inactive[leftIndex].Name() < inactive[rightIndex].Name()
         })
 

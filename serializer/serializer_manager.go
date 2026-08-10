@@ -35,7 +35,7 @@ func NewSerializerManager(serializersByMime map[string]serializercontract.Serial
             )
         }
 
-        /* @important a typed nil is refused alongside the untyped one: it passes the plain comparison, gets stored as a live serializer and dereferences its nil receiver on the first request the negotiation routes to it — the construction-time refusal exists precisely to keep that panic off the request path */
+        /* a typed nil is refused alongside the untyped one: it passes the plain comparison, gets stored as a live serializer and dereferences its nil receiver on the first request the negotiation routes to it — the construction-time refusal exists precisely to keep that panic off the request path */
         if nil == serializerInstance || true == internal.IsNilInterface(serializerInstance) {
             return nil, exception.NewError(
                 "serializer instance is nil",
@@ -46,7 +46,7 @@ func NewSerializerManager(serializersByMime map[string]serializercontract.Serial
             )
         }
 
-        /* @important two spellings collapsing into one normalized key are refused instead of overwritten: map iteration order would decide the surviving serializer, so the winner would change from one boot to the next with the loser dropped silently */
+        /* two spellings collapsing into one normalized key are refused instead of overwritten: map iteration order would decide the surviving serializer, so the winner would change from one boot to the next with the loser dropped silently */
         occupiedRawKey, occupied := rawKeysByNormalizedMime[normalizedMimeKey]
         if true == occupied {
             conflictingKeys := []string{occupiedRawKey, mimeKey}
@@ -138,7 +138,7 @@ func (instance *SerializerManager) ResolveByAcceptHeader(acceptHeader string) (s
 
     sort.Strings(candidateMimes)
 
-    /* @important each available type takes the quality of the MOST SPECIFIC range that covers it, so an exact range overrides a wildcard regardless of header order; a covered type whose range carries q=0 is refused rather than ignored, and a header that refuses every available type is answered as not acceptable instead of being served the very type it rejected */
+    /* each available type takes the quality of the MOST SPECIFIC range that covers it, so an exact range overrides a wildcard regardless of header order; a covered type whose range carries q=0 is refused rather than ignored, and a header that refuses every available type is answered as not acceptable instead of being served the very type it rejected */
     selectedMime := ""
     selectedQuality := 0.0
     selectedSpecificity := 0
@@ -167,6 +167,13 @@ func (instance *SerializerManager) ResolveByAcceptHeader(acceptHeader string) (s
         if quality == selectedQuality && specificity > selectedSpecificity {
             selectedMime = candidateMime
             selectedSpecificity = specificity
+
+            continue
+        }
+
+        /* a full tie — the header weighs the candidates identically — resolves through the same json-first convention defaultSerializer states for the empty header: the catch-all range is the RFC spelling of the same "I take anything", and without this preference it answered the lexically first candidate while the empty header answered json. Ties that do not involve json keep the lexically first candidate the sorted iteration already produced. */
+        if quality == selectedQuality && specificity == selectedSpecificity && MimeApplicationJson == candidateMime {
+            selectedMime = candidateMime
         }
     }
 

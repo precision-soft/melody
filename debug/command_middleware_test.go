@@ -472,3 +472,48 @@ func TestMiddlewareCommand_RendersTheDescriptionRefusal(t *testing.T) {
         t.Fatalf("expected the refusal in the envelope, got %q", rendered)
     }
 }
+
+func TestMiddlewareCommand_SameNameInactiveEntriesKeepTheReasonOrder(t *testing.T) {
+    inactiveEntries := make([]*middlewarepipeline.InactiveMiddleware, 0, 16)
+    for index := 15; index >= 0; index-- {
+        inactiveEntries = append(
+            inactiveEntries,
+            middlewarepipeline.NewInactiveMiddleware("profiler", fmt.Sprintf("reason %02d", index)),
+        )
+    }
+
+    command := NewMiddlewareCommand(
+        func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
+            report := middlewarepipeline.NewMiddlewareBuildReport(
+                "http",
+                "prod",
+                []string{},
+                inactiveEntries,
+                nil,
+                false,
+            )
+
+            return nil, report, nil
+        },
+        func() ([]httpcontract.Middleware, error) {
+            return nil, nil
+        },
+    )
+
+    rendered, runErr := runDebugCommand(command, newMiddlewareTestRuntime(), []string{"--format=table", "--table-width=400"})
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    row := debugTableBlockRow(rendered, "MIDDLEWARE")
+    if 16 != len(row) {
+        t.Fatalf("expected 16 inactive rows, got %d", len(row))
+    }
+
+    for index, columns := range row {
+        expectedReason := fmt.Sprintf("reason %02d", index)
+        if expectedReason != columns[5] {
+            t.Fatalf("expected the same-name rows ordered by reason, row %d carries %q", index, columns[5])
+        }
+    }
+}

@@ -152,3 +152,23 @@ func TestPrefersHtml_CaseInsensitiveAheadOfAnotherType(t *testing.T) {
         t.Fatalf("expected true for case-insensitive html before json")
     }
 }
+
+func TestPrefersHtml_QuotedCommaKeepsTheHtmlRefusal(t *testing.T) {
+    request := testhelper.NewHttpTestRequestWithAccept(
+        nethttp.MethodGet,
+        "http://example.com/",
+        `text/html;p="a,b";q=0, application/json`,
+    )
+
+    if true == PrefersHtml(request) {
+        t.Fatalf("expected the quoted-comma header to keep the explicit html refusal")
+    }
+}
+
+func TestAcceptQuality_QuotedSemicolonStaysOneParameter(t *testing.T) {
+    /* the quoted section carries a decoy: a naive semicolon split fabricates the fragment q=0.9" — an invalid q that drops the whole member — while the quote-aware split reads the one real q parameter */
+    quality, _ := acceptQuality(`text/html;p="x;q=0.9";q=0.5`, "text/html")
+    if 0.5 != quality {
+        t.Fatalf("expected the quoted semicolon to leave the q parameter readable, got %v", quality)
+    }
+}

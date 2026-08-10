@@ -551,6 +551,9 @@ func (instance *foreignIdSession) Clear()               { instance.cleared = tru
 func (instance *foreignIdSession) All() map[string]any  { return map[string]any{"a": 1} }
 func (instance *foreignIdSession) IsModified() bool     { return instance.modified }
 func (instance *foreignIdSession) IsCleared() bool      { return instance.cleared }
+func (instance *foreignIdSession) Snapshot() (map[string]any, bool, bool) {
+    return instance.All(), instance.modified, instance.cleared
+}
 
 func TestManager_ADeletedSessionCannotBeSavedBackByAnInFlightRequest(t *testing.T) {
     storage := NewInMemoryStorage()
@@ -900,5 +903,34 @@ func TestNewManagerWithTombstoneRetention_SizesTheRefusalWindow(t *testing.T) {
 
     if true == manager.isTombstoned(buriedId) {
         t.Fatalf("expected a burial older than the sized window to have lapsed")
+    }
+}
+
+/* the divergent fake constructs the interleaving instead of awaiting it: its Snapshot answers a cleared session while IsCleared still answers live — the state a Clear landing mid-decision produces. The manager must follow the snapshot. */
+type snapshotClearedSession struct {
+    foreignIdSession
+}
+
+func (instance *snapshotClearedSession) Id() string { return "1234567890abcdef1234567890abcdef" }
+
+func (instance *snapshotClearedSession) Snapshot() (map[string]any, bool, bool) {
+    return map[string]any{}, true, true
+}
+
+func TestSaveSession_TheBranchDecisionFollowsTheSnapshotNotTheAccessors(t *testing.T) {
+    storage := NewInMemoryStorage()
+    manager := NewManagerOwningStorage(storage, 0)
+    defer func() { _ = manager.Close() }()
+
+    sessionInstance := &snapshotClearedSession{}
+    sessionInstance.modified = true
+    sessionInstance.cleared = false
+
+    if saveErr := manager.SaveSession(sessionInstance); nil != saveErr {
+        t.Fatalf("expected the delete branch to answer nil, got %v", saveErr)
+    }
+
+    if _, exists, _ := storage.Load(sessionInstance.Id()); true == exists {
+        t.Fatalf("expected the snapshot's cleared flag to have taken the delete branch")
     }
 }

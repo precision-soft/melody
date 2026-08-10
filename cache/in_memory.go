@@ -477,18 +477,17 @@ func (instance *InMemoryBackend) incrementValue(
 
     var currentValue int64 = 0
 
-    /* an existing payload is parsed in its entirety: an empty or blank one is refused the same way a textual one is, instead of being silently adopted as a zero counter and overwritten — a present value that is not a number is the caller mixing keys, and the redis reference answers it with an error too */
+    /* an existing payload is parsed against the redis integer grammar, not Go's lenient one: redis rejects whitespace padding, a plus sign and leading zeros where a trimmed ParseInt adopts them, so the leniency made the same payload increment through one backend and error through the other — a present value that is not a canonical number is the caller mixing keys, and the parity this refusal claims has to hold spelling by spelling */
     if true == exists && nil != entry && nil != entry.item {
-        payload := entry.item.Payload()
-        trimmedValue := strings.TrimSpace(string(payload))
+        payloadValue := string(entry.item.Payload())
 
-        parsedValue, parseIntErr := strconv.ParseInt(trimmedValue, 10, 64)
+        parsedValue, parseIntErr := parseCanonicalCounterPayload(payloadValue)
         if nil != parseIntErr {
             return 0, exception.NewError(
                 "cache value is not a valid int64",
                 exceptioncontract.Context{
                     "key":   key,
-                    "value": trimmedValue,
+                    "value": payloadValue,
                 },
                 parseIntErr,
             )
@@ -614,6 +613,11 @@ func (instance *InMemoryBackend) saveLocked(
     now time.Time,
     ttl time.Duration,
 ) {
+    /* a nil payload is stored as the empty payload, the contract's rule: redis has no nil to store, so preserving the distinction here let a caller tell the backends apart by reading back what it wrote */
+    if nil == payload {
+        payload = []byte{}
+    }
+
     var expiresAt *time.Time
     if 0 < ttl {
         expiration := now.Add(ttl)
@@ -735,6 +739,41 @@ func (instance *InMemoryBackend) addInt64WithOverflowCheck(left int64, right int
     }
 
     return left + right, nil
+}
+
+/* parseCanonicalCounterPayload accepts exactly what redis's integer reader (string2ll) accepts: an optional minus, a first digit of 1-9 unless the whole number is the single digit 0, and nothing else — no whitespace, no plus sign, no leading zeros, no minus zero. Anything looser increments through this backend and errors through redis, and the two must answer one spelling one way. */
+func parseCanonicalCounterPayload(payload string) (int64, error) {
+    digits := payload
+    if "" != digits && '-' == digits[0] {
+        digits = digits[1:]
+    }
+
+    canonical := "" != digits
+    if true == canonical && 1 < len(digits) && '0' == digits[0] {
+        canonical = false
+    }
+    if true == canonical && "-0" == payload {
+        canonical = false
+    }
+    if true == canonical {
+        for index := 0; index < len(digits); index++ {
+            if digits[index] < '0' || digits[index] > '9' {
+                canonical = false
+
+                break
+            }
+        }
+    }
+
+    if false == canonical {
+        return 0, exception.NewError(
+            "value is not a canonical integer",
+            nil,
+            nil,
+        )
+    }
+
+    return strconv.ParseInt(payload, 10, 64)
 }
 
 var _ cachecontract.Backend = (*InMemoryBackend)(nil)

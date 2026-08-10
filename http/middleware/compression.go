@@ -18,6 +18,9 @@ import (
 /* maxConsecutiveEmptyPeekReads bounds how many (0, nil) results the peek loop accepts from a response body before it declares the reader stuck. The value matches the identical bound in bufio, so a reader that already works under bufio.Reader keeps working here. */
 const maxConsecutiveEmptyPeekReads = 100
 
+/* peekChunkSize is the peek buffer's starting length; the buffer doubles from here toward MinSize as bytes actually arrive. */
+const peekChunkSize = 32 * 1024
+
 type CompressionConfig struct {
     level                int
     minSize              int
@@ -112,7 +115,7 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
         config.SetLevel(gzip.DefaultCompression)
     }
 
-    /* a negative minimum would reach make([]byte, peekSize) below and panic on every request, so normalize the whole non-positive range, not just zero */
+    /* a non-positive minimum is not a threshold at all — zero would compress every response and a negative one would make the peek loop's arithmetic lie — so the whole range normalizes to the default */
     if 0 >= config.MinSize() {
         config.SetMinSize(1024)
     }
@@ -157,7 +160,8 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
                 }
             }
 
-            if false == acceptsGzip(httpRequest.Header.Get("Accept-Encoding")) {
+            /* every line of a repeated Accept-Encoding field is joined before parsing, the way the Accept readers join theirs: the header is list-typed, and reading only the first line dropped a coding the client named on the second */
+            if false == acceptsGzip(strings.Join(httpRequest.Header.Values("Accept-Encoding"), ",")) {
                 return response, nil
             }
 
@@ -171,12 +175,28 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
 
             originalReader := response.BodyReader()
 
+            /* the peek buffer grows with the bytes actually read instead of being allocated at the full threshold upfront: MinSize carries no upper bound, so an oversized — or unit-confused — minimum turned every eligible response into an allocation of that size before a single byte arrived, when a response below the threshold needs no more memory than its own length. */
             peekSize := config.MinSize()
-            peekBuffer := make([]byte, peekSize)
+            initialLength := peekSize
+            if peekChunkSize < initialLength {
+                initialLength = peekChunkSize
+            }
+            peekBuffer := make([]byte, initialLength)
             peeked := 0
             emptyReads := 0
             var peekErr error
             for peeked < peekSize {
+                if peeked == len(peekBuffer) {
+                    nextLength := len(peekBuffer) * 2
+                    if peekSize < nextLength {
+                        nextLength = peekSize
+                    }
+
+                    grown := make([]byte, nextLength)
+                    copy(grown, peekBuffer)
+                    peekBuffer = grown
+                }
+
                 readCount, readErr := originalReader.Read(peekBuffer[peeked:])
                 peeked += readCount
                 if nil != readErr {
@@ -234,13 +254,13 @@ func acceptsGzip(acceptEncoding string) bool {
     gzipQuality := -1.0
     starQuality := -1.0
 
-    for _, rawEntry := range strings.Split(acceptEncoding, ",") {
+    for _, rawEntry := range internal.SplitOutsideQuotes(acceptEncoding, ',') {
         entry := strings.TrimSpace(rawEntry)
         if "" == entry {
             continue
         }
 
-        parts := strings.Split(entry, ";")
+        parts := internal.SplitOutsideQuotes(entry, ';')
         codingName := strings.ToLower(strings.TrimSpace(parts[0]))
         if "" == codingName {
             continue
@@ -270,9 +290,10 @@ func acceptsGzip(acceptEncoding string) bool {
             continue
         }
 
-        if "gzip" == codingName {
+        /* a repeated coding resolves to its higher q, the tie rule of every Accept reader in this tree: last-wins made gzip;q=0.5, gzip;q=0 and its reversal answer differently for one statement */
+        if "gzip" == codingName && quality > gzipQuality {
             gzipQuality = quality
-        } else if "*" == codingName {
+        } else if "*" == codingName && quality > starQuality {
             starQuality = quality
         }
     }

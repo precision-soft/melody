@@ -98,7 +98,9 @@ func (instance *EventDispatcher) AddListener(
     }
 }
 
-/* MarkListenerRequired flags the registered listener so that if another listener stops event propagation before it runs, dispatch returns a RequiredListenerSkippedError and the caller can fail closed. An unknown registration is refused rather than ignored: a mark that lands nowhere leaves the guarantee unarmed while reporting that it was applied, and the caller has no way to tell. */
+/* MarkListenerRequired flags the registered listener so that if another listener stops event propagation before it runs, dispatch returns a RequiredListenerSkippedError and the caller can fail closed. An unknown registration is refused rather than ignored: a mark that lands nowhere leaves the guarantee unarmed while reporting that it was applied, and the caller has no way to tell.
+
+The mark necessarily follows the registration it takes as its argument, so a dispatch running between the two steps sees the listener unmarked and a stop in that window skips it without the error. Registration at boot — before anything dispatches — closes the window; a runtime registrar that needs the guarantee armed atomically must not dispatch the event until the mark is applied. */
 func (instance *EventDispatcher) MarkListenerRequired(registration eventcontract.ListenerRegistration) {
     instance.markListenerFlag(registration, func(entry *listenerWithPriority) {
         entry.required = true
@@ -306,6 +308,7 @@ func (instance *EventDispatcher) DispatchName(runtimeInstance runtimecontract.Ru
     )
 }
 
+/* RegisteredEvents reports a point-in-time view: a subscriber installation running concurrently is observed mid-step — a listener already live whose owning registration is not recorded yet answers with no owner until the installation finishes. Dispatch correctness never depends on this view. */
 func (instance *EventDispatcher) RegisteredEvents() []eventcontract.RegisteredEvent {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()

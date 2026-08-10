@@ -931,3 +931,40 @@ func TestCommandTimeout_BoundsTheContractCalls(t *testing.T) {
         t.Fatalf("expected the deadline to be the cause, got %v", getErr)
     }
 }
+
+func TestFirstSetFailure_NamesTheSortedFirstKeyAndCountsTheRest(t *testing.T) {
+    backend := &Backend{prefix: "p:"}
+
+    firstErr := errors.New("first")
+    zebraErr := errors.New("zebra")
+
+    reported := backend.firstSetFailure(map[string]error{
+        "zebra": zebraErr,
+        "alpha": firstErr,
+    }, 5)
+
+    if nil == reported {
+        t.Fatal("expected a failure report")
+    }
+
+    melodyErr, isMelodyErr := reported.(*exception.Error)
+    if false == isMelodyErr {
+        t.Fatalf("expected a melody error, got %T", reported)
+    }
+
+    contextValue := melodyErr.Context()
+    if "alpha" != contextValue["key"] {
+        t.Fatalf("expected the sorted-first key reported, got %v", contextValue["key"])
+    }
+    if 2 != contextValue["failedKeyCount"] || 5 != contextValue["requestedCount"] {
+        t.Fatalf("expected the counts to describe the batch, got %#v", contextValue)
+    }
+
+    if false == errors.Is(reported, firstErr) {
+        t.Fatalf("expected the sorted-first key's own error as the cause")
+    }
+
+    if nil != backend.firstSetFailure(map[string]error{}, 3) {
+        t.Fatalf("expected an empty failure map to answer nil")
+    }
+}

@@ -419,13 +419,13 @@ func TestInMemoryBackend_IncrementDecrement_HappyPath(t *testing.T) {
     }
 }
 
-func TestInMemoryBackend_Increment_ParsesTrimmedStringAndErrorsOnInvalid(t *testing.T) {
+func TestInMemoryBackend_Increment_AcceptsExactlyTheRedisIntegerGrammar(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
     backend := NewInMemoryBackend(10, time.Hour, clockInstance)
     defer backend.Close()
 
-    _ = backend.Set("n", []byte(" 10 "), 0)
+    _ = backend.Set("n", []byte("10"), 0)
 
     value, err := backend.Increment("n", 5)
     if nil != err {
@@ -435,11 +435,22 @@ func TestInMemoryBackend_Increment_ParsesTrimmedStringAndErrorsOnInvalid(t *test
         t.Fatalf("expected 15")
     }
 
-    _ = backend.Set("bad", []byte("not-a-number"), 0)
+    _ = backend.Set("negative", []byte("-3"), 0)
 
-    _, err = backend.Increment("bad", 1)
-    if nil == err {
-        t.Fatalf("expected error")
+    value, err = backend.Increment("negative", 1)
+    if nil != err {
+        t.Fatalf("increment error: %v", err)
+    }
+    if int64(-2) != value {
+        t.Fatalf("expected -2")
+    }
+
+    for _, payload := range []string{"not-a-number", " 10 ", "+10", "007", "-0", ""} {
+        _ = backend.Set("bad", []byte(payload), 0)
+
+        if _, err = backend.Increment("bad", 1); nil == err {
+            t.Fatalf("expected the payload %q to be refused the way redis refuses it", payload)
+        }
     }
 }
 
@@ -1186,5 +1197,25 @@ func TestInMemoryBackend_RefusalOrderMatchesTheRedisBackend(t *testing.T) {
     setErr := open.SetMultiple(map[string][]byte{"bad key": []byte("payload")}, -time.Second)
     if nil == setErr || false == strings.Contains(setErr.Error(), "ttl") {
         t.Fatalf("expected the batch ttl judgment to precede the key judgment, got %v", setErr)
+    }
+}
+
+func TestInMemoryBackend_ANilPayloadReadsBackEmptyNonNil(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    defer backend.Close()
+
+    if setErr := backend.Set("k", nil, 0); nil != setErr {
+        t.Fatalf("set failed: %v", setErr)
+    }
+
+    payload, exists, getErr := backend.Get("k")
+    if nil != getErr || false == exists {
+        t.Fatalf("get failed: exists=%v err=%v", exists, getErr)
+    }
+
+    if nil == payload || 0 != len(payload) {
+        t.Fatalf("expected the stored nil to read back as an empty non-nil slice, the redis identity; got nil=%v len=%d", nil == payload, len(payload))
     }
 }

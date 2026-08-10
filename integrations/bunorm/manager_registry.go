@@ -4,6 +4,7 @@ import (
     "context"
     "fmt"
     "reflect"
+    "sort"
     "sync"
 
     "github.com/uptrace/bun"
@@ -399,7 +400,15 @@ func (instance *ManagerRegistry) Close() error {
     var closeErr error
     failedNames := make([]string, 0)
 
-    for name, manager := range instance.managers {
+    /* both maps are walked in sorted name order so the carried cause and the failed-name list are the same for the same failing teardown on every run: a map walk let two identical failures report different causes and different orders, and the rueidis batch reporting sorts for the same reason */
+    managerNames := make([]string, 0, len(instance.managers))
+    for name := range instance.managers {
+        managerNames = append(managerNames, name)
+    }
+    sort.Strings(managerNames)
+
+    for _, name := range managerNames {
+        manager := instance.managers[name]
         if nil == manager {
             continue
         }
@@ -413,7 +422,14 @@ func (instance *ManagerRegistry) Close() error {
         }
     }
 
-    for name, migrationDatabase := range instance.migrationDatabases {
+    migrationNames := make([]string, 0, len(instance.migrationDatabases))
+    for name := range instance.migrationDatabases {
+        migrationNames = append(migrationNames, name)
+    }
+    sort.Strings(migrationNames)
+
+    for _, name := range migrationNames {
+        migrationDatabase := instance.migrationDatabases[name]
         if nil == migrationDatabase {
             continue
         }

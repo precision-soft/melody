@@ -3,6 +3,7 @@ package config
 import (
     "errors"
     "fmt"
+    "sort"
     "strings"
 
     "github.com/precision-soft/melody/exception"
@@ -30,7 +31,16 @@ func (instance *Configuration) resolveAll(deferUnresolvedReferences bool) error 
         )
     }
 
-    for name, parameter := range instance.parameters {
+    /* the names are walked sorted for the failure's identity, not the result's: the fixpoint is order-independent, but returning on the first broken template of a RANDOM map walk named a different parameter on every boot when several were broken — the dotenv reader sorts for exactly this reason */
+    names := make([]string, 0, len(instance.parameters))
+    for name := range instance.parameters {
+        names = append(names, name)
+    }
+    sort.Strings(names)
+
+    for _, name := range names {
+        parameter := instance.parameters[name]
+
         if KernelProjectDir == name {
             continue
         }

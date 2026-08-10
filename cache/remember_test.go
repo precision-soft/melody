@@ -3,10 +3,13 @@ package cache
 import (
     "context"
     "errors"
+    "reflect"
     "sync"
     "sync/atomic"
     "testing"
     "time"
+
+    "github.com/precision-soft/melody/clock"
 )
 
 func TestRemember_ReturnsCachedValueWithoutCallingCallback(t *testing.T) {
@@ -1335,5 +1338,58 @@ func TestRememberInFlightCall_RemoveWaiterToleratesAnAbsentCancelFunction(t *tes
 
     if true == call.IsCanceled() {
         t.Fatalf("expected a call with no cancel function to stay uncanceled")
+    }
+}
+
+func TestRemember_AnswersOneShapeOnMissAndHit(t *testing.T) {
+    backend := NewInMemoryBackend(0, time.Minute, clock.NewSystemClock())
+    defer func() { _ = backend.Close() }()
+
+    manager := NewManager(backend, NewJsonSerializer())
+
+    callback := func(ctx context.Context) (any, error) {
+        return 5, nil
+    }
+
+    missValue, missErr := Remember(manager, "remember:shape", time.Minute, callback, nil)
+    if nil != missErr {
+        t.Fatalf("miss failed: %v", missErr)
+    }
+
+    hitValue, hitErr := Remember(manager, "remember:shape", time.Minute, callback, nil)
+    if nil != hitErr {
+        t.Fatalf("hit failed: %v", hitErr)
+    }
+
+    if reflect.TypeOf(missValue) != reflect.TypeOf(hitValue) {
+        t.Fatalf("expected one shape for one key, got %v on the miss and %v on the hit", reflect.TypeOf(missValue), reflect.TypeOf(hitValue))
+    }
+
+    if float64(5) != missValue.(float64) {
+        t.Fatalf("expected the computing call to answer the stored shape, got %#v", missValue)
+    }
+}
+
+func TestRemember_StampedeProtectedMissAnswersTheStoredShape(t *testing.T) {
+    backend := NewInMemoryBackend(0, time.Minute, clock.NewSystemClock())
+    defer func() { _ = backend.Close() }()
+
+    manager := NewManager(backend, NewJsonSerializer())
+
+    value, rememberErr := Remember(
+        manager,
+        "remember:stampede-shape",
+        time.Minute,
+        func(ctx context.Context) (any, error) {
+            return map[string]int{"a": 1}, nil
+        },
+        NewDefaultRememberOption(),
+    )
+    if nil != rememberErr {
+        t.Fatalf("remember failed: %v", rememberErr)
+    }
+
+    if _, isGenericMap := value.(map[string]any); false == isGenericMap {
+        t.Fatalf("expected the protected miss to answer the stored generic shape, got %T", value)
     }
 }

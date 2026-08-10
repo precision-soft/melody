@@ -246,7 +246,13 @@ func executeRememberInFlightLeader(
         return
     }
 
-    call.Complete(computedValue, nil)
+    normalizedValue, normalizeErr := normalizeRememberedValue(cacheInstance, computedValue)
+    if nil != normalizeErr {
+        call.Complete(nil, normalizeErr)
+        return
+    }
+
+    call.Complete(normalizedValue, nil)
 }
 
 func rememberWithoutStampedeProtection(
@@ -269,7 +275,22 @@ func rememberWithoutStampedeProtection(
         return nil, setErr
     }
 
-    return value, nil
+    return normalizeRememberedValue(cacheInstance, value)
+}
+
+/* storedValueNormalizer is the optional door through which Remember learns what shape a stored value reads back as; the cache manager implements it with one local serializer round-trip. */
+type storedValueNormalizer interface {
+    NormalizeStoredValue(value any) (any, error)
+}
+
+/* normalizeRememberedValue makes the computing call answer the exact shape every cached call will answer: without it one key had two shapes — the callback's own value on the miss, the decoded generic form on every hit — so a type assertion worked on the cold path and failed on the warm one, from the second call on. A cache that does not expose its stored shape answers the callback's value unchanged. */
+func normalizeRememberedValue(cacheInstance cachecontract.Cache, value any) (any, error) {
+    normalizer, isNormalizer := cacheInstance.(storedValueNormalizer)
+    if false == isNormalizer {
+        return value, nil
+    }
+
+    return normalizer.NormalizeStoredValue(value)
 }
 
 /* rememberSingleFlightKey names the unit callers coalesce under: one cache instance, one key, one cancelability. The instance is told apart by its pointer, so only pointer-kind implementations coalesce — a value-kind Cache has no address to tell two instances apart, and one shared flight would hand a caller the value computed for somebody else's cache, so a value-kind instance gets no coalescing at all, which costs the stampede optimization and never the answer. Two managers over one backend are two units on purpose: the unit is what Remember was handed, not what stands behind it. */

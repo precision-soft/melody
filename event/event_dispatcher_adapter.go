@@ -35,7 +35,8 @@ type EventDispatcherAdapter struct {
     eventDispatcher         eventcontract.EventDispatcher
     listenerRegistrations   map[string][]adapterListenerRegistration
     subscriberRegistrations map[subscriberIdentity][]eventcontract.ListenerRegistration
-    nextRegistrationIndex   uint64
+    /* subscriberMutex serializes whole subscriber installations and removals against each other; it is always taken before mutex and never inside it. The per-step mutex keeps each individual record consistent, but a subscriber spans several of them: without this outer section, two concurrent AddSubscriber calls for one identity both pass the duplicate refusal and install every listener twice, and a RemoveSubscriber interleaved with an AddSubscriber removes the half already installed while the rest keeps arriving under a record the remover was just told is gone. */
+    subscriberMutex sync.Mutex
 }
 
 func (instance *EventDispatcherAdapter) AddListener(eventName string, listener eventcontract.EventListener, priority int) eventcontract.ListenerRegistration {
@@ -69,7 +70,7 @@ func (instance *EventDispatcherAdapter) AddListener(eventName string, listener e
 func (instance *EventDispatcherAdapter) RemoveListener(registration eventcontract.ListenerRegistration) bool {
     removed := instance.eventDispatcher.RemoveListener(registration)
 
-    /* @important the bookkeeping is scrubbed whether or not the wrapped dispatcher still held the listener. Returning early on false left the adapter's own record of a listener that no longer exists — reported by RegisteredEvents forever and removable by nothing, since every retry takes the same early return */
+    /* the bookkeeping is scrubbed whether or not the wrapped dispatcher still held the listener. Returning early on false left the adapter's own record of a listener that no longer exists — reported by RegisteredEvents forever and removable by nothing, since every retry takes the same early return */
     instance.mutex.Lock()
     listenerList, exists := instance.listenerRegistrations[registration.EventName]
     if true == exists {
@@ -119,6 +120,9 @@ func (instance *EventDispatcherAdapter) AddSubscriber(subscriber eventcontract.E
 
     plannedList := planSubscriberRegistrations(subscriber)
 
+    instance.subscriberMutex.Lock()
+    defer instance.subscriberMutex.Unlock()
+
     instance.mutex.Lock()
     _, alreadyRegistered := instance.subscriberRegistrations[subscriberIdentityValue]
     instance.mutex.Unlock()
@@ -158,6 +162,9 @@ func (instance *EventDispatcherAdapter) RemoveSubscriber(subscriber eventcontrac
         subscriber,
         "remove a subscriber",
     )
+
+    instance.subscriberMutex.Lock()
+    defer instance.subscriberMutex.Unlock()
 
     instance.mutex.Lock()
     registrationList := instance.subscriberRegistrations[subscriberIdentityValue]
@@ -240,6 +247,7 @@ func (instance *EventDispatcherAdapter) markListenerRegistration(
     }
 }
 
+/* RegisteredEvents reports a point-in-time view: a registration or removal running concurrently is observed mid-step — a listener already live in the wrapped dispatcher whose record here is not written yet, or the reverse during removal. The view settles the moment the concurrent (un)installation finishes; dispatch correctness never depends on it. */
 func (instance *EventDispatcherAdapter) RegisteredEvents() []eventcontract.RegisteredEvent {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
@@ -254,16 +262,17 @@ func (instance *EventDispatcherAdapter) RegisteredEvents() []eventcontract.Regis
     registeredEvents := make([]eventcontract.RegisteredEvent, 0, len(eventNameList))
 
     for _, eventName := range eventNameList {
-        /* @important sort a copy: the map-owned slice is shared, and RLock permits concurrent readers that would otherwise race sorting the same backing array */
+        /* sort a copy: the map-owned slice is shared, and RLock permits concurrent readers that would otherwise race sorting the same backing array */
         registeredSlice := instance.listenerRegistrations[eventName]
         listenerList := make([]adapterListenerRegistration, len(registeredSlice))
         copy(listenerList, registeredSlice)
 
+        /* equal priorities break the tie by the wrapped dispatcher's listener id, the same tiebreak dispatch uses: any adapter-side counter is issued under a different lock than the id, so two concurrent registrations can receive two counters in opposite orders and the inspector would report an execution order the dispatch never uses — permanently. */
         sort.SliceStable(
             listenerList,
             func(i int, j int) bool {
                 if listenerList[i].priority == listenerList[j].priority {
-                    return listenerList[i].registrationIndex < listenerList[j].registrationIndex
+                    return listenerList[i].registration.ListenerId < listenerList[j].registration.ListenerId
                 }
 
                 return listenerList[i].priority > listenerList[j].priority
@@ -334,11 +343,7 @@ func (instance *EventDispatcherAdapter) addListenerRegistration(
         priority,
     )
 
-    /* @important the ordering index is taken after the wrapped dispatcher issued its listener id, not before. Taken first, two concurrent registrations could receive the two counters in opposite orders, and since dispatch breaks ties between equal priorities by listener id while RegisteredEvents breaks them by this index, the inspector would report an execution order the dispatch never uses — permanently. */
     instance.mutex.Lock()
-    instance.nextRegistrationIndex++
-    registrationIndex := instance.nextRegistrationIndex
-
     instance.listenerRegistrations[eventName] = append(
         instance.listenerRegistrations[eventName],
         adapterListenerRegistration{
@@ -347,7 +352,6 @@ func (instance *EventDispatcherAdapter) addListenerRegistration(
             source:                 source,
             owner:                  owner,
             listenerProgramCounter: listenerProgramCounter,
-            registrationIndex:      registrationIndex,
         },
     )
     instance.mutex.Unlock()
@@ -361,7 +365,6 @@ type adapterListenerRegistration struct {
     source                   string
     owner                    string
     listenerProgramCounter   uintptr
-    registrationIndex        uint64
     required                 bool
     maySkipRequiredListeners bool
 }
