@@ -189,6 +189,21 @@ func MarkLogged(err error) error {
     return err
 }
 
+/* Logged answers an error that reports itself already logged, and is what a writer returns after filing its record. An error whose chain carries an AlreadyLogged implementer is marked in place and handed back unchanged, so its identity — and every errors.Is and errors.As its readers perform on it — survives. An error whose chain carries none has nowhere for the mark to live: errors.New, fmt.Errorf and every runtime error make MarkLogged a silent no-op, and the next reader then files the same failure a second time. That error is wrapped in a marked melody error keeping it as its cause, so the mark the writer meant to leave is the mark the reader finds. The wrap cannot change how a status is resolved: it happens exactly when no HttpException is in the chain, which is exactly when the status was already going to be the generic one. */
+func Logged(err error) error {
+    if nil == err || true == isNilInterfaceValue(err) {
+        return err
+    }
+
+    _ = MarkLogged(err)
+
+    if true == IsAlreadyLogged(err) {
+        return err
+    }
+
+    return MarkLogged(FromError(err))
+}
+
 /* IsAlreadyLogged reads the mark at the depth MarkLogged writes it. It is the single reader: reading the mark off a concrete *Error instead misses a marked HttpException and anything wrapping a marked error, which are then rendered a second time. */
 func IsAlreadyLogged(err error) bool {
     if nil == err || true == isNilInterfaceValue(err) {

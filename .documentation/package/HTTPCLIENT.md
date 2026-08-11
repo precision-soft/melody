@@ -123,7 +123,7 @@ func callHealthEndpoint() (string, error) {
     - [`(*HttpClient).RequestStream(method string, urlString string, options ...httpclientcontract.RequestOption) (httpclientcontract.StreamResponse, error)`](../../httpclient/http_client.go)
     - [`(*HttpClient).RequestStreamWithContext(contextInstance context.Context, method string, urlString string, options ...httpclientcontract.RequestOption) (httpclientcontract.StreamResponse, error)`](../../httpclient/http_client.go)
     - [`(*HttpClient).SetBaseUrl(baseUrl string)`](../../httpclient/http_client.go)
-    - [`(*HttpClient).SetHeader(key string, value string)`](../../httpclient/http_client.go)
+    - [`(*HttpClient).SetHeader(key string, value string)`](../../httpclient/http_client.go) — stores under the canonical spelling, the one the constructor stores under, so rotating a credential overwrites the entry it means to instead of leaving two that collapse onto one header
     - [`(*HttpClient).SetTimeout(timeout time.Duration)`](../../httpclient/http_client.go)
     - [`(*HttpClient).Close() error`](../../httpclient/http_client.go)
 - [`type HttpClientConfig`](../../httpclient/http_client_config.go)

@@ -9,6 +9,9 @@ import (
 
     "github.com/uptrace/bun"
 
+    "github.com/precision-soft/melody/config"
+    configcontract "github.com/precision-soft/melody/config/contract"
+    "github.com/precision-soft/melody/container"
     containercontract "github.com/precision-soft/melody/container/contract"
     "github.com/precision-soft/melody/exception"
 )
@@ -100,6 +103,9 @@ func NewManagerRegistryWithContext(ctx context.Context, resolver containercontra
         }
     }
 
+    /* the marking runs here rather than in the validation loop above: that loop must be able to refuse a definition set having changed nothing, and a marking applied from inside it would leave a partially redacted configuration behind a registry that was never built. Here the set is known good and the resolver is the one the opens will use. */
+    markProviderSecretParameters(openResolver, providerDefinitions)
+
     return &ManagerRegistry{
         openResolver:                  openResolver,
         openContext:                   ctx,
@@ -109,6 +115,29 @@ func NewManagerRegistryWithContext(ctx context.Context, resolver containercontra
         pendingOpenByName:             make(map[string]*managerOpen),
         migrationDatabases:            make(map[string]*bun.DB),
     }, nil
+}
+
+/* markProviderSecretParameters arms the framework's redaction for every credential parameter the definitions name, at construction rather than at the first dial. The configuration is asked through the tolerant door: a registry is legitimately built over a resolver that carries no configuration service — a test harness, a hand-wired container — and the Must door would turn that into a panic in the middle of a constructor that has nothing else to do with the configuration. An absent configuration, or a name no parameter answers to, leaves the marking undone the same way MarkSecret leaves an absent parameter alone. */
+func markProviderSecretParameters(resolver containercontract.Resolver, providerDefinitions []ProviderDefinition) {
+    configuration, configurationErr := container.FromResolver[configcontract.Configuration](resolver, config.ServiceConfig)
+    if nil != configurationErr || true == isNilInterface(configuration) {
+        return
+    }
+
+    for _, providerDefinition := range providerDefinitions {
+        secretProvider, isSecretProvider := providerDefinition.Provider.(SecretParameterProvider)
+        if false == isSecretProvider {
+            continue
+        }
+
+        for _, parameterName := range secretProvider.SecretParameterNames() {
+            if "" == parameterName {
+                continue
+            }
+
+            configuration.MarkSecret(parameterName)
+        }
+    }
 }
 
 /* isNilInterface answers whether the interface value is nil outright or holds a nil pointer, map, slice, channel or function: a typed nil passes a plain nil comparison and then panics on first use, far from the wiring mistake that produced it. Duplicated from the framework's internal package, which a separate module cannot import. */

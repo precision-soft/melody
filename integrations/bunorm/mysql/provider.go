@@ -182,6 +182,11 @@ func (instance *Provider) Open(resolver containercontract.Resolver) (*bun.DB, er
     return instance.OpenContext(context.Background(), resolver)
 }
 
+/* SecretParameterNames names the password parameter, so the registry can arm the redaction at construction: the marking inside open covers only a process that reaches the dial, and debug:parameters is precisely the process that does not. */
+func (instance *Provider) SecretParameterNames() []string {
+    return []string{instance.passwordParameterName}
+}
+
 /* OpenContext opens under the caller's context: an already-cancelled context is refused before the attempt, the retry sleeps watch it alongside the clock, and the configuration hook and the boot ping derive their budgets from it. The one step outside its reach is the dialect handshake bun performs at construction, which queries the server under no caller context and is bounded by the connect timeout alone — so a cancellation arriving mid-attempt is honoured at the next cancellable step rather than instantly. A nil context reads as context.Background(), which is exactly Open. */
 func (instance *Provider) OpenContext(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error) {
     if nil == ctx {

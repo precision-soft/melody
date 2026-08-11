@@ -115,6 +115,8 @@ type closeRecordingScope struct {
     containercontract.Scope
     failOverride bool
     closed       bool
+    /* onClose runs at the moment the scope-close defer runs. That defer is registered first, so it runs last: whatever a test reads here has already been decided by every defer above it, which is how the ordering between the early recovery guard and the scope close is asserted rather than assumed. */
+    onClose func()
 }
 
 func (instance *closeRecordingScope) OverrideProtectedInstance(serviceName string, value any) error {
@@ -128,12 +130,17 @@ func (instance *closeRecordingScope) OverrideProtectedInstance(serviceName strin
 func (instance *closeRecordingScope) Close() error {
     instance.closed = true
 
+    if nil != instance.onClose {
+        instance.onClose()
+    }
+
     return instance.Scope.Close()
 }
 
 type scopeRecordingContainer struct {
     containercontract.Container
     failOverride bool
+    onClose      func()
     scope        *closeRecordingScope
 }
 
@@ -141,6 +148,7 @@ func (instance *scopeRecordingContainer) NewScope() containercontract.Scope {
     instance.scope = &closeRecordingScope{
         Scope:        instance.Container.NewScope(),
         failOverride: instance.failOverride,
+        onClose:      instance.onClose,
     }
 
     return instance.scope

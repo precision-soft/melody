@@ -460,7 +460,7 @@ func TestMatchAccessControlRule_FallbackRuleSelectedOnce(t *testing.T) {
     }
 }
 
-/* @info an entry point that produces no response must not let the request through: without the fail-closed fall-through the listener writes a nil response the kernel reads as "no decision" and the handler runs for an unauthenticated request */
+/* an entry point that produces no response must not let the request through: without the fail-closed fall-through the listener writes a nil response the kernel reads as "no decision" and the handler runs for an unauthenticated request */
 func TestAccessControlListener_WhenEntryPointReturnsNoResponse_FailsClosed(t *testing.T) {
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
@@ -511,7 +511,7 @@ func TestAccessControlListener_WhenEntryPointReturnsNoResponse_FailsClosed(t *te
     }
 }
 
-/* @info when the kernel.exception dispatch produces no response (no exception listener registered, or propagation stopped) the listener must still write a fail-closed response rather than a nil the kernel serves the handler for */
+/* when the kernel.exception dispatch produces no response (no exception listener registered, or propagation stopped) the listener must still write a fail-closed response rather than a nil the kernel serves the handler for */
 func TestAccessControlListener_WhenExceptionProducesNoResponse_FailsClosed(t *testing.T) {
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
@@ -557,7 +557,7 @@ func TestAccessControlListener_WhenExceptionProducesNoResponse_FailsClosed(t *te
     }
 }
 
-/* @info an access denied handler that fails must keep the authorization decision as the cause so the denial status survives the cause chain; replacing it with the handler error turns a 403 into whatever the handler failure maps to */
+/* an access denied handler that fails must keep the authorization decision as the cause so the denial status survives the cause chain; replacing it with the handler error turns a 403 into whatever the handler failure maps to */
 func TestAccessControlListener_WhenDeniedHandlerFails_KeepsDecisionAsCause(t *testing.T) {
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
@@ -668,8 +668,169 @@ type refusalRecord struct {
 type refusalCaptureLogger struct {
     loggingcontract.Logger
     warningRecords []refusalRecord
+    errorRecords   []refusalRecord
 }
 
 func (instance *refusalCaptureLogger) Warning(message string, context loggingcontract.Context) {
     instance.warningRecords = append(instance.warningRecords, refusalRecord{message: message, context: context})
+}
+
+func (instance *refusalCaptureLogger) Error(message string, context loggingcontract.Context) {
+    instance.errorRecords = append(instance.errorRecords, refusalRecord{message: message, context: context})
+}
+
+/* newRefusalCaptureRuntime installs a capturing logger on a scope, so a test can count what one refusal filed. */
+func newRefusalCaptureRuntime(t *testing.T) (runtimecontract.Runtime, *refusalCaptureLogger) {
+    t.Helper()
+
+    capture := &refusalCaptureLogger{Logger: logging.NewNopLogger()}
+
+    scope := newTestScope()
+    if overrideErr := scope.OverrideInstance(logging.ServiceLogger, capture); nil != overrideErr {
+        t.Fatalf("could not install the capturing logger: %v", overrideErr)
+    }
+
+    return runtime.New(context.Background(), scope, container.NewContainer()), capture
+}
+
+func newRefusalTestFirewall(accessDecisionManager securitycontract.AccessDecisionManager) *CompiledFirewall {
+    return NewCompiledFirewall(
+        "admin-area",
+        nil,
+        "m",
+        nil,
+        nil,
+        NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN")),
+        accessDecisionManager,
+        nil,
+        nil,
+        nil,
+        "",
+        "",
+        nil,
+        nil,
+        SourceFirewall,
+        SourceFirewall,
+        SourceFirewall,
+        SourceNone,
+        SourceNone,
+    )
+}
+
+func dispatchRefusal(t *testing.T, runtimeInstance runtimecontract.Runtime, firewall *CompiledFirewall) *httpPkg.KernelRequestEvent {
+    t.Helper()
+
+    SecurityContextSetOnRuntime(runtimeInstance, NewSecurityContext(firewall, NewAuthenticatedToken("user", []string{"ROLE_USER"})))
+
+    kernel := newTestKernel()
+    httpPkg.RegisterKernelExceptionListener(kernel.EventDispatcher(), false)
+    RegisterKernelAccessControlListener(kernel, NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil)))
+
+    requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, newSecurityTestRequest("GET", "/admin", nil, runtimeInstance))
+
+    if _, dispatchErr := kernel.EventDispatcher().DispatchName(runtimeInstance, "kernel.request", requestEvent); nil != dispatchErr {
+        t.Fatalf("unexpected error: %v", dispatchErr)
+    }
+
+    return requestEvent
+}
+
+/* a real denial leaves one warning naming the branch, the firewall and the matched rule; it used to leave only the exception listener's generic "unhandled exception" carrying the word forbidden and nothing else */
+func TestAccessControlListener_A403LeavesOneWarningNamingItsBranch(t *testing.T) {
+    runtimeInstance, capture := newRefusalCaptureRuntime(t)
+
+    requestEvent := dispatchRefusal(t, runtimeInstance, newRefusalTestFirewall(NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, NewRoleVoter())))
+
+    if nil == requestEvent.Response() || 403 != requestEvent.Response().StatusCode() {
+        t.Fatalf("expected the 403 response")
+    }
+
+    if 1 != len(capture.warningRecords) || 0 != len(capture.errorRecords) {
+        t.Fatalf("expected exactly one warning and no error, got %v and %v", capture.warningRecords, capture.errorRecords)
+    }
+
+    record := capture.warningRecords[0]
+    if "authorization refused" != record.message {
+        t.Fatalf("expected the refusal message, got %q", record.message)
+    }
+
+    if RefusalReasonAffirmativeNoGrant != record.context["reason"] {
+        t.Fatalf("expected the branch named, got %v", record.context["reason"])
+    }
+
+    if "admin-area" != record.context["firewallName"] || "/admin" != record.context["matchedRule"] {
+        t.Fatalf("expected the firewall and the matched rule named, got %+v", record.context)
+    }
+}
+
+/* a firewall naming an attribute no configured voter looks at is a wiring fault: it answers the same 403 fail-closed, and it is the one refusal filed at error */
+func TestAccessControlListener_TheWiringFault403IsRecordedAtError(t *testing.T) {
+    runtimeInstance, capture := newRefusalCaptureRuntime(t)
+
+    requestEvent := dispatchRefusal(t, runtimeInstance, newRefusalTestFirewall(NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative)))
+
+    if nil == requestEvent.Response() || 403 != requestEvent.Response().StatusCode() {
+        t.Fatalf("expected the refusal to stay fail-closed at 403")
+    }
+
+    if 1 != len(capture.errorRecords) || 0 != len(capture.warningRecords) {
+        t.Fatalf("expected exactly one error and no warning, got %v and %v", capture.errorRecords, capture.warningRecords)
+    }
+
+    if RefusalReasonNoVoterSupportsAttribute != capture.errorRecords[0].context["reason"] {
+        t.Fatalf("expected the wiring fault named, got %v", capture.errorRecords[0].context["reason"])
+    }
+
+    refusedAttributes, isStringList := capture.errorRecords[0].context["attributes"].([]string)
+    if false == isStringList || 1 != len(refusedAttributes) || "ROLE_ADMIN" != refusedAttributes[0] {
+        t.Fatalf("expected the record to name the attribute nothing votes on, got %v", capture.errorRecords[0].context["attributes"])
+    }
+}
+
+/* an access denied handler that answers the request returns before any kernel.exception dispatch, so its exit used to leave no trace of the refusal it had just answered */
+func TestAccessControlListener_ADeniedHandlerThatAnswersStillLeavesOneRecord(t *testing.T) {
+    runtimeInstance, capture := newRefusalCaptureRuntime(t)
+
+    firewall := NewCompiledFirewall(
+        "admin-area",
+        nil,
+        "m",
+        nil,
+        nil,
+        NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN")),
+        NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, NewRoleVoter()),
+        nil,
+        nil,
+        &accessControlListenerTestAccessDeniedHandler{response: httpPkg.JsonErrorResponse(403, "denied"), err: nil},
+        "",
+        "",
+        nil,
+        nil,
+        SourceFirewall,
+        SourceFirewall,
+        SourceFirewall,
+        SourceNone,
+        SourceFirewall,
+    )
+
+    dispatchRefusal(t, runtimeInstance, firewall)
+
+    if 1 != len(capture.warningRecords) {
+        t.Fatalf("expected the answered refusal to leave one record, got %v", capture.warningRecords)
+    }
+}
+
+/* a decision manager of the application's own may refuse with a plain error, which has nowhere for the already-logged mark to live: the listener files its record and hands the exception dispatch a marked carrier, so the exception listener attaches its coordinates instead of filing the same refusal a second time */
+func TestAccessControlListener_ARefusalCarryingNoHttpExceptionStillFilesOneRecord(t *testing.T) {
+    runtimeInstance, capture := newRefusalCaptureRuntime(t)
+
+    dispatchRefusal(
+        t,
+        runtimeInstance,
+        newRefusalTestFirewall(&accessControlListenerTestAccessDecisionManager{decideAllErr: errors.New("refused by the application's own manager")}),
+    )
+
+    if 1 != len(capture.warningRecords) || 0 != len(capture.errorRecords) {
+        t.Fatalf("expected one record for one refusal, got %v and %v", capture.warningRecords, capture.errorRecords)
+    }
 }

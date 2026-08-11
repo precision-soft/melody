@@ -298,7 +298,7 @@ func (instance *HttpClient) Request(method string, urlString string, options ...
         )
     }
 
-    request, err := instance.buildRequest(method, urlString, requestConfig)
+    request, err := instance.buildRequest(context.Background(), method, urlString, requestConfig)
     if nil != err {
         return nil, err
     }
@@ -392,12 +392,10 @@ func (instance *HttpClient) RequestStreamWithContext(
         )
     }
 
-    requestInstance, err := instance.buildRequest(method, urlString, requestConfig)
+    requestInstance, err := instance.buildRequest(contextInstance, method, urlString, requestConfig)
     if nil != err {
         return nil, err
     }
-
-    requestInstance = requestInstance.WithContext(contextInstance)
 
     clientInstance := instance.streamClientForRequest(requestConfig.Timeout())
 
@@ -469,8 +467,9 @@ func newRequestFailedError(method string, requestUrl *url.URL, err error) error 
     )
 }
 
-/* buildRequest turns the caller's options into a net/http request: the url, the body, the headers of the client and of the request, and the authorization. */
+/* buildRequest turns the caller's options into a net/http request: the url, the body, the headers of the client and of the request, and the authorization. The caller's context is bound here rather than by the caller afterwards, because the per-request credential header names are planted in the request's context and a WithContext applied later replaces the whole context, taking the plant with it — the redirect policy would then find nothing to strip and a per-request credential would follow a cross-origin redirect. */
 func (instance *HttpClient) buildRequest(
+    contextInstance context.Context,
     method string,
     urlString string,
     requestConfig *RequestOptions,
@@ -485,7 +484,7 @@ func (instance *HttpClient) buildRequest(
         return nil, err
     }
 
-    request, err := nethttp.NewRequest(method, fullUrl, bodyReader)
+    request, err := nethttp.NewRequestWithContext(contextInstance, method, fullUrl, bodyReader)
     if nil != err {
         return nil, exception.NewError(
             "failed to create request",
@@ -596,11 +595,12 @@ func (instance *HttpClient) SetBaseUrl(baseUrl string) {
     instance.baseUrl = baseUrl
 }
 
+/* SetHeader stores the header under its canonical spelling, the one the constructor stores under: the map is applied to every request with Set, which canonicalizes, so rotating a credential under a different spelling than the one it was configured with used to leave two live entries whose survivor was chosen by map iteration order — a different credential per request. Canonicalizing here makes the collision structurally impossible, and a rotation overwrites the entry it means to. */
 func (instance *HttpClient) SetHeader(key string, value string) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    instance.headers[key] = value
+    instance.headers[canonicalHeaderKey(key)] = value
 }
 
 func (instance *HttpClient) SetTimeout(timeout time.Duration) {

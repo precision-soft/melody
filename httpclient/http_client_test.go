@@ -383,7 +383,7 @@ func TestHttpClientConcurrentSettersAndRequests(t *testing.T) {
     waitGroup.Wait()
 }
 
-/* @info net/http strips only Authorization/Cookie, and only across domains. A client-configured api-key header would otherwise be handed to whatever host the first server redirects to — a host that server's operator chooses. */
+/* net/http strips only Authorization/Cookie, and only across domains. A client-configured api-key header would otherwise be handed to whatever host the first server redirects to — a host that server's operator chooses. */
 func TestHttpClient_StripsCredentialHeadersOnCrossOriginRedirect(t *testing.T) {
     var receivedApiKey string
     var receivedAuthorization string
@@ -418,7 +418,7 @@ func TestHttpClient_StripsCredentialHeadersOnCrossOriginRedirect(t *testing.T) {
     }
 }
 
-/* @info A same-origin redirect is not a credential boundary; stripping there would break ordinary /login -> /home flows. */
+/* A same-origin redirect is not a credential boundary; stripping there would break ordinary /login -> /home flows. */
 func TestHttpClient_KeepsCredentialHeadersOnSameOriginRedirect(t *testing.T) {
     var receivedApiKey string
 
@@ -448,7 +448,7 @@ func TestHttpClient_KeepsCredentialHeadersOnSameOriginRedirect(t *testing.T) {
     }
 }
 
-/* @info int64(math.MaxInt)+1 wraps negative, so io.LimitReader would read zero bytes and hand back an empty body with no error. */
+/* int64(math.MaxInt)+1 wraps negative, so io.LimitReader would read zero bytes and hand back an empty body with no error. */
 func TestHttpClient_MaxResponseBodyBytesAtMaxIntDoesNotOverflow(t *testing.T) {
     server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
         writer.Write([]byte("payload"))
@@ -467,7 +467,7 @@ func TestHttpClient_MaxResponseBodyBytesAtMaxIntDoesNotOverflow(t *testing.T) {
     }
 }
 
-/* @info Per-request credential headers (WithHeader/WithHeaders) must be stripped on a cross-origin redirect exactly like the client-wide ones: the redirect target is chosen by whoever operates the first server. */
+/* Per-request credential headers (WithHeader/WithHeaders) must be stripped on a cross-origin redirect exactly like the client-wide ones: the redirect target is chosen by whoever operates the first server. */
 func TestHttpClient_StripsPerRequestCredentialHeadersOnCrossOriginRedirect(t *testing.T) {
     var receivedApiKey string
 
@@ -493,7 +493,35 @@ func TestHttpClient_StripsPerRequestCredentialHeadersOnCrossOriginRedirect(t *te
     }
 }
 
-/* @info An explicitly spelled default port names the same origin as an omitted one; treating it as cross-origin would strip credentials from an ordinary same-host redirect. */
+/* The streaming path binds the caller's context to the request, and the per-request credential names travel to the redirect policy through that same context: binding it after the request was built replaced the whole context and the names went with it, so the buffered path stripped and the streaming path did not. */
+func TestHttpClient_StripsPerRequestCredentialHeadersOnCrossOriginRedirectWhileStreaming(t *testing.T) {
+    var receivedApiKey string
+
+    target := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        receivedApiKey = request.Header.Get("X-Api-Key")
+        writer.WriteHeader(http.StatusOK)
+    }))
+    defer target.Close()
+
+    redirector := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        http.Redirect(writer, request, target.URL+"/stolen", http.StatusFound)
+    }))
+    defer redirector.Close()
+
+    client := NewHttpClient(NewHttpClientConfig("", 5*time.Second, nil))
+
+    response, err := client.RequestStream(http.MethodGet, redirector.URL, WithHeader("X-Api-Key", "super-secret"))
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+    defer response.Close()
+
+    if "" != receivedApiKey {
+        t.Fatalf("the per-request api key leaked to the redirect target of a stream: %q", receivedApiKey)
+    }
+}
+
+/* An explicitly spelled default port names the same origin as an omitted one; treating it as cross-origin would strip credentials from an ordinary same-host redirect. */
 func TestHttpClient_KeepsCredentialHeadersOnSameOriginRedirectWithExplicitDefaultPort(t *testing.T) {
     if false == isSameOrigin(mustParseUrl(t, "http://example.com:80/start"), mustParseUrl(t, "http://example.com/finish")) {
         t.Fatalf("an explicit :80 must not make an http origin foreign to itself")
@@ -523,7 +551,7 @@ func mustParseUrl(t *testing.T, value string) *url.URL {
     return parsed
 }
 
-/* @info The redirect policy runs on the request goroutine; reading the client's header map there while SetHeader writes it is a concurrent map access, which the runtime kills the process for. Run with -race. */
+/* The redirect policy runs on the request goroutine; reading the client's header map there while SetHeader writes it is a concurrent map access, which the runtime kills the process for. Run with -race. */
 func TestHttpClient_RedirectPolicyDoesNotRaceWithSetHeader(t *testing.T) {
     target := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
         writer.WriteHeader(http.StatusOK)
@@ -556,7 +584,7 @@ func TestHttpClient_RedirectPolicyDoesNotRaceWithSetHeader(t *testing.T) {
     waitGroup.Wait()
 }
 
-/* @info Variadic passing does not copy the slice: Post/Put/Patch append WithJson into a spare slot of the caller's slice, so two concurrent calls sharing one slice write the same backing-array slot and can deliver one call's body to the other's endpoint. Run with -race. */
+/* Variadic passing does not copy the slice: Post/Put/Patch append WithJson into a spare slot of the caller's slice, so two concurrent calls sharing one slice write the same backing-array slot and can deliver one call's body to the other's endpoint. Run with -race. */
 func TestHttpClientPost_DoesNotShareCallerOptionsSliceAcrossConcurrentCalls(t *testing.T) {
     var corruption atomic.Bool
 
@@ -601,7 +629,7 @@ func TestHttpClientPost_DoesNotShareCallerOptionsSliceAcrossConcurrentCalls(t *t
     }
 }
 
-/* @info Every other guard in the file treats a non-positive timeout as unset; a negative configured timeout must fall back to the 30s default, not build a client with no deadline at all. */
+/* Every other guard in the file treats a non-positive timeout as unset; a negative configured timeout must fall back to the 30s default, not build a client with no deadline at all. */
 func TestNewHttpClient_NegativeTimeoutFallsBackToDefault(t *testing.T) {
     client := NewHttpClient(NewHttpClientConfig("", -1*time.Second, nil))
 
@@ -613,7 +641,7 @@ func TestNewHttpClient_NegativeTimeoutFallsBackToDefault(t *testing.T) {
     }
 }
 
-/* @info net/http auto-sets Referer to the full previous url, query string included, and does not strip it on a non-downgrade cross-origin hop; a secret placed in the url would otherwise reach the redirect target the first server chose. */
+/* net/http auto-sets Referer to the full previous url, query string included, and does not strip it on a non-downgrade cross-origin hop; a secret placed in the url would otherwise reach the redirect target the first server chose. */
 func TestHttpClient_StripsRefererOnCrossOriginRedirect(t *testing.T) {
     var receivedReferer string
 
@@ -664,7 +692,7 @@ func TestNewHttpClient_TransportRetainsIdleConnectionsPerHost(t *testing.T) {
     }
 }
 
-/* @info A nil *BasicAuthorizationOptions boxed through the public SetBasic passes a nil check on the interface, and reading the username off it dereferences nil on the request path — where the promise is an error, not a panic. */
+/* A nil *BasicAuthorizationOptions boxed through the public SetBasic passes a nil check on the interface, and reading the username off it dereferences nil on the request path — where the promise is an error, not a panic. */
 func TestHttpClient_TypedNilBasicAuthorizationDoesNotPanic(t *testing.T) {
     server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
         writer.WriteHeader(http.StatusOK)
@@ -684,7 +712,7 @@ func TestHttpClient_TypedNilBasicAuthorizationDoesNotPanic(t *testing.T) {
     }
 }
 
-/* @info A nil AuthorizationOptions interface reaches the same guard from the other side. */
+/* A nil AuthorizationOptions interface reaches the same guard from the other side. */
 func TestHttpClient_NilAuthorizationDoesNotPanic(t *testing.T) {
     server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
         writer.WriteHeader(http.StatusOK)
@@ -701,7 +729,7 @@ func TestHttpClient_NilAuthorizationDoesNotPanic(t *testing.T) {
     }
 }
 
-/* @info The cap is caller input known before anything is dialled. Validating it after the exchange let a POST commit its side effect and then answered with an error phrased as though nothing had been sent, so a retry duplicated the operation. */
+/* The cap is caller input known before anything is dialled. Validating it after the exchange let a POST commit its side effect and then answered with an error phrased as though nothing had been sent, so a retry duplicated the operation. */
 func TestHttpClient_InvalidMaxResponseBodyBytesIsRefusedBeforeTheRequestIsSent(t *testing.T) {
     var hits int64
 
@@ -723,7 +751,7 @@ func TestHttpClient_InvalidMaxResponseBodyBytesIsRefusedBeforeTheRequestIsSent(t
     }
 }
 
-/* @info Url schemes are case-insensitive, and isSameOrigin one file over compares them with EqualFold; the absolute-url check compared them byte for byte, so an "HTTP://" target was hung under the base url as a path segment and the request went to the base host. */
+/* Url schemes are case-insensitive, and isSameOrigin one file over compares them with EqualFold; the absolute-url check compared them byte for byte, so an "HTTP://" target was hung under the base url as a path segment and the request went to the base host. */
 func TestHttpClient_UppercaseSchemeIsAnAbsoluteUrl(t *testing.T) {
     if false == hasAbsoluteUrlScheme("HTTP://other.example/path") {
         t.Fatalf("an uppercase scheme names an absolute url")
@@ -743,7 +771,7 @@ func TestHttpClient_UppercaseSchemeIsAnAbsoluteUrl(t *testing.T) {
     }
 }
 
-/* @info An api key spelled as the password of an empty user is the ordinary shape of curl's "-u :key". The username guard dropped the whole credential and sent the request unauthenticated with nothing to say so. */
+/* An api key spelled as the password of an empty user is the ordinary shape of curl's "-u :key". The username guard dropped the whole credential and sent the request unauthenticated with nothing to say so. */
 func TestHttpClient_BasicAuthorizationWithEmptyUsernameIsSent(t *testing.T) {
     var receivedUsername string
     var receivedPassword string
@@ -772,7 +800,7 @@ func TestHttpClient_BasicAuthorizationWithEmptyUsernameIsSent(t *testing.T) {
     }
 }
 
-/* @info A bearer token and a basic credential cannot share one Authorization header; the bearer wins, and the contract says so. */
+/* A bearer token and a basic credential cannot share one Authorization header; the bearer wins, and the contract says so. */
 func TestHttpClient_BearerTokenWinsOverBasicAuthorization(t *testing.T) {
     var receivedAuthorization string
 
@@ -793,7 +821,7 @@ func TestHttpClient_BearerTokenWinsOverBasicAuthorization(t *testing.T) {
     }
 }
 
-/* @info net/http writes the request body on its own goroutine and Do returns as soon as the response headers arrive, so a caller's []byte stays aliased into the transport after Request returned: a pooled buffer reused right after the call is a data race and torn bytes on the wire. The seam is asserted directly so the proof does not depend on scheduling. */
+/* net/http writes the request body on its own goroutine and Do returns as soon as the response headers arrive, so a caller's []byte stays aliased into the transport after Request returned: a pooled buffer reused right after the call is a data race and torn bytes on the wire. The seam is asserted directly so the proof does not depend on scheduling. */
 func TestHttpClient_ByteBodyIsCopiedFromTheCaller(t *testing.T) {
     options := NewRequestOptions()
     caller := []byte("original")
@@ -818,7 +846,7 @@ func TestHttpClient_ByteBodyIsCopiedFromTheCaller(t *testing.T) {
     }
 }
 
-/* @info The same aliasing, driven through the public path against a server that answers without draining the body. Run with -race. */
+/* The same aliasing, driven through the public path against a server that answers without draining the body. Run with -race. */
 func TestHttpClient_ByteBodyDoesNotRaceWithCallerReuse(t *testing.T) {
     server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
         writer.WriteHeader(http.StatusRequestEntityTooLarge)
@@ -836,7 +864,7 @@ func TestHttpClient_ByteBodyDoesNotRaceWithCallerReuse(t *testing.T) {
     }
 }
 
-/* @info The redirect policy exists so a configured secret does not reach a host the first server chose. An absolute target reaches a host the target string chose, one hop earlier, and the client attached the very same credentials to it. A client that talks to more than one origin is built without a base url. */
+/* The redirect policy exists so a configured secret does not reach a host the first server chose. An absolute target reaches a host the target string chose, one hop earlier, and the client attached the very same credentials to it. A client that talks to more than one origin is built without a base url. */
 func TestHttpClient_AbsoluteUrlLeavingTheBaseOriginIsRefused(t *testing.T) {
     var hits int64
     var receivedApiKey string
@@ -866,7 +894,7 @@ func TestHttpClient_AbsoluteUrlLeavingTheBaseOriginIsRefused(t *testing.T) {
     }
 }
 
-/* @info A client without a base url is the one that talks anywhere; the refusal must not reach it. */
+/* A client without a base url is the one that talks anywhere; the refusal must not reach it. */
 func TestHttpClient_AbsoluteUrlIsAllowedWithoutABaseUrl(t *testing.T) {
     server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
         writer.WriteHeader(http.StatusOK)
@@ -884,7 +912,7 @@ func TestHttpClient_AbsoluteUrlIsAllowedWithoutABaseUrl(t *testing.T) {
     }
 }
 
-/* @info An absolute url naming the origin the client was configured with is the same destination the base url describes, so it stays allowed. */
+/* An absolute url naming the origin the client was configured with is the same destination the base url describes, so it stays allowed. */
 func TestHttpClient_AbsoluteUrlOnTheBaseOriginIsAllowed(t *testing.T) {
     server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
         writer.WriteHeader(http.StatusOK)
@@ -902,7 +930,7 @@ func TestHttpClient_AbsoluteUrlOnTheBaseOriginIsAllowed(t *testing.T) {
     }
 }
 
-/* @info An empty target names the base resource itself; the join appended a slash to it, so a server that tells /v1 from /v1/ answered 301 or 404 and the base resource was unreachable. */
+/* An empty target names the base resource itself; the join appended a slash to it, so a server that tells /v1 from /v1/ answered 301 or 404 and the base resource was unreachable. */
 func TestHttpClient_EmptyTargetNamesTheBaseResource(t *testing.T) {
     client := NewHttpClient(NewHttpClientConfig("https://api.example.com/v1", 0, nil))
 
@@ -931,7 +959,7 @@ func TestHttpClient_EmptyTargetNamesTheBaseResource(t *testing.T) {
     }
 }
 
-/* @info An option chosen by a condition whose other branch produced nothing is a nil function value; calling it is a panic on the request path, outside any recovery this package owns. */
+/* An option chosen by a condition whose other branch produced nothing is a nil function value; calling it is a panic on the request path, outside any recovery this package owns. */
 func TestHttpClient_NilRequestOptionIsRefused(t *testing.T) {
     var hits int64
 
@@ -955,7 +983,7 @@ func TestHttpClient_NilRequestOptionIsRefused(t *testing.T) {
     }
 }
 
-/* @info The sibling resolveTransportConfig handles its nil argument explicitly and NewHttpClientConfig tolerates nil headers; the constructor dereferenced its own argument, so a wiring mistake died on an anonymous nil dereference instead of naming what was missing. */
+/* The sibling resolveTransportConfig handles its nil argument explicitly and NewHttpClientConfig tolerates nil headers; the constructor dereferenced its own argument, so a wiring mistake died on an anonymous nil dereference instead of naming what was missing. */
 func TestNewHttpClient_NilConfigurationIsRefusedByName(t *testing.T) {
     defer func() {
         recovered := recover()
@@ -975,7 +1003,7 @@ func TestNewHttpClient_NilConfigurationIsRefusedByName(t *testing.T) {
     NewHttpClient(nil)
 }
 
-/* @info net/url quotes the whole url in its own error text and the cause chain is rendered into the log record, so the most ordinary failure there is — a refused connection — wrote out a token passed through WithQuery or a password spelled in the userinfo. */
+/* net/url quotes the whole url in its own error text and the cause chain is rendered into the log record, so the most ordinary failure there is — a refused connection — wrote out a token passed through WithQuery or a password spelled in the userinfo. */
 func TestHttpClient_ErrorsDoNotCarryUrlSecrets(t *testing.T) {
     client := NewHttpClient(NewHttpClientConfig("", 0, nil))
 
@@ -1022,7 +1050,7 @@ func renderErrorForLog(t *testing.T, err error) string {
     return fmt.Sprintf("%v %v", err.Error(), exception.LogContext(err))
 }
 
-/* @info Every client owns a hundred-connection idle pool kept for ninety seconds, and dropping the last reference releases none of it: each parked connection has a read loop keeping the transport alive. */
+/* Every client owns a hundred-connection idle pool kept for ninety seconds, and dropping the last reference releases none of it: each parked connection has a read loop keeping the transport alive. */
 func TestHttpClient_CloseReleasesIdleConnections(t *testing.T) {
     var dialed int64
 
@@ -1063,7 +1091,7 @@ func TestHttpClient_CloseReleasesIdleConnections(t *testing.T) {
     }
 }
 
-/* @info The streaming client carries no whole-request deadline, so a stream a server never ends is bounded by nothing the caller holds; a context is the remedy. */
+/* The streaming client carries no whole-request deadline, so a stream a server never ends is bounded by nothing the caller holds; a context is the remedy. */
 func TestHttpClient_RequestStreamWithContextIsBoundedByTheContext(t *testing.T) {
     release := make(chan struct{})
 
@@ -1108,7 +1136,7 @@ func TestHttpClient_RequestStreamWithContextIsBoundedByTheContext(t *testing.T) 
     }
 }
 
-/* @info A nil context names the wiring mistake instead of dying inside net/http. */
+/* A nil context names the wiring mistake instead of dying inside net/http. */
 func TestHttpClient_RequestStreamWithNilContextIsRefused(t *testing.T) {
     client := NewHttpClient(NewHttpClientConfig("http://127.0.0.1:1", 0, nil))
 
@@ -1119,7 +1147,7 @@ func TestHttpClient_RequestStreamWithNilContextIsRefused(t *testing.T) {
     }
 }
 
-/* @info The option promised a cap and the streaming path never read it: a caller who asked for ten bytes was handed everything the server sent, with nothing to say the guard did not exist there. */
+/* The option promised a cap and the streaming path never read it: a caller who asked for ten bytes was handed everything the server sent, with nothing to say the guard did not exist there. */
 func TestHttpClient_StreamHonoursAnExplicitResponseBodyCap(t *testing.T) {
     payload := bytes.Repeat([]byte{97}, 5000)
 
@@ -1146,7 +1174,7 @@ func TestHttpClient_StreamHonoursAnExplicitResponseBodyCap(t *testing.T) {
     }
 }
 
-/* @info The default cap belongs to Request, which holds the whole body in memory; applying it to a stream would cut a server-sent-event feed or a download at ten mebibytes. A caller who named no cap keeps an unbounded stream. */
+/* The default cap belongs to Request, which holds the whole body in memory; applying it to a stream would cut a server-sent-event feed or a download at ten mebibytes. A caller who named no cap keeps an unbounded stream. */
 func TestHttpClient_StreamWithoutAnExplicitCapIsUnbounded(t *testing.T) {
     payload := bytes.Repeat([]byte{97}, 5000)
 
@@ -1177,7 +1205,7 @@ func TestHttpClient_StreamWithoutAnExplicitCapIsUnbounded(t *testing.T) {
     }
 }
 
-/* @info A caller computing what is left of a deadline that has already passed hands over a negative duration; the buffered path folds it into the configured timeout and the streaming path turned it into no deadline at all — an exhausted budget yielding a stream that runs forever. */
+/* A caller computing what is left of a deadline that has already passed hands over a negative duration; the buffered path folds it into the configured timeout and the streaming path turned it into no deadline at all — an exhausted budget yielding a stream that runs forever. */
 func TestHttpClient_NegativeRequestTimeoutIsNotAnUnboundedStream(t *testing.T) {
     client := NewHttpClient(NewHttpClientConfig("", 5*time.Second, nil))
 
@@ -1197,7 +1225,7 @@ func TestHttpClient_NegativeRequestTimeoutIsNotAnUnboundedStream(t *testing.T) {
     }
 }
 
-/* @info A body the client cannot encode says which type it was handed. */
+/* A body the client cannot encode says which type it was handed. */
 func TestHttpClient_UnsupportedBodyTypeNamesTheType(t *testing.T) {
     options := NewRequestOptions()
     options.SetBody(struct{ Quantity int }{Quantity: 1})
@@ -1275,7 +1303,7 @@ func TestHttpClient_ReusesPooledConnectionsAcrossConcurrentWaves(t *testing.T) {
     }
 }
 
-/* @info the constructor an application reaches for when it has nothing to configure had never been executed: the whole of what "default" means — a thirty-second whole-request timeout, no base url, no configured headers, and a real transport under it — went unproven, and a default drifting to zero would have made every request unbounded without a single test noticing. */
+/* the constructor an application reaches for when it has nothing to configure had never been executed: the whole of what "default" means — a thirty-second whole-request timeout, no base url, no configured headers, and a real transport under it — went unproven, and a default drifting to zero would have made every request unbounded without a single test noticing. */
 func TestNewDefaultHttpClient_CarriesTheDocumentedDefaults(t *testing.T) {
     client := NewDefaultHttpClient()
     defer client.Close()
@@ -1305,7 +1333,7 @@ func TestNewDefaultHttpClient_CarriesTheDocumentedDefaults(t *testing.T) {
     }
 }
 
-/* @info Put, Patch and Delete had never been executed. The first two are Post's siblings and carry the same two obligations — the method on the wire and the json encoding of the body — and the third carries neither a body nor a content type; a verb wired to the wrong method would send a create where an update was meant, which no status code distinguishes. */
+/* Put, Patch and Delete had never been executed. The first two are Post's siblings and carry the same two obligations — the method on the wire and the json encoding of the body — and the third carries neither a body nor a content type; a verb wired to the wrong method would send a create where an update was meant, which no status code distinguishes. */
 func TestHttpClient_PutPatchAndDeleteSendTheirOwnMethods(t *testing.T) {
     type recordedRequest struct {
         method      string
@@ -1416,7 +1444,7 @@ func assertBodyCarryingVerbOwnsItsOptionSlice(
     }
 }
 
-/* @info Put appends a body option to the caller's slice, and Post has carried the proof of that clamp since the httpclient session while its two siblings had none — the caller cannot see past its own length, so a lost clamp is invisible to a sequential assertion. */
+/* Put appends a body option to the caller's slice, and Post has carried the proof of that clamp since the httpclient session while its two siblings had none — the caller cannot see past its own length, so a lost clamp is invisible to a sequential assertion. */
 func TestHttpClient_PutDoesNotShareTheCallersOptionSliceAcrossConcurrentCalls(t *testing.T) {
     assertBodyCarryingVerbOwnsItsOptionSlice(
         t,
@@ -1427,7 +1455,7 @@ func TestHttpClient_PutDoesNotShareTheCallersOptionSliceAcrossConcurrentCalls(t 
     )
 }
 
-/* @info Patch carries the same clamp and needs its own proof: the two verbs are separate lines, and a test that drove both at once would stay green while either of them still clamped. */
+/* Patch carries the same clamp and needs its own proof: the two verbs are separate lines, and a test that drove both at once would stay green while either of them still clamped. */
 func TestHttpClient_PatchDoesNotShareTheCallersOptionSliceAcrossConcurrentCalls(t *testing.T) {
     assertBodyCarryingVerbOwnsItsOptionSlice(
         t,
@@ -1438,7 +1466,7 @@ func TestHttpClient_PatchDoesNotShareTheCallersOptionSliceAcrossConcurrentCalls(
     )
 }
 
-/* @info the redirect policy deletes three credential headers by name AFTER it has deleted the ones it learned from the client and from the request, and only a credential that reaches the request through NEITHER of those channels can prove that the by-name deletion is what removed it. A bearer token is exactly that: applyAuthorization writes the Authorization header straight onto the request, so its name never travels on the option map or on the request context, and this deletion is the only thing standing between it and a host the first server chose. */
+/* the redirect policy deletes three credential headers by name AFTER it has deleted the ones it learned from the client and from the request, and only a credential that reaches the request through NEITHER of those channels can prove that the by-name deletion is what removed it. A bearer token is exactly that: applyAuthorization writes the Authorization header straight onto the request, so its name never travels on the option map or on the request context, and this deletion is the only thing standing between it and a host the first server chose. */
 func TestHttpClient_StripsABearerTokenOnCrossOriginRedirect(t *testing.T) {
     receivedAuthorization := ""
 
@@ -1471,7 +1499,7 @@ func TestHttpClient_StripsABearerTokenOnCrossOriginRedirect(t *testing.T) {
     }
 }
 
-/* @info the textual fallback is what sanitizes a url net/url refused to parse, which is exactly the url a caller built by hand and the one most likely to carry a secret. Only one of its shapes had ever been entered — the one with userinfo and no query — so three branches were blind: the query cut, the early return for a string with no scheme separator, and the early return for an authority with no userinfo. Each is asserted on its own shape, because they all answer with a string and a shared assertion would let any of them fall through. */
+/* the textual fallback is what sanitizes a url net/url refused to parse, which is exactly the url a caller built by hand and the one most likely to carry a secret. Only one of its shapes had ever been entered — the one with userinfo and no query — so three branches were blind: the query cut, the early return for a string with no scheme separator, and the early return for an authority with no userinfo. Each is asserted on its own shape, because they all answer with a string and a shared assertion would let any of them fall through. */
 func TestSanitizeUrlTextually_CutsTheQueryWholeWhateverFollowsIt(t *testing.T) {
     sanitized := sanitizeUrlTextually("http://host/path\x7f?token=SECRET&page=2")
 
@@ -1488,7 +1516,7 @@ func TestSanitizeUrlTextually_CutsTheQueryWholeWhateverFollowsIt(t *testing.T) {
     }
 }
 
-/* @info a string with no scheme separator has no authority to cut a userinfo out of, and it is returned as it stands — a relative target a client with no base url was handed, which the failure report still has to name. The probe carries an at sign on purpose: without the early return the arithmetic underneath measures an authority that is not there and splices a redaction into the middle of a plain path, which is the only way this branch is distinguishable from the no-userinfo one below it. */
+/* a string with no scheme separator has no authority to cut a userinfo out of, and it is returned as it stands — a relative target a client with no base url was handed, which the failure report still has to name. The probe carries an at sign on purpose: without the early return the arithmetic underneath measures an authority that is not there and splices a redaction into the middle of a plain path, which is the only way this branch is distinguishable from the no-userinfo one below it. */
 func TestSanitizeUrlTextually_AStringWithoutASchemeSeparatorIsReturnedUnchanged(t *testing.T) {
     sanitized := sanitizeUrlTextually("/relative@path\x7f")
 
@@ -1501,7 +1529,7 @@ func TestSanitizeUrlTextually_AStringWithoutASchemeSeparatorIsReturnedUnchanged(
     }
 }
 
-/* @info an authority with no userinfo carries no credential to cut, and the url is returned with its host and path intact; without this early return the slice arithmetic underneath would splice a redaction into an authority that never had one. */
+/* an authority with no userinfo carries no credential to cut, and the url is returned with its host and path intact; without this early return the slice arithmetic underneath would splice a redaction into an authority that never had one. */
 func TestSanitizeUrlTextually_AnAuthorityWithoutUserinfoIsReturnedUnchanged(t *testing.T) {
     sanitized := sanitizeUrlTextually("http://example.com/path\x7f")
 
@@ -1514,7 +1542,7 @@ func TestSanitizeUrlTextually_AnAuthorityWithoutUserinfoIsReturnedUnchanged(t *t
     }
 }
 
-/* @info an authority that ends the string — no path after it — is the shape where the userinfo cut has to measure to the end rather than to a slash that is not there. */
+/* an authority that ends the string — no path after it — is the shape where the userinfo cut has to measure to the end rather than to a slash that is not there. */
 func TestSanitizeUrlTextually_AnAuthorityEndingTheStringStillLosesItsUserinfo(t *testing.T) {
     sanitized := sanitizeUrlTextually("http://user:SECRET@host\x7f")
 
@@ -1527,7 +1555,7 @@ func TestSanitizeUrlTextually_AnAuthorityEndingTheStringStillLosesItsUserinfo(t 
     }
 }
 
-/* @info every case pinned so far handed the sanitizer a url net/url REFUSES, so the parsed branches — the userinfo replacement and the fragment cut — had never run: a perfectly ordinary url with a password in it went through code no test had entered. The fragment matters because net/http does not send it, so a secret placed there reaches the log without ever reaching the wire. */
+/* every case pinned so far handed the sanitizer a url net/url REFUSES, so the parsed branches — the userinfo replacement and the fragment cut — had never run: a perfectly ordinary url with a password in it went through code no test had entered. The fragment matters because net/http does not send it, so a secret placed there reaches the log without ever reaching the wire. */
 func TestSanitizeUrlForDiagnostics_ParsedUrlsLoseTheirUserinfoAndFragment(t *testing.T) {
     sanitized := sanitizeUrlForDiagnostics("https://user:SECRET@example.com/path?token=ALSOSECRET#fragment-SECRET")
 
@@ -1548,7 +1576,7 @@ func TestSanitizeUrlForDiagnostics_ParsedUrlsLoseTheirUserinfoAndFragment(t *tes
     }
 }
 
-/* @info the client installs its own redirect policy, which means net/http's ten-hop cap is no longer in force unless this policy keeps it: without the refusal a server pointing at itself would spin the client forever on one call, holding a connection and a goroutine for the life of the process. */
+/* the client installs its own redirect policy, which means net/http's ten-hop cap is no longer in force unless this policy keeps it: without the refusal a server pointing at itself would spin the client forever on one call, holding a connection and a goroutine for the life of the process. */
 func TestHttpClient_StopsAfterTooManyRedirects(t *testing.T) {
     hops := 0
 
@@ -1576,7 +1604,7 @@ func TestHttpClient_StopsAfterTooManyRedirects(t *testing.T) {
     }
 }
 
-/* @info the redirect policy strips three headers by name beyond the ones it learned from the client and from the request, and neither Cookie nor Proxy-Authorization had ever been proven. Both deletions are SHADOWED for anything this API can produce: a caller sets them through WithHeader, which puts their names on the request context, and the per-request stripping above removes them first. They are belt-and-braces against a channel that does not exist today — a cookie jar, a transport-level proxy credential — so this test pins the verdict, that neither reaches a host the first server chose, and not the position of the guard. The bearer-token test below is the one that proves the by-name deletion on its own. */
+/* the redirect policy strips three headers by name beyond the ones it learned from the client and from the request, and neither Cookie nor Proxy-Authorization had ever been proven. Both deletions are SHADOWED for anything this API can produce: a caller sets them through WithHeader, which puts their names on the request context, and the per-request stripping above removes them first. They are belt-and-braces against a channel that does not exist today — a cookie jar, a transport-level proxy credential — so this test pins the verdict, that neither reaches a host the first server chose, and not the position of the guard. The bearer-token test below is the one that proves the by-name deletion on its own. */
 func TestHttpClient_StripsCookieAndProxyAuthorizationOnCrossOriginRedirect(t *testing.T) {
     receivedCookie := ""
     receivedProxyAuthorization := ""
@@ -1648,7 +1676,7 @@ func TestHttpClient_StreamRefusesAnInvalidCapBeforeTheRequestIsSent(t *testing.T
     }
 }
 
-/* @info the nil-option refusal had been proven on the buffered path alone, and the streaming path folds its options through the same function — but nothing had ever entered it from there, so a streaming call was relying on a guard proven for its sibling. */
+/* the nil-option refusal had been proven on the buffered path alone, and the streaming path folds its options through the same function — but nothing had ever entered it from there, so a streaming call was relying on a guard proven for its sibling. */
 func TestHttpClient_StreamRefusesANilRequestOption(t *testing.T) {
     serverHits := 0
 
@@ -1676,7 +1704,7 @@ func TestHttpClient_StreamRefusesANilRequestOption(t *testing.T) {
     }
 }
 
-/* @info a body json cannot encode — a channel, a function, a cyclic structure — fails before anything is dialled, and the refusal has to name the encoding rather than the transport: a caller shown a request failure would look at the network for a mistake that is in its own value. */
+/* a body json cannot encode — a channel, a function, a cyclic structure — fails before anything is dialled, and the refusal has to name the encoding rather than the transport: a caller shown a request failure would look at the network for a mistake that is in its own value. */
 func TestHttpClient_AJsonBodyThatCannotBeEncodedIsRefusedBeforeDialling(t *testing.T) {
     serverHits := 0
 
@@ -1704,7 +1732,7 @@ func TestHttpClient_AJsonBodyThatCannotBeEncodedIsRefusedBeforeDialling(t *testi
     }
 }
 
-/* @info a string body is sent verbatim, with no content type invented for it — the branch is what lets a caller send xml, form-encoded text or a pre-rendered json document under a content type it names itself, and nothing had ever entered it: a string falling through to the unsupported-type refusal would have been discovered by an application, not by the suite. */
+/* a string body is sent verbatim, with no content type invented for it — the branch is what lets a caller send xml, form-encoded text or a pre-rendered json document under a content type it names itself, and nothing had ever entered it: a string falling through to the unsupported-type refusal would have been discovered by an application, not by the suite. */
 func TestHttpClient_AStringBodyIsSentVerbatimWithoutAnInventedContentType(t *testing.T) {
     receivedBody := ""
     receivedContentType := ""
@@ -1740,7 +1768,7 @@ func TestHttpClient_AStringBodyIsSentVerbatimWithoutAnInventedContentType(t *tes
     }
 }
 
-/* @info a body that ends before the length the server declared is a truncated response, and it has to be reported as a read failure rather than handed to the caller as a short body — a json document cut in half decodes to a zero value, and the caller acts on it. */
+/* a body that ends before the length the server declared is a truncated response, and it has to be reported as a read failure rather than handed to the caller as a short body — a json document cut in half decodes to a zero value, and the caller acts on it. */
 func TestHttpClient_ATruncatedResponseBodyIsReportedAsAReadFailure(t *testing.T) {
     server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
         hijacker, isHijacker := writer.(http.Hijacker)
@@ -1776,7 +1804,7 @@ func TestHttpClient_ATruncatedResponseBodyIsReportedAsAReadFailure(t *testing.T)
     }
 }
 
-/* @info the origin check parses both sides, and each parse has a refusal of its own: a base url the configuration mangled and a target the caller mangled are different mistakes, and reporting either as the other sends a reader to the wrong file. Neither had been entered. */
+/* the origin check parses both sides, and each parse has a refusal of its own: a base url the configuration mangled and a target the caller mangled are different mistakes, and reporting either as the other sends a reader to the wrong file. Neither had been entered. */
 func TestHttpClient_AnUnparsableBaseUrlIsNamedAsTheBase(t *testing.T) {
     client := NewDefaultHttpClient()
     defer client.Close()
@@ -1803,7 +1831,7 @@ func TestHttpClient_AnUnparsableBaseUrlIsNamedAsTheBase(t *testing.T) {
     }
 }
 
-/* @info the target half of the same check, which fires for an absolute url the caller built by hand — the report has to name the request url rather than the base one, because a caller reading it is looking at its own call site. */
+/* the target half of the same check, which fires for an absolute url the caller built by hand — the report has to name the request url rather than the base one, because a caller reading it is looking at its own call site. */
 func TestHttpClient_AnUnparsableAbsoluteTargetIsNamedAsTheRequestUrl(t *testing.T) {
     client := NewDefaultHttpClient()
     defer client.Close()
@@ -1824,7 +1852,7 @@ func TestHttpClient_AnUnparsableAbsoluteTargetIsNamedAsTheRequestUrl(t *testing.
     }
 }
 
-/* @info the buffered path reads one byte past the cap precisely so a body ending EXACTLY at it is delivered rather than refused; the streaming sibling has carried that proof since the httpclient session and the buffered one had not, so an off-by-one there would have refused every response that filled its budget exactly. */
+/* the buffered path reads one byte past the cap precisely so a body ending EXACTLY at it is delivered rather than refused; the streaming sibling has carried that proof since the httpclient session and the buffered one had not, so an off-by-one there would have refused every response that filled its budget exactly. */
 func TestHttpClient_ABufferedBodyEndingExactlyAtTheCapIsDelivered(t *testing.T) {
     server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
         writer.WriteHeader(http.StatusOK)
@@ -1854,7 +1882,7 @@ func TestHttpClient_ABufferedBodyEndingExactlyAtTheCapIsDelivered(t *testing.T) 
     }
 }
 
-/* @info the origin comparison refuses a nil side rather than dereferencing it. No public path can hand it one — both call sites pass urls that are non-nil by construction — but the function is the credential boundary itself, and a fail-open answer here would keep an api key on a redirect that left the origin. Recorded in the backlog as unreachable through the public API. */
+/* the origin comparison refuses a nil side rather than dereferencing it. No public path can hand it one — both call sites pass urls that are non-nil by construction — but the function is the credential boundary itself, and a fail-open answer here would keep an api key on a redirect that left the origin. Recorded in the backlog as unreachable through the public API. */
 func TestIsSameOrigin_ANilSideIsNotTheSameOrigin(t *testing.T) {
     if true == isSameOrigin(nil, mustParseUrl(t, "https://example.com")) {
         t.Fatalf("expected a nil origin to be refused")
@@ -1869,7 +1897,7 @@ func TestIsSameOrigin_ANilSideIsNotTheSameOrigin(t *testing.T) {
     }
 }
 
-/* @info the effective port of a scheme that is neither http nor https is the empty string, which makes two urls of one unknown scheme compare EQUAL on port whatever ports they name — a fail-open answer. It cannot be reached today because the schemes must match first and every path guarantees http or https on at least one side, so this pins the behaviour rather than endorsing it; carried to the backlog beside the aliasing findings. */
+/* the effective port of a scheme that is neither http nor https is the empty string, which makes two urls of one unknown scheme compare EQUAL on port whatever ports they name — a fail-open answer. It cannot be reached today because the schemes must match first and every path guarantees http or https on at least one side, so this pins the behaviour rather than endorsing it; carried to the backlog beside the aliasing findings. */
 func TestEffectivePort_AnUnknownSchemeYieldsNoPortAtAll(t *testing.T) {
     if "" != effectivePort(mustParseUrl(t, "ftp://example.com/file")) {
         t.Fatalf("expected an unknown scheme to imply no port, got %q", effectivePort(mustParseUrl(t, "ftp://example.com/file")))
@@ -1890,7 +1918,7 @@ func (instance foreignRoundTripper) RoundTrip(request *http.Request) (*http.Resp
     return nil, nil
 }
 
-/* @info Close reaches for the transport's own idle pool, and a transport that is not net/http's has none to release: the guard is what keeps Close a no-op instead of a panic there. Nothing can install a foreign transport through the public API today — there is no setter and no configuration hook — so the transport is replaced white-box; the guard becomes load-bearing the moment such a hook is added. Recorded in the backlog as unreachable through the public API. */
+/* Close reaches for the transport's own idle pool, and a transport that is not net/http's has none to release: the guard is what keeps Close a no-op instead of a panic there. Nothing can install a foreign transport through the public API today — there is no setter and no configuration hook — so the transport is replaced white-box; the guard becomes load-bearing the moment such a hook is added. Recorded in the backlog as unreachable through the public API. */
 func TestHttpClient_CloseIsANoOpForATransportItDoesNotOwn(t *testing.T) {
     client := NewDefaultHttpClient()
 
@@ -1901,7 +1929,7 @@ func TestHttpClient_CloseIsANoOpForATransportItDoesNotOwn(t *testing.T) {
     }
 }
 
-/* @info the parse-error sanitizer unwraps a *url.Error to drop the url its message quotes, and falls back to the error text for anything else. Every caller feeds it a *url.Error today, so the fallback is unreachable — but it is what keeps the sanitizer total: a nil return or a panic there would take out the very report a failed url was being described in. */
+/* the parse-error sanitizer unwraps a *url.Error to drop the url its message quotes, and falls back to the error text for anything else. Every caller feeds it a *url.Error today, so the fallback is unreachable — but it is what keeps the sanitizer total: a nil return or a panic there would take out the very report a failed url was being described in. */
 func TestSanitizeUrlParseError_AnErrorThatIsNotAUrlErrorKeepsItsOwnText(t *testing.T) {
     sanitized := sanitizeUrlParseError(errors.New("a plain failure"))
 
@@ -1918,7 +1946,7 @@ func TestSanitizeUrlParseError_AnErrorThatIsNotAUrlErrorKeepsItsOwnText(t *testi
     }
 }
 
-/* @info the unsupported-body report names the type it was handed, and a nil reaching it would have no type to name — the branch answers "nil" rather than dereferencing. A nil body is filtered one step earlier so nothing can reach it, which is why it is pinned directly. */
+/* the unsupported-body report names the type it was handed, and a nil reaching it would have no type to name — the branch answers "nil" rather than dereferencing. A nil body is filtered one step earlier so nothing can reach it, which is why it is pinned directly. */
 func TestTypeNameOf_ANilValueIsNamedRatherThanDereferenced(t *testing.T) {
     if "nil" != typeNameOf(nil) {
         t.Fatalf("unexpected name for a nil value: %q", typeNameOf(nil))

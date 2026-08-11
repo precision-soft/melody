@@ -47,3 +47,14 @@ func TestRequestOptions_SetHeaderStoresTheCanonicalKeyDeterministically(t *testi
         t.Fatalf("expected the sequential last write on one canonical key, got %#v", headers)
     }
 }
+
+/* The client's own setter is the other door into a header map that is applied with Set: a rotation spelled differently from the configured key used to leave both entries live, and which credential travelled was decided by map iteration order. */
+func TestHttpClient_SetHeaderRotatesTheCredentialUnderItsCanonicalSpelling(t *testing.T) {
+    client := NewHttpClient(NewHttpClientConfig("", 0, map[string]string{"X-Api-Key": "rotated-out"}))
+
+    client.SetHeader("x-api-key", "rotated-in")
+
+    if 1 != len(client.headers) || "rotated-in" != client.headers["X-Api-Key"] {
+        t.Fatalf("expected one canonical entry holding the rotated-in credential, got %#v", client.headers)
+    }
+}

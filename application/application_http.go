@@ -135,6 +135,8 @@ func (instance *Application) runHttp(
 
     logger := logging.LoggerMustFromContainer(instance.kernel.ServiceContainer())
 
+    applyHttpServerErrorLog(httpServer, logger)
+
     instance.warnOnUnboundedDefaultCacheBackend(logger)
 
     instance.warnOnUnboundedDefaultSessionStorage(logger)

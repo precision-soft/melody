@@ -18,7 +18,7 @@ func canonicalHeaderMap(headers map[string]string) map[string]string {
     rawKeysByCanonicalKey := make(map[string]string, len(headers))
 
     for key, value := range headers {
-        canonicalKey := textproto.CanonicalMIMEHeaderKey(key)
+        canonicalKey := canonicalHeaderKey(key)
 
         occupiedRawKey, occupied := rawKeysByCanonicalKey[canonicalKey]
         if true == occupied {
@@ -43,4 +43,9 @@ func canonicalHeaderMap(headers map[string]string) map[string]string {
     }
 
     return canonical
+}
+
+/* canonicalHeaderKey is the one reader of the spelling rule: every door that writes into a header map goes through it, so a key stored by the constructor and the same key stored by a setter land on the same entry. */
+func canonicalHeaderKey(key string) string {
+    return textproto.CanonicalMIMEHeaderKey(key)
 }

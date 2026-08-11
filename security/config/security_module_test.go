@@ -192,7 +192,7 @@ func TestBuilder_RoleHierarchy_AutoUpgradesRoleVoterToRoleHierarchyVoter(t *test
     }
 }
 
-/* @info the zero value of the exported override struct must inherit the global access control the way the constructor does; without the default a firewall added with FirewallOverrideConfiguration{} compiles an empty access control that never falls back to the global policy and opens every route behind it */
+/* the zero value of the exported override struct must inherit the global access control the way the constructor does; without the default a firewall added with FirewallOverrideConfiguration{} compiles an empty access control that never falls back to the global policy and opens every route behind it */
 func TestBuilder_ZeroValueOverrideInheritsGlobalAccessControl(t *testing.T) {
     builder := NewBuilder()
 
@@ -227,7 +227,7 @@ func TestBuilder_ZeroValueOverrideInheritsGlobalAccessControl(t *testing.T) {
     }
 }
 
-/* @info a global access control declared without any firewall must still compile into an enforcing configuration; dropping it left every global rule silently unenforced */
+/* a global access control declared without any firewall must still compile into an enforcing configuration; dropping it left every global rule silently unenforced */
 func TestBuilder_GlobalAccessControlWithoutFirewallStillCompiles(t *testing.T) {
     builder := NewBuilder()
 
@@ -281,7 +281,7 @@ func newValidFirewallArguments() (string, securitycontract.Matcher, []securityco
         NewFirewallOverrideConfiguration()
 }
 
-/* @info every one of these is a boot-time refusal, and each is pinned by MESSAGE: the eight of them panic from the same helper, so a value-blind assertion would pass no matter which guard fired — including the wrong one */
+/* every one of these is a boot-time refusal, and each is pinned by MESSAGE: the eight of them panic from the same helper, so a value-blind assertion would pass no matter which guard fired — including the wrong one */
 func TestBuilder_ValidateFirewall_RefusesEachMissingPiece(t *testing.T) {
     refusalList := []struct {
         name            string
@@ -366,7 +366,7 @@ func TestBuilder_ValidateFirewall_RefusesEachMissingPiece(t *testing.T) {
     }
 }
 
-/* @info the refused firewall names itself in the error context, which is the difference between a readable boot failure and hunting through a wiring file */
+/* the refused firewall names itself in the error context, which is the difference between a readable boot failure and hunting through a wiring file */
 func TestBuilder_ValidateFirewall_NamesTheFirewallInTheRefusal(t *testing.T) {
     defer func() {
         recoveredValue := recover()
@@ -398,7 +398,7 @@ func TestBuilder_ValidateFirewall_NamesTheFirewallInTheRefusal(t *testing.T) {
     )
 }
 
-/* @info a stateless firewall that also declares login configuration is contradictory: each of the four pieces alone triggers the refusal, so none of them can slip through by being weighed with an OR that lost a term */
+/* a stateless firewall that also declares login configuration is contradictory: each of the four pieces alone triggers the refusal, so none of them can slip through by being weighed with an OR that lost a term */
 func TestBuilder_AddStatelessFirewall_RefusesEachLoginPiece(t *testing.T) {
     spoilList := []struct {
         name          string
@@ -439,7 +439,7 @@ func TestBuilder_AddStatelessFirewall_RefusesEachLoginPiece(t *testing.T) {
     }
 }
 
-/* @info the global configuration is declared once: a second call is a wiring mistake that would otherwise overwrite the first policy silently */
+/* the global configuration is declared once: a second call is a wiring mistake that would otherwise overwrite the first policy silently */
 func TestBuilder_SetGlobal_RefusesASecondDefinition(t *testing.T) {
     builder := NewBuilder().SetGlobal(nil, nil, nil, nil, nil)
 
@@ -452,7 +452,7 @@ func TestBuilder_SetGlobal_RefusesASecondDefinition(t *testing.T) {
     )
 }
 
-/* @info AddStatefulFirewall forces the stateless flag off, so a firewall added through it demands login configuration even when the override it was handed says stateless */
+/* AddStatefulFirewall forces the stateless flag off, so a firewall added through it demands login configuration even when the override it was handed says stateless */
 func TestBuilder_AddStatefulFirewall_ForcesTheStatefulShape(t *testing.T) {
     override := NewFirewallOverrideConfiguration()
     override.stateless = true
@@ -483,7 +483,7 @@ func TestBuilder_AddStatefulFirewall_ForcesTheStatefulShape(t *testing.T) {
     }
 }
 
-/* @info the same override handed to AddStatefulFirewall would be refused by AddStatelessFirewall: the two constructors decide the shape, not the caller's flag */
+/* the same override handed to AddStatefulFirewall would be refused by AddStatelessFirewall: the two constructors decide the shape, not the caller's flag */
 func TestBuilder_AddStatelessFirewall_ForcesTheStatelessShape(t *testing.T) {
     override := NewFirewallOverrideConfiguration()
     override.stateless = false
@@ -505,7 +505,7 @@ func TestBuilder_AddStatelessFirewall_ForcesTheStatelessShape(t *testing.T) {
     }
 }
 
-/* @info BuildAndCompile turns a compile error into a boot panic rather than handing back a nil configuration the kernel would register nothing from */
+/* BuildAndCompile turns a compile error into a boot panic rather than handing back a nil configuration the kernel would register nothing from */
 func TestBuilder_BuildAndCompile_PanicsOnACompileError(t *testing.T) {
     builder := NewBuilder()
 
@@ -527,7 +527,7 @@ func TestBuilder_BuildAndCompile_PanicsOnACompileError(t *testing.T) {
     )
 }
 
-/* @info a typed nil is not `nil ==`: handed to the builder it passed validation, passed Compile, and was called on the request path outside any recovery. Each of the four interface-typed pieces is pinned separately, and by message, so a guard that fires for the wrong reason cannot pass for the right one. */
+/* a typed nil is not `nil ==`: handed to the builder it passed validation, passed Compile, and was called on the request path outside any recovery. Each of the four interface-typed pieces is pinned separately, and by message, so a guard that fires for the wrong reason cannot pass for the right one. */
 func TestBuilder_ValidateFirewall_RefusesATypedNilForEachInterfacePiece(t *testing.T) {
     var typedNilMatcher *security.PathPrefixMatcher
     var typedNilTokenSource *anonymousTokenSource
@@ -596,7 +596,7 @@ func TestBuilder_ValidateFirewall_RefusesATypedNilForEachInterfacePiece(t *testi
     }
 }
 
-/* @info Compile carries the same refusals for a configuration that never went through the builder — the two validation walls must agree, or a typed nil refused at one is admitted at the other */
+/* Compile carries the same refusals for a configuration that never went through the builder — the two validation walls must agree, or a typed nil refused at one is admitted at the other */
 func TestCompile_RefusesATypedNilForEachInterfacePiece(t *testing.T) {
     var typedNilMatcher *security.PathPrefixMatcher
     var typedNilTokenSource *anonymousTokenSource
@@ -672,7 +672,7 @@ func TestCompile_RefusesATypedNilForEachInterfacePiece(t *testing.T) {
     }
 }
 
-/* @info a stateless firewall carrying a TYPED nil login handler is not carrying a handler: read as one it would be refused as a contradictory configuration, which is a refusal for the wrong reason at the wrong place */
+/* a stateless firewall carrying a TYPED nil login handler is not carrying a handler: read as one it would be refused as a contradictory configuration, which is a refusal for the wrong reason at the wrong place */
 func TestBuilder_AddStatelessFirewall_ReadsATypedNilHandlerAsAbsent(t *testing.T) {
     var typedNilLoginHandler *noopLoginHandler
 
@@ -696,7 +696,7 @@ func TestBuilder_AddStatelessFirewall_ReadsATypedNilHandlerAsAbsent(t *testing.T
     }
 }
 
-/* @info the builder owns the rule list it was handed: a caller that keeps the slice and edits it after registering the firewall must not be able to swap a rule the compiled firewall enforces */
+/* the builder owns the rule list it was handed: a caller that keeps the slice and edits it after registering the firewall must not be able to swap a rule the compiled firewall enforces */
 func TestBuilder_AddFirewall_CopiesTheCallersRules(t *testing.T) {
     originalRule := security.NewApiKeyHeaderRule(
         security.NewPathPrefixMatcher("/"),
@@ -725,5 +725,191 @@ func TestBuilder_AddFirewall_CopiesTheCallersRules(t *testing.T) {
 
     if originalRule != rules[0] {
         t.Fatalf("expected the builder to keep its own copy of the rules")
+    }
+}
+
+type recordingAccessDecisionManager struct{}
+
+func (instance *recordingAccessDecisionManager) DecideAll(token securitycontract.Token, attributes []string, subject any) error {
+    return nil
+}
+
+func (instance *recordingAccessDecisionManager) DecideAny(token securitycontract.Token, attributes []string, subject any) error {
+    return nil
+}
+
+type recordingEntryPoint struct{}
+
+func (instance *recordingEntryPoint) Start(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (httpcontract.Response, error) {
+    return nil, nil
+}
+
+type recordingAccessDeniedHandler struct{}
+
+func (instance *recordingAccessDeniedHandler) Handle(runtimeInstance runtimecontract.Runtime, request httpcontract.Request, decisionErr error) (httpcontract.Response, error) {
+    return nil, nil
+}
+
+func newOverrideTestBuilder() *Builder {
+    return NewBuilder().SetGlobal(
+        security.NewAccessControl(security.NewAccessControlRule("/admin", "ROLE_ADMIN")),
+        nil,
+        security.NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, security.NewRoleVoter()),
+        nil,
+        nil,
+    )
+}
+
+func compileWithOverride(t *testing.T, override FirewallOverrideConfiguration) *security.CompiledFirewall {
+    t.Helper()
+
+    return newOverrideTestBuilder().
+        AddStatelessFirewall(
+            "api",
+            security.NewPathPrefixMatcher("/"),
+            []securitycontract.Rule{},
+            &anonymousTokenSource{},
+            override,
+        ).
+        BuildAndCompile().
+        Firewalls()[0]
+}
+
+func TestFirewallOverride_ASetterOnTheZeroValueStartsFromTheConstructorDefaults(t *testing.T) {
+    override := FirewallOverrideConfiguration{}.WithStateless(true)
+
+    if AccessControlMergeLocalFirst != override.mergeStrategy {
+        t.Fatalf("expected the constructor merge strategy, got %q", override.mergeStrategy)
+    }
+
+    if false == override.inheritGlobalAccessControl {
+        t.Fatalf("expected the constructor inheritance")
+    }
+}
+
+func TestFirewallOverride_OptingOutOfInheritanceSurvivesTheBuilder(t *testing.T) {
+    firewall := compileWithOverride(
+        t,
+        FirewallOverrideConfiguration{}.
+            WithInheritGlobalAccessControl(false).
+            WithAccessControl(security.NewAccessControl(security.NewAccessControlRule("/local", "ROLE_LOCAL"))),
+    )
+
+    if _, matched := firewall.AccessControl().Match("/admin"); true == matched {
+        t.Fatalf("expected the global rule to be dropped when the firewall inherits nothing")
+    }
+
+    if _, matched := firewall.AccessControl().Match("/local"); false == matched {
+        t.Fatalf("expected the local rule to be kept")
+    }
+
+    _, _, accessControlSource, _, _ := firewall.Sources()
+    if security.SourceFirewall != accessControlSource {
+        t.Fatalf("expected the firewall as the source, got %v", accessControlSource)
+    }
+}
+
+func TestFirewallOverride_OverrideOnlyIsReachableThroughTheSetter(t *testing.T) {
+    firewall := compileWithOverride(
+        t,
+        NewFirewallOverrideConfiguration().
+            WithMergeStrategy(AccessControlMergeOverrideOnly).
+            WithAccessControl(security.NewAccessControl(security.NewAccessControlRule("/local", "ROLE_LOCAL"))),
+    )
+
+    if _, matched := firewall.AccessControl().Match("/admin"); true == matched {
+        t.Fatalf("expected overrideOnly to drop the global rules")
+    }
+
+    if _, matched := firewall.AccessControl().Match("/local"); false == matched {
+        t.Fatalf("expected overrideOnly to keep the local rules")
+    }
+}
+
+func TestFirewallOverride_GlobalFirstIsReachableThroughTheSetter(t *testing.T) {
+    firewall := compileWithOverride(
+        t,
+        NewFirewallOverrideConfiguration().
+            WithMergeStrategy(AccessControlMergeGlobalFirst).
+            WithAccessControl(security.NewAccessControl(security.NewAccessControlRule("/admin", "ROLE_LOCAL"))),
+    )
+
+    attributes, matched := firewall.AccessControl().Match("/admin")
+    if false == matched {
+        t.Fatalf("expected the merged control to answer /admin")
+    }
+
+    if 1 != len(attributes) || "ROLE_ADMIN" != attributes[0] {
+        t.Fatalf("expected globalFirst to put the global rule ahead of the tied local one, got %v", attributes)
+    }
+}
+
+func TestFirewallOverride_EachSetterCarriesItsFieldIntoTheCompiledFirewall(t *testing.T) {
+    roleHierarchy := security.NewRoleHierarchy(map[string][]string{"ROLE_ADMIN": {"ROLE_USER"}})
+    /* a manager that is not the framework's own concrete type: a *security.AccessDecisionManager holding a role voter is deliberately rebuilt with hierarchy-aware voters when a role hierarchy is present, so pointer identity is not the right assertion for that shape */
+    accessDecisionManager := &recordingAccessDecisionManager{}
+    entryPoint := &recordingEntryPoint{}
+    accessDeniedHandler := &recordingAccessDeniedHandler{}
+
+    firewall := compileWithOverride(
+        t,
+        NewFirewallOverrideConfiguration().
+            WithRoleHierarchy(roleHierarchy).
+            WithAccessDecisionManager(accessDecisionManager).
+            WithEntryPoint(entryPoint).
+            WithAccessDeniedHandler(accessDeniedHandler),
+    )
+
+    if roleHierarchy != firewall.RoleHierarchy() {
+        t.Fatalf("expected the firewall's own role hierarchy")
+    }
+
+    if accessDecisionManager != firewall.AccessDecisionManager() {
+        t.Fatalf("expected the firewall's own access decision manager")
+    }
+
+    if entryPoint != firewall.EntryPoint() {
+        t.Fatalf("expected the firewall's own entry point")
+    }
+
+    if accessDeniedHandler != firewall.AccessDeniedHandler() {
+        t.Fatalf("expected the firewall's own access denied handler")
+    }
+
+    roleHierarchySource, accessDecisionManagerSource, _, entryPointSource, accessDeniedHandlerSource := firewall.Sources()
+    for name, source := range map[string]security.Source{
+        "roleHierarchy":         roleHierarchySource,
+        "accessDecisionManager": accessDecisionManagerSource,
+        "entryPoint":            entryPointSource,
+        "accessDeniedHandler":   accessDeniedHandlerSource,
+    } {
+        if security.SourceFirewall != source {
+            t.Fatalf("expected %s to report the firewall as its source, got %v", name, source)
+        }
+    }
+}
+
+func TestFirewallOverride_WithMergeStrategyRefusesAnUnknownStrategy(t *testing.T) {
+    for _, refused := range []AccessControlMergeStrategy{"", "localfirst", "LOCAL_FIRST"} {
+        testhelper.AssertPanicsWithError(
+            t,
+            func() {
+                NewFirewallOverrideConfiguration().WithMergeStrategy(refused)
+            },
+            "unknown security access control merge strategy",
+        )
+    }
+}
+
+/* the compiled control is empty and the listener reads no matching rule as a grant, so this combination is a firewall that guards nothing; it is reachable on purpose and named here so it is a decision rather than a discovery */
+func TestFirewallOverride_AFirewallThatInheritsNothingAndDeclaresNothingEnforcesNothing(t *testing.T) {
+    firewall := compileWithOverride(t, FirewallOverrideConfiguration{}.WithInheritGlobalAccessControl(false))
+
+    if nil == firewall.AccessControl() {
+        t.Fatalf("expected an empty access control rather than a nil one")
+    }
+
+    if _, matched := firewall.AccessControl().Match("/admin"); true == matched {
+        t.Fatalf("expected no rule to match")
     }
 }

@@ -858,3 +858,71 @@ func (instance *panickingTextError) Error() string {
 
     return "unreachable"
 }
+
+func TestLogged_AForeignErrorComesBackAsAMarkedCarrier(t *testing.T) {
+    original := errors.New("plain handler failure")
+
+    reported := Logged(original)
+
+    if true == IsAlreadyLogged(original) {
+        t.Fatalf("a plain error has nowhere to carry the mark; it must not appear marked")
+    }
+
+    if false == IsAlreadyLogged(reported) {
+        t.Fatalf("expected the carrier to report itself already logged")
+    }
+
+    if false == errors.Is(reported, original) {
+        t.Fatalf("expected the carrier to keep the original as its cause")
+    }
+}
+
+func TestLogged_AMelodyErrorIsMarkedInPlaceAndKeepsItsIdentity(t *testing.T) {
+    original := NewError("melody failure", nil, nil)
+
+    reported := Logged(original)
+
+    if original != reported {
+        t.Fatalf("expected the very same error back, not a wrapper")
+    }
+
+    if false == IsAlreadyLogged(original) {
+        t.Fatalf("expected the original to carry the mark")
+    }
+}
+
+func TestLogged_AnHttpExceptionKeepsItsStatusThroughTheCarrier(t *testing.T) {
+    original := NotFound("no such article")
+
+    reported := Logged(original)
+
+    httpException := AsHttpException(reported)
+    if nil == httpException {
+        t.Fatalf("expected the status to stay resolvable")
+    }
+
+    if 404 != httpException.StatusCode() {
+        t.Fatalf("expected 404, got %d", httpException.StatusCode())
+    }
+}
+
+/* the wrapped shape is what the early return is for: on a bare melody error FromError is the identity, so only a foreign wrapper around a marked error can tell a return from a rewrap — and that is the shape a second writer meets, every writer between it and the failure having added its own context */
+func TestLogged_AnAlreadyLoggedErrorIsNotWrappedAgain(t *testing.T) {
+    original := MarkLogged(NewError("melody failure", nil, nil))
+
+    if original != Logged(original) {
+        t.Fatalf("expected an already marked error to come back untouched")
+    }
+
+    wrapped := fmt.Errorf("while saving the article: %w", original)
+
+    if wrapped != Logged(wrapped) {
+        t.Fatalf("expected a wrapper around a marked error to come back untouched, not wrapped a second time")
+    }
+}
+
+func TestLogged_ANilErrorStaysNil(t *testing.T) {
+    if nil != Logged(nil) {
+        t.Fatalf("expected nil")
+    }
+}

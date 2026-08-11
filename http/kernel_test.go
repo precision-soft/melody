@@ -2,6 +2,7 @@ package http
 
 import (
     "context"
+    "errors"
     "io"
     nethttp "net/http"
     "net/http/httptest"
@@ -368,33 +369,41 @@ func TestKernel_DoesNotDoublePersistSessionWhenWriteFailsAfterCommit(t *testing.
     }
 }
 
+/* the wiring panics of the request setup are raised above the main recovery guard, so a client used to meet a reset connection with nothing recorded; the early guard answers them, and it has to sit between the terminate guard and the scope close, which the status read at close time is what proves. */
 func TestKernel_ServeHttpClosesScopeWhenRequestLoggerSetupFails(t *testing.T) {
+    recorder := httptest.NewRecorder()
+
+    codeAtScopeClose := 0
+
     recordingContainer := &scopeRecordingContainer{
         Container:    newHttpTestContainer(),
         failOverride: true,
+        onClose: func() {
+            codeAtScopeClose = recorder.Code
+        },
     }
 
     handler := NewKernel(NewRouter()).ServeHttp(recordingContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/", nil)
-    recorder := httptest.NewRecorder()
-
-    defer func() {
-        recovered := recover()
-        if nil == recovered {
-            t.Fatalf("expected ServeHttp to panic when request logger setup fails")
-        }
-
-        if nil == recordingContainer.scope {
-            t.Fatalf("expected a request scope to have been created")
-        }
-
-        if false == recordingContainer.scope.closed {
-            t.Fatalf("expected the request scope to be closed even when request logger setup fails")
-        }
-    }()
 
     handler.ServeHTTP(recorder, request)
+
+    if nethttp.StatusInternalServerError != recorder.Code {
+        t.Fatalf("expected the wiring panic to be answered with a 500, got %d", recorder.Code)
+    }
+
+    if nethttp.StatusInternalServerError != codeAtScopeClose {
+        t.Fatalf("expected the 500 to have been written before the scope closed, the response carried %d at that moment", codeAtScopeClose)
+    }
+
+    if nil == recordingContainer.scope {
+        t.Fatalf("expected a request scope to have been created")
+    }
+
+    if false == recordingContainer.scope.closed {
+        t.Fatalf("expected the request scope to be closed even when request logger setup fails")
+    }
 }
 
 func TestKernel_FailsClosedWhenKernelRequestDispatchErrors(t *testing.T) {
@@ -2395,5 +2404,115 @@ func TestSetForwardedHeadersPolicy_CopiesTheTrustedProxyList(t *testing.T) {
 
     if "10.0.0.0/8" != kernel.options.ForwardedHeadersPolicy.TrustedProxyList[0] {
         t.Fatalf("expected the kernel to keep its own copy of the trusted list, got %q", kernel.options.ForwardedHeadersPolicy.TrustedProxyList[0])
+    }
+}
+
+/* recordCountingLogger counts what each level received, so a test can assert that one failure left one record. */
+type recordCountingLogger struct {
+    loggingcontract.Logger
+
+    mutex         sync.Mutex
+    errorMessages []string
+    lastContext   loggingcontract.Context
+}
+
+func (instance *recordCountingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+}
+
+func (instance *recordCountingLogger) Debug(message string, context loggingcontract.Context) {}
+
+func (instance *recordCountingLogger) Info(message string, context loggingcontract.Context) {}
+
+func (instance *recordCountingLogger) Warning(message string, context loggingcontract.Context) {}
+
+func (instance *recordCountingLogger) Error(message string, context loggingcontract.Context) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.errorMessages = append(instance.errorMessages, message)
+    instance.lastContext = context
+}
+
+func (instance *recordCountingLogger) Emergency(message string, context loggingcontract.Context) {}
+
+func serveAndCountErrorRecords(t *testing.T, handler httpcontract.Handler) *recordCountingLogger {
+    t.Helper()
+
+    router := NewRouter()
+    router.Handle(nethttp.MethodGet, "/subject", handler)
+
+    countingLogger := &recordCountingLogger{}
+
+    serviceContainer := newHttpTestContainer()
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, countingLogger)
+    RegisterKernelExceptionListener(event.EventDispatcherMustFromContainer(serviceContainer), false)
+
+    NewKernel(router).
+        ServeHttp(serviceContainer).
+        ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/subject", nil))
+
+    return countingLogger
+}
+
+/* a handler's plain errors.New carries no AlreadyLogged implementer, so the mark the kernel writes had nowhere to land and the exception listener filed the same failure a second time */
+func TestKernel_AForeignHandlerErrorFilesOneRecordNotTwo(t *testing.T) {
+    countingLogger := serveAndCountErrorRecords(
+        t,
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return nil, errors.New("plain handler failure")
+        },
+    )
+
+    if 1 != len(countingLogger.errorMessages) {
+        t.Fatalf("expected one error record for one handler failure, got %v", countingLogger.errorMessages)
+    }
+}
+
+/* the value a runtime panic recovers to is a runtime.Error, the case the recovery exists for, and it carries the mark no better than a plain error does */
+func TestKernel_ARuntimePanicFilesOneRecordNotTwo(t *testing.T) {
+    countingLogger := serveAndCountErrorRecords(
+        t,
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            var nilMap map[string]string
+            nilMap["boom"] = "boom"
+
+            return nil, nil
+        },
+    )
+
+    if 1 != len(countingLogger.errorMessages) {
+        t.Fatalf("expected one error record for one runtime panic, got %v", countingLogger.errorMessages)
+    }
+}
+
+func TestKernel_AMelodyHandlerErrorStillFilesOneRecord(t *testing.T) {
+    countingLogger := serveAndCountErrorRecords(
+        t,
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return nil, exception.NewError("melody handler failure", nil, nil)
+        },
+    )
+
+    if 1 != len(countingLogger.errorMessages) {
+        t.Fatalf("expected one error record, got %v", countingLogger.errorMessages)
+    }
+}
+
+func TestLogHandlerError_TheRecordNamesTheMethod(t *testing.T) {
+    countingLogger := &recordCountingLogger{}
+
+    logHandlerError(
+        countingLogger,
+        "controller handler error",
+        errors.New("failure"),
+        httptest.NewRequest(nethttp.MethodPatch, "/articles/7", nil),
+    )
+
+    if nethttp.MethodPatch != countingLogger.lastContext["method"] {
+        t.Fatalf("expected the record to name the method, got %v", countingLogger.lastContext["method"])
+    }
+
+    if "/articles/7" != countingLogger.lastContext["path"] {
+        t.Fatalf("expected the record to name the path, got %v", countingLogger.lastContext["path"])
     }
 }

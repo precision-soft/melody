@@ -25,6 +25,7 @@ type GlobalConfiguration struct {
     accessDeniedHandler   securitycontract.AccessDeniedHandler
 }
 
+/* FirewallOverrideConfiguration starts from the constructor defaults wherever it is built: the fields are unexported, so outside this package the only writes are the With setters, and a setter called on the exact zero value first reads the receiver as NewFirewallOverrideConfiguration before applying its own field. Without that reading, a zero value plus WithInheritGlobalAccessControl(false) carried an empty merge strategy, which the builder reads as an unconfigured override and repairs by writing the inheritance back to true — so the one field the caller set was the one field that never arrived. A firewall that inherits nothing and declares no rules of its own enforces nothing behind it: the compiled access control is empty, no rule matches, and every request reaches its handler. */
 type FirewallOverrideConfiguration struct {
     stateless                  bool
     inheritGlobalAccessControl bool
@@ -36,10 +37,88 @@ type FirewallOverrideConfiguration struct {
     accessDeniedHandler        securitycontract.AccessDeniedHandler
 }
 
+func (instance FirewallOverrideConfiguration) normalizeZeroReceiver() FirewallOverrideConfiguration {
+    if (FirewallOverrideConfiguration{}) == instance {
+        return NewFirewallOverrideConfiguration()
+    }
+
+    return instance
+}
+
 func (instance FirewallOverrideConfiguration) WithStateless(stateless bool) FirewallOverrideConfiguration {
+    instance = instance.normalizeZeroReceiver()
     instance.stateless = stateless
 
     return instance
+}
+
+func (instance FirewallOverrideConfiguration) WithAccessControl(accessControl *security.AccessControl) FirewallOverrideConfiguration {
+    instance = instance.normalizeZeroReceiver()
+    instance.accessControl = accessControl
+
+    return instance
+}
+
+func (instance FirewallOverrideConfiguration) WithRoleHierarchy(roleHierarchy *security.RoleHierarchy) FirewallOverrideConfiguration {
+    instance = instance.normalizeZeroReceiver()
+    instance.roleHierarchy = roleHierarchy
+
+    return instance
+}
+
+func (instance FirewallOverrideConfiguration) WithAccessDecisionManager(accessDecisionManager securitycontract.AccessDecisionManager) FirewallOverrideConfiguration {
+    instance = instance.normalizeZeroReceiver()
+    instance.accessDecisionManager = accessDecisionManager
+
+    return instance
+}
+
+func (instance FirewallOverrideConfiguration) WithEntryPoint(entryPoint securitycontract.EntryPoint) FirewallOverrideConfiguration {
+    instance = instance.normalizeZeroReceiver()
+    instance.entryPoint = entryPoint
+
+    return instance
+}
+
+func (instance FirewallOverrideConfiguration) WithAccessDeniedHandler(accessDeniedHandler securitycontract.AccessDeniedHandler) FirewallOverrideConfiguration {
+    instance = instance.normalizeZeroReceiver()
+    instance.accessDeniedHandler = accessDeniedHandler
+
+    return instance
+}
+
+/* WithMergeStrategy refuses a value that is none of the three by name: the merge reads the strategy by equality, so an unrecognised one behaved as localFirst in silence and an authorization policy the caller believed they had chosen was never applied. The empty string is refused with the rest, because it is the value the builder reads as an unconfigured override. */
+func (instance FirewallOverrideConfiguration) WithMergeStrategy(mergeStrategy AccessControlMergeStrategy) FirewallOverrideConfiguration {
+    if false == isValidAccessControlMergeStrategy(mergeStrategy) {
+        exception.Panic(
+            exception.NewError(
+                "unknown security access control merge strategy",
+                exceptioncontract.Context{
+                    "mergeStrategy": string(mergeStrategy),
+                },
+                nil,
+            ),
+        )
+    }
+
+    instance = instance.normalizeZeroReceiver()
+    instance.mergeStrategy = mergeStrategy
+
+    return instance
+}
+
+/* WithInheritGlobalAccessControl turns the global policy off for this firewall. A firewall that inherits nothing and declares no access control of its own enforces nothing: pair it with WithAccessControl. */
+func (instance FirewallOverrideConfiguration) WithInheritGlobalAccessControl(inheritGlobalAccessControl bool) FirewallOverrideConfiguration {
+    instance = instance.normalizeZeroReceiver()
+    instance.inheritGlobalAccessControl = inheritGlobalAccessControl
+
+    return instance
+}
+
+func isValidAccessControlMergeStrategy(mergeStrategy AccessControlMergeStrategy) bool {
+    return AccessControlMergeLocalFirst == mergeStrategy ||
+        AccessControlMergeGlobalFirst == mergeStrategy ||
+        AccessControlMergeOverrideOnly == mergeStrategy
 }
 
 type FirewallConfiguration struct {

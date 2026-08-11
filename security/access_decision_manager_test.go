@@ -68,7 +68,7 @@ func TestAccessDecisionManager_InvalidStrategyPanics(t *testing.T) {
     )
 }
 
-/* @info every strategy the constructor accepts has to be spelled out, because the refusal above is the only thing standing between a mistyped strategy constant and decideSingleAttribute's final fall-through, which behaves as Unanimous */
+/* every strategy the constructor accepts has to be spelled out, because the refusal above is the only thing standing between a mistyped strategy constant and decideSingleAttribute's final fall-through, which behaves as Unanimous */
 func TestAccessDecisionManager_AcceptsEveryDeclaredStrategy(t *testing.T) {
     strategyList := []securitycontract.DecisionStrategy{
         securitycontract.DecisionStrategyAffirmative,
@@ -84,7 +84,7 @@ func TestAccessDecisionManager_AcceptsEveryDeclaredStrategy(t *testing.T) {
     }
 }
 
-/* @info a nil voter is refused at construction, naming its position: left in place it votes on the request path, inside no recovery */
+/* a nil voter is refused at construction, naming its position: left in place it votes on the request path, inside no recovery */
 func TestAccessDecisionManager_NilVoterPanics(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
@@ -99,7 +99,7 @@ func TestAccessDecisionManager_NilVoterPanics(t *testing.T) {
     )
 }
 
-/* @info the typed-nil shape: an interface holding a nil pointer is not `nil ==`, so only the reflective guard sees it */
+/* the typed-nil shape: an interface holding a nil pointer is not `nil ==`, so only the reflective guard sees it */
 func TestAccessDecisionManager_TypedNilVoterPanics(t *testing.T) {
     var typedNilVoter *RoleVoter
 
@@ -132,7 +132,7 @@ func TestNewAccessDecisionManagerWithVoters_MatchesTheVariadicConstructor(t *tes
     }
 }
 
-/* @info DecideAll is an AND over the attributes: every one of them must be granted */
+/* DecideAll is an AND over the attributes: every one of them must be granted */
 func TestAccessDecisionManager_DecideAllGrantsWhenEveryAttributeIsGranted(t *testing.T) {
     manager := NewAccessDecisionManager(
         securitycontract.DecisionStrategyAffirmative,
@@ -150,7 +150,7 @@ func TestAccessDecisionManager_DecideAllGrantsWhenEveryAttributeIsGranted(t *tes
     }
 }
 
-/* @info one refused attribute refuses the whole decision, and it does so WITHOUT weighing the attributes behind it — asserted on the second voter's consultation count, because an AND that ran to completion would answer the same way and prove nothing about the short circuit */
+/* one refused attribute refuses the whole decision, and it does so WITHOUT weighing the attributes behind it — asserted on the second voter's consultation count, because an AND that ran to completion would answer the same way and prove nothing about the short circuit */
 func TestAccessDecisionManager_DecideAllRefusesAtTheFirstRefusedAttribute(t *testing.T) {
     trailingVoter := &recordingTestVoter{attribute: "ROLE_EDITOR", result: securitycontract.VoteGranted}
 
@@ -174,7 +174,7 @@ func TestAccessDecisionManager_DecideAllRefusesAtTheFirstRefusedAttribute(t *tes
     }
 }
 
-/* @info DecideAny is the OR sibling: it stops at the first attribute that is granted */
+/* DecideAny is the OR sibling: it stops at the first attribute that is granted */
 func TestAccessDecisionManager_DecideAnyStopsAtTheFirstGrantedAttribute(t *testing.T) {
     trailingVoter := &recordingTestVoter{attribute: "ROLE_EDITOR", result: securitycontract.VoteDenied}
 
@@ -198,7 +198,7 @@ func TestAccessDecisionManager_DecideAnyStopsAtTheFirstGrantedAttribute(t *testi
     }
 }
 
-/* @info no voter supports the attribute, so nobody votes: the decision refuses rather than reading "nobody objected" as consent */
+/* no voter supports the attribute, so nobody votes: the decision refuses rather than reading "nobody objected" as consent */
 func TestAccessDecisionManager_RefusesWhenNoVoterSupportsTheAttribute(t *testing.T) {
     manager := NewAccessDecisionManager(
         securitycontract.DecisionStrategyAffirmative,
@@ -215,7 +215,7 @@ func TestAccessDecisionManager_RefusesWhenNoVoterSupportsTheAttribute(t *testing
     }
 }
 
-/* @info a manager with no voters at all refuses everything, on every strategy */
+/* a manager with no voters at all refuses everything, on every strategy */
 func TestAccessDecisionManager_RefusesWithoutAnyVoter(t *testing.T) {
     strategyList := []securitycontract.DecisionStrategy{
         securitycontract.DecisionStrategyAffirmative,
@@ -237,7 +237,7 @@ func TestAccessDecisionManager_RefusesWithoutAnyVoter(t *testing.T) {
     }
 }
 
-/* @info every voter abstained, which is not a grant: the abstain-only branch refuses on every strategy, ahead of the strategy arithmetic that would otherwise read zero denials as agreement */
+/* every voter abstained, which is not a grant: the abstain-only branch refuses on every strategy, ahead of the strategy arithmetic that would otherwise read zero denials as agreement */
 func TestAccessDecisionManager_RefusesWhenEveryVoterAbstains(t *testing.T) {
     strategyList := []securitycontract.DecisionStrategy{
         securitycontract.DecisionStrategyAffirmative,
@@ -279,7 +279,7 @@ func TestAccessDecisionManager_AffirmativeRefusesWhenNobodyGrants(t *testing.T) 
     }
 }
 
-/* @info consensus counts: more grants than denials grants, more denials than grants refuses, and a TIE refuses — the tie is the branch that decides whether an even split fails open or closed */
+/* consensus counts: more grants than denials grants, more denials than grants refuses, and a TIE refuses — the tie is the branch that decides whether an even split fails open or closed */
 func TestAccessDecisionManager_ConsensusWeighsTheMajority(t *testing.T) {
     grantingManager := NewAccessDecisionManager(
         securitycontract.DecisionStrategyConsensus,
@@ -348,7 +348,7 @@ func TestAccessDecisionManager_UnanimousGrantsWhenNobodyDenies(t *testing.T) {
     }
 }
 
-/* @info Voters() hands out a copy: a caller that reads the list and edits it must not be able to reach into the manager's own decision path */
+/* Voters() hands out a copy: a caller that reads the list and edits it must not be able to reach into the manager's own decision path */
 func TestAccessDecisionManager_VotersAnswersACopy(t *testing.T) {
     manager := NewAccessDecisionManager(
         securitycontract.DecisionStrategyAffirmative,
@@ -398,7 +398,7 @@ func TestAccessDecisionManager_Unanimous_DeniesIfAnyDenied(t *testing.T) {
     }
 }
 
-/* @info the manager owns the voter list it was built with: a caller editing the slice it passed must not be able to swap in a voter that grants */
+/* the manager owns the voter list it was built with: a caller editing the slice it passed must not be able to swap in a voter that grants */
 func TestNewAccessDecisionManager_CopiesTheCallersVoters(t *testing.T) {
     callerVoters := []securitycontract.Voter{
         &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteDenied},
@@ -418,7 +418,7 @@ func TestNewAccessDecisionManager_CopiesTheCallersVoters(t *testing.T) {
     }
 }
 
-/* @info an empty attribute list refuses on BOTH methods. DecideAll used to read it as an AND over nothing and grant, while DecideAny refused the identical input — so the same caller, asking for nothing, was answered oppositely by two methods of one contract. Symfony answers denied here as well: its strategy over zero results falls back to allowIfAllAbstainDecisions, which defaults to false. */
+/* an empty attribute list refuses on BOTH methods. DecideAll used to read it as an AND over nothing and grant, while DecideAny refused the identical input — so the same caller, asking for nothing, was answered oppositely by two methods of one contract. Symfony answers denied here as well: its strategy over zero results falls back to allowIfAllAbstainDecisions, which defaults to false. */
 func TestAccessDecisionManager_RefusesAnEmptyAttributeList(t *testing.T) {
     manager := NewAccessDecisionManager(
         securitycontract.DecisionStrategyAffirmative,
@@ -440,7 +440,7 @@ func TestAccessDecisionManager_RefusesAnEmptyAttributeList(t *testing.T) {
     }
 }
 
-/* @info the refusal carries the 403 the rest of the package answers with, so a direct caller rendering the error gets the same status the listener would */
+/* the refusal carries the 403 the rest of the package answers with, so a direct caller rendering the error gets the same status the listener would */
 func TestAccessDecisionManager_EmptyAttributeListRefusalCarriesForbidden(t *testing.T) {
     manager := NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, NewRoleVoter())
 
@@ -453,5 +453,136 @@ func TestAccessDecisionManager_EmptyAttributeListRefusalCarriesForbidden(t *test
 
     if nethttp.StatusForbidden != httpException.StatusCode() {
         t.Fatalf("expected a 403, got %d", httpException.StatusCode())
+    }
+}
+
+type branchNamingVoter struct {
+    supports string
+    result   securitycontract.VoteResult
+}
+
+func (instance *branchNamingVoter) Supports(attribute string, subject any) bool {
+    return instance.supports == attribute
+}
+
+func (instance *branchNamingVoter) Vote(token securitycontract.Token, attribute string, subject any) securitycontract.VoteResult {
+    return instance.result
+}
+
+/* every refusal names the branch that produced it: nine of them answer the same status and the same client-facing message, so without the reason a wiring fault and a real denial were one record */
+func TestAccessDecisionManager_EachRefusalNamesItsBranch(t *testing.T) {
+    token := NewAuthenticatedToken("u1", []string{"ROLE_USER"})
+
+    granting := &branchNamingVoter{supports: "ROLE_KNOWN", result: securitycontract.VoteGranted}
+    denying := &branchNamingVoter{supports: "ROLE_KNOWN", result: securitycontract.VoteDenied}
+    abstaining := &branchNamingVoter{supports: "ROLE_KNOWN", result: securitycontract.VoteAbstain}
+
+    branchList := []struct {
+        name           string
+        manager        *AccessDecisionManager
+        decideAny      bool
+        attributes     []string
+        expectedReason string
+    }{
+        {
+            name:           "an empty attribute list through DecideAll",
+            manager:        NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, granting),
+            attributes:     []string{},
+            expectedReason: RefusalReasonEmptyAttributeList,
+        },
+        {
+            name:           "an empty attribute list through DecideAny",
+            manager:        NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, granting),
+            decideAny:      true,
+            attributes:     []string{},
+            expectedReason: RefusalReasonEmptyAttributeList,
+        },
+        {
+            name:           "nothing granted through DecideAny",
+            manager:        NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, denying),
+            decideAny:      true,
+            attributes:     []string{"ROLE_KNOWN"},
+            expectedReason: RefusalReasonNoAttributeGranted,
+        },
+        {
+            name:           "every supporting voter abstained",
+            manager:        NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, abstaining),
+            attributes:     []string{"ROLE_KNOWN"},
+            expectedReason: RefusalReasonAllVotersAbstained,
+        },
+        {
+            name:           "no voter looks at the attribute",
+            manager:        NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, granting),
+            attributes:     []string{"PERM_INVOICE_EDIT"},
+            expectedReason: RefusalReasonNoVoterSupportsAttribute,
+        },
+        {
+            name:           "affirmative with no grant",
+            manager:        NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, denying),
+            attributes:     []string{"ROLE_KNOWN"},
+            expectedReason: RefusalReasonAffirmativeNoGrant,
+        },
+        {
+            name:           "consensus with the denials ahead",
+            manager:        NewAccessDecisionManager(securitycontract.DecisionStrategyConsensus, denying, denying, granting),
+            attributes:     []string{"ROLE_KNOWN"},
+            expectedReason: RefusalReasonConsensusDenied,
+        },
+        {
+            name:           "consensus tied",
+            manager:        NewAccessDecisionManager(securitycontract.DecisionStrategyConsensus, denying, granting),
+            attributes:     []string{"ROLE_KNOWN"},
+            expectedReason: RefusalReasonConsensusTie,
+        },
+        {
+            name:           "unanimous with one denial",
+            manager:        NewAccessDecisionManager(securitycontract.DecisionStrategyUnanimous, granting, denying),
+            attributes:     []string{"ROLE_KNOWN"},
+            expectedReason: RefusalReasonUnanimousDenied,
+        },
+    }
+
+    for _, branch := range branchList {
+        var err error
+        if true == branch.decideAny {
+            err = branch.manager.DecideAny(token, branch.attributes, nil)
+        } else {
+            err = branch.manager.DecideAll(token, branch.attributes, nil)
+        }
+
+        if nil == err {
+            t.Fatalf("%s: expected a refusal", branch.name)
+        }
+
+        httpException := exception.AsHttpException(err)
+        if nil == httpException {
+            t.Fatalf("%s: expected the refusal to stay an http exception", branch.name)
+        }
+
+        if nethttp.StatusForbidden != httpException.StatusCode() {
+            t.Fatalf("%s: expected 403, got %d", branch.name, httpException.StatusCode())
+        }
+
+        if branch.expectedReason != httpException.Context()["reason"] {
+            t.Fatalf("%s: expected the reason %q, got %v", branch.name, branch.expectedReason, httpException.Context()["reason"])
+        }
+    }
+}
+
+/* the strategy travels with the refusal: the same reason under a different strategy is a different configuration and the record has to say which */
+func TestAccessDecisionManager_ARefusalNamesTheStrategyAndTheAttribute(t *testing.T) {
+    manager := NewAccessDecisionManager(securitycontract.DecisionStrategyUnanimous, &branchNamingVoter{supports: "ROLE_KNOWN", result: securitycontract.VoteDenied})
+
+    httpException := exception.AsHttpException(manager.DecideAll(NewAuthenticatedToken("u1", nil), []string{"ROLE_KNOWN"}, nil))
+    if nil == httpException {
+        t.Fatalf("expected a refusal")
+    }
+
+    if int(securitycontract.DecisionStrategyUnanimous) != httpException.Context()["strategy"] {
+        t.Fatalf("expected the strategy named, got %v", httpException.Context()["strategy"])
+    }
+
+    if "ROLE_KNOWN" != httpException.Context()["attribute"] {
+        t.Fatalf("expected the attribute named, got %v", httpException.Context()["attribute"])
     }
 }

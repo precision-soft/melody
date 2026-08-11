@@ -18,6 +18,30 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Security: a 403 names its branch and files one record
+
+**What changed.** Every refusal the access decision manager produces carries a `reason` — one of the exported `security.RefusalReason*` constants — beside the strategy and the attribute, in the exception context the response never renders. The access control listener files exactly one record for a refusal, naming the reason, the firewall and the matched rule: at warning for a denial, and at error only for `no_voter_supports_attribute`, the wiring fault in which a firewall names an attribute no configured voter looks at. The record is filed before the access denied handler can answer and return early, and the error the `kernel.exception` dispatch carries is marked as already logged. `DecideAny` refuses an empty attribute list, the guard `DecideAll` always had.
+
+**Symptom.** A 403 leaves an `authorization refused` warning where it used to leave only the exception listener's generic `unhandled exception`; a firewall whose attribute nothing votes on is now the one refusal filed at error, so it surfaces as a wiring fault rather than hiding among ordinary denials. An application calling `DecideAny(token, nil, subject)` directly is now refused instead of granted.
+
+**Remedy.** Point alerting at `reason` rather than at the count of 403s, and fix any firewall that starts filing `no_voter_supports_attribute`: the attribute it names reaches no voter, and every request behind it is being refused for a reason no client can repair. A direct `DecideAny` call with no attributes was already refused by `DecideAll`; pass the attributes.
+
+### Httpclient: `SetHeader` stores under the canonical spelling
+
+**What changed.** `SetHeader` canonicalizes the key the way the constructor does, so a header rotated under a spelling other than the configured one overwrites the entry it means to instead of adding a second live one.
+
+**Symptom.** A client configured with `X-Api-Key` and rotated through `SetHeader("x-api-key", …)` now sends the rotated value on every request. It used to send a per-request coin flip between the two, decided by map iteration order — measured at 166 of 200 requests carrying one value and 34 the other. A caller that read the header map expecting its own spelling back reads the canonical one.
+
+**Remedy.** None for the rotation itself, which is now correct. If code round-trips through the map by raw key, spell the key canonically.
+
+### Http: a panic in the request setup answers 500 instead of resetting the connection
+
+**What changed.** A last recovery guard covers the window the main one cannot — everything between the request scope opening and the main guard's own installation (the request logger, the request context override, the config and dispatcher resolutions, the routing), plus a panic raised inside the main guard after it has already recovered once. It files one record carrying the method, the path and the stack, and answers a rendered 500 while the scope is still open. `nethttp.ErrAbortHandler` still travels by identity and still drops the connection with no response.
+
+**Symptom.** A wiring fault that used to reset the connection with nothing in the journal now answers 500 and leaves an `unhandled http error before the kernel recovery guard` record. There is still no terminate dispatch for it, hence no access-log line, and no `kernel.exception` dispatch, hence no application error page — the record is that line's degraded substitute.
+
+**Remedy.** None. A test asserting that `ServeHttp` panics on a broken request setup must assert the 500 instead.
+
 ### Session: the contract gains an atomic Snapshot
 
 **What changed.** `session/contract.Session` carries `Snapshot() (values map[string]any, modified bool, cleared bool)` — the three answers read under one lock acquisition — and the response path decides between deleting and saving through it. Reading the flags and the values through the individual accessors let a `Clear` racing the response land between the reads and write the pre-logout state back under a live id.
@@ -388,7 +412,7 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 ### Config: late secret markings propagate, registrations are atomic, names are judged trimmed
 
-**What changed.** `MarkSecret` after the boot resolution now travels to every parameter whose template directly reads the marked key — the late marking used to redact the key while the dsn assembled from it printed in full. `RegisterRuntime`/`RegisterRuntimeSecret` resolve the value BEFORE publishing it, so a registration whose template fails leaves nothing behind — it used to leave the raw template served to every reader that outlived the recovered panic, with the name burnt for the corrected retry. And a name is judged trimmed: whitespace-only is refused as empty, a padded name is refused outright instead of registering a parameter no exact-match lookup ever names.
+**What changed.** `MarkSecret` after the boot resolution now travels to every parameter whose template directly reads the marked key — the late marking used to redact the key while the dsn assembled from it printed in full. `RegisterRuntime`/`RegisterRuntimeSecret` publish the parameter and then resolve it, rolling the publication back if the template fails, so a registration whose template fails still leaves nothing behind — it used to leave the raw template served to every reader that outlived the recovered panic, with the name burnt for the corrected retry. Publishing first is what lets a parameter registered after boot inherit the secret marking of the credential its template reads: the propagation marks the reader it finds by name in the parameter map, and a parameter resolved before it was published was absent at the only moment the propagation looks — so a dsn assembled from a marked password printed in full in `debug:parameters`. A self-referential runtime registration now names the cycle rather than reporting the key as undefined. And a name is judged trimmed: whitespace-only is refused as empty, a padded name is refused outright instead of registering a parameter no exact-match lookup ever names.
 
 **Symptom.** `debug:parameters` redacts derived values after a late `MarkSecret`; a failed late registration can be retried; padded names fail at the registration line.
 
@@ -991,9 +1015,9 @@ func (instance *ExampleHttpMiddlewareModule) RegisterHttpMiddlewares(
 
 ### Http: one record per handler failure, at the level of its status class
 
-**What changed.** The kernel's handler-error writers read and set the already-logged mark and record a deliberate 4xx at warning, so a handler failure files one record instead of two; a handler returning its request context's own cancellation is recorded once at warning as `request cancelled by client`; a response-write failure the client caused is `failed to write response; client disconnected` at warning; the access-control listener's three direct 401 branches file one warning naming the refusal reason; and the static file server's two per-request exits drop from info to debug.
+**What changed.** The kernel's handler-error writers read and set the already-logged mark and record a deliberate 4xx at warning, so a handler failure files one record instead of two; a handler returning its request context's own cancellation is recorded once at warning as `request cancelled by client`; a response-write failure the client caused is `failed to write response; client disconnected` at warning; the access-control listener's three direct 401 branches file one warning naming the refusal reason; and the static file server's two per-request exits drop from info to debug. The mark now lands on every shape of failure: `MarkLogged` marks the nearest `AlreadyLogged` implementer in the chain, and a handler's plain `errors.New` or a runtime panic implements none, so those two still filed twice — the writers hand the exception dispatch a marked carrier keeping the original as its cause, while the application's error handler still receives the error the handler returned. The handler-error record also names the request method beside the path.
 
-**Symptom.** Dashboards counting error records see handler failures once instead of twice and 4xx refusals at warning; log queries matching `controller handler error` no longer match client disconnects; a 401 now leaves an `authorization refused` warning; the two static info messages disappear from info-level journals.
+**Symptom.** Dashboards counting error records see handler failures once instead of twice — foreign errors and runtime panics included — and 4xx refusals at warning; log queries matching `controller handler error` no longer match client disconnects; a 401 now leaves an `authorization refused` warning; the two static info messages disappear from info-level journals. An application error handler that type-asserted the error it receives is unaffected; a `kernel.exception` listener that did so sees the carrier and must reach the original through `errors.As` or `Unwrap`.
 
 **Remedy.** Point alerting at the level that means what it says: error is now a server fault, warning a refusal or a client-caused condition. Update any query that keyed on the duplicated record or the old levels.
 

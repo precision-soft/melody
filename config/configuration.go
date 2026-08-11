@@ -226,7 +226,10 @@ func (instance *Configuration) registerRuntimeParameter(name string, value any, 
     parameter.name = name
     parameter.isSecret.Store(isSecret)
 
-    /* the boot resolution has already run, so this parameter would otherwise keep its raw template — a %env(...)% reaching the consuming service verbatim. Resolve it now against the parameters boot left in place, and only then publish: resolving after the map write left a failed registration half-made, with the raw template served to every reader that outlived the recovered panic and the name burnt for any corrected retry. A pre-resolve registration is left raw for the boot pass to resolve in one batch. */
+    /* the parameter is published before its own template is resolved, and removed again if that resolution fails. The resolution's secret propagation marks the READER it finds in this map by name, so a parameter resolved before it was published was absent at the only moment the propagation looks: a dsn assembled after boot from a credential the configuration had marked inherited nothing and printed in full beside the redacted key it was built from. Nothing observes the intermediate state — the publish, the resolution and the rollback all run under the write lock every reader takes, so the map a reader sees either holds a fully resolved parameter or has never held this name at all. */
+    instance.parameters[name] = parameter
+
+    /* the boot resolution has already run, so this parameter would otherwise keep its raw template — a %env(...)% reaching the consuming service verbatim. A pre-resolve registration is left raw for the boot pass to resolve in one batch. */
     if true == instance.resolved {
         stringValue, isString := value.(string)
         if true == isString {
@@ -237,6 +240,9 @@ func (instance *Configuration) registerRuntimeParameter(name string, value any, 
                 make(map[string]bool),
             )
             if nil != resolveErr {
+                /* the rollback runs before the panic, not after it: Panic panics, so anything below it is never reached, and a half-made parameter would otherwise serve its raw template to every reader that outlived the recovered panic, with the name burnt for the corrected retry */
+                delete(instance.parameters, name)
+
                 exception.Panic(
                     exception.NewError(
                         "could not resolve a runtime parameter registered after boot",
@@ -251,8 +257,6 @@ func (instance *Configuration) registerRuntimeParameter(name string, value any, 
             parameter.storeValue(resolvedValue)
         }
     }
-
-    instance.parameters[name] = parameter
 }
 
 /* MarkSecret marks an already registered parameter as holding a credential. The parameters melody registers automatically from the .env artifacts are the ones most likely to hold one, and they exist before any module runs, so marking them is separate from declaring them.

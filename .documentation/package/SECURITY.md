@@ -44,12 +44,25 @@ The `security/config` subpackage provides the user-facing builder and the compil
 
 ### Access control merge strategies
 
-When a firewall defines both global and local access control, `security/config` merges them according to:
+When a firewall inherits the global access control, `security/config` merges the global and local rule lists in
+the order the strategy names. The strategy orders the LIST; the matcher still resolves by category first, so an
+earlier position only decides what the categories leave tied:
 
 - [`securityconfig.AccessControlMergeStrategy`](../../security/config/security_module.go)
-    - `localFirst`
+    - `localFirst` — the default
     - `globalFirst`
-    - `overrideOnly`
+    - `overrideOnly` — the global policy is cut off entirely and nothing is merged
+
+The strategy is chosen with
+[`(FirewallOverrideConfiguration).WithMergeStrategy`](../../security/config/security_module.go), and inheritance
+is turned off entirely with
+[`(FirewallOverrideConfiguration).WithInheritGlobalAccessControl`](../../security/config/security_module.go). A
+value that is none of the three is refused at the setter with a named panic.
+
+An override built from `NewFirewallOverrideConfiguration()` — or from the zero value, which every setter reads as
+the constructor — inherits the global policy under `localFirst`. A firewall that inherits nothing and declares no
+access control of its own **enforces nothing behind it**: the compiled control is empty, no rule matches, and
+every request reaches its handler. Pair `WithInheritGlobalAccessControl(false)` with `WithAccessControl`.
 
 ## Container integration
 
@@ -267,6 +280,7 @@ Rotate on the way out too: logout should clear the session ([`Session.Clear`](..
 - A session-backed login that does not call [`RegenerateSession`](../../session/manager.go) is vulnerable to **session fixation**: the id the victim arrived with stays valid and authenticated. Rotating is a per-application responsibility — the framework cannot do it for you, because only the login handler knows when the privilege change happens. See [Session fixation](#session-fixation).
 - `SecurityContextSetOnRuntime` stores the context in the runtime scope under `security/contract.ServiceSecurityContext`.
 - [`ApiKeyHeaderAuthenticator`](../../security/api_key_authenticator.go) compares the supplied header against the expected value with [`crypto/subtle.ConstantTimeCompare`](https://pkg.go.dev/crypto/subtle#ConstantTimeCompare) so timing differences do not leak the expected key.
+- Every refusal the decision manager produces carries the branch that produced it, in the exception context the response never renders: `reason` — one of the exported `RefusalReason*` constants — beside `strategy` and, where a single attribute was being weighed, `attribute`. The access control listener files one record per refusal naming the reason, the firewall and the matched rule, at warning; the one exception is `RefusalReasonNoVoterSupportsAttribute`, filed at **error**, because a firewall naming an attribute no configured voter looks at is a wiring fault answered fail-closed and nothing about the request can repair it. The record is filed before an access denied handler can answer and return, so a handler that answers the request itself no longer hides the refusal, and the error carried into `kernel.exception` is marked as already logged so the exception listener attaches its coordinates instead of filing a second record.
 - Both methods of the decision manager refuse an empty attribute list. `DecideAll` used to read it as an AND over nothing and grant, so a call site whose attributes came from a configuration value that resolved away was authorized rather than refused; it now answers `403` exactly as `DecideAny` always did. The compiled access control cannot produce a rule with no attribute, so this only ever affected a caller reaching the decision manager directly.
 - A typed nil — an interface variable holding a nil pointer — is refused wherever a nil is refused, both at the definition site and in `Compile`. Such a value is not equal to nil, so before this it survived both walls and was first dereferenced on the request path, outside any recovery. Declaring a dependency as `var handler *MyLoginHandler` and never assigning it now fails the boot with the piece named, rather than the first request that reaches it.
 - A constructor that takes a slice copies it. Keeping your own reference to the rules, authenticators or voters you registered and editing it afterwards changes nothing about the firewall that was built from it — the swap would otherwise land past every nil check and past compilation, in the decision path of a live request.
@@ -328,6 +342,7 @@ Rotate on the way out too: logout should clear the session ([`Session.Clear`](..
 - [`NewResolverTokenSource(resolver securitycontract.TokenResolver)`](../../security/token_source.go)
 - [`NewAccessDecisionManager(strategy securitycontract.DecisionStrategy, voters ...securitycontract.Voter)`](../../security/access_decision_manager.go)
 - [`NewAccessDecisionManagerWithVoters(strategy securitycontract.DecisionStrategy, voters []securitycontract.Voter)`](../../security/access_decision_manager.go)
+- [`RefusalReasonEmptyAttributeList`, `RefusalReasonNoAttributeGranted`, `RefusalReasonAllVotersAbstained`, `RefusalReasonNoVoterSupportsAttribute`, `RefusalReasonAffirmativeNoGrant`, `RefusalReasonConsensusDenied`, `RefusalReasonConsensusTie`, `RefusalReasonUnanimousDenied`, `RefusalReasonUnanimousNoGrant`](../../security/access_decision_manager.go) — the branch a `403` names in its context
 - [`NewRoleVoter()`](../../security/voter.go)
 - [`NewRoleHierarchyVoter(roleHierarchy *RoleHierarchy, delegate *RoleVoter)`](../../security/role_hierarchy_voter.go)
 - [`NewSecurityContext(firewall *CompiledFirewall, token securitycontract.Token)`](../../security/security_context.go)
@@ -363,6 +378,13 @@ Rotate on the way out too: logout should clear the session ([`Session.Clear`](..
     - [`type FirewallOverrideConfiguration`](../../security/config/security_module.go)
     - [`NewFirewallOverrideConfiguration()`](../../security/config/security_module.go)
     - [`(FirewallOverrideConfiguration).WithStateless(stateless bool) FirewallOverrideConfiguration`](../../security/config/security_module.go)
+    - [`(FirewallOverrideConfiguration).WithAccessControl(accessControl *security.AccessControl) FirewallOverrideConfiguration`](../../security/config/security_module.go)
+    - [`(FirewallOverrideConfiguration).WithRoleHierarchy(roleHierarchy *security.RoleHierarchy) FirewallOverrideConfiguration`](../../security/config/security_module.go)
+    - [`(FirewallOverrideConfiguration).WithAccessDecisionManager(accessDecisionManager securitycontract.AccessDecisionManager) FirewallOverrideConfiguration`](../../security/config/security_module.go)
+    - [`(FirewallOverrideConfiguration).WithEntryPoint(entryPoint securitycontract.EntryPoint) FirewallOverrideConfiguration`](../../security/config/security_module.go)
+    - [`(FirewallOverrideConfiguration).WithAccessDeniedHandler(accessDeniedHandler securitycontract.AccessDeniedHandler) FirewallOverrideConfiguration`](../../security/config/security_module.go)
+    - [`(FirewallOverrideConfiguration).WithMergeStrategy(mergeStrategy AccessControlMergeStrategy) FirewallOverrideConfiguration`](../../security/config/security_module.go)
+    - [`(FirewallOverrideConfiguration).WithInheritGlobalAccessControl(inheritGlobalAccessControl bool) FirewallOverrideConfiguration`](../../security/config/security_module.go)
 - Access control builder:
     - [`NewAccessControlBuilder()`](../../security/config/access_control_builder.go)
     - [`(*AccessControlBuilder).Require(path string, attributes ...string)`](../../security/config/access_control_builder.go)

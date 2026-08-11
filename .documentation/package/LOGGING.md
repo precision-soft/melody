@@ -174,6 +174,7 @@ Implemented in:
 - [`NewNopLogger()`](../../logging/nop_logger.go)
 - [`NewRequestLogger(logger loggingcontract.Logger, requestId string, contextKey string)`](../../logging/request_logger.go) — the http path's correlation rule: the real id wins the context key, and a different non-empty string claim survives beside it under the key suffixed `Claimed`
 - [`NewProcessLogger(logger loggingcontract.Logger, processId string, contextKey string)`](../../logging/request_logger.go) — the console path's correlation rule, for a trusted caller: the generated id wins the context key, and a caller's own value — any type — is preserved verbatim under the key suffixed `Provided`
+- [`NewStandardErrorLogger(logger loggingcontract.Logger, message string) *log.Logger`](../../logging/standard_logger.go) — the adapter net/http's `Server.ErrorLog` wants: one record per line at warning, the line carried in the context under `line`, the message left as the one groupable string a query can key on. A nil logger is inert and an empty line writes nothing
 - [`NewLoggingConfiguration(labels loggingcontract.LevelLabels)`](../../logging/logging_config.go)
 
 #### Utilities

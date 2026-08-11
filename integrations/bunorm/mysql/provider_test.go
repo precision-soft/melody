@@ -813,3 +813,12 @@ func TestOpenContext_ACancelledContextReachesTheAttemptInFlight(t *testing.T) {
         t.Fatalf("expected the cancellation to reach the attempt in flight, waited %v", elapsed)
     }
 }
+
+func TestProvider_NamesThePasswordParameterAsItsOnlySecret(t *testing.T) {
+    provider := NewProvider("database.host", "database.port", "database.name", "database.user", "database.password")
+
+    names := provider.SecretParameterNames()
+    if 1 != len(names) || "database.password" != names[0] {
+        t.Fatalf("expected the password parameter as the only credential, got %v", names)
+    }
+}

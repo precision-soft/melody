@@ -645,3 +645,56 @@ func newResolvedConfiguration(
 
     return configuration
 }
+
+/* a parameter registered after boot inherits the secret marking of the credential its template reads: the propagation marks the reader it finds by name in the parameter map, and a parameter resolved before it was published was absent at the only moment the propagation looks */
+func TestRegisterRuntime_ALateParameterInheritsTheSecretMarkOfTheEnvironmentKeyItReads(t *testing.T) {
+    configuration := newLateRegistrationConfiguration(t)
+
+    configuration.RegisterRuntime("app.dsn.late", "postgres://user:%env(DB_PASSWORD)%@db/app")
+
+    if false == configuration.MustGet("app.dsn.late").IsSecret() {
+        t.Fatalf("expected the late parameter to inherit the marking of the credential it reads")
+    }
+}
+
+func TestRegisterRuntime_ALateParameterInheritsTheSecretMarkOfTheParameterItReads(t *testing.T) {
+    configuration := newLateRegistrationConfiguration(t)
+
+    configuration.RegisterRuntime("app.dsn.viaParameter", "postgres://user:%DB_PASSWORD%@db/app")
+
+    if false == configuration.MustGet("app.dsn.viaParameter").IsSecret() {
+        t.Fatalf("expected the marking to travel through a parameter reference too")
+    }
+}
+
+func TestRegisterRuntime_ALateParameterReadingNoCredentialStaysUnmarked(t *testing.T) {
+    configuration := newLateRegistrationConfiguration(t)
+
+    configuration.RegisterRuntime("app.endpoint.late", "https://api.internal/v1")
+
+    if true == configuration.MustGet("app.endpoint.late").IsSecret() {
+        t.Fatalf("expected an ordinary late parameter to stay unmarked")
+    }
+}
+
+func newLateRegistrationConfiguration(t *testing.T) *Configuration {
+    t.Helper()
+
+    configuration, newConfigurationErr := NewConfiguration(
+        &Environment{values: map[string]string{"DB_PASSWORD": "s3cr3t"}},
+        "/srv/app",
+    )
+    if nil != newConfigurationErr {
+        t.Fatalf("could not build the configuration: %v", newConfigurationErr)
+    }
+
+    if false == configuration.MarkSecret("DB_PASSWORD") {
+        t.Fatalf("expected the environment key to be registered as a parameter")
+    }
+
+    if resolveErr := configuration.Resolve(); nil != resolveErr {
+        t.Fatalf("could not resolve: %v", resolveErr)
+    }
+
+    return configuration
+}

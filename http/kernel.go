@@ -126,6 +126,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
         The report falls back to the emergency logger rather than being dropped: the request logger is read after the scope it was installed into has closed, which is safe only because it is an override and Close leaves overrides alone. A close failure is the one thing that must never go unreported, so the path that has no request logger to name still says what happened. */
         var requestLogger loggingcontract.Logger
+        var requestId string
         defer func() {
             scopeCloseErr := scope.Close()
             if nil == scopeCloseErr {
@@ -139,6 +140,56 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             }
 
             logging.EmergencyLogger().Error("failed to close service container scope", exception.LogContext(scopeCloseErr))
+        }()
+
+        /* the last guard, covering the window the main recovery defer cannot: everything between the scope opening and its own installation — the request logger, the request context override, the config and dispatcher resolutions, the routing — plus a panic raised inside the main guard itself, after it has already recovered once. Above it a panic escapes ServeHttp, net/http closes the connection with no response, the terminate listener never fires and the access-log line is lost; the comment on the session load below names the same failure mode as the reason that step was moved under the main guard.
+
+        It is registered under the scope-close defer so the response is written while the scope is still open, and it is inert on every request the main guard already answered: recover returns nil there and nothing else is read. What it cannot restore is written where it is lost — no terminate dispatch, so no access-log line, and no kernel.exception dispatch, so no application error page. The record it files is that line's degraded substitute, which is why it carries the method and the path the main guard's twin also carries. */
+        defer func() {
+            recoveredValue := recover()
+            if nil == recoveredValue {
+                return
+            }
+
+            /* the sentinel is the caller's own instruction to drop the connection without a response, and it travels by identity through every guard */
+            if nethttp.ErrAbortHandler == recoveredValue {
+                panic(recoveredValue)
+            }
+
+            recoveredErr := RecoverToError(recoveredValue)
+            if nil == recoveredErr {
+                return
+            }
+
+            logger := requestLogger
+            if nil == logger {
+                logger = logging.EmergencyLogger()
+            }
+
+            if false == exception.IsAlreadyLogged(recoveredErr) {
+                logger.Error(
+                    "unhandled http error before the kernel recovery guard",
+                    exception.LogContext(
+                        recoveredErr,
+                        exceptioncontract.Context{
+                            /* named explicitly: the emergency logger this falls back to when the request logger is what failed does not inject it */
+                            "requestId":  requestId,
+                            "method":     request.Method,
+                            "path":       request.URL.Path,
+                            "panicStack": string(debug.Stack()),
+                        },
+                    ),
+                )
+
+                _ = exception.Logged(recoveredErr)
+            }
+
+            if true == writer.HeadersWritten() {
+                return
+            }
+
+            /* written directly rather than through writeResponse: that path resolves the logger from the runtime, which does not exist in this window and files an emergency record of its own for the nil, and it persists the session, which has nothing to do with a request that never got that far */
+            _ = WriteToHttpResponseWriter(nil, nil, writer, JsonErrorResponse(nethttp.StatusInternalServerError, "internal server error"))
         }()
 
         requestLogger, requestId, requestIdLoggerErr := instance.requestIdLogger(serviceContainer, scope)
@@ -333,6 +384,9 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             /* the mark is read through the door that writes it, at the depth it is written: the concrete assertion this replaced saw no mark on a marked HttpException — so the failure was rendered twice — and, lacking a nil check its sibling below already had, dereferenced a typed-nil *exception.Error on the very line that decides whether to report, inside the deferred handler that has already recovered once */
             alreadyLogged := exception.IsAlreadyLogged(recoveredErr)
 
+            /* the value the exception dispatch carries: a runtime panic recovers to a runtime.Error, which has nowhere for the mark to live, so the report hands back a marked carrier keeping it as its cause. The error handler and the debug message below keep the recovered value itself. */
+            reportedErr := recoveredErr
+
             if false == alreadyLogged {
                 routeName := ""
                 routeNameValue, exists := melodyRequest.Attributes().Get(RouteAttributeName)
@@ -359,10 +413,10 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                     ),
                 )
 
-                _ = exception.MarkLogged(recoveredErr)
+                reportedErr = exception.Logged(recoveredErr)
             }
 
-            exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, recoveredErr)
+            exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, reportedErr)
             _, eventKernelExceptionErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
             instance.logEventDispatchError(requestLogger, "kernel exception error", eventKernelExceptionErr)
 
@@ -604,9 +658,9 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 if nil != instance.notFoundHandler {
                     response, err := instance.notFoundHandler(runtimeInstance, writer, request)
                     if nil != err {
-                        logHandlerError(requestLogger, "not found handler error", err, request.HttpRequest())
+                        reportedErr := logHandlerError(requestLogger, "not found handler error", err, request.HttpRequest())
 
-                        kernelExceptionEvent := NewKernelExceptionEvent(runtimeInstance, request, err)
+                        kernelExceptionEvent := NewKernelExceptionEvent(runtimeInstance, request, reportedErr)
                         instance.dispatchEventKernelException(kernelExceptionEvent, runtimeInstance, requestLogger, eventDispatcher)
 
                         if nil == kernelExceptionEvent.Response() {
@@ -705,9 +759,9 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         finalResponse = response
 
         if nil != finalHandlerErr {
-            logHandlerError(requestLogger, "controller handler error", finalHandlerErr, request)
+            reportedErr := logHandlerError(requestLogger, "controller handler error", finalHandlerErr, request)
 
-            kernelExceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, finalHandlerErr)
+            kernelExceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, reportedErr)
             instance.dispatchEventKernelException(kernelExceptionEvent, runtimeInstance, requestLogger, eventDispatcher)
 
             if nil == kernelExceptionEvent.Response() {
@@ -833,21 +887,29 @@ func (instance *Kernel) requestIdLogger(
 
 /* logHandlerError files the one record for a handler-returned failure, under the discipline the panic recovery and the exception listener already share: an error something upstream already logged is not filed again, a deliberate 4xx is a refusal recorded at warning, a client's own cancellation is named for what it is, and everything else keeps the error level. The record marks the error, so the exception listener attaches its request coordinates to it instead of filing the same failure a second time — without the mark every handler failure produced two records, the first at error even for a routine 404 or 429.
 
-A handler that honours its context and returns the request context's own cancellation is reporting the client's disconnect, not a fault of its own: recorded at error it paged the operator for every abandoned slow request, in a record that read exactly like a genuine handler failure. */
-func logHandlerError(requestLogger loggingcontract.Logger, message string, handlerErr error, httpRequest *nethttp.Request) {
+A handler that honours its context and returns the request context's own cancellation is reporting the client's disconnect, not a fault of its own: recorded at error it paged the operator for every abandoned slow request, in a record that read exactly like a genuine handler failure.
+
+The reported error is the value the caller must put on the exception event: a handler's plain errors.New carries no AlreadyLogged implementer for the mark to live on, so it comes back wrapped in a marked carrier keeping the original as its cause. The caller's own error is what still reaches the application's error handler. */
+func logHandlerError(requestLogger loggingcontract.Logger, message string, handlerErr error, httpRequest *nethttp.Request) error {
     if true == exception.IsAlreadyLogged(handlerErr) {
-        return
+        return handlerErr
     }
 
     path := ""
-    if nil != httpRequest && nil != httpRequest.URL {
-        path = httpRequest.URL.Path
+    method := ""
+    if nil != httpRequest {
+        method = httpRequest.Method
+
+        if nil != httpRequest.URL {
+            path = httpRequest.URL.Path
+        }
     }
 
     logContext := exception.LogContext(
         handlerErr,
         exceptioncontract.Context{
-            "path": path,
+            "method": method,
+            "path":   path,
         },
     )
 
@@ -864,7 +926,7 @@ func logHandlerError(requestLogger loggingcontract.Logger, message string, handl
         requestLogger.Error(message, logContext)
     }
 
-    _ = exception.MarkLogged(handlerErr)
+    return exception.Logged(handlerErr)
 }
 
 func (instance *Kernel) logEventDispatchError(

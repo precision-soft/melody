@@ -13,8 +13,47 @@ import (
     securitycontract "github.com/precision-soft/melody/security/contract"
 )
 
-/* logAuthorizationRefusal files the one record a direct 401 refusal leaves. These branches answer the request themselves — deliberately, without the kernel.exception dispatch their 403 sibling travels through — and used to complete without a trace: whether the token was absent, unauthenticated, or the security context missing entirely (a wiring fault, not a client mistake) was indistinguishable from the journal, while the byte-identical-looking 403 filed a warning naming its reason. The refusal is recorded at warning, the level the exception listener gives every deliberate 4xx. */
+/* logAuthorizationRefusal files the one record an authorization refusal leaves, naming the branch that refused. The direct 401 branches answer the request themselves, without the kernel.exception dispatch their 403 sibling travels through; the 403 marks its error as already logged before that dispatch, so both shapes leave exactly one record. */
 func logAuthorizationRefusal(runtimeInstance runtimecontract.Runtime, request httpcontract.Request, reason string) {
+    logAuthorizationRefusalAtLevel(runtimeInstance, request, reason, loggingcontract.LevelWarning, nil)
+}
+
+/* authorizationRefusalLevel answers the level a refusal is filed at. A refusal is a client outcome and is recorded at warning, the level the exception listener gives every deliberate 4xx. The one branch that is not a client outcome is a firewall whose attribute no configured voter looks at: a wiring fault answered fail-closed with the same 403, which nothing about the request can repair. A reason this package did not write — a decision manager of the application's own — is a refusal until it says otherwise. */
+func authorizationRefusalLevel(reason string) loggingcontract.Level {
+    if RefusalReasonNoVoterSupportsAttribute == reason {
+        return loggingcontract.LevelError
+    }
+
+    return loggingcontract.LevelWarning
+}
+
+/* authorizationRefusalReason reads the branch out of a refusal the decision manager produced. A refusal from elsewhere names nothing, and the record says so rather than inventing a branch. */
+func authorizationRefusalReason(decisionErr error) string {
+    httpException := exception.AsHttpException(decisionErr)
+    if nil == httpException {
+        return ""
+    }
+
+    reasonValue, exists := httpException.Context()["reason"]
+    if false == exists {
+        return ""
+    }
+
+    reason, isString := reasonValue.(string)
+    if false == isString {
+        return ""
+    }
+
+    return reason
+}
+
+func logAuthorizationRefusalAtLevel(
+    runtimeInstance runtimecontract.Runtime,
+    request httpcontract.Request,
+    reason string,
+    level loggingcontract.Level,
+    extraContext loggingcontract.Context,
+) {
     logger := logging.LoggerFromRuntime(runtimeInstance)
     if nil == logger {
         return
@@ -26,6 +65,20 @@ func logAuthorizationRefusal(runtimeInstance runtimecontract.Runtime, request ht
     if nil != request && nil != request.HttpRequest() {
         logContext["method"] = request.HttpRequest().Method
         logContext["path"] = request.HttpRequest().URL.Path
+    }
+    if nil != request && nil != request.RequestContext() {
+        logContext["requestId"] = request.RequestContext().RequestId()
+    }
+
+    for key, value := range extraContext {
+        logContext[key] = value
+    }
+
+    /* the record goes through the named methods rather than the level-taking door: a logger that decorates Warning — the capture loggers the guards use are one shape of it — is bypassed by Log */
+    if loggingcontract.LevelError == level {
+        logger.Error("authorization refused", logContext)
+
+        return
     }
 
     logger.Warning("authorization refused", logContext)
@@ -273,6 +326,26 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                 return eventSecurityAuthorizationGrantedErr
             }
 
+            /* the record is filed here, once, before the denied handler can answer the request and return early: that exit dispatches no kernel.exception, so it used to complete without a trace of the refusal it just answered */
+            refusalReason := authorizationRefusalReason(decisionErr)
+            refusalContext := loggingcontract.Context{
+                "attributes":    attributes,
+                "firewallName":  firewallName,
+                "matchedRule":   "",
+                "matchedSource": string(accessControlSource),
+            }
+            if nil != matchedRule {
+                refusalContext["matchedRule"] = matchedRule.PathPrefix()
+            }
+
+            logAuthorizationRefusalAtLevel(
+                runtimeInstance,
+                requestEvent.Request(),
+                refusalReason,
+                authorizationRefusalLevel(refusalReason),
+                refusalContext,
+            )
+
             if nil != accessDeniedHandler {
                 response, handlerErr := accessDeniedHandler.Handle(runtimeInstance, requestEvent.Request(), decisionErr)
                 if nil == handlerErr && nil != response {
@@ -315,6 +388,9 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
             if nil != eventSecurityAuthorizationDeniedErr {
                 return eventSecurityAuthorizationDeniedErr
             }
+
+            /* the mark rides the value the dispatch carries, after every wrap: MarkLogged marks the nearest AlreadyLogged implementer in the chain and IsAlreadyLogged reads it at that depth, so a wrapper added after the mark is an unmarked link in front of it and the exception listener would file the second record this listener has already taken responsibility for */
+            decisionErr = exception.Logged(decisionErr)
 
             exceptionEvent := http.NewKernelExceptionEvent(runtimeInstance, requestEvent.Request(), decisionErr)
 

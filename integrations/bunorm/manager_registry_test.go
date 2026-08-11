@@ -18,6 +18,8 @@ import (
     "github.com/uptrace/bun/dialect/feature"
     "github.com/uptrace/bun/schema"
 
+    "github.com/precision-soft/melody/config"
+    configcontract "github.com/precision-soft/melody/config/contract"
     "github.com/precision-soft/melody/container"
     containercontract "github.com/precision-soft/melody/container/contract"
     "github.com/precision-soft/melody/exception"
@@ -1300,5 +1302,155 @@ func TestManagerRegistry_CloseCarriesTheSortedFirstFailureAsCause(t *testing.T) 
         if false == (strings.Index(namesString, "alpha") < strings.Index(namesString, "zebra")) {
             t.Fatalf("iteration %d: expected the failed names sorted, got %v", iteration, namesString)
         }
+    }
+}
+
+type recordingConfiguration struct {
+    configcontract.Configuration
+
+    markedSecrets []string
+}
+
+func (instance *recordingConfiguration) MarkSecret(name string) bool {
+    instance.markedSecrets = append(instance.markedSecrets, name)
+
+    return true
+}
+
+type configurationCarryingResolver struct {
+    configuration configcontract.Configuration
+}
+
+func (instance *configurationCarryingResolver) Get(serviceName string) (any, error) {
+    if config.ServiceConfig == serviceName {
+        return instance.configuration, nil
+    }
+
+    return nil, errors.New("service not registered: " + serviceName)
+}
+
+func (instance *configurationCarryingResolver) MustGet(serviceName string) any {
+    value, getErr := instance.Get(serviceName)
+    if nil != getErr {
+        panic(getErr)
+    }
+
+    return value
+}
+
+func (instance *configurationCarryingResolver) GetByType(targetType reflect.Type) (any, error) {
+    return nil, errors.New("not implemented")
+}
+
+func (instance *configurationCarryingResolver) MustGetByType(targetType reflect.Type) any {
+    panic("not implemented")
+}
+
+func (instance *configurationCarryingResolver) Has(serviceName string) bool {
+    return config.ServiceConfig == serviceName
+}
+
+func (instance *configurationCarryingResolver) HasType(targetType reflect.Type) bool {
+    return false
+}
+
+var _ containercontract.Resolver = (*configurationCarryingResolver)(nil)
+
+type secretNamingProvider struct {
+    fakeProvider
+
+    secretParameterNames []string
+}
+
+func (instance *secretNamingProvider) SecretParameterNames() []string {
+    return instance.secretParameterNames
+}
+
+var _ SecretParameterProvider = (*secretNamingProvider)(nil)
+
+/* the credential is redacted by a process that never dials: the marking used to live inside open, so debug:parameters — which touches no route and opens no pool — printed the password in full */
+func TestNewManagerRegistry_MarksTheSecretParametersAtConstruction(t *testing.T) {
+    configuration := &recordingConfiguration{}
+    provider := &secretNamingProvider{secretParameterNames: []string{"database.password"}}
+
+    registry, registryErr := NewManagerRegistry(
+        &configurationCarryingResolver{configuration: configuration},
+        ProviderDefinition{Name: "default", Provider: provider, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("unexpected error: %v", registryErr)
+    }
+
+    if nil == registry {
+        t.Fatalf("expected a registry")
+    }
+
+    if 1 != len(configuration.markedSecrets) || "database.password" != configuration.markedSecrets[0] {
+        t.Fatalf("expected the credential parameter marked at construction, got %v", configuration.markedSecrets)
+    }
+
+    if 0 != provider.openCount {
+        t.Fatalf("expected the marking to cost no dial, got %d", provider.openCount)
+    }
+}
+
+func TestNewManagerRegistry_MarksEverySecretParameterOfEveryDefinition(t *testing.T) {
+    configuration := &recordingConfiguration{}
+
+    if _, registryErr := NewManagerRegistry(
+        &configurationCarryingResolver{configuration: configuration},
+        ProviderDefinition{Name: "primary", Provider: &secretNamingProvider{secretParameterNames: []string{"primary.password"}}, IsDefault: true},
+        ProviderDefinition{Name: "reporting", Provider: &secretNamingProvider{secretParameterNames: []string{"reporting.password", "reporting.dsn"}}},
+    ); nil != registryErr {
+        t.Fatalf("unexpected error: %v", registryErr)
+    }
+
+    if 3 != len(configuration.markedSecrets) {
+        t.Fatalf("expected every named parameter of every definition marked, got %v", configuration.markedSecrets)
+    }
+}
+
+func TestNewManagerRegistry_AProviderWithoutTheCapabilityIsNotAsked(t *testing.T) {
+    configuration := &recordingConfiguration{}
+
+    if _, registryErr := NewManagerRegistry(
+        &configurationCarryingResolver{configuration: configuration},
+        ProviderDefinition{Name: "default", Provider: &fakeProvider{}, IsDefault: true},
+    ); nil != registryErr {
+        t.Fatalf("unexpected error: %v", registryErr)
+    }
+
+    if 0 != len(configuration.markedSecrets) {
+        t.Fatalf("expected a provider without the capability to be left alone, got %v", configuration.markedSecrets)
+    }
+}
+
+/* a registry over a resolver that carries no configuration service is legitimate — a test harness, a hand-wired container — and the marking must not turn that into a panic in a constructor that has nothing else to do with the configuration */
+func TestNewManagerRegistry_ConstructsWhenTheConfigurationServiceIsAbsent(t *testing.T) {
+    registry, registryErr := NewManagerRegistry(
+        &fakeResolver{},
+        ProviderDefinition{Name: "default", Provider: &secretNamingProvider{secretParameterNames: []string{"database.password"}}, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("unexpected error: %v", registryErr)
+    }
+
+    if nil == registry {
+        t.Fatalf("expected a registry")
+    }
+}
+
+func TestNewManagerRegistry_AnEmptySecretParameterNameIsSkipped(t *testing.T) {
+    configuration := &recordingConfiguration{}
+
+    if _, registryErr := NewManagerRegistry(
+        &configurationCarryingResolver{configuration: configuration},
+        ProviderDefinition{Name: "default", Provider: &secretNamingProvider{secretParameterNames: []string{""}}, IsDefault: true},
+    ); nil != registryErr {
+        t.Fatalf("unexpected error: %v", registryErr)
+    }
+
+    if 0 != len(configuration.markedSecrets) {
+        t.Fatalf("expected an unnamed parameter to be skipped, got %v", configuration.markedSecrets)
     }
 }
