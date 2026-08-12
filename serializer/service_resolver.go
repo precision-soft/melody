@@ -9,6 +9,19 @@ import (
     serializercontract "github.com/precision-soft/melody/serializer/contract"
 )
 
+/*
+ServiceSerializer is the default serializer — the json one, registered by the
+application boot behind a Has gate so an application or module registering it
+first substitutes it. It is what SerializerMustFromRuntime and
+SerializerFromRuntime answer, and nothing else reads it.
+
+ServiceSerializerManager is what content negotiation reads: the media type a
+response is served under is chosen by the manager from the request's Accept
+header. Registering a serializer under ServiceSerializer therefore changes what
+the two resolvers hand a caller, not what a request is served — to add a media
+type, register ServiceSerializerManager with a manager built by
+NewSerializerManager carrying the wider map.
+*/
 const (
     ServiceSerializer        = "service.serializer"
     ServiceSerializerManager = "service.serializer.manager"
@@ -22,7 +35,7 @@ func SerializerManagerFromRuntime(runtimeInstance runtimecontract.Runtime) *Seri
     serializerManagerInstance, err := runtime.FromRuntime[*SerializerManager](runtimeInstance, ServiceSerializerManager)
     if nil == serializerManagerInstance || nil != err {
         if nil != err {
-            /* @important the failure is reported through the soft logger resolver: the Must variant panics when the logger itself cannot be resolved, and a runtime broken enough to lose the serializer manager is the runtime most likely to lose the logger with it — the reporting branch of a return-nil-on-failure resolver must not be the line that panics */
+            /* the failure is reported through the soft logger resolver: the Must variant panics when the logger itself cannot be resolved, and a runtime broken enough to lose the serializer manager is the runtime most likely to lose the logger with it — the reporting branch of a return-nil-on-failure resolver must not be the line that panics */
             logger := logging.LoggerFromRuntime(runtimeInstance)
             if nil != logger {
                 logger.Error(

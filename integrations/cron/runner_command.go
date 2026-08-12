@@ -7,6 +7,7 @@ import (
     "math"
     "reflect"
     "runtime/debug"
+    "sort"
     "strings"
     "sync"
     "time"
@@ -21,13 +22,18 @@ import (
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
-const flagNameOnce = "once"
+const (
+    flagNameOnce       = "once"
+    flagNameReportIdle = "report-idle"
+)
 
 /* scheduledRunEntry pairs a parsed schedule with the registered command it fires, resolved once at construction so the tick loop never looks a command up by name at run time. fixedTime carries the vixie-cron entry class the wall-clock reconciliation reads: a fixed-time entry pins both a minute and an hour, a wildcard entry leaves either as a plain or stepped wildcard. */
 type scheduledRunEntry struct {
     commandName     string
     command         clicontract.Command
     arguments       []string
+    /* the rendered expression is kept beside the parsed matcher because the runner's own document and its declaration record name the schedule an entry runs under, and the matcher is a set of admitted values with no way back to the text that produced it */
+    schedule        string
     matcher         *scheduleMatcher
     fixedTime       bool
     timeout         time.Duration
@@ -54,7 +60,18 @@ type RunnerCommand struct {
     now                 func() time.Time
     unwindGrace         time.Duration
     inFlight            sync.WaitGroup
+    /* the scheduler loop hands each minute's wait to a goroutine of its own, so two minutes' documents can complete in any order: the writer is guarded to keep one document one line */
+    writeMutex sync.Mutex
+    /* the output posture the scheduler loop reports under, installed by Run from the parsed flags before the loop starts and read by it alone. It is nil for a loop driven directly, which is how the loop's own tests reach it without a cli command context, and a nil reporting loop writes nothing — the behaviour every caller had before the document existed. */
+    reporting           *runReporting
     userIgnoredCommands []string
+}
+
+/* runReporting is the output posture one invocation of the scheduler loop reports under. */
+type runReporting struct {
+    commandContext *clicontract.CommandContext
+    option         output.Option
+    reportIdle     bool
 }
 
 /* NewRunnerCommand resolves every scheduled command name against the supplied commands and parses each schedule up front under the given day-combination dialect (the zero value is the crontab default); an entry naming a command that was not supplied, or carrying a malformed schedule, is a wiring error and panics at construction so it surfaces at boot rather than at the first tick, and a value naming no known RunnerDialect panics the same way with ErrUnknownRunnerDialect. The runner only supports name-scheduled single-instance entries, so an entry carrying a custom argv (EntryConfig.Command), more than one instance (EntryConfig.Instances) or a routed crontab file (EntryConfig.DestinationFile) also panics at construction: such entries belong to an external scheduler produced by the generator, and the routed one would otherwise run twice — in-process and in the generated crontab — whenever both are live. Two supplied commands sharing one name panic with ErrDuplicateRunnerCommand — resolving the collision silently would drop one of them (an exclusivity wrapper over its wrapped command, most likely) and schedule the survivor unnoticed. A command whose Flags() returns the same flag instances on every call panics with ErrSharedRunnerCommandFlags: the runner dispatches overlapping invocations of one command, the cli library writes parse state into the flag instances, and shared instances would race. An entry that names a system user (EntryConfig.User) stays runnable — in-process every job runs as the process user, so the runner keeps the entry and Run logs one warning naming the affected commands, letting the one Configuration keep driving both the generated manifests and the runner. */
@@ -177,6 +194,7 @@ func NewRunnerCommand(configuration *Configuration, dialect RunnerDialect, comma
             commandName:     scheduled.CommandName,
             command:         command,
             arguments:       argumentsOfEntry(scheduled),
+            schedule:        scheduleOfEntry(scheduled).Expression(),
             matcher:         matcher,
             fixedTime:       matcher.fixedTime(),
             timeout:         timeoutOfEntry(scheduled),
@@ -271,7 +289,7 @@ func (instance *RunnerCommand) Description() string {
     return "Run the cron Configuration in-process, invoking each scheduled command when it is due"
 }
 
-/* the standard flags join the runner's own because the framework rewrites -v/-vv into --verbosity for every command: without them, the runner was among the only melody commands to die on the framework's own convention with "flag provided but not defined". The runner writes nothing to the command output itself — its reporting is the log — so accepting and validating the posture is the whole of honouring it. */
+/* the standard flags join the runner's own because the framework rewrites -v/-vv into --verbosity for every command: without them, the runner was among the only melody commands to die on the framework's own convention with "flag provided but not defined". They are honoured rather than merely accepted: every dispatched minute renders the same envelope every other melody command renders, so `melody:cron:run --once --format=json | jq` is a document rather than the empty stream it used to be — a stream indistinguishable, to the deploy step reading it, from a missing binary. */
 func (instance *RunnerCommand) Flags() []clicontract.Flag {
     return output.MergeFlags(
         output.StandardFlags(),
@@ -279,6 +297,10 @@ func (instance *RunnerCommand) Flags() []clicontract.Flag {
             &clicontract.BoolFlag{
                 Name:  flagNameOnce,
                 Usage: "evaluate every schedule once against the current time, run the commands that are due, and exit instead of running the scheduler loop",
+            },
+            &clicontract.BoolFlag{
+                Name:  flagNameReportIdle,
+                Usage: "in the scheduler loop, report every evaluated minute instead of only the ones that dispatched a command, so a consumer can tell a live scheduler with nothing due from a dead one",
             },
         },
     )
@@ -297,11 +319,159 @@ func (instance *RunnerCommand) Run(
         }
     }
 
+    instance.declareSchedule(runtimeInstance)
+
+    option := output.NormalizeOption(output.ParseOptionFromCommand(commandContext))
+
     if true == commandContext.Bool(flagNameOnce) {
-        return instance.runDue(runtimeInstance, instance.now())
+        startedAt := instance.now()
+        report, runErr := instance.dispatchDue(runtimeInstance, startedAt, true, true)()
+
+        return instance.renderRunReport(commandContext, option, startedAt, report, runErr)
+    }
+
+    instance.reporting = &runReporting{
+        commandContext: commandContext,
+        option:         option,
+        reportIdle:     commandContext.Bool(flagNameReportIdle),
     }
 
     return instance.runLoop(runtimeInstance)
+}
+
+/*
+declareSchedule writes what this process is driving before it drives anything.
+A scheduler built over a configuration emptied by a refactor, or whose entries
+an environment gate filtered away, used to run forever, exit successfully and
+write not one byte on any channel: nothing distinguished a healthy scheduler
+from one that would never dispatch anything, and the absence was noticed days
+later, when the nightly sweep turned out not to have run. The empty case is a
+warning for the same reason the generator's nothingToWrite is one.
+*/
+func (instance *RunnerCommand) declareSchedule(runtimeInstance runtimecontract.Runtime) {
+    logger := logging.LoggerFromRuntime(runtimeInstance)
+    if nil == logger {
+        return
+    }
+
+    if 0 == len(instance.entries) {
+        logger.Warning(
+            "cron runner drives no scheduled entries: nothing will ever be dispatched",
+            map[string]any{"entries": 0},
+        )
+
+        return
+    }
+
+    scheduled := make([]map[string]any, 0, len(instance.entries))
+    for _, entry := range instance.entries {
+        scheduled = append(scheduled, map[string]any{
+            "command":   entry.commandName,
+            "schedule":  entry.schedule,
+            "arguments": entry.arguments,
+        })
+    }
+
+    logger.Info(
+        "cron runner drives the scheduled entries",
+        map[string]any{
+            "entries":   len(instance.entries),
+            "scheduled": scheduled,
+        },
+    )
+}
+
+/*
+renderRunReport writes one evaluated minute as the envelope every other melody
+command writes: meta, data, warnings, error. The runner used to declare and
+validate --format and then answer zero bytes on every path, so a deploy step
+spelled `app melody:cron:run --once --format=json | jq` received an empty
+stream — indistinguishable, to the step reading it, from a missing binary.
+
+Under json each minute is one closed document on its own line, so the scheduler
+loop is a stream a consumer can follow live at constant memory rather than a
+summary that would only arrive when the process dies. Under text it is one
+line, which is what a supervisor's log wants.
+
+The writer is guarded because the loop hands each minute's wait to a goroutine
+of its own — two minutes' documents may complete in any order and must not
+interleave inside one line.
+*/
+func (instance *RunnerCommand) renderRunReport(
+    commandContext *clicontract.CommandContext,
+    option output.Option,
+    startedAt time.Time,
+    report dueReport,
+    runErr error,
+) error {
+    instance.writeMutex.Lock()
+    defer instance.writeMutex.Unlock()
+
+    if output.FormatJson != option.Format {
+        _, _ = fmt.Fprintf(
+            commandContext.Writer,
+            "%s  dispatched %d of %d configured entries%s\n",
+            report.At.Format(time.RFC3339),
+            len(report.Ran),
+            report.Configured,
+            failedSuffixOf(report),
+        )
+
+        return runErr
+    }
+
+    meta := output.NewMeta(instance.Name(), nil, option, startedAt, time.Since(startedAt), output.Version{})
+    envelope := output.NewEnvelope(meta)
+
+    envelope.Data = report
+
+    if 0 == report.Configured {
+        envelope.Warnings = append(
+            envelope.Warnings,
+            output.NewWarning(
+                "cron.nothingScheduled",
+                "the cron runner drives no scheduled entries: nothing will ever be dispatched",
+                nil,
+            ),
+        )
+    }
+
+    if nil != runErr {
+        envelope.SetError(
+            "cron.runFailed",
+            "one or more scheduled commands failed",
+            map[string]any{"failed": failedCommandsOf(report)},
+            output.NewErrorCause(runErr.Error(), nil),
+        )
+    }
+
+    renderErr := output.Render(commandContext.Writer, envelope, option)
+    if nil != runErr {
+        return runErr
+    }
+
+    return renderErr
+}
+
+/* failedCommandsOf answers the failed commands of a minute as a list on every row, empty rather than null when nothing failed */
+func failedCommandsOf(report dueReport) []string {
+    failed := make([]string, 0)
+    for _, run := range report.Ran {
+        if true == run.Failed {
+            failed = append(failed, run.Command)
+        }
+    }
+
+    return failed
+}
+
+func failedSuffixOf(report dueReport) string {
+    failed := failedCommandsOf(report)
+    if 0 == len(failed) {
+        return ""
+    }
+
+    return ", failed: " + strings.Join(failed, ", ")
 }
 
 /* runLoop wakes at each minute boundary until the runtime context is cancelled. The evaluation is pinned to the minute the (monotonic) timer was armed for, so a wall-clock step between arming and firing neither replays nor skips a minute; the armed minute's wall rendering is then reconciled against the last evaluated minute by reconcileWallClock, which resolves daylight-saving transitions and larger clock jumps with vixie-cron semantics. The chain anchor and the first armed minute derive from one clock read — two reads could straddle a minute boundary and manufacture a jump that never happened. A wake that re-arrives at the wall minute the previous wake already dispatched is skipped: a backward wall step inside the armed window makes the loop arm for that minute a second time, and dispatching it again would run every wildcard entry twice seconds apart — the repeated wall minute of a daylight-saving fall-back is a different case, since a whole hour of other minutes runs in between. Due commands are dispatched without waiting for them, so arming the next minute never blocks on a running job; command failures are logged by the dispatch as the commands complete. On cancellation the loop stops ticking and waits for the in-flight jobs — their contexts derive from the runtime context, so the cancellation has already reached them — before returning. */
@@ -309,6 +479,8 @@ func (instance *RunnerCommand) runLoop(runtimeInstance runtimecontract.Runtime) 
     now := instance.now()
     previousTarget := now.Truncate(time.Minute)
     dispatchedIndex := wallMinuteIndex(previousTarget)
+
+    reporting := instance.reporting
 
     for {
         nextWake := now.Truncate(time.Minute).Add(time.Minute)
@@ -342,28 +514,70 @@ func (instance *RunnerCommand) runLoop(runtimeInstance runtimecontract.Runtime) 
         }
 
         for _, evaluation := range evaluations {
-            instance.dispatchDue(runtimeInstance, evaluation.at, evaluation.runFixedTime, evaluation.runWildcard)
+            wait := instance.dispatchDue(runtimeInstance, evaluation.at, evaluation.runFixedTime, evaluation.runWildcard)
+
+            if nil == reporting {
+                continue
+            }
+
+            /* the wait runs on a goroutine of its own so arming the next minute never blocks on a running job — the loop's own rule — and it counts towards the in-flight wait so a shutdown does not cut the last minute's document off mid-line */
+            instance.inFlight.Add(1)
+
+            go func(waitForMinute func() (dueReport, error), minuteStartedAt time.Time) {
+                defer instance.inFlight.Done()
+
+                report, runErr := waitForMinute()
+
+                /* a minute that dispatched nothing is silent by default: a per-minute document for an entry that runs once a night is 1439 lines saying nothing. --report-idle asks for them, which is how a consumer tells a live scheduler with nothing due from a dead one */
+                if 0 == len(report.Ran) && false == reporting.reportIdle {
+                    return
+                }
+
+                _ = instance.renderRunReport(reporting.commandContext, reporting.option, minuteStartedAt, report, runErr)
+            }(wait, instance.now())
         }
     }
 }
 
-/* runDue invokes every entry whose schedule matches the given minute and waits for all of them, aggregating command failures so one bad job neither aborts the others nor is silently dropped. */
+/* runDue invokes every entry whose schedule matches the given minute and waits for all of them, aggregating command failures so one bad job neither aborts the others nor is silently dropped. It answers the failure alone; the caller that also wants the document dispatches directly. */
 func (instance *RunnerCommand) runDue(runtimeInstance runtimecontract.Runtime, at time.Time) error {
-    return instance.dispatchDue(runtimeInstance, at, true, true)()
+    _, runErr := instance.dispatchDue(runtimeInstance, at, true, true)()
+
+    return runErr
 }
 
-/* dispatchDue starts every entry of the requested classes whose schedule matches the given minute, each in its own goroutine, so scheduled commands run as independently as crontab processes: one slow job delays neither its minute-mates nor the caller. Each failure is logged as its command completes, and the returned wait function blocks until every command launched here has finished and reports their aggregated failure — the --once mode calls it, while the scheduler loop deliberately does not. */
+/* dueRun is one dispatched command inside a minute's document: what ran, under which schedule and argv, the run id its own records carry, how long it took and whether it failed. The error text is empty rather than absent on a run that succeeded, so the field keeps its json type across rows. */
+type dueRun struct {
+    Command              string   `json:"command"`
+    Schedule             string   `json:"schedule"`
+    Arguments            []string `json:"arguments"`
+    RunId                string   `json:"runId"`
+    DurationMilliseconds int64    `json:"durationMilliseconds"`
+    Failed               bool     `json:"failed"`
+    Cancelled            bool     `json:"cancelled"`
+    Error                string   `json:"error"`
+}
+
+/* dueReport is one evaluated minute: the minute itself, how many entries the runner drives at all, and the runs it dispatched for it. Both counts matter to a consumer — a minute with an empty ran list and a configured count of zero is a scheduler that will never do anything, while the same list with a configured count of seven is simply a quiet minute. */
+type dueReport struct {
+    At         time.Time `json:"at"`
+    Configured int       `json:"configured"`
+    Ran        []dueRun  `json:"ran"`
+}
+
+/* dispatchDue starts every entry of the requested classes whose schedule matches the given minute, each in its own goroutine, so scheduled commands run as independently as crontab processes: one slow job delays neither its minute-mates nor the caller. Each failure is logged as its command completes, and the returned wait function blocks until every command launched here has finished and answers the minute's document beside their aggregated failure — the --once mode calls it directly, while the scheduler loop hands it to a goroutine of its own so arming the next minute never waits on a running job. */
 func (instance *RunnerCommand) dispatchDue(
     runtimeInstance runtimecontract.Runtime,
     at time.Time,
     runFixedTime bool,
     runWildcard bool,
-) func() error {
+) func() (dueReport, error) {
     var launched sync.WaitGroup
 
     var failureMutex sync.Mutex
     failedCommands := make([]string, 0)
     failures := make([]error, 0)
+    runs := make([]dueRun, 0)
 
     for _, entry := range instance.entries {
         if true == entry.fixedTime && false == runFixedTime {
@@ -385,7 +599,26 @@ func (instance *RunnerCommand) dispatchDue(
             defer instance.inFlight.Done()
             defer launched.Done()
 
-            if runId, invokeErr := instance.invoke(runtimeInstance, launchedEntry); nil != invokeErr {
+            invokedAt := time.Now()
+            runId, invokeErr := instance.invoke(runtimeInstance, launchedEntry)
+
+            /* the document classifies the run the same way the aggregate does: a shutdown cancellation is a clean stop, so it is reported as cancelled rather than failed and the two never disagree about the same run */
+            cancelled := nil != invokeErr && true == isShutdownCancellation(runtimeInstance, invokeErr)
+
+            failureMutex.Lock()
+            runs = append(runs, dueRun{
+                Command:              launchedEntry.commandName,
+                Schedule:             launchedEntry.schedule,
+                Arguments:            launchedEntry.arguments,
+                RunId:                runId,
+                DurationMilliseconds: time.Since(invokedAt).Milliseconds(),
+                Failed:               nil != invokeErr && false == cancelled,
+                Cancelled:            cancelled,
+                Error:                errorTextOrEmpty(invokeErr),
+            })
+            failureMutex.Unlock()
+
+            if nil != invokeErr {
                 /* a command that watched its context and unwound when the shutdown cancelled it did exactly what the runner's own GoDoc asks of it: that is the clean stop, not a job failure. Counted as one, every SIGTERM with a job in flight filed an error record and failed the --once run, indistinguishable from a genuinely broken job — so the parent's cancellation is recorded at warning, named, and kept out of the failure aggregate. A deadline the entry asked for stays a failure. */
                 if true == isShutdownCancellation(runtimeInstance, invokeErr) {
                     if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
@@ -426,21 +659,41 @@ func (instance *RunnerCommand) dispatchDue(
         }(entry)
     }
 
-    return func() error {
+    return func() (dueReport, error) {
         launched.Wait()
 
-        if 0 < len(failedCommands) {
-            return exception.NewError(
+        failureMutex.Lock()
+        report := dueReport{At: at, Configured: len(instance.entries), Ran: append([]dueRun{}, runs...)}
+        aggregated := append([]error{}, failures...)
+        aggregatedNames := append([]string{}, failedCommands...)
+        failureMutex.Unlock()
+
+        /* the runs are ordered by the command name rather than by the order they happened to finish in: the entries of one minute run concurrently, so completion order is scheduling luck and a document that changes shape between two identical minutes cannot be diffed */
+        sort.Slice(report.Ran, func(first int, second int) bool {
+            return report.Ran[first].Command < report.Ran[second].Command
+        })
+
+        if 0 < len(aggregatedNames) {
+            return report, exception.NewError(
                 "cron: one or more scheduled commands failed",
                 exceptioncontract.Context{
-                    "commands": strings.Join(failedCommands, ", "),
+                    "commands": strings.Join(aggregatedNames, ", "),
                 },
-                errors.Join(failures...),
+                errors.Join(aggregated...),
             )
         }
 
-        return nil
+        return report, nil
     }
+}
+
+/* errorTextOrEmpty keeps the document's error field a string on every row: absent on a run that succeeded means a field whose json type changes with the outcome, which is the shape the machine contracts of this family were taken off. */
+func errorTextOrEmpty(err error) string {
+    if nil == err || true == isNilInterface(err) {
+        return ""
+    }
+
+    return err.Error()
 }
 
 /* clockJumpResetThreshold is the vixie-cron three-hour bound on wall-clock reconciliation: a jump smaller than this (a daylight-saving transition, a suspend, an ntp step) is resolved minute by minute, while a jump of at least this much in either direction is treated as a clock reset and the minute chain re-anchors to the current minute without catch-up. */
@@ -521,18 +774,37 @@ func (instance *RunnerCommand) invoke(runtimeInstance runtimecontract.Runtime, e
 
     childScope := runtimeInstance.Container().NewScope()
     defer func() {
-        if closeErr := childScope.Close(); nil != closeErr {
-            invokeErr = errors.Join(
-                invokeErr,
-                exception.NewError(
-                    "cron: child scope close failed after the scheduled command",
-                    exceptioncontract.Context{
-                        "commandName": entry.commandName,
-                    },
-                    closeErr,
-                ),
-            )
+        closeErr := childScope.Close()
+        if nil == closeErr {
+            return
         }
+
+        scopeCloseFailure := exception.NewError(
+            "cron: child scope close failed after the scheduled command",
+            exceptioncontract.Context{
+                "commandName": entry.commandName,
+            },
+            closeErr,
+        )
+
+        if nil == invokeErr {
+            invokeErr = scopeCloseFailure
+
+            return
+        }
+
+        /* the command's own failure stays the wrapped one, so its context and its whole cause chain still reach the record, and the close failure travels beside it in the context rather than through a join that would empty both */
+        invokeErr = exception.NewError(
+            "cron: the scheduled command failed and its child scope close failed",
+            withSiblingFailure(
+                exceptioncontract.Context{
+                    "commandName": entry.commandName,
+                },
+                "scopeCloseError",
+                scopeCloseFailure,
+            ),
+            invokeErr,
+        )
     }()
 
     /* each run gets the console identity the cli entry point installs into its own scope, because the child scope is a sibling and inherits nothing: a fresh ProcessContext under the per-run id minted above — overlapping runs of one entry stay distinguishable — and a logger derived from the run's own, so the job's records carry the runner's processId AND the run's cronRunId. Without these, a command reading the documented console doors works launched by hand and fails under the scheduler. */
@@ -585,7 +857,7 @@ func (instance *RunnerCommand) invoke(runtimeInstance runtimecontract.Runtime, e
     case runErr := <-completed:
         /* a command that returned nil finished its work, whatever the clock did in the same instant; only a failure is attributed to the deadline */
         if nil != runErr && true == errors.Is(childContext.Err(), context.DeadlineExceeded) {
-            return runId, errors.Join(instance.timeoutError(entry, false), runErr)
+            return runId, instance.timeoutError(entry, false, runErr)
         }
 
         return runId, runErr
@@ -675,6 +947,62 @@ func (instance *RunnerCommand) reportScheduledOutput(
     logger.Info("cron: scheduled command output", recordContext)
 }
 
+/*
+withSiblingFailure carries a second failure inside the context of the error the
+runner returns, instead of joining the two.
+
+errors.Join answers an Unwrap of []error while exception.LogContext anchors the
+record's cause and causeChain on errors.Unwrap — the single-value form — which
+answers nothing for a joined value. A joined failure therefore reached the
+journal with no cause at all: for a job panicking through melody's own idiom,
+the context naming the parameter, the chain naming the connection that refused
+and everything below the top message were gone, and the operator woken by it
+was told only that the job panicked. The same failure returned rather than
+raised filed a complete record, which is the difference this exists to remove.
+
+The primary error stays the one wrapped, so every errors.Is a caller performs
+still answers, and the sibling travels under the given prefix with its own
+context and cause chain where it has them. Both extra fields keep their json
+type on every row — an empty object and an empty list rather than null — since
+a field whose type changes with the outcome cannot be consumed.
+*/
+func withSiblingFailure(base exceptioncontract.Context, prefix string, sibling error) exceptioncontract.Context {
+    merged := exceptioncontract.Context{}
+    for key, value := range base {
+        merged[key] = value
+    }
+
+    if nil == sibling || true == isNilInterface(sibling) {
+        return merged
+    }
+
+    merged[prefix] = sibling.Error()
+
+    siblingContext := map[string]any{}
+
+    var provider exceptioncontract.ContextProvider
+    if true == errors.As(sibling, &provider) && false == isNilInterface(provider) {
+        for key, value := range provider.Context() {
+            siblingContext[key] = value
+        }
+    }
+
+    merged[prefix+"Context"] = siblingContext
+
+    causeChain := []string{}
+    for current := errors.Unwrap(sibling); nil != current && false == isNilInterface(current); current = errors.Unwrap(current) {
+        causeChain = append(causeChain, current.Error())
+
+        if 8 <= len(causeChain) {
+            break
+        }
+    }
+
+    merged[prefix+"CauseChain"] = causeChain
+
+    return merged
+}
+
 /* isShutdownCancellation classifies a run's failure as the runner's own shutdown reaching it: the runner's context is cancelled and the outcome is the cancellation, not an entry deadline. Only the parent's cancellation qualifies — a deadline the entry asked for stays a failure whatever the shutdown is doing. */
 func isShutdownCancellation(runtimeInstance runtimecontract.Runtime, invokeErr error) bool {
     if nil == runtimeInstance.Context().Err() {
@@ -695,7 +1023,7 @@ func (instance *RunnerCommand) resolveAbandonedRun(
     select {
     case runErr := <-completed:
         if nil != runErr && true == errors.Is(childContext.Err(), context.DeadlineExceeded) {
-            return errors.Join(instance.timeoutError(entry, false), runErr)
+            return instance.timeoutError(entry, false, runErr)
         }
 
         return runErr
@@ -715,7 +1043,7 @@ func (instance *RunnerCommand) resolveAbandonedRun(
         )
     }
 
-    return instance.timeoutError(entry, true)
+    return instance.timeoutError(entry, true, nil)
 }
 
 /* abandonDelayOf places the abandon signal one unwind grace past the deadline without letting the sum wrap. Both durations are caller-supplied and unbounded, so a graceful window written as the largest duration — the natural spelling of "never abandon this one" — would overflow into a negative delay, and a timer armed with one fires at once: every run of that entry would be killed the instant it started, its scope closed under it, and reported as having ignored a cancellation it never received. Saturating at the maximum keeps that spelling meaning what it says. */
@@ -745,17 +1073,33 @@ func runScheduledCommand(
     defer func() {
         if recovered := recover(); nil != recovered {
             /* the panic value travels as the CAUSE and the stack is captured here, where the frames of the job that raised it are still on the goroutine. Stringified into the context alone, an error-shaped panic collapsed to its bare message: the context naming the parameter, the chain naming the connection that refused, and any file and line were all gone from the record, and the operator woken by a nightly job was told only that it panicked. The event dispatcher's recovery boundary states the same reason for the same shape. */
-            runErr = errors.Join(
-                runErr,
-                exception.NewError(
-                    "cron: scheduled command panicked",
+            panicFailure := exception.NewError(
+                "cron: scheduled command panicked",
+                exceptioncontract.Context{
+                    "commandName": entry.commandName,
+                    "panicValue":  fmt.Sprintf("%v", recovered),
+                    "panicStack":  string(debug.Stack()),
+                },
+                panicCause(recovered),
+            )
+
+            if nil == runErr {
+                /* the ordinary case: the command never returned, so the panic error is assigned rather than joined and keeps a single-value Unwrap — which is the whole reason the cause chain, and the context of every link under it, reaches the record at all */
+                runErr = panicFailure
+
+                return
+            }
+
+            runErr = exception.NewError(
+                "cron: the scheduled command failed and then panicked",
+                withSiblingFailure(
                     exceptioncontract.Context{
                         "commandName": entry.commandName,
-                        "panicValue":  fmt.Sprintf("%v", recovered),
-                        "panicStack":  string(debug.Stack()),
                     },
-                    panicCause(recovered),
+                    "commandError",
+                    runErr,
                 ),
+                panicFailure,
             )
         }
     }()
@@ -800,7 +1144,8 @@ func isNilInterface(value any) bool {
 }
 
 /* timeoutError reports a run the deadline cut short. The abandoned form is the louder one, and deliberately so: that command is still running, against a cancelled context and a closed scope, and it no longer counts towards the shutdown wait — a state an operator has to be able to read out of a log line rather than infer from a memory graph. */
-func (instance *RunnerCommand) timeoutError(entry *scheduledRunEntry, abandoned bool) error {
+/* timeoutError classifies a run the deadline ended, carrying the command's own failure where there is one. The two used to be joined, which answered every errors.Is a caller performs and nothing at all to exception.LogContext — the record lost the command's context and its whole cause chain. They now share one single-valued chain through commandTimeoutCause: the classification stays reachable by identity, the command's failure stays reachable by identity, and the chain the record is built from walks straight through both. */
+func (instance *RunnerCommand) timeoutError(entry *scheduledRunEntry, abandoned bool, runErr error) error {
     if true == abandoned {
         return exception.NewError(
             "cron: scheduled command exceeded its timeout and did not return; it was abandoned and its container scope closed while it may still be running",
@@ -809,7 +1154,7 @@ func (instance *RunnerCommand) timeoutError(entry *scheduledRunEntry, abandoned 
                 "timeout":     entry.timeout.String(),
                 "unwindGrace": instance.gracefulTimeoutOf(entry).String(),
             },
-            ErrCommandTimeout,
+            commandTimeoutCause(runErr),
         )
     }
 
@@ -819,7 +1164,7 @@ func (instance *RunnerCommand) timeoutError(entry *scheduledRunEntry, abandoned 
             "commandName": entry.commandName,
             "timeout":     entry.timeout.String(),
         },
-        ErrCommandTimeout,
+        commandTimeoutCause(runErr),
     )
 }
 

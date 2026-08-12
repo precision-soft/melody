@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- the `bun` requirement moves to `v1.2.17`, with the dialect and driver packages in lockstep: the dialects verify at init that their version equals bun's and panic otherwise. v1.2.16 swallowed the failure of a migration read from a `.sql` file, which `integrations/bunorm/migrate` answered with `[success]` and exit 0 over a schema that never changed; the whole family moves together so no binary can assemble a mismatched pair
+
 ### Fixed
 
 - the manager registry no longer wedges permanently when opening a database panics while the registry is being closed. The section that publishes the opened manager released its lock without a defer, so a panic from the database's own `Close` unwound with the lock held and the recovery path then blocked on that same lock — after which every later call to the registry blocked forever, silently. A provider returning a nil database was enough to trigger it

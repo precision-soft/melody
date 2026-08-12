@@ -11,6 +11,8 @@ import (
 
     "github.com/precision-soft/melody/cli"
     "github.com/precision-soft/melody/cli/output"
+    "github.com/precision-soft/melody/exception"
+    exceptioncontract "github.com/precision-soft/melody/exception/contract"
 )
 
 func newBufferedOutput(noColor bool) (*commandOutput, *bytes.Buffer) {
@@ -382,5 +384,106 @@ func TestCommandOutput_TheAbsentDatabaseIsJsonNull(t *testing.T) {
 
     if false == strings.Contains(namedBuffer.String(), `"database": "orders"`) {
         t.Fatalf("expected the named database in the document, got %q", namedBuffer.String())
+    }
+}
+
+/*
+TestCommandOutput_FinishCarriesTheFailureDetailsAndCause pins the two fields
+the json envelope always declared and always answered null. The machine
+document is the contract a pipeline reads, and it was the one rendering that
+threw away what the error already carried: at the same instant, over the same
+value, the journal filed the connection, the pool sizing and the whole cause
+chain while stdout answered a single sentence beside `"details":null,
+"cause":null`.
+*/
+func TestCommandOutput_FinishCarriesTheFailureDetailsAndCause(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    outputInstance := newCommandOutput(buffer, output.Option{Format: output.FormatJson})
+
+    runErr := exception.NewError(
+        "database connection failed",
+        exceptioncontract.Context{"host": "mysql", "port": "3306"},
+        exception.NewError(
+            "Error 1045 (28000): Access denied for user 'melody'",
+            nil,
+            errors.New("dial refused"),
+        ),
+    )
+
+    if finishErr := outputInstance.finish("db:migrate", time.Now(), runErr); nil == finishErr {
+        t.Fatal("expected the command's own failure to stay the verdict")
+    }
+
+    document := struct {
+        Error *struct {
+            Code    string         `json:"code"`
+            Message string         `json:"message"`
+            Details map[string]any `json:"details"`
+            Cause   *struct {
+                Message string              `json:"message"`
+                Details map[string][]string `json:"details"`
+            } `json:"cause"`
+        } `json:"error"`
+    }{}
+    if decodeErr := json.Unmarshal(buffer.Bytes(), &document); nil != decodeErr {
+        t.Fatalf("failed to decode the document: %v; rendered %q", decodeErr, buffer.String())
+    }
+
+    if nil == document.Error {
+        t.Fatalf("expected the failure inside the envelope, got %q", buffer.String())
+    }
+
+    if "mysql" != document.Error.Details["host"] || "3306" != document.Error.Details["port"] {
+        t.Fatalf("expected the failure's own context in the details, got %#v", document.Error.Details)
+    }
+
+    if nil == document.Error.Cause {
+        t.Fatalf("expected the failure to carry its cause, got %q", buffer.String())
+    }
+
+    if false == strings.Contains(document.Error.Cause.Message, "Access denied") {
+        t.Fatalf("expected the cause to be the link under the failure, got %q", document.Error.Cause.Message)
+    }
+
+    if 2 > len(document.Error.Cause.Details["chain"]) {
+        t.Fatalf("expected the whole chain beneath the failure, got %#v", document.Error.Cause.Details)
+    }
+
+    if false == strings.Contains(strings.Join(document.Error.Cause.Details["chain"], " | "), "dial refused") {
+        t.Fatalf("expected the chain to reach the bottom, got %#v", document.Error.Cause.Details["chain"])
+    }
+}
+
+/* an error carrying no context still answers an object, and one carrying no cause answers a null there: a field whose json type changes with the outcome cannot be consumed, while a cause that genuinely does not exist is honestly absent */
+func TestCommandOutput_FinishKeepsTheDetailsAnObjectWithoutAContext(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    outputInstance := newCommandOutput(buffer, output.Option{Format: output.FormatJson})
+
+    if finishErr := outputInstance.finish("db:migrate", time.Now(), errors.New("bare failure")); nil == finishErr {
+        t.Fatal("expected the command's own failure to stay the verdict")
+    }
+
+    document := struct {
+        Error *struct {
+            Details map[string]any `json:"details"`
+            Cause   *struct {
+                Message string `json:"message"`
+            } `json:"cause"`
+        } `json:"error"`
+    }{}
+    if decodeErr := json.Unmarshal(buffer.Bytes(), &document); nil != decodeErr {
+        t.Fatalf("failed to decode the document: %v; rendered %q", decodeErr, buffer.String())
+    }
+
+    if nil == document.Error.Details {
+        t.Fatalf("expected an empty details object rather than null, got %q", buffer.String())
+    }
+
+    if 0 != len(document.Error.Details) {
+        t.Fatalf("expected the details to be empty for a bare failure, got %#v", document.Error.Details)
+    }
+
+    if nil != document.Error.Cause {
+        t.Fatalf("expected no cause for a failure that has none, got %#v", document.Error.Cause)
     }
 }

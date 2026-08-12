@@ -20,6 +20,26 @@ const (
     RefusalReasonUnanimousNoGrant          = "unanimous_no_grant"
 )
 
+/*
+RoleHierarchyAware is the optional capability an AccessDecisionManager
+implements to receive the declared role hierarchy at compilation, answering the
+manager that applies it.
+
+The compilation asks for it and nothing else: it used to assert on the concrete
+*AccessDecisionManager, so a manager of the integrator's own — even a wrapper
+that only delegated, to log or cache decisions — skipped the whole hierarchy
+upgrade. ROLE_ADMIN: [ROLE_USER] then had no effect on the enforcement path
+while security.IsGranted, which expands the hierarchy straight from the
+compiled firewall, kept answering true for the same request: one door granted
+and the other answered 403, with no record on either.
+
+A manager that does not implement it and is handed a hierarchy is refused at
+compilation by name, because the alternative is that silence.
+*/
+type RoleHierarchyAware interface {
+    WithRoleHierarchy(roleHierarchy *RoleHierarchy) securitycontract.AccessDecisionManager
+}
+
 func NewAccessDecisionManagerWithVoters(strategy securitycontract.DecisionStrategy, voters []securitycontract.Voter) *AccessDecisionManager {
     return NewAccessDecisionManager(strategy, voters...)
 }
@@ -68,6 +88,33 @@ func (instance *AccessDecisionManager) Voters() []securitycontract.Voter {
 
 func (instance *AccessDecisionManager) Strategy() securitycontract.DecisionStrategy {
     return instance.strategy
+}
+
+/* WithRoleHierarchy answers a manager whose built-in role voters read the expanded roles, leaving every other voter as it was: melody knows what a RoleVoter does with a role and cannot know what a foreign voter would do with an expanded set, so wrapping one would be a decision taken on the integrator's behalf. An integrator who does want it wraps the voter with NewRoleHierarchyVoter, which takes any Voter. A nil hierarchy answers the manager unchanged, so the caller need not branch. */
+func (instance *AccessDecisionManager) WithRoleHierarchy(roleHierarchy *RoleHierarchy) securitycontract.AccessDecisionManager {
+    if nil == roleHierarchy {
+        return instance
+    }
+
+    upgradedVoters := make([]securitycontract.Voter, 0, len(instance.voters))
+    upgraded := false
+
+    for _, voter := range instance.voters {
+        if roleVoter, isRoleVoter := voter.(*RoleVoter); true == isRoleVoter {
+            upgradedVoters = append(upgradedVoters, NewRoleHierarchyVoter(roleHierarchy, roleVoter))
+            upgraded = true
+
+            continue
+        }
+
+        upgradedVoters = append(upgradedVoters, voter)
+    }
+
+    if false == upgraded {
+        return instance
+    }
+
+    return NewAccessDecisionManagerWithVoters(instance.strategy, upgradedVoters)
 }
 
 /* refuse answers the 403 every branch answers, carrying the branch that produced it. The message stays the one the client is served; the reason, the strategy and the attribute travel in the exception context, which the response never renders and the log record always carries. */
@@ -176,7 +223,10 @@ func (instance *AccessDecisionManager) decideSingleAttribute(token securitycontr
     return instance.refuse(RefusalReasonUnanimousNoGrant, attribute)
 }
 
-var _ securitycontract.AccessDecisionManager = (*AccessDecisionManager)(nil)
+var (
+    _ securitycontract.AccessDecisionManager = (*AccessDecisionManager)(nil)
+    _ RoleHierarchyAware                     = (*AccessDecisionManager)(nil)
+)
 
 func isValidDecisionStrategy(strategy securitycontract.DecisionStrategy) bool {
     if securitycontract.DecisionStrategyAffirmative == strategy {

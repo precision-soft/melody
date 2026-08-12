@@ -738,6 +738,21 @@ func (instance *recordingAccessDecisionManager) DecideAny(token securitycontract
     return nil
 }
 
+/* the double carries the hierarchy capability and answers itself: it holds no voters to upgrade, so identity is the honest answer, and it is what lets the override test exercise the hierarchy and the manager setters together. A manager without the capability beside a declared hierarchy is refused by compilation, which hierarchyBlindAccessDecisionManager pins. */
+func (instance *recordingAccessDecisionManager) WithRoleHierarchy(roleHierarchy *security.RoleHierarchy) securitycontract.AccessDecisionManager {
+    return instance
+}
+
+type hierarchyBlindAccessDecisionManager struct{}
+
+func (instance *hierarchyBlindAccessDecisionManager) DecideAll(token securitycontract.Token, attributes []string, subject any) error {
+    return nil
+}
+
+func (instance *hierarchyBlindAccessDecisionManager) DecideAny(token securitycontract.Token, attributes []string, subject any) error {
+    return nil
+}
+
 type recordingEntryPoint struct{}
 
 func (instance *recordingEntryPoint) Start(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (httpcontract.Response, error) {

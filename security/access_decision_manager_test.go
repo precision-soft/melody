@@ -586,3 +586,76 @@ func TestAccessDecisionManager_ARefusalNamesTheStrategyAndTheAttribute(t *testin
         t.Fatalf("expected the attribute named, got %v", httpException.Context()["attribute"])
     }
 }
+
+/*
+TestAccessDecisionManager_WithRoleHierarchyUpgradesTheRoleVoters pins the
+capability the compilation now asks for instead of asserting on this concrete
+type. The upgrade reaches the built-in role voters and leaves every other voter
+exactly as it was: melody knows what a RoleVoter does with a role and cannot
+know what a foreign voter would do with an expanded set, so wrapping one would
+be a decision taken on the integrator's behalf.
+*/
+func TestAccessDecisionManager_WithRoleHierarchyUpgradesTheRoleVoters(t *testing.T) {
+    foreign := &recordingProbeVoter{}
+    manager := NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, NewRoleVoter(), foreign)
+
+    roleHierarchy := NewRoleHierarchy(map[string][]string{"ROLE_ADMIN": {"ROLE_USER"}})
+
+    upgraded := manager.WithRoleHierarchy(roleHierarchy)
+    if manager == upgraded {
+        t.Fatal("expected a manager carrying the hierarchy-aware voters")
+    }
+
+    upgradedManager, isManager := upgraded.(*AccessDecisionManager)
+    if false == isManager {
+        t.Fatalf("expected the upgrade to answer the built-in manager, got %T", upgraded)
+    }
+
+    voters := upgradedManager.Voters()
+    if 2 != len(voters) {
+        t.Fatalf("expected both voters to survive the upgrade, got %d", len(voters))
+    }
+
+    if _, isHierarchyVoter := voters[0].(*RoleHierarchyVoter); false == isHierarchyVoter {
+        t.Fatalf("expected the role voter to be wrapped, got %T", voters[0])
+    }
+
+    if foreign != voters[1] {
+        t.Fatalf("expected the foreign voter to be left exactly as it was, got %T", voters[1])
+    }
+
+    /* the upgrade is what makes the hierarchy apply at all: without it the admin token is refused for the role it inherits */
+    token := NewAuthenticatedToken("admin", []string{"ROLE_ADMIN"})
+    if decideErr := upgradedManager.DecideAll(token, []string{"ROLE_USER"}, nil); nil != decideErr {
+        t.Fatalf("expected the inherited role to be granted, got %v", decideErr)
+    }
+}
+
+/* a manager holding no role voter answers itself: there is nothing to upgrade, and building a copy would break the pointer identity a caller may be holding */
+func TestAccessDecisionManager_WithRoleHierarchyAnswersItselfWithoutARoleVoter(t *testing.T) {
+    manager := NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, &recordingProbeVoter{})
+
+    if manager != manager.WithRoleHierarchy(NewRoleHierarchy(map[string][]string{"ROLE_ADMIN": {"ROLE_USER"}})) {
+        t.Fatal("expected the manager itself when there is no role voter to upgrade")
+    }
+}
+
+/* a nil hierarchy answers the manager unchanged, so the compilation need not branch before asking */
+func TestAccessDecisionManager_WithRoleHierarchyAnswersItselfForANilHierarchy(t *testing.T) {
+    manager := NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, NewRoleVoter())
+
+    if manager != manager.WithRoleHierarchy(nil) {
+        t.Fatal("expected the manager itself for a nil hierarchy")
+    }
+}
+
+/* recordingProbeVoter is a voter of nobody's but this test's: it abstains, so it changes no decision and only its identity is asserted */
+type recordingProbeVoter struct{}
+
+func (instance *recordingProbeVoter) Supports(attribute string, subject any) bool {
+    return false
+}
+
+func (instance *recordingProbeVoter) Vote(token securitycontract.Token, attribute string, subject any) securitycontract.VoteResult {
+    return securitycontract.VoteAbstain
+}

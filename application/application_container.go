@@ -151,13 +151,16 @@ func (instance *Application) bootContainer() {
         },
     )
 
-    instance.RegisterService(
-        http.ServiceUrlGenerator,
-        func(resolver containercontract.Resolver) (httpcontract.UrlGenerator, error) {
-            return http.NewUrlGenerator(instance.routeRegistry), nil
-        },
-    )
+    if false == serviceContainer.Has(http.ServiceUrlGenerator) {
+        instance.RegisterService(
+            http.ServiceUrlGenerator,
+            func(resolver containercontract.Resolver) (httpcontract.UrlGenerator, error) {
+                return http.NewUrlGenerator(instance.routeRegistry), nil
+            },
+        )
+    }
 
+    /* the router, the dispatcher, the clock, the config, the route registry and the process role are deliberately NOT gated: they hand back objects the kernel owns and the request path reads directly, so a gate would promise a substitution the framework would then ignore — the honest answer for those is the document, not a door that lies. The gates below stand where a replacement built outside is a whole answer: the logger, the cache, the session, the firewall manager, and the three the boot used to make unsubstitutable. */
     instance.RegisterService(
         http.ServiceRouter,
         func(resolver containercontract.Resolver) (httpcontract.Router, error) {
@@ -172,24 +175,39 @@ func (instance *Application) bootContainer() {
         },
     )
 
-    instance.RegisterService(
-        serializer.ServiceSerializerManager,
-        func(resolver containercontract.Resolver) (*serializer.SerializerManager, error) {
-            return serializer.NewSerializerManager(
-                map[string]serializercontract.Serializer{
-                    "application/json": serializer.NewJsonSerializer(),
-                    "text/plain":       serializer.NewPlainTextSerializer(),
-                },
-            )
-        },
-    )
+    /* the manager is the door content negotiation reads, and it was registered unconditionally: a module registering the same id to add a media type — xml, msgpack, cbor, application/vnd.api+json — got the boot's duplicate-registration exit, code 1, instead of a substitution, so the whole negotiation was closed to everything but a fork. NewSerializerManager is exported and takes the map, so a replacement built outside is a whole answer */
+    if false == serviceContainer.Has(serializer.ServiceSerializerManager) {
+        instance.RegisterService(
+            serializer.ServiceSerializerManager,
+            func(resolver containercontract.Resolver) (*serializer.SerializerManager, error) {
+                return serializer.NewSerializerManager(
+                    map[string]serializercontract.Serializer{
+                        "application/json": serializer.NewJsonSerializer(),
+                        "text/plain":       serializer.NewPlainTextSerializer(),
+                    },
+                )
+            },
+        )
+    }
 
-    instance.RegisterService(
-        validation.ServiceValidator,
-        func(resolver containercontract.Resolver) (*validation.Validator, error) {
-            return validation.NewValidator(), nil
-        },
-    )
+    /* the default serializer answers the two documented resolvers, SerializerFromRuntime and SerializerMustFromRuntime, which named an id nothing ever registered: the Must door panicked for every caller and the soft one answered nil, both by construction. This is the default serializer alone — content negotiation runs through the manager above, and registering another serializer here changes what those two resolvers answer, not what a request is served */
+    if false == serviceContainer.Has(serializer.ServiceSerializer) {
+        instance.RegisterService(
+            serializer.ServiceSerializer,
+            func(resolver containercontract.Resolver) (serializercontract.Serializer, error) {
+                return serializer.NewJsonSerializer(), nil
+            },
+        )
+    }
+
+    if false == serviceContainer.Has(validation.ServiceValidator) {
+        instance.RegisterService(
+            validation.ServiceValidator,
+            func(resolver containercontract.Resolver) (*validation.Validator, error) {
+                return validation.NewValidator(), nil
+            },
+        )
+    }
 
     instance.RegisterService(
         clock.ServiceClock,

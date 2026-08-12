@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- the `bun` requirement moves to `v1.2.17`, with the dialect and driver packages in lockstep: the dialects verify at init that their version equals bun's and panic otherwise. v1.2.16 swallowed the failure of a migration read from a `.sql` file, which `integrations/bunorm/migrate` answered with `[success]` and exit 0 over a schema that never changed; the whole family moves together so no binary can assemble a mismatched pair
+
 ### Added
 
 - the provider implements `bunorm.MigrationProvider`: `OpenForMigration` opens the same database with the read and write deadlines lifted and the connect timeout kept — a down database must still fail fast — over a pool of the two connections a sequential migration run needs, with no mid-run connection recycling, because a lifetime rotation under a running statement is the same mid-statement cut by another name. This is what lets a migration whose DDL legitimately runs past the request-sized 30s deadlines finish instead of dying with `invalid connection` at step N of M

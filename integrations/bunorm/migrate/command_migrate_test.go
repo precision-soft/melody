@@ -271,3 +271,75 @@ func TestMigrateCommand_JsonCarriesTheDetailAtTheDefaultVerbosity(t *testing.T) 
         t.Fatalf("expected the bare text run to stay bare, got %q", textRendered)
     }
 }
+
+/*
+TestMigrateCommand_ARunThatChangedTheSchemaSaysSoOnTheText pins the line a
+deploy log captures. The success line lived inside wantsDetail(), so a plain
+run — the shape a deploy script invokes — printed a warning for the run that
+did nothing and not one byte for the run that applied migrations: the log was
+empty exactly when something had happened, and the operator reading it could
+not tell the two apart. The rollback sibling has always printed its line.
+*/
+func TestMigrateCommand_ARunThatChangedTheSchemaSaysSoOnTheText(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = appliedMigrationRowsHook()
+
+    migrations := migrate.NewMigrations()
+    migrations.Add(migrate.Migration{Name: "20240101000000", Comment: "create_users"})
+
+    rendered, runErr := runMigrationCommand(
+        t,
+        newRuntimeWithDatabase(t, database),
+        NewMigrateCommand(migrations, DefaultOptions()),
+        "--no-color",
+    )
+    if nil != runErr {
+        t.Fatalf("unexpected error: %s; rendered %q", runErr.Error(), rendered)
+    }
+
+    if false == strings.Contains(rendered, "applied 1 migration") {
+        t.Fatalf("expected the applied count on the plain text, got %q", rendered)
+    }
+
+    if false == strings.Contains(rendered, "<default>") {
+        t.Fatalf("expected the manager label on the plain text, got %q", rendered)
+    }
+
+    if true == strings.Contains(rendered, "APPLIED MIGRATIONS") {
+        t.Fatalf("expected the name list to stay behind --verbose, got %q", rendered)
+    }
+}
+
+/* the machine document is deliberately untouched by the line above: under json the same run already carries the applied count, the group and the names as structured fields, so a prose duplicate would be a second and weaker spelling of what the consumer has */
+func TestMigrateCommand_TheSuccessLineDoesNotEnterTheMachineDocument(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = appliedMigrationRowsHook()
+
+    migrations := migrate.NewMigrations()
+    migrations.Add(migrate.Migration{Name: "20240101000000", Comment: "create_users"})
+
+    rendered, runErr := runMigrationCommand(
+        t,
+        newRuntimeWithDatabase(t, database),
+        NewMigrateCommand(migrations, DefaultOptions()),
+        "--format=json",
+    )
+    if nil != runErr {
+        t.Fatalf("unexpected error: %s; rendered %q", runErr.Error(), rendered)
+    }
+
+    document := struct {
+        Data struct {
+            Messages []string `json:"messages"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal([]byte(rendered), &document); nil != decodeErr {
+        t.Fatalf("failed to decode the document: %v; rendered %q", decodeErr, rendered)
+    }
+
+    for _, message := range document.Data.Messages {
+        if true == strings.Contains(message, "applied 1 migration") {
+            t.Fatalf("expected the text line to stay out of the machine document, got %#v", document.Data.Messages)
+        }
+    }
+}

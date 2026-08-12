@@ -18,6 +18,38 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Bunorm: the `bun` requirement moves to v1.2.17, dialects and drivers in lockstep
+
+**What changed.** Every module of the `bunorm` family — the manager, `mysql`, `pgsql` and the three `migrate` modules — requires `github.com/uptrace/bun v1.2.17` and, where they carry one, `dialect/mysqldialect`, `dialect/pgdialect` or `driver/pgdriver` at the same version. v1.2.16 swallowed the failure of a migration read from a `.sql` file: the deferred `conn.Close()` / `tx.Rollback()` overwrote the exec error with its own nil return, so `db:migrate` printed `[success]`, exited 0 and marked a migration applied that never ran.
+
+**Symptom.** If your application pins a bun dialect or driver of its own, the build now selects `bun v1.2.17` through this dependency while your dialect stays where it was, and the process **panics at init**: `mysqldialect and Bun must have the same version: v1.2.16 != v1.2.17`. The dialect packages check this themselves; it is not a melody rule.
+
+**Remedy.** Move your own `github.com/uptrace/bun/...` requirements to `v1.2.17` in the same change — `go get github.com/uptrace/bun@v1.2.17 github.com/uptrace/bun/dialect/mysqldialect@v1.2.17` and the equivalent for `pgdialect` / `pgdriver`. Applications that declare no bun dependency of their own need no action.
+
+### Security: `NewRoleHierarchyVoter` takes any `Voter` as its delegate
+
+**What changed.** The `delegate` parameter widened from `*RoleVoter` to `securitycontract.Voter`. The wrapper calls nothing but `Supports` and `Vote`, so the narrower type bought nothing and cost an integrator's own voter — multi-tenant, ownership — the ability to see the expanded roles at all; the only way out was copying the wrapper, which meant every foreign voter reimplementing the expansion rule.
+
+**Symptom.** Source-breaking only for a caller that leaned on the narrowing — a variable or field declared as the parameter type, or a function value assigned from the constructor. Every call passing a `*RoleVoter` compiles unchanged, because `*RoleVoter` is a `Voter`.
+
+**Remedy.** Widen the declaration to `securitycontract.Voter`. A caller that genuinely needs the concrete type keeps it at the construction site and passes it in as before.
+
+### Security: a substituted `AccessDecisionManager` must accept the role hierarchy
+
+**What changed.** The compilation hands the declared role hierarchy to the access decision manager through the optional `security.RoleHierarchyAware` capability instead of asserting on the concrete `*security.AccessDecisionManager`. A manager that does not implement the capability **and is handed a hierarchy** is now refused at compilation, naming the firewall and the capability.
+
+**Symptom.** A boot that declared both a role hierarchy and a manager of your own now fails with `security access decision manager cannot apply the declared role hierarchy`. Before, it booted and the hierarchy silently stopped applying on the enforcement path: `ROLE_ADMIN: [ROLE_USER]` was refused with `403` by the access control listener while `security.IsGranted(runtime, "ROLE_USER")` kept answering `true` for the same request, with no record on either side. Nothing changes for the built-in manager, or for any configuration that declares no role hierarchy.
+
+**Remedy.** Implement `WithRoleHierarchy(roleHierarchy *security.RoleHierarchy) securitycontract.AccessDecisionManager` on your manager. A wrapper that delegates hands the hierarchy to the manager it wraps and re-wraps the answer; a manager that builds its own voters wraps the ones that read roles with `security.NewRoleHierarchyVoter`, which now takes any `Voter`. A manager that deliberately ignores hierarchies answers itself — the capability is the declaration that the omission is intentional.
+
+### Application: three framework services became substitutable
+
+**What changed.** `serializer.ServiceSerializerManager`, `validation.ServiceValidator` and `http.ServiceUrlGenerator` are registered behind a `Has` gate, like the logger, the cache, the session and the firewall manager. `serializer.ServiceSerializer` — the default serializer, the id the two published `Serializer*FromRuntime` resolvers read — is registered for the first time, behind the same gate.
+
+**Symptom.** None for an application that registers none of these ids. An application or module that registered one of them used to die at boot with `duplicate registrations detected at boot`, exit code 1; it now substitutes the framework's registration, which is what the collision was standing in the way of. If your code registered `service.serializer` to make the documented resolvers answer, that registration still wins — the gate defers to it.
+
+**Remedy.** None required. To add a media type to content negotiation, register `serializer.ServiceSerializerManager` with a manager built by `serializer.NewSerializerManager` carrying the wider map. Note that registering `serializer.ServiceSerializer` changes what the two resolvers answer, not what a request is served: negotiation reads the manager.
+
 ### Http: `Kernel` gains `SetMethodPolicy`
 
 **What changed.** `http/contract.Kernel` declares `SetMethodPolicy(policy MethodPolicy)`, and `MethodPolicy` moved to `http/contract` beside the two policies already there, with an alias keeping the name `melodyhttp.MethodPolicy` valid. The type was documented, built by `DefaultKernelOptions()` and read on every request, with no door to hand one to.

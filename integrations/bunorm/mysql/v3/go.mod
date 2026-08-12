@@ -6,8 +6,8 @@ require (
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/precision-soft/melody/integrations/bunorm/v3 v3.1.1
 	github.com/precision-soft/melody/v3 v3.7.0
-	github.com/uptrace/bun v1.2.16
-	github.com/uptrace/bun/dialect/mysqldialect v1.2.16
+	github.com/uptrace/bun v1.2.17
+	github.com/uptrace/bun/dialect/mysqldialect v1.2.17
 )
 
 require (
@@ -18,6 +18,6 @@ require (
 	github.com/urfave/cli/v3 v3.6.1 // indirect
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
-	golang.org/x/mod v0.30.0 // indirect
-	golang.org/x/sys v0.38.0 // indirect
+	golang.org/x/mod v0.33.0 // indirect
+	golang.org/x/sys v0.41.0 // indirect
 )

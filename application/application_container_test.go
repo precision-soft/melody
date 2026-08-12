@@ -4,6 +4,7 @@ import (
     "errors"
     "os"
     "path/filepath"
+    "strings"
     "testing"
     "time"
 
@@ -27,8 +28,11 @@ import (
     "github.com/precision-soft/melody/security"
     securityconfig "github.com/precision-soft/melody/security/config"
     securitycontract "github.com/precision-soft/melody/security/contract"
+    "github.com/precision-soft/melody/serializer"
+    serializercontract "github.com/precision-soft/melody/serializer/contract"
     "github.com/precision-soft/melody/session"
     sessioncontract "github.com/precision-soft/melody/session/contract"
+    "github.com/precision-soft/melody/validation"
 )
 
 type testKernel struct {
@@ -578,5 +582,177 @@ func TestApplicationRegisterHttpSession_HandsTheConfiguredTombstoneRetentionToTh
 
     if saveErr := manager.SaveSession(inFlightView); nil != saveErr {
         t.Fatalf("expected the configured 300ms window to have lapsed, got %v", saveErr)
+    }
+}
+
+/*
+TestBootContainer_TheSerializerManagerIsSubstitutedNotCollided pins the door a
+media type is added through. The manager was registered unconditionally while
+four sibling services were gated, so a module registering the same id to serve
+xml, msgpack, cbor or application/vnd.api+json did not get a substitution: it
+got the boot's duplicate-registration exit, code 1. Content negotiation reads
+this one service and the manager has no registration method, so the gate is the
+only way to reach it from outside a fork.
+*/
+func TestBootContainer_TheSerializerManagerIsSubstitutedNotCollided(t *testing.T) {
+    applicationInstance := NewApplication(
+        testhelper.NewEmbeddedEnvFs(),
+        testhelper.NewEmbeddedStaticFs(),
+    )
+
+    ownManager, managerErr := serializer.NewSerializerManager(
+        map[string]serializercontract.Serializer{
+            "application/json": serializer.NewJsonSerializer(),
+            "application/xml":  serializer.NewJsonSerializer(),
+        },
+    )
+    if nil != managerErr {
+        t.Fatalf("unexpected manager error: %v", managerErr)
+    }
+
+    applicationInstance.RegisterService(
+        serializer.ServiceSerializerManager,
+        func(resolver containercontract.Resolver) (*serializer.SerializerManager, error) {
+            return ownManager, nil
+        },
+    )
+
+    kernelInstance := applicationInstance.Boot()
+
+    resolved, resolveErr := container.FromResolver[*serializer.SerializerManager](
+        kernelInstance.ServiceContainer(),
+        serializer.ServiceSerializerManager,
+    )
+    if nil != resolveErr {
+        t.Fatalf("unexpected resolve error: %v", resolveErr)
+    }
+
+    if ownManager != resolved {
+        t.Fatalf("expected the application's own serializer manager to be served")
+    }
+}
+
+/*
+TestBootContainer_TheValidatorAndUrlGeneratorAreSubstitutedNotCollided pins the
+other two the boot used to make unsubstitutable. Both have exported
+constructors, so a replacement built outside is a whole answer — which is the
+line that separates them from the router, the dispatcher and the clock, where a
+gate would promise a substitution the request path would then ignore.
+*/
+func TestBootContainer_TheValidatorAndUrlGeneratorAreSubstitutedNotCollided(t *testing.T) {
+    applicationInstance := NewApplication(
+        testhelper.NewEmbeddedEnvFs(),
+        testhelper.NewEmbeddedStaticFs(),
+    )
+
+    ownValidator := validation.NewValidator()
+    ownUrlGenerator := http.NewUrlGenerator(http.NewRouteRegistry())
+
+    applicationInstance.RegisterService(
+        validation.ServiceValidator,
+        func(resolver containercontract.Resolver) (*validation.Validator, error) {
+            return ownValidator, nil
+        },
+    )
+
+    applicationInstance.RegisterService(
+        http.ServiceUrlGenerator,
+        func(resolver containercontract.Resolver) (httpcontract.UrlGenerator, error) {
+            return ownUrlGenerator, nil
+        },
+    )
+
+    kernelInstance := applicationInstance.Boot()
+
+    resolvedValidator, validatorErr := container.FromResolver[*validation.Validator](
+        kernelInstance.ServiceContainer(),
+        validation.ServiceValidator,
+    )
+    if nil != validatorErr {
+        t.Fatalf("unexpected validator resolve error: %v", validatorErr)
+    }
+
+    if ownValidator != resolvedValidator {
+        t.Fatalf("expected the application's own validator to be served")
+    }
+
+    resolvedUrlGenerator, urlGeneratorErr := container.FromResolver[httpcontract.UrlGenerator](
+        kernelInstance.ServiceContainer(),
+        http.ServiceUrlGenerator,
+    )
+    if nil != urlGeneratorErr {
+        t.Fatalf("unexpected url generator resolve error: %v", urlGeneratorErr)
+    }
+
+    if ownUrlGenerator != resolvedUrlGenerator {
+        t.Fatalf("expected the application's own url generator to be served")
+    }
+}
+
+/*
+TestBootContainer_TheDefaultSerializerAnswersItsDocumentedResolvers pins the id
+the two published resolvers read. SerializerMustFromRuntime and
+SerializerFromRuntime were documented with the id nothing registered, so the
+Must door panicked for every caller and the soft one answered nil — by
+construction, on every boot the framework has ever performed.
+*/
+func TestBootContainer_TheDefaultSerializerAnswersItsDocumentedResolvers(t *testing.T) {
+    applicationInstance := NewApplication(
+        testhelper.NewEmbeddedEnvFs(),
+        testhelper.NewEmbeddedStaticFs(),
+    )
+
+    kernelInstance := applicationInstance.Boot()
+
+    resolved, resolveErr := container.FromResolver[serializercontract.Serializer](
+        kernelInstance.ServiceContainer(),
+        serializer.ServiceSerializer,
+    )
+    if nil != resolveErr {
+        t.Fatalf("unexpected resolve error: %v", resolveErr)
+    }
+
+    if nil == resolved {
+        t.Fatalf("expected the default serializer to be registered")
+    }
+
+    if false == strings.HasPrefix(resolved.ContentType(), "application/json") {
+        t.Fatalf("expected the json serializer as the default, got %q", resolved.ContentType())
+    }
+}
+
+/*
+TestBootContainer_TheApplicationsOwnDefaultSerializerIsSubstitutedNotCollided
+pins the gate over the same id, so registering a default serializer is a
+substitution rather than the boot collision every ungated framework id answered
+with.
+*/
+func TestBootContainer_TheApplicationsOwnDefaultSerializerIsSubstitutedNotCollided(t *testing.T) {
+    applicationInstance := NewApplication(
+        testhelper.NewEmbeddedEnvFs(),
+        testhelper.NewEmbeddedStaticFs(),
+    )
+
+    ownSerializer := serializer.NewPlainTextSerializer()
+
+    applicationInstance.RegisterService(
+        serializer.ServiceSerializer,
+        func(resolver containercontract.Resolver) (serializercontract.Serializer, error) {
+            return ownSerializer, nil
+        },
+    )
+
+    kernelInstance := applicationInstance.Boot()
+
+    resolved, resolveErr := container.FromResolver[serializercontract.Serializer](
+        kernelInstance.ServiceContainer(),
+        serializer.ServiceSerializer,
+    )
+    if nil != resolveErr {
+        t.Fatalf("unexpected resolve error: %v", resolveErr)
+    }
+
+    if ownSerializer != resolved {
+        t.Fatalf("expected the application's own default serializer to be served")
     }
 }

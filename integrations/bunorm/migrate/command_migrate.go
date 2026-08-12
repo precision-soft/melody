@@ -1,6 +1,7 @@
 package migrate
 
 import (
+    "fmt"
     "time"
 
     "strconv"
@@ -97,13 +98,23 @@ func (instance *MigrateCommand) Run(runtimeInstance runtimecontract.Runtime, com
         return nil
     }
 
+    groupString := "<none>"
+    if nil != group {
+        groupString = group.String()
+    }
+
+    /* the run that changed the schema says so on the plain text, the way the rollback sibling always has. The line lived inside wantsDetail(), so a deploy log captured a warning for the run that did nothing and not one byte for the run that applied five migrations — the operator reading it at three in the morning could not tell which of the two had happened. The manager label is the one resolveDatabase already computed and this branch used to throw away outside the detail block. */
+    outputInstance.printTextSuccess(
+        fmt.Sprintf(
+            "applied %s to %s (group %s)",
+            pluralizeMigrations(appliedCount),
+            managerName,
+            groupString,
+        ),
+    )
+
     if true == outputInstance.wantsDetail() {
         outputInstance.newline()
-
-        groupString := "<none>"
-        if nil != group {
-            groupString = group.String()
-        }
 
         outputInstance.printDetailsBlock(map[string]string{
             "manager": managerName,

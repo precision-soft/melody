@@ -3,6 +3,7 @@ package cron
 import (
     "encoding/json"
     "context"
+    "errors"
     "fmt"
     "os"
     "path/filepath"
@@ -16,6 +17,7 @@ import (
     "github.com/precision-soft/melody/container"
     containercontract "github.com/precision-soft/melody/container/contract"
     "github.com/precision-soft/melody/exception"
+    exceptioncontract "github.com/precision-soft/melody/exception/contract"
     "github.com/precision-soft/melody/runtime"
 )
 
@@ -2409,9 +2411,12 @@ func TestGenerateCommand_JsonReportsTheFailureAndWhatWasAlreadyWritten(t *testin
             Writes []map[string]any `json:"writes"`
         } `json:"data"`
         Error *struct {
-            Code  string `json:"code"`
-            Cause struct {
-                Message string `json:"message"`
+            Code    string         `json:"code"`
+            Message string         `json:"message"`
+            Details map[string]any `json:"details"`
+            Cause   *struct {
+                Message string              `json:"message"`
+                Details map[string][]string `json:"details"`
             } `json:"cause"`
         } `json:"error"`
     }{}
@@ -2427,8 +2432,25 @@ func TestGenerateCommand_JsonReportsTheFailureAndWhatWasAlreadyWritten(t *testin
         t.Fatalf("expected the generate-failed code, got %q", document.Error.Code)
     }
 
+    if nil == document.Error.Cause {
+        t.Fatalf("expected the failure to carry its cause, got %q", stdout)
+    }
+
     if false == strings.Contains(document.Error.Cause.Message, "logs-dir") {
         t.Fatalf("expected the cause to name the missing logs-dir, got %q", document.Error.Cause.Message)
+    }
+
+    /* the document used to flatten every failure to that one sentence — details and cause.details were nil on every run alike — while the journal, over the same value at the same instant, carried the context and the whole chain under it */
+    if nil == document.Error.Details {
+        t.Fatalf("expected the failure details to be an object, got %q", stdout)
+    }
+
+    if 0 == len(document.Error.Cause.Details["chain"]) {
+        t.Fatalf("expected the cause chain inside the failure, got %q", stdout)
+    }
+
+    if false == strings.Contains(document.Error.Cause.Details["chain"][0], "logs-dir") {
+        t.Fatalf("expected the chain to start at the failure itself, got %v", document.Error.Cause.Details["chain"])
     }
 
     /* the writes key stays an array on a failed run: a consumer keying on it must not meet a null */
@@ -3003,5 +3025,79 @@ func TestRunKeepsARelativeFlagPathRelativeToTheWorkingDirectory(t *testing.T) {
 
     if _, statErr := os.Stat(filepath.Join(projectDirectory, "var", "cron", "crontab")); nil == statErr {
         t.Fatal("expected the flag path not to be anchored at the project directory")
+    }
+}
+
+/*
+TestErrorDetailsOf_CarriesTheFailuresOwnContext pins the guard where it lives.
+The envelope's details and cause were nil on every failure alike, so the
+machine document — the one a deploy pipeline reads — was the single rendering
+that threw away what the error already carried. The rule is asserted here
+rather than through the command, because the generate failures reachable from
+the command carry no context of their own and would leave the rule
+unobservable: the guard would pass just as well emptied.
+*/
+func TestErrorDetailsOf_CarriesTheFailuresOwnContext(t *testing.T) {
+    runErr := exception.NewError(
+        "the cron manifest could not be renamed into place",
+        exceptioncontract.Context{"destination": "/etc/cron.d/app", "source": "/tmp/app.tmp"},
+        errors.New("permission denied"),
+    )
+
+    details := errorDetailsOf(runErr)
+
+    if "/etc/cron.d/app" != details["destination"] {
+        t.Fatalf("expected the failure's own context in the details, got %#v", details)
+    }
+
+    if "/tmp/app.tmp" != details["source"] {
+        t.Fatalf("expected the failure's own context in the details, got %#v", details)
+    }
+}
+
+/* a failure carrying no context still answers an object: a field whose json type changes with the outcome cannot be consumed at all */
+func TestErrorDetailsOf_KeepsAnObjectWithoutAContext(t *testing.T) {
+    details := errorDetailsOf(errors.New("bare failure"))
+
+    if nil == details {
+        t.Fatal("expected an empty object rather than nil")
+    }
+
+    if 0 != len(details) {
+        t.Fatalf("expected the details to be empty for a bare failure, got %#v", details)
+    }
+}
+
+/* the cause starts at the failure itself here, unlike the migrate envelope: this document's message is a fixed label, so the failure's own sentence lives in the cause */
+func TestErrorCauseOf_StartsAtTheFailureAndCarriesTheChain(t *testing.T) {
+    runErr := exception.NewError(
+        "the cron manifest could not be renamed into place",
+        nil,
+        errors.New("permission denied"),
+    )
+
+    cause := errorCauseOf(runErr)
+    if nil == cause {
+        t.Fatal("expected the failure to carry its cause")
+    }
+
+    if false == strings.Contains(cause.Message, "could not be renamed") {
+        t.Fatalf("expected the cause to be the failure's own sentence, got %q", cause.Message)
+    }
+
+    chain, isChain := cause.Details["chain"].([]string)
+    if false == isChain || 2 > len(chain) {
+        t.Fatalf("expected the whole chain beneath the failure, got %#v", cause.Details)
+    }
+
+    if false == strings.Contains(strings.Join(chain, " | "), "permission denied") {
+        t.Fatalf("expected the chain to reach the bottom, got %#v", chain)
+    }
+}
+
+/* a failure with nothing under it answers no cause at all: a null there is the honest answer, unlike the null the field used to carry on every failure alike */
+func TestErrorCauseOf_AnswersNothingForAFailureWithoutACause(t *testing.T) {
+    if nil != errorCauseOf(nil) {
+        t.Fatal("expected no cause for a nil failure")
     }
 }

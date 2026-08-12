@@ -4,9 +4,9 @@ go 1.25.0
 
 require (
 	github.com/precision-soft/melody/v3 v3.11.0
-	github.com/uptrace/bun v1.2.16
-	github.com/uptrace/bun/dialect/pgdialect v1.2.16
-	github.com/uptrace/bun/driver/pgdriver v1.2.16
+	github.com/uptrace/bun v1.2.17
+	github.com/uptrace/bun/dialect/pgdialect v1.2.17
+	github.com/uptrace/bun/driver/pgdriver v1.2.17
 )
 
 require (

@@ -4,8 +4,8 @@ go 1.24.0
 
 require (
 	github.com/precision-soft/melody/v3 v3.6.0
-	github.com/uptrace/bun v1.2.16
-	github.com/uptrace/bun/dialect/mysqldialect v1.2.16
+	github.com/uptrace/bun v1.2.17
+	github.com/uptrace/bun/dialect/mysqldialect v1.2.17
 )
 
 require (

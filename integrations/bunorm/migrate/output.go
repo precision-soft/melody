@@ -1,6 +1,7 @@
 package migrate
 
 import (
+    "errors"
     "fmt"
     "io"
     "strconv"
@@ -8,6 +9,8 @@ import (
 
     "github.com/precision-soft/melody/cli"
     "github.com/precision-soft/melody/cli/output"
+    "github.com/precision-soft/melody/exception"
+    exceptioncontract "github.com/precision-soft/melody/exception/contract"
 )
 
 type commandOutput struct {
@@ -96,7 +99,12 @@ func (instance *commandOutput) finish(command string, startedAt time.Time, runEr
     }
 
     if nil != runErr {
-        envelope.Error = output.NewError("migrate.failed", runErr.Error(), nil, nil)
+        envelope.Error = output.NewError(
+            "migrate.failed",
+            runErr.Error(),
+            errorDetailsOf(runErr),
+            errorCauseOf(runErr),
+        )
     }
 
     renderErr := output.Render(instance.writer, envelope, instance.option)
@@ -105,6 +113,59 @@ func (instance *commandOutput) finish(command string, startedAt time.Time, runEr
     }
 
     return renderErr
+}
+
+/*
+errorDetailsOf and errorCauseOf fill the two fields the json envelope always
+declared and always answered null. The machine document is the contract a
+pipeline reads, and it was the one rendering that threw away what the error
+already carried: at the same instant, over the same value, the journal filed
+the connection, the pool sizing, the deadlines and the whole cause chain, while
+stdout answered `"details":null,"cause":null` beside a single sentence.
+
+The details object is empty rather than null when the error carries no context,
+so the field keeps its json type on every failure — the rule the machine
+contracts of this family were put on.
+*/
+func errorDetailsOf(runErr error) map[string]any {
+    details := map[string]any{}
+
+    var provider exceptioncontract.ContextProvider
+    if true == errors.As(runErr, &provider) && nil != provider {
+        for key, value := range provider.Context() {
+            details[key] = value
+        }
+    }
+
+    return details
+}
+
+/* errorCauseOf answers the first link under the failure together with the whole chain beneath it, and nothing at all when the failure has no cause — a null there is the honest answer, unlike the null the field used to carry on every failure alike. */
+func errorCauseOf(runErr error) *output.ErrorCause {
+    causeChain := exception.BuildCauseChain(errors.Unwrap(runErr), 8)
+    if 0 == len(causeChain) {
+        return nil
+    }
+
+    return output.NewErrorCause(causeChain[0], map[string]any{"chain": causeChain})
+}
+
+/* pluralizeMigrations renders the applied count the way a log line reads it, so a single migration does not report "1 migrations" */
+func pluralizeMigrations(count int) string {
+    if 1 == count {
+        return "1 migration"
+    }
+
+    return strconv.Itoa(count) + " migrations"
+}
+
+/* printTextSuccess writes the line a person reads and leaves the machine document untouched: under json the same run already carries the applied count, the group and the migration names as structured fields, so a prose duplicate would be a second and weaker spelling of what the consumer already has. */
+func (instance *commandOutput) printTextSuccess(message string) {
+    if true == instance.isJson() {
+        return
+    }
+
+    instance.printSuccess(message)
 }
 
 func (instance *commandOutput) printSuccess(message string) {

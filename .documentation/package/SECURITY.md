@@ -22,7 +22,7 @@ The [`security`](../../security) package provides Melody’s HTTP security build
 - Model authentication state via `Token` implementations (`AuthenticatedToken`, `AnonymousToken`).
 - Define `Firewall` evaluation by applying `Rule` checks and resolving a request `Token` via a `TokenSource`.
 - Provide path-based access control rules (`AccessControlRule`) with deterministic match priority.
-- Provide role/attribute authorization via `AccessDecisionManager` and `Voter` implementations.
+- Provide role/attribute authorization via `AccessDecisionManager` and `Voter` implementations. A substituted manager receives the declared role hierarchy through the `RoleHierarchyAware` capability, and is refused at compilation if it cannot apply one.
 - Provide event types and standard kernel listeners for:
     - security context resolution (`RegisterKernelSecurityResolutionListener`)
     - access control enforcement (`RegisterKernelAccessControlListener`)
@@ -342,9 +342,11 @@ Rotate on the way out too: logout should clear the session ([`Session.Clear`](..
 - [`NewResolverTokenSource(resolver securitycontract.TokenResolver)`](../../security/token_source.go)
 - [`NewAccessDecisionManager(strategy securitycontract.DecisionStrategy, voters ...securitycontract.Voter)`](../../security/access_decision_manager.go)
 - [`NewAccessDecisionManagerWithVoters(strategy securitycontract.DecisionStrategy, voters []securitycontract.Voter)`](../../security/access_decision_manager.go)
+- [`type RoleHierarchyAware`](../../security/access_decision_manager.go) — the optional capability an `AccessDecisionManager` implements to receive the declared role hierarchy at compilation, answering the manager that applies it. The built-in manager implements it by wrapping its own `RoleVoter`s; a manager that does not implement it and is handed a hierarchy is **refused at compilation, by firewall name**, because the alternative was silence: the assertion the compilation used to make on the concrete type let a foreign manager — even a delegating wrapper — skip the upgrade, so `ROLE_ADMIN: [ROLE_USER]` stopped applying on the enforcement path while `IsGranted`, which expands the hierarchy straight from the compiled firewall, kept answering for it
+- [`(*AccessDecisionManager).WithRoleHierarchy(roleHierarchy *RoleHierarchy)`](../../security/access_decision_manager.go) — answers a manager whose built-in role voters read the expanded roles, leaving every other voter as it was; a nil hierarchy answers the manager unchanged
 - [`RefusalReasonEmptyAttributeList`, `RefusalReasonNoAttributeGranted`, `RefusalReasonAllVotersAbstained`, `RefusalReasonNoVoterSupportsAttribute`, `RefusalReasonAffirmativeNoGrant`, `RefusalReasonConsensusDenied`, `RefusalReasonConsensusTie`, `RefusalReasonUnanimousDenied`, `RefusalReasonUnanimousNoGrant`](../../security/access_decision_manager.go) — the branch a `403` names in its context
 - [`NewRoleVoter()`](../../security/voter.go)
-- [`NewRoleHierarchyVoter(roleHierarchy *RoleHierarchy, delegate *RoleVoter)`](../../security/role_hierarchy_voter.go)
+- [`NewRoleHierarchyVoter(roleHierarchy *RoleHierarchy, delegate securitycontract.Voter)`](../../security/role_hierarchy_voter.go) — the delegate is any `Voter`, so an integrator's own voter can be handed the expanded roles instead of reimplementing the expansion rule
 - [`NewSecurityContext(firewall *CompiledFirewall, token securitycontract.Token)`](../../security/security_context.go)
 - [`NewFirewall(rules ...securitycontract.Rule)`](../../security/firewall.go)
 - [`NewFirewallManager(compiledConfiguration *CompiledConfiguration)`](../../security/firewall_manager.go)

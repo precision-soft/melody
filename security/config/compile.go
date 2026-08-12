@@ -5,7 +5,6 @@ import (
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
     "github.com/precision-soft/melody/internal"
     "github.com/precision-soft/melody/security"
-    securitycontract "github.com/precision-soft/melody/security/contract"
 )
 
 /* Compile turns a Configuration into the compiled form the runtime reads. The argument is the thing to know about this door: Configuration carries only unexported fields and no constructor, and Builder never hands one out, so no caller outside this package can build a non-empty one — a composition root calling Compile from outside gets the empty configuration's answer, which is a nil compiled configuration and a nil error, meaning "no security was declared". That is the ordinary case and not a hidden failure: the application installs security through the module hook, which is the only writer of the field the runtime reads, and a nil there simply means no module registered any. The public path from a declaration to the runtime is Builder.BuildAndCompile. */
@@ -120,24 +119,36 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
             }
         }
 
-        if nil != effectiveRoleHierarchy && nil != effectiveDecisionManager {
-            if dm, ok := effectiveDecisionManager.(*security.AccessDecisionManager); true == ok {
-                upgradedVoters := make([]securitycontract.Voter, 0, len(dm.Voters()))
-                upgraded := false
-
-                for _, voter := range dm.Voters() {
-                    if rv, isRoleVoter := voter.(*security.RoleVoter); true == isRoleVoter {
-                        upgradedVoters = append(upgradedVoters, security.NewRoleHierarchyVoter(effectiveRoleHierarchy, rv))
-                        upgraded = true
-                    } else {
-                        upgradedVoters = append(upgradedVoters, voter)
-                    }
-                }
-
-                if true == upgraded {
-                    effectiveDecisionManager = security.NewAccessDecisionManagerWithVoters(dm.Strategy(), upgradedVoters)
-                }
+        /* the hierarchy reaches the decision manager through the optional capability, never through an assertion on the concrete type: asserting made a manager of the integrator's own — even a wrapper that only delegated — skip the upgrade in silence, so the declared hierarchy stopped applying on the enforcement path while security.IsGranted, which expands it straight from the compiled firewall, kept answering for it. A manager handed a hierarchy it cannot apply is refused here by name, because the alternative is a firewall that grants through one door and answers 403 through the other, with no record on either */
+        if nil != effectiveRoleHierarchy && false == internal.IsNilInterface(effectiveDecisionManager) {
+            hierarchyAware, isHierarchyAware := effectiveDecisionManager.(security.RoleHierarchyAware)
+            if false == isHierarchyAware {
+                return nil, exception.NewError(
+                    "security access decision manager cannot apply the declared role hierarchy",
+                    exceptioncontract.Context{
+                        "firewallName":          firewall.name,
+                        "roleHierarchySource":   roleHierarchySource,
+                        "decisionManagerSource": decisionManagerSource,
+                        "capability":            "security.RoleHierarchyAware",
+                    },
+                    nil,
+                )
             }
+
+            upgradedDecisionManager := hierarchyAware.WithRoleHierarchy(effectiveRoleHierarchy)
+            if true == internal.IsNilInterface(upgradedDecisionManager) {
+                return nil, exception.NewError(
+                    "security access decision manager answered no manager for the declared role hierarchy",
+                    exceptioncontract.Context{
+                        "firewallName":          firewall.name,
+                        "roleHierarchySource":   roleHierarchySource,
+                        "decisionManagerSource": decisionManagerSource,
+                    },
+                    nil,
+                )
+            }
+
+            effectiveDecisionManager = upgradedDecisionManager
         }
 
         effectiveEntryPoint := firewall.override.entryPoint

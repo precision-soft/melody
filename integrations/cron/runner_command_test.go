@@ -1,7 +1,9 @@
 package cron
 
 import (
+    "bytes"
     "context"
+    "encoding/json"
     "errors"
     "fmt"
     "io"
@@ -2223,13 +2225,29 @@ func TestRunnerCommand_InvokeInstallsThePerRunIdentity(t *testing.T) {
     }
 }
 
-/* the runner accepts the standard flags every melody command carries, so the framework's -v rewrite no longer kills it at parse. */
+/* the runner accepts the standard flags every melody command carries, so the framework's -v rewrite no longer kills it at parse, and it carries its own two beside them. Asserted by name rather than by count: a count passes just as well when a standard flag is swapped for another, which is not what the sentence above claims. */
 func TestRunnerCommand_CarriesTheStandardFlags(t *testing.T) {
     runner := NewRunnerCommand(NewConfiguration(), RunnerDialectCrontab)
 
-    expectedFlagCount := 1 + len(output.StandardFlags())
-    if expectedFlagCount != len(runner.Flags()) {
-        t.Fatalf("expected %d flags (--once + the standard set), got %d", expectedFlagCount, len(runner.Flags()))
+    declared := map[string]bool{}
+    for _, flag := range runner.Flags() {
+        for _, name := range flag.Names() {
+            declared[name] = true
+        }
+    }
+
+    for _, standardFlag := range output.StandardFlags() {
+        for _, name := range standardFlag.Names() {
+            if false == declared[name] {
+                t.Fatalf("expected the standard flag %q to be declared", name)
+            }
+        }
+    }
+
+    for _, ownFlag := range []string{flagNameOnce, flagNameReportIdle} {
+        if false == declared[ownFlag] {
+            t.Fatalf("expected the runner's own flag %q to be declared", ownFlag)
+        }
     }
 }
 
@@ -2643,4 +2661,524 @@ func TestRunnerCommand_EntryArgumentsReachTheScheduledCommand(t *testing.T) {
     if string(output.FormatJson) != job.observedFormat {
         t.Fatalf("expected the entry's own posture to reach the child, got %q", job.observedFormat)
     }
+}
+
+/* newCapturingRunnerRuntime is a runtime whose logger records every line, which is how the runner's own declarations and failure records are read back. */
+func newCapturingRunnerRuntime(ctx context.Context) (runtimecontract.Runtime, *capturingRunnerLogger) {
+    captured := &capturingRunnerLogger{}
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return captured, nil
+        },
+    )
+
+    return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer), captured
+}
+
+/*
+TestRunnerCommand_OnceRendersTheMachineDocument pins the document a deploy step
+reads. The command declared and validated --format=json through StandardFlags
+and then answered zero bytes on every path: `melody:cron:run --once
+--format=json | jq` received an empty stream, which is indistinguishable, to
+the step consuming it, from a missing binary. The only observable effect the
+flag had was that the cli banner disappeared.
+*/
+func TestRunnerCommand_OnceRendersTheMachineDocument(t *testing.T) {
+    job := newRecordingCommand("job:top")
+
+    configuration := NewConfiguration().
+        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner.now = func() time.Time {
+        return time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
+    }
+
+    buffer := &bytes.Buffer{}
+
+    cliCommand := &urfavecli.Command{
+        Name:   runner.Name(),
+        Flags:  runner.Flags(),
+        Writer: buffer,
+        Action: func(ctx context.Context, commandContext *urfavecli.Command) error {
+            return runner.Run(newRunnerTestRuntime(ctx), commandContext)
+        },
+    }
+
+    if runErr := cliCommand.Run(context.Background(), []string{runner.Name(), "--once", "--format=json"}); nil != runErr {
+        t.Fatalf("unexpected error running --once: %v", runErr)
+    }
+
+    if 0 == buffer.Len() {
+        t.Fatal("expected --format=json to answer a document, got an empty stream")
+    }
+
+    document := struct {
+        Meta struct {
+            Command string `json:"command"`
+        } `json:"meta"`
+        Data struct {
+            Configured int `json:"configured"`
+            Ran        []struct {
+                Command  string `json:"command"`
+                Schedule string `json:"schedule"`
+                RunId    string `json:"runId"`
+                Failed   bool   `json:"failed"`
+            } `json:"ran"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal(buffer.Bytes(), &document); nil != decodeErr {
+        t.Fatalf("expected one json document, got %q: %v", buffer.String(), decodeErr)
+    }
+
+    if runner.Name() != document.Meta.Command {
+        t.Fatalf("expected the runner to name itself, got %q", document.Meta.Command)
+    }
+
+    if 1 != document.Data.Configured {
+        t.Fatalf("expected the configured count, got %d", document.Data.Configured)
+    }
+
+    if 1 != len(document.Data.Ran) {
+        t.Fatalf("expected the dispatched run in the document, got %v", document.Data.Ran)
+    }
+
+    if "job:top" != document.Data.Ran[0].Command {
+        t.Fatalf("expected the dispatched command, got %q", document.Data.Ran[0].Command)
+    }
+
+    if "0 * * * *" != document.Data.Ran[0].Schedule {
+        t.Fatalf("expected the schedule the entry runs under, got %q", document.Data.Ran[0].Schedule)
+    }
+
+    if "" == document.Data.Ran[0].RunId {
+        t.Fatalf("expected the run id its own records carry, got %q", document.Data.Ran[0].RunId)
+    }
+
+    if true == document.Data.Ran[0].Failed {
+        t.Fatalf("expected the healthy run to be reported as such, got %v", document.Data.Ran[0])
+    }
+}
+
+/* a failed run puts the failure inside the envelope's error, naming which command failed, so the document reports the same verdict as the exit code */
+func TestRunnerCommand_OnceRendersTheFailureInsideTheDocument(t *testing.T) {
+    failing := newRecordingCommand("job:failing")
+    failing.runErr = errors.New("boom")
+
+    configuration := NewConfiguration().
+        Schedule("job:failing", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, failing)
+    runner.now = func() time.Time {
+        return time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
+    }
+
+    buffer := &bytes.Buffer{}
+    runtimeInstance, _ := newCapturingRunnerRuntime(context.Background())
+
+    cliCommand := &urfavecli.Command{
+        Name:   runner.Name(),
+        Flags:  runner.Flags(),
+        Writer: buffer,
+        Action: func(ctx context.Context, commandContext *urfavecli.Command) error {
+            return runner.Run(runtimeInstance, commandContext)
+        },
+    }
+
+    if runErr := cliCommand.Run(context.Background(), []string{runner.Name(), "--once", "--format=json"}); nil == runErr {
+        t.Fatal("expected the failed job to fail the run")
+    }
+
+    document := struct {
+        Data struct {
+            Ran []struct {
+                Command string `json:"command"`
+                Failed  bool   `json:"failed"`
+                Error   string `json:"error"`
+            } `json:"ran"`
+        } `json:"data"`
+        Error *struct {
+            Code    string              `json:"code"`
+            Details map[string][]string `json:"details"`
+        } `json:"error"`
+    }{}
+    if decodeErr := json.Unmarshal(buffer.Bytes(), &document); nil != decodeErr {
+        t.Fatalf("expected one json document, got %q: %v", buffer.String(), decodeErr)
+    }
+
+    if nil == document.Error {
+        t.Fatalf("expected the failure inside the envelope, got %q", buffer.String())
+    }
+
+    if "cron.runFailed" != document.Error.Code {
+        t.Fatalf("expected the run-failed code, got %q", document.Error.Code)
+    }
+
+    if 1 != len(document.Error.Details["failed"]) || "job:failing" != document.Error.Details["failed"][0] {
+        t.Fatalf("expected the failed command named in the details, got %v", document.Error.Details)
+    }
+
+    if 1 != len(document.Data.Ran) || false == document.Data.Ran[0].Failed {
+        t.Fatalf("expected the run itself to be reported as failed, got %v", document.Data.Ran)
+    }
+
+    if false == strings.Contains(document.Data.Ran[0].Error, "boom") {
+        t.Fatalf("expected the run to carry its own failure, got %q", document.Data.Ran[0].Error)
+    }
+}
+
+/*
+TestRunnerCommand_DeclaresWhatItDrives pins the other half of the same silence.
+A scheduler built over a configuration emptied by a refactor, or whose entries
+an environment gate filtered away, ran forever, exited successfully and wrote
+not one byte on any channel: nothing distinguished it from a healthy one, and
+the absence was noticed days later, when the nightly sweep turned out not to
+have run.
+*/
+func TestRunnerCommand_DeclaresWhatItDrives(t *testing.T) {
+    job := newRecordingCommand("job:top")
+
+    configuration := NewConfiguration().
+        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+
+    runtimeInstance, captured := newCapturingRunnerRuntime(context.Background())
+
+    runner.declareSchedule(runtimeInstance)
+
+    record, found := captured.recordByMessageProbe("cron runner drives the scheduled entries")
+    if false == found {
+        t.Fatalf("expected the runner to declare what it drives, got %v", captured.entries)
+    }
+
+    if 1 != record.context["entries"] {
+        t.Fatalf("expected the entry count, got %v", record.context["entries"])
+    }
+
+    scheduled, isList := record.context["scheduled"].([]map[string]any)
+    if false == isList || 1 != len(scheduled) {
+        t.Fatalf("expected the scheduled entries in the record, got %v", record.context["scheduled"])
+    }
+
+    if "job:top" != scheduled[0]["command"] {
+        t.Fatalf("expected the command name, got %v", scheduled[0]["command"])
+    }
+
+    if "0 * * * *" != scheduled[0]["schedule"] {
+        t.Fatalf("expected the schedule the entry runs under, got %v", scheduled[0]["schedule"])
+    }
+}
+
+/* a runner driving nothing says so at warning, mirroring the generator's own nothingToWrite: a configuration emptied by a refactor is exactly the case where silence reads as health */
+func TestRunnerCommand_DeclaresAnEmptyScheduleAsAWarning(t *testing.T) {
+    runner := NewRunnerCommand(NewConfiguration(), RunnerDialectCrontab)
+
+    runtimeInstance, captured := newCapturingRunnerRuntime(context.Background())
+
+    runner.declareSchedule(runtimeInstance)
+
+    record, found := captured.recordByMessageProbe("cron runner drives no scheduled entries: nothing will ever be dispatched")
+    if false == found {
+        t.Fatalf("expected the empty schedule to be declared, got %v", captured.entries)
+    }
+
+    if 0 != record.context["entries"] {
+        t.Fatalf("expected the zero count, got %v", record.context["entries"])
+    }
+}
+
+/*
+TestRunScheduledCommand_APanicKeepsItsCauseChain pins the record a panicking
+job produces. The recovery boundary joined its rich error onto the (nil) run
+error, and errors.Join answers an Unwrap of []error while exception.LogContext
+anchors cause and causeChain on errors.Unwrap — the single-value form — so the
+record carried the top message and nothing else: not the context naming the
+parameter, not the chain naming what refused. The same failure RETURNED rather
+than raised filed a complete record, which is the difference this closes.
+*/
+func TestRunScheduledCommand_APanicKeepsItsCauseChain(t *testing.T) {
+    dialErr := errors.New("dial tcp 10.0.0.9:5432: connect: connection refused")
+
+    job := &panicValueCommand{
+        commandName: "job:panicking",
+        panicValue: exception.NewError(
+            "the ledger client refused the handshake",
+            exceptioncontract.Context{"ledger": "acme-prod", "endpoint": "10.0.0.9:5432"},
+            dialErr,
+        ),
+    }
+
+    configuration := NewConfiguration().
+        Schedule("job:panicking", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+
+    runtimeInstance, captured := newCapturingRunnerRuntime(context.Background())
+
+    at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
+    if runErr := runner.runDue(runtimeInstance, at); nil == runErr {
+        t.Fatal("expected the panicking job to fail the run")
+    }
+
+    record, found := captured.recordByMessageProbe("cron runner command failed")
+    if false == found {
+        t.Fatalf("expected the failure record, got %v", captured.entries)
+    }
+
+    if nil == record.context["cause"] {
+        t.Fatalf("expected the panic's cause in the record, got %v", record.context)
+    }
+
+    if false == strings.Contains(fmt.Sprintf("%v", record.context["cause"]), "refused the handshake") {
+        t.Fatalf("expected the cause to be the panic's own error, got %v", record.context["cause"])
+    }
+
+    causeChain, isChain := record.context["causeChain"].([]string)
+    if false == isChain || 2 > len(causeChain) {
+        t.Fatalf("expected the whole cause chain in the record, got %v", record.context["causeChain"])
+    }
+
+    if false == strings.Contains(strings.Join(causeChain, " | "), "connection refused") {
+        t.Fatalf("expected the chain to reach what refused, got %v", causeChain)
+    }
+
+    /* the context of the panic error itself travels under causeContextChain, which is where LogContext files the context of every link below the top one: the ledger and the endpoint are exactly what tells an outage from a credential change from a wiring fault, and none of the three reached any record while the boundary joined */
+    causeContextChain, isContextChain := record.context["causeContextChain"].([]map[string]any)
+    if false == isContextChain || 0 == len(causeContextChain) {
+        t.Fatalf("expected the cause context chain in the record, got %v", record.context["causeContextChain"])
+    }
+
+    if "acme-prod" != causeContextChain[0]["ledger"] {
+        t.Fatalf("expected the panic error's own context in the record, got %v", causeContextChain)
+    }
+
+    if "10.0.0.9:5432" != causeContextChain[0]["endpoint"] {
+        t.Fatalf("expected the panic error's own context in the record, got %v", causeContextChain)
+    }
+}
+
+/* panicValueCommand panics with a value the test chooses, so the boundary's handling of a rich error-shaped panic is observable */
+type panicValueCommand struct {
+    commandName string
+    panicValue  any
+}
+
+func (instance *panicValueCommand) Name() string {
+    return instance.commandName
+}
+
+func (instance *panicValueCommand) Description() string {
+    return "panicking command with a chosen value"
+}
+
+func (instance *panicValueCommand) Flags() []clicontract.Flag {
+    return nil
+}
+
+func (instance *panicValueCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+    panic(instance.panicValue)
+}
+
+/* a timeout carries the command's own failure down one chain: both stay reachable by identity, and the record built from that chain reaches the command's own context instead of stopping at the join */
+func TestTimeoutError_CarriesTheCommandFailureDownOneChain(t *testing.T) {
+    runner := &RunnerCommand{unwindGrace: commandUnwindGrace}
+    entry := &scheduledRunEntry{commandName: "job:top", timeout: time.Minute}
+
+    commandErr := exception.NewError(
+        "the nightly sweep could not reach its ledger",
+        exceptioncontract.Context{"ledger": "acme-prod"},
+        errors.New("connection refused"),
+    )
+
+    timeoutErr := runner.timeoutError(entry, false, commandErr)
+
+    if false == errors.Is(timeoutErr, ErrCommandTimeout) {
+        t.Fatalf("expected the classification to stay reachable, got %v", timeoutErr)
+    }
+
+    if false == errors.Is(timeoutErr, commandErr) {
+        t.Fatalf("expected the command's own failure to stay reachable, got %v", timeoutErr)
+    }
+
+    logContext := exception.LogContext(timeoutErr)
+
+    causeChain, isChain := logContext["causeChain"].([]string)
+    if false == isChain || 3 > len(causeChain) {
+        t.Fatalf("expected the whole chain in the record, got %v", logContext["causeChain"])
+    }
+
+    if false == strings.Contains(strings.Join(causeChain, " | "), "connection refused") {
+        t.Fatalf("expected the chain to reach what refused, got %v", causeChain)
+    }
+}
+
+/* a timeout with no command failure keeps the sentinel alone as its cause, so the shape a caller reads does not change with the presence of a second error */
+func TestTimeoutError_WithoutACommandFailureWrapsTheSentinelAlone(t *testing.T) {
+    runner := &RunnerCommand{unwindGrace: commandUnwindGrace}
+    entry := &scheduledRunEntry{commandName: "job:top", timeout: time.Minute}
+
+    timeoutErr := runner.timeoutError(entry, true, nil)
+
+    if ErrCommandTimeout != errors.Unwrap(timeoutErr) {
+        t.Fatalf("expected the sentinel as the sole cause, got %v", errors.Unwrap(timeoutErr))
+    }
+}
+
+/*
+TestInvoke_ACommandFailureAndAScopeCloseFailureBothSurvive pins the shape that
+replaced the join at the scope-close boundary. The command's own failure stays
+the wrapped one, so its context and its whole cause chain still reach the
+record; the close failure travels beside it in the context, where a join would
+have emptied both — errors.Join answers an Unwrap of []error and
+exception.LogContext anchors cause and causeChain on the single-value form.
+*/
+func TestInvoke_ACommandFailureAndAScopeCloseFailureBothSurvive(t *testing.T) {
+    job := newRecordingCommand("job:top")
+    job.runErr = exception.NewError(
+        "the nightly sweep could not reach its ledger",
+        exceptioncontract.Context{"ledger": "acme-prod"},
+        errors.New("connection refused"),
+    )
+
+    configuration := NewConfiguration().
+        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+
+    scopeCloseErr := errors.New("scope close failed")
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(
+        context.Background(),
+        serviceContainer.NewScope(),
+        failingScopeContainer{Container: serviceContainer, scopeCloseErr: scopeCloseErr},
+    )
+
+    _, invokeErr := runner.invoke(runtimeInstance, runner.entries[0])
+    if nil == invokeErr {
+        t.Fatal("expected the run to fail")
+    }
+
+    if false == errors.Is(invokeErr, job.runErr) {
+        t.Fatalf("expected the command's own failure to stay reachable, got %v", invokeErr)
+    }
+
+    logContext := exception.LogContext(invokeErr)
+
+    causeChain, isChain := logContext["causeChain"].([]string)
+    if false == isChain || 2 > len(causeChain) {
+        t.Fatalf("expected the command's whole chain in the record, got %v", logContext["causeChain"])
+    }
+
+    if false == strings.Contains(strings.Join(causeChain, " | "), "connection refused") {
+        t.Fatalf("expected the chain to reach what refused, got %v", causeChain)
+    }
+
+    if false == strings.Contains(fmt.Sprintf("%v", logContext["scopeCloseError"]), "child scope close failed") {
+        t.Fatalf("expected the close failure beside it in the context, got %v", logContext["scopeCloseError"])
+    }
+
+    closeChain, isCloseChain := logContext["scopeCloseErrorCauseChain"].([]string)
+    if false == isCloseChain || 0 == len(closeChain) {
+        t.Fatalf("expected the close failure's own chain, got %v", logContext["scopeCloseErrorCauseChain"])
+    }
+
+    if false == strings.Contains(strings.Join(closeChain, " | "), "scope close failed") {
+        t.Fatalf("expected the close failure's chain to reach its cause, got %v", closeChain)
+    }
+}
+
+/*
+TestRunLoop_IsSilentOnAMinuteThatDispatchedNothing pins the default posture of
+the scheduler loop's document. A per-minute document for an entry that runs
+once a night would be 1439 lines a day saying nothing, so a minute that
+dispatched nothing is silent unless --report-idle asks for it.
+*/
+func TestRunLoop_IsSilentOnAMinuteThatDispatchedNothing(t *testing.T) {
+    buffer, finished, cancel := driveOneIdleLoopMinute(t, false)
+    defer cancel()
+
+    <-finished
+
+    if 0 != buffer.Len() {
+        t.Fatalf("expected an idle minute to stay silent by default, got %q", buffer.String())
+    }
+}
+
+/*
+TestRunLoop_ReportsAnIdleMinuteWhenAsked pins the flag: without it a consumer
+cannot tell a live scheduler with nothing due from a dead one, since both write
+nothing at all.
+*/
+func TestRunLoop_ReportsAnIdleMinuteWhenAsked(t *testing.T) {
+    buffer, finished, cancel := driveOneIdleLoopMinute(t, true)
+    defer cancel()
+
+    <-finished
+
+    if 0 == buffer.Len() {
+        t.Fatalf("expected --report-idle to report the idle minute, got an empty stream")
+    }
+
+    document := struct {
+        Data struct {
+            Configured int             `json:"configured"`
+            Ran        []map[string]any `json:"ran"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal([]byte(strings.TrimSpace(buffer.String())), &document); nil != decodeErr {
+        t.Fatalf("expected one json document per idle minute, got %q: %v", buffer.String(), decodeErr)
+    }
+
+    if 1 != document.Data.Configured {
+        t.Fatalf("expected the configured count on an idle minute, got %d", document.Data.Configured)
+    }
+
+    if 0 != len(document.Data.Ran) {
+        t.Fatalf("expected an idle minute to dispatch nothing, got %v", document.Data.Ran)
+    }
+}
+
+/* driveOneIdleLoopMinute runs the scheduler loop across exactly one minute boundary on which no entry is due, and answers the loop's output buffer together with its completion. The clock trick is the one the loop's other tests use: the first reads sit just before the boundary, so the armed timer fires in milliseconds. */
+func driveOneIdleLoopMinute(t *testing.T, reportIdle bool) (*bytes.Buffer, chan error, context.CancelFunc) {
+    t.Helper()
+
+    /* the entry is due at minute 30 and the loop crosses minute 10, so the minute dispatches nothing while the runner still drives one configured entry */
+    configuration := NewConfiguration().
+        Schedule("job:never", &EntryConfig{Schedule: &Schedule{Minute: "30"}})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, newRecordingCommand("job:never"))
+
+    idleMinute := time.Date(2026, time.July, 15, 9, 10, 0, 0, time.UTC)
+
+    var nowCallCount atomic.Int32
+    runner.now = func() time.Time {
+        if 2 >= nowCallCount.Add(1) {
+            return idleMinute.Add(-5 * time.Millisecond)
+        }
+
+        return idleMinute
+    }
+
+    buffer := &bytes.Buffer{}
+    runner.reporting = &runReporting{
+        commandContext: &clicontract.CommandContext{Name: runner.Name(), Writer: buffer},
+        option:         output.NormalizeOption(output.Option{Format: output.FormatJson}),
+        reportIdle:     reportIdle,
+    }
+
+    ctx, cancel := context.WithCancel(context.Background())
+
+    finished := make(chan error, 1)
+    go func() {
+        finished <- runner.runLoop(newRunnerTestRuntime(ctx))
+    }()
+
+    /* the boundary is five milliseconds away; the wait is generous because what is asserted is what the loop wrote, not how fast it woke */
+    time.Sleep(250 * time.Millisecond)
+    cancel()
+
+    return buffer, finished, cancel
 }

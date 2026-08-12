@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- a migration read from a `.sql` file whose statement the database refuses now fails the command instead of being reported as applied. The module required `bun v1.2.16`, where the deferred `conn.Close()` / `tx.Rollback()` overwrote the exec failure with its own nil return, so `Migrate` answered nil for a statement that never ran: `db:migrate` printed `[success]`, exited 0, wrote nothing to the journal, and marked the migration applied — which made the failure unrepeatable and `db:status` report it as done. The requirement moves to `bun v1.2.17`, the oldest release that returns the exec failure, and a regression pin drives a refused `.up.sql` through the migrator built here and requires both halves: the refusal reaches the caller, and no row is written for it. Go migrations were never affected
 - the migration lock is released on a context detached from the command's own, so interrupting a running migration no longer leaves the lock row behind and refusing every later migration until someone runs the unlock command by hand. The cancelled context made the delete fail before it reached the database, and the failure was discarded; it is now reported
 
 ## [v3.1.0] - 2026-07-11 - Multi-Context Migrations and Per-Context Manager Pinning

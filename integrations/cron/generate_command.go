@@ -574,11 +574,12 @@ func (instance *GenerateCommand) reportWrites(
         }
 
         if nil != runErr {
+            /* the details and the cause used to be nil on every failure alike, so the machine document — the one a deploy pipeline reads — was the single rendering that threw away what the error already carried: a failed rename filed the destination and the source in the journal at the same instant and answered `"details":null,"cause":null` on stdout. The details object stays an object when the failure carries no context, so the field keeps its json type on every failure. */
             envelope.SetError(
                 "cron.generateFailed",
                 "the cron manifest generation failed",
-                nil,
-                output.NewErrorCause(runErr.Error(), nil),
+                errorDetailsOf(runErr),
+                errorCauseOf(runErr),
             )
         }
 
@@ -1103,3 +1104,27 @@ func isHeartbeatAutoEnabled(configuration configcontract.Configuration) (bool, e
 }
 
 var _ clicontract.Command = (*GenerateCommand)(nil)
+
+/* errorDetailsOf renders the failure's own context as the json envelope's details, an empty object rather than null when it carries none: a field whose json type changes with the outcome cannot be consumed at all. It is written here rather than shared with the migrate integration because the two are separate modules. */
+func errorDetailsOf(runErr error) map[string]any {
+    details := map[string]any{}
+
+    var provider exceptioncontract.ContextProvider
+    if true == errors.As(runErr, &provider) && nil != provider {
+        for key, value := range provider.Context() {
+            details[key] = value
+        }
+    }
+
+    return details
+}
+
+/* errorCauseOf answers the failure's text together with the whole chain beneath it. The chain starts at the failure itself rather than one link below, because this envelope's message is a fixed label — "the cron manifest generation failed" — so the cause is where the failure's own sentence lives; the migrate integration's envelope puts that sentence in the message and its cause therefore starts one link lower. */
+func errorCauseOf(runErr error) *output.ErrorCause {
+    causeChain := exception.BuildCauseChain(runErr, 8)
+    if 0 == len(causeChain) {
+        return nil
+    }
+
+    return output.NewErrorCause(causeChain[0], map[string]any{"chain": causeChain})
+}

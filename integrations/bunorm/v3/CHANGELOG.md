@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- the `bun` requirement moves to `v1.2.17`, with the dialect and driver packages in lockstep: the dialects verify at init that their version equals bun's and panic otherwise. v1.2.16 swallowed the failure of a migration read from a `.sql` file, which `integrations/bunorm/migrate` answered with `[success]` and exit 0 over a schema that never changed; the whole family moves together so no binary can assemble a mismatched pair
+
 ### Added
 
 - `MigrationProvider` is the optional capability of opening a connection tuned for migrations, and `ManagerRegistry.MigrationDatabase` answers it: the pool a provider opens for request traffic carries driver-level read and write deadlines sized for requests, and a legitimate DDL statement that runs past them — an ALTER TABLE adding constraints on a large table — is cut mid-statement with `invalid connection`, outside any transaction MySQL would roll back. A provider that implements the capability opens the same database with those deadlines lifted; the registry opens it once per definition, caches it beside the request pool — never inside it — and closes it on Close. A provider without the capability keeps the old behaviour: the ordinary pooled connection, reported as not dedicated
