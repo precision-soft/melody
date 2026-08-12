@@ -5,6 +5,7 @@ import (
     "fmt"
     "hash/fnv"
     "reflect"
+    "runtime/debug"
     "time"
 
     cachecontract "github.com/precision-soft/melody/cache/contract"
@@ -206,10 +207,11 @@ func executeRememberInFlightLeader(
             exception.NewError(
                 "cache remember cache access panicked",
                 map[string]any{
-                    "key":   key,
-                    "panic": fmt.Sprintf("%v", recoveredValue),
+                    "key":        key,
+                    "panic":      fmt.Sprintf("%v", recoveredValue),
+                    "panicStack": string(debug.Stack()),
                 },
-                nil,
+                exception.PanicCause(recoveredValue),
             ),
         )
     }()
@@ -343,6 +345,7 @@ func executeRememberCallbackSafely(
     result = nil
     callbackErr = nil
 
+    /* the panic value travels as the CAUSE and the stack is captured here, on the goroutine whose frames raised it. Stringified into the context alone, an error-shaped panic collapsed to its bare message: the context naming the parameter it could not read, the chain naming the connection that refused, and any file and line were all gone, so a handler's own bug reached the operator as a message and a cache key. */
     defer func() {
         recoveredValue := recover()
         if nil == recoveredValue {
@@ -352,10 +355,11 @@ func executeRememberCallbackSafely(
         callbackErr = exception.NewError(
             "cache remember callback panicked",
             map[string]any{
-                "key":   key,
-                "panic": fmt.Sprintf("%v", recoveredValue),
+                "key":        key,
+                "panic":      fmt.Sprintf("%v", recoveredValue),
+                "panicStack": string(debug.Stack()),
             },
-            nil,
+            exception.PanicCause(recoveredValue),
         )
 
         result = nil

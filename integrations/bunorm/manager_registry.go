@@ -4,6 +4,7 @@ import (
     "context"
     "fmt"
     "reflect"
+    "runtime/debug"
     "sort"
     "sync"
 
@@ -154,6 +155,16 @@ func isNilInterface(value any) bool {
     default:
         return false
     }
+}
+
+/* panicCause reads a recovered panic value as the cause of the error the recovery boundary fabricates in its place. It mirrors exception.PanicCause rather than calling it, because this module's go.mod pins a framework version that predates that door. A typed nil answers no cause: its Error() would dereference a nil receiver at the first render of the very record the boundary exists to hand on. */
+func panicCause(recovered any) error {
+    recoveredErr, isRecoveredError := recovered.(error)
+    if false == isRecoveredError || true == isNilInterface(recoveredErr) {
+        return nil
+    }
+
+    return recoveredErr
 }
 
 /* MigrationDatabase answers the connection the migration commands should run on: a dedicated one with the driver deadlines lifted when the provider implements MigrationProvider — reported through the second return — and the ordinary pooled connection otherwise. A request pool carries read and write deadlines sized for requests, and a DDL statement that legitimately runs past them is cut mid-statement with "invalid connection", outside any transaction MySQL would roll back; the dedicated connection exists so a long migration finishes instead. An empty name selects the default definition. The dedicated database is opened once per name, cached, and closed by Close. */
@@ -321,11 +332,15 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
         delete(instance.pendingOpenByName, name)
         instance.lock.Unlock()
 
-        /* the panic value rides along for the coalesced waiters: they receive this error instead of the re-raised panic, and without the value their log names the definition but not the refusal that produced it */
+        /* the panic value rides along for the coalesced waiters: they receive this error instead of the re-raised panic, and without the value their log names the definition but not the refusal that produced it. It travels as the CAUSE as well as in the context, and the stack is captured here: the re-raised panic reaches a boundary that records both, so the waiters — who never see that panic — were the only callers handed a flattened message, for the same failure, decided by which goroutine they were on. */
         pendingOpen.openError = exception.NewError(
             "bunorm manager provider panicked while opening",
-            map[string]any{"name": name, "panic": fmt.Sprintf("%v", recovered)},
-            nil,
+            map[string]any{
+                "name":       name,
+                "panic":      fmt.Sprintf("%v", recovered),
+                "panicStack": string(debug.Stack()),
+            },
+            panicCause(recovered),
         )
         close(pendingOpen.done)
 

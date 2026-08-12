@@ -926,3 +926,38 @@ func TestLogged_ANilErrorStaysNil(t *testing.T) {
         t.Fatalf("expected nil")
     }
 }
+
+/* an error-shaped panic value belongs in the cause slot: kept only in a context slot it collapses to its bare message at the render boundary, so the context and the cause chain of the very error that was raised reach no record. */
+func TestPanicCause_AnErrorShapedPanicTravelsAsTheCause(t *testing.T) {
+    rootCause := errors.New("connection refused")
+    panicValue := NewError("config parameter is not defined", nil, rootCause)
+
+    cause := PanicCause(panicValue)
+    if nil == cause {
+        t.Fatal("expected the error-shaped panic value to answer as the cause")
+    }
+
+    if false == errors.Is(cause, rootCause) {
+        t.Fatalf("expected the cause chain to survive, got %v", cause)
+    }
+}
+
+/* a typed nil answers no cause: its Error() dereferences a nil receiver, so a cause slot holding it would detonate at the first render of the record the boundary exists to write. */
+func TestPanicCause_ATypedNilAnswersNoCause(t *testing.T) {
+    var typedNil *Error
+
+    if nil != PanicCause(typedNil) {
+        t.Fatal("expected a typed-nil panic value to answer no cause")
+    }
+}
+
+/* a panic value that is not an error has no cause to give; the recovery boundary still renders it into the context. */
+func TestPanicCause_ANonErrorPanicAnswersNoCause(t *testing.T) {
+    if nil != PanicCause("scheduled command panicked on purpose") {
+        t.Fatal("expected a non-error panic value to answer no cause")
+    }
+
+    if nil != PanicCause(nil) {
+        t.Fatal("expected a nil panic value to answer no cause")
+    }
+}

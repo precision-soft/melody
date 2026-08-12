@@ -17,6 +17,7 @@ import (
     "github.com/precision-soft/melody/container"
     containercontract "github.com/precision-soft/melody/container/contract"
     "github.com/precision-soft/melody/exception"
+    exceptioncontract "github.com/precision-soft/melody/exception/contract"
     "github.com/precision-soft/melody/logging"
     loggingcontract "github.com/precision-soft/melody/logging/contract"
     "github.com/precision-soft/melody/runtime"
@@ -2284,4 +2285,146 @@ func TestInvoke_AnswersTheRunIdBesideTheOutcome(t *testing.T) {
     if "" == runId {
         t.Fatal("expected a non-empty run id beside the outcome")
     }
+}
+
+/* the runner's recovery boundary keeps what wakes an operator usefully: the panic value travels as the cause so errors.Is still reaches the failure underneath, and the stack is captured on the goroutine that raised it. Stringified into the context alone, a nightly job that died on the framework's own idiom reached the record as a message and a command name, with no file and no line anywhere. */
+func TestRunnerCommand_APanickingJobKeepsItsCauseAndItsStack(t *testing.T) {
+    rootCause := errors.New("dial tcp 10.0.0.7:5432: connect: connection refused")
+
+    job := &idiomaticPanickingCommand{
+        commandName: "job:panicking",
+        panicValue: exception.NewError(
+            "config parameter is not defined",
+            exceptioncontract.Context{"parameterName": "app.report.recipient"},
+            rootCause,
+        ),
+    }
+
+    configuration := NewConfiguration().
+        Schedule("job:panicking", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+
+    captured := &capturingRunnerLogger{}
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return captured, nil
+        },
+    )
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
+
+    runErr := runner.runDue(runtimeInstance, at)
+    if nil == runErr {
+        t.Fatal("expected the panicking job to fail the run")
+    }
+
+    if false == errors.Is(runErr, rootCause) {
+        t.Fatalf("expected the cause chain of the panicking error to survive, got %v", runErr)
+    }
+
+    record, found := captured.recordByContextValue("commandName", "job:panicking")
+    if false == found {
+        t.Fatal("expected a failure record naming the panicking job")
+    }
+
+    stack, hasStack := record.context["panicStack"]
+    if false == hasStack {
+        t.Fatalf("expected the record to carry the stack of the panicking job, got keys %v", record.context)
+    }
+
+    stackText, isString := stack.(string)
+    if false == isString || false == strings.Contains(stackText, "runScheduledCommand") {
+        t.Fatalf("expected the stack of the goroutine that raised the panic, got %v", stack)
+    }
+}
+
+/* a typed-nil panic value must not reach the cause slot: its Error() dereferences a nil receiver, and the render of the very record the boundary exists to write would take the scheduler down with it. */
+func TestRunnerCommand_ATypedNilPanicValueIsNotHandedOnAsACause(t *testing.T) {
+    var typedNil *exception.Error
+
+    job := &idiomaticPanickingCommand{commandName: "job:panicking", panicValue: typedNil}
+
+    configuration := NewConfiguration().
+        Schedule("job:panicking", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+
+    captured := &capturingRunnerLogger{}
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return captured, nil
+        },
+    )
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
+
+    runErr := runner.runDue(runtimeInstance, at)
+    if nil == runErr {
+        t.Fatal("expected the panicking job to fail the run")
+    }
+
+    /* the record renders, which is what a cause holding the typed nil would have taken away */
+    if _, found := captured.recordByContextValue("commandName", "job:panicking"); false == found {
+        t.Fatal("expected the failure record to be written rather than lost to a second panic")
+    }
+}
+
+/* panicCause is the guard itself, so it is proved where it lives: a typed nil boxed into a non-nil error interface must not become the cause, because every later reader of that chain calls Error() on a nil receiver. */
+func TestPanicCause_ATypedNilAnswersNoCause(t *testing.T) {
+    var typedNil *exception.Error
+
+    if nil != panicCause(typedNil) {
+        t.Fatal("expected a typed-nil panic value to answer no cause")
+    }
+}
+
+func TestPanicCause_AnErrorShapedPanicTravelsAsTheCause(t *testing.T) {
+    rootCause := errors.New("connection refused")
+
+    cause := panicCause(exception.NewError("config parameter is not defined", nil, rootCause))
+    if nil == cause {
+        t.Fatal("expected the error-shaped panic value to answer as the cause")
+    }
+
+    if false == errors.Is(cause, rootCause) {
+        t.Fatalf("expected the cause chain to survive, got %v", cause)
+    }
+}
+
+func TestPanicCause_ANonErrorPanicAnswersNoCause(t *testing.T) {
+    if nil != panicCause("scheduled command panicked on purpose") {
+        t.Fatal("expected a non-error panic value to answer no cause")
+    }
+
+    if nil != panicCause(nil) {
+        t.Fatal("expected a nil panic value to answer no cause")
+    }
+}
+
+type idiomaticPanickingCommand struct {
+    commandName string
+    panicValue  any
+}
+
+func (instance *idiomaticPanickingCommand) Name() string {
+    return instance.commandName
+}
+
+func (instance *idiomaticPanickingCommand) Description() string {
+    return "idiomatic panicking command"
+}
+
+func (instance *idiomaticPanickingCommand) Flags() []clicontract.Flag {
+    return nil
+}
+
+func (instance *idiomaticPanickingCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+    panic(instance.panicValue)
 }

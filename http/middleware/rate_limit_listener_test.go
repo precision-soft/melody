@@ -166,3 +166,31 @@ func TestRegisterRateLimitRequestListener_RefusesAMissingLimiter(t *testing.T) {
         "limiter is required for rate limit request listener",
     )
 }
+
+/* the listener door classifies the caller's cancellation apart from a store failure, the way its middleware twin does: at error every client that hung up mid-round-trip paged the operator for a healthy store — and this door meters every request, ahead of authentication, so it sees more of those than the middleware ever does. */
+func TestRegisterRateLimitRequestListener_ACancelledLimiterCallIsRecordedAtWarning(t *testing.T) {
+    capture := &rateLimitCaptureLogger{Logger: logging.NewNopLogger()}
+
+    serviceContainer := container.NewContainer()
+    scope := serviceContainer.NewScope()
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture)
+    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+
+    RegisterRateLimitRequestListener(
+        dispatcher,
+        NewRateLimitConfig(&cancellingRuntimeLimiter{}, nil, nil),
+    )
+
+    requestEvent := newRateLimitListenerTestRequestEvent(runtimeInstance)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, requestEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if 1 != capture.warningCalls || 0 != capture.errorCalls {
+        t.Fatalf("expected one warning and no error for the cancelled call, got %d warnings %d errors", capture.warningCalls, capture.errorCalls)
+    }
+}

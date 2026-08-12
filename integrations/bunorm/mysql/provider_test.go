@@ -14,6 +14,9 @@ import (
     "github.com/precision-soft/melody/config"
     configcontract "github.com/precision-soft/melody/config/contract"
     containercontract "github.com/precision-soft/melody/container/contract"
+    "github.com/precision-soft/melody/exception"
+    "github.com/precision-soft/melody/logging"
+    loggingcontract "github.com/precision-soft/melody/logging/contract"
 )
 
 type stubParameter struct {
@@ -820,5 +823,157 @@ func TestProvider_NamesThePasswordParameterAsItsOnlySecret(t *testing.T) {
     names := provider.SecretParameterNames()
     if 1 != len(names) || "database.password" != names[0] {
         t.Fatalf("expected the password parameter as the only credential, got %v", names)
+    }
+}
+
+type capturedProviderRecord struct {
+    level   loggingcontract.Level
+    message string
+    context loggingcontract.Context
+}
+
+type capturingProviderLogger struct {
+    entries []capturedProviderRecord
+}
+
+func (instance *capturingProviderLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+    instance.entries = append(instance.entries, capturedProviderRecord{level: level, message: message, context: context})
+}
+
+func (instance *capturingProviderLogger) Debug(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelDebug, message, context)
+}
+
+func (instance *capturingProviderLogger) Info(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelInfo, message, context)
+}
+
+func (instance *capturingProviderLogger) Warning(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelWarning, message, context)
+}
+
+func (instance *capturingProviderLogger) Error(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelError, message, context)
+}
+
+func (instance *capturingProviderLogger) Emergency(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelEmergency, message, context)
+}
+
+var _ loggingcontract.Logger = (*capturingProviderLogger)(nil)
+
+type stubResolverWithLogger struct {
+    *stubResolver
+    logger loggingcontract.Logger
+}
+
+func (instance *stubResolverWithLogger) Get(serviceName string) (any, error) {
+    if logging.ServiceLogger == serviceName {
+        return instance.logger, nil
+    }
+
+    return instance.stubResolver.Get(serviceName)
+}
+
+func (instance *stubResolverWithLogger) MustGet(serviceName string) any {
+    value, getErr := instance.Get(serviceName)
+    if nil != getErr {
+        panic(getErr)
+    }
+
+    return value
+}
+
+func (instance *stubResolverWithLogger) Has(serviceName string) bool {
+    return logging.ServiceLogger == serviceName || instance.stubResolver.Has(serviceName)
+}
+
+func newStubResolverWithLogger(logger loggingcontract.Logger) *stubResolverWithLogger {
+    return &stubResolverWithLogger{
+        stubResolver: newStubResolver("203.0.113.1", "3306", "melody", "melody", "melody"),
+        logger:       logger,
+    }
+}
+
+/* the caller's own cancellation is a clean stop, not a database outage: the transient classifier carries no cancellation marker, so a shutdown that cancelled the open fell through to the terminal branch and paged the operator with "non-transient error" against a healthy database. */
+func TestOpenWithRetry_ACancelledOpenIsAWarningRatherThanANonTransientOutage(t *testing.T) {
+    logger := &capturingProviderLogger{}
+    resolver := newStubResolverWithLogger(logger)
+
+    provider := newTestProvider().
+        WithTimeoutConfig(NewTimeoutConfig(10*time.Second, 10*time.Second, 10*time.Second)).
+        WithRetryConfig(DefaultRetryConfig())
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    _, openErr := provider.OpenContext(cancelledContext, resolver)
+    if nil == openErr {
+        t.Fatal("expected the cancelled open to fail")
+    }
+
+    if false == errors.Is(openErr, context.Canceled) {
+        t.Fatalf("expected the cancellation to stay the cause, got %v", openErr)
+    }
+
+    if false == exception.IsAlreadyLogged(openErr) {
+        t.Fatal("expected the recorded cancellation to carry the already-logged mark")
+    }
+
+    if 1 != len(logger.entries) {
+        t.Fatalf("expected exactly one record for the cancelled open, got %d: %v", len(logger.entries), logger.entries)
+    }
+
+    record := logger.entries[0]
+
+    if loggingcontract.LevelWarning != record.level {
+        t.Fatalf("expected the cancellation at warning, got %v", record.level)
+    }
+
+    if "database open cancelled by the caller's context" != record.message {
+        t.Fatalf("expected the cancellation named as itself, got %q", record.message)
+    }
+}
+
+/* the cancellation that lands while an attempt waits out its backoff is the same clean stop, and it is recorded and marked here — an unmarked cancellation travelling up as a bare resolution failure is filed at error by whichever writer meets it. */
+func TestOpenWithRetry_ACancellationDuringTheBackoffIsRecordedAndMarked(t *testing.T) {
+    logger := &capturingProviderLogger{}
+    resolver := &stubResolverWithLogger{
+        stubResolver: newStubResolver("127.0.0.1", "1", "melody_unreachable", "melody", "melody"),
+        logger:       logger,
+    }
+
+    provider := newTestProvider().
+        WithTimeoutConfig(NewTimeoutConfig(50*time.Millisecond, 0, 0)).
+        WithRetryConfig(NewRetryConfig(5, 2*time.Second, 2*time.Second, 1.0))
+
+    ctx, cancel := context.WithCancel(context.Background())
+    go func() {
+        time.Sleep(100 * time.Millisecond)
+        cancel()
+    }()
+
+    _, openErr := provider.OpenContext(ctx, resolver)
+    if nil == openErr {
+        t.Fatal("expected the cancelled retry to fail")
+    }
+
+    if false == exception.IsAlreadyLogged(openErr) {
+        t.Fatal("expected the recorded cancellation to carry the already-logged mark")
+    }
+
+    cancellationRecords := 0
+    for _, entry := range logger.entries {
+        if "database connection retry cancelled by the caller's context" == entry.message {
+            cancellationRecords++
+
+            if loggingcontract.LevelWarning != entry.level {
+                t.Fatalf("expected the cancelled retry at warning, got %v", entry.level)
+            }
+        }
+    }
+
+    if 1 != cancellationRecords {
+        t.Fatalf("expected exactly one record for the cancelled retry, got %d: %v", cancellationRecords, logger.entries)
     }
 }

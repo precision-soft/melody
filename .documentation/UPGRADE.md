@@ -18,6 +18,30 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Validation: a rule-declaration fault is an error, and its context stays out of the response
+
+**What changed.** Three validation codes name a mistake in the DECLARATION rather than in the submitted value: `unknownRule`, `invalidRuleSyntax` and `invalidPattern`. A 400 carrying any of them is now recorded at **error** instead of the warning a deliberate 4xx earns, and the internal context of those entries — `rule`, `params`, `cause` — is stripped from the response body while staying in full in the record. Every other validation error is unchanged in both places, so the bounds a numeric constraint reports still reach the client. The refusal itself is still a field error with the same status and the same code: the validator continues to fail closed on a rule it cannot honour rather than passing the value.
+
+**Symptom.** A struct tag naming a rule that does not exist — `validate:"reqiured"`, a `regex` written without parameters, a pattern that does not compile — starts producing `error` records instead of `warning` ones. A client parsing the 400 body no longer finds a `context` object on those entries; it still finds `field`, `message` and `code`.
+
+**Remedy.** Read the new error records: each one names the route and the misspelled rule, and the route it names has been refusing every request it serves. A client that read `errors[].context` for a wiring code was reading the developer's own typo and should read `code` instead.
+
+### Http: the end of a session is a warning, not a storage outage
+
+**What changed.** When another request ends a session while this one is running, the response path records it at **warning** under its own name. The two genuine failures on that path — a save that could not land and a delete that could not land — keep the error level. All of them now carry the session id, the request method and the path.
+
+**Symptom.** `session was deleted while the request was in flight` moves from `error` to `warning`. An alert counting session errors will see its volume drop, by exactly the traffic that was never a failure: a user logging out in one tab produced one of these per concurrent request in the others.
+
+**Remedy.** If an alert was tuned around that volume, retune it; the records it was counting were the session ending, which `SESSION.md` and `HTTP.md` both describe as the normal outcome.
+
+### Cache and cron: a recovered panic carries its cause
+
+**What changed.** The recovery boundaries of `cache.Remember`, of the cron runner and of the bunorm manager registry hand the panic value on as the CAUSE of the error they fabricate, and capture the stack of the goroutine that raised it. The context keys they already wrote — `panic`, `panicValue` — are unchanged; `panicStack` is added beside them.
+
+**Symptom.** `errors.Is` and `errors.As` on the returned error now reach the failure underneath, where before they stopped at the fabricated wrapper. Code that relied on those calls answering false for a panicked callback will now see them answer true.
+
+**Remedy.** None for a reader that only renders the error. A caller that branches on `errors.Is` against a sentinel it also uses for non-panic failures should check whether it means to treat a panicked callback the same way; the message still says the boundary was a panic.
+
 ### Security: a 403 names its branch and files one record
 
 **What changed.** Every refusal the access decision manager produces carries a `reason` — one of the exported `security.RefusalReason*` constants — beside the strategy and the attribute, in the exception context the response never renders. The access control listener files exactly one record for a refusal, naming the reason, the firewall and the matched rule: at warning for a denial, and at error only for `no_voter_supports_attribute`, the wiring fault in which a firewall names an attribute no configured voter looks at. The record is filed before the access denied handler can answer and return early, and the error the `kernel.exception` dispatch carries is marked as already logged. `DecideAny` refuses an empty attribute list, the guard `DecideAll` always had.

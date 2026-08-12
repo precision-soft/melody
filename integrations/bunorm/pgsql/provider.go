@@ -282,6 +282,20 @@ func (instance *Provider) openWithRetry(ctx context.Context, resolver containerc
             return database, nil
         }
 
+        /* the caller's own cancellation is not a database outage. The transient classifier reads messages and error types, none of which a cancellation carries, so a SIGTERM that cancelled the open mid-deploy fell through to the terminal branch and paged whoever was on call with "database connection failed with non-transient error" against a perfectly healthy database. It is a clean stop: recorded at warning under its own name and not retried, because the context that would carry the retry is already gone. Only Canceled, never DeadlineExceeded — the ping budget is derived from the connect timeout, so a deadline here can be the database itself. */
+        if true == errors.Is(openErr, context.Canceled) {
+            cancelledErr := exception.FromError(openErr)
+            logger.Warning(
+                "database open cancelled by the caller's context",
+                exception.LogContext(
+                    cancelledErr,
+                    map[string]any{"attempt": attempt},
+                ),
+            )
+
+            return nil, exception.MarkLogged(cancelledErr)
+        }
+
         if false == instance.isTransientError(openErr) {
             /* the terminal record is the log of this failure: it is written in full and the returned error carries the mark, so the exit handler and the http exception path do not write the same outage a second time */
             terminalErr := exception.FromError(openErr)
@@ -327,11 +341,19 @@ func (instance *Provider) openWithRetry(ctx context.Context, resolver containerc
         case <-ctx.Done():
             delayTimer.Stop()
 
-            return nil, exception.NewError(
+            /* the same clean stop as the branch above, reached one step later: the cancellation arrived while this attempt was waiting out its backoff. It is recorded here and marked, because an unmarked cancellation travelling up as a bare resolution failure is filed at error by whichever writer meets it — the very record this classification exists to prevent. */
+            cancelledErr := exception.NewError(
                 "database connection retry cancelled by the caller's context",
                 map[string]any{"attempt": attempt, "error": openErr.Error()},
                 ctx.Err(),
             )
+
+            logger.Warning(
+                "database connection retry cancelled by the caller's context",
+                exception.LogContext(cancelledErr),
+            )
+
+            return nil, exception.MarkLogged(cancelledErr)
         case <-delayTimer.C:
         }
     }

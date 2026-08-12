@@ -2,9 +2,11 @@ package http
 
 import (
     "context"
+    "encoding/json"
     "errors"
     "io"
     "net/http/httptest"
+    "reflect"
     "strings"
     "testing"
 
@@ -19,6 +21,7 @@ import (
     loggingcontract "github.com/precision-soft/melody/logging/contract"
     "github.com/precision-soft/melody/runtime"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
+    "github.com/precision-soft/melody/validation"
 )
 
 func TestExceptionListener_HtmlResponse_EscapesXss(t *testing.T) {
@@ -436,15 +439,17 @@ func TestExceptionListener_AnswersATypedNilHttpExceptionWithoutDereferencingIt(t
 }
 
 type exceptionListenerCaptureLogger struct {
-    errorCalls   int
-    warningCalls int
-    lastMessage  string
-    lastContext  map[string]any
+    errorCalls       int
+    warningCalls     int
+    lastMessage      string
+    lastContext      map[string]any
+    lastErrorContext map[string]any
 }
 
 func (instance *exceptionListenerCaptureLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
     if loggingcontract.LevelError == level {
         instance.errorCalls++
+        instance.lastErrorContext = context
     }
     if loggingcontract.LevelWarning == level {
         instance.warningCalls++
@@ -659,5 +664,124 @@ func TestExceptionListener_A5xxKeepsTheErrorLevel(t *testing.T) {
 
     if 1 != capture.errorCalls || 0 != capture.warningCalls {
         t.Fatalf("expected one error record and no warning record for a 5xx, got %d error / %d warning", capture.errorCalls, capture.warningCalls)
+    }
+}
+
+/* a struct tag naming a rule that does not exist is a program failure wearing a 400: it refuses every request that route will ever serve, and no input a client can send produces it. At warning it sat in the dashboard among the users who mistyped their address, with the route permanently broken and nothing saying so. */
+func TestExceptionListener_AValidationWiringFaultIsRecordedAtErrorRatherThanAsARoutineFourHundred(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    capture := &exceptionListenerCaptureLogger{}
+    runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
+
+    RegisterKernelExceptionListener(dispatcher, false)
+
+    httpException := exception.BadRequest("validation failed")
+    httpException.SetContext(map[string]any{
+        "errors": validation.ValidationErrors{
+            validation.NewValidationError("email", "unknown validation rule", validation.ErrorUnknownRule, map[string]any{"rule": "reqiured"}),
+        },
+    })
+
+    request := httptest.NewRequest("POST", "/api/subscribe", nil)
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, testhelper.NewHttpTestRequestFromHttpRequest(request), httpException)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if 1 != capture.errorCalls || 0 != capture.warningCalls {
+        t.Fatalf("expected one error and no warning for the wiring fault, got %d errors %d warnings", capture.errorCalls, capture.warningCalls)
+    }
+}
+
+/* a genuine field refusal keeps the warning level a deliberate 4xx earns: raising every 400 would put the users who mistyped their address back among the incidents, which is the mirror of the defect. */
+func TestExceptionListener_AGenuineFieldRefusalStaysAWarning(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    capture := &exceptionListenerCaptureLogger{}
+    runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
+
+    RegisterKernelExceptionListener(dispatcher, false)
+
+    httpException := exception.BadRequest("validation failed")
+    httpException.SetContext(map[string]any{
+        "errors": validation.ValidationErrors{
+            validation.NewValidationError("email", "this field is required", validation.ConstraintNotBlankErrorIsBlank, nil),
+        },
+    })
+
+    request := httptest.NewRequest("POST", "/api/subscribe", nil)
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, testhelper.NewHttpTestRequestFromHttpRequest(request), httpException)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if 1 != capture.warningCalls || 0 != capture.errorCalls {
+        t.Fatalf("expected one warning and no error for a genuine field refusal, got %d warnings %d errors", capture.warningCalls, capture.errorCalls)
+    }
+}
+
+/* the context of a wiring fault names the developer's typo, the parameters the constraint refused and its reason: the operator's material, not the client's. It stays in the record and leaves the response body. */
+func TestExceptionListener_AWiringFaultKeepsItsContextInTheRecordAndOutOfTheResponse(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    capture := &exceptionListenerCaptureLogger{}
+    runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
+
+    RegisterKernelExceptionListener(dispatcher, false)
+
+    httpException := exception.BadRequest("validation failed")
+    httpException.SetContext(map[string]any{
+        "errors": validation.ValidationErrors{
+            validation.NewValidationError("email", "unknown validation rule", validation.ErrorUnknownRule, map[string]any{"rule": "reqiured"}),
+            validation.NewValidationError("age", "value is too small", validation.ConstraintGreaterThanErrorSmallerThan, map[string]any{"bound": 18}),
+        },
+    })
+
+    request := httptest.NewRequest("POST", "/api/subscribe", nil)
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, testhelper.NewHttpTestRequestFromHttpRequest(request), httpException)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    body := readResponseBody(t, exceptionEvent.Response())
+
+    if true == strings.Contains(body, "reqiured") {
+        t.Fatalf("expected the developer's own typo to stay out of the client's body, got %s", body)
+    }
+
+    if false == strings.Contains(body, "unknownRule") {
+        t.Fatalf("expected the code to still name the refusal, got %s", body)
+    }
+
+    /* a genuine field refusal keeps the context the client needs to correct its request */
+    if false == strings.Contains(body, "bound") {
+        t.Fatalf("expected an ordinary validation error to keep its context, got %s", body)
+    }
+
+    recordErrors, hasErrors := capture.lastErrorContext["errors"]
+    if false == hasErrors {
+        t.Fatalf("expected the record to carry the per-field errors, got %v", capture.lastErrorContext)
+    }
+
+    recordBytes, marshalErr := json.Marshal(recordErrors)
+    if nil != marshalErr {
+        t.Fatalf("unexpected marshal error: %v", marshalErr)
+    }
+
+    if false == strings.Contains(string(recordBytes), "reqiured") {
+        t.Fatalf("expected the record to keep the rule that was misspelled, got %s", recordBytes)
+    }
+}
+
+/* an application that put its own shape under the public key owns it: the projection hands back what it cannot read rather than dropping it. */
+func TestExceptionListener_AForeignErrorsPayloadIsHandedBackUntouched(t *testing.T) {
+    foreign := []map[string]string{{"field": "email", "detail": "custom"}}
+
+    if projected := clientVisibleValidationErrors(foreign); false == reflect.DeepEqual(foreign, projected) {
+        t.Fatalf("expected a foreign payload to travel unchanged, got %#v", projected)
     }
 }

@@ -218,6 +218,16 @@ func IsAlreadyLogged(err error) bool {
     return alreadyLoggedValue.AlreadyLogged()
 }
 
+/* PanicCause reads a recovered panic value as the cause of the error a recovery boundary fabricates in its place. An error-shaped panic value belongs in the cause slot, not in a context slot: kept only in the context it collapses to its bare message at the render boundary — the json logger stringifies an error it finds in a context — so the context map and the cause chain of the very error that was raised reach no record at all, and the reason a write failed is gone while the stack that says where survives. A typed nil answers no cause, because its Error() would dereference a nil receiver at the first render, and a panic value that is not an error has no cause to give. */
+func PanicCause(recoveredValue any) error {
+    recoveredErr, isRecoveredError := recoveredValue.(error)
+    if false == isRecoveredError || true == isNilInterfaceValue(recoveredErr) {
+        return nil
+    }
+
+    return recoveredErr
+}
+
 func copyStringMap[T any](input map[string]T) map[string]T {
     if nil == input {
         return make(map[string]T)

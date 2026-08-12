@@ -10,6 +10,7 @@ import (
     kernelcontract "github.com/precision-soft/melody/kernel/contract"
     "github.com/precision-soft/melody/logging"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
+    "github.com/precision-soft/melody/validation"
 )
 
 const (
@@ -73,8 +74,8 @@ func RegisterKernelExceptionListener(eventDispatcher eventcontract.EventDispatch
                             },
                         )
 
-                        /* a deliberate 4xx a handler returned is a refusal, not an incident: it is recorded at warning, while a 5xx and every non-http error keep the error level */
-                        if nil != httpException && nethttp.StatusInternalServerError > httpException.StatusCode() {
+                        /* a deliberate 4xx a handler returned is a refusal, not an incident: it is recorded at warning, while a 5xx and every non-http error keep the error level. A 4xx whose validation errors blame the DECLARATION is the exception, because the deliberation is exactly what is missing: a struct tag naming a rule that does not exist refuses every request that route will ever serve, with a body naming the client's field, and at warning it sat in the dashboard among the users who mistyped their address while the route stayed permanently broken. */
+                        if nil != httpException && nethttp.StatusInternalServerError > httpException.StatusCode() && false == carriesRuleWiringError(httpException) {
                             loggerInstance.Warning("unhandled exception", recordContext)
                         } else {
                             loggerInstance.Error("unhandled exception", recordContext)
@@ -95,10 +96,12 @@ func RegisterKernelExceptionListener(eventDispatcher eventcontract.EventDispatch
 
             payloadExtras := map[string]any{}
 
-            /* the errors context key is the public half of an http exception's context: BindJsonAndValidate attaches the per-field validation errors under it, and without this the detail the validator computed reached neither the client nor, structured, anything else */
+            /* the errors context key is the public half of an http exception's context: BindJsonAndValidate attaches the per-field validation errors under it, and without this the detail the validator computed reached neither the client nor, structured, anything else.
+
+            Public is the operative word. An entry blaming the declaration rather than the value carries the developer's own typo, the parameters the constraint refused and its reason, and those belong to the operator reading the record, not to whoever sent the request. The projection is taken here and only here: the record is rendered from the exception's own context, which keeps everything — the marshaler the two renderings share is the same one, and it stays the one that says the same thing in both places. */
             if nil != httpException {
                 if errorsValue, exists := httpException.Context()["errors"]; true == exists {
-                    payloadExtras["errors"] = errorsValue
+                    payloadExtras["errors"] = clientVisibleValidationErrors(errorsValue)
                 }
             }
 
@@ -149,4 +152,33 @@ func attachRequestContextToError(err error, requestId string, method string, pat
 
         melodyError.SetContextValue(key, value)
     }
+}
+
+/* carriesRuleWiringError reports whether the exception's validation errors blame the rule DECLARATION rather than the submitted value — a rule the registry does not know, a parameter set the constraint refused, a tag the parser could not read, a pattern that does not compile. None of them is reachable from any input a client sends, so the 4xx they produce is a program failure wearing a client-error status, and the record it earns is an error rather than the warning a deliberate refusal earns. */
+func carriesRuleWiringError(httpException *exception.HttpException) bool {
+    if nil == httpException {
+        return false
+    }
+
+    errorsValue, exists := httpException.Context()["errors"]
+    if false == exists {
+        return false
+    }
+
+    validationErrors, isValidationErrors := errorsValue.(validation.ValidationErrors)
+    if false == isValidationErrors {
+        return false
+    }
+
+    return validationErrors.HasRuleWiringError()
+}
+
+/* clientVisibleValidationErrors projects the per-field errors onto what the client may see, stripping the internal context of the entries that blame the declaration and leaving every other entry — bounds, lengths, the material a client needs to correct its request — untouched. A value that is not the framework's own collection is handed back as it came: the key is the public half of the context by contract, and an application that put its own shape there owns it. */
+func clientVisibleValidationErrors(errorsValue any) any {
+    validationErrors, isValidationErrors := errorsValue.(validation.ValidationErrors)
+    if false == isValidationErrors {
+        return errorsValue
+    }
+
+    return validationErrors.WithoutRuleWiringContext()
 }

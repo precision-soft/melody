@@ -12,9 +12,13 @@ import (
     "syscall"
     "testing"
 
+    "github.com/precision-soft/melody/container"
     containercontract "github.com/precision-soft/melody/container/contract"
     "github.com/precision-soft/melody/exception"
     httpcontract "github.com/precision-soft/melody/http/contract"
+    "github.com/precision-soft/melody/logging"
+    loggingcontract "github.com/precision-soft/melody/logging/contract"
+    "github.com/precision-soft/melody/runtime"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
     "github.com/precision-soft/melody/session"
     "github.com/precision-soft/melody/session/contract"
@@ -24,6 +28,7 @@ type stubSessionManager struct {
     saveCalled   int
     deleteCalled int
     saveErr      error
+    deleteErr    error
 }
 
 func (instance *stubSessionManager) Session(sessionId string) contract.Session { return nil }
@@ -43,7 +48,7 @@ func (instance *stubSessionManager) SaveSession(sessionInstance contract.Session
 func (instance *stubSessionManager) DeleteSession(sessionId string) error {
     instance.deleteCalled++
 
-    return nil
+    return instance.deleteErr
 }
 
 func (instance *stubSessionManager) Close() error { return nil }
@@ -1520,5 +1525,171 @@ func TestWriteResponse_AHijackedConnectionKeepsTheSubstituteStatus(t *testing.T)
 
     if nethttp.StatusNoContent != reported.StatusCode() {
         t.Fatalf("expected the substitute kept for the statusless hijack, got %d", reported.StatusCode())
+    }
+}
+
+type sessionPersistenceCaptureRecord struct {
+    level   loggingcontract.Level
+    message string
+    context map[string]any
+}
+
+type sessionPersistenceCaptureLogger struct {
+    entries []sessionPersistenceCaptureRecord
+}
+
+func (instance *sessionPersistenceCaptureLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+    instance.entries = append(instance.entries, sessionPersistenceCaptureRecord{level: level, message: message, context: context})
+}
+
+func (instance *sessionPersistenceCaptureLogger) Debug(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelDebug, message, context)
+}
+
+func (instance *sessionPersistenceCaptureLogger) Info(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelInfo, message, context)
+}
+
+func (instance *sessionPersistenceCaptureLogger) Warning(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelWarning, message, context)
+}
+
+func (instance *sessionPersistenceCaptureLogger) Error(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelError, message, context)
+}
+
+func (instance *sessionPersistenceCaptureLogger) Emergency(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelEmergency, message, context)
+}
+
+var _ loggingcontract.Logger = (*sessionPersistenceCaptureLogger)(nil)
+
+func writeResponseWithSessionOutcome(
+    t *testing.T,
+    logger loggingcontract.Logger,
+    sessionManager contract.Manager,
+    sessionInstance contract.Session,
+) {
+    t.Helper()
+
+    serviceContainer := container.NewContainer()
+    scope := serviceContainer.NewScope()
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger)
+    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+
+    netRequest := httptest.NewRequest(nethttp.MethodPost, "http://example.com/account/settings", nil)
+    netRequest.RemoteAddr = "127.0.0.1:1234"
+
+    writeResponse(
+        runtimeInstance,
+        NewRequest(netRequest, nil, nil, nil),
+        httptest.NewRecorder(),
+        TextResponse(nethttp.StatusOK, "handler body"),
+        sessionManager,
+        sessionInstance,
+        httpcontract.ForwardedHeadersPolicy{},
+        httpcontract.SessionCookiePolicy{Path: "/"},
+    )
+}
+
+/* a session another request ended under this one is the session ending, not a storage outage — the contract says so in as many words. At error it read exactly like a redis that had fallen over, so a user who logged out in a second tab paged the operator once per concurrent request. */
+func TestWriteResponse_ADeletedSessionIsRecordedAtWarningWithTheRequestCoordinates(t *testing.T) {
+    capture := &sessionPersistenceCaptureLogger{}
+
+    writeResponseWithSessionOutcome(
+        t,
+        capture,
+        &stubSessionManager{
+            saveErr: exception.NewError(
+                "session was deleted and cannot be saved again",
+                map[string]any{"sessionId": "session-123"},
+                session.ErrSessionDeleted,
+            ),
+        },
+        &stubSession{id: "session-123", isModified: true},
+    )
+
+    if 1 != len(capture.entries) {
+        t.Fatalf("expected exactly one record, got %d: %v", len(capture.entries), capture.entries)
+    }
+
+    record := capture.entries[0]
+
+    if loggingcontract.LevelWarning != record.level {
+        t.Fatalf("expected the session ending at warning, got %v", record.level)
+    }
+
+    if "session was deleted while the request was in flight" != record.message {
+        t.Fatalf("unexpected message: %q", record.message)
+    }
+
+    for key, expected := range map[string]any{"sessionId": "session-123", "method": nethttp.MethodPost, "path": "/account/settings"} {
+        if expected != record.context[key] {
+            t.Fatalf("expected %q to be %v, got %v in %v", key, expected, record.context[key], record.context)
+        }
+    }
+}
+
+/* a storage outage keeps the error level it deserves, and it too names the session and the route: only the deleted-session record ever carried a session id, and that by accident, through its cause's own context. */
+func TestWriteResponse_ASaveOutageStaysAtErrorAndNamesTheSessionAndTheRoute(t *testing.T) {
+    capture := &sessionPersistenceCaptureLogger{}
+
+    writeResponseWithSessionOutcome(
+        t,
+        capture,
+        &stubSessionManager{saveErr: errors.New("redis: connection refused")},
+        &stubSession{id: "session-456", isModified: true},
+    )
+
+    if 1 != len(capture.entries) {
+        t.Fatalf("expected exactly one record, got %d: %v", len(capture.entries), capture.entries)
+    }
+
+    record := capture.entries[0]
+
+    if loggingcontract.LevelError != record.level {
+        t.Fatalf("expected a storage outage at error, got %v", record.level)
+    }
+
+    if "failed to save session" != record.message {
+        t.Fatalf("unexpected message: %q", record.message)
+    }
+
+    for key, expected := range map[string]any{"sessionId": "session-456", "method": nethttp.MethodPost, "path": "/account/settings"} {
+        if expected != record.context[key] {
+            t.Fatalf("expected %q to be %v, got %v in %v", key, expected, record.context[key], record.context)
+        }
+    }
+}
+
+/* the delete-path outage is the third of the family and carries the same coordinates. */
+func TestWriteResponse_ADeleteOutageStaysAtErrorAndNamesTheSessionAndTheRoute(t *testing.T) {
+    capture := &sessionPersistenceCaptureLogger{}
+
+    writeResponseWithSessionOutcome(
+        t,
+        capture,
+        &stubSessionManager{deleteErr: errors.New("redis: connection refused")},
+        &stubSession{id: "session-789", isCleared: true},
+    )
+
+    if 1 != len(capture.entries) {
+        t.Fatalf("expected exactly one record, got %d: %v", len(capture.entries), capture.entries)
+    }
+
+    record := capture.entries[0]
+
+    if loggingcontract.LevelError != record.level {
+        t.Fatalf("expected a storage outage at error, got %v", record.level)
+    }
+
+    if "failed to delete session" != record.message {
+        t.Fatalf("unexpected message: %q", record.message)
+    }
+
+    for key, expected := range map[string]any{"sessionId": "session-789", "method": nethttp.MethodPost, "path": "/account/settings"} {
+        if expected != record.context[key] {
+            t.Fatalf("expected %q to be %v, got %v in %v", key, expected, record.context[key], record.context)
+        }
     }
 }

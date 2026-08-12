@@ -288,7 +288,7 @@ func writeResponse(
                 /* a session-backend outage on logout must degrade to a logged error but STILL expire the browser cookie: clearing the cookie is independent of and strictly safer than the backend delete (it can only end a session, never resurrect an unpersisted one), so a failed DeleteSession must not leave the client holding a live session cookie while it is told it was logged out. Mark the persistence failed so MarkSessionPersisted is skipped, but emit the clearing cookie below regardless. (This differs from the save path, where a failed SaveSession MUST suppress the cookie so the browser is not pointed at a never-persisted session id.) */
                 sessionPersistFailed = true
 
-                logSessionPersistenceError(runtimeInstance, "failed to delete session", err)
+                logSessionPersistenceEvent(runtimeInstance, loggingcontract.LevelError, "failed to delete session", err, sessionInstance.Id(), request)
             }
 
             cookie := &nethttp.Cookie{
@@ -311,11 +311,13 @@ func writeResponse(
 
                 logger := logging.LoggerFromRuntime(runtimeInstance)
                 if nil != logger {
-                    logger.Warning(
+                    logSessionPersistenceEvent(
+                        runtimeInstance,
+                        loggingcontract.LevelWarning,
                         "session not persisted: the response was already committed and the request does not name this session",
-                        loggingcontract.Context{
-                            "sessionId": sessionInstance.Id(),
-                        },
+                        nil,
+                        sessionInstance.Id(),
+                        request,
                     )
                 }
             } else {
@@ -324,7 +326,7 @@ func writeResponse(
                     /* the session ended while this request was running — another request logged it out, or rotated it away. That is not a failure of this request and it is not a storage outage: the write is refused so the deleted session cannot be re-created, the cookie is expired so the client stops presenting an id that no longer exists, and the handler's own response is served unchanged. */
                     sessionPersistFailed = true
 
-                    logSessionPersistenceError(runtimeInstance, "session was deleted while the request was in flight", err)
+                    logSessionPersistenceEvent(runtimeInstance, loggingcontract.LevelWarning, "session was deleted while the request was in flight", err, sessionInstance.Id(), request)
 
                     SetCookie(
                         response,
@@ -343,7 +345,7 @@ func writeResponse(
                     /* a storage outage on the save path answers 500 rather than the response the handler produced. The handler wrote to the session and returned success on the assumption the write would land — a login answering "welcome" with the identity never stored, or an attempt counter that never grows while the backend is down — and the client cannot tell the difference. The headers are not committed at this point (the branch above holds the case where they are), so the response can still be replaced; the cookie is suppressed either way, so the browser is never pointed at an id nothing persisted. */
                     sessionPersistFailed = true
 
-                    logSessionPersistenceError(runtimeInstance, "failed to save session", err)
+                    logSessionPersistenceEvent(runtimeInstance, loggingcontract.LevelError, "failed to save session", err, sessionInstance.Id(), request)
 
                     closeDiscardedResponseBody(response, logging.LoggerFromRuntime(runtimeInstance))
 
@@ -531,20 +533,42 @@ func resolveSessionCookieSecure(
     return "https" == detectSchemeWithForwardedHeadersPolicy(request.HttpRequest(), forwardedHeadersPolicy)
 }
 
-func logSessionPersistenceError(
+/* logSessionPersistenceEvent records what the response path did with the session, at the level the event deserves and with the coordinates that let it be found again.
+
+The level is a parameter because one of the three is not a failure at all: a session another request ended while this one was running is the session ending — the contract says so in as many words, and so does the branch that answers it — while the other two are storage outages. Filed at error alongside them, a user who logged out in a second tab produced one indistinguishable "failed to save session" per concurrent request, against a perfectly healthy backend.
+
+The coordinates travel because only the middle record ever named the session, and that by accident: it carries sessionId through the cause's own context. None of the three named the route, so a record that did arrive could not be tied to the request that produced it. The level switch goes through the named methods rather than Log, because that is the door a substituted logger overrides. */
+func logSessionPersistenceEvent(
     runtimeInstance runtimecontract.Runtime,
+    level loggingcontract.Level,
     message string,
     err error,
+    sessionId string,
+    request httpcontract.Request,
 ) {
     logger := logging.LoggerFromRuntime(runtimeInstance)
     if nil == logger {
         return
     }
 
-    logger.Error(
-        message,
-        exception.LogContext(err),
-    )
+    recordContext := exceptioncontract.Context{}
+
+    if "" != sessionId {
+        recordContext["sessionId"] = sessionId
+    }
+
+    if nil != request && nil != request.HttpRequest() {
+        recordContext["method"] = request.HttpRequest().Method
+        recordContext["path"] = request.HttpRequest().URL.Path
+    }
+
+    if loggingcontract.LevelWarning == level {
+        logger.Warning(message, exception.LogContext(err, recordContext))
+
+        return
+    }
+
+    logger.Error(message, exception.LogContext(err, recordContext))
 }
 
 func closeDiscardedResponseBody(response httpcontract.Response, logger loggingcontract.Logger) {

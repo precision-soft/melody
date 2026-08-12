@@ -1454,3 +1454,175 @@ func TestNewManagerRegistry_AnEmptySecretParameterNameIsSkipped(t *testing.T) {
         t.Fatalf("expected an unnamed parameter to be skipped, got %v", configuration.markedSecrets)
     }
 }
+
+type idiomaticPanickingProvider struct {
+    openStarted chan struct{}
+    releaseOpen chan struct{}
+    startOnce   sync.Once
+    panicValue  any
+}
+
+func (instance *idiomaticPanickingProvider) Open(resolver containercontract.Resolver) (*bun.DB, error) {
+    instance.startOnce.Do(
+        func() {
+            close(instance.openStarted)
+        },
+    )
+    <-instance.releaseOpen
+
+    panic(instance.panicValue)
+}
+
+/* the coalesced waiter receives the same diagnosis the re-raised panic carries to its own boundary: the panic value as the cause and the stack of the goroutine that raised it. Stringified into the context alone, the waiter's error named the definition and the bare message and nothing else — the same failure told two ways, decided only by which goroutine the caller happened to be on. */
+func TestManagerRegistry_APanickingOpenHandsItsCauseAndItsStackToTheWaiter(t *testing.T) {
+    resolver := &fakeResolver{}
+
+    rootCause := errors.New("dial tcp 10.0.0.7:5432: connect: connection refused")
+
+    openStarted := make(chan struct{})
+    releaseOpen := make(chan struct{})
+
+    provider := &idiomaticPanickingProvider{
+        openStarted: openStarted,
+        releaseOpen: releaseOpen,
+        panicValue:  exception.NewError("provider hook is not wired", nil, rootCause),
+    }
+
+    registry, registryErr := NewManagerRegistry(
+        resolver,
+        ProviderDefinition{Name: "x", Provider: provider, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("unexpected error: %v", registryErr)
+    }
+
+    firstDone := make(chan struct{})
+    go func() {
+        defer func() {
+            _ = recover()
+            close(firstDone)
+        }()
+
+        _, _ = registry.Manager("x")
+    }()
+
+    select {
+    case <-openStarted:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("the provider open never started")
+    }
+
+    secondResult := make(chan error, 1)
+    go func() {
+        _, secondErr := registry.Manager("x")
+        secondResult <- secondErr
+    }()
+
+    time.Sleep(100 * time.Millisecond)
+
+    close(releaseOpen)
+
+    select {
+    case secondErr := <-secondResult:
+        if nil == secondErr {
+            t.Fatal("expected the coalesced caller to receive an error after the open panicked")
+        }
+
+        if false == errors.Is(secondErr, rootCause) {
+            t.Fatalf("expected the cause chain of the panicking provider to reach the waiter, got %v", secondErr)
+        }
+
+        var exceptionErr *exception.Error
+        if false == errors.As(secondErr, &exceptionErr) {
+            t.Fatalf("expected an exception error for the coalesced caller, got %v", secondErr)
+        }
+
+        stack, hasStack := exceptionErr.Context()["panicStack"]
+        if false == hasStack {
+            t.Fatalf("expected the waiter's error to carry the stack, got %v", exceptionErr.Context())
+        }
+
+        if false == strings.Contains(fmt.Sprintf("%v", stack), "Manager") {
+            t.Fatalf("expected the stack of the goroutine that raised the panic, got %v", stack)
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatal("the coalesced Manager call blocked forever on the un-closed done channel")
+    }
+
+    <-firstDone
+}
+
+/* a typed-nil panic value must not reach the cause slot: its Error() dereferences a nil receiver, and the waiter rendering its own error would die of the very failure the boundary exists to report. */
+func TestManagerRegistry_ATypedNilPanicValueIsNotHandedOnAsACause(t *testing.T) {
+    resolver := &fakeResolver{}
+
+    var typedNil *exception.Error
+
+    openStarted := make(chan struct{})
+    releaseOpen := make(chan struct{})
+
+    provider := &idiomaticPanickingProvider{
+        openStarted: openStarted,
+        releaseOpen: releaseOpen,
+        panicValue:  typedNil,
+    }
+
+    registry, registryErr := NewManagerRegistry(
+        resolver,
+        ProviderDefinition{Name: "x", Provider: provider, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("unexpected error: %v", registryErr)
+    }
+
+    firstDone := make(chan struct{})
+    go func() {
+        defer func() {
+            _ = recover()
+            close(firstDone)
+        }()
+
+        _, _ = registry.Manager("x")
+    }()
+
+    select {
+    case <-openStarted:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("the provider open never started")
+    }
+
+    secondResult := make(chan error, 1)
+    go func() {
+        _, secondErr := registry.Manager("x")
+        secondResult <- secondErr
+    }()
+
+    time.Sleep(100 * time.Millisecond)
+
+    close(releaseOpen)
+
+    select {
+    case secondErr := <-secondResult:
+        if nil == secondErr {
+            t.Fatal("expected the coalesced caller to receive an error after the open panicked")
+        }
+
+        var exceptionErr *exception.Error
+        if false == errors.As(secondErr, &exceptionErr) {
+            t.Fatalf("expected an exception error for the coalesced caller, got %v", secondErr)
+        }
+
+        if nil != exceptionErr.CauseErr() {
+            t.Fatalf("expected a typed nil to answer no cause, got %v", exceptionErr.CauseErr())
+        }
+
+        /* the message renders, which is what a cause holding the typed nil would have taken away */
+        if false == strings.Contains(secondErr.Error(), "bunorm manager provider panicked while opening") {
+            t.Fatalf("unexpected message: %q", secondErr.Error())
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatal("the coalesced Manager call blocked forever on the un-closed done channel")
+    }
+
+    <-firstDone
+}

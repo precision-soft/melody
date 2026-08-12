@@ -7,6 +7,7 @@ import (
     "math"
     "os"
     "reflect"
+    "runtime/debug"
     "strings"
     "sync"
     "time"
@@ -646,6 +647,7 @@ func runScheduledCommand(
 ) (runErr error) {
     defer func() {
         if recovered := recover(); nil != recovered {
+            /* the panic value travels as the CAUSE and the stack is captured here, where the frames of the job that raised it are still on the goroutine. Stringified into the context alone, an error-shaped panic collapsed to its bare message: the context naming the parameter, the chain naming the connection that refused, and any file and line were all gone from the record, and the operator woken by a nightly job was told only that it panicked. The event dispatcher's recovery boundary states the same reason for the same shape. */
             runErr = errors.Join(
                 runErr,
                 exception.NewError(
@@ -653,8 +655,9 @@ func runScheduledCommand(
                     exceptioncontract.Context{
                         "commandName": entry.commandName,
                         "panicValue":  fmt.Sprintf("%v", recovered),
+                        "panicStack":  string(debug.Stack()),
                     },
-                    nil,
+                    panicCause(recovered),
                 ),
             )
         }
@@ -670,6 +673,16 @@ func normalizeScheduledRunError(err error) error {
     }
 
     return err
+}
+
+/* panicCause reads a recovered panic value as the cause of the error the recovery boundary fabricates in its place. It mirrors exception.PanicCause rather than calling it, because this module's go.mod pins a framework version that predates that door. A typed nil answers no cause: its Error() would dereference a nil receiver at the first render. */
+func panicCause(recovered any) error {
+    recoveredErr, isRecoveredError := recovered.(error)
+    if false == isRecoveredError || true == isNilInterface(recoveredErr) {
+        return nil
+    }
+
+    return recoveredErr
 }
 
 /* isNilInterface duplicates the framework's internal helper, which an integration module may not import. */

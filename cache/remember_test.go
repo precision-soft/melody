@@ -4,12 +4,15 @@ import (
     "context"
     "errors"
     "reflect"
+    "strings"
     "sync"
     "sync/atomic"
     "testing"
     "time"
 
+    cachecontract "github.com/precision-soft/melody/cache/contract"
     "github.com/precision-soft/melody/clock"
+    "github.com/precision-soft/melody/exception"
 )
 
 func TestRemember_ReturnsCachedValueWithoutCallingCallback(t *testing.T) {
@@ -1392,4 +1395,137 @@ func TestRemember_StampedeProtectedMissAnswersTheStoredShape(t *testing.T) {
     if _, isGenericMap := value.(map[string]any); false == isGenericMap {
         t.Fatalf("expected the protected miss to answer the stored generic shape, got %T", value)
     }
+}
+
+/* the recovery boundary keeps what the operator needs to act: the panic value travels as the cause so errors.Is still reaches the connection that refused, and the stack is captured on the goroutine that raised it. Stringified into the context alone, the framework's own idiom — a MustGet on a mistyped parameter — reached the record as a message and a cache key, with no file and no line anywhere. */
+func TestExecuteRememberCallbackSafely_APanickingCallbackKeepsItsCauseAndItsStack(t *testing.T) {
+    rootCause := errors.New("dial tcp 10.0.0.7:5432: connect: connection refused")
+
+    panicValue := exception.NewError(
+        "config parameter is not defined",
+        map[string]any{"parameterName": "app.report.recipient"},
+        rootCause,
+    )
+
+    _, callbackErr := executeRememberCallbackSafely(
+        context.Background(),
+        func(ctx context.Context) (any, error) {
+            panic(panicValue)
+        },
+        "report:daily",
+    )
+
+    if nil == callbackErr {
+        t.Fatal("expected the panic to surface as an error")
+    }
+
+    if false == errors.Is(callbackErr, rootCause) {
+        t.Fatalf("expected the cause chain of the panicking error to survive, got %v", callbackErr)
+    }
+
+    typedErr, isTyped := callbackErr.(*exception.Error)
+    if false == isTyped {
+        t.Fatalf("expected a melody error, got %T", callbackErr)
+    }
+
+    stack, hasStack := typedErr.Context()["panicStack"]
+    if false == hasStack {
+        t.Fatalf("expected the recovery boundary to capture a stack, got context %v", typedErr.Context())
+    }
+
+    stackText, isString := stack.(string)
+    if false == isString || false == strings.Contains(stackText, "executeRememberCallbackSafely") {
+        t.Fatalf("expected the stack of the goroutine that raised the panic, got %v", stack)
+    }
+}
+
+/* a typed-nil panic value must not reach the cause slot: its Error() dereferences a nil receiver, and the first render of the record would detonate inside the boundary that exists to write it. */
+func TestExecuteRememberCallbackSafely_ATypedNilPanicValueIsNotHandedOnAsACause(t *testing.T) {
+    var typedNil *exception.Error
+
+    _, callbackErr := executeRememberCallbackSafely(
+        context.Background(),
+        func(ctx context.Context) (any, error) {
+            panic(typedNil)
+        },
+        "report:daily",
+    )
+
+    if nil == callbackErr {
+        t.Fatal("expected the panic to surface as an error")
+    }
+
+    typedErr, isTyped := callbackErr.(*exception.Error)
+    if false == isTyped {
+        t.Fatalf("expected a melody error, got %T", callbackErr)
+    }
+
+    if nil != typedErr.CauseErr() {
+        t.Fatalf("expected a typed nil to answer no cause, got %v", typedErr.CauseErr())
+    }
+
+    /* the message renders, which is what a cause holding the typed nil would have taken away */
+    if false == strings.Contains(callbackErr.Error(), "cache remember callback panicked") {
+        t.Fatalf("unexpected message: %q", callbackErr.Error())
+    }
+}
+
+/* the cache-side boundary carries the same discipline as its callback twin: a Get or Set that panicked hands its cause and its stack on rather than a flattened message. */
+func TestExecuteRememberInFlightLeader_APanickingCacheAccessKeepsItsCauseAndItsStack(t *testing.T) {
+    rootCause := errors.New("redis: client is closed")
+
+    shard := getRememberInFlightShard("panicking-key")
+    call := newRememberInFlightCall(false)
+    call.AddWaiter()
+
+    shard.mutex.Lock()
+    shard.inFlightByKey["panicking-key"] = call
+    shard.mutex.Unlock()
+
+    go executeRememberInFlightLeader(
+        &panickingRememberCache{panicValue: exception.NewError("cache get exploded", nil, rootCause)},
+        shard,
+        "panicking-key",
+        "report:daily",
+        time.Minute,
+        call,
+        func(ctx context.Context) (any, error) {
+            return "value", nil
+        },
+    )
+
+    _, waitErr := call.Wait(5*time.Second, "report:daily")
+    if nil == waitErr {
+        t.Fatal("expected the cache-side panic to surface as an error")
+    }
+
+    if false == errors.Is(waitErr, rootCause) {
+        t.Fatalf("expected the cause chain of the panicking cache to survive, got %v", waitErr)
+    }
+
+    typedErr, isTyped := waitErr.(*exception.Error)
+    if false == isTyped {
+        t.Fatalf("expected a melody error, got %T", waitErr)
+    }
+
+    stack, hasStack := typedErr.Context()["panicStack"]
+    if false == hasStack {
+        t.Fatalf("expected the cache-side boundary to capture a stack, got context %v", typedErr.Context())
+    }
+
+    /* the key alone proves nothing — an empty string under it is the same blindness with a heading */
+    stackText, isString := stack.(string)
+    if false == isString || false == strings.Contains(stackText, "executeRememberInFlightLeader") {
+        t.Fatalf("expected the stack of the goroutine that raised the panic, got %v", stack)
+    }
+}
+
+/* only Get is reached before the boundary under test, so the rest of the contract is embedded rather than written out */
+type panickingRememberCache struct {
+    cachecontract.Cache
+    panicValue error
+}
+
+func (instance *panickingRememberCache) Get(key string) (any, bool, error) {
+    panic(instance.panicValue)
 }
