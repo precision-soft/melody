@@ -55,7 +55,7 @@ func (instance *InitCommand) Run(runtimeInstance runtimecontract.Runtime, comman
         return migratorErr
     }
 
-    if option.Verbose {
+    if true == outputInstance.wantsDetail() {
         identity, identityErr := fetchDatabaseIdentity(runtimeInstance.Context(), db)
         if nil != identityErr {
             return identityErr
@@ -73,7 +73,7 @@ func (instance *InitCommand) Run(runtimeInstance runtimecontract.Runtime, comman
 
     outputInstance.printSuccess("migrations tables initialized")
 
-    if option.Verbose {
+    if true == outputInstance.wantsDetail() {
         outputInstance.newline()
         outputInstance.printDetailsBlock(map[string]string{
             "manager": managerName,

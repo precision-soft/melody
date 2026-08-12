@@ -4,6 +4,7 @@ import (
     "context"
     "errors"
     "fmt"
+    "io"
     "math"
     "strings"
     "sync"
@@ -2427,4 +2428,219 @@ func (instance *idiomaticPanickingCommand) Flags() []clicontract.Flag {
 
 func (instance *idiomaticPanickingCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
     panic(instance.panicValue)
+}
+
+/* outputRecordFor reads the one record carrying a job's own output, which the failure lookup beside it cannot answer: that one filters on the dispatch failure message, and a successful run files no failure at all */
+func (instance *capturingRunnerLogger) outputRecordFor(commandName string) (capturedRunnerRecord, bool) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    for _, entry := range instance.entries {
+        if "cron: scheduled command output" != entry.message {
+            continue
+        }
+
+        if commandName == entry.context["commandName"] {
+            return entry, true
+        }
+    }
+
+    return capturedRunnerRecord{}, false
+}
+
+type outputWritingProbeCommand struct {
+    commandName    string
+    observedFormat string
+    output         string
+}
+
+func (instance *outputWritingProbeCommand) Name() string {
+    return instance.commandName
+}
+
+func (instance *outputWritingProbeCommand) Description() string {
+    return "a job that writes its own report and reads its own posture"
+}
+
+func (instance *outputWritingProbeCommand) Flags() []clicontract.Flag {
+    return output.StandardFlags()
+}
+
+func (instance *outputWritingProbeCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+    instance.observedFormat = string(output.NormalizeOption(output.ParseOptionFromCommand(commandContext)).Format)
+
+    _, writeErr := io.WriteString(commandContext.Writer, instance.output)
+
+    return writeErr
+}
+
+/* a job's own output belongs in the journal. Due entries run concurrently and every one of them held the same os.Stdout, so several reports arrived interleaved, in colour, and none of them reached the log file the operator reads — the runner's documented promise that it writes nothing to the command output itself was true only of the runner's own lines. */
+func TestRunnerCommand_ScheduledJobOutputIsCapturedIntoTheJournal(t *testing.T) {
+    job := &outputWritingProbeCommand{commandName: "job:reporting", output: "SYNCED 42 ROWS\n"}
+
+    configuration := NewConfiguration().
+        Schedule("job:reporting", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+
+    captured := &capturingRunnerLogger{}
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return captured, nil
+        },
+    )
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
+    if runErr := runner.runDue(runtimeInstance, at); nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    record, found := captured.outputRecordFor("job:reporting")
+    if false == found {
+        t.Fatal("expected a record naming the job that wrote")
+    }
+
+    if "SYNCED 42 ROWS\n" != record.context["commandOutput"] {
+        t.Fatalf("expected the job's own output in the record, got %#v", record.context["commandOutput"])
+    }
+
+    /* the run id ties the output to the run that produced it, which is the whole point under overlapping runs of one entry */
+    if runId, hasRunId := record.context["cronRunId"].(string); false == hasRunId || "" == runId {
+        t.Fatalf("expected the record to name the run, got %#v", record.context["cronRunId"])
+    }
+
+    /* a job that printed nothing files nothing: an empty record per entry per minute would bury the runner's own lines */
+    silent := &outputWritingProbeCommand{commandName: "job:silent", output: ""}
+    silentConfiguration := NewConfiguration().
+        Schedule("job:silent", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    silentCaptured := &capturingRunnerLogger{}
+    silentContainer := container.NewContainer()
+    silentContainer.MustRegister(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return silentCaptured, nil
+        },
+    )
+
+    if runErr := NewRunnerCommand(silentConfiguration, RunnerDialectCrontab, silent).runDue(
+        runtime.New(context.Background(), silentContainer.NewScope(), silentContainer),
+        at,
+    ); nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    if _, silentFound := silentCaptured.outputRecordFor("job:silent"); true == silentFound {
+        t.Fatal("expected a job that printed nothing to file no output record")
+    }
+}
+
+/* what one run may contribute to the journal is bounded: a job printing a row per record would write its whole result set into one log line, and the failure of the log would be caused by the reporting meant to make the run visible. What was cut is counted, so a truncated report never reads as a complete one — and the job must not discover the budget as a short write on its own report. */
+func TestRunnerCommand_ScheduledJobOutputIsBoundedAndSaysWhatItCut(t *testing.T) {
+    oversized := strings.Repeat("x", scheduledOutputCaptureLimit+512)
+    job := &outputWritingProbeCommand{commandName: "job:verbose", output: oversized}
+
+    configuration := NewConfiguration().
+        Schedule("job:verbose", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    captured := &capturingRunnerLogger{}
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return captured, nil
+        },
+    )
+
+    at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
+
+    /* the run has to succeed: a short write answered to the job would come back as the job's own failure */
+    if runErr := NewRunnerCommand(configuration, RunnerDialectCrontab, job).runDue(
+        runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer),
+        at,
+    ); nil != runErr {
+        t.Fatalf("expected the write to be answered in full, got %v", runErr)
+    }
+
+    record, found := captured.outputRecordFor("job:verbose")
+    if false == found {
+        t.Fatal("expected a record naming the job that wrote")
+    }
+
+    recorded, isText := record.context["commandOutput"].(string)
+    if false == isText || scheduledOutputCaptureLimit != len(recorded) {
+        t.Fatalf("expected the record to carry exactly the budget, got %d bytes", len(recorded))
+    }
+
+    if 512 != record.context["commandOutputDroppedBytes"] {
+        t.Fatalf("expected the dropped byte count, got %#v", record.context["commandOutputDroppedBytes"])
+    }
+}
+
+/* the writer itself is where two of its rules live, and neither is observable through a job that writes once: the budget is measured against what is already held, so a second write has to see the first, and the full length is always reported because a short write is an io.Writer contract violation the standard library answers with an error the job would then return as its own failure. */
+func TestScheduledOutputCapture_ReportsTheFullLengthAndBoundsWhatItKeeps(t *testing.T) {
+    capture := newScheduledOutputCapture()
+
+    firstChunk := strings.Repeat("a", scheduledOutputCaptureLimit-100)
+    firstWritten, firstErr := capture.Write([]byte(firstChunk))
+    if nil != firstErr || len(firstChunk) != firstWritten {
+        t.Fatalf("expected the first write to be answered in full, got %d, %v", firstWritten, firstErr)
+    }
+
+    /* the second write overruns the budget by 512: only 100 bytes of it may be kept */
+    secondChunk := strings.Repeat("b", 612)
+    secondWritten, secondErr := capture.Write([]byte(secondChunk))
+    if nil != secondErr || len(secondChunk) != secondWritten {
+        t.Fatalf("expected the overrunning write to be answered in full, got %d, %v", secondWritten, secondErr)
+    }
+
+    kept, dropped := capture.captured()
+    if scheduledOutputCaptureLimit != len(kept) {
+        t.Fatalf("expected the capture to stop at the budget, kept %d bytes", len(kept))
+    }
+
+    if 512 != dropped {
+        t.Fatalf("expected the overrun to be counted, got %d", dropped)
+    }
+
+    /* a write arriving after the budget is exhausted is still answered in full and still counted */
+    thirdWritten, thirdErr := capture.Write([]byte("ccc"))
+    if nil != thirdErr || 3 != thirdWritten {
+        t.Fatalf("expected the write past the budget to be answered in full, got %d, %v", thirdWritten, thirdErr)
+    }
+
+    _, droppedAfterThird := capture.captured()
+    if 515 != droppedAfterThird {
+        t.Fatalf("expected the write past the budget to be counted, got %d", droppedAfterThird)
+    }
+}
+
+/* an entry declares its own posture, because the runner has none to lend it: the dispatch used to hand the child nothing but its command name, so every job ran on the declared defaults of its flags whatever the entry configured, and the manifest generated from the same Configuration ran a different command line. */
+func TestRunnerCommand_EntryArgumentsReachTheScheduledCommand(t *testing.T) {
+    job := &outputWritingProbeCommand{commandName: "job:posture", output: "done\n"}
+
+    entryArguments := []string{"--format=json"}
+
+    configuration := NewConfiguration().
+        Schedule("job:posture", &EntryConfig{
+            Schedule:  &Schedule{Minute: "0"},
+            Arguments: entryArguments,
+        })
+
+    /* the registrant keeps writing to its own slice: what was registered is what stays in force */
+    entryArguments[0] = "--format=table"
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+
+    at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
+    if runErr := runner.runDue(newRunnerTestRuntime(context.Background()), at); nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    if string(output.FormatJson) != job.observedFormat {
+        t.Fatalf("expected the entry's own posture to reach the child, got %q", job.observedFormat)
+    }
 }

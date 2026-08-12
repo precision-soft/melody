@@ -517,3 +517,46 @@ func TestMiddlewareCommand_SameNameInactiveEntriesKeepTheReasonOrder(t *testing.
         }
     }
 }
+
+/* the reason appeared and disappeared with the row: omitempty dropped it from every active middleware, so a consumer keying on it could not tell an active entry from a malformed document, and the three shapes this one struct serves — described-active, described-inactive, built — differed in their key set as well as their values. */
+func TestMiddlewareCommand_TheReasonKeyIsPresentOnEveryRow(t *testing.T) {
+    rendered, runErr := runDebugCommand(
+        NewMiddlewareCommand(
+            func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
+                return []middlewarepipeline.MiddlewareDescription{
+                    {Name: "cors", Priority: 100, FunctionName: "cors.Middleware"},
+                }, nil, nil
+            },
+            func() ([]httpcontract.Middleware, error) {
+                return nil, nil
+            },
+        ),
+        newTestRuntime(container.NewContainer()),
+        []string{"--format=json"},
+    )
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    decoded := struct {
+        Data struct {
+            Items []map[string]any `json:"items"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal([]byte(rendered), &decoded); nil != decodeErr {
+        t.Fatalf("failed to decode the rendered envelope: %v, rendered %q", decodeErr, rendered)
+    }
+
+    if 1 != len(decoded.Data.Items) {
+        t.Fatalf("expected the one middleware, got %d in %q", len(decoded.Data.Items), rendered)
+    }
+
+    reasonValue, hasReason := decoded.Data.Items[0]["reason"]
+    if false == hasReason {
+        t.Fatalf("expected the reason key on an active row, got %q", rendered)
+    }
+
+    if "" != reasonValue {
+        t.Fatalf("expected an empty reason on an active row, got %#v", reasonValue)
+    }
+}

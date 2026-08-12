@@ -92,13 +92,24 @@ func (instance *SerializerManager) Get(mime string) (serializercontract.Serializ
 
 /* defaultSerializer answers the representation served when the header expresses no usable preference: the json serializer when one is registered, otherwise the first configured serializer in lexical mime order — an empty accept header means the client takes anything, so a manager deliberately configured without json serves what it has instead of refusing every request. */
 func (instance *SerializerManager) defaultSerializer() (serializercontract.Serializer, bool) {
-    serializerInstance, exists := instance.serializersByMime[MimeApplicationJson]
-    if true == exists {
-        return serializerInstance, true
+    return instance.defaultSerializerExcluding(nil)
+}
+
+/* defaultSerializerExcluding is the same fallback with the types the header refused taken out of the running: a q of 0 names a representation the client will not accept, so it may not be served as the default either — the empty-header rule and the refusal have to hold at once, and answering json to a header that spelled application/json;q=0 would serve the very type it rejected. Everything else is the plain default: json first, then lexical mime order. */
+func (instance *SerializerManager) defaultSerializerExcluding(refusedMimes map[string]struct{}) (serializercontract.Serializer, bool) {
+    if _, refused := refusedMimes[MimeApplicationJson]; false == refused {
+        serializerInstance, exists := instance.serializersByMime[MimeApplicationJson]
+        if true == exists {
+            return serializerInstance, true
+        }
     }
 
     configuredMimes := make([]string, 0, len(instance.serializersByMime))
     for configuredMime := range instance.serializersByMime {
+        if _, refused := refusedMimes[configuredMime]; true == refused {
+            continue
+        }
+
         configuredMimes = append(configuredMimes, configuredMime)
     }
 
@@ -138,11 +149,11 @@ func (instance *SerializerManager) ResolveByAcceptHeader(acceptHeader string) (s
 
     sort.Strings(candidateMimes)
 
-    /* each available type takes the quality of the MOST SPECIFIC range that covers it, so an exact range overrides a wildcard regardless of header order; a covered type whose range carries q=0 is refused rather than ignored, and a header that refuses every available type is answered as not acceptable instead of being served the very type it rejected */
+    /* each available type takes the quality of the MOST SPECIFIC range that covers it, so an exact range overrides a wildcard regardless of header order; a covered type whose range carries q=0 is REFUSED and can never be served, not by the negotiation and not by the fallback below, and not acceptable is answered only when the header refuses every type this manager has — a refusal that leaves another registered type merely unmatched is a preference, and answering it 406 denied a client the representation it never rejected */
     selectedMime := ""
     selectedQuality := 0.0
     selectedSpecificity := 0
-    refusedEveryMatch := false
+    refusedMimes := map[string]struct{}{}
 
     for _, candidateMime := range candidateMimes {
         quality, specificity, matched := acceptQualityFor(acceptedMimes, candidateMime)
@@ -151,7 +162,7 @@ func (instance *SerializerManager) ResolveByAcceptHeader(acceptHeader string) (s
         }
 
         if 0 == quality {
-            refusedEveryMatch = true
+            refusedMimes[candidateMime] = struct{}{}
 
             continue
         }
@@ -181,7 +192,7 @@ func (instance *SerializerManager) ResolveByAcceptHeader(acceptHeader string) (s
         return instance.serializersByMime[selectedMime], nil
     }
 
-    if true == refusedEveryMatch {
+    if len(refusedMimes) == len(candidateMimes) && 0 < len(refusedMimes) {
         return nil, exception.NewError(
             notAcceptableMessage,
             exceptioncontract.Context{"accept": acceptHeader},
@@ -189,7 +200,7 @@ func (instance *SerializerManager) ResolveByAcceptHeader(acceptHeader string) (s
         )
     }
 
-    serializerInstance, exists := instance.defaultSerializer()
+    serializerInstance, exists := instance.defaultSerializerExcluding(refusedMimes)
     if true == exists {
         return serializerInstance, nil
     }

@@ -5,7 +5,6 @@ import (
     "errors"
     "fmt"
     "math"
-    "os"
     "reflect"
     "runtime/debug"
     "strings"
@@ -28,6 +27,7 @@ const flagNameOnce = "once"
 type scheduledRunEntry struct {
     commandName     string
     command         clicontract.Command
+    arguments       []string
     matcher         *scheduleMatcher
     fixedTime       bool
     timeout         time.Duration
@@ -176,6 +176,7 @@ func NewRunnerCommand(configuration *Configuration, dialect RunnerDialect, comma
         entries = append(entries, &scheduledRunEntry{
             commandName:     scheduled.CommandName,
             command:         command,
+            arguments:       argumentsOfEntry(scheduled),
             matcher:         matcher,
             fixedTime:       matcher.fixedTime(),
             timeout:         timeoutOfEntry(scheduled),
@@ -197,6 +198,15 @@ func scheduleOfEntry(scheduled *ScheduledCommand) *Schedule {
     }
 
     return scheduled.Config.Schedule
+}
+
+/* argumentsOfEntry reads the arguments this entry runs under, none when it declares none. The slice needs no copy here: Schedule already copied what the registrant handed in, which is where the configuration states that ownership, and a second copy would be a guard nothing could ever observe. */
+func argumentsOfEntry(scheduled *ScheduledCommand) []string {
+    if nil == scheduled.Config {
+        return nil
+    }
+
+    return scheduled.Config.Arguments
 }
 
 /* timeoutOfEntry resolves the deadline one entry runs under: its own when it sets one, the runner default when it leaves it at zero, and none at all when it sets a negative one — the explicit opt-out that reads the same as the default and is kept so an entry can say so deliberately rather than by omission. */
@@ -539,11 +549,17 @@ func (instance *RunnerCommand) invoke(runtimeInstance runtimecontract.Runtime, e
 
     childRuntime := runtime.New(childContext, childScope, runtimeInstance.Container())
 
+    /* the job's own output belongs in the journal, not on the process stdout. Due entries run concurrently, one goroutine each, and they all held the same os.Stdout: the reports of several jobs arrived interleaved, in ANSI colour nobody asked for, and nothing of them reached the log file the operator actually reads. Captured here, one job's output is one record carrying the entry and the run id, so the runner's promise that it writes nothing to the command output itself is true on every format. */
+    capturedOutput := newScheduledOutputCapture()
+    defer func() {
+        instance.reportScheduledOutput(runtimeInstance, entry, runId, capturedOutput, invokeErr)
+    }()
+
     commandContext := &clicontract.CommandContext{
         Name:      entry.commandName,
         Flags:     entry.command.Flags(),
-        Writer:    os.Stdout,
-        ErrWriter: os.Stderr,
+        Writer:    capturedOutput,
+        ErrWriter: capturedOutput,
         Action: func(actionContext context.Context, actionCommandContext *clicontract.CommandContext) error {
             return normalizeScheduledRunError(entry.command.Run(childRuntime, actionCommandContext))
         },
@@ -576,6 +592,87 @@ func (instance *RunnerCommand) invoke(runtimeInstance runtimecontract.Runtime, e
     case <-abandon:
         return runId, instance.resolveAbandonedRun(runtimeInstance, entry, runId, childContext, completed)
     }
+}
+
+/* scheduledOutputCaptureLimit bounds what one run may contribute to the journal. A job that prints a row per record would otherwise write its whole result set into a single log line, and the failure of the log — a rotated file filled in one run, a line no reader can open — would be caused by the very reporting meant to make the run visible. What was cut is counted and named in the record, so a truncated report never reads as a complete one. */
+const scheduledOutputCaptureLimit = 64 * 1024
+
+/* scheduledOutputCapture is the writer a scheduled command is handed in place of the process stdout. It always reports the full length as written: a command must not discover the runner's budget as a short write on its own report, which is an io.Writer contract violation and would be answered by half the standard library with an error the job then returns as its failure. */
+type scheduledOutputCapture struct {
+    mutex        sync.Mutex
+    buffer       strings.Builder
+    droppedBytes int
+}
+
+func newScheduledOutputCapture() *scheduledOutputCapture {
+    return &scheduledOutputCapture{}
+}
+
+func (instance *scheduledOutputCapture) Write(content []byte) (int, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    remaining := scheduledOutputCaptureLimit - instance.buffer.Len()
+    if 0 >= remaining {
+        instance.droppedBytes = instance.droppedBytes + len(content)
+
+        return len(content), nil
+    }
+
+    if len(content) > remaining {
+        instance.buffer.Write(content[:remaining])
+        instance.droppedBytes = instance.droppedBytes + len(content) - remaining
+
+        return len(content), nil
+    }
+
+    instance.buffer.Write(content)
+
+    return len(content), nil
+}
+
+func (instance *scheduledOutputCapture) captured() (string, int) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return instance.buffer.String(), instance.droppedBytes
+}
+
+/* reportScheduledOutput files what the job wrote, once, under the identity of the run that wrote it. A run that printed nothing files nothing: the record exists to carry output, and an empty one per entry per minute would bury the runner's own lines. The level follows the run — a job that failed has its report read beside its failure — and the failure itself is filed by the dispatch, which is where the aggregation happens. */
+func (instance *RunnerCommand) reportScheduledOutput(
+    runtimeInstance runtimecontract.Runtime,
+    entry *scheduledRunEntry,
+    runId string,
+    capturedOutput *scheduledOutputCapture,
+    invokeErr error,
+) {
+    commandOutput, droppedBytes := capturedOutput.captured()
+    if "" == commandOutput {
+        return
+    }
+
+    logger := logging.LoggerFromRuntime(runtimeInstance)
+    if nil == logger {
+        return
+    }
+
+    recordContext := exceptioncontract.Context{
+        "commandName":   entry.commandName,
+        "cronRunId":     runId,
+        "commandOutput": commandOutput,
+    }
+
+    if 0 < droppedBytes {
+        recordContext["commandOutputDroppedBytes"] = droppedBytes
+    }
+
+    if nil != invokeErr {
+        logger.Warning("cron: scheduled command output", recordContext)
+
+        return
+    }
+
+    logger.Info("cron: scheduled command output", recordContext)
 }
 
 /* isShutdownCancellation classifies a run's failure as the runner's own shutdown reaching it: the runner's context is cancelled and the outcome is the cancellation, not an entry deadline. Only the parent's cancellation qualifies — a deadline the entry asked for stays a failure whatever the shutdown is doing. */
@@ -663,7 +760,8 @@ func runScheduledCommand(
         }
     }()
 
-    return commandContext.Run(ctx, []string{entry.commandName})
+    /* the entry's own arguments travel with the command name, so a job declaring Arguments: []string{"--format=json"} runs under the posture it asked for. The dispatch used to hand the child nothing but its name, which left every job on the declared defaults of its flags whatever the entry configured, and the generated manifest for the same entry ran a different command line. */
+    return commandContext.Run(ctx, append([]string{entry.commandName}, entry.arguments...))
 }
 
 /* normalizeScheduledRunError reads the command's result through the interface the way the cli entry point does before rendering: a command that returns its failure through a concrete error pointer hands back a typed nil boxed into a non-nil interface, and the runner would read it as the failure it is not — on the dispatch goroutine, which deliberately carries no recover, so the first Error() call on the nil receiver would take the scheduler down with every entry it drives. */

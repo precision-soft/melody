@@ -1,6 +1,7 @@
 package debug
 
 import (
+    "encoding/json"
     "fmt"
     "sort"
     "strings"
@@ -93,7 +94,7 @@ func (instance *RouterCommand) Run(
                 Locales:      locales,
                 Requirements: routeDefinition.Requirements(),
                 Defaults:     routeDefinition.Defaults(),
-                Attributes:   routeDefinition.Attributes(),
+                Attributes:   serializableRouteAttributes(routeDefinition.Attributes()),
             },
         )
     }
@@ -219,6 +220,26 @@ func renderCompactStringMap(values map[string]string) string {
     }
 
     return strings.Join(pairs, ",")
+}
+
+/* serializableRouteAttributes keeps the document producible whatever userland hung on a route. A route attribute is arbitrary any — the framework contributes only serializable values, but WithRouteAttribute takes whatever the application hands it, and one closure among them made json.Marshal fail on the whole envelope, so the command answered ZERO bytes and the printer had no fallback to write anything else. A value that marshals is kept exactly as it is, because folding everything to text would turn the methods attribute from a list into a string; only the value that cannot be represented degrades to the same %v rendering the verbose table prints, which names the attribute instead of losing the document. */
+func serializableRouteAttributes(values map[string]any) map[string]any {
+    if 0 == len(values) {
+        return values
+    }
+
+    projected := make(map[string]any, len(values))
+    for key, value := range values {
+        if _, marshalErr := json.Marshal(value); nil != marshalErr {
+            projected[key] = fmt.Sprintf("%v", value)
+
+            continue
+        }
+
+        projected[key] = value
+    }
+
+    return projected
 }
 
 func renderCompactAnyMap(values map[string]any) string {

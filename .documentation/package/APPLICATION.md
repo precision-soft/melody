@@ -150,10 +150,10 @@ var _ applicationcontract.ParameterModule = (*demoModule)(nil)
 var _ applicationcontract.ServiceModule = (*demoModule)(nil)
 var _ applicationcontract.HttpModule = (*demoModule)(nil)
 
-func buildApplication(embeddedPublicFiles fs.FS, embeddedConfigFiles fs.FS) *application.Application {
+func buildApplication(embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS) *application.Application {
 	app := application.NewApplication(
+		embeddedEnvFiles,
 		embeddedPublicFiles,
-		embeddedConfigFiles,
 	)
 
 	app.RegisterModule(&demoModule{})
@@ -181,8 +181,8 @@ func buildApplication(embeddedPublicFiles fs.FS, embeddedConfigFiles fs.FS) *app
 	return app
 }
 
-func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.FS) {
-	app := buildApplication(embeddedPublicFiles, embeddedConfigFiles)
+func run(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS) {
+	app := buildApplication(embeddedEnvFiles, embeddedPublicFiles)
 	app.Run(ctx)
 }
 ```
@@ -229,7 +229,7 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 
 ### Constructors
 
-- [`NewApplication(embeddedPublicFiles, embeddedConfigFiles)`](../../application/application_new.go)
+- [`NewApplication(embeddedEnvFiles, embeddedPublicFiles)`](../../application/application_new.go) — both parameters are `fs.FS`, so the compiler never objects to them being swapped: the **env** files come first and the **public** files second, matching the `melody_env_embedded` and `melody_static_embedded` build tags in that order.
 - [`NewRuntimeFlags(mode)`](../../application/cli.go)
 - [`ParseRuntimeFlags(defaultMode)`](../../application/cli.go)
 - [`NewHttpMiddleware(staticOptions, configuration)`](../../application/http_middleware.go)

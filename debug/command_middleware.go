@@ -108,13 +108,16 @@ func (instance *MiddlewareCommand) Run(
     return output.Render(commandContext.Writer, envelope, option)
 }
 
+/* middlewareListItem is one shape serving three documents, and the reason is the field that used to appear and disappear with them: an active row omitted it, an inactive row carried it, and a consumer keying on it could not tell an active middleware from a malformed document. It is always present now, empty where there is nothing to say.
+
+What --build cannot fill is worth naming rather than faking: MiddlewareBuildProvider hands back the built chain and nothing else, so a built row carries no name and no priority — index, function and status are all the build knows. Correlating the built chain with the described one by position would be a guess, because the description also lists the inactive entries the build never produces. A consumer that needs the name reads the default listing, which describes without building. */
 type middlewareListItem struct {
     Index    int    `json:"index"`
     Name     string `json:"name"`
     Priority int    `json:"priority"`
     Function string `json:"function"`
     Status   string `json:"status"`
-    Reason   string `json:"reason,omitempty"`
+    Reason   string `json:"reason"`
 }
 
 /* populateDescription is the default listing: nothing is built, so listing the pipeline in a console process runs no factory and touches no serving-process state */

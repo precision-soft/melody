@@ -71,7 +71,7 @@ func (instance *MigrateCommand) Run(runtimeInstance runtimecontract.Runtime, com
         }
     }()
 
-    if option.Verbose {
+    if true == outputInstance.wantsDetail() {
         identity, identityErr := fetchDatabaseIdentity(runtimeInstance.Context(), db)
         if nil != identityErr {
             return identityErr
@@ -97,7 +97,7 @@ func (instance *MigrateCommand) Run(runtimeInstance runtimecontract.Runtime, com
         return nil
     }
 
-    if option.Verbose {
+    if true == outputInstance.wantsDetail() {
         outputInstance.newline()
 
         groupString := "<none>"
@@ -117,7 +117,7 @@ func (instance *MigrateCommand) Run(runtimeInstance runtimecontract.Runtime, com
             for _, migration := range group.Migrations {
                 names = append(names, migration.Name)
             }
-            outputInstance.printMigrationsBlock("APPLIED MIGRATIONS", names)
+            outputInstance.printMigrationsBlock("applied", "APPLIED MIGRATIONS", names)
         }
     }
 

@@ -65,7 +65,7 @@ func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, co
         }
     }()
 
-    if option.Verbose {
+    if true == outputInstance.wantsDetail() {
         identity, identityErr := fetchDatabaseIdentity(runtimeInstance.Context(), db)
         if nil != identityErr {
             return identityErr
@@ -93,7 +93,7 @@ func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, co
 
     outputInstance.printSuccess("migrations rolled back successfully")
 
-    if option.Verbose {
+    if true == outputInstance.wantsDetail() {
         outputInstance.newline()
 
         groupString := "<none>"
@@ -112,7 +112,7 @@ func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, co
             for _, migration := range group.Migrations {
                 names = append(names, migration.Name)
             }
-            outputInstance.printMigrationsBlock("ROLLED BACK MIGRATIONS", names)
+            outputInstance.printMigrationsBlock("rolledBack", "ROLLED BACK MIGRATIONS", names)
         }
     }
 

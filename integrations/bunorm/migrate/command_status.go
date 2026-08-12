@@ -53,7 +53,7 @@ func (instance *StatusCommand) Run(runtimeInstance runtimecontract.Runtime, comm
         return migratorErr
     }
 
-    if option.Verbose {
+    if true == outputInstance.wantsDetail() {
         identity, identityErr := fetchDatabaseIdentity(runtimeInstance.Context(), db)
         if nil != identityErr {
             return identityErr
@@ -84,7 +84,7 @@ func (instance *StatusCommand) Run(runtimeInstance runtimecontract.Runtime, comm
         for _, migration := range applied {
             appliedNames = append(appliedNames, migration.Name)
         }
-        outputInstance.printMigrationsBlock("APPLIED", appliedNames)
+        outputInstance.printMigrationsBlock("applied", "APPLIED", appliedNames)
     }
 
     if 0 < len(unapplied) {
@@ -93,7 +93,7 @@ func (instance *StatusCommand) Run(runtimeInstance runtimecontract.Runtime, comm
         for _, migration := range unapplied {
             pendingNames = append(pendingNames, migration.Name)
         }
-        outputInstance.printMigrationsBlock("PENDING", pendingNames)
+        outputInstance.printMigrationsBlock("pending", "PENDING", pendingNames)
     }
 
     if 0 == len(applied) && 0 == len(unapplied) {

@@ -43,6 +43,15 @@ func (instance *commandOutput) isJson() bool {
     return output.FormatJson == instance.option.Format
 }
 
+/* wantsDetail decides whether the detail blocks are collected at all, and it is deliberately not the same question as --verbose. Verbosity is a rendering decision about TEXT — the README says so in as many words — while the json document is the machine contract, and shaping it with a display flag left `db:migrate --format=json` answering {"data":{}} for a run that applied five migrations: a pipeline recording what it deployed learned nothing, and the flag its author would have needed is documented as affecting the plain-text output alone. Under json the blocks are always collected; under text --verbose still decides. The cost is one extra query per run — the database identity block — paid only by a run that asked for the machine document. */
+func (instance *commandOutput) wantsDetail() bool {
+    if true == instance.isJson() {
+        return true
+    }
+
+    return instance.option.Verbose
+}
+
 /* finish is the command's one exit door: under --format=json it renders the accumulated document — the failure included — and in every mode it answers the error the command should return. The command's own failure stays the verdict; a rendering failure becomes one only when the command itself succeeded. */
 func (instance *commandOutput) finish(command string, startedAt time.Time, runErr error) error {
     if false == instance.isJson() {
@@ -57,13 +66,14 @@ func (instance *commandOutput) finish(command string, startedAt time.Time, runEr
         data["messages"] = instance.messages
     }
     if nil != instance.database {
-        currentDatabaseString := "<null>"
+        /* the absent database is json null, not the placeholder the text block renders: as a string, "no current database" was indistinguishable from a database named literally <null>, and a consumer had to know melody's own placeholder to read the field at all */
+        currentDatabaseValue := (any)(nil)
         if nil != instance.database.CurrentDatabase {
-            currentDatabaseString = *instance.database.CurrentDatabase
+            currentDatabaseValue = *instance.database.CurrentDatabase
         }
 
         data["database"] = map[string]any{
-            "database": currentDatabaseString,
+            "database": currentDatabaseValue,
             "host":     instance.database.Hostname,
             "port":     instance.database.Port,
             "user":     instance.database.CurrentUser,
@@ -185,7 +195,8 @@ func (instance *commandOutput) printDetailsBlock(fields map[string]string) {
     }
 }
 
-func (instance *commandOutput) printMigrationsBlock(title string, names []string) {
+/* printMigrationsBlock takes the document key apart from the display title: the two used to be one string, so the json document was keyed on the heading a person reads — data.migrations.APPLIED from db:status against data.migrations["APPLIED MIGRATIONS"] from db:migrate, for the same thing — with no enumerable set of keys and a rename for readability breaking every consumer silently. The key is the contract; the title is rendering. */
+func (instance *commandOutput) printMigrationsBlock(key string, title string, names []string) {
     if 0 == len(names) {
         return
     }
@@ -194,7 +205,7 @@ func (instance *commandOutput) printMigrationsBlock(title string, names []string
         if nil == instance.migrations {
             instance.migrations = make(map[string][]string)
         }
-        instance.migrations[title] = names
+        instance.migrations[key] = names
 
         return
     }

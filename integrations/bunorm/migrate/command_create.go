@@ -67,7 +67,7 @@ func (instance *CreateCommand) Run(runtimeInstance runtimecontract.Runtime, comm
     outputInstance.newline()
     outputInstance.printFilesBlock(fileLines)
 
-    if option.Verbose {
+    if true == outputInstance.wantsDetail() {
         outputInstance.newline()
         outputInstance.printDetailsBlock(map[string]string{
             "manager": managerName,

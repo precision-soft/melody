@@ -561,3 +561,82 @@ func TestRouterCommand_TiedPatternAndMethodsRowsKeepTheRegistrationOrder(t *test
         }
     }
 }
+
+/* a route attribute is arbitrary any from userland, and one value the encoder cannot represent made the whole envelope fail to marshal: the printer has no fallback, so the command answered ZERO bytes and the caller was left with an empty stream indistinguishable from a missing binary. The value that cannot be represented degrades to the rendering the verbose table already prints; every value that CAN be represented keeps its json type, or the methods attribute would arrive as a string where the consumer keyed a list. */
+func TestRouterCommand_KeepsTheDocumentWhenAnAttributeCannotBeSerialized(t *testing.T) {
+    router := http.NewRouter()
+    router.HandleWithOptions(
+        "/probe",
+        func(
+            runtimeInstance runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            return nil, nil
+        },
+        http.NewRouteOptions(
+            "probe.route",
+            []string{nethttp.MethodGet},
+            "",
+            nil,
+            nil,
+            nil,
+            nil,
+            0,
+            map[string]any{
+                "handlerHook":   func() {},
+                "allowedRoles":  []string{"admin", "auditor"},
+                "requiresLogin": true,
+            },
+        ),
+    )
+
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(
+        http.ServiceRouter,
+        func(resolver containercontract.Resolver) (httpcontract.Router, error) {
+            return router, nil
+        },
+    )
+
+    rendered, runErr := runDebugCommand(
+        &RouterCommand{},
+        newTestRuntime(serviceContainer),
+        []string{"--format=json"},
+    )
+    if nil != runErr {
+        t.Fatalf("expected the document to be produced, got %v", runErr)
+    }
+
+    decoded := struct {
+        Data struct {
+            Items []struct {
+                Attributes map[string]any `json:"attributes"`
+            } `json:"items"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal([]byte(rendered), &decoded); nil != decodeErr {
+        t.Fatalf("failed to decode the rendered envelope: %v, rendered %q", decodeErr, rendered)
+    }
+
+    if 1 != len(decoded.Data.Items) {
+        t.Fatalf("expected the one route, got %d in %q", len(decoded.Data.Items), rendered)
+    }
+
+    attributes := decoded.Data.Items[0].Attributes
+
+    hookValue, hookIsText := attributes["handlerHook"].(string)
+    if false == hookIsText || false == strings.HasPrefix(hookValue, "0x") {
+        t.Fatalf("expected the unrepresentable attribute to degrade to its rendering, got %#v", attributes["handlerHook"])
+    }
+
+    /* the list must stay a list: folding every value to text would have been the cheaper repair and the wrong one */
+    roles, rolesAreList := attributes["allowedRoles"].([]any)
+    if false == rolesAreList || 2 != len(roles) {
+        t.Fatalf("expected the serializable list to keep its type, got %#v", attributes["allowedRoles"])
+    }
+
+    if true != attributes["requiresLogin"] {
+        t.Fatalf("expected the serializable boolean to keep its type, got %#v", attributes["requiresLogin"])
+    }
+}

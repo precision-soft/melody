@@ -158,9 +158,17 @@ type runOptions struct {
 func (instance *GenerateCommand) runWithConfiguration(
     commandContext *clicontract.CommandContext,
     configuration configcontract.Configuration,
-) error {
+) (runErr error) {
     startedAt := time.Now()
     option := output.NormalizeOption(output.ParseOptionFromCommand(commandContext))
+
+    writes := ([]destinationWrite)(nil)
+    emptyMessage := ""
+
+    /* the report is a defer so that no failure path can leave the run without a document: under --format=json every early return used to travel straight out past the one door that builds the envelope, and the cli silences the command's own error line in json mode, so `app melody:cron:generate --format=json | jq …` received an empty stream — indistinguishable from a missing binary — for a malformed schedule or an unwritable directory. The sibling integration's commands have carried this shape since the verdict that gave migrate its machine contract. */
+    defer func() {
+        runErr = instance.reportWrites(commandContext, option, startedAt, writes, emptyMessage, runErr)
+    }()
 
     options, resolveErr := instance.resolveRunOptions(commandContext, configuration)
     if nil != resolveErr {
@@ -172,7 +180,10 @@ func (instance *GenerateCommand) runWithConfiguration(
         return collectErr
     }
 
-    return instance.writeDestinations(commandContext, option, startedAt, options, entries)
+    writeErr := (error)(nil)
+    writes, emptyMessage, writeErr = instance.writeDestinations(option, options, entries)
+
+    return writeErr
 }
 
 func (instance *GenerateCommand) resolveRunOptions(
@@ -334,26 +345,19 @@ type destinationWrite struct {
     HeartbeatOnly bool   `json:"heartbeatOnly"`
 }
 
+/* writeDestinations answers what it wrote, what there was to say about an empty run and what stopped it, leaving the one report door to the caller's defer: reporting from here left the seven failure paths below with no document at all, and the writes accumulated before a failure are exactly what tells the consumer which files a partial run left on disk — the destinations are written one by one with no rollback. */
 func (instance *GenerateCommand) writeDestinations(
-    commandContext *clicontract.CommandContext,
     option output.Option,
-    startedAt time.Time,
     options *runOptions,
     entries []Entry,
-) error {
+) ([]destinationWrite, string, error) {
     entriesByDestination, groupErr := groupEntriesByDestination(entries, options.outputPath)
     if nil != groupErr {
-        return groupErr
+        return nil, "", groupErr
     }
 
     if 0 == len(entriesByDestination) && false == options.heartbeatEnabled {
-        return instance.reportWrites(
-            commandContext,
-            option,
-            startedAt,
-            nil,
-            "the cron Configuration is empty and no --heartbeat-path or --heartbeat-command was provided; nothing to write",
-        )
+        return nil, "the cron Configuration is empty and no --heartbeat-path or --heartbeat-command was provided; nothing to write", nil
     }
 
     if 0 == len(entriesByDestination) && true == options.heartbeatEnabled {
@@ -372,7 +376,7 @@ func (instance *GenerateCommand) writeDestinations(
         destinationPaths,
     )
     if nil != heartbeatDestinationsErr {
-        return heartbeatDestinationsErr
+        return nil, "", heartbeatDestinationsErr
     }
 
     writes := make([]destinationWrite, 0, len(destinationPaths))
@@ -388,7 +392,7 @@ func (instance *GenerateCommand) writeDestinations(
 
         content, renderErr := options.template.Render(destinationEntries, renderOptions)
         if nil != renderErr {
-            return exception.NewError(
+            return writes, "", exception.NewError(
                 fmt.Sprintf("cron: could not render %s content for %s: %s", options.template.Name(), destination, renderErr.Error()),
                 exceptioncontract.Context{
                     "template":    options.template.Name(),
@@ -399,7 +403,7 @@ func (instance *GenerateCommand) writeDestinations(
         }
 
         if mkdirErr := os.MkdirAll(filepath.Dir(destination), 0o755); nil != mkdirErr {
-            return exception.NewError(
+            return writes, "", exception.NewError(
                 "cron: could not create the output directory",
                 exceptioncontract.Context{"directory": filepath.Dir(destination)},
                 mkdirErr,
@@ -407,7 +411,7 @@ func (instance *GenerateCommand) writeDestinations(
         }
 
         if writeErr := atomicWriteFile(destination, []byte(content), 0o644); nil != writeErr {
-            return writeErr
+            return writes, "", writeErr
         }
 
         writes = append(writes, destinationWrite{
@@ -417,16 +421,19 @@ func (instance *GenerateCommand) writeDestinations(
         })
     }
 
-    return instance.reportWrites(commandContext, option, startedAt, writes, "")
+    return writes, "", nil
 }
 
-/* reportWrites is the generator's one report door: the written summary as text lines, or as the single machine-readable document under --format=json. The summary is essential output — the command's whole visible result — so --quiet, which suppresses headers and non-essential output, does not silence it. */
+/* reportWrites is the generator's one report door, reached from the run's defer on every path: the written summary as text lines, or as the single machine-readable document under --format=json — the failure inside it, beside whatever the run had already written before it stopped. The summary is essential output — the command's whole visible result — so --quiet, which suppresses headers and non-essential output, does not silence it.
+
+The run's own failure stays the verdict the command returns; a rendering failure becomes one only when the run itself succeeded, which is the rule the sibling integration's exit door states in the same words. In text mode the failure travels alone, as it always has: the cli entry point prints it. */
 func (instance *GenerateCommand) reportWrites(
     commandContext *clicontract.CommandContext,
     option output.Option,
     startedAt time.Time,
     writes []destinationWrite,
     emptyMessage string,
+    runErr error,
 ) error {
     if output.FormatJson == option.Format {
         meta := output.NewMeta(instance.Name(), nil, option, startedAt, time.Since(startedAt), output.Version{})
@@ -441,7 +448,25 @@ func (instance *GenerateCommand) reportWrites(
             envelope.Warnings = append(envelope.Warnings, output.NewWarning("cron.nothingToWrite", emptyMessage, nil))
         }
 
-        return output.Render(commandContext.Writer, envelope, option)
+        if nil != runErr {
+            envelope.SetError(
+                "cron.generateFailed",
+                "the cron manifest generation failed",
+                nil,
+                output.NewErrorCause(runErr.Error(), nil),
+            )
+        }
+
+        renderErr := output.Render(commandContext.Writer, envelope, option)
+        if nil != runErr {
+            return runErr
+        }
+
+        return renderErr
+    }
+
+    if nil != runErr {
+        return runErr
     }
 
     if "" != emptyMessage {
@@ -760,6 +785,9 @@ func expandEntriesForCommand(
                     fmt.Sprintf("--instance-index=%d", index),
                 )
             }
+
+            /* the entry's own arguments come last, after the instance flags this generator adds, so the manifest line runs the command line the entry declared — the same one the in-process runner hands the child. A Configuration drives both halves, and an argument honoured by only one of them is a divergence nothing would report. */
+            args = append(args, config.Arguments...)
 
             entry.Binary = binary
             entry.Args = args

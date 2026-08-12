@@ -48,7 +48,7 @@ func (instance *UnlockCommand) Run(runtimeInstance runtimecontract.Runtime, comm
         return migratorErr
     }
 
-    if option.Verbose {
+    if true == outputInstance.wantsDetail() {
         identity, identityErr := fetchDatabaseIdentity(runtimeInstance.Context(), db)
         if nil != identityErr {
             return identityErr
@@ -66,7 +66,7 @@ func (instance *UnlockCommand) Run(runtimeInstance runtimecontract.Runtime, comm
 
     outputInstance.printSuccess("migrations table unlocked")
 
-    if option.Verbose {
+    if true == outputInstance.wantsDetail() {
         outputInstance.newline()
         outputInstance.printDetailsBlock(map[string]string{
             "manager": managerName,

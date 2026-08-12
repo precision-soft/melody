@@ -253,18 +253,18 @@ type containerServiceDetails struct {
 
 func resolveErrorContextJson(resolveErr error, option output.Option) string {
     if nil == resolveErr {
-        return ""
+        return emptyErrorContextJsonForFormat(option)
     }
 
     /* the context is read through the ContextProvider contract rather than the concrete *exception.Error: an HttpException — or any userland error carrying a context — in the resolution chain used to contribute nothing, so its context was silently absent from the one report built to show it */
     var provider exceptioncontract.ContextProvider
     if false == errors.As(resolveErr, &provider) || true == internal.IsNilInterface(provider) {
-        return ""
+        return emptyErrorContextJsonForFormat(option)
     }
 
     contextValue := provider.Context()
     if nil == contextValue {
-        return ""
+        return emptyErrorContextJsonForFormat(option)
     }
 
     /* sanitize BEFORE marshalling: both fallbacks below print the value they were handed, so walking only the happy path would leak exactly the stack and trace entries the noise filter strips whenever json.Marshal or json.Unmarshal fails. The defined exceptioncontract.Context type is converted to its plain map[string]any underlying because the walk matches via value.(map[string]any) first; nested named types are converted inside the tracked walk itself. */
@@ -296,6 +296,24 @@ func resolveErrorContextJson(resolveErr error, option output.Option) string {
     }
 
     return truncateErrorContextForFormat(string(contextJsonBytes), option)
+}
+
+/* emptyErrorContextJsonForFormat answers "nothing to report" in the grammar of the format asking. The json document declares a string of json, so the absence has to be a parseable one: `.errorContextJson | fromjson` died with "Cannot parse ''" on every healthy row of the very sweep built to be read by a machine, and a field whose type changes with the value of the row cannot be consumed at all. The table keeps the empty cell, where a literal {} would be noise in a column read by a person. */
+func emptyErrorContextJsonForFormat(option output.Option) string {
+    if output.FormatTable == option.Format {
+        return ""
+    }
+
+    return "{}"
+}
+
+/* normalizeErrorCauseChain answers an empty list rather than a nil one, so the field stays an array in every row of one document — `jq '.data.items[].errorCauseChain[]'` used to die with "Cannot iterate over null" at the first service that resolved. It is the convention the envelope factory already applies to Warnings. The table renders both spellings identically. */
+func normalizeErrorCauseChain(causeChain []string) []string {
+    if nil == causeChain {
+        return []string{}
+    }
+
+    return causeChain
 }
 
 /* truncateErrorContextForFormat applies the table-cell truncation to the table format alone: the json envelope is a machine document, and cutting a json fragment at a display width handed the consumer an unparseable value with no sign anything was dropped */
@@ -357,12 +375,12 @@ func (instance *ContainerCommand) populateServiceList(
 
         typeName := ""
         errorString := ""
-        errorContextJson := ""
-        errorCauseChain := ([]string)(nil)
+        errorContextJson := emptyErrorContextJsonForFormat(option)
+        errorCauseChain := []string{}
 
         if nil != getErr {
             errorString = getErr.Error()
-            errorCauseChain = resolveErrorCauseChain(getErr)
+            errorCauseChain = normalizeErrorCauseChain(resolveErrorCauseChain(getErr))
             errorContextJson = resolveErrorContextJson(getErr, option)
         }
 
@@ -384,6 +402,8 @@ func (instance *ContainerCommand) populateServiceList(
             okItems = append(okItems, item)
         }
     }
+
+    reportServiceSweepFailures(errorItems, envelope)
 
     if output.FormatTable == option.Format {
         builder := output.NewTableBuilder()
@@ -486,6 +506,37 @@ func (instance *ContainerCommand) populateServiceList(
         total,
         option.Limit,
         option.Offset,
+    )
+}
+
+/* reportServiceSweepFailures puts the sweep's failures where the exit code reads them. Render turns an envelope carrying an error into a non-zero exit, which is the whole reason the envelope contract exists: `app debug:container --build --format=json || exit 1` is a deployment gate, and a sweep whose declared purpose is "build everything and report the failures with their causes" used to answer `"error": null` and exit 0 over every one of them, leaving the failures reachable only as data.items[].error for a consumer nobody told to read them. The single-name door and the middleware sibling have reported theirs all along. */
+func reportServiceSweepFailures(
+    errorItems []containerServiceListItem,
+    envelope *output.Envelope,
+) {
+    if 0 == len(errorItems) {
+        return
+    }
+
+    failedNames := make([]string, 0, len(errorItems))
+    for _, item := range errorItems {
+        failedNames = append(failedNames, item.Name)
+    }
+
+    envelope.SetError(
+        "debug.buildFailed",
+        "services failed to build",
+        map[string]any{
+            "failedCount": len(errorItems),
+            "failedNames": failedNames,
+        },
+        output.NewErrorCause(
+            errorItems[0].ErrorString,
+            map[string]any{
+                "serviceName": errorItems[0].Name,
+                "causeChain":  errorItems[0].ErrorCauseChain,
+            },
+        ),
     )
 }
 
@@ -898,12 +949,12 @@ func (instance *ContainerCommand) populateSingleService(
 
     typeName := ""
     errorString := ""
-    errorContextJson := ""
-    errorCauseChain := ([]string)(nil)
+    errorContextJson := emptyErrorContextJsonForFormat(option)
+    errorCauseChain := []string{}
 
     if nil != getErr {
         errorString = getErr.Error()
-        errorCauseChain = resolveErrorCauseChain(getErr)
+        errorCauseChain = normalizeErrorCauseChain(resolveErrorCauseChain(getErr))
         errorContextJson = resolveErrorContextJson(getErr, option)
 
         /* a registered service that fails to build is a wiring problem inside the provider, not a missing registration; reporting both as notFound sends the operator after a registration that is in fact present — and a registration either lifetime knows counts as present */

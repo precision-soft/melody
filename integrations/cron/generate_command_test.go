@@ -2382,3 +2382,173 @@ func TestGenerateCommand_JsonFormatRendersOneDocument(t *testing.T) {
         t.Fatalf("expected the write summary inside the document, got %v", data)
     }
 }
+
+/* every failure path used to travel out past the one door that builds the envelope, and the cli silences the command's own error line in json mode, so a deploy script piping this command into jq received an empty stream for a malformed schedule or an unwritable directory — indistinguishable from a missing binary. The report is a defer now, so the document exists whatever stopped the run, and it names what had already been written: the destinations are written one by one with no rollback, so a failure on the third of four leaves two files on disk that the consumer has to be able to learn about. */
+func TestGenerateCommand_JsonReportsTheFailureAndWhatWasAlreadyWritten(t *testing.T) {
+    tempDir := t.TempDir()
+
+    stdout, runErr := runGenerateCommand(
+        t,
+        []clicontract.Command{
+            newFakeCommandWithSchedule("product:list", &testSchedule{Minute: "0", Hour: "3"}),
+        },
+        []string{
+            "--out", filepath.Join(tempDir, "crontab"),
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "deploy",
+            "--format=json",
+        },
+    )
+
+    if nil == runErr {
+        t.Fatalf("expected the missing logs-dir to fail the run, got %q", stdout)
+    }
+
+    document := struct {
+        Data struct {
+            Writes []map[string]any `json:"writes"`
+        } `json:"data"`
+        Error *struct {
+            Code  string `json:"code"`
+            Cause struct {
+                Message string `json:"message"`
+            } `json:"cause"`
+        } `json:"error"`
+    }{}
+    if decodeErr := json.Unmarshal([]byte(stdout), &document); nil != decodeErr {
+        t.Fatalf("expected one json document on a failed run, got %q: %v", stdout, decodeErr)
+    }
+
+    if nil == document.Error {
+        t.Fatalf("expected the failure inside the envelope, got %q", stdout)
+    }
+
+    if "cron.generateFailed" != document.Error.Code {
+        t.Fatalf("expected the generate-failed code, got %q", document.Error.Code)
+    }
+
+    if false == strings.Contains(document.Error.Cause.Message, "logs-dir") {
+        t.Fatalf("expected the cause to name the missing logs-dir, got %q", document.Error.Cause.Message)
+    }
+
+    /* the writes key stays an array on a failed run: a consumer keying on it must not meet a null */
+    if nil == document.Data.Writes {
+        t.Fatalf("expected an empty writes array on a failed run, got %q", stdout)
+    }
+
+    /* the success path must stay exactly what it was, or the guard above would pass for a command that reports every run as failed */
+    successStdout, successErr := runGenerateCommand(
+        t,
+        []clicontract.Command{
+            newFakeCommandWithSchedule("product:list", &testSchedule{Minute: "0", Hour: "3"}),
+        },
+        []string{
+            "--out", filepath.Join(tempDir, "crontab"),
+            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "deploy",
+            "--format=json",
+        },
+    )
+    if nil != successErr {
+        t.Fatalf("expected the successful run to stay successful, got %v", successErr)
+    }
+
+    if false == strings.Contains(successStdout, `"error": null`) {
+        t.Fatalf("expected no error on a successful run, got %q", successStdout)
+    }
+}
+
+/* one Configuration drives the generated manifest and the in-process runner alike, so an entry's own arguments have to reach both: an argument honoured by only one of them is a divergence nothing would report. They come after the instance flags this generator adds, so the line reads as the entry declared it. */
+func TestGenerateCommand_EntryArgumentsReachTheGeneratedLine(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+
+    commands := []clicontract.Command{
+        newFakeCommandWithConfig("product:list", &EntryConfig{
+            Schedule:  &Schedule{Minute: "0", Hour: "3"},
+            Arguments: []string{"--format=json", "--quiet"},
+        }),
+    }
+
+    stdout, runErr := runGenerateCommand(
+        t,
+        commands,
+        []string{
+            "--out", outputPath,
+            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "deploy",
+        },
+    )
+    if nil != runErr {
+        t.Fatalf("Run returned unexpected error: %v\nstdout=%s", runErr, stdout)
+    }
+
+    body, readErr := os.ReadFile(outputPath)
+    if nil != readErr {
+        t.Fatalf("failed to read crontab output %s: %v", outputPath, readErr)
+    }
+
+    expectedLine := "0 3 * * * deploy /usr/local/bin/fakeapp product:list --format=json --quiet >> '" + filepath.Join(tempDir, "logs", "product-list.log") + "' 2>&1"
+    if false == strings.Contains(string(body), expectedLine) {
+        t.Fatalf("expected the entry arguments on the generated line %q in:\n%s", expectedLine, string(body))
+    }
+}
+
+/* the destinations are written one by one with no rollback, so a failure on a later one leaves the earlier files on disk: the document has to name them, or the consumer cannot tell a run that wrote nothing from one that wrote half */
+func TestGenerateCommand_JsonNamesTheDestinationsWrittenBeforeTheFailure(t *testing.T) {
+    tempDir := t.TempDir()
+
+    /* the second destination cannot be created: its parent is a file, so MkdirAll fails after the first has been written */
+    blockingFile := filepath.Join(tempDir, "blocked")
+    if writeErr := os.WriteFile(blockingFile, []byte("not a directory"), 0o644); nil != writeErr {
+        t.Fatalf("failed to place the blocking file: %v", writeErr)
+    }
+
+    commands := []clicontract.Command{
+        newFakeCommandWithConfig("a:first", &EntryConfig{
+            Schedule:        &Schedule{Minute: "0"},
+            DestinationFile: filepath.Join(tempDir, "a-crontab"),
+        }),
+        newFakeCommandWithConfig("b:second", &EntryConfig{
+            Schedule:        &Schedule{Minute: "0"},
+            DestinationFile: filepath.Join(blockingFile, "b-crontab"),
+        }),
+    }
+
+    stdout, runErr := runGenerateCommand(
+        t,
+        commands,
+        []string{
+            "--out", filepath.Join(tempDir, "crontab"),
+            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "deploy",
+            "--format=json",
+        },
+    )
+
+    if nil == runErr {
+        t.Fatalf("expected the unwritable destination to fail the run, got %q", stdout)
+    }
+
+    document := struct {
+        Data struct {
+            Writes []struct {
+                Destination string `json:"destination"`
+            } `json:"writes"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal([]byte(stdout), &document); nil != decodeErr {
+        t.Fatalf("expected one json document on a partial run, got %q: %v", stdout, decodeErr)
+    }
+
+    if 1 != len(document.Data.Writes) {
+        t.Fatalf("expected the destination written before the failure, got %#v in %q", document.Data.Writes, stdout)
+    }
+
+    if filepath.Join(tempDir, "a-crontab") != document.Data.Writes[0].Destination {
+        t.Fatalf("expected the first destination to be named, got %q", document.Data.Writes[0].Destination)
+    }
+}

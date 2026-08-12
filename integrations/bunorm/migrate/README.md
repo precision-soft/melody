@@ -112,7 +112,9 @@ Empty values are replaced with the defaults in [`RegisterCommands`](./register.g
 
 ## Commands
 
-All commands accept the standard Melody output flags. Under `--format=json` a command accumulates its output and renders one machine-readable json envelope — a failure included — instead of the plain-text output; `--verbose` and `--no-color` affect the plain-text output.
+All commands accept the standard Melody output flags. Under `--format=json` a command accumulates its output and renders one machine-readable json envelope — a failure included — instead of the plain-text output; `--verbose` and `--no-color` affect the plain-text output alone.
+
+The json document therefore carries every block the command produces at any verbosity: `--verbose` never shapes it. Its keys are stable — `data.details`, `data.migrations.applied`, `data.migrations.pending`, `data.migrations.rolledBack`, `data.database`, `data.files`, `data.messages` — and are not the headings the text blocks print. `data.database.database` is json `null` when the connection reports no current database, where the text block renders `<null>`. One consequence is worth knowing: a json run performs the database-identity query a text run only performs under `--verbose`.
 
 The manager can be selected with `--<managerFlagName>`. If not provided, the registry default manager is used.
 

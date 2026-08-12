@@ -18,6 +18,70 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Debug: the `--build` sweep exits non-zero over the services it could not build
+
+**What changed.** `debug:container --build` reports its failures on the envelope, so `Render` answers a non-zero exit for them: the envelope carries `debug.buildFailed`, the number of failures, the names, and the first failure as its cause. The single-name door (`debug:container app.repository.order`) and `debug:middleware --build` have reported theirs all along; the sweep did not.
+
+**Symptom.** A deploy step spelled `app debug:container --build || exit 1`, or any script reading the exit status of the sweep, now fails on an application with a service that does not resolve. It used to pass, with the failures visible only inside `data.items[].error`.
+
+**Remedy.** None if the gate was meant to fail — that is what it was written for. If a pipeline runs the sweep for information rather than as a gate, read the document and ignore the status, or drop `--build` and list without resolving.
+
+### Debug: two json fields keep one type across every row
+
+**What changed.** In the `debug:container` json document, `errorCauseChain` is always an array — empty on a service that resolved — and `errorContextJson` is always a parseable json string, `{}` where there is nothing to report. The table views are unchanged: an empty cell stays empty.
+
+**Symptom.** A consumer that tested `errorCauseChain == null` to detect a healthy row no longer finds a null, and `errorContextJson` is `"{}"` rather than `""`.
+
+**Remedy.** Test the length instead of the null: `.errorCauseChain | length == 0`. `jq '.data.items[].errorCauseChain[]'` and `.errorContextJson | fromjson`, which used to die at the first healthy row, now work over the whole listing.
+
+### Debug: `debug:events --format=json` declares the serving-process listeners at every verbosity
+
+**What changed.** `data.servingProcessListeners` is present at the default verbosity, beside the listing, which stays exactly where it was on `data.items`. The declaration was previously carried only under `--verbose`, where it sits inside a reparented payload. `--order` now also reaches the listener detail: it orders the events, while the rows inside one event keep the dispatch order their `order` field reports.
+
+**Symptom.** The default-verbosity document grows one key when the composition root declares listeners it wires only in the serving process. Under `--order=desc --verbose`, `data.listeners` is grouped by event in descending order rather than ascending.
+
+**Remedy.** None for a consumer reading `data.items`. A consumer that pinned the exact key set of `data` should accept the added key — it is the answer to "is access control wired?", which an absence could not give.
+
+### Debug: `debug:router --format=json` degrades an unserializable route attribute instead of emptying the document
+
+**What changed.** A route attribute whose value the encoder cannot represent — a closure hung on a route by application code — is rendered as its `%v` text instead of failing the whole envelope. Every value that can be represented keeps its json type, so a `[]string` attribute is still a list.
+
+**Symptom.** A command that answered zero bytes and a marshalling error now answers its document. An attribute that used to break the command appears as a string.
+
+**Remedy.** None. If a value should be readable rather than an address, give the route a serializable attribute.
+
+### Debug: `debug:middleware` items always carry `reason`
+
+**What changed.** The `reason` field is present on every item, empty where there is nothing to say. It used to be omitted from every active row.
+
+**Symptom.** The active rows of `data.items` grow a `"reason": ""` field.
+
+**Remedy.** None. A consumer that keyed on the presence of `reason` to detect an inactive middleware should read `status` instead, which has always carried `active`, `inactive` or `built`.
+
+### Serializer: a refusal of one type is not a refusal of the negotiation
+
+**What changed.** `Accept: application/json;q=0` against a manager that also holds `text/plain` is answered with plain text rather than `406 Not Acceptable`. A type covered by a `q=0` range is recorded as refused and can never be served — by the negotiation or by the fallback, which steps past json when json is what was refused — and `ErrNotAcceptable` is answered only when every registered type is refused.
+
+**Symptom.** A request whose accept header names one type it does not want, against an application with more than one serializer registered, receives a representation where it used to receive a 406.
+
+**Remedy.** None: this is what the manager's own comment and `SERIALIZER.md` promised. A client that wants nothing at all still gets its 406 by refusing everything — `*/*;q=0`.
+
+### Migrate: the json document is not shaped by `--verbose`, and its keys are stable
+
+**What changed.** Under `--format=json`, `db:migrate`, `db:rollback`, `db:status`, `db:init` and `db:unlock` collect every block at any verbosity: verbosity remains a rendering decision about the plain text alone, which is what the readme always said. The document keys are now stable names rather than display headings — `data.migrations.applied`, `.pending`, `.rolledBack` — and `data.database.database` is json `null` when the connection reports no current database, where it used to be the rendered string `"<null>"`. The text blocks keep their headings and their `<null>`.
+
+**Symptom.** `db:migrate --format=json` without `-v` answers a populated `data` where it answered `{}`. A consumer reading `data.migrations["APPLIED MIGRATIONS"]` or `data.migrations.APPLIED` finds nothing under those keys. A json run performs the database-identity query that a text run performs only under `--verbose`.
+
+**Remedy.** Read `data.migrations.applied`, `data.migrations.pending` and `data.migrations.rolledBack`; test `data.database.database` for null rather than for the string `"<null>"`. Nothing needs `--verbose` any more to fill the document.
+
+### Cron: the generator answers a document on every outcome, and a job's output goes to the journal
+
+**What changed.** `melody:cron:generate --format=json` renders one envelope whatever happened: a failure travels as `error.code = "cron.generateFailed"` with its message as the cause, and `data.writes` names the destinations already written before it stopped. Under the in-process runner, a scheduled command's own output no longer reaches the process stdout — it is captured and filed as one record per run that printed anything, naming the command and the run id, capped at 64 KiB.
+
+**Symptom.** A pipeline that read an empty stream from a failed generation now reads a document with an error in it, and the command still exits non-zero. Anything tailing the stdout of `melody:cron:run` for a job's own printed output finds it in the log instead, under `cron: scheduled command output`.
+
+**Remedy.** Read `error` in the generator's document rather than inferring failure from an empty stream. For the runner, read the journal; a job that must write to a stream of its own should open it itself rather than relying on the command writer.
+
 ### Validation: a rule-declaration fault is an error, and its context stays out of the response
 
 **What changed.** Three validation codes name a mistake in the DECLARATION rather than in the submitted value: `unknownRule`, `invalidRuleSyntax` and `invalidPattern`. A 400 carrying any of them is now recorded at **error** instead of the warning a deliberate 4xx earns, and the internal context of those entries — `rule`, `params`, `cause` — is stripped from the response body while staying in full in the record. Every other validation error is unchanged in both places, so the bounds a numeric constraint reports still reach the client. The refusal itself is still a field error with the same status and the same code: the validator continues to fail closed on a rule it cannot honour rather than passing the value.

@@ -1088,3 +1088,187 @@ func TestContainerCommand_DefaultListingRunsNoProvider(t *testing.T) {
         t.Fatalf("expected the sweep to run the provider once, ran %d times", buildCount)
     }
 }
+
+/* the sweep's failures have to reach the exit code, not only the data. Render answers a non-zero exit for an envelope carrying an error, which is what makes `app debug:container --build --format=json || exit 1` a deployment gate; the sweep — the one command whose declared purpose is to build everything and report the failures — used to answer "error": null and exit 0 over every one of them. The single-name door beside it has always reported its own. */
+func TestContainerCommand_BuildSweepReportsItsFailuresInTheEnvelope(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(
+        "sweep.healthy.service",
+        func(resolver containercontract.Resolver) (*sweepHealthyService, error) {
+            return &sweepHealthyService{}, nil
+        },
+    )
+    serviceContainer.MustRegister(
+        "sweep.broken.service",
+        func(resolver containercontract.Resolver) (*sweepBrokenService, error) {
+            return nil, exception.NewError("service build failed", nil, errors.New("connection refused"))
+        },
+    )
+
+    rendered, runErr := runDebugCommand(
+        &ContainerCommand{},
+        newTestRuntime(serviceContainer),
+        []string{"--format=json", "--build"},
+    )
+
+    if nil == runErr {
+        t.Fatalf("expected the sweep to fail the run over a service that does not build, got %q", rendered)
+    }
+
+    exitErr := (*exception.ExitError)(nil)
+    if false == errors.As(runErr, &exitErr) {
+        t.Fatalf("expected the failure to carry the exit code, got %v", runErr)
+    }
+
+    if 1 != exitErr.ExitCode() {
+        t.Fatalf("expected exit code 1, got %d", exitErr.ExitCode())
+    }
+
+    decoded := struct {
+        Error struct {
+            Code    string         `json:"code"`
+            Details map[string]any `json:"details"`
+            Cause   struct {
+                Message string `json:"message"`
+            } `json:"cause"`
+        } `json:"error"`
+    }{}
+    if decodeErr := json.Unmarshal([]byte(rendered), &decoded); nil != decodeErr {
+        t.Fatalf("failed to decode the rendered envelope: %v, rendered %q", decodeErr, rendered)
+    }
+
+    if "debug.buildFailed" != decoded.Error.Code {
+        t.Fatalf("expected the build-failed code, got %q in %q", decoded.Error.Code, rendered)
+    }
+
+    /* the count is what tells the operator the sweep found more than the one failure the cause names */
+    if float64(1) != decoded.Error.Details["failedCount"] {
+        t.Fatalf("expected the failure count in the details, got %#v", decoded.Error.Details["failedCount"])
+    }
+
+    if "service build failed" != decoded.Error.Cause.Message {
+        t.Fatalf("expected the first failure as the cause, got %q", decoded.Error.Cause.Message)
+    }
+
+    /* the healthy sweep must stay a success, or the guard above would pass for a command that reports every run as failed */
+    healthyContainer := container.NewContainer()
+    healthyContainer.MustRegister(
+        "sweep.healthy.service",
+        func(resolver containercontract.Resolver) (*sweepHealthyService, error) {
+            return &sweepHealthyService{}, nil
+        },
+    )
+
+    if _, healthyErr := runDebugCommand(
+        &ContainerCommand{},
+        newTestRuntime(healthyContainer),
+        []string{"--format=json", "--build"},
+    ); nil != healthyErr {
+        t.Fatalf("expected a sweep without failures to succeed, got %v", healthyErr)
+    }
+}
+
+type sweepHealthyService struct{}
+
+type sweepBrokenService struct{}
+
+/* one json document cannot carry two types under one key: errorCauseChain was null on a service that resolved and a list on one that did not, and errorContextJson was the empty string beside a json object, so `jq '.data.items[].errorCauseChain[]'` died at the first healthy service and `.errorContextJson | fromjson` died with "Cannot parse ''". The table keeps its empty cell — a literal {} in a column read by a person is noise. */
+func TestContainerCommand_JsonItemFieldsKeepOneTypeAcrossRows(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(
+        "shape.healthy.service",
+        func(resolver containercontract.Resolver) (*sweepHealthyService, error) {
+            return &sweepHealthyService{}, nil
+        },
+    )
+    serviceContainer.MustRegister(
+        "shape.broken.service",
+        func(resolver containercontract.Resolver) (*sweepBrokenService, error) {
+            return nil, exception.NewError("service build failed", nil, errors.New("connection refused"))
+        },
+    )
+
+    rendered, _ := runDebugCommand(
+        &ContainerCommand{},
+        newTestRuntime(serviceContainer),
+        []string{"--format=json", "--build"},
+    )
+
+    decoded := struct {
+        Data struct {
+            Items []struct {
+                Name             string    `json:"name"`
+                ErrorCauseChain  *[]string `json:"errorCauseChain"`
+                ErrorContextJson *string   `json:"errorContextJson"`
+            } `json:"items"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal([]byte(rendered), &decoded); nil != decodeErr {
+        t.Fatalf("failed to decode the rendered envelope: %v, rendered %q", decodeErr, rendered)
+    }
+
+    if 2 != len(decoded.Data.Items) {
+        t.Fatalf("expected both services in the document, got %d in %q", len(decoded.Data.Items), rendered)
+    }
+
+    for _, item := range decoded.Data.Items {
+        if nil == item.ErrorCauseChain {
+            t.Fatalf("%s: expected an array, got a json null in %q", item.Name, rendered)
+        }
+
+        if nil == item.ErrorContextJson {
+            t.Fatalf("%s: expected a string, got a json null in %q", item.Name, rendered)
+        }
+
+        /* the value has to be parseable json, not merely present: the empty string is a string too */
+        parsed := map[string]any{}
+        if parseErr := json.Unmarshal([]byte(*item.ErrorContextJson), &parsed); nil != parseErr {
+            t.Fatalf("%s: expected a parseable context document, got %q: %v", item.Name, *item.ErrorContextJson, parseErr)
+        }
+    }
+
+    /* the format branch is what keeps the table unchanged, and only a failure carrying NO context provider can show it: a melody error answers an empty context object either way, so the plain error is the one input that separates the two renderings */
+    plainContainer := container.NewContainer()
+    plainContainer.MustRegister(
+        "shape.plain.service",
+        func(resolver containercontract.Resolver) (*sweepBrokenService, error) {
+            return nil, errors.New("connection refused")
+        },
+    )
+
+    plainTableRendered, _ := runDebugCommand(
+        &ContainerCommand{},
+        newTestRuntime(plainContainer),
+        []string{"--verbosity=2", "--build", "--table-width=400"},
+    )
+
+    if true == strings.Contains(plainTableRendered, "{}") {
+        t.Fatalf("expected the table to keep the empty cell for a failure carrying no context, got %q", plainTableRendered)
+    }
+
+    plainJsonRendered, _ := runDebugCommand(
+        &ContainerCommand{},
+        newTestRuntime(plainContainer),
+        []string{"--format=json", "--build"},
+    )
+
+    if false == strings.Contains(plainJsonRendered, `"errorContextJson": "{}"`) {
+        t.Fatalf("expected the json document to answer an empty context object, got %q", plainJsonRendered)
+    }
+
+    /* a failure with no causes below it is the one input that reaches the cause-chain normalization with nothing: every other row is filled by the resolver, so without this the empty-list rule would be unobservable */
+    plainDecoded := struct {
+        Data struct {
+            Items []struct {
+                ErrorCauseChain *[]string `json:"errorCauseChain"`
+            } `json:"items"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal([]byte(plainJsonRendered), &plainDecoded); nil != decodeErr {
+        t.Fatalf("failed to decode the rendered envelope: %v, rendered %q", decodeErr, plainJsonRendered)
+    }
+
+    if 1 != len(plainDecoded.Data.Items) || nil == plainDecoded.Data.Items[0].ErrorCauseChain {
+        t.Fatalf("expected an array on a failure carrying no causes, got %q", plainJsonRendered)
+    }
+}

@@ -308,6 +308,35 @@ func TestResolveByAcceptHeader_UnmatchedHeaderStillFallsBackToJson(t *testing.T)
     }
 }
 
+/* a refusal that leaves another registered type merely unmatched is a preference, not a refusal of the whole manager: the flag it replaced was raised by a single refused candidate, so Accept: application/json;q=0 answered 406 against a manager holding plain text beside json — the client was denied the very representation it never rejected. The refused type still may not be served, by the negotiation or by the fallback, so the json-first default has to step aside for it. */
+func TestResolveByAcceptHeader_ARefusedTypeLeavesTheUnrefusedOneServable(t *testing.T) {
+    manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
+        MimeApplicationJson: NewJsonSerializer(),
+        MimeTextPlain:       NewPlainTextSerializer(),
+    })
+    if nil != managerErr {
+        t.Fatalf("unexpected manager error: %v", managerErr)
+    }
+
+    /* the second spelling refuses json through a wildcard rather than by name, so the repair cannot depend on the refusal being exact */
+    for _, acceptHeader := range []string{"application/json;q=0", "application/*;q=0"} {
+        resolved, resolveErr := manager.ResolveByAcceptHeader(acceptHeader)
+        if nil != resolveErr {
+            t.Fatalf("accept %q: expected the unrefused type to be served, got %v", acceptHeader, resolveErr)
+        }
+
+        if false == strings.HasPrefix(resolved.ContentType(), MimeTextPlain) {
+            t.Fatalf("accept %q: expected %s, got %s", acceptHeader, MimeTextPlain, resolved.ContentType())
+        }
+    }
+
+    /* the refusal of every registered type stays a refusal: without this half the repair could simply have deleted the not-acceptable branch */
+    _, everyTypeRefusedErr := manager.ResolveByAcceptHeader("*/*;q=0")
+    if false == errors.Is(everyTypeRefusedErr, ErrNotAcceptable) {
+        t.Fatalf("expected a header refusing every registered type to stay not acceptable, got %v", everyTypeRefusedErr)
+    }
+}
+
 /* Get answers false for a mime that normalizes away to nothing, before it ever touches the map. The branch had no test of its own: an empty header value, a whitespace-only one and a bare parameter list all arrive here from the same place — a caller reading a Content-Type off a request that carried none — and without the guard the lookup would run with the empty key, which is exactly the key a manager built from a map with an empty spelling would have had, had the constructor not refused it. */
 func TestSerializerManager_Get_RefusesAMimeThatNormalizesToNothing(t *testing.T) {
     manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{

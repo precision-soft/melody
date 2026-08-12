@@ -2,9 +2,11 @@ package migrate
 
 import (
     "bytes"
+    "encoding/json"
     "errors"
     "strings"
     "testing"
+    "time"
     "unicode/utf8"
 
     "github.com/precision-soft/melody/cli"
@@ -177,7 +179,7 @@ func TestCommandOutput_PrintDetailsBlockOrdersAndFiltersKeys(t *testing.T) {
 
 func TestCommandOutput_PrintMigrationsBlock(t *testing.T) {
     empty, emptyBuffer := newBufferedOutput(true)
-    empty.printMigrationsBlock("APPLIED", []string{})
+    empty.printMigrationsBlock("applied", "APPLIED", []string{})
 
     if 0 != emptyBuffer.Len() {
         t.Fatalf("empty migrations list produced output: %q", emptyBuffer.String())
@@ -185,7 +187,7 @@ func TestCommandOutput_PrintMigrationsBlock(t *testing.T) {
 
     instance, buffer := newBufferedOutput(true)
     longName := strings.Repeat("m", 60)
-    instance.printMigrationsBlock("PENDING", []string{"20240101000000_create_users", longName})
+    instance.printMigrationsBlock("pending", "PENDING", []string{"20240101000000_create_users", longName})
 
     rendered := buffer.String()
 
@@ -253,7 +255,7 @@ func TestTruncateString(t *testing.T) {
     }
 }
 
-/* @info the format widths pad by rune count, so the budget is runes too: a byte-sliced multi-byte value would be truncated even when it fits the column, with the cut landing mid-rune and rendering as a replacement character */
+/* the format widths pad by rune count, so the budget is runes too: a byte-sliced multi-byte value would be truncated even when it fits the column, with the cut landing mid-rune and rendering as a replacement character */
 func TestTruncateString_CountsRunesNotBytes(t *testing.T) {
     seventeenRunes := strings.Repeat("愛", 17)
     if seventeenRunes != truncateString(seventeenRunes, 18) {
@@ -270,7 +272,7 @@ func TestTruncateString_CountsRunesNotBytes(t *testing.T) {
     }
 }
 
-/* @info a budget with no room for the ellipsis answers the clipped runes alone instead of slicing negative */
+/* a budget with no room for the ellipsis answers the clipped runes alone instead of slicing negative */
 func TestTruncateString_SurvivesABudgetSmallerThanTheEllipsis(t *testing.T) {
     if "ab" != truncateString("abcdef", 2) {
         t.Fatalf("expected the clipped runes alone, got %q", truncateString("abcdef", 2))
@@ -282,5 +284,103 @@ func TestTruncateString_SurvivesABudgetSmallerThanTheEllipsis(t *testing.T) {
 
     if "" != truncateString("abcdef", -1) {
         t.Fatalf("expected nothing for a negative budget, got %q", truncateString("abcdef", -1))
+    }
+}
+
+/* the machine document is not shaped by a display flag: verbosity decides how the TEXT renders — the readme says so in as many words — while json is the contract, and gating the blocks on --verbose left db:migrate --format=json answering an empty data object for a run that applied five migrations. */
+func TestCommandOutput_WantsDetailFollowsTheFormatNotTheVerbosity(t *testing.T) {
+    for _, testCase := range []struct {
+        format          output.Format
+        verbose         bool
+        expectedOutcome bool
+    }{
+        {output.FormatJson, false, true},
+        {output.FormatJson, true, true},
+        {output.FormatTable, false, false},
+        {output.FormatTable, true, true},
+    } {
+        option := output.DefaultOption()
+        option.Format = testCase.format
+        option.Verbose = testCase.verbose
+
+        if testCase.expectedOutcome != newCommandOutput(&bytes.Buffer{}, option).wantsDetail() {
+            t.Fatalf("format %s verbose %v: expected %v", testCase.format, testCase.verbose, testCase.expectedOutcome)
+        }
+    }
+}
+
+/* the document key and the display title were one string, so the same set of migrations arrived under APPLIED from db:status and under APPLIED MIGRATIONS from db:migrate, with no enumerable set of keys and a rename for readability breaking every consumer in silence */
+func TestCommandOutput_PrintMigrationsBlockKeysTheDocumentApartFromTheTitle(t *testing.T) {
+    jsonOption := output.DefaultOption()
+    jsonOption.Format = output.FormatJson
+
+    jsonBuffer := &bytes.Buffer{}
+    jsonInstance := newCommandOutput(jsonBuffer, jsonOption)
+    jsonInstance.printMigrationsBlock("applied", "APPLIED MIGRATIONS", []string{"20240101000000_create_users"})
+
+    if _, keyedOnTheKey := jsonInstance.migrations["applied"]; false == keyedOnTheKey {
+        t.Fatalf("expected the document to be keyed on the key, got %v", jsonInstance.migrations)
+    }
+
+    if _, keyedOnTheTitle := jsonInstance.migrations["APPLIED MIGRATIONS"]; true == keyedOnTheTitle {
+        t.Fatalf("expected the display title to stay out of the document, got %v", jsonInstance.migrations)
+    }
+
+    /* the title is still what a person reads */
+    textInstance, textBuffer := newBufferedOutput(true)
+    textInstance.printMigrationsBlock("applied", "APPLIED MIGRATIONS", []string{"20240101000000_create_users"})
+
+    if false == strings.Contains(textBuffer.String(), "APPLIED MIGRATIONS") {
+        t.Fatalf("expected the display title in the text block, got %q", textBuffer.String())
+    }
+
+    if true == strings.Contains(textBuffer.String(), "applied\n") {
+        t.Fatalf("expected the document key to stay out of the text block, got %q", textBuffer.String())
+    }
+}
+
+/* "no current database" was the string <null>, indistinguishable from a database named literally <null> and readable only by a consumer who knew melody's own placeholder; the text block keeps rendering it, because a person reads an empty cell as a missing value either way */
+func TestCommandOutput_TheAbsentDatabaseIsJsonNull(t *testing.T) {
+    jsonOption := output.DefaultOption()
+    jsonOption.Format = output.FormatJson
+
+    buffer := &bytes.Buffer{}
+    instance := newCommandOutput(buffer, jsonOption)
+    instance.printDatabaseBlock(&databaseIdentity{Hostname: "localhost", Port: 5432, CurrentUser: "app"})
+
+    if finishErr := instance.finish("db:status", time.Now(), nil); nil != finishErr {
+        t.Fatalf("unexpected error: %v", finishErr)
+    }
+
+    document := struct {
+        Data struct {
+            Database map[string]any `json:"database"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal(buffer.Bytes(), &document); nil != decodeErr {
+        t.Fatalf("failed to decode the document: %v, got %q", decodeErr, buffer.String())
+    }
+
+    databaseValue, hasDatabaseKey := document.Data.Database["database"]
+    if false == hasDatabaseKey {
+        t.Fatalf("expected the database key to stay present, got %#v", document.Data.Database)
+    }
+
+    if nil != databaseValue {
+        t.Fatalf("expected the absent database to be json null, got %#v", databaseValue)
+    }
+
+    /* a named database still arrives as its name, or the guard above would pass for a field that never carries anything */
+    named := "orders"
+    namedBuffer := &bytes.Buffer{}
+    namedInstance := newCommandOutput(namedBuffer, jsonOption)
+    namedInstance.printDatabaseBlock(&databaseIdentity{CurrentDatabase: &named})
+
+    if finishErr := namedInstance.finish("db:status", time.Now(), nil); nil != finishErr {
+        t.Fatalf("unexpected error: %v", finishErr)
+    }
+
+    if false == strings.Contains(namedBuffer.String(), `"database": "orders"`) {
+        t.Fatalf("expected the named database in the document, got %q", namedBuffer.String())
     }
 }

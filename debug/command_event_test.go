@@ -743,3 +743,101 @@ func TestEventCommand_RendersTheDeclaredServingProcessListeners(t *testing.T) {
         t.Fatalf("expected the zero-value command to declare nothing, got %q", bareRendered)
     }
 }
+
+/* the declaration is not part of the verbose detail: it exists so that "is access control wired?" is not answered with an absence meaning "not in this process", the table has printed it at every verbosity since the verdict that introduced it, and a machine consumer auditing the wiring read a list the two security listeners were simply missing from. The listing keeps its place — data.items, not data.events.items — because reparenting is what --verbose does and doing it here would break the very query the consumer would have to rewrite. */
+func TestEventCommand_DeclaresTheServingProcessListenersAtEveryVerbosity(t *testing.T) {
+    command := NewEventCommand(func() []DeferredListener {
+        return []DeferredListener{
+            {EventName: "kernel.request", Priority: 50, ListenerName: "security resolution listener", Note: "registered only in the http serving process"},
+        }
+    })
+
+    rendered, runErr := runDebugCommand(command, newEventTestRuntime(2), []string{"--format=json"})
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    decoded := struct {
+        Data struct {
+            Items []struct {
+                EventName string `json:"eventName"`
+            } `json:"items"`
+            Total                   int                `json:"total"`
+            ServingProcessListeners []DeferredListener `json:"servingProcessListeners"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal([]byte(rendered), &decoded); nil != decodeErr {
+        t.Fatalf("failed to decode the rendered envelope: %v, rendered %q", decodeErr, rendered)
+    }
+
+    /* the listing stays where it was: without this half the repair could have reparented the payload and still declared */
+    if 2 != len(decoded.Data.Items) || 2 != decoded.Data.Total {
+        t.Fatalf("expected the listing to keep data.items, got %q", rendered)
+    }
+
+    if 1 != len(decoded.Data.ServingProcessListeners) {
+        t.Fatalf("expected the declaration beside the listing, got %q", rendered)
+    }
+
+    if "security resolution listener" != decoded.Data.ServingProcessListeners[0].ListenerName {
+        t.Fatalf("expected the declared listener, got %#v", decoded.Data.ServingProcessListeners[0])
+    }
+
+    /* a command with nothing to declare must not grow an empty key: the table prints no block either */
+    bareRendered, bareErr := runDebugCommand(&EventCommand{}, newEventTestRuntime(1), []string{"--format=json"})
+    if nil != bareErr {
+        t.Fatalf("expected no error, got %v", bareErr)
+    }
+
+    if true == strings.Contains(bareRendered, "servingProcessListeners") {
+        t.Fatalf("expected no declaration key when nothing is declared, got %q", bareRendered)
+    }
+}
+
+/* one document cannot order its two halves in opposite directions: --order=desc reversed the event listing and left the listener detail ascending, and the comment on the selector claimed the detail follows "the way the listing is ordered". The direction applies to the EVENTS; inside an event the rows keep the dispatcher's own slice order, which IS the dispatch order the order column reports. */
+func TestEventCommand_DescendingOrderReachesTheListenerDetail(t *testing.T) {
+    rendered, runErr := runDebugCommand(
+        &EventCommand{},
+        newEventTestRuntime(3),
+        []string{"--format=json", "--verbose", "--order=desc"},
+    )
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    decoded := struct {
+        Data struct {
+            Events struct {
+                Items []struct {
+                    EventName string `json:"eventName"`
+                } `json:"items"`
+            } `json:"events"`
+            Listeners []struct {
+                EventName string `json:"eventName"`
+                Order     int    `json:"order"`
+            } `json:"listeners"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal([]byte(rendered), &decoded); nil != decodeErr {
+        t.Fatalf("failed to decode the rendered envelope: %v, rendered %q", decodeErr, rendered)
+    }
+
+    if 3 != len(decoded.Data.Events.Items) || 3 != len(decoded.Data.Listeners) {
+        t.Fatalf("expected three events with one listener each, got %q", rendered)
+    }
+
+    for index, item := range decoded.Data.Events.Items {
+        if item.EventName != decoded.Data.Listeners[index].EventName {
+            t.Fatalf("expected the detail to follow the listing, got %s beside %s in %q", decoded.Data.Listeners[index].EventName, item.EventName, rendered)
+        }
+    }
+
+    if "event.02" != decoded.Data.Listeners[0].EventName {
+        t.Fatalf("expected the detail to start at the last event name, got %s", decoded.Data.Listeners[0].EventName)
+    }
+
+    /* the dispatch rank inside an event is not a sortable direction: it is the order the listeners run in */
+    if 1 != decoded.Data.Listeners[0].Order {
+        t.Fatalf("expected the dispatch rank to stay ascending inside an event, got %d", decoded.Data.Listeners[0].Order)
+    }
+}
