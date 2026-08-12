@@ -6,6 +6,8 @@ import (
     "strings"
     "testing"
     "time"
+
+    "github.com/precision-soft/melody/exception"
 )
 
 /* July 15 2026 is a Wednesday (weekday 3); the day-of-week cases below rely on that. */
@@ -720,5 +722,55 @@ func TestScheduleMatcher_QuestionMarkDayFieldIsUnrestricted(t *testing.T) {
 
     if true == dayOfWeekFixed.Matches(time.Date(2026, time.July, 15, 3, 0, 0, 0, time.UTC)) {
         t.Fatal("expected a Wednesday not to match when only Monday is named")
+    }
+}
+
+func TestNewScheduleMatcher_TheRefusalNamesTheFieldTheBoundsAndTheDialect(t *testing.T) {
+    _, matcherErr := newScheduleMatcher(&Schedule{DayOfWeek: "7"}, RunnerDialectKubernetes)
+    if nil == matcherErr {
+        t.Fatal("expected the kubernetes dialect to refuse a day of week of 7")
+    }
+
+    var melodyErr *exception.Error
+    if false == errors.As(matcherErr, &melodyErr) {
+        t.Fatalf("expected a melody error, got %T", matcherErr)
+    }
+
+    errorContext := melodyErr.Context()
+
+    if "DayOfWeek" != errorContext["field"] {
+        t.Fatalf("expected the failing field named, got %v", errorContext["field"])
+    }
+
+    if dayOfWeekMaximumKubernetes != errorContext["maximum"] {
+        t.Fatalf("expected the bound the value was judged against, got %v", errorContext["maximum"])
+    }
+
+    if string(RunnerDialectKubernetes) != errorContext["dialect"] {
+        t.Fatalf("expected the dialect that chose the bound, got %v", errorContext["dialect"])
+    }
+
+    if _, crontabErr := newScheduleMatcher(&Schedule{DayOfWeek: "7"}, RunnerDialectCrontab); nil != crontabErr {
+        t.Fatalf("expected the same expression to stay legal under the crontab dialect, got %v", crontabErr)
+    }
+}
+
+func TestParseCronField_ARefusalWithoutADialectNamesNoDialect(t *testing.T) {
+    _, parseErr := parseCronField("99", cronFieldBounds{name: "Minute", minimum: minuteMinimum, maximum: minuteMaximum})
+    if nil == parseErr {
+        t.Fatal("expected the out-of-range minute to be refused")
+    }
+
+    var melodyErr *exception.Error
+    if false == errors.As(parseErr, &melodyErr) {
+        t.Fatalf("expected a melody error, got %T", parseErr)
+    }
+
+    if _, exists := melodyErr.Context()["dialect"]; true == exists {
+        t.Fatalf("expected no dialect where none chose the bounds, got %v", melodyErr.Context())
+    }
+
+    if "Minute" != melodyErr.Context()["field"] {
+        t.Fatalf("expected the field named even without a dialect, got %v", melodyErr.Context())
     }
 }

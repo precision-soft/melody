@@ -6,8 +6,6 @@ import (
     "testing"
 )
 
-/* @info AllowedMethods is the source of the Allow header a 405 carries, and it was never entered by a test. A client that receives a 405 without a correct Allow list is told the path exists and nothing about how to reach it — and a browser preflight reads the same list. */
-
 func TestRouter_AllowedMethodsGathersEveryMethodRegisteredOnThePath(t *testing.T) {
     router := NewRouter()
 
@@ -28,8 +26,6 @@ func TestRouter_AllowedMethodsGathersEveryMethodRegisteredOnThePath(t *testing.T
     }
 }
 
-/* @info the list is sorted, so the Allow header a client sees does not depend on map iteration order — two identical deployments answering the same 405 differently is a difference nothing explains. */
-
 func TestRouter_AllowedMethodsAreSorted(t *testing.T) {
     router := NewRouter()
 
@@ -45,8 +41,6 @@ func TestRouter_AllowedMethodsAreSorted(t *testing.T) {
         t.Fatalf("expected the methods in sorted order, got: %v", allowed)
     }
 }
-
-/* @info a route declared with an empty method contributes no token: an empty element is not a valid method token under RFC 9110, and an Allow header carrying ", GET" is one a strict client rejects outright. */
 
 func TestRouter_AllowedMethodsDropsTheEmptyMethodToken(t *testing.T) {
     router := NewRouter()
@@ -67,8 +61,6 @@ func TestRouter_AllowedMethodsDropsTheEmptyMethodToken(t *testing.T) {
         }
     }
 }
-
-/* @info a route bound to another host contributes nothing, so a 405 on one virtual host cannot advertise the methods of another — which would tell a client about routes that host does not serve. */
 
 func TestRouter_AllowedMethodsHonoursTheHostBinding(t *testing.T) {
     router := NewRouter()
@@ -98,8 +90,6 @@ func TestRouter_AllowedMethodsHonoursTheHostBinding(t *testing.T) {
     }
 }
 
-/* @info a scheme-restricted route contributes only on the scheme it names. matchesScheme is otherwise reached almost nowhere, and a route pinned to https advertising itself over http would invite a client to retry a request the router refuses. */
-
 func TestRouter_AllowedMethodsHonoursTheSchemeBinding(t *testing.T) {
     router := NewRouter()
 
@@ -127,8 +117,6 @@ func TestRouter_AllowedMethodsHonoursTheSchemeBinding(t *testing.T) {
     }
 }
 
-/* @info the scheme comparison is case-insensitive, because a scheme written "HTTPS" in a route declaration names the same scheme the request resolved as "https"; a case-sensitive comparison would make the route unreachable with no diagnostic anywhere. */
-
 func TestRouter_AllowedMethodsComparesTheSchemeCaseInsensitively(t *testing.T) {
     router := NewRouter()
 
@@ -144,8 +132,6 @@ func TestRouter_AllowedMethodsComparesTheSchemeCaseInsensitively(t *testing.T) {
     }
 }
 
-/* @info a path nothing is registered on yields an empty list rather than a nil one the caller has to test separately — the 405 path only ever reaches here for a path that matched something, but the accessor is public. */
-
 func TestRouter_AllowedMethodsOnAnUnknownPathIsEmpty(t *testing.T) {
     router := NewRouter()
 
@@ -155,5 +141,47 @@ func TestRouter_AllowedMethodsOnAnUnknownPathIsEmpty(t *testing.T) {
 
     if 0 != len(allowed) {
         t.Fatalf("expected no methods for an unregistered path, got: %v", allowed)
+    }
+}
+
+func TestRouter_AllowedMethodsSkipsARouteThePathsLocaleExcludes(t *testing.T) {
+    router := NewRouter()
+
+    handler := routeRegistryTestHandler()
+
+    router.HandleWithOptions(
+        "/:_locale/articles",
+        handler,
+        NewRouteOptions("articles", []string{nethttp.MethodGet}, "", nil, nil, nil, []string{"en"}, 0, nil),
+    )
+
+    if 0 != len(router.AllowedMethods("/de/articles", "", "")) {
+        t.Fatalf("expected no method for a locale the route excludes, got %v", router.AllowedMethods("/de/articles", "", ""))
+    }
+
+    allowed := router.AllowedMethods("/en/articles", "", "")
+    if 1 != len(allowed) || nethttp.MethodGet != allowed[0] {
+        t.Fatalf("expected the route's method for a locale it accepts, got %v", allowed)
+    }
+}
+
+func TestRouter_AllowedMethodsAndTheMatcherAgreeOnTheSameLocalePath(t *testing.T) {
+    router := NewRouter()
+
+    handler := routeRegistryTestHandler()
+
+    router.HandleWithOptions(
+        "/:_locale/articles",
+        handler,
+        NewRouteOptions("articles", []string{nethttp.MethodGet}, "", nil, nil, nil, []string{"en"}, 0, nil),
+    )
+
+    for _, path := range []string{"/en/articles", "/de/articles"} {
+        _, matched := router.Match(nethttp.MethodGet, path, "", "")
+        announced := 0 != len(router.AllowedMethods(path, "", ""))
+
+        if matched != announced {
+            t.Fatalf("expected the announced methods and the matcher to agree on %q: matched=%t announced=%t", path, matched, announced)
+        }
     }
 }

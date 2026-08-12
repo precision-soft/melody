@@ -214,7 +214,7 @@ func (instance *GenerateCommand) resolveRunOptions(
     /* the crontab-no-user dialect renders no user column at all (busybox crond and per-user crontabs reject one), so a user is never needed to place the heartbeat line — demanding one turned a valid configuration into a hard error */
     templateRendersUserColumn := TemplateNameCrontabNoUser != template.Name()
 
-    outputPath := resolveDefault(commandContext, configuration, flagNameOutput, ParameterDestinationFile)
+    outputPath := resolveDefaultPath(commandContext, configuration, flagNameOutput, ParameterDestinationFile)
     if "" == outputPath {
         return nil, exception.NewError(
             "cron: no output path configured; set the cli flag or register the parameter (see RegisterDefaultParameters)",
@@ -236,7 +236,7 @@ func (instance *GenerateCommand) resolveRunOptions(
     }
     options.outputPath = absoluteOutputPath
 
-    logsDir := resolveDefault(commandContext, configuration, flagNameLogsDir, ParameterLogsDir)
+    logsDir := resolveDefaultPath(commandContext, configuration, flagNameLogsDir, ParameterLogsDir)
     if "" != logsDir {
         absoluteLogsDir, logsDirAbsErr := filepath.Abs(logsDir)
         if nil != logsDirAbsErr {
@@ -261,7 +261,7 @@ func (instance *GenerateCommand) resolveRunOptions(
     options.binary = resolveDefault(commandContext, configuration, flagNameBinary, ParameterBinary)
     options.defaultUserName = resolveDefault(commandContext, configuration, flagNameDefaultUser, ParameterUser)
 
-    heartbeatPath := resolveDefault(commandContext, configuration, flagNameHeartbeatPath, ParameterHeartbeatPath)
+    heartbeatPath := resolveDefaultPath(commandContext, configuration, flagNameHeartbeatPath, ParameterHeartbeatPath)
     if "" == heartbeatPath && "" != logsDir {
         autoEnabled, autoEnabledErr := isHeartbeatAutoEnabled(configuration)
         if nil != autoEnabledErr {
@@ -1026,6 +1026,55 @@ func resolveDefault(
     }
 
     return ""
+}
+
+/* resolveDefaultPath is resolveDefault for a value that names a path, and it differs in one thing: a relative path that came from a PARAMETER is anchored at the project directory, while one typed as a cli FLAG stays relative to the working directory. The two sources answer to different conventions. A flag is typed in a shell, next to the paths that shell already resolves, and anchoring it elsewhere would surprise every operator. A parameter is part of the application's configuration and belongs to the project: melody resolves MELODY_LOG_PATH, kernel.logs_dir and kernel.cache_dir against the project directory for exactly that reason, and cron was the one place where "melody.cron.logs_dir = var/log/cron" meant a different directory depending on where the binary was invoked from — under a supervisor that starts from /, the generated crontab baked /var/log/cron into itself. The shipped defaults hid it by carrying %kernel.project_dir% themselves. */
+func resolveDefaultPath(
+    commandContext *clicontract.CommandContext,
+    configuration configcontract.Configuration,
+    flagName string,
+    parameterName string,
+) string {
+    if true == commandContext.IsSet(flagName) {
+        value := commandContext.String(flagName)
+        if "" != value {
+            return value
+        }
+    }
+
+    if nil == configuration {
+        return ""
+    }
+
+    parameter := configuration.Get(parameterName)
+    if nil == parameter {
+        return ""
+    }
+
+    return anchorConfiguredPath(parameter.String(), configuration)
+}
+
+/* anchorConfiguredPath carries locally the rule application/bootstrap.go applies to every other melody runtime path; it cannot call that door, which is unexported and in another module. A configuration that names no project directory keeps the working-directory anchoring, because there is nothing better to anchor to and refusing would turn a generator that works today into a boot failure. */
+func anchorConfiguredPath(value string, configuration configcontract.Configuration) string {
+    if "" == value {
+        return value
+    }
+
+    if true == filepath.IsAbs(value) {
+        return value
+    }
+
+    kernelConfiguration := configuration.Kernel()
+    if nil == kernelConfiguration {
+        return value
+    }
+
+    projectDirectory := kernelConfiguration.ProjectDir()
+    if "" == projectDirectory {
+        return value
+    }
+
+    return filepath.Join(projectDirectory, value)
 }
 
 /* isHeartbeatAutoEnabled separates an unset opt-in from a malformed one. Reading a value the parameter cannot convert as "not enabled" would generate a crontab without the liveness line the operator asked for and report success — the misspelling would be indistinguishable from never having asked. */

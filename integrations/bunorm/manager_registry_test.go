@@ -1729,3 +1729,67 @@ func TestManagerRegistry_ATypedNilPanicValueIsNotHandedOnAsACause(t *testing.T) 
 
     <-firstDone
 }
+
+func TestManagerRegistry_AnUnknownDefinitionNamesTheRequestedAndTheRegistered(t *testing.T) {
+    registry, registryErr := NewManagerRegistry(
+        &fakeResolver{},
+        ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, IsDefault: true},
+        ProviderDefinition{Name: "analytics", Provider: &fakeProvider{}},
+    )
+    if nil != registryErr {
+        t.Fatalf("NewManagerRegistry returned an error: %v", registryErr)
+    }
+
+    _, managerErr := registry.Manager("repots")
+    if nil == managerErr {
+        t.Fatal("expected the misspelled definition to be refused")
+    }
+
+    if false == errors.Is(managerErr, ErrProviderDefinitionNotFound) {
+        t.Fatalf("expected the sentinel to stay the cause, got %v", managerErr)
+    }
+
+    var melodyErr *exception.Error
+    if false == errors.As(managerErr, &melodyErr) {
+        t.Fatalf("expected a melody error carrying the names, got %T", managerErr)
+    }
+
+    errorContext := melodyErr.Context()
+
+    if "repots" != errorContext["requested"] {
+        t.Fatalf("expected the requested name in the record, got %v", errorContext["requested"])
+    }
+
+    registered, isList := errorContext["registered"].([]string)
+    if false == isList {
+        t.Fatalf("expected the registered names as a list, got %T", errorContext["registered"])
+    }
+
+    if 2 != len(registered) || "analytics" != registered[0] || "reports" != registered[1] {
+        t.Fatalf("expected the registered names sorted, got %v", registered)
+    }
+}
+
+func TestManagerRegistry_AnUnknownMigrationDefinitionNamesTheRequestedAndTheRegistered(t *testing.T) {
+    registry, registryErr := NewManagerRegistry(
+        &fakeResolver{},
+        ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("NewManagerRegistry returned an error: %v", registryErr)
+    }
+
+    _, _, migrationErr := registry.MigrationDatabase("repots")
+    if false == errors.Is(migrationErr, ErrProviderDefinitionNotFound) {
+        t.Fatalf("expected the sentinel to stay the cause, got %v", migrationErr)
+    }
+
+    var melodyErr *exception.Error
+    if false == errors.As(migrationErr, &melodyErr) {
+        t.Fatalf("expected a melody error carrying the names, got %T", migrationErr)
+    }
+
+    if "repots" != melodyErr.Context()["requested"] {
+        t.Fatalf("expected the requested name in the record, got %v", melodyErr.Context()["requested"])
+    }
+}

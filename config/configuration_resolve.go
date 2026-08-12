@@ -76,11 +76,18 @@ func (instance *Configuration) resolveAll(deferUnresolvedReferences bool) error 
                 continue
             }
 
+            failureContext := map[string]any{
+                "parameter": name,
+            }
+
+            /* the environment key is named beside the parameter because the two are not the same word to the operator: a MELODY_* key and its kernel.* alias are one *Parameter stored under both names, the sorted walk reaches the alias first (M sorts before k), and the failure therefore named "kernel.log_path" to someone who had only ever written MELODY_LOG_PATH — a name they could not find in their own configuration. The key is omitted for a parameter registered at runtime, which has none. */
+            if "" != parameter.environmentKey && parameter.environmentKey != name {
+                failureContext["environmentKey"] = parameter.environmentKey
+            }
+
             return exception.NewError(
                 "failed to resolve parameter",
-                map[string]any{
-                    "parameter": name,
-                },
+                failureContext,
                 resolveTemplateErr,
             )
         }

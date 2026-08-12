@@ -23,6 +23,7 @@ import (
 
 const defaultMaxRateLimitKeys = 1_000_000
 
+/* NewFixedWindowLimiter builds a limiter whose counters live in THIS process and nowhere else, which is the one thing to weigh before it guards anything that matters. The map is built at construction and dies with the process, so every restart hands each caller a full budget back — under a supervisor that restarts quickly, a limit of five per hour becomes five per restart — and it is not shared across replicas, so a limit of five is five per instance and the deployment enforces five times the number of them. That is the right trade for shaping ordinary traffic and the wrong one for login, one-time-password or password-reset routes, where the limit is a security control: those want a store the whole deployment sees, which is what integrations/rueidis.RateLimiter is — the distributed drop-in for these limiters. Melody says the same thing at boot about the two other defaults that live in the process, its cache backend and its session storage; it cannot say it about a limiter, because a limiter is wired by the application rather than by the framework. */
 func NewFixedWindowLimiter(rate int, window time.Duration) *FixedWindowLimiter {
     return NewFixedWindowLimiterWithClock(clock.NewSystemClock(), rate, window)
 }
@@ -198,6 +199,7 @@ func idlePruneThreshold(window time.Duration) time.Duration {
 
 var _ httpcontract.RateLimiter = (*FixedWindowLimiter)(nil)
 
+/* NewSlidingWindowLimiter holds its timestamps in THIS process, exactly as NewFixedWindowLimiter holds its counters: a restart returns every caller's full budget and each replica enforces the limit on its own, so the deployment allows the limit times the number of instances. Where the limit is a security control rather than traffic shaping, use the distributed drop-in in integrations/rueidis. */
 func NewSlidingWindowLimiter(limit int, window time.Duration) *SlidingWindowLimiter {
     return NewSlidingWindowLimiterWithClock(clock.NewSystemClock(), limit, window)
 }

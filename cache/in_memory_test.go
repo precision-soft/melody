@@ -1244,3 +1244,38 @@ func TestInMemoryBackend_SetMultipleNamesTheSortedFirstMalformedKey(t *testing.T
         }
     }
 }
+
+func TestInMemoryBackend_DecrementRefusesTheClosedBackendBeforeTheDeltaMagnitude(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+
+    if closeErr := backend.Close(); nil != closeErr {
+        t.Fatalf("Close returned an error: %v", closeErr)
+    }
+
+    _, decrementErr := backend.Decrement("counter", math.MinInt64)
+    if nil == decrementErr {
+        t.Fatalf("expected a refusal from a closed backend")
+    }
+
+    if "cache backend is closed" != decrementErr.Error() {
+        t.Fatalf("expected the closed refusal the redis sibling answers first, got: %v", decrementErr)
+    }
+}
+
+func TestInMemoryBackend_DecrementRefusesTheMalformedKeyBeforeTheDeltaMagnitude(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    defer backend.Close()
+
+    _, decrementErr := backend.Decrement("bad key", math.MinInt64)
+    if nil == decrementErr {
+        t.Fatalf("expected a refusal for the malformed key")
+    }
+
+    if true == strings.Contains(decrementErr.Error(), "delta overflows") {
+        t.Fatalf("expected the key refusal ahead of the magnitude one, got: %v", decrementErr)
+    }
+}

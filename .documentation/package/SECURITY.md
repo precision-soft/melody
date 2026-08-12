@@ -39,8 +39,8 @@ Security is wired through a compiled configuration:
 The `security/config` subpackage provides the user-facing builder and the compilation entry point:
 
 - [`securityconfig.NewBuilder`](../../security/config/security_module.go)
-- [`securityconfig.Builder.BuildAndCompile`](../../security/config/security_module.go)
-- [`securityconfig.Compile`](../../security/config/compile.go)
+- [`securityconfig.Builder.BuildAndCompile`](../../security/config/security_module.go) — the public path from a declaration to the runtime
+- [`securityconfig.Compile`](../../security/config/compile.go) — `Compile(configuration Configuration) (*security.CompiledConfiguration, error)`, the step `BuildAndCompile` performs. Its argument carries only unexported fields and has no constructor, and the builder never hands one out, so a caller outside the package can only pass the empty value: the answer is a nil compiled configuration and a nil error, which is what "no security was declared" looks like everywhere else.
 
 ### Access control merge strategies
 

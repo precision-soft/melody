@@ -235,7 +235,10 @@ func validateScheduleFields(entry Entry, forbidden []ForbiddenCharacter) error {
         }
 
         /* the rendered field must parse under the bounds crond enforces: crond treats one bad field as a parse error and refuses the whole crontab file with it — so an out-of-range value fails generation instead. */
-        if _, parseErr := parseCronField(fieldOrWildcard(normalizeCronNameTokens(field.value, field.names)), field.minimum, field.maximum); nil != parseErr {
+        /* the bounds here name no dialect on purpose: the generator judges every field against the crontab limits whatever runner dialect the same Configuration drives, so filling one in would name a chooser that never chose */
+        fieldBounds := cronFieldBounds{name: field.name, minimum: field.minimum, maximum: field.maximum}
+
+        if _, parseErr := parseCronField(fieldOrWildcard(normalizeCronNameTokens(field.value, field.names)), fieldBounds); nil != parseErr {
             return exception.NewError(
                 fmt.Sprintf("cron: entry %q has an invalid Schedule.%s (%q)", entry.Name, field.name, field.value),
                 exceptioncontract.Context{

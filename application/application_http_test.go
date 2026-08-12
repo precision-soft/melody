@@ -611,6 +611,9 @@ func (instance *errorHandlerlessKernel) SetForwardedHeadersPolicy(policy httpcon
 func (instance *errorHandlerlessKernel) SetSessionCookiePolicy(policy httpcontract.SessionCookiePolicy) {
 }
 
+func (instance *errorHandlerlessKernel) SetMethodPolicy(policy httpcontract.MethodPolicy) {
+}
+
 func (instance *errorHandlerlessKernel) ServeHttp(serviceContainer containercontract.Container) nethttp.Handler {
     return nil
 }

@@ -16,9 +16,9 @@ const defaultRateLimiterPrefix = "melody:rate_limit:"
 
 const defaultRateLimiterCallTimeout = 250 * time.Millisecond
 
-/* rateLimiterScript is the atomic fixed-window counter: one INCR per call, with the window expiry set only when the counter is created, all in a single round trip. */
+/* rateLimiterScript is the atomic fixed-window counter: one INCR per call, with the window expiry armed in the same round trip on the call that creates the counter and on any later call that finds the key carrying no expiry at all. Without the second half a key that reached the store without a ttl — a PERSIST, an eviction policy that dropped it, a writer that set it by hand — never lapsed: the counter climbed past the limit and stayed there, so every request keyed on it was refused for as long as the key lived, which under the fail-closed default is a permanent refusal nothing in the application can lift. Reading the ttl inside the script keeps the check and the arming atomic, which is the whole reason this is a script and not three commands. */
 var rateLimiterScript = rueidis.NewLuaScript(`local count = redis.call("incr", KEYS[1])
-if count == 1 then
+if count == 1 or redis.call("pttl", KEYS[1]) < 0 then
     redis.call("pexpire", KEYS[1], tonumber(ARGV[1]))
 end
 return count`)

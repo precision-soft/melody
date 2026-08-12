@@ -42,7 +42,7 @@ The limiter surface:
 * `AllowWithRuntime(runtimeInstance, key)` — the entry point the rate-limit middleware prefers; it caps the request context with the call timeout, so a request that already carries a tighter deadline keeps it while a request with no deadline still fails fast, and it reports the store failure alongside the decision.
 * `Reset(key)` — drops the counter for one key, best-effort; a store failure is only reported through the error observer.
 
-Keys live under the `melody:rate_limit:` prefix, so the limiter shares a Redis instance with the cache and the lock without colliding.
+Keys live under the `melody:rate_limit:` prefix, so inside one application the limiter shares a Redis instance with the cache and the lock without colliding. Between two applications it is the opposite: the shipped prefixes are the same strings in every melody application and the client's `SelectDb` defaults to `0`, so two applications on one Redis with the defaults share every namespace — give each one its own prefix.
 
 Optional configuration:
 

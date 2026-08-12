@@ -8,6 +8,7 @@ import (
     clicontract "github.com/precision-soft/melody/cli/contract"
     melodyconfig "github.com/precision-soft/melody/config"
     configcontract "github.com/precision-soft/melody/config/contract"
+    loggingcontract "github.com/precision-soft/melody/logging/contract"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
     urfavecli "github.com/urfave/cli/v3"
 )
@@ -248,4 +249,56 @@ func (instance *stubConfiguration) Http() configcontract.HttpConfiguration {
 
 func (instance *stubConfiguration) Names() []string {
     return nil
+}
+
+type stubKernelConfiguration struct {
+    projectDirectory string
+}
+
+func (instance *stubKernelConfiguration) DefaultMode() string {
+    return "http"
+}
+
+func (instance *stubKernelConfiguration) ProcessRole() string {
+    return ""
+}
+
+func (instance *stubKernelConfiguration) Env() string {
+    return "dev"
+}
+
+func (instance *stubKernelConfiguration) ProjectDir() string {
+    return instance.projectDirectory
+}
+
+func (instance *stubKernelConfiguration) LogsDir() string {
+    return ""
+}
+
+func (instance *stubKernelConfiguration) CacheDir() string {
+    return ""
+}
+
+func (instance *stubKernelConfiguration) LogPath() string {
+    return ""
+}
+
+func (instance *stubKernelConfiguration) LogLevel() loggingcontract.Level {
+    return loggingcontract.LevelInfo
+}
+
+type stubConfigurationWithKernel struct {
+    *stubConfiguration
+    kernel configcontract.KernelConfiguration
+}
+
+func (instance *stubConfigurationWithKernel) Kernel() configcontract.KernelConfiguration {
+    return instance.kernel
+}
+
+func newStubConfigurationWithProjectDirectory(values map[string]string, projectDirectory string) *stubConfigurationWithKernel {
+    return &stubConfigurationWithKernel{
+        stubConfiguration: newStubConfiguration(values),
+        kernel:            &stubKernelConfiguration{projectDirectory: projectDirectory},
+    }
 }

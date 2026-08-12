@@ -255,3 +255,37 @@ func TestRateLimiter_TheCallersCancellationIsNotAStoreFailure(t *testing.T) {
         t.Fatalf("expected the cancellation named apart from a store failure, got %q", allowErr.Error())
     }
 }
+
+func TestRateLimiter_ReArmsTheWindowOnAKeyThatLostItsExpiry(t *testing.T) {
+    client := rateLimiterTestClient(t)
+
+    key := "persisted:" + t.Name()
+    fullKey := defaultRateLimiterPrefix + key
+
+    limiter := NewRateLimiter(client, 5, time.Minute)
+
+    t.Cleanup(func() {
+        _ = client.Do(context.Background(), client.B().Del().Key(fullKey).Build()).Error()
+    })
+
+    if deleteErr := client.Do(context.Background(), client.B().Del().Key(fullKey).Build()).Error(); nil != deleteErr {
+        t.Fatalf("could not clear the key: %v", deleteErr)
+    }
+
+    limiter.Allow(key)
+
+    if persistErr := client.Do(context.Background(), client.B().Persist().Key(fullKey).Build()).Error(); nil != persistErr {
+        t.Fatalf("could not strip the expiry: %v", persistErr)
+    }
+
+    limiter.Allow(key)
+
+    remaining, remainingErr := client.Do(context.Background(), client.B().Pttl().Key(fullKey).Build()).AsInt64()
+    if nil != remainingErr {
+        t.Fatalf("could not read the remaining ttl: %v", remainingErr)
+    }
+
+    if 0 >= remaining {
+        t.Fatalf("expected the window to be re-armed on a key carrying no expiry, got a ttl of %d", remaining)
+    }
+}

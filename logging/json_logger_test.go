@@ -5,6 +5,7 @@ import (
     "bytes"
     "encoding/json"
     "errors"
+    "io"
     "os"
     "strings"
     "sync"
@@ -866,5 +867,79 @@ func TestJsonLogger_ContextDepthBound_IsAppliedExactlyWhereItIsDeclared(t *testi
 
     if false == strings.Contains(buffer.String(), `"cause":{}`) {
         t.Fatalf("expected the error below the bound to reach the encoder unconverted, got %q", buffer.String())
+    }
+}
+
+type failingJsonLogWriter struct {
+    writeCount int
+}
+
+func (instance *failingJsonLogWriter) Write(payload []byte) (int, error) {
+    instance.writeCount = instance.writeCount + 1
+
+    return 0, errors.New("no space left on device")
+}
+
+func TestJsonLogger_TheFirstFailedWriteIsEchoedOnStderrExactlyOnce(t *testing.T) {
+    originalStderr := os.Stderr
+
+    reader, writer, pipeErr := os.Pipe()
+    if nil != pipeErr {
+        t.Fatalf("pipe: %v", pipeErr)
+    }
+
+    os.Stderr = writer
+
+    output := &failingJsonLogWriter{}
+    logger := NewJsonLogger(output, loggingcontract.LevelInfo)
+
+    logger.Info("one", nil)
+    logger.Info("two", nil)
+    logger.Error("three", nil)
+
+    writer.Close()
+    os.Stderr = originalStderr
+
+    echoed, readErr := io.ReadAll(reader)
+    if nil != readErr {
+        t.Fatalf("read: %v", readErr)
+    }
+
+    if 3 != output.writeCount {
+        t.Fatalf("expected the logger to keep trying its own output, got %d writes", output.writeCount)
+    }
+
+    if false == strings.Contains(string(echoed), "no space left on device") {
+        t.Fatalf("expected the silenced journal to be reported on stderr, got %q", string(echoed))
+    }
+
+    if 1 != strings.Count(string(echoed), "melody: the json logger failed to write") {
+        t.Fatalf("expected exactly one echo for a logger that fails on every record, got %q", string(echoed))
+    }
+}
+
+func TestJsonLogger_TheEchoIsSkippedWhenTheOutputIsStderrItself(t *testing.T) {
+    originalStderr := os.Stderr
+
+    reader, writer, pipeErr := os.Pipe()
+    if nil != pipeErr {
+        t.Fatalf("pipe: %v", pipeErr)
+    }
+
+    os.Stderr = writer
+
+    logger := &jsonLogger{output: os.Stderr}
+    logger.reportWriteFailure(errors.New("no space left on device"))
+
+    writer.Close()
+    os.Stderr = originalStderr
+
+    echoed, readErr := io.ReadAll(reader)
+    if nil != readErr {
+        t.Fatalf("read: %v", readErr)
+    }
+
+    if 0 != len(echoed) {
+        t.Fatalf("expected no second attempt at the destination that just refused the first, got %q", string(echoed))
     }
 }

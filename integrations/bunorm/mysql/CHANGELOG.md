@@ -21,6 +21,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- `provider.go` — the retry warning carries the diagnostic shape the terminal records carry: the host and port dialed, the pool sizing, the deadlines that governed the attempt and the cause chain, lifted through `exception.LogContext` the way the three records above it already are. The first two records an operator sees when a database is down had the failure flattened to `openErr.Error()` — a message and nothing to act on — and only the third, terminal one named the database
+
 - `provider.go` — the caller's own cancellation is a clean stop, recorded at warning under its own name and not retried. The transient classifier reads error types and message markers, none of which a cancellation carries, so a SIGTERM that cancelled the open mid-deploy fell through to the terminal branch and paged whoever was on call with "database connection failed with non-transient error" against a perfectly healthy database — the fifth site of a class the framework's fourth pass classified at four others, and the one that this module's own early refusal created. A cancellation that lands while an attempt waits out its backoff is recorded and marked the same way, so it does not travel up as a bare resolution failure for some later writer to file at error. Only `context.Canceled`: the ping budget derives from the connect timeout, so a deadline here can be the database itself
 
 - `provider.go` — the connection-failure record carries the pool sizing and the deadlines that governed the attempt, the pgsql sibling's diagnostic shape; it named only the address that refused, so the same outage read differently depending on which provider reported it

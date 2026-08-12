@@ -189,9 +189,10 @@ func (instance *ManagerRegistry) MigrationDatabase(name string) (*bun.DB, bool, 
 
     providerDefinition, exists := instance.providerDefinitionByName[name]
     if false == exists {
+        notFoundErr := instance.providerDefinitionNotFoundErrorLocked(name)
         instance.lock.Unlock()
 
-        return nil, false, ErrProviderDefinitionNotFound
+        return nil, false, notFoundErr
     }
 
     migrationProvider, isMigrationProvider := providerDefinition.Provider.(MigrationProvider)
@@ -273,6 +274,26 @@ func (instance *ManagerRegistry) MustDefaultDatabase() *bun.DB {
     return database
 }
 
+/* providerDefinitionNotFoundErrorLocked names the definition that was asked for and the ones that are registered, the way the framework's own container names an unregistered service id rather than answering a bare sentinel. It is called with the registry lock held, because it reads the definition map. The sentinel stays the CAUSE: every caller testing errors.Is(err, ErrProviderDefinitionNotFound) keeps its answer through Unwrap, and a replacement that dropped it would break them silently. */
+func (instance *ManagerRegistry) providerDefinitionNotFoundErrorLocked(name string) error {
+    registered := make([]string, 0, len(instance.providerDefinitionByName))
+    for definitionName := range instance.providerDefinitionByName {
+        registered = append(registered, definitionName)
+    }
+
+    /* sorted so one misspelling always prints one list: the map walk is random, and an operator comparing two runs would otherwise read two different answers to the same question */
+    sort.Strings(registered)
+
+    return exception.NewError(
+        "provider definition not found",
+        map[string]any{
+            "requested":  name,
+            "registered": registered,
+        },
+        ErrProviderDefinitionNotFound,
+    )
+}
+
 func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
     if "" == name {
         return nil, ErrProviderDefinitionNameIsRequired
@@ -295,9 +316,10 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
 
     providerDefinition, exists := instance.providerDefinitionByName[name]
     if false == exists {
+        notFoundErr := instance.providerDefinitionNotFoundErrorLocked(name)
         instance.lock.Unlock()
 
-        return nil, ErrProviderDefinitionNotFound
+        return nil, notFoundErr
     }
 
     if pendingOpen, inFlight := instance.pendingOpenByName[name]; true == inFlight {

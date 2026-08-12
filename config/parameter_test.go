@@ -390,3 +390,41 @@ func TestParameter_Bool_ReadsBothShapesAndRefusesTheRest(t *testing.T) {
         t.Fatalf("expected no parser cause for a value the parser never saw")
     }
 }
+
+func TestParameter_IntReadsTheSameGrammarItsSiblingsRead(t *testing.T) {
+    source := &testEnvironmentSource{values: map[string]string{}}
+
+    environment, environmentErr := NewEnvironment(source)
+    if nil != environmentErr {
+        t.Fatalf("new environment error: %v", environmentErr)
+    }
+
+    configuration, configurationErr := NewConfiguration(environment, t.TempDir())
+    if nil != configurationErr {
+        t.Fatalf("new configuration error: %v", configurationErr)
+    }
+
+    configuration.RegisterRuntime("app.batch_size", int64(500))
+
+    intValue, intErr := configuration.MustGet("app.batch_size").Int()
+    if nil != intErr {
+        t.Fatalf("expected the int64 a sibling accessor already converts, got: %v", intErr)
+    }
+
+    if 500 != intValue {
+        t.Fatalf("expected 500, got %d", intValue)
+    }
+
+    configuration.RegisterRuntime("app.retry_count", "  7 ")
+
+    stringSourced, stringSourcedErr := configuration.MustGet("app.retry_count").Int()
+    if nil != stringSourcedErr || 7 != stringSourced {
+        t.Fatalf("expected the string spelling to keep converting, got %d and %v", stringSourced, stringSourcedErr)
+    }
+
+    configuration.RegisterRuntime("app.not_a_number", "seven")
+
+    if _, refusalErr := configuration.MustGet("app.not_a_number").Int(); nil == refusalErr {
+        t.Fatal("expected a value that is not a number to stay refused")
+    }
+}

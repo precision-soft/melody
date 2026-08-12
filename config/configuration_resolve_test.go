@@ -930,3 +930,48 @@ func TestResolveAll_TwoBrokenTemplatesFailOnTheSortedFirstParameterEveryTime(t *
         }
     }
 }
+
+func TestResolve_TheFailureNamesTheEnvironmentKeyBesideTheInternalAlias(t *testing.T) {
+    source := &testEnvironmentSource{
+        values: map[string]string{
+            "MELODY_LOG_PATH": "%app.name%/application.log",
+        },
+    }
+
+    environment, environmentErr := NewEnvironment(source)
+    if nil != environmentErr {
+        t.Fatalf("new environment error: %v", environmentErr)
+    }
+
+    _, configurationErr := NewConfiguration(environment, t.TempDir())
+    if nil == configurationErr {
+        t.Fatal("expected the undefined reference to fail the construction")
+    }
+
+    resolutionContext := map[string]any(nil)
+
+    for current := error(configurationErr); nil != current; current = errors.Unwrap(current) {
+        melodyErr, isMelodyErr := current.(*exception.Error)
+        if false == isMelodyErr {
+            continue
+        }
+
+        if "failed to resolve parameter" == melodyErr.Error() {
+            resolutionContext = melodyErr.Context()
+
+            break
+        }
+    }
+
+    if nil == resolutionContext {
+        t.Fatalf("expected the parameter resolution failure in the chain, got %v", configurationErr)
+    }
+
+    if KernelLogPath != resolutionContext["parameter"] {
+        t.Fatalf("expected the internal alias kept, got %v", resolutionContext["parameter"])
+    }
+
+    if "MELODY_LOG_PATH" != resolutionContext["environmentKey"] {
+        t.Fatalf("expected the key the operator actually wrote, got %v", resolutionContext["environmentKey"])
+    }
+}

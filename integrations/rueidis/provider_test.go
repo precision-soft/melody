@@ -1,6 +1,7 @@
 package rueidis
 
 import (
+    "errors"
     "os"
     "strings"
     "testing"
@@ -10,6 +11,7 @@ import (
     configcontract "github.com/precision-soft/melody/config/contract"
     "github.com/precision-soft/melody/container"
     containercontract "github.com/precision-soft/melody/container/contract"
+    "github.com/precision-soft/melody/exception"
 )
 
 const (
@@ -333,4 +335,34 @@ func TestProviderOpen_RefusesAWrongTypedCredentialLoudly(t *testing.T) {
 
     _, openErr := newTestProvider().Open(serviceContainer)
     t.Fatalf("expected a panic, got error %v", openErr)
+}
+
+func TestProviderOpen_TheRefusalNamesTheParameterAndTheDeadlines(t *testing.T) {
+    resolver := newProviderTestResolver(t, "", "melody", "secret")
+
+    provider := NewProvider(testAddressParameterName, testUserParameterName, testPasswordParameterName)
+
+    _, openErr := provider.Open(resolver)
+    if nil == openErr {
+        t.Fatal("expected an empty address to be refused")
+    }
+
+    var melodyErr *exception.Error
+    if false == errors.As(openErr, &melodyErr) {
+        t.Fatalf("expected a melody error, got %T", openErr)
+    }
+
+    errorContext := melodyErr.Context()
+
+    if testAddressParameterName != errorContext["addressParameter"] {
+        t.Fatalf("expected the parameter the operator has to set, got %v", errorContext["addressParameter"])
+    }
+
+    if _, exists := errorContext["connectTimeout"]; false == exists {
+        t.Fatalf("expected the deadline that governs the attempt, got %v", errorContext)
+    }
+
+    if "secret" == errorContext["password"] {
+        t.Fatalf("expected the credential to stay out of the record, got %v", errorContext)
+    }
 }

@@ -431,6 +431,11 @@ func (instance *InMemoryBackend) Increment(key string, delta int64) (int64, erro
 }
 
 func (instance *InMemoryBackend) Decrement(key string, delta int64) (int64, error) {
+    /* the magnitude of the delta is judged last, after the closed backend and the key, because the shared contract fixes that order for every implementation: the redis sibling refuses a closed backend before it looks at anything else, so a call that is wrong in more than one way — a minInt64 delta against a backend already closed — used to get one answer here and another there, which is exactly the difference the contract exists to remove */
+    if refusalErr := instance.refuseClosedOrInvalidKey(key); nil != refusalErr {
+        return 0, refusalErr
+    }
+
     if minInt64 == delta {
         return 0, exception.NewError(
             "delta overflows int64 when negated",
@@ -442,6 +447,19 @@ func (instance *InMemoryBackend) Decrement(key string, delta int64) (int64, erro
     }
 
     return instance.incrementValue(key, -delta)
+}
+
+/* refuseClosedOrInvalidKey answers the two refusals incrementValue makes under its own lock, in the same order, so a caller that has to judge something of its own in between asks for them explicitly rather than reordering them. The flag is read under the lock every writer takes; a Close landing after the read is caught by incrementValue itself. */
+func (instance *InMemoryBackend) refuseClosedOrInvalidKey(key string) error {
+    instance.mutex.RLock()
+    closed := instance.closed
+    instance.mutex.RUnlock()
+
+    if true == closed {
+        return closedBackendError()
+    }
+
+    return validateKey(key)
 }
 
 func (instance *InMemoryBackend) Close() error {

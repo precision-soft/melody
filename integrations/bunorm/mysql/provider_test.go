@@ -1034,3 +1034,52 @@ func TestOpenWithRetry_ACancellationDuringTheBackoffIsRecordedAndMarked(t *testi
         t.Fatalf("expected exactly one record for the cancelled retry, got %d: %v", cancellationRecords, logger.entries)
     }
 }
+
+func TestOpenWithRetry_TheRetryWarningCarriesTheDiagnosticShapeTheTerminalRecordCarries(t *testing.T) {
+    logger := &capturingProviderLogger{}
+
+    resolver := &stubResolverWithLogger{
+        stubResolver: newStubResolver("127.0.0.1", "1", "melody", "melody", "melody"),
+        logger:       logger,
+    }
+
+    provider := newTestProvider().
+        WithTimeoutConfig(NewTimeoutConfig(time.Second, time.Second, time.Second)).
+        WithRetryConfig(NewRetryConfig(2, time.Millisecond, 2*time.Millisecond, 2.0))
+
+    _, openErr := provider.OpenContext(context.Background(), resolver)
+    if nil == openErr {
+        t.Fatal("expected the open against a refused port to fail")
+    }
+
+    retryRecordIndex := -1
+    for index := range logger.entries {
+        if "database connection failed and retrying" == logger.entries[index].message {
+            retryRecordIndex = index
+
+            break
+        }
+    }
+
+    if -1 == retryRecordIndex {
+        t.Fatalf("expected a retry warning, got %v", logger.entries)
+    }
+
+    retryContext := logger.entries[retryRecordIndex].context
+
+    if _, exists := retryContext["connection"]; false == exists {
+        t.Fatalf("expected the retry warning to name the connection the terminal record names, got %v", retryContext)
+    }
+
+    if _, exists := retryContext["timeoutConfig"]; false == exists {
+        t.Fatalf("expected the retry warning to carry the deadlines that governed the attempt, got %v", retryContext)
+    }
+
+    if _, exists := retryContext["attempt"]; false == exists {
+        t.Fatalf("expected the retry warning to keep its own attempt counter, got %v", retryContext)
+    }
+
+    if _, exists := retryContext["retryIn"]; false == exists {
+        t.Fatalf("expected the retry warning to keep the delay it announces, got %v", retryContext)
+    }
+}

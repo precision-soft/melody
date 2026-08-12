@@ -162,7 +162,9 @@ The value is a comma-separated list whose entries are trimmed of surrounding whi
 
 ### Typed accessors
 
-[`Parameter`](../../config/parameter.go) reads its value through `MustString`, `Bool`, `Int`, `Float` and `Duration`, converting from the native type or from the string an environment value always arrives as. Each fallible accessor reports an unset or non-convertible value as an error identified by environment key alone, keeping an inline credential out of the exception context.
+[`Parameter`](../../config/parameter.go) reads its value through `MustString`, `Bool`, `Int`, `Float` and `Duration`, converting from the native type or from the string an environment value always arrives as. `Int`, `Float` and `Duration` read one grammar through the shared parser, so a whole number registered at runtime as an `int64` — or as an integral `float64` — converts through every one of them; `Int` additionally refuses by name a value outside the `int` range rather than truncating it on a 32-bit build. Each fallible accessor reports an unset or non-convertible value as an error identified by environment key alone, keeping an inline credential out of the exception context.
+
+A parameter melody auto-registered from a `MELODY_*` key and the reserved `kernel.*` name that aliases it are one parameter under two names, and the resolution walks names in sorted order, so the failure of a template names the alias. It carries the environment key beside it — the name the operator actually wrote — under `environmentKey` in the error context.
 
 ## Container integration
 

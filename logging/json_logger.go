@@ -56,7 +56,8 @@ type jsonLogger struct {
     minLevel    loggingcontract.Level
     levelLabels loggingcontract.LevelLabels
     /* closed is atomic so Closed() can answer without the write lock: the probe is asked by the process-boundary exit handler, and an answer serialized behind an in-flight Write into a stalled pipe would hang the one handler that must reach os.Exit. The writes to the flag still happen under writeMutex — atomicity covers the lock-free read alone. */
-    closed atomic.Bool
+    closed           atomic.Bool
+    writeFailureOnce sync.Once
 }
 
 func (instance *jsonLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
@@ -108,7 +109,23 @@ func (instance *jsonLogger) Log(level loggingcontract.Level, message string, con
         return
     }
 
-    _, _ = instance.output.Write(append(encoded, '\n'))
+    _, writeErr := instance.output.Write(append(encoded, '\n'))
+    if nil != writeErr {
+        instance.reportWriteFailure(writeErr)
+    }
+}
+
+/* reportWriteFailure echoes the first failed write to stderr, once for the life of the logger. A var/log that is full, read-only or on a vanished mount otherwise silences the entire journal with no signal on any channel — the operator reads a healthy-looking empty file — while the other way this same function can fail, a value that will not marshal, has had its fallback since it was written.
+
+It writes to stderr directly rather than through EmergencyLogger, which is itself a jsonLogger and would re-enter the very Write that just failed, and it stays silent when this logger's own output already IS stderr, where the echo would be a second attempt at the destination that refused the first. Once, because a logger writing into a full disk fails on every record it is given, and a per-record echo would move the flood from one channel to the other rather than report it. */
+func (instance *jsonLogger) reportWriteFailure(writeErr error) {
+    if os.Stderr == instance.output {
+        return
+    }
+
+    instance.writeFailureOnce.Do(func() {
+        fmt.Fprintf(os.Stderr, "melody: the json logger failed to write a record to its output: %v\n", writeErr)
+    })
 }
 
 func (instance *jsonLogger) Debug(message string, context loggingcontract.Context) {
@@ -131,7 +148,7 @@ func (instance *jsonLogger) Emergency(message string, context loggingcontract.Co
     instance.Log(loggingcontract.LevelEmergency, message, context)
 }
 
-/* @important the close takes the same lock the writes take: it hands the writer to a Close that may mutate it, and a goroutine that outlives the container teardown can still be inside Write. The process console is recognized by identity — the os.Stdout and os.Stderr values themselves — and left open on purpose, so the flag is set only where the writer was really closed; the previous check compared the file name, which also matched a file the caller opened on "/dev/stdout", skipped the close it owed, and leaked that descriptor once per boot. */
+/* the close takes the same lock the writes take: it hands the writer to a Close that may mutate it, and a goroutine that outlives the container teardown can still be inside Write. The process console is recognized by identity — the os.Stdout and os.Stderr values themselves — and left open on purpose, so the flag is set only where the writer was really closed; the previous check compared the file name, which also matched a file the caller opened on "/dev/stdout", skipped the close it owed, and leaked that descriptor once per boot. */
 func (instance *jsonLogger) Close() error {
     instance.writeMutex.Lock()
     defer instance.writeMutex.Unlock()

@@ -330,14 +330,19 @@ func (instance *Provider) openWithRetry(ctx context.Context, resolver containerc
 
         delay := instance.computeBackoffDelay(attempt)
 
+        /* the retry warnings are the first two records the operator sees when a database is down, and they carry the same diagnostic shape as the terminal records above: LogContext lifts the failure's own context — the host and port dialed, the pool sizing, the deadlines that governed the attempt — and its cause chain, where the flattened openErr.Error() handed on a message and nothing to act on */
+        retryErr := exception.FromError(openErr)
+
         logger.Warning(
             "database connection failed and retrying",
-            map[string]interface{}{
-                "attempt":     attempt,
-                "maxAttempts": maxAttempts,
-                "retryIn":     delay.String(),
-                "error":       openErr.Error(),
-            },
+            exception.LogContext(
+                retryErr,
+                map[string]any{
+                    "attempt":     attempt,
+                    "maxAttempts": maxAttempts,
+                    "retryIn":     delay.String(),
+                },
+            ),
         )
 
         /* the sleep watches the caller's context alongside the clock: a shutdown signal arriving mid-retry would otherwise sleep through the whole remaining budget, and the second signal exits with no teardown at all */

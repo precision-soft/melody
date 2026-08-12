@@ -47,6 +47,7 @@ This package covers the HTTP runtime behavior inside Melody:
 * Kernel orchestration:
     * [`Kernel`](../../http/kernel.go) / [`NewKernel`](../../http/kernel.go)
     * Kernel options via [`KernelOptions`](../../http/kernel.go) / [`DefaultKernelOptions`](../../http/kernel.go)
+    * The method policy — whether `HEAD` falls back to the `GET` route, whether an unrouted `OPTIONS` is answered with the computed `Allow` header — is installed with [`Kernel.SetMethodPolicy`](../../http/kernel.go), which takes the [`MethodPolicy`](../../http/contract/kernel.go) of the contract; both halves default to on, which is what the framework has always done. An api that must answer `405` to `OPTIONS` starts from `DefaultKernelOptions().MethodPolicy` and turns the half it means off.
     * Kernel lifecycle events in [`kernel_event.go`](../../http/kernel_event.go)
 
 * Container resolver helpers:

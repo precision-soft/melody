@@ -8,9 +8,10 @@ import (
     securitycontract "github.com/precision-soft/melody/security/contract"
 )
 
+/* Compile turns a Configuration into the compiled form the runtime reads. The argument is the thing to know about this door: Configuration carries only unexported fields and no constructor, and Builder never hands one out, so no caller outside this package can build a non-empty one — a composition root calling Compile from outside gets the empty configuration's answer, which is a nil compiled configuration and a nil error, meaning "no security was declared". That is the ordinary case and not a hidden failure: the application installs security through the module hook, which is the only writer of the field the runtime reads, and a nil there simply means no module registered any. The public path from a declaration to the runtime is Builder.BuildAndCompile. */
 func Compile(configuration Configuration) (*security.CompiledConfiguration, error) {
     if 0 == len(configuration.firewalls) {
-        /* @important a global access control declared without any firewall still enforces: the resolution listener matches no firewall and sets no context, the access control listener falls back to this global control and denies unauthenticated access, which is the behaviour the runtime is built and tested for. Dropping it here would silently disable every declared global rule. */
+        /* a global access control declared without any firewall still enforces: the resolution listener matches no firewall and sets no context, the access control listener falls back to this global control and denies unauthenticated access, which is the behaviour the runtime is built and tested for. Dropping it here would silently disable every declared global rule. */
         if nil != configuration.global.accessControl {
             return security.NewCompiledConfiguration(nil, configuration.global.accessControl), nil
         }

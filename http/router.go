@@ -405,28 +405,8 @@ func (instance *Router) match(method string, path string, host string, scheme st
             continue
         }
 
-        if 0 != len(routeDefinition.locales) {
-            localeValue := ""
-            if value, exists := params[RouteAttributeLocale]; true == exists {
-                localeValue = value
-            }
-
-            if "" == localeValue {
-                continue
-            }
-
-            allowed := false
-            for _, allowedLocale := range routeDefinition.locales {
-                if allowedLocale == localeValue {
-                    allowed = true
-
-                    break
-                }
-            }
-
-            if false == allowed {
-                continue
-            }
+        if false == matchesLocale(routeDefinition.locales, params) {
+            continue
         }
 
         if false == matchesMethod(routeDefinition.methods, method) {

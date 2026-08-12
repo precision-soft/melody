@@ -20,6 +20,7 @@ const (
     rueidisBackendDefaultMaxKeyLength = 1024
 )
 
+/* NewBackend builds the redis-backed cache over one key prefix, which is the whole of this backend's isolation: every key it writes carries it, and Clear scans and deletes everything under it. An empty prefix takes the shipped default, and the shipped default is the same string in every melody application, so two applications pointed at one redis with it share a namespace — a Get answers whatever the other one wrote under the same name, and because a foreign json document of another shape decodes without error it is served as a hit rather than treated as a miss, while a Clear from either empties the other's entries too. Redis databases do not separate them either: the client's SelectDb defaults to 0. Give each application (and each environment sharing a store) its own prefix. */
 func NewBackend(
     client rueidis.Client,
     ctx context.Context,

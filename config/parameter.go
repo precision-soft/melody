@@ -2,8 +2,6 @@ package config
 
 import (
     "fmt"
-    "strconv"
-    "strings"
     "sync"
     "sync/atomic"
     "time"
@@ -172,33 +170,26 @@ func (instance *Parameter) Bool() (bool, error) {
     )
 }
 
+/* Int reads the value through the same parser its sibling accessors use, so one grammar answers for every typed reading of a parameter: an int64 registered at runtime — what a caller writing RegisterRuntime("app.batch_size", int64(500)) hands over — converted through Float and refused through Int, on a value that is plainly a whole number. The one thing this door adds is the narrowing: internal.Int answers an int64 while an int is what a caller asked for, so a value outside the int range is refused by name rather than truncated, which is the silent corruption the shared parser already refuses for a float64 too wide to hold. */
 func (instance *Parameter) Int() (int, error) {
-    value := instance.loadValue()
-
-    intValue, ok := value.(int)
-    if true == ok {
-        return intValue, nil
+    intValue, isSet, intErr := internal.Int(instance.loadValue(), instance.conversionName())
+    if nil != intErr || false == isSet {
+        return 0, exception.NewError(
+            "cannot convert parameter value to int",
+            instance.diagnosticContext(),
+            instance.conversionCause(intErr),
+        )
     }
 
-    stringValue, ok := value.(string)
-    if true == ok {
-        parsedValue, atoiErr := strconv.Atoi(strings.TrimSpace(stringValue))
-        if nil != atoiErr {
-            return 0, exception.NewError(
-                "cannot convert parameter value to int",
-                instance.diagnosticContext(),
-                instance.conversionCause(atoiErr),
-            )
-        }
-
-        return parsedValue, nil
+    if int64(int(intValue)) != intValue {
+        return 0, exception.NewError(
+            "parameter value does not fit an int on this platform",
+            instance.diagnosticContext(),
+            nil,
+        )
     }
 
-    return 0, exception.NewError(
-        "cannot convert parameter value to int",
-        instance.diagnosticContext(),
-        nil,
-    )
+    return int(intValue), nil
 }
 
 func (instance *Parameter) Float() (float64, error) {

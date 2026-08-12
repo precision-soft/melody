@@ -2516,3 +2516,55 @@ func TestLogHandlerError_TheRecordNamesTheMethod(t *testing.T) {
         t.Fatalf("expected the record to name the path, got %v", countingLogger.lastContext["path"])
     }
 }
+
+func TestKernel_SetMethodPolicyReachesTheAutomaticOptionsAnswer(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/articles",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(nethttp.StatusOK, "articles"), nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainer()
+
+    kernelInstance := NewKernel(router)
+
+    policy := DefaultKernelOptions().MethodPolicy
+    policy.AutomaticOptions = false
+    kernelInstance.SetMethodPolicy(policy)
+
+    handler := kernelInstance.ServeHttp(serviceContainer)
+
+    recorder := httptest.NewRecorder()
+    handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodOptions, "/articles", nil))
+
+    if nethttp.StatusMethodNotAllowed != recorder.Code {
+        t.Fatalf("expected the policy to refuse the unrouted OPTIONS with %d, got %d", nethttp.StatusMethodNotAllowed, recorder.Code)
+    }
+
+    if true == strings.Contains(recorder.Header().Get("Allow"), nethttp.MethodOptions) {
+        t.Fatalf("expected Allow to stop advertising the method the policy no longer answers, got %q", recorder.Header().Get("Allow"))
+    }
+}
+
+func TestKernel_MethodPolicyKeepsTheAutomaticOptionsAnswerByDefault(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/articles",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(nethttp.StatusOK, "articles"), nil
+        },
+    )
+
+    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+
+    recorder := httptest.NewRecorder()
+    handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodOptions, "/articles", nil))
+
+    if nethttp.StatusNoContent != recorder.Code {
+        t.Fatalf("expected the shipped policy to answer OPTIONS with %d, got %d", nethttp.StatusNoContent, recorder.Code)
+    }
+}

@@ -745,6 +745,30 @@ func matchesScheme(schemes []string, scheme string) bool {
     return false
 }
 
+/* matchesLocale is the locale half of the match, in one place because two readers used to answer it: the matcher applied it and AllowedMethods did not, so the method list announced for a path named the methods of routes that path can never reach. A route declaring no locales accepts every one; a route declaring some accepts only a path that carries one of them, and a path carrying none is refused rather than admitted, since a locale-scoped route reached without a locale would serve one arbitrary language to everybody. */
+func matchesLocale(locales []string, params map[string]string) bool {
+    if 0 == len(locales) {
+        return true
+    }
+
+    localeValue := ""
+    if value, exists := params[RouteAttributeLocale]; true == exists {
+        localeValue = value
+    }
+
+    if "" == localeValue {
+        return false
+    }
+
+    for _, allowedLocale := range locales {
+        if allowedLocale == localeValue {
+            return true
+        }
+    }
+
+    return false
+}
+
 func matchPath(
     routeDefinition route,
     pathSegments []string,

@@ -18,6 +18,30 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Http: `Kernel` gains `SetMethodPolicy`
+
+**What changed.** `http/contract.Kernel` declares `SetMethodPolicy(policy MethodPolicy)`, and `MethodPolicy` moved to `http/contract` beside the two policies already there, with an alias keeping the name `melodyhttp.MethodPolicy` valid. The type was documented, built by `DefaultKernelOptions()` and read on every request, with no door to hand one to.
+
+**Symptom.** An out-of-tree implementation of `http/contract.Kernel` — a wrapper or a test double — stops compiling: `does not implement …Kernel (missing method SetMethodPolicy)`.
+
+**Remedy.** Add the method. A wrapper delegates it to the kernel it wraps; a double that does not care about the policy takes the argument and does nothing, as it already does for `SetForwardedHeadersPolicy`. Applications that do not implement the interface are unaffected, and the shipped defaults are unchanged.
+
+### Http: `Router.AllowedMethods` honours the path's locale
+
+**What changed.** The door filters routes by locale exactly as the matcher does, so a route restricted to a set of locales contributes nothing for a path carrying another one.
+
+**Symptom.** A `405` handler of your own that builds its `Allow` header from this door stops advertising methods that in fact answer `405`. Nothing changes for a routing table with no locale-restricted routes, which is every table that never passes `locales` to `NewRouteOptions`.
+
+**Remedy.** None. If you were compensating for the old answer by filtering the list yourself, the compensation is now redundant. Note that the kernel adds the synthetic `OPTIONS` and `HEAD` its `MethodPolicy` allows on top of this set when it writes the header itself.
+
+### Cron: a relative path from a parameter is anchored at the project directory
+
+**What changed.** In `melody:cron:generate`, a relative path read from a parameter — `melody.cron.destination_file`, `melody.cron.logs_dir`, `melody.cron.heartbeat_path` — is resolved against `%kernel.project_dir%`, the way `MELODY_LOG_PATH`, `kernel.logs_dir` and `kernel.cache_dir` have always been. A relative path passed as a cli flag still resolves against the working directory.
+
+**Symptom.** A deployment whose cron parameters carry relative paths and whose generator runs from a directory other than the project root writes its crontab and its log directory elsewhere than before — where they were always meant to go. The shipped defaults carry `%kernel.project_dir%` already and are unaffected, as are absolute paths and every flag.
+
+**Remedy.** None to apply if the working directory was the project directory, which is the ordinary case. Otherwise either accept the new location or write the parameter as an absolute path — a value already absolute is never re-anchored. A configuration whose `Kernel()` names no project directory keeps the previous behaviour.
+
 ### Http/static: in the embedded mode the cache validators change shape
 
 **What changed.** An `embed.FS` reports the zero instant for every file it holds, so the entity tag used to be built out of that constant — degenerating into size alone, identical across every rebuild — and `Last-Modified` was rendered as `Mon, 01 Jan 0001 00:00:00 GMT`. The tag of an undated file is now derived from its size and `version.BuildVersion()`, and `Last-Modified` is not emitted at all when the filesystem carries no time. Nothing changes for the filesystem mode, where files have real modification times.

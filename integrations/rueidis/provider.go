@@ -8,6 +8,7 @@ import (
     "github.com/precision-soft/melody/config"
     containercontract "github.com/precision-soft/melody/container/contract"
     "github.com/precision-soft/melody/exception"
+    exceptioncontract "github.com/precision-soft/melody/exception/contract"
     "github.com/redis/rueidis"
 )
 
@@ -89,7 +90,7 @@ func (instance *Provider) Open(resolver containercontract.Resolver) (rueidis.Cli
     if 0 == len(addresses) {
         return nil, exception.NewError(
             "redis address is empty",
-            connectionConfig.SafeContext(),
+            instance.connectionContext(connectionConfig, clientConfig, timeoutConfig),
             nil,
         )
     }
@@ -118,7 +119,7 @@ func (instance *Provider) Open(resolver containercontract.Resolver) (rueidis.Cli
     if nil != createErr {
         return nil, exception.NewError(
             "redis client creation failed",
-            connectionConfig.SafeContext(),
+            instance.connectionContext(connectionConfig, clientConfig, timeoutConfig),
             createErr,
         )
     }
@@ -139,9 +140,29 @@ func (instance *Provider) Open(resolver containercontract.Resolver) (rueidis.Cli
 
     return nil, exception.NewError(
         "redis connection failed",
-        connectionConfig.SafeContext(),
+        instance.connectionContext(connectionConfig, clientConfig, timeoutConfig),
         pingErr,
     )
+}
+
+/* connectionContext is the diagnostic shape of every refusal this provider writes, and it is assembled here rather than inside ConnectionConfig.SafeContext because only the provider knows the two things the operator is missing: which configuration parameter the address was read from — "redis address is empty" names a package otherwise, not a key to go and set — and the deadlines that actually governed the attempt, which live in the client and timeout configurations the connection values know nothing about. It is the shape the bunorm siblings' toConnectionContext already writes for a failed dial. The password is never part of it: the safe context decides what may be rendered. */
+func (instance *Provider) connectionContext(
+    connectionConfig *ConnectionConfig,
+    clientConfig *ClientConfig,
+    timeoutConfig *TimeoutConfig,
+) exceptioncontract.Context {
+    connectionContext := connectionConfig.SafeContext()
+
+    connectionContext["addressParameter"] = instance.addressParameterName
+    connectionContext["userParameter"] = instance.userParameterName
+    connectionContext["connectTimeout"] = resolveConnectTimeout(timeoutConfig).String()
+
+    if nil != clientConfig {
+        connectionContext["dialTimeout"] = clientConfig.DialTimeout.String()
+        connectionContext["selectDb"] = clientConfig.SelectDb
+    }
+
+    return connectionContext
 }
 
 /* resolveConnectTimeout bounds the boot ping. A non-positive value takes the default rather than removing the bound, the way Ping reads its own zero and the way this package's options read theirs: a TimeoutConfig that names only the command timeout would otherwise run the ping on a context with no deadline, and a store that accepts the connection without answering would hang boot forever holding a client no one can close yet. */

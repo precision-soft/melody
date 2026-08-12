@@ -26,10 +26,8 @@ import (
     sessioncontract "github.com/precision-soft/melody/session/contract"
 )
 
-type MethodPolicy struct {
-    HeadFallbackToGet bool
-    AutomaticOptions  bool
-}
+/* MethodPolicy is the contract's type under this package's name: the policy travels through httpcontract.Kernel.SetMethodPolicy, where an application meets the kernel, and the alias keeps every caller and every composite literal written against melodyhttp.MethodPolicy compiling unchanged. */
+type MethodPolicy = httpcontract.MethodPolicy
 
 type KernelOptions struct {
     MethodPolicy           MethodPolicy
@@ -106,6 +104,11 @@ func (instance *Kernel) SetForwardedHeadersPolicy(policy httpcontract.ForwardedH
 
 func (instance *Kernel) SetSessionCookiePolicy(policy httpcontract.SessionCookiePolicy) {
     instance.options.SessionCookiePolicy = policy
+}
+
+/* SetMethodPolicy installs the method policy the kernel reads on every request — whether HEAD falls back to the GET route, whether an unrouted OPTIONS is answered with the computed Allow header. Without this door the policy was a documented type with nowhere to hand it: DefaultKernelOptions built one, the kernel read one on every request, and no application could reach the field between them, so an api that had to answer 405 to OPTIONS wrote the configuration and watched it change nothing. */
+func (instance *Kernel) SetMethodPolicy(policy httpcontract.MethodPolicy) {
+    instance.options.MethodPolicy = policy
 }
 
 func copyStringList(values []string) []string {

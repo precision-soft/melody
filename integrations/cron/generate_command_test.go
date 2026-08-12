@@ -2927,3 +2927,81 @@ func TestCrontabTemplatesRenderTheirOwnershipMarker(t *testing.T) {
         }
     }
 }
+
+func TestRunAnchorsARelativeParameterPathAtTheProjectDirectory(t *testing.T) {
+    projectDirectory := t.TempDir()
+    workingDirectory := t.TempDir()
+
+    t.Chdir(workingDirectory)
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("backup:run", &testSchedule{Minute: "0", Hour: "2"}),
+    }
+
+    configuration := newStubConfigurationWithProjectDirectory(
+        map[string]string{
+            ParameterUser:            "deploy",
+            ParameterBinary:          "/opt/melody/app",
+            ParameterDestinationFile: filepath.Join("var", "cron", "crontab"),
+            ParameterLogsDir:         filepath.Join("var", "log", "cron"),
+        },
+        projectDirectory,
+    )
+
+    _, runErr := runGenerateCommandWithConfiguration(t, commands, nil, configuration)
+    if nil != runErr {
+        t.Fatalf("Run returned unexpected error: %v", runErr)
+    }
+
+    anchoredDestination := filepath.Join(projectDirectory, "var", "cron", "crontab")
+    if _, statErr := os.Stat(anchoredDestination); nil != statErr {
+        t.Fatalf("expected the relative parameter path under the project directory: %v", statErr)
+    }
+
+    if _, statErr := os.Stat(filepath.Join(workingDirectory, "var", "cron", "crontab")); nil == statErr {
+        t.Fatal("expected nothing written under the working directory")
+    }
+
+    body, _ := os.ReadFile(anchoredDestination)
+    if false == strings.Contains(string(body), filepath.Join(projectDirectory, "var", "log", "cron")) {
+        t.Fatalf("expected the logs directory anchored at the project directory too, got:\n%s", string(body))
+    }
+}
+
+func TestRunKeepsARelativeFlagPathRelativeToTheWorkingDirectory(t *testing.T) {
+    projectDirectory := t.TempDir()
+    workingDirectory := t.TempDir()
+
+    t.Chdir(workingDirectory)
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("backup:run", &testSchedule{Minute: "0", Hour: "2"}),
+    }
+
+    configuration := newStubConfigurationWithProjectDirectory(
+        map[string]string{
+            ParameterUser:    "deploy",
+            ParameterBinary:  "/opt/melody/app",
+            ParameterLogsDir: filepath.Join(projectDirectory, "var", "log", "cron"),
+        },
+        projectDirectory,
+    )
+
+    _, runErr := runGenerateCommandWithConfiguration(
+        t,
+        commands,
+        []string{"--out", filepath.Join("var", "cron", "crontab")},
+        configuration,
+    )
+    if nil != runErr {
+        t.Fatalf("Run returned unexpected error: %v", runErr)
+    }
+
+    if _, statErr := os.Stat(filepath.Join(workingDirectory, "var", "cron", "crontab")); nil != statErr {
+        t.Fatalf("expected the flag path to follow the working directory: %v", statErr)
+    }
+
+    if _, statErr := os.Stat(filepath.Join(projectDirectory, "var", "cron", "crontab")); nil == statErr {
+        t.Fatal("expected the flag path not to be anchored at the project directory")
+    }
+}
