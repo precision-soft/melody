@@ -236,3 +236,63 @@ func TestWriteToHttpResponseWriter_RefusesAStatusOutsideTheWritableRangeByName(t
         t.Fatalf("expected nothing written to the delegate, got %d bytes", recorder.Body.Len())
     }
 }
+
+/* the refusal runs ahead of the first mutation, headers included: the response's headers used to be copied onto the writer before the status was judged, so a caller that handled the returned error and wrote its own response sent it carrying the refused response's Set-Cookie on top of its own. */
+func TestWriteToHttpResponseWriter_ARefusedStatusLeavesNoHeaderOnTheWriter(t *testing.T) {
+    recorder := httptest.NewRecorder()
+
+    response := NewResponse(1000, []byte("body"))
+    response.Headers().Set("Set-Cookie", "session=abc")
+    response.Headers().Set("X-Refused", "left-behind")
+
+    writeErr := WriteToHttpResponseWriter(nil, nil, recorder, response)
+    if nil == writeErr {
+        t.Fatal("expected the out-of-range status to be refused")
+    }
+
+    if "" != recorder.Header().Get("Set-Cookie") {
+        t.Fatalf("expected the refused response to leave no cookie behind, got %q", recorder.Header().Get("Set-Cookie"))
+    }
+
+    if "" != recorder.Header().Get("X-Refused") {
+        t.Fatalf("expected the refused response to leave no header behind, got %q", recorder.Header().Get("X-Refused"))
+    }
+}
+
+/* the writable range is refused at both ends, and the refusal answers before the headers either way */
+func TestWriteToHttpResponseWriter_RefusesAStatusBelowTheWritableRange(t *testing.T) {
+    recorder := httptest.NewRecorder()
+
+    response := NewResponse(99, []byte("body"))
+    response.Headers().Set("X-Refused", "left-behind")
+
+    writeErr := WriteToHttpResponseWriter(nil, nil, recorder, response)
+    if nil == writeErr {
+        t.Fatal("expected the below-range status to be refused")
+    }
+
+    if "" != recorder.Header().Get("X-Refused") {
+        t.Fatalf("expected the refused response to leave no header behind, got %q", recorder.Header().Get("X-Refused"))
+    }
+}
+
+/* an accepted status still carries its headers to the writer: the refusal moved ahead of the copy, it did not replace it */
+func TestWriteToHttpResponseWriter_AnAcceptedStatusStillCarriesItsHeaders(t *testing.T) {
+    recorder := httptest.NewRecorder()
+
+    response := NewResponse(nethttp.StatusCreated, []byte("body"))
+    response.Headers().Set("X-Accepted", "carried")
+
+    writeErr := WriteToHttpResponseWriter(nil, nil, recorder, response)
+    if nil != writeErr {
+        t.Fatalf("unexpected write error: %v", writeErr)
+    }
+
+    if "carried" != recorder.Header().Get("X-Accepted") {
+        t.Fatalf("expected the accepted response's header to reach the writer, got %q", recorder.Header().Get("X-Accepted"))
+    }
+
+    if nethttp.StatusCreated != recorder.Code {
+        t.Fatalf("expected the accepted status on the connection, got %d", recorder.Code)
+    }
+}

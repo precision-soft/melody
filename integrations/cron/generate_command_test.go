@@ -30,11 +30,11 @@ func TestNewGenerateCommandIdentity(t *testing.T) {
         t.Fatalf("Description() should not be empty")
     }
 
-    /* the command carries its 8 own flags plus the standard set every melody command accepts — without the standard set, the framework's -v/-vv rewrite into --verbosity killed exactly this command with "flag provided but not defined" */
+    /* the command carries its 9 own flags plus the standard set every melody command accepts — without the standard set, the framework's -v/-vv rewrite into --verbosity killed exactly this command with "flag provided but not defined" */
     flags := command.Flags()
-    expectedFlagCount := 8 + len(output.StandardFlags())
+    expectedFlagCount := 9 + len(output.StandardFlags())
     if expectedFlagCount != len(flags) {
-        t.Fatalf("expected %d flags (8 own + the standard set), got %d", expectedFlagCount, len(flags))
+        t.Fatalf("expected %d flags (9 own + the standard set), got %d", expectedFlagCount, len(flags))
     }
 }
 
@@ -2550,5 +2550,380 @@ func TestGenerateCommand_JsonNamesTheDestinationsWrittenBeforeTheFailure(t *test
 
     if filepath.Join(tempDir, "a-crontab") != document.Data.Writes[0].Destination {
         t.Fatalf("expected the first destination to be named, got %q", document.Data.Writes[0].Destination)
+    }
+}
+
+/* Render is userland and Schedule.Defaults is documented as mutating in place, so every entry carries its own schedule: a template calling it on the schedule it was handed would otherwise rewrite the one behind every sibling entry of the same command. */
+func TestExpandEntriesForCommand_EveryEntryCarriesItsOwnSchedule(t *testing.T) {
+    schedule := &Schedule{Minute: "0", Hour: "3"}
+
+    entries, expandErr := expandEntriesForCommand(
+        "reports:daily",
+        &EntryConfig{Schedule: schedule, Instances: 2},
+        "/usr/local/bin/fakeapp",
+        "deploy",
+        t.TempDir(),
+    )
+    if nil != expandErr {
+        t.Fatalf("unexpected expand error: %v", expandErr)
+    }
+
+    if 2 != len(entries) {
+        t.Fatalf("expected two entries, got %d", len(entries))
+    }
+
+    if entries[0].Schedule == schedule || entries[1].Schedule == schedule {
+        t.Fatal("expected the entries to carry copies rather than the configured schedule itself")
+    }
+
+    if entries[0].Schedule == entries[1].Schedule {
+        t.Fatal("expected the two instances to carry distinct schedules")
+    }
+
+    entries[0].Schedule.Defaults()
+
+    if "3" != schedule.Hour || "" != schedule.DayOfMonth {
+        t.Fatalf("expected the configured schedule untouched by a template calling Defaults, got %#v", schedule)
+    }
+
+    if "3" != entries[1].Schedule.Hour || "" != entries[1].Schedule.DayOfMonth {
+        t.Fatalf("expected the sibling entry untouched, got %#v", entries[1].Schedule)
+    }
+}
+
+/* a destination an earlier version wrote is never reconciled by default, so a job retired between versions keeps running forever and a job MOVED to another destination runs from both files — the double execution the runner refuses at construction, produced silently by the generator. --prune is the opt-in that closes it. */
+func TestRunPruneEmptiesADestinationThisRunNoLongerProduces(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+    retiredPath := filepath.Join(tempDir, "reports.crontab")
+
+    baseArgs := []string{
+        "--out", outputPath,
+        "--logs-dir", filepath.Join(tempDir, "logs"),
+        "--binary", "/usr/local/bin/fakeapp",
+        "--user", "deploy",
+    }
+
+    _, firstErr := runGenerateCommand(
+        t,
+        []clicontract.Command{
+            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+                Schedule:        &Schedule{Minute: "0", Hour: "3"},
+                DestinationFile: "reports.crontab",
+            }),
+        },
+        baseArgs,
+    )
+    if nil != firstErr {
+        t.Fatalf("the first generation failed: %v", firstErr)
+    }
+
+    firstContent, firstReadErr := os.ReadFile(retiredPath)
+    if nil != firstReadErr {
+        t.Fatalf("the first generation wrote no %s: %v", retiredPath, firstReadErr)
+    }
+
+    if false == strings.Contains(string(firstContent), "reports:daily") {
+        t.Fatalf("the first generation did not name the job: %s", firstContent)
+    }
+
+    /* the next version moves the same job to the default destination */
+    stdout, secondErr := runGenerateCommand(
+        t,
+        []clicontract.Command{
+            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+                Schedule: &Schedule{Minute: "0", Hour: "3"},
+            }),
+        },
+        append(append([]string{}, baseArgs...), "--prune"),
+    )
+    if nil != secondErr {
+        t.Fatalf("the second generation failed: %v", secondErr)
+    }
+
+    stale, staleErr := os.ReadFile(retiredPath)
+    if nil != staleErr {
+        t.Fatalf("expected the pruned destination to survive as an empty manifest: %v", staleErr)
+    }
+
+    if true == strings.Contains(string(stale), "reports:daily") {
+        t.Fatalf("expected the retired destination to stop naming the job, got: %s", stale)
+    }
+
+    if false == strings.Contains(string(stale), CrontabOwnershipMarker) {
+        t.Fatalf("expected the pruned destination to keep its ownership marker, got: %s", stale)
+    }
+
+    current, currentErr := os.ReadFile(outputPath)
+    if nil != currentErr {
+        t.Fatalf("the second generation wrote no %s: %v", outputPath, currentErr)
+    }
+
+    if false == strings.Contains(string(current), "reports:daily") {
+        t.Fatalf("expected the job to live at its new destination, got: %s", current)
+    }
+
+    if false == strings.Contains(stdout, "pruned "+retiredPath) {
+        t.Fatalf("expected the sweep to be reported, got: %q", stdout)
+    }
+}
+
+/* without the flag the sweep does not run at all: a deployment that manages the output directory itself keeps exactly the behaviour it had */
+func TestRunWithoutPruneLeavesAStaleDestinationUntouched(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+    retiredPath := filepath.Join(tempDir, "reports.crontab")
+
+    baseArgs := []string{
+        "--out", outputPath,
+        "--logs-dir", filepath.Join(tempDir, "logs"),
+        "--binary", "/usr/local/bin/fakeapp",
+        "--user", "deploy",
+    }
+
+    if _, firstErr := runGenerateCommand(
+        t,
+        []clicontract.Command{
+            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+                Schedule:        &Schedule{Minute: "0", Hour: "3"},
+                DestinationFile: "reports.crontab",
+            }),
+        },
+        baseArgs,
+    ); nil != firstErr {
+        t.Fatalf("the first generation failed: %v", firstErr)
+    }
+
+    if _, secondErr := runGenerateCommand(
+        t,
+        []clicontract.Command{
+            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+                Schedule: &Schedule{Minute: "0", Hour: "3"},
+            }),
+        },
+        baseArgs,
+    ); nil != secondErr {
+        t.Fatalf("the second generation failed: %v", secondErr)
+    }
+
+    stale, staleErr := os.ReadFile(retiredPath)
+    if nil != staleErr {
+        t.Fatalf("expected the stale destination to be left alone: %v", staleErr)
+    }
+
+    if false == strings.Contains(string(stale), "reports:daily") {
+        t.Fatalf("expected the stale destination untouched without --prune, got: %s", stale)
+    }
+}
+
+/* emptying a file is not reversible, so the sweep touches only what it can prove it wrote: a file the operator put in the same directory carries no ownership marker and is left exactly as it is */
+func TestRunPruneLeavesAFileItCannotProveItWrote(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+    foreignPath := filepath.Join(tempDir, "operator.crontab")
+
+    foreignContent := "# written by the operator\n*/5 * * * * root /usr/local/bin/backup\n"
+    if writeErr := os.WriteFile(foreignPath, []byte(foreignContent), 0o644); nil != writeErr {
+        t.Fatalf("unexpected write error: %v", writeErr)
+    }
+
+    if _, runErr := runGenerateCommand(
+        t,
+        []clicontract.Command{
+            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+                Schedule: &Schedule{Minute: "0", Hour: "3"},
+            }),
+        },
+        []string{
+            "--out", outputPath,
+            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "deploy",
+            "--prune",
+        },
+    ); nil != runErr {
+        t.Fatalf("the generation failed: %v", runErr)
+    }
+
+    survived, readErr := os.ReadFile(foreignPath)
+    if nil != readErr {
+        t.Fatalf("expected the operator's file to survive: %v", readErr)
+    }
+
+    if foreignContent != string(survived) {
+        t.Fatalf("expected the operator's file untouched, got: %s", survived)
+    }
+}
+
+/* emptying the configuration is exactly the version in which every destination the previous one wrote is stale, so the sweep runs there too — while the run itself stays the success it always was */
+func TestRunPruneSweepsWhenTheConfigurationBecomesEmpty(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+
+    baseArgs := []string{
+        "--out", outputPath,
+        "--logs-dir", filepath.Join(tempDir, "logs"),
+        "--binary", "/usr/local/bin/fakeapp",
+        "--user", "deploy",
+    }
+
+    if _, firstErr := runGenerateCommand(
+        t,
+        []clicontract.Command{
+            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+                Schedule: &Schedule{Minute: "0", Hour: "3"},
+            }),
+        },
+        baseArgs,
+    ); nil != firstErr {
+        t.Fatalf("the first generation failed: %v", firstErr)
+    }
+
+    stdout, secondErr := runGenerateCommand(
+        t,
+        nil,
+        append(append([]string{}, baseArgs...), "--prune"),
+    )
+    if nil != secondErr {
+        t.Fatalf("an empty configuration must stay a success, got: %v", secondErr)
+    }
+
+    if false == strings.Contains(stdout, "nothing to write") {
+        t.Fatalf("expected the empty run to keep its message, got: %q", stdout)
+    }
+
+    swept, sweptErr := os.ReadFile(outputPath)
+    if nil != sweptErr {
+        t.Fatalf("expected the previously written destination to survive as an empty manifest: %v", sweptErr)
+    }
+
+    if true == strings.Contains(string(swept), "reports:daily") {
+        t.Fatalf("expected the emptied configuration to stop the job, got: %s", swept)
+    }
+}
+
+/* the machine document names the sweep beside the writes, as a list on every run rather than a field whose json type changes with the outcome */
+func TestRunPruneIsReportedInTheJsonEnvelope(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+    retiredPath := filepath.Join(tempDir, "reports.crontab")
+
+    baseArgs := []string{
+        "--out", outputPath,
+        "--logs-dir", filepath.Join(tempDir, "logs"),
+        "--binary", "/usr/local/bin/fakeapp",
+        "--user", "deploy",
+    }
+
+    if _, firstErr := runGenerateCommand(
+        t,
+        []clicontract.Command{
+            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+                Schedule:        &Schedule{Minute: "0", Hour: "3"},
+                DestinationFile: "reports.crontab",
+            }),
+        },
+        baseArgs,
+    ); nil != firstErr {
+        t.Fatalf("the first generation failed: %v", firstErr)
+    }
+
+    stdout, secondErr := runGenerateCommand(
+        t,
+        []clicontract.Command{
+            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+                Schedule: &Schedule{Minute: "0", Hour: "3"},
+            }),
+        },
+        append(append([]string{}, baseArgs...), "--prune", "--format=json"),
+    )
+    if nil != secondErr {
+        t.Fatalf("the second generation failed: %v", secondErr)
+    }
+
+    document := map[string]any{}
+    if unmarshalErr := json.Unmarshal([]byte(stdout), &document); nil != unmarshalErr {
+        t.Fatalf("the envelope did not parse: %v, got %q", unmarshalErr, stdout)
+    }
+
+    data, hasData := document["data"].(map[string]any)
+    if false == hasData {
+        t.Fatalf("expected a data object, got %q", stdout)
+    }
+
+    pruned, hasPruned := data["pruned"].([]any)
+    if false == hasPruned {
+        t.Fatalf("expected pruned to be a list on every run, got %q", stdout)
+    }
+
+    if 1 != len(pruned) || retiredPath != pruned[0] {
+        t.Fatalf("expected the swept destination to be named, got %v", pruned)
+    }
+}
+
+/* a run that sweeps nothing still answers a list rather than null, so a consumer can key on it unconditionally */
+func TestRunReportsAnEmptyPrunedListWhenNothingIsSwept(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+
+    stdout, runErr := runGenerateCommand(
+        t,
+        []clicontract.Command{
+            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+                Schedule: &Schedule{Minute: "0", Hour: "3"},
+            }),
+        },
+        []string{
+            "--out", outputPath,
+            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "deploy",
+            "--format=json",
+        },
+    )
+    if nil != runErr {
+        t.Fatalf("the generation failed: %v", runErr)
+    }
+
+    document := map[string]any{}
+    if unmarshalErr := json.Unmarshal([]byte(stdout), &document); nil != unmarshalErr {
+        t.Fatalf("the envelope did not parse: %v, got %q", unmarshalErr, stdout)
+    }
+
+    data := document["data"].(map[string]any)
+
+    pruned, hasPruned := data["pruned"].([]any)
+    if false == hasPruned {
+        t.Fatalf("expected pruned to be a list even when nothing was swept, got %q", stdout)
+    }
+
+    if 0 != len(pruned) {
+        t.Fatalf("expected an empty sweep, got %v", pruned)
+    }
+}
+
+/* the marker is what the sweep reads, so both dialects have to carry it in what they actually render */
+func TestCrontabTemplatesRenderTheirOwnershipMarker(t *testing.T) {
+    for _, template := range BuiltinTemplates() {
+        ownedTemplate, isOwned := template.(OwnedTemplate)
+        if false == isOwned {
+            t.Fatalf("expected %q to name its ownership marker", template.Name())
+        }
+
+        /* the marker is read back from the same door the rendering is compared against, so it is pinned to the constant as well: an empty marker would satisfy every containment check while making the template unprunable, which is the fail-safe rather than the contract */
+        if CrontabOwnershipMarker != ownedTemplate.OwnershipMarker() {
+            t.Fatalf("expected %q to name the crontab marker, got %q", template.Name(), ownedTemplate.OwnershipMarker())
+        }
+
+        for _, entries := range [][]Entry{nil, {{Name: "job:one", User: "deploy", Schedule: &Schedule{Minute: "*"}, Binary: "/bin/app", Args: []string{"job:one"}}}} {
+            rendered, renderErr := template.Render(entries, RenderOptions{})
+            if nil != renderErr {
+                t.Fatalf("unexpected render error for %q: %v", template.Name(), renderErr)
+            }
+
+            if false == strings.Contains(rendered, ownedTemplate.OwnershipMarker()) {
+                t.Fatalf("expected %q to render its own marker, got: %s", template.Name(), rendered)
+            }
+        }
     }
 }

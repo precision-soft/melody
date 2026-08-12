@@ -280,6 +280,22 @@ Render(entries []Entry, options RenderOptions) (string, error)
 
 There is **no all-or-nothing guarantee across destinations.** `melody:cron:generate` walks the destinations in lexicographic order and renders and writes each one before moving to the next, so an error raised while rendering the third of four files leaves the first two already on disk and the last two absent. Per-file atomicity holds; a whole-run rollback does not. Validate a multi-destination configuration in a test, or treat a failed generation as "the output directory is now in an unknown state" and re-run once the error is fixed.
 
+### Reconciling destinations across versions — `--prune`
+
+A run writes the destinations the **current** configuration names, and by default touches nothing else. A destination an earlier version wrote and this one no longer names is therefore left exactly as it was: an entry you retired keeps running on every tick forever, and an entry you **moved** to another destination file runs from both — the double execution `melody:cron:run` refuses at construction, produced silently by the generator.
+
+`--prune` closes that. It empties, in `dir(--out)`, the destinations this run did not produce, so the retired job stops. Three rules bound it, because emptying a file is not reversible:
+
+* **Opt-in.** Without the flag the behaviour is exactly what it was. A deployment that manages the output directory itself — a release directory built fresh every time — needs nothing here.
+* **Proof of ownership.** Only a file whose head carries the current template's ownership marker is touched. The built-in dialects render `cron.CrontabOwnershipMarker` in their header block; a file you or another tool put in the same directory carries no marker and is left alone. A template of your own opts in by implementing `cron.OwnedTemplate` and including the string it returns in **everything** `Render` produces, entries or none — a template that does not implement it is never pruned.
+* **The output directory only.** The sweep reads `dir(--out)` and does not recurse. An entry that named an absolute `DestinationFile` outside that directory is written where you asked and is never swept: those files live where the operator put them.
+
+Emptying means re-rendering the template with no entries, so the destination keeps its header — and with it its marker — and stays recognisable to the next run instead of becoming an unowned file the sweep would refuse to touch ever again. An empty configuration sweeps too: that is precisely the version in which every previously written destination is stale. The run stays a success either way, and the destinations it emptied are named on stdout and under `data.pruned` in the `--format=json` envelope, which is a list on every run.
+
+```bash
+melody:cron:generate --out /etc/cron.d/app --prune
+```
+
 ### Built-in templates
 
 `cron.BuiltinTemplates()` returns the list of templates shipped with the binding: the `crontab` template (`cron.TemplateNameCrontab == "crontab"`) and the user-less `crontab-no-user` variant (`cron.TemplateNameCrontabNoUser == "crontab-no-user"`) in all three bindings, plus the `k8s` template (`cron.TemplateNameK8s == "k8s"`) in the v3 binding only. `NewGenerateCommand` iterates this slice on construction, so you never register the built-ins by hand — they are always available even after you add your own.

@@ -119,3 +119,65 @@ func TestConfiguration_EntriesHandsOutACopyOfTheList(t *testing.T) {
         t.Fatal("expected the registry's list untouched by mutation of the handed-out slice")
     }
 }
+
+/* the copy reaches past the list: ScheduledCommand and EntryConfig are exported structs with exported fields, so a caller writing through the pointer it was handed rewrote the registration itself — the very mutation Schedule takes a copy to prevent, arriving through the other door. */
+func TestConfiguration_EntriesHandsOutACopyOfEachRegistration(t *testing.T) {
+    configuration := NewConfiguration().Schedule(
+        "job:one",
+        &EntryConfig{
+            Schedule:  &Schedule{Minute: "5", Hour: "3"},
+            Command:   []string{"app"},
+            Arguments: []string{"--format=json"},
+            Timeout:   time.Minute,
+        },
+    )
+
+    handed := configuration.Entries()[0]
+    handed.CommandName = "job:hijacked"
+    handed.Config.Timeout = time.Hour
+    handed.Config.Schedule.Hour = "23"
+    handed.Config.Command[0] = "rewritten"
+    handed.Config.Arguments[0] = "--format=table"
+
+    registered := configuration.Entries()[0]
+
+    if "job:one" != registered.CommandName {
+        t.Fatalf("expected the registered command name untouched, got %q", registered.CommandName)
+    }
+
+    if time.Minute != registered.Config.Timeout {
+        t.Fatalf("expected the registered timeout untouched, got %v", registered.Config.Timeout)
+    }
+
+    if "3" != registered.Config.Schedule.Hour {
+        t.Fatalf("expected the registered schedule untouched, got %q", registered.Config.Schedule.Hour)
+    }
+
+    if "app" != registered.Config.Command[0] {
+        t.Fatalf("expected the registered command untouched, got %q", registered.Config.Command[0])
+    }
+
+    if "--format=json" != registered.Config.Arguments[0] {
+        t.Fatalf("expected the registered arguments untouched, got %q", registered.Config.Arguments[0])
+    }
+}
+
+/* two calls hand out two objects, so a consumer holding an earlier list cannot be reached through a later one either */
+func TestConfiguration_EntriesHandsOutADistinctObjectOnEveryCall(t *testing.T) {
+    configuration := NewConfiguration().Schedule("job:one", &EntryConfig{Schedule: &Schedule{Minute: "*"}})
+
+    first := configuration.Entries()[0]
+    second := configuration.Entries()[0]
+
+    if first == second {
+        t.Fatal("expected a distinct ScheduledCommand on every call")
+    }
+
+    if first.Config == second.Config {
+        t.Fatal("expected a distinct EntryConfig on every call")
+    }
+
+    if first.Config.Schedule == second.Config.Schedule {
+        t.Fatal("expected a distinct Schedule on every call")
+    }
+}

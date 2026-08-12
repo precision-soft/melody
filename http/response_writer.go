@@ -24,6 +24,22 @@ func WriteToHttpResponseWriter(
         return nil
     }
 
+    statusCode := response.StatusCode()
+    if 0 == statusCode {
+        statusCode = nethttp.StatusOK
+    }
+
+    /* a status outside net/http's [100, 999] is refused by name before anything is written, the headers included: this is a public door, and handing the code to WriteHeader panics deep inside the response path, turning a caller's arithmetic mistake into a connection reset instead of the error return this signature promises. The whole validation runs ahead of the first mutation because a caller that handles the returned error and writes its own response would otherwise send it with the refused response's Set-Cookie on top — the internal write path refuses the same range before it renders anything. */
+    if 100 > statusCode || 999 < statusCode {
+        return exception.NewError(
+            "response status code is out of range",
+            map[string]any{
+                "statusCode": statusCode,
+            },
+            nil,
+        )
+    }
+
     headers := response.Headers()
     if nil != headers {
         /* a key the response names is owned by the response: the writer's values for it are
@@ -37,22 +53,6 @@ func WriteToHttpResponseWriter(
                 responseWriter.Header().Add(key, value)
             }
         }
-    }
-
-    statusCode := response.StatusCode()
-    if 0 == statusCode {
-        statusCode = nethttp.StatusOK
-    }
-
-    /* a status outside net/http's [100, 999] is refused by name before the delegate: this is a public door, and handing the code to WriteHeader panics deep inside the response path, turning a caller's arithmetic mistake into a connection reset instead of the error return this signature promises. The internal write path refuses the same range before rendering its 500. */
-    if 100 > statusCode || 999 < statusCode {
-        return exception.NewError(
-            "response status code is out of range",
-            map[string]any{
-                "statusCode": statusCode,
-            },
-            nil,
-        )
     }
 
     responseWriter.WriteHeader(statusCode)

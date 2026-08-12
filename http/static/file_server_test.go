@@ -3146,3 +3146,196 @@ func TestNewFileServer_RefusesNilOptionsByName(t *testing.T) {
         "options are required for the static file server",
     )
 }
+
+/* an embedded filesystem reports the zero instant for every file, and rendering it as year 1 published a validator that is not one: the zero time is never After anything, so every If-Modified-Since without an entity tag was answered 304 for the life of the deployment */
+func TestFileServer_AnUndatedFileEmitsNoLastModifiedAndAnswersNoConditional304(t *testing.T) {
+    fileSystem := fstest.MapFS{
+        "a.txt": &fstest.MapFile{
+            Data: []byte("a"),
+        },
+    }
+
+    server := NewFileServer(
+        NewOptions(
+            NewFileServerConfig(ModeEmbedded, "", "", "", true, 3600, false),
+            "",
+            fileSystem,
+        ),
+    )
+
+    request := testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt")
+    request.HttpRequest().Header.Set("If-Modified-Since", "Mon, 02 Jan 2006 15:04:05 GMT")
+
+    statusCode, headers, body, served := server.Serve(request, logging.NewNopLogger())
+
+    if false == served {
+        t.Fatalf("expected the asset to be served")
+    }
+
+    if http.StatusOK != statusCode {
+        t.Fatalf("expected 200 for a client holding nothing, got %d", statusCode)
+    }
+
+    if "a" != string(body) {
+        t.Fatalf("expected the body to be served, got %q", body)
+    }
+
+    if "" != headers.Get("Last-Modified") {
+        t.Fatalf("expected no Last-Modified for an undated file, got %q", headers.Get("Last-Modified"))
+    }
+
+    if "" == headers.Get("ETag") {
+        t.Fatalf("expected the entity tag to remain the validator for an undated file")
+    }
+}
+
+/* the streaming twin of the guard above: both paths build their own header block, and only one of them being corrected would answer 304 forever through the reader door */
+func TestFileServer_ServeReader_AnUndatedFileEmitsNoLastModifiedAndAnswersNoConditional304(t *testing.T) {
+    fileSystem := fstest.MapFS{
+        "a.txt": &fstest.MapFile{
+            Data: []byte("a"),
+        },
+    }
+
+    server := NewFileServer(
+        NewOptions(
+            NewFileServerConfig(ModeEmbedded, "", "", "", true, 3600, false),
+            "",
+            fileSystem,
+        ),
+    )
+
+    request := testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt")
+    request.HttpRequest().Header.Set("If-Modified-Since", "Mon, 02 Jan 2006 15:04:05 GMT")
+
+    statusCode, headers, bodyReader, served := server.ServeReader(request, logging.NewNopLogger())
+
+    if false == served {
+        t.Fatalf("expected the asset to be served")
+    }
+
+    if nil != bodyReader {
+        defer bodyReader.Close()
+    }
+
+    if http.StatusOK != statusCode {
+        t.Fatalf("expected 200 for a client holding nothing, got %d", statusCode)
+    }
+
+    if "" != headers.Get("Last-Modified") {
+        t.Fatalf("expected no Last-Modified for an undated file, got %q", headers.Get("Last-Modified"))
+    }
+}
+
+/* a dated file keeps both validators: the suppression above is about a filesystem that cannot date its files, not about the conditional machinery */
+func TestFileServer_ADatedFileKeepsItsLastModifiedAndItsConditional304(t *testing.T) {
+    modifiedAt := time.Date(2026, 1, 3, 12, 34, 56, 0, time.UTC)
+
+    fileSystem := fstest.MapFS{
+        "a.txt": &fstest.MapFile{
+            Data:    []byte("a"),
+            ModTime: modifiedAt,
+        },
+    }
+
+    server := NewFileServer(
+        NewOptions(
+            NewFileServerConfig(ModeEmbedded, "", "", "", true, 3600, false),
+            "",
+            fileSystem,
+        ),
+    )
+
+    request := testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt")
+    request.HttpRequest().Header.Set("If-Modified-Since", modifiedAt.Format(http.TimeFormat))
+
+    statusCode, headers, _, served := server.Serve(request, logging.NewNopLogger())
+
+    if false == served {
+        t.Fatalf("expected the asset to be served")
+    }
+
+    if http.StatusNotModified != statusCode {
+        t.Fatalf("expected 304 for a dated file the client already holds, got %d", statusCode)
+    }
+
+    if "" == headers.Get("Last-Modified") {
+        t.Fatalf("expected a dated file to keep its Last-Modified")
+    }
+}
+
+/* MELODY_PUBLIC_DIR stays a runtime key while the embedded layout is frozen at compile time, so a value the build did not embed used to boot cleanly and answer 404 for every asset in the binary */
+func TestNewFileServer_RefusesAPublicDirectoryTheEmbeddedFileSystemDoesNotHold(t *testing.T) {
+    fileSystem := fstest.MapFS{
+        "public/app.css": &fstest.MapFile{
+            Data: []byte("body{}"),
+        },
+    }
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            NewFileServer(
+                NewOptions(
+                    NewFileServerConfig(ModeEmbedded, "web", "", "", false, 0, false),
+                    "",
+                    fileSystem,
+                ),
+            )
+        },
+        "the public directory is not present in the embedded file system",
+    )
+}
+
+/* a name the embedded filesystem holds as a FILE is refused for the same reason a missing one is: every path would resolve underneath it and none would open */
+func TestNewFileServer_RefusesAnEmbeddedPublicDirectoryThatIsAFile(t *testing.T) {
+    fileSystem := fstest.MapFS{
+        "public": &fstest.MapFile{
+            Data: []byte("not a directory"),
+        },
+    }
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            NewFileServer(
+                NewOptions(
+                    NewFileServerConfig(ModeEmbedded, "public", "", "", false, 0, false),
+                    "",
+                    fileSystem,
+                ),
+            )
+        },
+        "the public directory is not present in the embedded file system",
+    )
+}
+
+/* the empty public directory is the unconfigured value and means the root of the embedded filesystem, so it is not a name to prove */
+func TestNewFileServer_AcceptsAnEmptyEmbeddedPublicDirectory(t *testing.T) {
+    fileSystem := fstest.MapFS{
+        "app.css": &fstest.MapFile{
+            Data: []byte("body{}"),
+        },
+    }
+
+    server := NewFileServer(
+        NewOptions(
+            NewFileServerConfig(ModeEmbedded, "", "", "", false, 0, false),
+            "",
+            fileSystem,
+        ),
+    )
+
+    _, _, body, served := server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/app.css"),
+        logging.NewNopLogger(),
+    )
+
+    if false == served {
+        t.Fatalf("expected the asset to be served from the root of the embedded file system")
+    }
+
+    if "body{}" != string(body) {
+        t.Fatalf("unexpected body %q", body)
+    }
+}

@@ -209,7 +209,7 @@ func (instance *ManagerRegistry) MigrationDatabase(name string) (*bun.DB, bool, 
     /* the dial runs outside the registry-wide lock for the same reason Manager's does: a down database must not serialize cache hits or a concurrent Close. Migrations run from a sequential cli command, so no coalescing machinery is warranted — a concurrent duplicate open is resolved below by closing the loser. */
     instance.lock.Unlock()
 
-    database, openErr := migrationProvider.OpenForMigration(instance.openResolver)
+    database, openErr := instance.openProviderMigrationDatabase(migrationProvider)
     if nil != openErr {
         if nil != database {
             _ = database.Close()
@@ -406,6 +406,15 @@ func (instance *ManagerRegistry) openProviderDatabase(provider Provider) (*bun.D
     }
 
     return provider.Open(instance.openResolver)
+}
+
+/* openProviderMigrationDatabase runs one migration open, under the registry's context when the provider can honour one — the same preference its sibling above applies to the ordinary open, on the door the promise had not reached. */
+func (instance *ManagerRegistry) openProviderMigrationDatabase(provider MigrationProvider) (*bun.DB, error) {
+    if contextOpener, isContextOpener := provider.(MigrationContextOpener); true == isContextOpener {
+        return contextOpener.OpenForMigrationContext(instance.openContext, instance.openResolver)
+    }
+
+    return provider.OpenForMigration(instance.openResolver)
 }
 
 func (instance *ManagerRegistry) MustManager(name string) *Manager {

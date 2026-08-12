@@ -785,3 +785,82 @@ func TestExceptionListener_AForeignErrorsPayloadIsHandedBackUntouched(t *testing
         t.Fatalf("expected a foreign payload to travel unchanged, got %#v", projected)
     }
 }
+
+/* the debug-mode rendering of the error text runs under the containment its siblings received: a panic value whose own Error() dereferences exactly the nil that produced the panic raised a second panic while the listener was rendering the first, and the dispatcher absorbed it one level up — at the price of the whole debug payload, so the client received the kernel's fallback body instead of the degraded page the listener exists to serve. */
+func TestExceptionListener_DebugModeOn_APanickingErrorTextIsContained(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := event.NewEventDispatcher(clockInstance)
+    runtimeInstance := newTestRuntime()
+
+    RegisterKernelExceptionListener(dispatcher, true)
+
+    request := httptest.NewRequest("GET", "/api/test", nil)
+    request.Header.Set("Accept", "application/json")
+
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, &nilMapPanickingError{})
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("expected the listener to complete rather than panic, got %v", dispatchErr)
+    }
+
+    response := exceptionEvent.Response()
+    if nil == response {
+        t.Fatalf("expected the listener to serve a response instead of dying of the failure it was rendering")
+    }
+
+    body := readResponseBody(t, response)
+    if false == strings.Contains(body, "error message panicked") {
+        t.Fatalf("expected the contained rendering failure to be named in the body, got %s", body)
+    }
+}
+
+/* the same containment covers the cause the debug payload carries: the cause is a second error, rendered by a second call, and only one of the two being contained leaves the same hole. */
+func TestExceptionListener_DebugModeOn_APanickingCauseTextIsContained(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := event.NewEventDispatcher(clockInstance)
+    runtimeInstance := newTestRuntime()
+
+    RegisterKernelExceptionListener(dispatcher, true)
+
+    wrapped := exception.NewError("the outer failure", nil, &nilMapPanickingError{})
+
+    request := httptest.NewRequest("GET", "/api/test", nil)
+    request.Header.Set("Accept", "application/json")
+
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, wrapped)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("expected the listener to complete rather than panic, got %v", dispatchErr)
+    }
+
+    response := exceptionEvent.Response()
+    if nil == response {
+        t.Fatalf("expected the listener to serve a response instead of dying of the cause it was rendering")
+    }
+
+    body := readResponseBody(t, response)
+    if false == strings.Contains(body, "the outer failure") {
+        t.Fatalf("expected the outer message to be served, got %s", body)
+    }
+
+    if false == strings.Contains(body, "error message panicked") {
+        t.Fatalf("expected the contained cause rendering to be named in the body, got %s", body)
+    }
+}
+
+/* nilMapPanickingError is the shape a recovery boundary actually meets: an error whose Error() dereferences the very nil that produced the panic */
+type nilMapPanickingError struct {
+    values map[string]string
+}
+
+func (instance *nilMapPanickingError) Error() string {
+    instance.values["key"] = "value"
+
+    return "unreachable"
+}

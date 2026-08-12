@@ -54,6 +54,7 @@ func NewFileStorageFromPath(path string) (*FileStorage, error) {
     return storage, nil
 }
 
+/* NewFileStorageFromFile builds the storage over a handle the caller owns and keeps owning: it is not closed here, and every write goes through that same handle rather than through a path. The atomicity its NewFileStorageFromPath sibling guarantees is therefore NOT available to this door — a temp file and a rename would unlink the inode the caller still holds, leaving it writing into a file nothing can reach. What this door guarantees instead: the snapshot is encoded whole before a byte is written, the write precedes the truncation, and the truncation cuts to the length just written, so no crash can leave a zero-length file and lose every persisted session. A kill landing inside the write itself can still leave a torn document, which the next construction reports as a decode failure rather than reading as an empty one. */
 func NewFileStorageFromFile(fileInstance *os.File) (*FileStorage, error) {
     if nil == fileInstance {
         return nil, exception.NewError("session storage file is nil", nil, nil)
@@ -379,14 +380,15 @@ func writeSessionFileInPlace(fileInstance *os.File, snapshot map[string]fileSess
         return exception.NewError("failed to seek session storage file", nil, err)
     }
 
-    err = fileInstance.Truncate(0)
-    if nil != err {
-        return exception.NewError("failed to truncate session storage file", nil, err)
-    }
-
+    /* the write goes first and the truncation cuts to the length it produced, because the reverse order held a window in which the file was empty on disk: a process killed between a truncation to zero and the write that was to follow — an OOM kill, a docker kill, a deploy with no grace period — left a zero-length file, which the next boot reads as "no sessions at all" and answers by logging every user out without a single error. This door writes through a handle it does not own, so the temp-and-rename its FromPath sibling uses is not available to it: a rename would unlink the very inode the caller still holds. What remains is a window in which a torn document can survive a kill mid-write, and that one is written on the contract instead of being made to disappear. */
     _, err = fileInstance.Write(buffer.Bytes())
     if nil != err {
         return exception.NewError("failed to write session storage file", nil, err)
+    }
+
+    err = fileInstance.Truncate(int64(buffer.Len()))
+    if nil != err {
+        return exception.NewError("failed to truncate session storage file", nil, err)
     }
 
     err = fileInstance.Sync()

@@ -3,6 +3,7 @@ package cron
 import (
     "errors"
     "fmt"
+    "io"
     "os"
     "path/filepath"
     "sort"
@@ -28,6 +29,7 @@ const (
     flagNameHeartbeatCommand     = "heartbeat-command"
     flagNameHeartbeatDestination = "heartbeat-destination"
     flagNameTemplate             = "template"
+    flagNamePrune                = "prune"
 )
 
 const heartbeatDestinationDefault = "default"
@@ -106,6 +108,10 @@ func (instance *GenerateCommand) ownFlags() []clicontract.Flag {
             Name:  flagNameTemplate,
             Usage: "name of the registered template that will render the entries; overrides the melody.cron.template parameter (default: crontab). Built-in templates: crontab, crontab-no-user",
         },
+        &clicontract.BoolFlag{
+            Name:  flagNamePrune,
+            Usage: "empty the destinations in dir(--out) that this generator wrote earlier and this run no longer produces, so an entry retired or moved between versions stops running. Only files carrying the current template's ownership marker are touched, and destinations outside dir(--out) are never swept",
+        },
     }
 }
 
@@ -153,6 +159,7 @@ type runOptions struct {
     heartbeatCommand   []string
     heartbeatRequested []string
     heartbeatEnabled   bool
+    prune              bool
 }
 
 func (instance *GenerateCommand) runWithConfiguration(
@@ -163,11 +170,12 @@ func (instance *GenerateCommand) runWithConfiguration(
     option := output.NormalizeOption(output.ParseOptionFromCommand(commandContext))
 
     writes := ([]destinationWrite)(nil)
+    pruned := ([]string)(nil)
     emptyMessage := ""
 
     /* the report is a defer so that no failure path can leave the run without a document: under --format=json every early return used to travel straight out past the one door that builds the envelope, and the cli silences the command's own error line in json mode, so `app melody:cron:generate --format=json | jq …` received an empty stream — indistinguishable from a missing binary — for a malformed schedule or an unwritable directory. The sibling integration's commands have carried this shape since the verdict that gave migrate its machine contract. */
     defer func() {
-        runErr = instance.reportWrites(commandContext, option, startedAt, writes, emptyMessage, runErr)
+        runErr = instance.reportWrites(commandContext, option, startedAt, writes, pruned, emptyMessage, runErr)
     }()
 
     options, resolveErr := instance.resolveRunOptions(commandContext, configuration)
@@ -181,7 +189,7 @@ func (instance *GenerateCommand) runWithConfiguration(
     }
 
     writeErr := (error)(nil)
-    writes, emptyMessage, writeErr = instance.writeDestinations(option, options, entries)
+    writes, pruned, emptyMessage, writeErr = instance.writeDestinations(option, options, entries)
 
     return writeErr
 }
@@ -280,6 +288,7 @@ func (instance *GenerateCommand) resolveRunOptions(
     options.heartbeatCommand = commandContext.StringSlice(flagNameHeartbeatCommand)
     options.heartbeatRequested = commandContext.StringSlice(flagNameHeartbeatDestination)
     options.heartbeatEnabled = 0 < len(options.heartbeatCommand) || "" != options.heartbeatPath
+    options.prune = commandContext.Bool(flagNamePrune)
 
     if true == options.heartbeatEnabled && true == templateRendersUserColumn && "" == options.defaultUserName {
         return nil, exception.NewError(
@@ -350,14 +359,17 @@ func (instance *GenerateCommand) writeDestinations(
     option output.Option,
     options *runOptions,
     entries []Entry,
-) ([]destinationWrite, string, error) {
+) ([]destinationWrite, []string, string, error) {
     entriesByDestination, groupErr := groupEntriesByDestination(entries, options.outputPath)
     if nil != groupErr {
-        return nil, "", groupErr
+        return nil, nil, "", groupErr
     }
 
+    /* an empty configuration still sweeps: emptying the configuration is exactly the version in which every destination the previous one wrote is stale, and answering "nothing to write" while leaving them all live is the worst of the three cases. It stays a success either way — a run that has nothing to write has not failed. */
     if 0 == len(entriesByDestination) && false == options.heartbeatEnabled {
-        return nil, "the cron Configuration is empty and no --heartbeat-path or --heartbeat-command was provided; nothing to write", nil
+        pruned, pruneErr := pruneStaleDestinations(options, nil)
+
+        return nil, pruned, "the cron Configuration is empty and no --heartbeat-path or --heartbeat-command was provided; nothing to write", pruneErr
     }
 
     if 0 == len(entriesByDestination) && true == options.heartbeatEnabled {
@@ -376,7 +388,7 @@ func (instance *GenerateCommand) writeDestinations(
         destinationPaths,
     )
     if nil != heartbeatDestinationsErr {
-        return nil, "", heartbeatDestinationsErr
+        return nil, nil, "", heartbeatDestinationsErr
     }
 
     writes := make([]destinationWrite, 0, len(destinationPaths))
@@ -392,7 +404,7 @@ func (instance *GenerateCommand) writeDestinations(
 
         content, renderErr := options.template.Render(destinationEntries, renderOptions)
         if nil != renderErr {
-            return writes, "", exception.NewError(
+            return writes, nil, "", exception.NewError(
                 fmt.Sprintf("cron: could not render %s content for %s: %s", options.template.Name(), destination, renderErr.Error()),
                 exceptioncontract.Context{
                     "template":    options.template.Name(),
@@ -403,7 +415,7 @@ func (instance *GenerateCommand) writeDestinations(
         }
 
         if mkdirErr := os.MkdirAll(filepath.Dir(destination), 0o755); nil != mkdirErr {
-            return writes, "", exception.NewError(
+            return writes, nil, "", exception.NewError(
                 "cron: could not create the output directory",
                 exceptioncontract.Context{"directory": filepath.Dir(destination)},
                 mkdirErr,
@@ -411,7 +423,7 @@ func (instance *GenerateCommand) writeDestinations(
         }
 
         if writeErr := atomicWriteFile(destination, []byte(content), 0o644); nil != writeErr {
-            return writes, "", writeErr
+            return writes, nil, "", writeErr
         }
 
         writes = append(writes, destinationWrite{
@@ -421,7 +433,113 @@ func (instance *GenerateCommand) writeDestinations(
         })
     }
 
-    return writes, "", nil
+    pruned, pruneErr := pruneStaleDestinations(options, writes)
+
+    return writes, pruned, "", pruneErr
+}
+
+/* pruneStaleDestinations empties the destinations this generator wrote earlier and this run no longer produces. Without it a version that retires an entry leaves its file untouched and crond keeps running the retired job forever, and a version that MOVES an entry to another destination leaves it live in both — the double execution the runner refuses at construction, produced silently by the generator.
+
+Three rules bound what it may touch, because emptying a file is not reversible. It is opt-in, so a deployment that manages the directory itself is unaffected. It reads only the output directory, never recursing and never following a destination an entry placed elsewhere by absolute path — those live where the operator put them and are not this directory's to reconcile. And it empties only a file whose first bytes carry the ownership marker of the template generating now, so a file this generator cannot prove it wrote is left exactly as it is.
+
+Emptying means rendering the template with no entries: the destination keeps its header and with it the marker, so it stays recognizable to the next run rather than becoming an unowned file the sweep would refuse to touch ever again. */
+func pruneStaleDestinations(options *runOptions, writes []destinationWrite) ([]string, error) {
+    if false == options.prune {
+        return nil, nil
+    }
+
+    ownedTemplate, isOwnedTemplate := options.template.(OwnedTemplate)
+    if false == isOwnedTemplate {
+        return nil, nil
+    }
+
+    marker := ownedTemplate.OwnershipMarker()
+    if "" == strings.TrimSpace(marker) {
+        return nil, nil
+    }
+
+    written := make(map[string]bool, len(writes))
+    for _, write := range writes {
+        written[write.Destination] = true
+    }
+
+    outputDirectory := filepath.Dir(options.outputPath)
+
+    directoryEntries, readDirErr := os.ReadDir(outputDirectory)
+    if nil != readDirErr {
+        return nil, exception.NewError(
+            "cron: could not read the output directory to prune it",
+            exceptioncontract.Context{"directory": outputDirectory},
+            readDirErr,
+        )
+    }
+
+    emptyContent, renderErr := options.template.Render(nil, RenderOptions{})
+    if nil != renderErr {
+        return nil, exception.NewError(
+            fmt.Sprintf("cron: could not render the empty %s content used to prune", options.template.Name()),
+            exceptioncontract.Context{"template": options.template.Name()},
+            renderErr,
+        )
+    }
+
+    pruned := make([]string, 0)
+
+    for _, directoryEntry := range directoryEntries {
+        if true == directoryEntry.IsDir() {
+            continue
+        }
+
+        candidate := filepath.Join(outputDirectory, directoryEntry.Name())
+        if true == written[candidate] {
+            continue
+        }
+
+        owned, ownershipErr := fileCarriesOwnershipMarker(candidate, marker)
+        if nil != ownershipErr {
+            return pruned, ownershipErr
+        }
+
+        if false == owned {
+            continue
+        }
+
+        if writeErr := atomicWriteFile(candidate, []byte(emptyContent), 0o644); nil != writeErr {
+            return pruned, writeErr
+        }
+
+        pruned = append(pruned, candidate)
+    }
+
+    return pruned, nil
+}
+
+/* ownershipMarkerReadLimit bounds what is read to decide ownership: the marker rides in the header block every rendered destination opens with, and a file large enough to push it past this is not one this generator wrote. */
+const ownershipMarkerReadLimit = 8 * 1024
+
+func fileCarriesOwnershipMarker(path string, marker string) (bool, error) {
+    fileInstance, openErr := os.Open(path)
+    if nil != openErr {
+        return false, exception.NewError(
+            "cron: could not read a candidate destination while pruning",
+            exceptioncontract.Context{"destination": path},
+            openErr,
+        )
+    }
+    defer fileInstance.Close()
+
+    head := make([]byte, ownershipMarkerReadLimit)
+
+    read, readErr := io.ReadFull(fileInstance, head)
+    if nil != readErr && io.ErrUnexpectedEOF != readErr && io.EOF != readErr {
+        return false, exception.NewError(
+            "cron: could not read a candidate destination while pruning",
+            exceptioncontract.Context{"destination": path},
+            readErr,
+        )
+    }
+
+    return strings.Contains(string(head[:read]), marker), nil
 }
 
 /* reportWrites is the generator's one report door, reached from the run's defer on every path: the written summary as text lines, or as the single machine-readable document under --format=json — the failure inside it, beside whatever the run had already written before it stopped. The summary is essential output — the command's whole visible result — so --quiet, which suppresses headers and non-essential output, does not silence it.
@@ -432,6 +550,7 @@ func (instance *GenerateCommand) reportWrites(
     option output.Option,
     startedAt time.Time,
     writes []destinationWrite,
+    pruned []string,
     emptyMessage string,
     runErr error,
 ) error {
@@ -442,7 +561,13 @@ func (instance *GenerateCommand) reportWrites(
         if nil == writes {
             writes = []destinationWrite{}
         }
-        envelope.Data = map[string]any{"writes": writes}
+
+        /* pruned is a list on every run, empty rather than null when nothing was swept or the sweep was never asked for: a field whose json type changes with the outcome cannot be consumed at all, which is the rule the machine contracts of the debug family were put on */
+        if nil == pruned {
+            pruned = []string{}
+        }
+
+        envelope.Data = map[string]any{"writes": writes, "pruned": pruned}
 
         if "" != emptyMessage {
             envelope.Warnings = append(envelope.Warnings, output.NewWarning("cron.nothingToWrite", emptyMessage, nil))
@@ -472,6 +597,8 @@ func (instance *GenerateCommand) reportWrites(
     if "" != emptyMessage {
         _, _ = fmt.Fprintln(commandContext.Writer, emptyMessage)
 
+        printPrunedDestinations(commandContext, pruned)
+
         return nil
     }
 
@@ -483,7 +610,15 @@ func (instance *GenerateCommand) reportWrites(
         }
     }
 
+    printPrunedDestinations(commandContext, pruned)
+
     return nil
+}
+
+func printPrunedDestinations(commandContext *clicontract.CommandContext, pruned []string) {
+    for _, destination := range pruned {
+        _, _ = fmt.Fprintf(commandContext.Writer, "pruned %s\n", destination)
+    }
 }
 
 func atomicWriteFile(destination string, content []byte, mode os.FileMode) error {
@@ -768,10 +903,11 @@ func expandEntriesForCommand(
             return nil, logPathErr
         }
 
+        /* every entry carries its own schedule: Render is userland, Schedule.Defaults is documented as mutating in place, and a template that calls it on the schedule it was handed would otherwise rewrite the one behind every sibling entry of this command — and, before Entries copied, the registered one for the rest of the process */
         entry := Entry{
             Name:            commandName,
             User:            user,
-            Schedule:        config.Schedule,
+            Schedule:        copySchedule(config.Schedule),
             Command:         config.Command,
             LogPath:         logPath,
             DestinationFile: config.DestinationFile,

@@ -32,7 +32,7 @@ func RecoverToError(recoveredValue any) error {
     )
 }
 
-/* debugErrorMessage renders an error's text for the debug-mode response body under a recover: the sites that consult it run inside the kernel's recovery defer, where a value whose Error() panics would raise a second panic past the recovery and reset the connection instead of serving the degraded page — the same trade exception.LogContext makes for the record's text. */
+/* debugErrorMessage renders an error's text for the debug-mode response body under a recover: a value whose Error() panics — the shape that dereferences exactly the nil field that produced the panic — would otherwise raise a second panic while the first one is being rendered. Inside the kernel's recovery defer that reset the connection; inside the exception listener it was absorbed one level up by the dispatcher, at the price of the whole debug payload the listener exists to build, so the client received the kernel's fallback body instead of the degraded page. The trade is the one exception.LogContext makes for the record's text: a named rendering failure beats losing the report. */
 func debugErrorMessage(err error) (message string) {
     defer func() {
         recoveredValue := recover()

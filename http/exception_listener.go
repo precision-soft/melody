@@ -91,7 +91,7 @@ func RegisterKernelExceptionListener(eventDispatcher eventcontract.EventDispatch
                 statusCode = httpException.StatusCode()
                 message = httpException.Message()
             } else if true == debugMode {
-                message = exceptionEvent.Err().Error()
+                message = debugErrorMessage(exceptionEvent.Err())
             }
 
             payloadExtras := map[string]any{}
@@ -113,7 +113,7 @@ func RegisterKernelExceptionListener(eventDispatcher eventcontract.EventDispatch
 
                     causeErr := melodyError.CauseErr()
                     if nil != causeErr {
-                        payloadExtras["cause"] = causeErr.Error()
+                        payloadExtras["cause"] = debugErrorMessage(causeErr)
                     }
                 }
             }

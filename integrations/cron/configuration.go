@@ -42,7 +42,7 @@ func NewConfiguration() *Configuration {
     }
 }
 
-/* Schedule copies the entry configuration instead of retaining the caller's pointer: the runner reads an entry's deadlines at every run and the generator re-reads its fields at every generation, so a caller mutating its own struct after registration changed validated behavior mid-process — an unsynchronized write racing the scheduler goroutine's reads. What was registered is what stays in force. */
+/* Schedule copies the entry configuration instead of retaining the caller's pointer: the generator re-reads an entry's fields at every generation, so a caller mutating its own struct after registration changed the manifests emitted afterwards. The in-process runner is not the consumer at risk — it photographs each entry's deadlines into its own run entry at construction, so a mutation landing after that cannot reach a scheduler already running — but a runner built later reads the same fields the generator does. What was registered is what stays in force, for both. */
 func (instance *Configuration) Schedule(commandName string, config *EntryConfig) *Configuration {
     instance.entries = append(instance.entries, &ScheduledCommand{
         CommandName: commandName,
@@ -52,17 +52,23 @@ func (instance *Configuration) Schedule(commandName string, config *EntryConfig)
     return instance
 }
 
+func copySchedule(schedule *Schedule) *Schedule {
+    if nil == schedule {
+        return nil
+    }
+
+    copied := *schedule
+
+    return &copied
+}
+
 func copyEntryConfig(config *EntryConfig) *EntryConfig {
     if nil == config {
         return nil
     }
 
     copied := *config
-
-    if nil != config.Schedule {
-        copiedSchedule := *config.Schedule
-        copied.Schedule = &copiedSchedule
-    }
+    copied.Schedule = copySchedule(config.Schedule)
 
     if nil != config.Command {
         copied.Command = append(make([]string, 0, len(config.Command)), config.Command...)
@@ -75,7 +81,16 @@ func copyEntryConfig(config *EntryConfig) *EntryConfig {
     return &copied
 }
 
-/* Entries hands out a copy of the list; the entries behind the pointers belong to the registration, private since Schedule copies what it is given. */
+/* Entries hands out copies all the way down: the list, each ScheduledCommand and each EntryConfig behind it, schedule included. Copying the list alone was not enough, because ScheduledCommand and EntryConfig are exported structs with exported fields — a caller writing through the pointer it was handed rewrote the registration itself, which is the exact mutation Schedule took a copy to prevent, arriving through the other door. */
 func (instance *Configuration) Entries() []*ScheduledCommand {
-    return append(make([]*ScheduledCommand, 0, len(instance.entries)), instance.entries...)
+    copied := make([]*ScheduledCommand, 0, len(instance.entries))
+
+    for _, scheduled := range instance.entries {
+        copied = append(copied, &ScheduledCommand{
+            CommandName: scheduled.CommandName,
+            Config:      copyEntryConfig(scheduled.Config),
+        })
+    }
+
+    return copied
 }

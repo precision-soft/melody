@@ -13,11 +13,15 @@ const TemplateNameCrontab = "crontab"
 /* TemplateNameCrontabNoUser renders the user-less crontab dialect: busybox crond (alpine images) and per-user `crontab` files reject the /etc/cron.d user column, so this variant omits it — no more cutting the column with sed in the image build. */
 const TemplateNameCrontabNoUser = "crontab-no-user"
 
+/* CrontabOwnershipMarker is the line every crontab destination carries so a later --prune can tell a file this generator wrote from one the operator put in the same directory. It names the command rather than saying "generated", because "GENERATED FILE" is what every generator writes and proves nothing about which one. */
+const CrontabOwnershipMarker = "# owned by melody:cron:generate"
+
 const crontabHeaderBlock = `#############################################################################
 #
 # GENERATED FILE
 # DO NOT EDIT LOCALLY
 #
+` + CrontabOwnershipMarker + `
 #############################################################################
 # Example of job definition:
 # .---------------- minute (0 - 59)
@@ -35,6 +39,7 @@ const crontabNoUserHeaderBlock = `##############################################
 # GENERATED FILE
 # DO NOT EDIT LOCALLY
 #
+` + CrontabOwnershipMarker + `
 #############################################################################
 # Example of job definition (user-less dialect: busybox crond, per-user crontab):
 # .---------------- minute (0 - 59)
@@ -67,6 +72,11 @@ var defaultCrontabNoUserTemplate = &CrontabTemplate{
 
 func (instance *CrontabTemplate) Name() string {
     return instance.name
+}
+
+/* OwnershipMarker names the line both dialects carry in their header block, so --prune can prove a destination is one this template wrote before it empties it */
+func (instance *CrontabTemplate) OwnershipMarker() string {
+    return CrontabOwnershipMarker
 }
 
 func (instance *CrontabTemplate) Render(entries []Entry, options RenderOptions) (string, error) {

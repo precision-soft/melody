@@ -18,6 +18,30 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Http/static: in the embedded mode the cache validators change shape
+
+**What changed.** An `embed.FS` reports the zero instant for every file it holds, so the entity tag used to be built out of that constant — degenerating into size alone, identical across every rebuild — and `Last-Modified` was rendered as `Mon, 01 Jan 0001 00:00:00 GMT`. The tag of an undated file is now derived from its size and `version.BuildVersion()`, and `Last-Modified` is not emitted at all when the filesystem carries no time. Nothing changes for the filesystem mode, where files have real modification times.
+
+**Symptom.** After the upgrade, every embedded asset revalidates once: the tag it carried no longer matches the one caches hold. Responses that used to be `304` are `200` for one round per asset per client. A conditional request carrying `If-Modified-Since` and no `If-None-Match` is now answered `200` rather than `304` — that request used to be answered `304` permanently, because the zero instant is never later than anything, so an asset was served stale for the life of the deployment.
+
+**Remedy.** None to apply, but link the version: a build without `-ldflags` setting `version.buildVersion` produces one version string for every build, and with it the stale-asset behaviour returns. Where per-file precision matters more than the one revalidation per deploy, put a content hash in the asset url.
+
+### Http/static: an embedded public directory that does not exist refuses the boot
+
+**What changed.** In the embedded mode `NewFileServer` proves the configured public directory against the embedded filesystem and panics by name — "the public directory is not present in the embedded file system" — when it is absent or is not a directory.
+
+**Symptom.** A release build whose `MELODY_PUBLIC_DIR` names a directory the `//go:embed` directive did not pack now fails at construction. It used to boot cleanly and answer `404` for every asset in the binary, which is the failure this refusal replaces.
+
+**Remedy.** Align the key with what the build embeds, or leave it unset to serve from the root of the embedded filesystem. The key is deliberately not ignored in this mode: the join with the public directory is what confines a stripped prefix to it.
+
+### Cron: `Configuration.Entries` hands out copies
+
+**What changed.** `Entries` copies all the way down — the list, each `*ScheduledCommand` and each `*EntryConfig` behind it, schedule included. Each entry the generator expands also carries its own `*Schedule`.
+
+**Symptom.** Code that reconfigured a registration by writing through what `Entries` returned — `configuration.Entries()[0].Config.Schedule.Hour = "23"` — no longer changes anything. A `Template.Render` implementation that calls the mutating `Schedule.Defaults()` on the schedule it was handed no longer rewrites the registered one for the rest of the process, which is what it used to do.
+
+**Remedy.** Register the entry with the configuration it should have. `Entries` is an inspector; the registry is written through `Schedule`.
+
 ### Debug: the `--build` sweep exits non-zero over the services it could not build
 
 **What changed.** `debug:container --build` reports its failures on the envelope, so `Render` answers a non-zero exit for them: the envelope carries `debug.buildFailed`, the number of failures, the names, and the first failure as its cause. The single-name door (`debug:container app.repository.order`) and `debug:middleware --build` have reported theirs all along; the sweep did not.

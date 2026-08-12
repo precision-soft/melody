@@ -138,7 +138,12 @@ func (instance *Provider) OpenContext(ctx context.Context, resolver containercon
 
 /* OpenForMigration opens the same database with the driver deadlines lifted: ReadTimeout and WriteTimeout are per-operation socket deadlines baked into the connector, sized for request traffic, and a DDL statement that legitimately runs past them — an ALTER TABLE adding constraints on a large table, a long CREATE INDEX — is cut mid-statement with an i/o timeout. The connect timeout stays armed (a down database must still fail fast), the pool is kept to the two connections a sequential migration run needs, and no connection is recycled mid-run — a lifetime rotation under a running statement is the same cut by another name. */
 func (instance *Provider) OpenForMigration(resolver containercontract.Resolver) (*bun.DB, error) {
-    return instance.migrationProvider().Open(resolver)
+    return instance.OpenForMigrationContext(context.Background(), resolver)
+}
+
+/* OpenForMigrationContext is OpenForMigration under the caller's context, the way OpenContext is Open under it: the registry hands the context it was constructed with, so an already-cancelled migration is refused before the attempt and a cancellation arriving mid-attempt is honoured at the next cancellable step instead of sleeping out the retry budget. A nil context reads as context.Background(), which is exactly OpenForMigration. */
+func (instance *Provider) OpenForMigrationContext(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error) {
+    return instance.migrationProvider().OpenContext(ctx, resolver)
 }
 
 /* migrationProvider derives the provider OpenForMigration dials with: the same parameters, hook and retry policy, over the migration pool and the lifted deadlines. */
@@ -580,7 +585,8 @@ func (instance *Provider) isTransientError(inputErr error) bool {
 }
 
 var (
-    _ bunorm.Provider          = (*Provider)(nil)
-    _ bunorm.MigrationProvider = (*Provider)(nil)
-    _ bunorm.ContextOpener     = (*Provider)(nil)
+    _ bunorm.Provider               = (*Provider)(nil)
+    _ bunorm.MigrationProvider      = (*Provider)(nil)
+    _ bunorm.ContextOpener          = (*Provider)(nil)
+    _ bunorm.MigrationContextOpener = (*Provider)(nil)
 )

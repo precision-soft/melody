@@ -742,6 +742,63 @@ func TestProviderOpenMarksThePasswordParameterSecret(t *testing.T) {
     }
 }
 
+/* the migration open is the door the registry's bound context did not reach: OpenForMigration carried no context at all, so a db:migrate cancelled by a supervisor slept out the whole retry budget against a down database. The derived provider is the same one either way — only the context differs — so the sleep has to be cut here too. */
+func TestProviderOpenForMigrationContextCancelsTheRetrySleep(t *testing.T) {
+    resolver := newStubResolver("127.0.0.1", "1", "melody_unreachable", "melody", "melody")
+
+    provider := newTestProvider().
+        WithTimeoutConfig(NewTimeoutConfig(50*time.Millisecond, 0, 0)).
+        WithRetryConfig(NewRetryConfig(5, 2*time.Second, 2*time.Second, 1.0))
+
+    ctx, cancel := context.WithCancel(context.Background())
+    go func() {
+        time.Sleep(100 * time.Millisecond)
+        cancel()
+    }()
+
+    start := time.Now()
+    database, openErr := provider.OpenForMigrationContext(ctx, resolver)
+    elapsed := time.Since(start)
+
+    if nil != database {
+        _ = database.Close()
+        t.Fatal("expected no database from a cancelled migration open")
+    }
+
+    if nil == openErr {
+        t.Fatal("expected the cancelled migration open to fail")
+    }
+
+    if false == errors.Is(openErr, context.Canceled) {
+        t.Fatalf("expected the cancellation to be the cause, got %v", openErr)
+    }
+
+    if elapsed > time.Second {
+        t.Fatalf("expected the cancellation to cut the retry sleep, took %v", elapsed)
+    }
+}
+
+/* the context-less door stays what it was for every caller that holds no context: it is OpenForMigrationContext under a background one, which is why it can still be reached without changing a single call site */
+func TestProviderOpenForMigrationRunsTheSameAttemptUnderABackgroundContext(t *testing.T) {
+    resolver := newStubResolver("127.0.0.1", "1", "melody_unreachable", "melody", "melody")
+
+    provider := newTestProvider().
+        WithTimeoutConfig(NewTimeoutConfig(50*time.Millisecond, 0, 0))
+
+    database, openErr := provider.OpenForMigration(resolver)
+    if nil != database {
+        _ = database.Close()
+    }
+
+    if nil == openErr {
+        t.Fatal("expected the unreachable migration open to fail")
+    }
+
+    if true == errors.Is(openErr, context.Canceled) {
+        t.Fatalf("expected no cancellation from a background context, got %v", openErr)
+    }
+}
+
 func TestProviderOpenContextCancelsTheRetrySleep(t *testing.T) {
     resolver := newStubResolver("127.0.0.1", "1", "melody_unreachable", "melody", "melody")
 

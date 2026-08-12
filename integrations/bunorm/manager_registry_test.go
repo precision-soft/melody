@@ -564,6 +564,109 @@ func (instance *migrationCapableProvider) OpenForMigration(resolver containercon
 
 var _ MigrationProvider = (*migrationCapableProvider)(nil)
 
+/* migrationContextRecordingProvider carries both migration doors, so a test can tell which one the registry reached */
+type migrationContextRecordingProvider struct {
+    observed          context.Context
+    plainOpenReached  bool
+    migrationDatabase *bun.DB
+}
+
+func (instance *migrationContextRecordingProvider) Open(resolver containercontract.Resolver) (*bun.DB, error) {
+    return nil, errors.New("the ordinary open must not run for a migration database")
+}
+
+func (instance *migrationContextRecordingProvider) OpenForMigration(resolver containercontract.Resolver) (*bun.DB, error) {
+    instance.plainOpenReached = true
+
+    return instance.migrationDatabase, nil
+}
+
+func (instance *migrationContextRecordingProvider) OpenForMigrationContext(
+    ctx context.Context,
+    resolver containercontract.Resolver,
+) (*bun.DB, error) {
+    instance.observed = ctx
+
+    return instance.migrationDatabase, nil
+}
+
+var _ MigrationContextOpener = (*migrationContextRecordingProvider)(nil)
+
+/* the registry's bound context has to reach the MIGRATION open too: it reached the ordinary one alone, so a db:migrate cancelled by a supervisor slept out the whole retry budget against a down database instead of refusing at the first cancellable step */
+func TestManagerRegistry_MigrationDatabasePrefersTheContextOpenerWithTheConstructionContext(t *testing.T) {
+    migrationDatabase, _ := newCloseRaceDatabase()
+
+    ctx := context.WithValue(context.Background(), registryProbeContextKey{}, "bound")
+    provider := &migrationContextRecordingProvider{migrationDatabase: migrationDatabase}
+
+    registry, registryErr := NewManagerRegistryWithContext(
+        ctx,
+        &fakeResolver{},
+        ProviderDefinition{Name: "main", Provider: provider, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry: %v", registryErr)
+    }
+
+    database, dedicated, migrationErr := registry.MigrationDatabase("")
+    if nil != migrationErr {
+        t.Fatalf("migration database error: %v", migrationErr)
+    }
+
+    if false == dedicated {
+        t.Fatalf("expected the dedicated migration connection to be preferred")
+    }
+
+    if migrationDatabase != database {
+        t.Fatalf("expected the migration database")
+    }
+
+    if true == provider.plainOpenReached {
+        t.Fatalf("expected the context door to be preferred over the context-less one")
+    }
+
+    if nil == provider.observed {
+        t.Fatalf("expected the construction context to reach the migration open")
+    }
+
+    if "bound" != provider.observed.Value(registryProbeContextKey{}) {
+        t.Fatalf("expected the exact construction context to reach the migration open")
+    }
+}
+
+/* a provider carrying only the context-less capability is unaffected: the door is optional, and the three implementers written before it must keep working */
+func TestManagerRegistry_MigrationDatabaseFallsBackToTheContextLessCapability(t *testing.T) {
+    ordinaryDatabase, _ := newCloseRaceDatabase()
+    migrationDatabase, _ := newCloseRaceDatabase()
+
+    provider := &migrationCapableProvider{
+        ordinaryDatabase:  ordinaryDatabase,
+        migrationDatabase: migrationDatabase,
+    }
+
+    registry, registryErr := NewManagerRegistryWithContext(
+        context.Background(),
+        &fakeResolver{},
+        ProviderDefinition{Name: "main", Provider: provider, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry: %v", registryErr)
+    }
+
+    database, dedicated, migrationErr := registry.MigrationDatabase("")
+    if nil != migrationErr {
+        t.Fatalf("migration database error: %v", migrationErr)
+    }
+
+    if false == dedicated || migrationDatabase != database {
+        t.Fatalf("expected the dedicated migration connection of a context-less provider")
+    }
+
+    if 1 != provider.migrationOpenCount {
+        t.Fatalf("expected exactly one migration open, got %d", provider.migrationOpenCount)
+    }
+}
+
 func TestManagerRegistry_MigrationDatabasePrefersTheCapability(t *testing.T) {
     ordinaryDatabase, _ := newCloseRaceDatabase()
     migrationDatabase, _ := newCloseRaceDatabase()

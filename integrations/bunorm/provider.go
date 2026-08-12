@@ -26,3 +26,8 @@ type SecretParameterProvider interface {
 type MigrationProvider interface {
     OpenForMigration(resolver containercontract.Resolver) (*bun.DB, error)
 }
+
+/* MigrationContextOpener is what ContextOpener is to Open: the migration open under the caller's context, so the context the registry was constructed with reaches this door too. Without it the registry's promise held on the Manager path alone — the migration open took no context at all — and a db:migrate that received SIGTERM against a down database slept through the whole retry budget instead of refusing at the first cancellable step, which is the exact window a supervisor's signal lands in. The registry prefers it whenever the provider implements it; a provider carrying only MigrationProvider is unaffected. */
+type MigrationContextOpener interface {
+    OpenForMigrationContext(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error)
+}

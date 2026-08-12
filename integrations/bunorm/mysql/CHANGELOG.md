@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- `Provider.OpenForMigrationContext` — the provider implements `bunorm.MigrationContextOpener`: the migration open runs under the caller's context, so an already-cancelled migration is refused before the attempt and a cancellation arriving mid-attempt is honoured at the next cancellable step instead of sleeping out the retry budget. `OpenForMigration` is the same call under `context.Background()`, so no existing call site changes
+
 - `Provider.OpenContext` — the provider implements `bunorm.ContextOpener`: the retry sleeps watch the caller's context alongside the clock, so a shutdown that cancels it reaches a retry loop in flight instead of sleeping through the whole remaining budget, and the cancellation is reported with the last attempt's own failure as context
 - `Provider.OpenForMigration` — the provider implements `bunorm.MigrationProvider` and opens the same database with the driver deadlines lifted: `ReadTimeout` and `WriteTimeout` are per-connection settings baked into the connector, sized for request traffic, and a DDL statement that legitimately runs past them is cut mid-statement with "invalid connection", outside any transaction MySQL would roll back. The connect timeout stays armed, the pool is kept to the two connections a sequential migration run needs, and no connection is recycled mid-run — a lifetime rotation under a running statement is the same cut by another name
 
