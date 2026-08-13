@@ -2,6 +2,7 @@ package security
 
 import (
     "fmt"
+    nethttp "net/http"
     "runtime/debug"
 
     eventcontract "github.com/precision-soft/melody/event/contract"
@@ -81,16 +82,22 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
                         }
                     }
 
-                    logger.Error(
-                        "security token source resolution failed",
-                        exception.LogContext(
-                            resolveErr,
-                            exceptioncontract.Context{
-                                "method": method,
-                                "path":   path,
-                            },
-                        ),
+                    /* a token the client got wrong — an expired jwt, a malformed Authorization, a bad signature — surfaces as a sub-500 HttpException, and that is a refusal recorded at warning, the classification its api-key sibling already earns by travelling to the exception listener. Depositing it at error, and then marking it so the listener adds nothing, made every client with an expired token page whoever reads the error stream. A token backend that is genuinely down, or any error that is not a deliberate 4xx, keeps the error level. The switch is on the named methods rather than Log, so a capture logger that overrides only one level is not stepped past. */
+                    resolutionMessage := "security token source resolution failed"
+                    resolutionContext := exception.LogContext(
+                        resolveErr,
+                        exceptioncontract.Context{
+                            "method": method,
+                            "path":   path,
+                        },
                     )
+
+                    httpException := exception.AsHttpException(resolveErr)
+                    if nil != httpException && nethttp.StatusInternalServerError > httpException.StatusCode() {
+                        logger.Warning(resolutionMessage, resolutionContext)
+                    } else {
+                        logger.Error(resolutionMessage, resolutionContext)
+                    }
 
                     _ = exception.MarkLogged(resolveErr)
                 }

@@ -510,14 +510,20 @@ func TestSecurityResolutionListener_WhenTokenSourceReturnsATypedNilToken_SetsAno
 }
 
 type resolutionListenerCaptureLogger struct {
-    errorCalls  int
-    lastMessage string
-    lastContext map[string]any
+    errorCalls   int
+    warningCalls int
+    lastMessage  string
+    lastContext  map[string]any
 }
 
 func (instance *resolutionListenerCaptureLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
     if loggingcontract.LevelError == level {
         instance.errorCalls++
+        instance.lastMessage = message
+        instance.lastContext = context
+    }
+    if loggingcontract.LevelWarning == level {
+        instance.warningCalls++
         instance.lastMessage = message
         instance.lastContext = context
     }
@@ -632,6 +638,108 @@ func TestSecurityResolutionListener_ResolveFailureIsRecordedOnceWithTheRequestCo
 
     if "/admin" != capture.lastContext["path"] {
         t.Fatalf("expected the path on the record, got %v", capture.lastContext["path"])
+    }
+}
+
+func dispatchResolutionFailureWithSource(t *testing.T, tokenSourceErr error) *resolutionListenerCaptureLogger {
+    t.Helper()
+
+    kernel := newTestKernel()
+    capture := &resolutionListenerCaptureLogger{}
+    runtimeInstance := newResolutionListenerTestRuntimeWithLogger(capture)
+
+    firewall := NewCompiledFirewall(
+        "main",
+        &resolutionListenerTestMatcher{matches: true},
+        "matcher:main",
+        []securitycontract.Rule{},
+        &resolutionListenerTestTokenSource{
+            resolveToken: nil,
+            resolveErr:   tokenSourceErr,
+        },
+        NewAccessControl(
+            NewAccessControlRule("/admin", "ROLE_ADMIN"),
+        ),
+        NewAccessDecisionManager(
+            securitycontract.DecisionStrategyAffirmative,
+            NewRoleHierarchyVoter(
+                NewRoleHierarchy(map[string][]string{}),
+                NewRoleVoter(),
+            ),
+        ),
+        NewRoleHierarchy(map[string][]string{}),
+        nil,
+        nil,
+        "/admin/login",
+        "/admin/logout",
+        nil,
+        nil,
+        SourceFirewall,
+        SourceFirewall,
+        SourceFirewall,
+        SourceNone,
+        SourceNone,
+    )
+
+    registry := NewFirewallRegistry(
+        NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil),
+    )
+
+    httpPkg.RegisterKernelExceptionListener(kernel.EventDispatcher(), false)
+    RegisterKernelSecurityResolutionListener(kernel, registry)
+
+    request := newSecurityTestRequest("GET", "/admin", nil, runtimeInstance)
+    requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, request)
+
+    _, err := kernel.EventDispatcher().DispatchName(
+        runtimeInstance,
+        "kernel.request",
+        requestEvent,
+    )
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    return capture
+}
+
+func TestSecurityResolutionListener_AClientTokenRefusalIsRecordedAtWarning(t *testing.T) {
+    capture := dispatchResolutionFailureWithSource(t, exception.Unauthorized("token expired"))
+
+    if 1 != capture.warningCalls {
+        t.Fatalf("expected the sub-500 refusal recorded once at warning, got %d warnings", capture.warningCalls)
+    }
+
+    if 0 != capture.errorCalls {
+        t.Fatalf("expected no error record for a client token refusal, got %d", capture.errorCalls)
+    }
+
+    if "security token source resolution failed" != capture.lastMessage {
+        t.Fatalf("expected the security record to own the refusal, got %q", capture.lastMessage)
+    }
+}
+
+func TestSecurityResolutionListener_ATokenBackendFailureStaysAtError(t *testing.T) {
+    capture := dispatchResolutionFailureWithSource(t, errors.New("token backend down"))
+
+    if 1 != capture.errorCalls {
+        t.Fatalf("expected a genuine backend failure recorded once at error, got %d errors", capture.errorCalls)
+    }
+
+    if 0 != capture.warningCalls {
+        t.Fatalf("expected no warning record for a backend failure, got %d", capture.warningCalls)
+    }
+}
+
+func TestSecurityResolutionListener_A500ExceptionStaysAtError(t *testing.T) {
+    capture := dispatchResolutionFailureWithSource(t, exception.NewHttpException(500, "token store unavailable"))
+
+    if 1 != capture.errorCalls {
+        t.Fatalf("expected a 500 refusal recorded once at error, got %d errors", capture.errorCalls)
+    }
+
+    if 0 != capture.warningCalls {
+        t.Fatalf("expected no warning record for a 500 refusal, got %d", capture.warningCalls)
     }
 }
 

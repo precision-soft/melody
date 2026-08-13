@@ -722,6 +722,76 @@ func TestRememberOption_ASetterOnTheZeroValueStartsFromTheDefaults(t *testing.T)
     }
 }
 
+func TestRememberOption_ADeliberateProtectionOffWithZeroWaitStaysWhatItSays(t *testing.T) {
+    option := NewDefaultRememberOption().
+        WithStampedeProtectionEnabled(false).
+        WithWaitTimeout(0)
+
+    if true == option.EnableStampedeProtection() {
+        t.Fatalf("expected protection to stay off when both fields land on their zero value, got it armed")
+    }
+
+    if 0 != option.WaitTimeout() {
+        t.Fatalf("expected the explicit zero wait to survive, got %v", option.WaitTimeout())
+    }
+}
+
+func TestRememberOption_AnUnspokenWaitReadsTheDefaultAndAnExplicitZeroReadsZero(t *testing.T) {
+    unspoken := NewDefaultRememberOption().WithStampedeProtectionEnabled(false)
+    if -1 != unspoken.WaitTimeout() {
+        t.Fatalf("expected an unspoken wait to read the default -1, got %v", unspoken.WaitTimeout())
+    }
+
+    explicitZero := NewDefaultRememberOption().WithWaitTimeout(0)
+    if 0 != explicitZero.WaitTimeout() {
+        t.Fatalf("expected an explicit zero wait to read zero, got %v", explicitZero.WaitTimeout())
+    }
+
+    rawZero := &RememberOption{}
+    if -1 != rawZero.WaitTimeout() {
+        t.Fatalf("expected a value built outside the constructor to read the default -1, got %v", rawZero.WaitTimeout())
+    }
+}
+
+func TestRemember_ADeliberateProtectionOffWithZeroWaitIsNotCoalesced(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    backend := NewInMemoryBackend(100, time.Hour, clockInstance)
+    defer backend.Close()
+
+    cacheManager := NewManager(backend, NewJsonSerializer())
+
+    option := NewDefaultRememberOption().
+        WithStampedeProtectionEnabled(false).
+        WithWaitTimeout(0)
+
+    releaseCallbackChannel := make(chan struct{})
+
+    var callbackCalls int64
+    callback := func(ctx context.Context) (any, error) {
+        atomic.AddInt64(&callbackCalls, 1)
+        <-releaseCallbackChannel
+        return "value", nil
+    }
+
+    var waitGroup sync.WaitGroup
+    waitGroup.Add(2)
+    for index := 0; index < 2; index++ {
+        go func() {
+            defer waitGroup.Done()
+            _, _ = Remember(cacheManager, "protection.off.zero.wait", time.Minute, callback, option)
+        }()
+    }
+
+    time.Sleep(50 * time.Millisecond)
+    close(releaseCallbackChannel)
+    waitGroup.Wait()
+
+    if 2 != atomic.LoadInt64(&callbackCalls) {
+        t.Fatalf("expected the protection-off option to run both callbacks, got %d — the two-off option collapsed to the defaults", atomic.LoadInt64(&callbackCalls))
+    }
+}
+
 func TestRemember_AZeroOptionPlusASetterAnswersTheMissWithTheValue(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 

@@ -14,17 +14,21 @@ import (
 )
 
 func NewDefaultRememberOption() *RememberOption {
+    defaultWaitTimeout := time.Duration(-1)
+
     return &RememberOption{
         enableStampedeProtection: true,
-        waitTimeout:              -1,
+        waitTimeout:              &defaultWaitTimeout,
         isCancelable:             false,
     }
 }
 
-/* RememberOption starts from the constructor defaults wherever it is built: the fields are unexported, so outside this package the only writes are the With setters, and a setter called on the exact zero value first reads the receiver as NewDefaultRememberOption before applying its own field. Without that reading, a zero value plus one setter carried a waitTimeout of zero — every miss answered with a timeout while the callback computed in the background — and configuring cancelability alone silently disarmed the stampede protection the caller never asked to configure. A deliberate no-wait or protection-off option is spelled through the constructor: NewDefaultRememberOption().WithWaitTimeout(0). */
+/* RememberOption starts from the constructor defaults wherever it is built: the fields are unexported, so outside this package the only writes are the With setters, and a setter called on the exact zero value first reads the receiver as NewDefaultRememberOption before applying its own field. Without that reading, a zero value plus one setter carried a waitTimeout of zero — every miss answered with a timeout while the callback computed in the background — and configuring cancelability alone silently disarmed the stampede protection the caller never asked to configure.
+
+waitTimeout is a pointer so that a deliberate zero — no-wait, spelled NewDefaultRememberOption().WithWaitTimeout(0) — is told apart from the field left unspoken: a nil answers the default wait, a set pointer answers exactly what it holds. Without the distinction, a protection-off option that also asked for no wait was the zero struct itself, which the guard below reads as the constructor defaults, so the caller who spelled "no coalescing and no wait" got protection armed with an unbounded wait — the opposite, on both fields. The guard now equals the zero struct only for a value built outside the constructor, which never sets the pointer, and that value is what should read as the defaults. */
 type RememberOption struct {
     enableStampedeProtection bool
-    waitTimeout              time.Duration
+    waitTimeout              *time.Duration
     isCancelable             bool
 }
 
@@ -45,12 +49,16 @@ func (instance *RememberOption) WithStampedeProtectionEnabled(enableStampedeProt
 }
 
 func (instance *RememberOption) WaitTimeout() time.Duration {
-    return instance.waitTimeout
+    if nil == instance.waitTimeout {
+        return -1
+    }
+
+    return *instance.waitTimeout
 }
 
 func (instance *RememberOption) WithWaitTimeout(waitTimeout time.Duration) *RememberOption {
     instance.normalizeZeroReceiver()
-    instance.waitTimeout = waitTimeout
+    instance.waitTimeout = &waitTimeout
     return instance
 }
 
@@ -64,6 +72,7 @@ func (instance *RememberOption) WithCancelable(isCancelable bool) *RememberOptio
     return instance
 }
 
+/* Remember answers the cached value, computing it through the callback on a miss and storing it. The computed value is run through the backend's stored shape before it is returned, so the miss answers exactly what every later hit answers — a callback's int comes back a float64 and its struct a map, and this makes that true from the first call rather than only from the second. The cost is that the round-trip is uniform: with the default JSON serializer an integer beyond 2^53 comes back changed on the computing call as well, not only on the cached reads. Where a cached value carries an integer that large, carry a version inside it or key it so it never decodes through JSON; a serializer that preserves integers is an opt-in planned for the major still under development. */
 func Remember(
     cacheInstance cachecontract.Cache,
     key string,
