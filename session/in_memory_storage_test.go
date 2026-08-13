@@ -301,7 +301,7 @@ func TestInMemoryStorage_LoadDoesNotDeleteConcurrentlySavedEntry(t *testing.T) {
 }
 
 
-/* @info A closed storage refuses the operation the way FileStorage does. Serving one would be worse than the error: the cleanup goroutine is stopped by then, so an entry saved after Close is reclaimed by nothing except a Load that happens to name it, and the map grows for the rest of the process. The two storages the framework ships have to answer the same way here, or an application that swaps one for the other inherits a different failure. */
+/* A closed storage refuses the operation the way FileStorage does. Serving one would be worse than the error: the cleanup goroutine is stopped by then, so an entry saved after Close is reclaimed by nothing except a Load that happens to name it, and the map grows for the rest of the process. The two storages the framework ships have to answer the same way here, or an application that swaps one for the other inherits a different failure. */
 func TestInMemoryStorage_RefusesEveryOperationAfterClose(t *testing.T) {
     storage := NewInMemoryStorage()
 
@@ -326,7 +326,7 @@ func TestInMemoryStorage_RefusesEveryOperationAfterClose(t *testing.T) {
     }
 }
 
-/* @info the id is what names the entry, so an empty one is refused on every operation rather than reaching the map as a real key — where a single shared entry would be handed to every request whose id was lost on the way in */
+/* the id is what names the entry, so an empty one is refused on every operation rather than reaching the map as a real key — where a single shared entry would be handed to every request whose id was lost on the way in */
 func TestInMemoryStorage_RefusesAnEmptySessionIdOnEveryOperation(t *testing.T) {
     storage := NewInMemoryStorage()
     defer storage.Close()
@@ -353,7 +353,7 @@ func TestInMemoryStorage_RefusesAnEmptySessionIdOnEveryOperation(t *testing.T) {
     }
 }
 
-/* @info Clear drops every session at once — what a "log everybody out" command does — and leaves the storage usable afterwards, unlike Close */
+/* Clear drops every session at once — what a "log everybody out" command does — and leaves the storage usable afterwards, unlike Close */
 func TestInMemoryStorage_Clear_DropsEverySessionAndLeavesTheStorageUsable(t *testing.T) {
     storage := NewInMemoryStorage()
     defer storage.Close()
@@ -388,7 +388,7 @@ func TestInMemoryStorage_Clear_DropsEverySessionAndLeavesTheStorageUsable(t *tes
     }
 }
 
-/* @info The sweep drops exactly the lapsed entries: one whose instant has passed goes, one whose instant is still ahead stays, and one stored without a ttl at all has no instant to compare and must survive every sweep for the life of the process. */
+/* The sweep drops exactly the lapsed entries: one whose instant has passed goes, one whose instant is still ahead stays, and one stored without a ttl at all has no instant to compare and must survive every sweep for the life of the process. */
 func TestInMemoryStorage_CleanupExpired_DropsOnlyTheLapsedEntries(t *testing.T) {
     storage := NewInMemoryStorage()
     defer storage.Close()
@@ -429,7 +429,40 @@ func TestInMemoryStorage_CleanupExpired_DropsOnlyTheLapsedEntries(t *testing.T) 
     }
 }
 
-/* @info The sweep is what reclaims a session nobody ever loads again: without the ticker branch calling it, a lapsed entry is only dropped when a Load happens to name it, and a session whose owner never comes back holds its memory for the rest of the process. */
+/* the sweep releases the lock between chunks, so the ids it walks were read before that gap and the entry behind one of them may have been saved again since. The deletion reads the entry a second time, under the lock the chunk itself holds, and that reading is what keeps a session refreshed mid-sweep from being signed out: the first reading said lapsed, the second says the user came back. */
+func TestInMemoryStorage_TheSweepDoesNotDropASessionRefreshedSinceTheIdsWereRead(t *testing.T) {
+    storage := NewInMemoryStorage()
+    defer storage.Close()
+
+    sweepInstant := time.Now()
+
+    lapsedInstant := sweepInstant.Add(-time.Hour)
+    storage.mutex.Lock()
+    storage.sessions["refreshed"] = inMemorySessionEntry{
+        data:      map[string]any{"k": "v"},
+        expiresAt: &lapsedInstant,
+    }
+    storage.mutex.Unlock()
+
+    /* the gap between chunks, stood in for by the save that lands in it */
+    if saveErr := storage.Save("refreshed", map[string]any{"k": "v"}, time.Hour); nil != saveErr {
+        t.Fatalf("unexpected error refreshing the session: %v", saveErr)
+    }
+
+    storage.mutex.Lock()
+    storage.deleteLapsedLocked("refreshed", sweepInstant)
+    storage.mutex.Unlock()
+
+    storage.mutex.RLock()
+    _, stillStored := storage.sessions["refreshed"]
+    storage.mutex.RUnlock()
+
+    if false == stillStored {
+        t.Fatalf("expected a session refreshed after the sweep read the ids to survive the chunk that reached it")
+    }
+}
+
+/* The sweep is what reclaims a session nobody ever loads again: without the ticker branch calling it, a lapsed entry is only dropped when a Load happens to name it, and a session whose owner never comes back holds its memory for the rest of the process. */
 func TestInMemoryStorage_CleanupLoop_ReclaimsALapsedEntryNobodyLoads(t *testing.T) {
     storage := NewInMemoryStorageWithCleanupInterval(5 * time.Millisecond)
     defer storage.Close()
@@ -462,7 +495,7 @@ func TestInMemoryStorage_CleanupLoop_ReclaimsALapsedEntryNobodyLoads(t *testing.
     }
 }
 
-/* @info The sweep goroutine ends on a cancelled context as well as on Close, and that second exit is what keeps a storage whose owner cancels the boot context from leaving a ticker running for the life of the process. It is proved on its own here: Close closes stopCleanup too, so a test that only calls Close never tells the two apart. */
+/* The sweep goroutine ends on a cancelled context as well as on Close, and that second exit is what keeps a storage whose owner cancels the boot context from leaving a ticker running for the life of the process. It is proved on its own here: Close closes stopCleanup too, so a test that only calls Close never tells the two apart. */
 func TestInMemoryStorage_CleanupLoop_EndsOnACancelledContext(t *testing.T) {
     storage := NewInMemoryStorageWithCleanupInterval(time.Hour)
 
@@ -480,7 +513,7 @@ func TestInMemoryStorage_CleanupLoop_EndsOnACancelledContext(t *testing.T) {
     }
 }
 
-/* @info The instant an entry expires counts as lapsed, the same boundary FileStorage draws with `now >= ExpiresAt`. A session stored with a one second lifetime is gone exactly one second later in both storages, rather than living one instant longer in this one — an application that moves between the two must not find the boundary moving with it. */
+/* The instant an entry expires counts as lapsed, the same boundary FileStorage draws with `now >= ExpiresAt`. A session stored with a one second lifetime is gone exactly one second later in both storages, rather than living one instant longer in this one — an application that moves between the two must not find the boundary moving with it. */
 func TestInMemoryStorage_TreatsTheExpiryInstantItselfAsLapsed(t *testing.T) {
     storage := NewInMemoryStorage()
 

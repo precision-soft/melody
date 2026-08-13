@@ -18,6 +18,22 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Session: a userland `Storage` may now be called concurrently for different sessions
+
+**What changed.** `Manager.SaveSession` and `Manager.DeleteSession` hold a lock keyed to the session id across the storage call instead of one lock for the whole manager. The tombstone check and the write are still one critical section for the SAME session, which is the invariant that stops a logout being undone by a request that loaded the session before it; two requests acting on different sessions no longer wait on each other. Sixteen concurrent saves of distinct sessions against a storage with a 2 ms round trip took 35.5 ms and now take 2.8 ms.
+
+**Symptom.** An implementation of `session/contract.Storage` written against the previous behaviour — one that assumed the manager serialised every call and therefore keeps unsynchronised state of its own — can now be entered concurrently for different session ids. Both storages melody ships took a mutex of their own all along and are unaffected; so is any storage that delegates to a client which is already safe for concurrent use, which redis and database clients are.
+
+**Remedy.** Make the implementation safe for concurrent calls naming different session ids — for most storages this is already true and needs no change. Calls naming the same id are still serialised by the manager, so per-session state needs nothing added.
+
+### Container: the teardown orders a service against what it resolved through a resolver it kept
+
+**What changed.** The dependency edge is recorded from the resolver a provider was handed, so a resolution made after the provider returned — a `container.Lazy` handle's first use, a replay through the `ContainerCarrier` pattern — is recorded like one made during construction. Previously no edge was recorded for those at all and the two services were closed in descending name order.
+
+**Symptom.** The order in which two services are closed can change, and it changes toward the documented one: the holder is now closed before what it resolved. An application that had come to depend on the previous accidental order — a service whose `Close` assumed the other had already ended — sees the reverse. A handle built over the **container itself**, rather than over the resolver its provider received, still has no owner and keeps the previous ordering.
+
+**Remedy.** None for the ordinary case, which is the one this repairs: a component that drains through a lazily-resolved handle at `Close` now finds it alive. If a service genuinely must close after another, express it as a dependency by resolving that other service inside its provider.
+
 ### Bunorm: the `bun` requirement moves to v1.2.17, dialects and drivers in lockstep
 
 **What changed.** Every module of the `bunorm` family — the manager, `mysql`, `pgsql` and the three `migrate` modules — requires `github.com/uptrace/bun v1.2.17` and, where they carry one, `dialect/mysqldialect`, `dialect/pgdialect` or `driver/pgdriver` at the same version. v1.2.16 swallowed the failure of a migration read from a `.sql` file: the deferred `conn.Close()` / `tx.Rollback()` overwrote the exec error with its own nil return, so `db:migrate` printed `[success]`, exited 0 and marked a migration applied that never ran.

@@ -166,6 +166,38 @@ func TestSlidingWindowLimiter_AllowsAfterWindowExpires(t *testing.T) {
     }
 }
 
+/* the window is trimmed by index rather than rebuilt, so the cut has to land on exactly the marks that left the window: one short and the caller keeps paying for a request that expired, one long and the limit is widened by a slot nobody spent. Staggered marks are what tells the two apart — a whole-window cut and a no-op cut both pass when every mark carries the same instant. */
+func TestSlidingWindowLimiter_FreesExactlyTheExpiredPrefix(t *testing.T) {
+    startedAt := time.Now()
+    frozenClock := clock.NewFrozenClock(startedAt)
+    limiter := NewSlidingWindowLimiterWithClock(frozenClock, 3, time.Minute)
+
+    for i := 0; i < 3; i++ {
+        if 0 < i {
+            frozenClock.Advance(20 * time.Second)
+        }
+
+        if false == limiter.Allow("key1") {
+            t.Fatalf("expected mark %d to be admitted", i+1)
+        }
+    }
+
+    /* the marks sit at +0s, +20s and +40s, and the clock reads +40s */
+    if true == limiter.Allow("key1") {
+        t.Fatalf("expected refusal while all three marks are inside the window")
+    }
+
+    frozenClock.TravelTo(startedAt.Add(61 * time.Second))
+
+    if false == limiter.Allow("key1") {
+        t.Fatalf("expected the slot of the mark at +0s to be free")
+    }
+
+    if true == limiter.Allow("key1") {
+        t.Fatalf("expected refusal: the marks at +20s and +40s have not expired yet")
+    }
+}
+
 func TestSlidingWindowLimiter_Reset(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
     limiter := NewSlidingWindowLimiterWithClock(frozenClock, 1, time.Minute)

@@ -16,13 +16,26 @@ var ErrSessionDeleted = errors.New("session was deleted")
 /* TombstoneRetention is the default for how long a deleted session id is remembered so a request that loaded that session before it was deleted cannot write it back. It has to cover the longest a request can still be holding a snapshot taken before the delete — the lifetime of an in-flight request, not the lifetime of a session — and nothing in the chain bounds that lifetime: the server's socket timeouts cut the connection, not the handler goroutine, so a request that outlives the window can save the deleted session back. A deployment whose slowest legitimate request exceeds five minutes sizes the window to match, through MELODY_HTTP_SESSION_TOMBSTONE_RETENTION on the framework path or NewManagerWithTombstoneRetention when wiring the manager by hand; what the window costs is one remembered entry per deletion inside it, and the record lives in this manager, per process. */
 const TombstoneRetention = 5 * time.Minute
 
+/* sessionStripeCount is how many locks the per-session critical sections are spread over. The number is fixed rather than one lock per live session: a map of locks would have to be grown and pruned under a lock of its own, which is the contention this exists to remove, and 256 already puts two concurrent requests on the same stripe about as often as they collide on the same session. */
+const sessionStripeCount = 256
+
 type Manager struct {
     storage            sessioncontract.Storage
     ttl                time.Duration
     ownsStorage        bool
     tombstoneRetention time.Duration
-    mutex              sync.Mutex
-    deletedAtById      map[string]time.Time
+    /* the per-session lock is what makes the tombstone check and the storage write one critical section, and it is taken per session id rather than per manager: the section spans a storage call, and the storages an application writes itself sit behind a network, so one lock for the whole process would serialise every session write in it — sessions that share nothing but the manager waiting on each other for the length of a round trip. */
+    sessionMutexes [sessionStripeCount]sync.Mutex
+    /* the tombstone record has a lock of its own, held for a map read or a map write and never across the storage: a section that spans I/O and a section that does not have no reason to share a lock. */
+    tombstoneMutex sync.Mutex
+    deletedAtById  map[string]time.Time
+    /* the same burials in the order they happened, which is the order they lapse in, so the pruning walks only what has actually lapsed instead of the whole record */
+    buriedInOrder []tombstone
+}
+
+type tombstone struct {
+    sessionId string
+    deletedAt time.Time
 }
 
 /* NewManager takes a storage it does not own: Close leaves it open, because a storage handed in was built by someone else and is closed by whoever built it. That is the same rule NewFileStorageFromFile follows for an injected file handle, and it is what the container path needs — the storage is a registered service the container closes itself, so a manager that closed it too would close it twice, which a storage wrapping a connection typically reports as a failure on the second call and turns a clean shutdown into a reported one. Use NewManagerOwningStorage to get the cascade back. */
@@ -199,11 +212,12 @@ func (instance *Manager) SaveSession(sessionInstance sessioncontract.Session) er
 
     /* a session deleted while this request was in flight is not written back. Storage.Save is a blind upsert, so without this a request that loaded the session before a logout deleted it re-creates the entry when its own handler finishes — with the identity intact and the cookie re-issued — and the window is as long as a request takes, which is long enough for someone holding a stolen cookie to keep a revoked session alive by repeating a slow one.
 
-    The check and the write are one critical section, and that is the whole point: testing the record and then writing outside the lock leaves the same race in miniature, where a delete lands between the two and the write that follows it resurrects the session anyway. Both storages melody ships already serialise every operation on a single mutex of their own, so for them this adds no contention that was not already there. */
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
+    The check and the write are one critical section, and that is the whole point: testing the record and then writing outside the lock leaves the same race in miniature, where a delete lands between the two and the write that follows it resurrects the session anyway. The section is keyed to this session id, because that is the whole extent of what it defends — a delete of a DIFFERENT id can neither resurrect nor be resurrected by this write, and holding one lock for all of them would put every session write in the process behind whatever round trip the storage is in the middle of. */
+    sessionMutex := instance.sessionMutexOf(sessionId)
+    sessionMutex.Lock()
+    defer sessionMutex.Unlock()
 
-    if true == instance.isTombstonedLocked(sessionId) {
+    if true == instance.isTombstoned(sessionId) {
         return exception.NewError(
             "session was deleted and cannot be saved again",
             map[string]any{
@@ -225,13 +239,26 @@ func (instance *Manager) DeleteSession(sessionId string) error {
         )
     }
 
-    /* the burial and the removal are one critical section for the same reason the save path is: a save that passed the record a moment ago must not be able to reach the storage after this delete has left it */
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
+    /* the burial and the removal are one critical section for the same reason the save path is: a save that passed the record a moment ago must not be able to reach the storage after this delete has left it. It is the same per-session lock, so the two paths exclude each other exactly where they act on the same session and nowhere else. */
+    sessionMutex := instance.sessionMutexOf(sessionId)
+    sessionMutex.Lock()
+    defer sessionMutex.Unlock()
 
-    instance.buryTombstoneLocked(sessionId)
+    instance.buryTombstone(sessionId)
 
     return instance.storage.Delete(sessionId)
+}
+
+/* sessionMutexOf answers the lock a session id belongs to. The mapping is a pure function of the id, which is the whole requirement: two calls naming the same session must land on the same lock, or the check and the write stop being one section. */
+func (instance *Manager) sessionMutexOf(sessionId string) *sync.Mutex {
+    hash := uint32(2166136261)
+
+    for index := 0; index < len(sessionId); index++ {
+        hash = hash ^ uint32(sessionId[index])
+        hash = hash * 16777619
+    }
+
+    return &instance.sessionMutexes[hash%sessionStripeCount]
 }
 
 func (instance *Manager) Close() error {
@@ -243,27 +270,50 @@ func (instance *Manager) Close() error {
 }
 
 func (instance *Manager) buryTombstone(sessionId string) {
-    instance.mutex.Lock()
-    instance.buryTombstoneLocked(sessionId)
-    instance.mutex.Unlock()
+    instance.buryTombstoneAt(sessionId, time.Now())
 }
 
-func (instance *Manager) buryTombstoneLocked(sessionId string) {
-    now := time.Now()
+/* buryTombstoneAt records a burial at a given instant, which is what lets the pruning be driven by the order of the burials rather than by a walk of the whole record.
 
-    /* pruning rides on the burial, so the record holds only what was deleted inside the retention window and nothing has to sweep it on a timer */
-    for buriedId, deletedAt := range instance.deletedAtById {
-        if instance.tombstoneRetention <= now.Sub(deletedAt) {
-            delete(instance.deletedAtById, buriedId)
+Pruning still rides on the burial, so nothing has to sweep the record on a timer — but it now walks only the burials that have actually lapsed. Every tombstone is held for the same window, so the burials lapse in the order they happened and the lapsed ones are a prefix of the queue: the walk stops at the first one still inside the window. Sweeping the whole map instead cost a step per remembered deletion on every login and every logout, and the record grows with the rate of logins, so the burial got slower exactly as the traffic that drives it got heavier — at a hundred thousand remembered deletions one logout cost six hundred microseconds, with the manager's lock held for all of it. */
+func (instance *Manager) buryTombstoneAt(sessionId string, deletedAt time.Time) {
+    instance.tombstoneMutex.Lock()
+    defer instance.tombstoneMutex.Unlock()
+
+    instance.pruneLapsedTombstonesLocked(deletedAt)
+
+    instance.deletedAtById[sessionId] = deletedAt
+    instance.buriedInOrder = append(
+        instance.buriedInOrder,
+        tombstone{sessionId: sessionId, deletedAt: deletedAt},
+    )
+}
+
+func (instance *Manager) pruneLapsedTombstonesLocked(now time.Time) {
+    lapsedUntil := 0
+
+    for _, buried := range instance.buriedInOrder {
+        if instance.tombstoneRetention > now.Sub(buried.deletedAt) {
+            break
         }
+
+        /* an id buried twice inside one window has two entries in the queue and one in the record, so the record is only removed for the burial that actually wrote it: dropping it for the earlier one would forget a tombstone that is still inside its window */
+        deletedAt, exists := instance.deletedAtById[buried.sessionId]
+        if true == exists && true == deletedAt.Equal(buried.deletedAt) {
+            delete(instance.deletedAtById, buried.sessionId)
+        }
+
+        lapsedUntil = lapsedUntil + 1
     }
 
-    instance.deletedAtById[sessionId] = now
+    if 0 < lapsedUntil {
+        instance.buriedInOrder = instance.buriedInOrder[lapsedUntil:]
+    }
 }
 
 func (instance *Manager) isTombstoned(sessionId string) bool {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
+    instance.tombstoneMutex.Lock()
+    defer instance.tombstoneMutex.Unlock()
 
     return instance.isTombstonedLocked(sessionId)
 }

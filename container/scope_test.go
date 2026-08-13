@@ -94,6 +94,42 @@ func TestScope_OverrideInstance_IsolatedFromContainer(t *testing.T) {
     }
 }
 
+/* an override answers before anything else, and that holds for a name the container has ALREADY built: the container's own resolution reads its instance map without taking the exclusive lock when there is nothing to write, and a resolution layered over a scope must never be answered from there — the scope is the whole reason the caller asked through it. The container instance is built first here on purpose, because a name the container has not built yet cannot tell the two paths apart. */
+func TestScope_AnOverrideWinsOverAnInstanceTheContainerHasAlreadyBuilt(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    if err := serviceContainer.Register(
+        "service.test",
+        func(resolver containercontract.Resolver) (*scopeTestService, error) {
+            return &scopeTestService{value: "container"}, nil
+        },
+    ); nil != err {
+        t.Fatalf("unexpected register error: %v", err)
+    }
+
+    if _, err := serviceContainer.Get("service.test"); nil != err {
+        t.Fatalf("unexpected container get error: %v", err)
+    }
+
+    scope := serviceContainer.NewScope()
+
+    if err := scope.OverrideProtectedInstance(
+        "service.test",
+        &scopeTestService{value: "scope"},
+    ); nil != err {
+        t.Fatalf("unexpected override error: %v", err)
+    }
+
+    valueAny, err := scope.Get("service.test")
+    if nil != err {
+        t.Fatalf("unexpected get error: %v", err)
+    }
+
+    if "scope" != valueAny.(*scopeTestService).value {
+        t.Fatalf("expected the scope override to answer, got the container's own instance")
+    }
+}
+
 func TestScope_CloseReturnsErrorOnGet(t *testing.T) {
     serviceContainer := NewContainer()
 

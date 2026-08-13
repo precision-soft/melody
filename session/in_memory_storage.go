@@ -60,7 +60,7 @@ func (instance *InMemoryStorage) Load(sessionId string) (map[string]any, bool, e
 
     instance.mutex.RLock()
 
-    /* @important a closed storage refuses the operation the way FileStorage does. Serving a closed store would be worse than the error: the cleanup goroutine is stopped by then, so an entry saved after Close is never reclaimed by anything but a Load that happens to name it — the map grows for the rest of the process. The two storages the framework ships have to answer the same way here, or an application that swaps one for the other inherits a different failure. */
+    /* a closed storage refuses the operation the way FileStorage does. Serving a closed store would be worse than the error: the cleanup goroutine is stopped by then, so an entry saved after Close is never reclaimed by anything but a Load that happens to name it — the map grows for the rest of the process. The two storages the framework ships have to answer the same way here, or an application that swaps one for the other inherits a different failure. */
     if true == instance.closed {
         instance.mutex.RUnlock()
 
@@ -194,20 +194,47 @@ func (instance *InMemoryStorage) cleanupLoop(ctx context.Context) {
     }
 }
 
+const sessionCleanupChunkSize = 1024
+
+/* the sweep takes the ids once and then expires them in chunks, releasing the lock between chunks: Load takes the same lock, so a single whole-map pass under one lock stalls every request in flight for as long as the map is large — this is the default session storage, the map grows with the number of signed-in users, and the stall lands on every one of them once per interval. Measured at two hundred thousand sessions, one pass held the lock for ten milliseconds and a concurrent Load waited exactly that long. The cache backend's sweep was cut the same way, for the same reason. */
 func (instance *InMemoryStorage) cleanupExpired() {
     now := time.Now()
 
     instance.mutex.Lock()
-    for sessionId, entry := range instance.sessions {
-        if nil == entry.expiresAt {
-            continue
-        }
-
-        if true == isLapsed(entry.expiresAt, now) {
-            delete(instance.sessions, sessionId)
-        }
+    sessionIds := make([]string, 0, len(instance.sessions))
+    for sessionId := range instance.sessions {
+        sessionIds = append(sessionIds, sessionId)
     }
     instance.mutex.Unlock()
+
+    for start := 0; start < len(sessionIds); start = start + sessionCleanupChunkSize {
+        end := start + sessionCleanupChunkSize
+        if len(sessionIds) < end {
+            end = len(sessionIds)
+        }
+
+        instance.mutex.Lock()
+        for _, sessionId := range sessionIds[start:end] {
+            instance.deleteLapsedLocked(sessionId, now)
+        }
+        instance.mutex.Unlock()
+    }
+}
+
+/* deleteLapsedLocked reads the entry again under the lock the chunk holds, and that second reading is what the chunking costs: the list of ids was taken before the lock was released, so by the time a later chunk reaches one of them the session may have been saved again with a fresh expiry, or deleted and replaced under the same id. Deleting on the strength of the first reading would sign out a user who was active in between. Load takes the same second reading before it deletes a lapsed entry it just served past. */
+func (instance *InMemoryStorage) deleteLapsedLocked(sessionId string, now time.Time) {
+    entry, exists := instance.sessions[sessionId]
+    if false == exists {
+        return
+    }
+
+    if nil == entry.expiresAt {
+        return
+    }
+
+    if true == isLapsed(entry.expiresAt, now) {
+        delete(instance.sessions, sessionId)
+    }
 }
 
 /* isLapsed answers whether an expiry instant has been reached, and the instant itself counts as reached — the same boundary FileStorage draws with `now >= ExpiresAt`. A session stored with a one second lifetime is therefore gone exactly one second later in both storages, rather than living one instant longer in this one; an application that moves between the two storages must not find the boundary moving with it. */

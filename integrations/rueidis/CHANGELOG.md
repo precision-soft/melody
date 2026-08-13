@@ -27,6 +27,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- `go.mod` — the melody requirement names `v1.18.0`, the oldest release that carries `Configuration.MarkSecret`, which `provider.go` has called since the credential masking landed. The module pinned `v1.16.0` and therefore did not build outside melody's own workspace: a consumer adding it to an unrelated application got `configuration.MarkSecret undefined` from `go build`, while the workspace's own module resolution hid it here. The pin is the oldest version that compiles, not the newest that exists, so the requirement still states the real floor
+
 - `rate_limit.go` — the fixed-window script arms the expiry on any call that finds the key carrying none, not only on the call that creates the counter. A key that reached the store without a ttl — a `PERSIST`, a writer that set it by hand — never lapsed: the counter climbed past the limit and stayed there, so every request keyed on it was refused for as long as the key lived, which under the fail-closed default is a permanent refusal nothing in the application can lift. The ttl is read inside the script, so the check and the arming stay atomic
 
 - `rate_limit.go` — the caller's own cancellation is named apart from a store failure: a client that disconnected while the limiter's round trip was in flight surfaced as `redis rate limiter store failure`, so the operator chased a redis outage that was a client hanging up. The failure-mode answer applies either way — the request is already gone — and the call-timeout deadline stays a store failure, since that budget exists to catch the store being slow

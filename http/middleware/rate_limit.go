@@ -7,6 +7,7 @@ import (
     "math"
     "net"
     nethttp "net/http"
+    "sort"
     "sync"
     "time"
 
@@ -285,23 +286,27 @@ func (instance *SlidingWindowLimiter) Allow(key string) bool {
         instance.windows[key] = window
     }
 
-    validRequests := make([]time.Time, 0, len(window.requests))
+    /* the marks are appended in clock order, so the expired ones are a contiguous prefix and the window is trimmed by index rather than rebuilt: the whole slice used to be reallocated and copied on every call, admitted or refused alike, under the lock every key shares — at a limit of ten thousand that is a full scan an attacker pays on each of his own refusals while every other client waits behind it. Dropping the prefix leaves the live marks in place; append reclaims the vacated head when it grows the slice, so the compaction is amortized rather than paid per call.
 
-    for _, requestTime := range window.requests {
-        if requestTime.After(windowStart) {
-            validRequests = append(validRequests, requestTime)
-        }
+    The cut is the first mark still inside the window, so everything it drops is genuinely expired whatever order the marks are in: a clock that answered an earlier instant than one already recorded — a fake clock in a test, a wall clock moved under the process — can only leave an expired mark standing, which shortens the caller's own budget, never widens it. */
+    liveFrom := sort.Search(
+        len(window.requests),
+        func(index int) bool {
+            return window.requests[index].After(windowStart)
+        },
+    )
+
+    if 0 < liveFrom {
+        window.requests = window.requests[liveFrom:]
     }
 
-    window.requests = validRequests
-
-    if instance.limit > len(window.requests) {
-        window.requests = append(window.requests, now)
-
-        return true
+    if instance.limit <= len(window.requests) {
+        return false
     }
 
-    return false
+    window.requests = append(window.requests, now)
+
+    return true
 }
 
 func (instance *SlidingWindowLimiter) Reset(key string) {

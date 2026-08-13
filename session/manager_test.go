@@ -638,9 +638,8 @@ func TestManager_TombstonesArePrunedByTheRetentionWindow(t *testing.T) {
     staleId := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     freshId := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
-    manager.mutex.Lock()
-    manager.deletedAtById[staleId] = time.Now().Add(-TombstoneRetention - time.Minute)
-    manager.mutex.Unlock()
+    /* the burial is seeded through the door that records it, not by writing the map behind it: pruning walks the burials in the order they happened, so a record entry with no burial behind it is a state no caller can produce */
+    manager.buryTombstoneAt(staleId, time.Now().Add(-TombstoneRetention-time.Minute))
 
     if true == manager.isTombstoned(staleId) {
         t.Fatalf("expected a tombstone older than the retention window to have lapsed")
@@ -648,10 +647,10 @@ func TestManager_TombstonesArePrunedByTheRetentionWindow(t *testing.T) {
 
     manager.buryTombstone(freshId)
 
-    manager.mutex.Lock()
+    manager.tombstoneMutex.Lock()
     _, staleStillHeld := manager.deletedAtById[staleId]
     entryCount := len(manager.deletedAtById)
-    manager.mutex.Unlock()
+    manager.tombstoneMutex.Unlock()
 
     if true == staleStillHeld {
         t.Fatalf("expected the lapsed tombstone to be pruned by the next burial")
@@ -872,6 +871,157 @@ func TestManager_ADeleteCannotInterleaveBetweenTheTombstoneCheckAndTheWrite(t *t
     }
 }
 
+/* the double holds the save of ONE named session open and lets every other one through, announcing each as it arrives: that is what tells a per-session critical section apart from a per-manager one, since only the second makes an unrelated session wait behind this one's round trip */
+type heldSaveStorage struct {
+    inner       *InMemoryStorage
+    heldId      string
+    enteredSave chan string
+    releaseSave chan struct{}
+}
+
+func (instance *heldSaveStorage) Load(sessionId string) (map[string]any, bool, error) {
+    return instance.inner.Load(sessionId)
+}
+
+func (instance *heldSaveStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+    instance.enteredSave <- sessionId
+
+    if sessionId == instance.heldId {
+        <-instance.releaseSave
+    }
+
+    return instance.inner.Save(sessionId, data, ttl)
+}
+
+func (instance *heldSaveStorage) Delete(sessionId string) error {
+    return instance.inner.Delete(sessionId)
+}
+
+func (instance *heldSaveStorage) Close() error { return instance.inner.Close() }
+
+func TestManager_ASaveDoesNotWaitOnTheSaveOfAnotherSession(t *testing.T) {
+    inner := NewInMemoryStorage()
+    defer inner.Close()
+
+    storage := &heldSaveStorage{
+        inner:       inner,
+        enteredSave: make(chan string, 4),
+        releaseSave: make(chan struct{}),
+    }
+
+    manager := NewManager(storage, time.Minute)
+
+    heldSession := manager.NewSession()
+    heldSession.Set("userId", "u-1")
+
+    /* the two sessions have to sit on different locks for the question to mean anything; ids are random, so the pair is chosen rather than assumed */
+    otherSession := manager.NewSession()
+    for attempt := 0; manager.sessionMutexOf(heldSession.Id()) == manager.sessionMutexOf(otherSession.Id()); attempt++ {
+        if 64 < attempt {
+            t.Fatalf("could not mint two session ids on different locks")
+        }
+
+        otherSession = manager.NewSession()
+    }
+    otherSession.Set("userId", "u-2")
+
+    storage.heldId = heldSession.Id()
+
+    heldDone := make(chan error, 1)
+    go func() {
+        heldDone <- manager.SaveSession(heldSession)
+    }()
+
+    select {
+    case arrived := <-storage.enteredSave:
+        if heldSession.Id() != arrived {
+            t.Fatalf("expected the held save to reach the storage first, got %q", arrived)
+        }
+    case <-time.After(5 * time.Second):
+        t.Fatalf("the held save never reached the storage")
+    }
+
+    otherDone := make(chan error, 1)
+    go func() {
+        otherDone <- manager.SaveSession(otherSession)
+    }()
+
+    select {
+    case saveErr := <-otherDone:
+        if nil != saveErr {
+            t.Fatalf("unexpected error saving the unrelated session: %v", saveErr)
+        }
+    case <-time.After(5 * time.Second):
+        close(storage.releaseSave)
+        t.Fatalf("an unrelated session waited on a save that was still inside the storage")
+    }
+
+    close(storage.releaseSave)
+
+    if saveErr := <-heldDone; nil != saveErr {
+        t.Fatalf("unexpected error saving the held session: %v", saveErr)
+    }
+}
+
+/* the pruning walks the burials in the order they happened and stops at the first one still inside its window, so it has to free exactly the lapsed prefix: one short and the record keeps growing, one long and a tombstone that is still refusing write-backs is forgotten */
+func TestManager_TheBurialPruningStopsAtTheFirstLivingTombstone(t *testing.T) {
+    manager := NewManager(NewInMemoryStorage(), time.Minute)
+
+    lapsedId := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    livingId := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    freshId := "cccccccccccccccccccccccccccccccc"
+
+    manager.buryTombstoneAt(lapsedId, time.Now().Add(-TombstoneRetention-time.Minute))
+    manager.buryTombstoneAt(livingId, time.Now().Add(-time.Minute))
+
+    manager.buryTombstone(freshId)
+
+    if true == manager.isTombstoned(lapsedId) {
+        t.Fatalf("expected the lapsed tombstone to be gone")
+    }
+
+    if false == manager.isTombstoned(livingId) {
+        t.Fatalf("expected the tombstone still inside the window to be held")
+    }
+
+    if false == manager.isTombstoned(freshId) {
+        t.Fatalf("expected the fresh tombstone to be held")
+    }
+
+    manager.tombstoneMutex.Lock()
+    entryCount := len(manager.deletedAtById)
+    queuedCount := len(manager.buriedInOrder)
+    manager.tombstoneMutex.Unlock()
+
+    if 2 != entryCount {
+        t.Fatalf("expected two tombstones to remain, got %d", entryCount)
+    }
+
+    if 2 != queuedCount {
+        t.Fatalf("expected the lapsed burial to leave the queue, got %d queued", queuedCount)
+    }
+}
+
+/* an id buried twice inside one window has two burials in the queue and one entry in the record, and the entry belongs to the later burial: pruning the earlier one must not take it, or the session stops being refused a write-back while it is still inside its window — the exact resurrection the record exists to prevent */
+func TestManager_AReburiedTombstoneSurvivesThePruningOfItsEarlierBurial(t *testing.T) {
+    manager := NewManager(NewInMemoryStorage(), time.Minute)
+
+    reburiedId := "dddddddddddddddddddddddddddddddd"
+    freshId := "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+
+    /* both burials have to be in the queue when the pruning reaches the first one, which is what puts a lapsed queue entry in front of a record entry that belongs to a later burial: the second burial happens while the first is still inside the window, so it prunes nothing */
+    now := time.Now()
+
+    manager.buryTombstoneAt(reburiedId, now.Add(-TombstoneRetention-time.Minute))
+    manager.buryTombstoneAt(reburiedId, now.Add(-TombstoneRetention+time.Minute))
+
+    manager.buryTombstoneAt(freshId, now)
+
+    if false == manager.isTombstoned(reburiedId) {
+        t.Fatalf("expected the re-burial to keep refusing write-backs after its earlier burial lapsed")
+    }
+}
+
 func TestNewManagerWithTombstoneRetention_RefusesANonPositiveRetention(t *testing.T) {
     for _, invalidRetention := range []time.Duration{0, -time.Second} {
         testhelper.AssertPanicsWithError(
@@ -889,17 +1039,13 @@ func TestNewManagerWithTombstoneRetention_SizesTheRefusalWindow(t *testing.T) {
 
     buriedId := "dddddddddddddddddddddddddddddddd"
 
-    manager.mutex.Lock()
-    manager.deletedAtById[buriedId] = time.Now().Add(-TombstoneRetention - time.Minute)
-    manager.mutex.Unlock()
+    manager.buryTombstoneAt(buriedId, time.Now().Add(-TombstoneRetention-time.Minute))
 
     if false == manager.isTombstoned(buriedId) {
         t.Fatalf("expected a burial older than the default window to still refuse under the sized one")
     }
 
-    manager.mutex.Lock()
-    manager.deletedAtById[buriedId] = time.Now().Add(-time.Hour - time.Minute)
-    manager.mutex.Unlock()
+    manager.buryTombstoneAt(buriedId, time.Now().Add(-time.Hour-time.Minute))
 
     if true == manager.isTombstoned(buriedId) {
         t.Fatalf("expected a burial older than the sized window to have lapsed")

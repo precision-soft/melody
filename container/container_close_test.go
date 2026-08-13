@@ -521,7 +521,7 @@ func TestContainer_Close_ClosesDiamondDependencyInDeterministicOrder(t *testing.
     }
 }
 
-/* @info OverrideProtectedInstance on a WithoutTypeRegistration value service must close once */
+/* OverrideProtectedInstance on a WithoutTypeRegistration value service must close once */
 
 type overrideValueCloser struct {
     counter *int
@@ -572,7 +572,7 @@ func TestContainer_Close_OverrideProtectedInstanceWithoutTypeRegistrationClosesO
     }
 }
 
-/* @info a concurrent second Close must not report success while the first is still tearing services down: both callers get the first teardown's result once it finishes */
+/* a concurrent second Close must not report success while the first is still tearing services down: both callers get the first teardown's result once it finishes */
 func TestClose_ConcurrentCallersShareTheResult(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -634,7 +634,7 @@ func (instance *panickingCloseService) Close() error {
     panic("teardown exploded")
 }
 
-/* @info a service whose Close panics must not abort the teardown: the remaining services still close, the panic is recorded as a close failure, and a repeated Close reports the same error instead of a silent success */
+/* a service whose Close panics must not abort the teardown: the remaining services still close, the panic is recorded as a close failure, and a repeated Close reports the same error instead of a silent success */
 func TestContainer_Close_PanickingServiceCloseIsRecordedAndSiblingsStillClose(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -714,7 +714,7 @@ func (instance *panickingErrorMessageService) Close() error {
     return panickingErrorMessage{}
 }
 
-/* @info a user error whose Error() panics must not escape the teardown: the failure is recorded with a deterministic message and a repeated Close reports the same error instead of a silent success */
+/* a user error whose Error() panics must not escape the teardown: the failure is recorded with a deterministic message and a repeated Close reports the same error instead of a silent success */
 func TestContainer_Close_PanickingErrorMessageIsContainedAndRecorded(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -893,7 +893,7 @@ func (instance *sameTypeZeroSizeCloser) Close() error {
     return nil
 }
 
-/* @info two distinct services of one zero-size type share an address, so pairing the address with the type is not enough to tell them apart; without the dependency-graph qualifier the second one was collapsed onto the first and never closed */
+/* two distinct services of one zero-size type share an address, so pairing the address with the type is not enough to tell them apart; without the dependency-graph qualifier the second one was collapsed onto the first and never closed */
 func TestContainer_Close_DistinctServicesOfOneZeroSizeTypeEachClose(t *testing.T) {
     sameTypeZeroSizeCloseCount = 0
 
@@ -928,7 +928,7 @@ func TestContainer_Close_DistinctServicesOfOneZeroSizeTypeEachClose(t *testing.T
     }
 }
 
-/* @info the mirror case: a service whose provider hands back what it resolved from another service holds the same instance, and the dependency edge proves it, so the shared instance is still closed exactly once */
+/* the mirror case: a service whose provider hands back what it resolved from another service holds the same instance, and the dependency edge proves it, so the shared instance is still closed exactly once */
 func TestContainer_Close_ResolverMediatedZeroSizeAliasClosesOnce(t *testing.T) {
     sameTypeZeroSizeCloseCount = 0
 
@@ -979,7 +979,7 @@ func (instance *replacedBuiltProbe) Close() error {
     return nil
 }
 
-/* @info an override replacing an instance the container built evicts it from the only maps the close sweep reads: it used to leak forever, with both the resolution and the override reporting success. The evicted value waits in the graveyard and the teardown closes it — once — alongside the override that took its place. */
+/* an override replacing an instance the container built evicts it from the only maps the close sweep reads: it used to leak forever, with both the resolution and the override reporting success. The evicted value waits in the graveyard and the teardown closes it — once — alongside the override that took its place. */
 func TestContainer_Close_ReplacedBuiltInstanceIsClosed(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1036,7 +1036,7 @@ func TestContainer_Close_ReplacedBuiltInstanceIsClosed(t *testing.T) {
     }
 }
 
-/* @info an override evicting an EARLIER override closes nothing: an installed override belongs to whoever installed it, and only what the container itself built enters the graveyard. */
+/* an override evicting an EARLIER override closes nothing: an installed override belongs to whoever installed it, and only what the container itself built enters the graveyard. */
 func TestContainer_Close_ReplacedOverrideIsNotClosed(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1084,7 +1084,7 @@ func TestContainer_Close_ReplacedOverrideIsNotClosed(t *testing.T) {
     }
 }
 
-/* @info a close that both fails and cycles used to keep the failures and drop the cycle's node list — the operator saw WHICH services failed but not which ones cycled. The nodes ride inside the failure text now. */
+/* a close that both fails and cycles used to keep the failures and drop the cycle's node list — the operator saw WHICH services failed but not which ones cycled. The nodes ride inside the failure text now. */
 func TestContainer_Close_CycleFailureNamesTheNodes(t *testing.T) {
     serviceContainer := NewContainer().(*container)
 
@@ -1145,7 +1145,7 @@ func TestContainer_Close_CycleFailureNamesTheNodes(t *testing.T) {
     }
 }
 
-/* @info IsClosed is asked before a defensive Close: the memoized close error makes a repeated Close indistinguishable from the discovering one, and the asker must not re-report a failure somebody else already carried away. */
+/* IsClosed is asked before a defensive Close: the memoized close error makes a repeated Close indistinguishable from the discovering one, and the asker must not re-report a failure somebody else already carried away. */
 func TestContainerIsClosed_FlipsExactlyAtClose(t *testing.T) {
     containerInstance := NewContainer()
 
@@ -1164,5 +1164,80 @@ func TestContainerIsClosed_FlipsExactlyAtClose(t *testing.T) {
 
     if false == closedChecker.IsClosed() {
         t.Fatalf("expected a closed container to report closed")
+    }
+}
+
+type lazyHoldingService struct {
+    recorder *closeOrderRecorder
+    handle   *LazyService[*closeOrderServiceA]
+}
+
+func (instance *lazyHoldingService) Close() error {
+    instance.recorder.record("holder")
+    return nil
+}
+
+/* a service that keeps its resolver and reaches through it after its provider returned depends on what it then resolves exactly as hard as one that resolved it during construction. The edge used to be read from the live resolution stack, which is empty by then, so no edge was recorded at all and the teardown fell back to closing the two in descending name order — here that closes the dependency FIRST, and the holder's own Close then runs over a service that has already ended. The names are chosen so the fallback and the correct order disagree: without the edge, "service.a" sorts after "app.holder" and goes first. */
+func TestContainer_Close_ClosesAHolderBeforeTheServiceItResolvedThroughAKeptResolver(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    if err := serviceContainer.Register(
+        "service.a",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{recorder: recorder}, nil
+        },
+    ); nil != err {
+        t.Fatalf("unexpected register error: %v", err)
+    }
+
+    if err := serviceContainer.Register(
+        "app.holder",
+        func(resolver containercontract.Resolver) (*lazyHoldingService, error) {
+            /* nothing is resolved here: the handle defers it to first use, which is the whole point */
+            return &lazyHoldingService{
+                recorder: recorder,
+                handle:   Lazy[*closeOrderServiceA](resolver, "service.a"),
+            }, nil
+        },
+    ); nil != err {
+        t.Fatalf("unexpected register error: %v", err)
+    }
+
+    holder, err := FromResolver[*lazyHoldingService](serviceContainer, "app.holder")
+    if nil != err {
+        t.Fatalf("unexpected get error: %v", err)
+    }
+
+    /* the dependency is built before the handle ever asks for it, which is the ordinary case and the one that tells the read path from the write path: a resolution that finds the instance already there still has an edge to record */
+    if _, err := serviceContainer.Get("service.a"); nil != err {
+        t.Fatalf("unexpected get error: %v", err)
+    }
+
+    /* the first use, on a path that runs long after the provider returned */
+    if nil == holder.handle.Get() {
+        t.Fatalf("expected the lazy handle to resolve the service")
+    }
+
+    if err := serviceContainer.Close(); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    if 2 != len(closeSequence) {
+        t.Fatalf("expected 2 close calls, got %d: %v", len(closeSequence), closeSequence)
+    }
+
+    if "holder" != closeSequence[0] {
+        t.Fatalf("expected the holder to close before the service it resolved, got %v", closeSequence)
+    }
+
+    if "a" != closeSequence[1] {
+        t.Fatalf("expected the resolved service to close last, got %v", closeSequence)
     }
 }

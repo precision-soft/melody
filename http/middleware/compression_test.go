@@ -9,6 +9,7 @@ import (
     nethttp "net/http"
     "net/http/httptest"
     "runtime"
+    "strconv"
     "strings"
     "sync"
     "testing"
@@ -1117,5 +1118,80 @@ func TestCompressionMiddleware_NilConfigReadsAsTheDefaultConfiguration(t *testin
 
     if "gzip" != resultResponse.Headers().Get("Content-Encoding") {
         t.Fatalf("expected the default configuration to serve gzip, got %q", resultResponse.Headers().Get("Content-Encoding"))
+    }
+}
+
+/* compressThroughStream runs one response through the streaming compressor the middleware uses and returns what a client would have decompressed */
+func compressThroughStream(t *testing.T, payload string, level int) string {
+    t.Helper()
+
+    pipeReader, pipeWriter := io.Pipe()
+    compressionDone := make(chan struct{})
+
+    source := strings.NewReader(payload)
+
+    go streamGzipCompressInto(pipeWriter, source, source, level, compressionDone)
+
+    gzipReader, gzipErr := gzip.NewReader(pipeReader)
+    if nil != gzipErr {
+        t.Fatalf("expected a readable gzip stream, got: %v", gzipErr)
+    }
+
+    decompressed, readErr := io.ReadAll(gzipReader)
+    if nil != readErr {
+        t.Fatalf("expected the whole body back, got: %v", readErr)
+    }
+
+    _ = gzipReader.Close()
+    _ = pipeReader.Close()
+
+    <-compressionDone
+
+    return string(decompressed)
+}
+
+/* the writers are pooled, so the second response is served by the writer the first one finished with: the reset onto the new pipe is the whole of what separates them, and without it the second body is written into a pipe nobody is reading any more */
+func TestCompressionMiddleware_APooledGzipWriterServesTheNextResponseFromItsOwnBody(t *testing.T) {
+    first := strings.Repeat("first-response-payload ", 64)
+    second := strings.Repeat("second-response-payload ", 64)
+
+    if decompressed := compressThroughStream(t, first, gzip.DefaultCompression); first != decompressed {
+        t.Fatalf("expected the first response to decompress to its own body")
+    }
+
+    if decompressed := compressThroughStream(t, second, gzip.DefaultCompression); second != decompressed {
+        t.Fatalf("expected the second response to decompress to its own body, not the first one's writer state")
+    }
+}
+
+/* a writer goes back to the pool only once Close has returned: a writer returned while its response is still being written would be handed to another response in flight and the two bodies would interleave into one stream. Sixteen at once is what makes that observable, and each body is distinct so a crossed pair is named rather than merely detected. */
+func TestCompressionMiddleware_ConcurrentResponsesDoNotShareAPooledWriter(t *testing.T) {
+    var waitGroup sync.WaitGroup
+
+    for index := 0; index < 16; index++ {
+        waitGroup.Add(1)
+
+        go func(index int) {
+            defer waitGroup.Done()
+
+            payload := strings.Repeat("payload-"+strconv.Itoa(index)+" ", 128)
+
+            if decompressed := compressThroughStream(t, payload, gzip.DefaultCompression); payload != decompressed {
+                t.Errorf("response %d decompressed to another response's body", index)
+            }
+        }(index)
+    }
+
+    waitGroup.Wait()
+}
+
+/* a level gzip refuses has no pool and must still be reported where it is made, rather than silently falling back to a default the caller never asked for */
+func TestCompressionMiddleware_AnInvalidCompressionLevelIsRefused(t *testing.T) {
+    if _, acquireErr := acquireGzipWriter(io.Discard, highestGzipLevel+1); nil == acquireErr {
+        t.Fatalf("expected a level above BestCompression to be refused")
+    }
+
+    if _, acquireErr := acquireGzipWriter(io.Discard, lowestGzipLevel-1); nil == acquireErr {
+        t.Fatalf("expected a level below HuffmanOnly to be refused")
     }
 }

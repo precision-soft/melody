@@ -8,6 +8,7 @@ import (
     nethttp "net/http"
     "strconv"
     "strings"
+    "sync"
 
     "github.com/precision-soft/melody/exception"
     httpcontract "github.com/precision-soft/melody/http/contract"
@@ -347,17 +348,61 @@ func closePipeReaderOnRequestUnwind(requestContext context.Context, pipeReader *
     }
 }
 
+/* the pools are indexed by compression level, because a writer carries the level it was built with and resetting it does not change it. gzip accepts HuffmanOnly through BestCompression and refuses anything else, so a level outside that range never reaches a pool: it fails at creation, which is where an invalid configuration should be reported. */
+const lowestGzipLevel = gzip.HuffmanOnly
+const highestGzipLevel = gzip.BestCompression
+
+var gzipWriterPools [highestGzipLevel - lowestGzipLevel + 1]sync.Pool
+
+func gzipWriterPoolFor(level int) *sync.Pool {
+    if lowestGzipLevel > level || highestGzipLevel < level {
+        return nil
+    }
+
+    return &gzipWriterPools[level-lowestGzipLevel]
+}
+
+/* acquireGzipWriter hands out a writer whose deflate state is already allocated. A fresh one costs about 800 KiB of window and hash tables, and the middleware built one per compressed response: at a thousand responses a second that is the better part of a gigabyte of garbage a second, on the hot path of every request, and the allocation dominated the compression itself. The writer is reset onto this response's pipe before it is handed over — that reset is what separates the two responses, and without it the second body would be written into the first one's pipe. */
+func acquireGzipWriter(destination io.Writer, level int) (*gzip.Writer, error) {
+    pool := gzipWriterPoolFor(level)
+    if nil == pool {
+        return gzip.NewWriterLevel(destination, level)
+    }
+
+    pooled, isWriter := pool.Get().(*gzip.Writer)
+    if false == isWriter {
+        return gzip.NewWriterLevel(destination, level)
+    }
+
+    pooled.Reset(destination)
+
+    return pooled, nil
+}
+
+/* releaseGzipWriter is called only once Close has returned. A writer still inside a response holds the deflate state of a body that has not been terminated yet, and handing it to another response would interleave the two into one stream; Reset clears the error a failed Close left behind, so a writer whose response ended badly is still reusable. */
+func releaseGzipWriter(gzipWriter *gzip.Writer, level int) {
+    pool := gzipWriterPoolFor(level)
+    if nil == pool {
+        return
+    }
+
+    pool.Put(gzipWriter)
+}
+
 func streamGzipCompressInto(pipeWriter *io.PipeWriter, source io.Reader, sourceCloser io.Reader, level int, compressionDone chan<- struct{}) {
     defer close(compressionDone)
     defer closeBodyReaderQuiet(sourceCloser)
 
-    gzipWriter, gzipErr := gzip.NewWriterLevel(pipeWriter, level)
+    gzipWriter, gzipErr := acquireGzipWriter(pipeWriter, level)
     if nil != gzipErr {
         _ = pipeWriter.CloseWithError(
             exception.NewError("failed to initialize gzip writer", nil, gzipErr),
         )
         return
     }
+
+    /* every path below reaches this only after gzipWriter.Close has returned, which is the condition the pool depends on */
+    defer releaseGzipWriter(gzipWriter, level)
 
     _, copyErr := io.Copy(gzipWriter, source)
     if nil != copyErr {

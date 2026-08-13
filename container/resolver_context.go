@@ -22,7 +22,7 @@ func newResolverContext(containerInstance *container) *resolverContext {
         scopeInstance:     nil,
         contextId:         containerInstance.resolverContextIdCounter.Add(1),
         rootRequestedKey:  "",
-        stack:             make([]string, 0, 8),
+        stack:             newResolutionStack(),
     }
 }
 
@@ -32,8 +32,17 @@ func newScopeResolverContext(containerInstance *container, scopeInstance *scope)
         scopeInstance:     scopeInstance,
         contextId:         containerInstance.resolverContextIdCounter.Add(1),
         rootRequestedKey:  "",
-        stack:             make([]string, 0, 8),
+        stack:             newResolutionStack(),
     }
+}
+
+/* resolutionStack is the live chain of node keys one resolution is in the middle of building, held apart from the context so a provider's own view of the resolution can carry a different owner while still pushing and popping the one chain the cycle detection reads. */
+type resolutionStack struct {
+    keys []string
+}
+
+func newResolutionStack() *resolutionStack {
+    return &resolutionStack{keys: make([]string, 0, 8)}
 }
 
 type resolverContext struct {
@@ -41,11 +50,37 @@ type resolverContext struct {
     scopeInstance     *scope
     contextId         uint64
     rootRequestedKey  string
-    stack             []string
+    stack             *resolutionStack
+    /* ownerKey is the node whose provider was handed this view of the resolution, and it is what a resolution performed after that provider returned belongs to. The live stack answers the question while the provider is running and is empty the moment it returns, so a service that holds its resolver and reaches through it later — container.Lazy, the ContainerCarrier pattern, any replay of deferred work — used to record no dependency edge at all, and the teardown then closed its dependencies in name order instead of after it. A handle built over the container itself has no owner and keeps that behaviour, because there is no node the container could be said to belong to. */
+    ownerKey string
     /* scopeSuspended is set while a provider registered on the CONTAINER builds its service, and it is what keeps the two apart. The container is request-agnostic: a service it owns is one instance for the whole process, so its construction may read only what the container holds. A request scope layers over the container for the code that runs inside a request, not underneath the container's own wiring, and a factory that reached through it would assemble a process-lifetime singleton out of one request's values.
 
     Suspension is a refusal, not a substitution. A container provider that asks for something only a scope carries — the request context — is told the service does not exist, which is a wiring mistake reported where it is made; a provider that asks for the logger gets the container's agnostic one, because that is the logger a process-lifetime service should hold. Only the service actually being requested is looked up through the scope, which is the layering a caller means by resolving through a scope at all. */
     scopeSuspended bool
+}
+
+/* childOwnedBy is the view of this resolution handed to the provider of one node: the same container, the same scope, the same resolution id and the same live stack, so cycle detection and the wait graph are unchanged, with the owning node written on it. A provider that keeps it and resolves through it after it has returned is then still recorded as depending on what it resolves.
+
+The suspension rides on the view rather than being set on the shared context and restored afterwards: the caller's own resolution continues above this frame and must keep seeing the scope, and a restore that runs at the wrong moment — after a panic unwound past it, say — would leave the wrong answer behind for everything further up. */
+func (instance *resolverContext) childOwnedBy(nodeKey string, scopeSuspended bool) *resolverContext {
+    return &resolverContext{
+        containerInstance: instance.containerInstance,
+        scopeInstance:     instance.scopeInstance,
+        contextId:         instance.contextId,
+        rootRequestedKey:  instance.rootRequestedKey,
+        stack:             instance.stack,
+        ownerKey:          nodeKey,
+        scopeSuspended:    scopeSuspended,
+    }
+}
+
+/* parentNodeKey answers the node a resolution starting here depends on: the node currently being built while a provider is running, and the node that owns this view once it has returned. */
+func (instance *resolverContext) parentNodeKey() string {
+    if 0 < len(instance.stack.keys) {
+        return instance.stack.keys[len(instance.stack.keys)-1]
+    }
+
+    return instance.ownerKey
 }
 
 /* scopeVisible reports whether this resolution may read the request scope. */
@@ -118,9 +153,19 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
         nodeKey = scopedNameNodeKey(serviceName)
     }
 
-    parentKey := ""
-    if 0 < len(instance.stack) {
-        parentKey = instance.stack[len(instance.stack)-1]
+    parentKey := instance.parentNodeKey()
+
+    /* a resolution that has nothing to write takes the read lock instead of the exclusive one. Every resolution used to take the container's exclusive lock, even one that only reads a singleton built long ago, so dependency injection had a hard ceiling that did not move with the number of cores — the http kernel alone resolves four services per request, and an application cannot route around it without giving up the container.
+
+    Nothing to write means all three at once: no scope layered over this resolution, no node to record an edge for, and the instance already built. The last two are what keep the ordering guarantee intact — a resolution that would record an edge, including one made through a resolver a provider kept, falls through to the exclusive path that writes the graph. */
+    if false == instance.scopeVisible() && "" == parentKey {
+        instance.containerInstance.mutex.RLock()
+        memoizedValue, memoized := instance.containerInstance.instances[serviceName]
+        instance.containerInstance.mutex.RUnlock()
+
+        if true == memoized {
+            return memoizedValue, nil
+        }
     }
 
     pushKeyErr := instance.pushKey(nodeKey)
@@ -178,6 +223,7 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
         guardedCreation{
             requestedKey: requestedKey,
             creatingKey:  serviceName,
+            ownerNodeKey: nodeKey,
             getCreatingState: func() (*creationState, bool) {
                 state, exists := instance.containerInstance.creatingByName[serviceName]
                 return state, exists
@@ -324,10 +370,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
         nodeKey = scopedTypeNodeKey(typeKey)
     }
 
-    parentKey := ""
-    if 0 < len(instance.stack) {
-        parentKey = instance.stack[len(instance.stack)-1]
-    }
+    parentKey := instance.parentNodeKey()
 
     pushKeyErr := instance.pushKey(nodeKey)
     if nil != pushKeyErr {
@@ -450,6 +493,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
             guardedCreation{
                 requestedKey: requestedKey,
                 creatingKey:  serviceName,
+                ownerNodeKey: nodeKey,
                 getCreatingState: func() (*creationState, bool) {
                     state, exists := instance.containerInstance.creatingByName[serviceName]
                     return state, exists
@@ -504,6 +548,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
         guardedCreation{
             requestedKey: requestedKey,
             creatingKey:  typeKey,
+            ownerNodeKey: nodeKey,
             getCreatingState: func() (*creationState, bool) {
                 state, exists := instance.containerInstance.creatingByType[typeKey]
                 return state, exists
@@ -607,7 +652,7 @@ func (instance *resolverContext) pushKey(creatingKey string) error {
         )
     }
 
-    for _, key := range instance.stack {
+    for _, key := range instance.stack.keys {
         if key == creatingKey {
             return exception.NewError(
                 "circular service dependency detected",
@@ -620,22 +665,22 @@ func (instance *resolverContext) pushKey(creatingKey string) error {
         }
     }
 
-    instance.stack = append(instance.stack, creatingKey)
+    instance.stack.keys = append(instance.stack.keys, creatingKey)
 
     return nil
 }
 
 func (instance *resolverContext) popKey() {
-    if 0 == len(instance.stack) {
+    if 0 == len(instance.stack.keys) {
         return
     }
 
-    instance.stack = instance.stack[:len(instance.stack)-1]
+    instance.stack.keys = instance.stack.keys[:len(instance.stack.keys)-1]
 }
 
 func (instance *resolverContext) stackStringWithRepeat(repeatedKey string) string {
-    parts := make([]string, 0, len(instance.stack)+1)
-    parts = append(parts, instance.stack...)
+    parts := make([]string, 0, len(instance.stack.keys)+1)
+    parts = append(parts, instance.stack.keys...)
     parts = append(parts, repeatedKey)
 
     return strings.Join(parts, " -> ")

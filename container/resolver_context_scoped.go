@@ -53,6 +53,7 @@ func (instance *resolverContext) scopedServiceByName(
         guardedCreation{
             requestedKey: instance.rootRequestedKey,
             creatingKey:  scopedNameNodeKey(serviceName),
+            ownerNodeKey: scopedNameNodeKey(serviceName),
             getCreatingState: func() (*creationState, bool) {
                 state, exists := scopeInstance.creatingByName[serviceName]
 
@@ -95,6 +96,7 @@ func (instance *resolverContext) scopedServiceByType(
         guardedCreation{
             requestedKey: instance.rootRequestedKey,
             creatingKey:  scopedTypeNodeKey(typeKey),
+            ownerNodeKey: scopedTypeNodeKey(typeKey),
             getCreatingState: func() (*creationState, bool) {
                 state, exists := scopeInstance.creatingByType[typeKey]
 

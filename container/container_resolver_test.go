@@ -178,8 +178,8 @@ func TestServiceWithCreationGuard_SilentNilProviderKeepsTheGenericReport(t *test
     }
 }
 
-/* A provider that panics unwinds through the guard's recovery, so restoring scope visibility inline after the provider call would never run. The resolution that continues above the failed frame belongs to the caller, and leaving it suspended would hide the scope from every service resolved after the failure. */
-func TestServiceWithCreationGuard_RestoresScopeVisibilityAfterAPanickingProvider(t *testing.T) {
+/* the suspension is written on the view the provider is handed, not on the caller's own resolution, so a provider that panics cannot leave the caller suspended: the resolution that continues above the failed frame belongs to the caller, and a scope hidden from every service it resolves afterwards is the failure this guards against. */
+func TestServiceWithCreationGuard_LeavesTheCallersScopeVisibleAfterAPanickingProvider(t *testing.T) {
     serviceContainer := NewContainer().(*container)
 
     scopeInstance := newScope(serviceContainer, serviceContainer.scopePlanForNewScope()).(*scope)
