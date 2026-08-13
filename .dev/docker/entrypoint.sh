@@ -11,21 +11,18 @@ mkdir -p /go/pkg/mod
 mkdir -p /go/cache/go-build
 touch ${HOME}/.bash_history
 
-# refresh the shared icons (logo/favicon) in the example apps from their single source in .assets.
-# The example copies are COMMITTED, so a fresh clone serves them with no prior step; this pass only
-# carries a change made in .assets across to the three examples, and is a no-op while they match
-ASSETS_DIR="${WORKDIR}.assets"
-if [[ -d "${ASSETS_DIR}" ]]; then
-    for EXAMPLE in "${WORKDIR}.example" "${WORKDIR}v2/.example" "${WORKDIR}v3/.example"; do
-        [[ -d "${EXAMPLE}/public" ]] || continue
-        mkdir -p "${EXAMPLE}/public/assets"
-        cp -f "${ASSETS_DIR}/favicon.ico" "${EXAMPLE}/public/favicon.ico" 2>/dev/null || true
-        cp -f "${ASSETS_DIR}/logo.svg" "${EXAMPLE}/public/assets/favicon.svg" 2>/dev/null || true
-        cp -f "${ASSETS_DIR}/logo.png" "${EXAMPLE}/public/assets/logo.png" 2>/dev/null || true
-        cp -f "${ASSETS_DIR}/logo.png" "${EXAMPLE}/public/assets/apple-touch-icon.png" 2>/dev/null || true
-    done
-    echo "[melody-dev] assets synced into examples from ${ASSETS_DIR}"
-fi
+# put the shared icons (logo/favicon) into every example's public/ directory. They live in ONE place in
+# the tree — <root>/.assets — and are git-ignored under the examples, so a checkout carries no copy that
+# could go stale. The mapping from source name to served name is not restated here: each example's
+# assets/sync-icons.mjs owns it, and this loop runs that script. It runs for all three majors rather than
+# only the one this container serves, because the end-to-end harness builds all three out of the tree.
+for EXAMPLE in "${WORKDIR}.example" "${WORKDIR}v2/.example" "${WORKDIR}v3/.example"; do
+    [[ -f "${EXAMPLE}/assets/sync-icons.mjs" ]] || continue
+    command -v node >/dev/null 2>&1 || continue
+    ( cd "${EXAMPLE}/assets" && node sync-icons.mjs ) >/dev/null 2>&1 \
+        && echo "[melody-dev] icons synced into ${EXAMPLE#${WORKDIR}}" \
+        || echo "[melody-dev] icon sync FAILED for ${EXAMPLE#${WORKDIR}}; the pages will 404 on favicon and logo"
+done
 
 REFLEX_ENABLED="${MELODY_DEV_REFLEX_ENABLED:-1}"
 EXAMPLE_DIR="${MELODY_DEV_EXAMPLE_DIR:-${WORKDIR}v3/.example}"

@@ -169,17 +169,24 @@ Once started, open the application in your browser:
 
 The pages are server-rendered HTML driven by a small TypeScript bundle: every link, form action and `fetch` target is built from a **route name** rather than a hardcoded path, against the manifest the application injects into each page as `window.melodyRoutes` (assembled in [`url/route_registry.go`](./url/route_registry.go)).
 
-The bundle is **generated, not committed** — its source lives in [`assets/`](./assets/) and the built file is git-ignored. Build it once before opening the application in a browser:
+Everything a browser needs beyond the HTML is **generated, not committed**, and one command produces all of it:
 
 ```bash
 cd v2/.example/assets
 npm ci
-npm run build      # assets/app.ts -> public/assets/app.js
+npm run build
 ```
 
-Without this step the pages still load and every JSON endpoint still answers, but `public/assets/app.js` is a 404 and the browser interface does nothing: logging in, listing, editing and deleting all go through `window.melodyExample.*`, which the bundle is what installs.
+That command does two things:
 
-While iterating on the TypeScript, `npm run build:watch` rebuilds on save, and `npm run typecheck` runs `tsc --noEmit` over the sources.
+- `sync-icons.mjs` copies the shared icons — `favicon.ico`, `assets/favicon.svg`, `assets/logo.png`, `assets/apple-touch-icon.png` — out of `<repository root>/.assets`, which is the **single place** they exist in the tree;
+- esbuild bundles `assets/app.ts` into `public/assets/app.js`.
+
+Both destinations are git-ignored, so a checkout carries no copy of either and neither can go stale. Without this step the pages still load and every JSON endpoint still answers, but `public/assets/app.js` and the four icons are 404s and the browser interface does nothing: logging in, listing, editing and deleting all go through `window.melodyExample.*`, which the bundle is what installs.
+
+The development container runs the same script for every major at startup, so `./dc up:all` needs nothing extra.
+
+While iterating on the TypeScript, `npm run build:watch` rebuilds on save, `npm run typecheck` runs `tsc --noEmit` over the sources, and `npm run sync-icons` re-copies the icons alone after a change in `.assets`.
 
 ### CLI mode
 
@@ -273,7 +280,7 @@ They are controlled independently via build tags.
 
 Depending on how you build the binary, you must ship different artifacts.
 
-> **Build the frontend bundle first.** `public/assets/app.js` is generated from [`assets/`](./assets/) and is not committed, so it exists only after `cd assets && npm ci && npm run build`. Under `melody_static_embedded` the `public/` directory is frozen into the binary at compile time (`//go:embed all:public`), so a binary built before that step carries no bundle and cannot gain one afterwards. The shared icons — `favicon.ico`, `assets/favicon.svg`, `assets/logo.png`, `assets/apple-touch-icon.png` — **are** committed and need no build step.
+> **Run `cd assets && npm ci && npm run build` first.** Neither the frontend bundle nor the four shared icons is committed — they are produced by that one command, into a git-ignored `public/` (see [Frontend bundle](#frontend-bundle)). Under `melody_static_embedded` the `public/` directory is frozen into the binary at compile time (`//go:embed all:public`), so a binary built before that step carries neither and cannot gain them afterwards; under the filesystem modes the shipped `public/` is missing them just the same.
 
 ### A) Fully embedded “black-box” binary (recommended for a self-contained handout)
 
@@ -289,7 +296,7 @@ Ship:
 
 Required at runtime:
 
-- nothing else — the binary carries every `.env` file and every asset that was in `public/` **at build time**, the committed icons included
+- nothing else — the binary carries every `.env` file and every asset that was in `public/` **at the moment `go build` ran**, which is why the frontend build above has to come first
 
 ---
 

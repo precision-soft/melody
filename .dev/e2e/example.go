@@ -189,14 +189,23 @@ func prepareExampleWorkspace(major exampleMajor, workspace string) {
         fail("[%s] example application: write the workspace .env: %v", major.label, writeErr)
     }
 
-    /* the frontend bundle is generated from assets/app.ts and git-ignored, so it is in the tree only after a
-       build has run — the container entrypoint runs one per major at startup. Its absence is caught HERE, where
-       the cause can be named, instead of downstream as a bare 404 on /assets/app.js that reads like a routing
-       or static-surface fault. */
+    /* nothing a browser needs beyond the HTML is committed: the bundle is emitted from assets/app.ts and the
+       four icons are copied out of <root>/.assets, both into a git-ignored public/, by the one `npm run build`
+       the container entrypoint runs per major at startup. Their absence is caught HERE, where the cause can be
+       named, instead of downstream as bare 404s that read like a routing or static-surface fault. */
     if _, statErr := os.Stat(filepath.Join(directory, "assets", "package.json")); nil == statErr {
-        bundlePath := filepath.Join(directory, "public", "assets", "app.js")
-        if _, bundleErr := os.Stat(bundlePath); nil != bundleErr {
-            fail("[%s] example application: %s has a frontend source in assets/ but no built bundle at public/assets/app.js — build it with `cd %s/assets && npm ci && npm run build` (the container entrypoint does this per major at startup): %v", major.label, major.relativeDirectory, major.relativeDirectory, bundleErr)
+        producedPathList := []string{
+            filepath.Join("public", "assets", "app.js"),
+            filepath.Join("public", "favicon.ico"),
+            filepath.Join("public", "assets", "favicon.svg"),
+            filepath.Join("public", "assets", "logo.png"),
+            filepath.Join("public", "assets", "apple-touch-icon.png"),
+        }
+
+        for _, producedPath := range producedPathList {
+            if _, producedErr := os.Stat(filepath.Join(directory, producedPath)); nil != producedErr {
+                fail("[%s] example application: %s has a frontend source in assets/ but %s was never produced — run `cd %s/assets && npm ci && npm run build` (the container entrypoint does this per major at startup): %v", major.label, major.relativeDirectory, producedPath, major.relativeDirectory, producedErr)
+            }
         }
     }
 
@@ -479,12 +488,14 @@ const (
     exampleFrontendBundle     = "/assets/app.js"
 )
 
-/* the icons every page links in its head. They are COMMITTED in each example's public/ — <root>/.assets is
-their single source and the container entrypoint refreshes them from it — so a checkout serves them with no
-prior step, and that is exactly what these assertions defend: they used to be git-ignored and produced only by
-the entrypoint, which made a build from a clean clone answer 404 for all four while the packaging matrix
-promised a binary requiring "nothing else" at runtime. */
-var exampleCommittedIconList = []string{
+/* the icons every page links in its head. They exist in exactly ONE place in the tree — <root>/.assets — and
+are git-ignored under every example, so nothing here is a second copy that could go stale. What puts them in
+public/ is assets/sync-icons.mjs, run as the prebuild step of `npm run build` and by the container entrypoint
+for each major, which is the same single command that produces the bundle. Asserting them is what defends that
+wiring: they used to be produced only by a hand-written copy loop inside the entrypoint, so a build from a
+clean clone answered 404 for all four while the packaging matrix promised a binary requiring "nothing else" at
+runtime. */
+var exampleSyncedIconList = []string{
     "/favicon.ico",
     "/assets/favicon.svg",
     "/assets/logo.png",
@@ -624,26 +635,26 @@ func assertExampleLoginFlow(major exampleMajor, client *exampleClient) {
 does anything at all, and it asserts them on CONTENT rather than on the status code: a static surface answers 200
 for a file that is present and empty just as readily as for one that is whole.
 
-The first half is the icons every page links, which are committed and therefore owed by a bare checkout.
+Neither half is committed: both are produced by `npm run build` in the example's assets/ directory — the icons
+copied out of the single source by sync-icons.mjs, the bundle emitted from app.ts by esbuild — which the
+container entrypoint runs for each major at startup.
 
-The second is the frontend bundle. It is generated from assets/app.ts and deliberately NOT committed, so this is
-the one assertion here that depends on a build having run — the container entrypoint builds it per major, driven
-by MELODY_DEV_EXAMPLE_DIR. What it defends is the state the bundle came out of: every page loaded /assets/app.js
-and drove every interaction through window.melodyExample.*, while no assets/ directory existed in v1 or v2 at
-all, so the file could not be produced by anything and the whole browser interface was dead behind five pages
-that rendered perfectly. A 404 here means either that source or that build step is gone again. */
+What the bundle half defends is the state it came out of: every page loaded /assets/app.js and drove every
+interaction through window.melodyExample.*, while no assets/ directory existed in v1 or v2 at all, so the file
+could not be produced by anything and the whole browser interface was dead behind five pages that rendered
+perfectly. A 404 here means that source, or the step that runs it, is gone again. */
 func assertExampleBrowserAssets(major exampleMajor, client *exampleClient) {
-    for _, iconPath := range exampleCommittedIconList {
+    for _, iconPath := range exampleSyncedIconList {
         icon := client.call("GET", iconPath, "", "", "")
 
         if http.StatusOK != icon.statusCode {
-            fail("[%s] %s answered %d, wanted 200 — the icon is committed in public/, so a checkout owes it with no build step", major.label, iconPath, icon.statusCode)
+            fail("[%s] %s answered %d, wanted 200 — the icon is copied out of <root>/.assets by assets/sync-icons.mjs, which `npm run build` runs", major.label, iconPath, icon.statusCode)
         }
         if 0 == len(icon.body) {
             fail("[%s] %s answered 200 with an empty body — the file is present and truncated, which every status-code check reports as served", major.label, iconPath)
         }
     }
-    pass("[%s] the %d committed icons are served whole", major.label, len(exampleCommittedIconList))
+    pass("[%s] the %d shared icons are served whole", major.label, len(exampleSyncedIconList))
 
     bundle := client.call("GET", exampleFrontendBundle, "", "", "")
     if http.StatusOK != bundle.statusCode {
