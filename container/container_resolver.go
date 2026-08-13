@@ -55,6 +55,11 @@ func (instance *container) serviceWithCreationGuardLocked(
     lookup := creation.lookup
     create := creation.create
 
+    /* a resolution after the teardown finished is refused before the lookup, not after it: the maps still hold what was built, and answering out of them handed the caller a service every Close in the process has already run on, with a nil error saying it was fine. During the teardown the lookup still answers — a service's own Close is entitled to what it depends on — which is the other half of closing the logger last. */
+    if true == instance.teardownFinished {
+        return nil, newContainerClosedError(creatingKey)
+    }
+
     value, exists := lookup()
     if true == exists {
         return value, nil

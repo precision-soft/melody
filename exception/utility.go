@@ -63,14 +63,14 @@ func LogContext(err error, extra ...exceptioncontract.Context) exceptioncontract
         }
     }
 
-    /* the chain is anchored on the top error's own wrap link, not on the nearest *Error a deep search would find: anchoring deep drops the context of every link above it */
-    causeErr := errors.Unwrap(err)
-    if nil != causeErr && false == isNilInterfaceValue(causeErr) {
+    /* the chain is anchored on the top error's own wrap links, not on the nearest *Error a deep search would find: anchoring deep drops the context of every link above it. Links, plural, because a joined error has several of them and taking only the first would keep exactly the branch the reader already sees rendered in the message */
+    causeErrs := causesOf(err)
+    if 0 < len(causeErrs) {
         _, hasCause := context["cause"]
         _, hasCauseChain := context["causeChain"]
 
         if false == hasCause || false == hasCauseChain {
-            causeChain := BuildCauseChain(causeErr, 8)
+            causeChain := buildCauseChainFromRoots(causeErrs, 8)
             if 0 < len(causeChain) {
                 if false == hasCause {
                     context["cause"] = causeChain[0]
@@ -79,13 +79,13 @@ func LogContext(err error, extra ...exceptioncontract.Context) exceptioncontract
                     context["causeChain"] = causeChain
                 }
             } else if false == hasCause {
-                context["cause"] = renderErrorText(causeErr)
+                context["cause"] = renderErrorText(causeErrs[0])
             }
         }
 
         _, hasCauseContextChain := context["causeContextChain"]
         if false == hasCauseContextChain {
-            causeContextChain := BuildCauseContextChain(causeErr, 8)
+            causeContextChain := buildCauseContextChainFromRoots(causeErrs, 8)
             if 0 < len(causeContextChain) {
                 context["causeContextChain"] = causeContextChain
             }
@@ -245,6 +245,41 @@ func copyStringMap[T any](input map[string]T) map[string]T {
 /* causeChainCapacityHint bounds the pre-allocated capacity of the cause-chain builders; the walk still honours the caller's maxDepth. An unclamped maxDepth of math.MaxInt panics in makeslice. */
 const causeChainCapacityHint = 8
 
+/* causesOf answers the links below an error, in both the shapes the standard library defines: the single Unwrap() error a wrap produces, and the Unwrap() []error an errors.Join produces. Every reader here anchored on errors.Unwrap alone, which answers nothing at all for a joined error — so a failure that gathered what several replicas, several destinations or several rules had to say reached the record as one flattened line of text, with the context of every branch and every link beneath them gone. The writers this framework repaired are one producer of the shape; a joined error can arrive from any dependency and from any application, and it is the readers that were blind to all of them.
+
+The single form is tried first because it is the overwhelmingly common one and answers without allocating, and a link that carries both is a wrap whose own Unwrap wins, which is what errors.Is and errors.As do with it too. */
+func causesOf(err error) []error {
+    if singleUnwrapper, isSingleUnwrapper := err.(interface{ Unwrap() error }); true == isSingleUnwrapper {
+        causeErr := singleUnwrapper.Unwrap()
+        if nil == causeErr || true == isNilInterfaceValue(causeErr) {
+            return nil
+        }
+
+        return []error{causeErr}
+    }
+
+    multiUnwrapper, isMultiUnwrapper := err.(interface{ Unwrap() []error })
+    if false == isMultiUnwrapper {
+        return nil
+    }
+
+    causeErrs := make([]error, 0, len(multiUnwrapper.Unwrap()))
+    for _, causeErr := range multiUnwrapper.Unwrap() {
+        if nil == causeErr || true == isNilInterfaceValue(causeErr) {
+            continue
+        }
+
+        causeErrs = append(causeErrs, causeErr)
+    }
+
+    if 0 == len(causeErrs) {
+        return nil
+    }
+
+    return causeErrs
+}
+
+
 func BuildCauseChain(causeErr error, maxDepth int) []string {
     if nil == causeErr || true == isNilInterfaceValue(causeErr) {
         return nil
@@ -254,6 +289,10 @@ func BuildCauseChain(causeErr error, maxDepth int) []string {
         return []string{renderErrorText(causeErr)}
     }
 
+    return buildCauseChainFromRoots([]error{causeErr}, maxDepth)
+}
+
+func buildCauseChainFromRoots(roots []error, maxDepth int) []string {
     capacity := maxDepth
     if capacity > causeChainCapacityHint {
         capacity = causeChainCapacityHint
@@ -261,15 +300,21 @@ func BuildCauseChain(causeErr error, maxDepth int) []string {
 
     chain := make([]string, 0, capacity)
 
-    current := causeErr
-    for depth := 0; depth < maxDepth && nil != current; depth++ {
-        /* a typed-nil link is the nil its producer meant and ends the chain */
-        if true == isNilInterfaceValue(current) {
-            break
+    /* the walk is breadth-first over both unwrap shapes, so a chain of single wraps produces exactly the sequence it always did while a join contributes its branches side by side instead of ending the chain at its own link. maxDepth bounds the number of LINKS rendered, not the depth of the tree, which is what keeps a wide join from costing more than a deep chain. */
+    pending := append([]error{}, roots...)
+
+    for 0 < len(pending) && len(chain) < maxDepth {
+        current := pending[0]
+        pending = pending[1:]
+
+        /* a typed-nil link is the nil its producer meant and contributes nothing */
+        if nil == current || true == isNilInterfaceValue(current) {
+            continue
         }
 
         chain = append(chain, renderErrorText(current))
-        current = errors.Unwrap(current)
+
+        pending = append(pending, causesOf(current)...)
     }
 
     return chain
@@ -284,6 +329,10 @@ func BuildCauseContextChain(causeErr error, maxDepth int) []map[string]any {
         maxDepth = 1
     }
 
+    return buildCauseContextChainFromRoots([]error{causeErr}, maxDepth)
+}
+
+func buildCauseContextChainFromRoots(roots []error, maxDepth int) []map[string]any {
     capacity := maxDepth
     if capacity > causeChainCapacityHint {
         capacity = causeChainCapacityHint
@@ -292,11 +341,16 @@ func BuildCauseContextChain(causeErr error, maxDepth int) []map[string]any {
     chain := make([]map[string]any, 0, capacity)
     hasAnyContext := false
 
-    current := causeErr
-    for depth := 0; depth < maxDepth && nil != current; depth++ {
-        /* a typed-nil link is the nil its producer meant and ends the chain */
-        if true == isNilInterfaceValue(current) {
-            break
+    /* the same breadth-first walk BuildCauseChain performs, so the two chains stay index-aligned: an operator reading causeChain[2] finds its context at causeContextChain[2] whether the failure below was one wrap or a join of several */
+    pending := append([]error{}, roots...)
+
+    for 0 < len(pending) && len(chain) < maxDepth {
+        current := pending[0]
+        pending = pending[1:]
+
+        /* a typed-nil link is the nil its producer meant and contributes nothing */
+        if nil == current || true == isNilInterfaceValue(current) {
+            continue
         }
 
         /* the immediate node is asserted rather than searched with errors.As: a deep search emits the nearest provider's context once per intervening wrapper, while the cursor advances one link at a time */
@@ -313,7 +367,7 @@ func BuildCauseContextChain(causeErr error, maxDepth int) []map[string]any {
             chain = append(chain, nil)
         }
 
-        current = errors.Unwrap(current)
+        pending = append(pending, causesOf(current)...)
     }
 
     if false == hasAnyContext {

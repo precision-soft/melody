@@ -1,6 +1,8 @@
 package config
 
 import (
+    "fmt"
+
     "github.com/precision-soft/melody/exception"
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
     "github.com/precision-soft/melody/internal"
@@ -119,6 +121,10 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
             }
         }
 
+        if typedNilErr := refuseTypedNilDependency(firewall.name, "access decision manager", decisionManagerSource, effectiveDecisionManager); nil != typedNilErr {
+            return nil, typedNilErr
+        }
+
         /* the hierarchy reaches the decision manager through the optional capability, never through an assertion on the concrete type: asserting made a manager of the integrator's own — even a wrapper that only delegated — skip the upgrade in silence, so the declared hierarchy stopped applying on the enforcement path while security.IsGranted, which expands it straight from the compiled firewall, kept answering for it. A manager handed a hierarchy it cannot apply is refused here by name, because the alternative is a firewall that grants through one door and answers 403 through the other, with no record on either */
         if nil != effectiveRoleHierarchy && false == internal.IsNilInterface(effectiveDecisionManager) {
             hierarchyAware, isHierarchyAware := effectiveDecisionManager.(security.RoleHierarchyAware)
@@ -162,6 +168,10 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
             }
         }
 
+        if typedNilErr := refuseTypedNilDependency(firewall.name, "entry point", entryPointSource, effectiveEntryPoint); nil != typedNilErr {
+            return nil, typedNilErr
+        }
+
         effectiveDeniedHandler := firewall.override.accessDeniedHandler
         deniedHandlerSource := security.SourceFirewall
         if nil == effectiveDeniedHandler {
@@ -171,6 +181,10 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
             } else {
                 deniedHandlerSource = security.SourceNone
             }
+        }
+
+        if typedNilErr := refuseTypedNilDependency(firewall.name, "access denied handler", deniedHandlerSource, effectiveDeniedHandler); nil != typedNilErr {
+            return nil, typedNilErr
         }
 
         globalAccessControl := configuration.global.accessControl
@@ -234,6 +248,30 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
         compiledFirewalls,
         configuration.global.accessControl,
     ), nil
+}
+
+/* refuseTypedNilDependency refuses a dependency that reads as declared and holds a typed nil. The three interfaces an override carries — the decision manager, the entry point, the denied handler — are the ones the plain comparison above cannot judge: `var manager *myManager` handed to the setter is not nil as an interface, so the fallback to the global one is skipped, the firewall compiles green, and the first request behind it dereferences a nil receiver inside the listener. The matcher, the token source and the login and logout handlers are refused by name in this same loop; the three that are not include the one that decides access, so the silence fell on the security-critical dependency and on no other.
+
+The refusal names the source, because a typed nil that arrived through the global configuration and one that arrived through this firewall's own override are two different mistakes in two different files. */
+func refuseTypedNilDependency(firewallName string, dependencyName string, source security.Source, dependency any) error {
+    if nil == dependency {
+        return nil
+    }
+
+    if false == internal.IsNilInterface(dependency) {
+        return nil
+    }
+
+    return exception.NewError(
+        "security firewall "+dependencyName+" is a typed nil",
+        exceptioncontract.Context{
+            "firewallName":   firewallName,
+            "dependency":     dependencyName,
+            "dependencyType": fmt.Sprintf("%T", dependency),
+            "source":         string(source),
+        },
+        nil,
+    )
 }
 
 func mergeAccessControls(globalAccessControl *security.AccessControl, localAccessControl *security.AccessControl, strategy AccessControlMergeStrategy) *security.AccessControl {

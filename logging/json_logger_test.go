@@ -389,7 +389,7 @@ func (instance *statefulProbeWriter) Close() error {
     return nil
 }
 
-/* @info Close hands the writer to a Close that may mutate it while a goroutine outliving the container teardown is still inside Write; run with -race */
+/* Close hands the writer to a Close that may mutate it while a goroutine outliving the container teardown is still inside Write; run with -race */
 func TestJsonLogger_CloseIsSynchronizedWithConcurrentWrites(t *testing.T) {
     writer := &statefulProbeWriter{}
     logger := NewJsonLogger(writer, loggingcontract.LevelDebug)
@@ -445,7 +445,7 @@ func TestJsonLogger_WritesAreDroppedAfterClose(t *testing.T) {
     }
 }
 
-/* @info Closed is what the process-boundary exit handler asks before trusting this logger with the final record: a file-backed logger closed by a teardown silently drops every write. */
+/* Closed is what the process-boundary exit handler asks before trusting this logger with the final record: a file-backed logger closed by a teardown silently drops every write. */
 func TestJsonLogger_ClosedReportsOnlyAReallyClosedWriter(t *testing.T) {
     file, createErr := os.CreateTemp(t.TempDir(), "melody-json-logger-*.log")
     if nil != createErr {
@@ -489,7 +489,7 @@ func TestJsonLogger_ClosedReportsOnlyAReallyClosedWriter(t *testing.T) {
     }
 }
 
-/* @info a typed nil stored under a context key matched the error assertion and Error() dereferenced the nil receiver inside Log — a panic on the logging path, reachable from the exit handler; it renders as null, the nil its producer meant */
+/* a typed nil stored under a context key matched the error assertion and Error() dereferenced the nil receiver inside Log — a panic on the logging path, reachable from the exit handler; it renders as null, the nil its producer meant */
 func TestJsonLogger_NormalizesTypedNilErrorToNull(t *testing.T) {
     logger, buffer := testNewJsonLogger()
 
@@ -513,7 +513,7 @@ func TestJsonLogger_NormalizesTypedNilErrorToNull(t *testing.T) {
     }
 }
 
-/* @info an error one level down used to reach the encoder unnormalized and marshal as an empty object — every field unexported, no marshaler — so the diagnostic survived at the top level and vanished one level below it */
+/* an error one level down used to reach the encoder unnormalized and marshal as an empty object — every field unexported, no marshaler — so the diagnostic survived at the top level and vanished one level below it */
 func TestJsonLogger_NormalizesNestedErrors(t *testing.T) {
     logger, buffer := testNewJsonLogger()
 
@@ -548,7 +548,7 @@ func TestJsonLogger_NormalizesNestedErrors(t *testing.T) {
     }
 }
 
-/* @info one unmarshalable value used to cost every other key of the record: the fallback now carries the whole context as text, so the service name and the cause survive next to the marshal error */
+/* one unmarshalable value used to cost every other key of the record: the fallback now carries the whole context as text, so the service name and the cause survive next to the marshal error */
 func TestJsonLogger_FallbackKeepsTheContextAsText(t *testing.T) {
     logger, buffer := testNewJsonLoggerWithMinLevel(loggingcontract.LevelInfo)
 
@@ -584,7 +584,7 @@ func (instance *gatedProbeWriter) Write(payload []byte) (int, error) {
     return len(payload), nil
 }
 
-/* @info Closed is asked by the process-boundary exit handler; an answer serialized behind an in-flight Write into a stalled pipe used to hang the one handler that must reach os.Exit — the probe is held open inside Write while Closed is required to answer */
+/* Closed is asked by the process-boundary exit handler; an answer serialized behind an in-flight Write into a stalled pipe used to hang the one handler that must reach os.Exit — the probe is held open inside Write while Closed is required to answer */
 func TestJsonLogger_ClosedAnswersWhileAWriteIsInFlight(t *testing.T) {
     writer := &gatedProbeWriter{
         entered: make(chan struct{}),
@@ -618,7 +618,7 @@ func TestJsonLogger_ClosedAnswersWhileAWriteIsInFlight(t *testing.T) {
     close(writer.release)
 }
 
-/* @info the console is recognized by identity — the os.Stdout and os.Stderr values themselves — not by name: a file the caller opened on the "/dev/stdout" path is a descriptor this logger owns, and the name check skipped the close it owed and leaked it once per boot */
+/* the console is recognized by identity — the os.Stdout and os.Stderr values themselves — not by name: a file the caller opened on the "/dev/stdout" path is a descriptor this logger owns, and the name check skipped the close it owed and leaked it once per boot */
 func TestJsonLogger_CloseClosesAFileOpenedOnTheConsolePath(t *testing.T) {
     file, openErr := os.OpenFile("/dev/stdout", os.O_WRONLY|os.O_APPEND, 0644)
     if nil != openErr {
@@ -638,7 +638,7 @@ func TestJsonLogger_CloseClosesAFileOpenedOnTheConsolePath(t *testing.T) {
     }
 }
 
-/* @info the labels are read lock-free on every Log call while the caller keeps its reference: without the copy, a later write into that map raced the reads fatally; with it, the logger keeps rendering the labels it was built with */
+/* the labels are read lock-free on every Log call while the caller keeps its reference: without the copy, a later write into that map raced the reads fatally; with it, the logger keeps rendering the labels it was built with */
 func TestNewJsonLoggerWithLabels_CopiesTheLabels(t *testing.T) {
     labels := loggingcontract.LevelLabels{
         loggingcontract.LevelError: loggingcontract.LevelLabelFromString("custom-error"),
@@ -668,7 +668,7 @@ func (instance *marshalingProbeError) MarshalJSON() ([]byte, error) {
     return json.Marshal(map[string]string{"detail": instance.detail})
 }
 
-/* @info decizie user 08-01: an error that also marshals itself opts into a structural rendering — the validation error collection says the same thing in the log that it says in the response body — while a plain error still renders as its message */
+/* an error that also marshals itself opts into a structural rendering — the validation error collection says the same thing in the log that it says in the response body — while a plain error still renders as its message */
 func TestJsonLogger_ErrorImplementingMarshalerRendersStructurally(t *testing.T) {
     logger, buffer := testNewJsonLogger()
 
@@ -697,7 +697,7 @@ func TestJsonLogger_ErrorImplementingMarshalerRendersStructurally(t *testing.T) 
     }
 }
 
-/* @info decizie user 08-01: a level outside the five known ones weighs as error instead of debug — the unknown level is the case that least deserves silence, and the zero-value exception carries an empty one; the label keeps the raw level so the record says what it was handed */
+/* a level outside the five known ones weighs as error instead of debug — the unknown level is the case that least deserves silence, and the zero-value exception carries an empty one; the label keeps the raw level so the record says what it was handed */
 func TestJsonLogger_UnknownLevelIsWeighedAsError(t *testing.T) {
     logger, buffer := testNewJsonLoggerWithMinLevel(loggingcontract.LevelInfo)
 
@@ -720,7 +720,7 @@ func TestJsonLogger_UnknownLevelIsWeighedAsError(t *testing.T) {
     }
 }
 
-/* @info decizie user 08-01: nanosecond precision keeps the ordering the write mutex pays for; three records make an all-zero fraction astronomically unlikely, and the stamp still parses under the RFC 3339 layout */
+/* nanosecond precision keeps the ordering the write mutex pays for; three records make an all-zero fraction astronomically unlikely, and the stamp still parses under the RFC 3339 layout */
 func TestJsonLogger_TimestampCarriesSubSecondPrecision(t *testing.T) {
     logger, buffer := testNewJsonLogger()
 
@@ -753,7 +753,7 @@ func TestJsonLogger_TimestampCarriesSubSecondPrecision(t *testing.T) {
     }
 }
 
-/* @info Close is called by the container teardown and can be called again by an owner that also holds the logger; the second call must not hand the writer to Close twice — a file descriptor closed twice is a descriptor another goroutine may already have been given by the operating system */
+/* Close is called by the container teardown and can be called again by an owner that also holds the logger; the second call must not hand the writer to Close twice — a file descriptor closed twice is a descriptor another goroutine may already have been given by the operating system */
 func TestJsonLogger_Close_IsIdempotent(t *testing.T) {
     file, createErr := os.CreateTemp(t.TempDir(), "melody-json-logger-*.log")
     if nil != createErr {
@@ -777,7 +777,7 @@ func TestJsonLogger_Close_IsIdempotent(t *testing.T) {
     }
 }
 
-/* @info a writer that cannot be closed — a buffer, a pipe half held by somebody else — is left alone and the logger keeps writing: reporting itself closed would make the exit handler refuse a logger that is perfectly alive, and the final record would be routed to the emergency logger for nothing */
+/* a writer that cannot be closed — a buffer, a pipe half held by somebody else — is left alone and the logger keeps writing: reporting itself closed would make the exit handler refuse a logger that is perfectly alive, and the final record would be routed to the emergency logger for nothing */
 func TestJsonLogger_Close_WithANonClosableWriter_KeepsTheLoggerAlive(t *testing.T) {
     logger, buffer := testNewJsonLogger()
 
@@ -798,7 +798,7 @@ func TestJsonLogger_Close_WithANonClosableWriter_KeepsTheLoggerAlive(t *testing.
     }
 }
 
-/* @info the normalization descends into the context maps the framework itself nests — the cause context chain is exactly this shape — and the exception contract's Context is the type those maps arrive as; without the case for it, an error one level down inside one would reach the encoder unconverted and marshal as an empty object */
+/* the normalization descends into the context maps the framework itself nests — the cause context chain is exactly this shape — and the exception contract's Context is the type those maps arrive as; without the case for it, an error one level down inside one would reach the encoder unconverted and marshal as an empty object */
 func TestJsonLogger_NestedContextTypedMap_IsNormalizedLikeAPlainMap(t *testing.T) {
     logger, buffer := testNewJsonLogger()
 
@@ -831,7 +831,7 @@ func TestJsonLogger_NestedContextTypedMap_IsNormalizedLikeAPlainMap(t *testing.T
     }
 }
 
-/* @info a nil context value renders as json null rather than being dropped or reaching the encoder as an untyped nil inside a converted container */
+/* a nil context value renders as json null rather than being dropped or reaching the encoder as an untyped nil inside a converted container */
 func TestJsonLogger_NilContextValue_RendersAsNull(t *testing.T) {
     logger, buffer := testNewJsonLogger()
 
@@ -842,7 +842,7 @@ func TestJsonLogger_NilContextValue_RendersAsNull(t *testing.T) {
     }
 }
 
-/* @info the descent is bounded: a context that nests deeper than the bound is handed to the encoder as it is instead of recursing without end, which is what keeps a pathological self-referencing structure from taking the process down inside the logger. The assertion is written at the boundary itself — one level above it the error still renders as its message, one level below it reaches the encoder unconverted and marshals as an empty object — because a bound asserted from far away survives being moved by one */
+/* the descent is bounded: a context that nests deeper than the bound is handed to the encoder as it is instead of recursing without end, which is what keeps a pathological self-referencing structure from taking the process down inside the logger. The assertion is written at the boundary itself — one level above it the error still renders as its message, one level below it reaches the encoder unconverted and marshals as an empty object — because a bound asserted from far away survives being moved by one */
 func TestJsonLogger_ContextDepthBound_IsAppliedExactlyWhereItIsDeclared(t *testing.T) {
     buildNestedContext := func(depth int) loggingcontract.Context {
         nested := any(map[string]any{"cause": errors.New("at the bound")})
@@ -942,4 +942,118 @@ func TestJsonLogger_TheEchoIsSkippedWhenTheOutputIsStderrItself(t *testing.T) {
     if 0 != len(echoed) {
         t.Fatalf("expected no second attempt at the destination that just refused the first, got %q", string(echoed))
     }
+}
+
+/* blockingOrderedWriter holds the first write open until it is released, so the interleaving the guard is about is CONSTRUCTED rather than waited for */
+type blockingOrderedWriter struct {
+    mutex        sync.Mutex
+    written      [][]byte
+    firstWriteAt chan struct{}
+    release      chan struct{}
+    blocked      bool
+}
+
+func (instance *blockingOrderedWriter) Write(payload []byte) (int, error) {
+    instance.mutex.Lock()
+    copied := make([]byte, len(payload))
+    copy(copied, payload)
+    instance.written = append(instance.written, copied)
+    shouldBlock := false == instance.blocked
+    instance.blocked = true
+    instance.mutex.Unlock()
+
+    if true == shouldBlock {
+        close(instance.firstWriteAt)
+        <-instance.release
+    }
+
+    return len(payload), nil
+}
+
+/*
+TestJsonLogger_TheStampOrderIsTheWriteOrder pins a guard against a RACE, so it
+is proven by construction rather than by a mutant: one write is held open while
+a second record is asked for, and the second record's stamp cannot precede the
+first write's completion unless the stamp is taken outside the lock. It was:
+the stamp said when the record was FORMED and the encoding happened between the
+stamp and the write, so at eight goroutines 484 records of 1600 reached the
+file out of stamp order while LOGGING.md promised the write order stays
+reconstructible from them.
+*/
+func TestJsonLogger_TheStampOrderIsTheWriteOrder(t *testing.T) {
+    writer := &blockingOrderedWriter{
+        firstWriteAt: make(chan struct{}),
+        release:      make(chan struct{}),
+    }
+
+    logger := NewJsonLogger(writer, loggingcontract.LevelDebug)
+
+    firstDone := make(chan struct{})
+    go func() {
+        defer close(firstDone)
+
+        logger.Info("first", nil)
+    }()
+
+    <-writer.firstWriteAt
+
+    secondDone := make(chan struct{})
+    go func() {
+        defer close(secondDone)
+
+        logger.Info("second", nil)
+    }()
+
+    /* the first write is held open across a real interval: whatever the scheduler does with the second goroutine, its stamp can only land later than this, so the assertion below never depends on scheduling luck */
+    heldOpen := 150 * time.Millisecond
+    time.Sleep(heldOpen)
+
+    close(writer.release)
+
+    <-firstDone
+    <-secondDone
+
+    writer.mutex.Lock()
+    written := writer.written
+    writer.mutex.Unlock()
+
+    if 2 != len(written) {
+        t.Fatalf("expected both records to be written, got %d", len(written))
+    }
+
+    firstStamp := stampOfRecord(t, written[0])
+    secondStamp := stampOfRecord(t, written[1])
+
+    if false == secondStamp.After(firstStamp) {
+        t.Fatalf("expected the second record to be stamped after the first, got %v and %v", firstStamp, secondStamp)
+    }
+
+    if secondStamp.Sub(firstStamp) < heldOpen/2 {
+        t.Fatalf(
+            "expected the second stamp to be taken after the first write completed, got a gap of %v while the write was held open for %v",
+            secondStamp.Sub(firstStamp),
+            heldOpen,
+        )
+    }
+}
+
+func stampOfRecord(t *testing.T, payload []byte) time.Time {
+    t.Helper()
+
+    entry := map[string]any{}
+    if unmarshalErr := json.Unmarshal(bytes.TrimSpace(payload), &entry); nil != unmarshalErr {
+        t.Fatalf("unexpected unmarshal error: %v", unmarshalErr)
+    }
+
+    stamp, isString := entry["time"].(string)
+    if false == isString {
+        t.Fatalf("expected a stamp on the record, got %v", entry["time"])
+    }
+
+    parsed, parseErr := time.Parse(time.RFC3339Nano, stamp)
+    if nil != parseErr {
+        t.Fatalf("unexpected stamp format: %v", parseErr)
+    }
+
+    return parsed
 }

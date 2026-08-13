@@ -47,9 +47,27 @@ func (instance *RoleHierarchyVoter) Vote(token securitycontract.Token, attribute
 
     expandedRoles := instance.roleHierarchy.ExpandRoles(token.Roles())
 
-    expandedToken := NewAuthenticatedToken(token.UserIdentifier(), expandedRoles)
+    return instance.delegate.Vote(expandedRolesToken(token, expandedRoles), attribute, subject)
+}
 
-    return instance.delegate.Vote(expandedToken, attribute, subject)
+/* RolesReplacer is the optional capability a token implements to answer its own twin under a different role set. It exists because the delegate of a hierarchy voter is any Voter, and a voter of the application's own reads more than Roles(): it asserts the concrete token, or an interface of its own on it, to learn WHICH tenant or which owner the request speaks for. A token rebuilt as one of melody's own answers that assertion with a type the voter has never seen, so the voter abstains — and a voter that would have REFUSED, abstaining under the affirmative strategy beside a role voter that grants, hands out the access it exists to withhold. A token that answers its own twin keeps its dynamic type through the expansion and the delegate is none the wiser.
+
+The capability is optional because Token is a published contract of a stable major and cannot grow a method. A token that does not carry it is rebuilt as before, which is what it already got. */
+type RolesReplacer interface {
+    WithRoles(roles []string) securitycontract.Token
+}
+
+/* expandedRolesToken answers the token the delegate votes on: the original's own twin when it can make one, and melody's rebuild when it cannot. A twin answered as nil is treated as no answer at all, because a delegate handed nil would deny every request the hierarchy was meant to widen. */
+func expandedRolesToken(token securitycontract.Token, expandedRoles []string) securitycontract.Token {
+    replacer, isReplacer := token.(RolesReplacer)
+    if true == isReplacer && false == internal.IsNilInterface(replacer) {
+        twin := replacer.WithRoles(expandedRoles)
+        if false == internal.IsNilInterface(twin) {
+            return twin
+        }
+    }
+
+    return NewAuthenticatedToken(token.UserIdentifier(), expandedRoles)
 }
 
 var _ securitycontract.Voter = (*RoleHierarchyVoter)(nil)

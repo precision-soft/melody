@@ -961,3 +961,111 @@ func TestPanicCause_ANonErrorPanicAnswersNoCause(t *testing.T) {
         t.Fatal("expected a nil panic value to answer no cause")
     }
 }
+
+/*
+TestLogContext_AJoinedCauseReachesTheRecord pins the readers against the second
+unwrap shape the standard library defines. Every walk here anchored on the
+single-valued errors.Unwrap, which answers nothing at all for an errors.Join:
+a failure that gathered what several replicas had to say arrived as one
+flattened line of text, with the context of every branch — the host that
+refused, the destination that timed out — reaching no record. The writers this
+framework repaired are one producer of the shape; a join can arrive from any
+dependency and from any application.
+*/
+func TestLogContext_AJoinedCauseReachesTheRecord(t *testing.T) {
+    firstCause := NewError(
+        "the primary replica refused the write",
+        exceptioncontract.Context{"host": "db-1"},
+        nil,
+    )
+    secondCause := NewError(
+        "the standby replica refused the write",
+        exceptioncontract.Context{"host": "db-2"},
+        nil,
+    )
+
+    top := NewError(
+        "could not persist the order",
+        exceptioncontract.Context{"orderId": 42},
+        errors.Join(firstCause, secondCause),
+    )
+
+    context := LogContext(top)
+
+    causeChain, isChain := context["causeChain"].([]string)
+    if false == isChain {
+        t.Fatalf("expected a cause chain, got %v", context["causeChain"])
+    }
+
+    if 3 != len(causeChain) {
+        t.Fatalf("expected the join and both of its branches in the chain, got %v", causeChain)
+    }
+
+    if false == strings.Contains(causeChain[1], "primary replica") || false == strings.Contains(causeChain[2], "standby replica") {
+        t.Fatalf("expected both branches named in the chain, got %v", causeChain)
+    }
+
+    causeContextChain, isContextChain := context["causeContextChain"].([]map[string]any)
+    if false == isContextChain {
+        t.Fatalf("expected a cause context chain, got %v", context["causeContextChain"])
+    }
+
+    if 3 != len(causeContextChain) {
+        t.Fatalf("expected one context slot per link, got %v", causeContextChain)
+    }
+
+    if "db-1" != causeContextChain[1]["host"] || "db-2" != causeContextChain[2]["host"] {
+        t.Fatalf("expected each branch to keep its own context, got %v", causeContextChain)
+    }
+}
+
+/* a join handed straight to the reader, with nothing wrapping it, is the shape an application produces when it gathers failures and returns them as they are */
+func TestLogContext_ABareJoinIsWalkedAsItsBranches(t *testing.T) {
+    joined := errors.Join(
+        NewError("the first destination refused", exceptioncontract.Context{"destination": "a"}, nil),
+        NewError("the second destination refused", exceptioncontract.Context{"destination": "b"}, nil),
+    )
+
+    context := LogContext(joined)
+
+    causeChain, isChain := context["causeChain"].([]string)
+    if false == isChain || 2 != len(causeChain) {
+        t.Fatalf("expected both branches of a bare join, got %v", context["causeChain"])
+    }
+
+    causeContextChain, isContextChain := context["causeContextChain"].([]map[string]any)
+    if false == isContextChain || 2 != len(causeContextChain) {
+        t.Fatalf("expected a context slot per branch, got %v", context["causeContextChain"])
+    }
+
+    if "a" != causeContextChain[0]["destination"] || "b" != causeContextChain[1]["destination"] {
+        t.Fatalf("expected each branch to keep its own context, got %v", causeContextChain)
+    }
+}
+
+/* the depth budget counts LINKS, not levels: a join of many branches must not cost more than a deep chain of the same length */
+func TestBuildCauseChain_TheDepthBudgetBoundsAWideJoin(t *testing.T) {
+    branches := make([]error, 0, 12)
+    for index := 0; index < 12; index++ {
+        branches = append(branches, NewError("branch", nil, nil))
+    }
+
+    chain := BuildCauseChain(errors.Join(branches...), 4)
+
+    if 4 != len(chain) {
+        t.Fatalf("expected the budget to bound the walk, got %d entries", len(chain))
+    }
+}
+
+/* a single-wrap chain keeps exactly the sequence it always produced: the walk changed shape, and nothing that was already right may move */
+func TestBuildCauseChain_ASingleWrapChainIsUnchanged(t *testing.T) {
+    deepest := NewError("deepest", nil, nil)
+    middle := NewError("middle", nil, deepest)
+    top := NewError("top", nil, middle)
+
+    chain := BuildCauseChain(top, 8)
+
+    if 3 != len(chain) || "top" != chain[0] || "middle" != chain[1] || "deepest" != chain[2] {
+        t.Fatalf("expected the chain walked top down, got %v", chain)
+    }
+}

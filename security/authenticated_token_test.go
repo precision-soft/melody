@@ -20,7 +20,7 @@ func TestAuthenticatedToken_CarriesItsIdentityAndRoles(t *testing.T) {
     }
 }
 
-/* @info the token owns its roles on both sides: a caller that edits the slice it passed in, or the slice it read back, must not be able to grant itself a role that the voters will then honour */
+/* the token owns its roles on both sides: a caller that edits the slice it passed in, or the slice it read back, must not be able to grant itself a role that the voters will then honour */
 func TestAuthenticatedToken_OwnsItsRoles(t *testing.T) {
     callerRoles := []string{"ROLE_USER"}
 
@@ -40,7 +40,7 @@ func TestAuthenticatedToken_OwnsItsRoles(t *testing.T) {
     }
 }
 
-/* @info an absent role list stays absent rather than becoming an empty one: nil in, nil out, so a caller can tell "no roles declared" from "declared empty" */
+/* an absent role list stays absent rather than becoming an empty one: nil in, nil out, so a caller can tell "no roles declared" from "declared empty" */
 func TestAuthenticatedToken_WithoutRolesAnswersAnEmptyList(t *testing.T) {
     token := NewAuthenticatedToken("u1", nil)
 
@@ -54,7 +54,7 @@ func TestAuthenticatedToken_WithoutRolesAnswersAnEmptyList(t *testing.T) {
     }
 }
 
-/* @info the zero value is reachable from outside the package — the type is exported and its fields are not required — and it answers a nil role list rather than dereferencing. Pinned so the nil branch inside Roles stays honest about who can reach it. */
+/* the zero value is reachable from outside the package — the type is exported and its fields are not required — and it answers a nil role list rather than dereferencing. Pinned so the nil branch inside Roles stays honest about who can reach it. */
 func TestAuthenticatedToken_ZeroValueAnswersNoRoles(t *testing.T) {
     token := &AuthenticatedToken{}
 
@@ -68,5 +68,28 @@ func TestAuthenticatedToken_ZeroValueAnswersNoRoles(t *testing.T) {
 
     if nil != token.Roles() {
         t.Fatalf("expected the zero value to answer a nil role list, got %v", token.Roles())
+    }
+}
+
+/* the token answers its own twin under another role set, which is what the role hierarchy voter asks of it instead of rebuilding one: the receiver keeps the roles it was built with, because the voter holds the caller's token while the delegate may keep the twin */
+func TestAuthenticatedToken_WithRolesAnswersATwinAndLeavesTheReceiver(t *testing.T) {
+    token := NewAuthenticatedToken("u1", []string{"ROLE_ADMIN"})
+
+    twin := token.WithRoles([]string{"ROLE_ADMIN", "ROLE_USER"})
+
+    if 2 != len(twin.Roles()) {
+        t.Fatalf("expected the twin to carry the new role set, got %v", twin.Roles())
+    }
+
+    if "u1" != twin.UserIdentifier() {
+        t.Fatalf("expected the twin to keep the identifier, got %q", twin.UserIdentifier())
+    }
+
+    if 1 != len(token.Roles()) || "ROLE_ADMIN" != token.Roles()[0] {
+        t.Fatalf("expected the receiver to keep its own roles, got %v", token.Roles())
+    }
+
+    if _, isAuthenticatedToken := twin.(*AuthenticatedToken); false == isAuthenticatedToken {
+        t.Fatalf("expected the twin to keep the token's own type, got %T", twin)
     }
 }

@@ -26,6 +26,38 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 **Remedy.** Make the implementation safe for concurrent calls naming different session ids — for most storages this is already true and needs no change. Calls naming the same id are still serialised by the manager, so per-session state needs nothing added.
 
+### Container: the teardown breaks a tie on creation order, not on the service name
+
+**What changed.** What the dependency graph leaves open — two services with no edge between them — is now closed newest-created first, where it used to be closed by node key descending. The declared edges still decide everything they cover; only the tie-break moved. The rule is causal rather than lexical: a service built during the construction of another was needed by it whether or not the edge was declared, and the string comparison it replaces was written by nobody. The container logger, resolved first at boot, is now closed last without anything naming it — measured, a worker keeping 219 bytes of shutdown journal under one name and 90 under another was the defect this closes.
+
+**Symptom.** An application whose services close in an order that happened to be right because of how they were named, and is not expressed as a dependency, may now close them in a different order. The change can only move a service that no edge constrains.
+
+**Remedy.** Express the ordering: resolve what a service needs inside its own provider, or build a `container.Lazy` handle over the resolver the provider was handed, and the edge constrains the teardown exactly as before. A service that legitimately depends on nothing is unaffected by which of the two rules applies.
+
+### Container: a resolution after the teardown finished is refused
+
+**What changed.** Closing now has two states. `IsClosed()` answers true from the moment the teardown begins and refuses every new creation for its whole duration, unchanged. Resolutions of what is already built keep answering until the last `Close` returns — a service reporting its drain from inside its own `Close` is entitled to what it reports through — and answer `container is closed` from then on. They used to answer the instance found in the maps, already closed, with a nil error.
+
+**Symptom.** Code that resolves out of a container or a resolver it kept, after the process has finished tearing down, now receives an error where it received a closed service and no indication of it. A goroutine outliving the teardown is the usual shape.
+
+**Remedy.** Handle the error the way every other resolution failure is handled, or stop the goroutine before the teardown — a service's `Close` is the place to do it, and it may still resolve.
+
+### Application: a teardown that hangs is abandoned and exits non-zero
+
+**What changed.** The normal return of `Run` closes the container through the same ten-second shield the panic path has used since the exit-step budget was installed, and takes exit code 1 when the budget runs out. Previously the clean path had no budget at all: one `Close` that never returned parked every service behind it and the process with them, so the healthy shutdown was the one without an emergency exit while the dying one had a way out.
+
+**Symptom.** A process whose teardown blocks for more than ten seconds now prints one line to stderr naming the abandoned step and exits 1, where it used to hang until the supervisor killed it.
+
+**Remedy.** None required — the exit is the intended outcome. A service whose `Close` legitimately takes longer than ten seconds should bound its own work: the shield abandons the step, it does not shorten it.
+
+### Security: a typed-nil firewall dependency is refused at boot
+
+**What changed.** A firewall's access decision manager, entry point and access denied handler are refused at compilation when they hold a typed nil, by firewall name and naming which configuration declared it; `Builder.SetGlobal` refuses the same three at the door. The matcher, the token source and the login and logout handlers were already refused in the same loop.
+
+**Symptom.** A composition root that declares `var manager *myManager` and hands it over — without ever assigning it — now fails the boot with `security firewall access decision manager is a typed nil`. It used to boot green, drop the declared role hierarchy in silence, and answer every request behind the firewall with a recovered panic.
+
+**Remedy.** Assign the dependency, or pass nothing at all: a plain nil still means "not declared" and falls back to the global configuration exactly as before.
+
 ### Container: the teardown orders a service against what it resolved through a resolver it kept
 
 **What changed.** The dependency edge is recorded from the resolver a provider was handed, so a resolution made after the provider returned — a `container.Lazy` handle's first use, a replay through the `ContainerCarrier` pattern — is recorded like one made during construction. Previously no edge was recorded for those at all and the two services were closed in descending name order.

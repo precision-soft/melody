@@ -3,6 +3,9 @@ package security
 import (
     "context"
     "errors"
+    "io"
+    "os"
+    "strings"
     "testing"
 
     "github.com/precision-soft/melody/container"
@@ -833,4 +836,236 @@ func TestAccessControlListener_ARefusalCarryingNoHttpExceptionStillFilesOneRecor
     if 1 != len(capture.warningRecords) || 0 != len(capture.errorRecords) {
         t.Fatalf("expected one record for one refusal, got %v and %v", capture.warningRecords, capture.errorRecords)
     }
+}
+
+/* a denied handler that FAILS leaves the one record it always left, but at error and naming its own failure: the record used to be filed above the handler call with the DECISION's reason and the mark set below suppressed the exception listener that carried the wrap, so a permanently broken refusal page reached no channel at all */
+func TestAccessControlListener_AFailingDeniedHandlerIsNamedInTheOneRecord(t *testing.T) {
+    runtimeInstance, capture := newRefusalCaptureRuntime(t)
+
+    firewall := NewCompiledFirewall(
+        "admin-area",
+        nil,
+        "m",
+        nil,
+        nil,
+        NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN")),
+        NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, NewRoleVoter()),
+        nil,
+        nil,
+        &accessControlListenerTestAccessDeniedHandler{response: nil, err: errors.New("the denied page template is missing")},
+        "",
+        "",
+        nil,
+        nil,
+        SourceFirewall,
+        SourceFirewall,
+        SourceFirewall,
+        SourceNone,
+        SourceFirewall,
+    )
+
+    dispatchRefusal(t, runtimeInstance, firewall)
+
+    if 1 != len(capture.errorRecords) || 0 != len(capture.warningRecords) {
+        t.Fatalf("expected exactly one error and no warning, got %v and %v", capture.errorRecords, capture.warningRecords)
+    }
+
+    record := capture.errorRecords[0]
+
+    if "failed" != record.context["deniedHandlerOutcome"] {
+        t.Fatalf("expected the record to name what the handler did, got %+v", record.context)
+    }
+
+    handlerError, isString := record.context["handlerError"].(string)
+    if false == isString || "the denied page template is missing" != handlerError {
+        t.Fatalf("expected the handler's own failure in the record, got %v", record.context["handlerError"])
+    }
+
+    if RefusalReasonAffirmativeNoGrant != record.context["reason"] {
+        t.Fatalf("expected the decision branch to survive beside the handler failure, got %v", record.context["reason"])
+    }
+}
+
+/* a denied handler that answers nil without failing is the same broken page by another spelling, and earns the same record */
+func TestAccessControlListener_ADeniedHandlerAnsweringNilIsNamedInTheOneRecord(t *testing.T) {
+    runtimeInstance, capture := newRefusalCaptureRuntime(t)
+
+    firewall := NewCompiledFirewall(
+        "admin-area",
+        nil,
+        "m",
+        nil,
+        nil,
+        NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN")),
+        NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, NewRoleVoter()),
+        nil,
+        nil,
+        &accessControlListenerTestAccessDeniedHandler{response: nil, err: nil},
+        "",
+        "",
+        nil,
+        nil,
+        SourceFirewall,
+        SourceFirewall,
+        SourceFirewall,
+        SourceNone,
+        SourceFirewall,
+    )
+
+    dispatchRefusal(t, runtimeInstance, firewall)
+
+    if 1 != len(capture.errorRecords) || 0 != len(capture.warningRecords) {
+        t.Fatalf("expected exactly one error and no warning, got %v and %v", capture.errorRecords, capture.warningRecords)
+    }
+
+    if "nil_response" != capture.errorRecords[0].context["deniedHandlerOutcome"] {
+        t.Fatalf("expected the record to name what the handler did, got %+v", capture.errorRecords[0].context)
+    }
+}
+
+/* a handler that answers the request keeps the refusal at the level the DECISION earned, and keeps carrying no handler outcome: the record moved below the call, and moving it must not change what a working handler files */
+func TestAccessControlListener_AnAnsweringDeniedHandlerKeepsTheDecisionLevel(t *testing.T) {
+    runtimeInstance, capture := newRefusalCaptureRuntime(t)
+
+    firewall := NewCompiledFirewall(
+        "admin-area",
+        nil,
+        "m",
+        nil,
+        nil,
+        NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN")),
+        NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, NewRoleVoter()),
+        nil,
+        nil,
+        &accessControlListenerTestAccessDeniedHandler{response: httpPkg.JsonErrorResponse(403, "denied"), err: nil},
+        "",
+        "",
+        nil,
+        nil,
+        SourceFirewall,
+        SourceFirewall,
+        SourceFirewall,
+        SourceNone,
+        SourceFirewall,
+    )
+
+    dispatchRefusal(t, runtimeInstance, firewall)
+
+    if 1 != len(capture.warningRecords) || 0 != len(capture.errorRecords) {
+        t.Fatalf("expected one warning and no error, got %v and %v", capture.warningRecords, capture.errorRecords)
+    }
+
+    if _, exists := capture.warningRecords[0].context["deniedHandlerOutcome"]; true == exists {
+        t.Fatalf("expected a working handler to leave no outcome key, got %+v", capture.warningRecords[0].context)
+    }
+}
+
+type accessControlListenerTestTypedNilManager struct {
+    voters []securitycontract.Voter
+}
+
+func (instance *accessControlListenerTestTypedNilManager) DecideAll(token securitycontract.Token, attributes []string, subject any) error {
+    if 0 == len(instance.voters) {
+        return nil
+    }
+
+    return nil
+}
+
+func (instance *accessControlListenerTestTypedNilManager) DecideAny(token securitycontract.Token, attributes []string, subject any) error {
+    return instance.DecideAll(token, attributes, subject)
+}
+
+/* a firewall assembled through NewCompiledFirewall never passes the compile step that refuses a typed nil, so the listener judges the interface rather than comparing it: the plain comparison let a manager holding nothing reach DecideAll, where it dereferenced its own nil receiver and answered every request behind the firewall with a recovered panic */
+func TestAccessControlListener_ATypedNilDecisionManagerAnswersTheMissingManagerBranch(t *testing.T) {
+    runtimeInstance, _ := newRefusalCaptureRuntime(t)
+
+    var typedNilManager *accessControlListenerTestTypedNilManager
+
+    firewall := NewCompiledFirewall(
+        "admin-area",
+        nil,
+        "m",
+        nil,
+        nil,
+        NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN")),
+        typedNilManager,
+        nil,
+        nil,
+        nil,
+        "",
+        "",
+        nil,
+        nil,
+        SourceFirewall,
+        SourceFirewall,
+        SourceFirewall,
+        SourceNone,
+        SourceNone,
+    )
+
+    requestEvent := dispatchRefusal(t, runtimeInstance, firewall)
+
+    if nil == requestEvent.Response() {
+        t.Fatalf("expected the missing-manager branch to answer the request")
+    }
+
+    if 500 != requestEvent.Response().StatusCode() {
+        t.Fatalf("expected the missing-manager response, got %d", requestEvent.Response().StatusCode())
+    }
+}
+
+/*
+TestRegisterKernelAccessControlListener_ADispatcherWithoutTheCapabilityIsNamed
+pins the branch that used to be silent. The required-listener mark is what makes
+a listener stopping propagation ahead of access control fail the dispatch closed
+instead of letting the request reach its handler unchecked; a dispatcher that
+cannot take the mark disarms that guarantee for the whole process, and the
+framework's own event adapter refuses the very same condition with a panic
+rather than swallowing it. The record goes to the emergency channel because this
+runs at boot, before the configured logger is resolvable.
+*/
+func TestRegisterKernelAccessControlListener_ADispatcherWithoutTheCapabilityIsNamed(t *testing.T) {
+    readEnd, writeEnd, pipeErr := os.Pipe()
+    if nil != pipeErr {
+        t.Fatalf("unexpected pipe error: %v", pipeErr)
+    }
+
+    logging.CloseEmergencyLogger()
+
+    originalStderr := os.Stderr
+    os.Stderr = writeEnd
+    defer func() {
+        os.Stderr = originalStderr
+        logging.CloseEmergencyLogger()
+    }()
+
+    kernel := newTestKernel()
+    kernel.eventDispatcher = &capabilitylessDispatcher{EventDispatcher: kernel.eventDispatcher}
+
+    RegisterKernelAccessControlListener(
+        kernel,
+        NewFirewallRegistry(NewCompiledConfiguration(nil, NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN")))),
+    )
+
+    _ = writeEnd.Close()
+    os.Stderr = originalStderr
+
+    output, readErr := io.ReadAll(readEnd)
+    if nil != readErr {
+        t.Fatalf("unexpected read error: %v", readErr)
+    }
+
+    if false == strings.Contains(string(output), "cannot mark the access control listener required") {
+        t.Fatalf("expected the degradation to be reported, got %q", string(output))
+    }
+
+    if false == strings.Contains(string(output), "capabilitylessDispatcher") {
+        t.Fatalf("expected the dispatcher to be named, got %q", string(output))
+    }
+}
+
+/* capabilitylessDispatcher is a dispatcher of the application's own: it forwards every dispatch through the published contract and carries no MarkListenerRequired, which is exactly what an implementation written against the contract looks like */
+type capabilitylessDispatcher struct {
+    eventcontract.EventDispatcher
 }

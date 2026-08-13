@@ -408,9 +408,25 @@ func (instance *Application) exitFileLogger(emergencyLogger loggingcontract.Logg
 /* applicationExit terminates the process when the teardown of a normally-returning Run reports a failure; tests replace it to observe the exit code without stopping the test binary, the way signalContextExit is replaced */
 var applicationExit = os.Exit
 
-/* closeAndExitOnFailure is Run's non-panic return: a teardown failure this call itself discovered turns into a non-zero exit, so a supervisor sees a shutdown that lost something — a failed flush, a close that errored — instead of recording a clean exit 0 whose only trace was one stderr line. A close somebody else already performed reported its failure through its own channel and keeps its own exit code. */
+/* shieldedCloseStep is the door the clean-shutdown teardown runs through; tests replace it to drive the abandoned branch without waiting out the real budget, the way they replace applicationExit to observe an exit code */
+var shieldedCloseStep = logging.RunShieldedStep
+
+/* closeAndExitOnFailure is Run's non-panic return: a teardown failure this call itself discovered turns into a non-zero exit, so a supervisor sees a shutdown that lost something — a failed flush, a close that errored — instead of recording a clean exit 0 whose only trace was one stderr line. A close somebody else already performed reported its failure through its own channel and keeps its own exit code.
+
+The teardown runs under the same shield the panic path has had since the exit-step budget was installed, and for the same reason: the loop is strictly sequential with no budget of its own, so one Close that never returns — a pooled connection draining to a peer that is gone, a session file on a vanished mount — parks every service behind it and the process with them. The healthy shutdown was the one without an escape while the dying one had ten seconds. An abandoned teardown exits non-zero, because a process that could not release what it held did not shut down cleanly however quiet it was; and the error the step was writing is deliberately not read on that branch, since the step is still running on its own goroutine. */
 func (instance *Application) closeAndExitOnFailure() {
-    closeErr := instance.close()
+    var closeErr error
+
+    completed := shieldedCloseStep("closing the application", func() {
+        closeErr = instance.close()
+    })
+
+    if false == completed {
+        applicationExit(1)
+
+        return
+    }
+
     if nil == closeErr {
         return
     }

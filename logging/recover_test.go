@@ -1005,3 +1005,25 @@ func (instance *panickingResolveError) Error() string {
 
     return "unreachable"
 }
+
+/* RunShieldedStep answers whether the step finished, which is what lets the clean shutdown tell a teardown that completed from one it had to abandon: the budget exists so a process holding something it cannot release ends anyway, and a caller told nothing would have no reason to exit non-zero */
+func TestRunShieldedStep_AnswersWhetherTheStepFinished(t *testing.T) {
+    if false == RunShieldedStep("a step that returns", func() {}) {
+        t.Fatalf("expected a returning step to report completion")
+    }
+
+    originalBudget := exitStepBudget
+    exitStepBudget = 30 * time.Millisecond
+    defer func() {
+        exitStepBudget = originalBudget
+    }()
+
+    release := make(chan struct{})
+    defer close(release)
+
+    if true == RunShieldedStep("a step that hangs", func() {
+        <-release
+    }) {
+        t.Fatalf("expected a hanging step to be abandoned and reported as unfinished")
+    }
+}

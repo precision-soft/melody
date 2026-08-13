@@ -26,6 +26,7 @@ func NewContainer() containercontract.Container {
         typeIdentityKeyToType:       make(map[string]reflect.Type),
         dependencyGraph:             make(map[string]map[string]struct{}),
         builtServiceNames:           make(map[string]struct{}),
+        creationOrderByNodeKey:      make(map[string]int),
 
         scopedProviders:                   make(map[string]providerAny),
         scopedTypeProviders:               make(map[reflect.Type]providerAny),
@@ -52,8 +53,11 @@ type container struct {
     typeIdentityKeyToType map[string]reflect.Type
     dependencyGraph       map[string]map[string]struct{}
     /* builtServiceNames marks the name-keyed instances the container itself created, as opposed to installed overrides: an override replacing a built instance orphans a value only the container ever held, and the teardown closes what this set points at even after the maps stopped naming it (via replacedBuiltInstances). An installed override evicted by a later override is NOT the container's to close — it belongs to whoever installed it. */
-    builtServiceNames       map[string]struct{}
-    replacedBuiltInstances  []any
+    builtServiceNames      map[string]struct{}
+    replacedBuiltInstances []any
+    /* the order in which the teardown nodes came into being, which is what breaks a tie the dependency graph leaves open. It is written wherever a value enters the instance maps — a creation or an installed override — and read only by the teardown; see closesBefore for why creation order and not the node key. */
+    creationOrderByNodeKey map[string]int
+    creationOrderCounter   int
     /* the scoped registrations: providers of services the SCOPES of this container own, kept apart from the container's own so nothing resolved against the container can reach them. They are the source the immutable plan below is built from, never read on the request path. */
     scopedProviders                   map[string]providerAny
     scopedTypeProviders               map[reflect.Type]providerAny
@@ -65,6 +69,8 @@ type container struct {
     /* the published plan every new scope is bound to by reference. A registration clears it and the next scope rebuilds it, so creating a scope costs one atomic load once boot has settled. */
     scopePlanPointer atomic.Pointer[scopePlan]
     isClosed         bool
+    /* teardownFinished is the SECOND of the two closing states, and the pair is what lets a service's own Close still resolve what it depends on. isClosed is set before the first service Close runs and refuses every new CREATION for the whole teardown; teardownFinished is set after the last one returns and refuses every RESOLUTION from then on. Between them the memoized instances are still served, because a worker reporting its drain at Close is entitled to the logger it reports through — which is the whole reason the logger is closed last — while after them a resolution used to answer a closed instance with a nil error, so a caller that kept a resolver got a handle to a dead service and no way to know it. */
+    teardownFinished bool
     closeErr         error
     closeOnce        sync.Once
 }
@@ -145,6 +151,9 @@ func (instance *container) HasType(targetType reflect.Type) bool {
     return false
 }
 
+/* OverrideInstance installs a value under a registered name, and the container CLOSES what was installed into it — unlike a scope, whose overrides belong to whoever installed them unless the installer says otherwise with ClosedWithScope. The two defaults are opposite because the two lifetimes are: a scope ends while its installer goes on running, and the http kernel that installs the request logger keeps using it to report the scope's own close failure, so a scope closing its overrides would close them under their owner. A container ends when the process does, and there is nobody left to hand the value to.
+
+The one case where that reasoning does not hold is a value shared with a SECOND container in the same process — a test suite that boots the application repeatedly and reuses one client across every boot, or a host embedding melody that closes its own handles. There this container's teardown closes it for all of them, and there is no opt-out. Install a wrapper whose Close does nothing, and keep the real handle where it belongs. */
 func (instance *container) OverrideInstance(serviceName string, value any) error {
     if "" == serviceName {
         return exception.NewError(
@@ -274,15 +283,18 @@ func (instance *container) OverrideProtectedInstance(serviceName string, value a
     delete(instance.builtServiceNames, serviceName)
 
     instance.instances[serviceName] = value
+    instance.recordCreationOrderLocked("service:" + serviceName)
 
     if _, typeRegistered := instance.typeRegistrationNamesByType[canonicalType]; true == typeRegistered {
         instance.typeInstances[canonicalType] = value
+        instance.recordCreationOrderLocked("type:" + typeIdentityKey(canonicalType))
     }
 
     for registeredType, registeredServiceNames := range instance.typeRegistrationNamesByType {
         for _, registeredServiceName := range registeredServiceNames {
             if serviceName == registeredServiceName {
                 instance.typeInstances[registeredType] = value
+                instance.recordCreationOrderLocked("type:" + typeIdentityKey(registeredType))
                 break
             }
         }

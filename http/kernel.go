@@ -888,7 +888,7 @@ func (instance *Kernel) requestIdLogger(
     return requestLogger, requestId, nil
 }
 
-/* logHandlerError files the one record for a handler-returned failure, under the discipline the panic recovery and the exception listener already share: an error something upstream already logged is not filed again, a deliberate 4xx is a refusal recorded at warning, a client's own cancellation is named for what it is, and everything else keeps the error level. The record marks the error, so the exception listener attaches its request coordinates to it instead of filing the same failure a second time — without the mark every handler failure produced two records, the first at error even for a routine 404 or 429.
+/* logHandlerError files the one record for a handler-returned failure, under the discipline the panic recovery and the exception listener already share: an error something upstream already logged is not filed again, a deliberate 4xx is a refusal recorded at warning, a client's own cancellation is named for what it is, and everything else keeps the error level. The one 4xx that is not a refusal is the one whose validation errors blame the DECLARATION — a struct tag naming a rule that does not exist refuses every request that route will ever serve — and it is classified here through the same reader the exception listener uses, because this writer runs FIRST on the production path and marks what it filed: the listener's own error branch is unreachable for anything this record already carried, so a route broken by a typo sat at warning among the users who mistyped their address. The record marks the error, so the exception listener attaches its request coordinates to it instead of filing the same failure a second time — without the mark every handler failure produced two records, the first at error even for a routine 404 or 429.
 
 A handler that honours its context and returns the request context's own cancellation is reporting the client's disconnect, not a fault of its own: recorded at error it paged the operator for every abandoned slow request, in a record that read exactly like a genuine handler failure.
 
@@ -923,7 +923,7 @@ func logHandlerError(requestLogger loggingcontract.Logger, message string, handl
 
     if true == clientCancelled {
         requestLogger.Warning("request cancelled by client", logContext)
-    } else if nil != httpException && nethttp.StatusInternalServerError > httpException.StatusCode() {
+    } else if nil != httpException && nethttp.StatusInternalServerError > httpException.StatusCode() && false == carriesRuleWiringError(httpException) {
         requestLogger.Warning(message, logContext)
     } else {
         requestLogger.Error(message, logContext)

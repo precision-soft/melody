@@ -4,6 +4,7 @@ import (
     "container/heap"
     "fmt"
     "reflect"
+    "runtime/debug"
     "sort"
     "strings"
 
@@ -11,6 +12,16 @@ import (
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
     "github.com/precision-soft/melody/internal"
 )
+
+/* recordCreationOrderLocked stamps a teardown node with the moment it came into being, the first time it does. The container mutex is held by every caller: the stamp is written on the same line the instance maps are written, so a node cannot exist without one. A node stamped twice would claim to have been created when it was merely re-filed — an override installed over a built instance is a new value under an old node, and it keeps the position the value it replaced held, because everything built after that node still depends on the NAME. */
+func (instance *container) recordCreationOrderLocked(nodeKey string) {
+    if _, stamped := instance.creationOrderByNodeKey[nodeKey]; true == stamped {
+        return
+    }
+
+    instance.creationOrderCounter = instance.creationOrderCounter + 1
+    instance.creationOrderByNodeKey[nodeKey] = instance.creationOrderCounter
+}
 
 /* IsClosed reports whether a Close already began tearing the container down. Because a repeated Close returns the first teardown's memoized error, a caller that closes defensively cannot tell a failure it just caused from one somebody else already discovered and reported; asking before closing is what keeps one failure from being presented as two incidents. */
 func (instance *container) IsClosed() bool {
@@ -255,7 +266,22 @@ func (instance *container) closeInternal() error {
         }
     }
 
-    closeOrder, remaining := teardownCloseOrder(canonicalNodeKeys, canonicalEdges)
+    /* an alias group is as old as its OLDEST member: the same instance filed under a name and under a type came into being once, and the stamp of the later filing would claim it was built after services that were in fact built from it */
+    canonicalCreationOrder := make(map[string]int, len(canonicalNodeKeys))
+
+    for nodeKey, canonicalKey := range representativeOf {
+        nodeOrder, stamped := instance.creationOrderByNodeKey[nodeKey]
+        if false == stamped {
+            continue
+        }
+
+        existingOrder, hasExisting := canonicalCreationOrder[canonicalKey]
+        if false == hasExisting || nodeOrder < existingOrder {
+            canonicalCreationOrder[canonicalKey] = nodeOrder
+        }
+    }
+
+    closeOrder, remaining := teardownCloseOrder(canonicalNodeKeys, canonicalEdges, canonicalCreationOrder)
 
     dependencyCycleDetected := 0 < len(remaining)
 
@@ -361,10 +387,17 @@ func (instance *container) closeInternal() error {
         )
     }
 
+    /* the second closing state is taken only now, after the last Close returned: from here a resolution is refused rather than answered out of the maps, which is what the whole teardown just emptied of meaning */
+    instance.mutex.Lock()
+    instance.teardownFinished = true
+    instance.mutex.Unlock()
+
     return resultErr
 }
 
-/* contain a panicking Close() as a recorded failure so the teardown loop still closes the remaining services and closeErr is assigned. */
+/* contain a panicking Close() as a recorded failure so the teardown loop still closes the remaining services and closeErr is assigned.
+
+What the failure carries is the whole of what the operator will ever learn about it: this is a containment boundary, so nothing above it sees the panic and nothing below it survives. An error-shaped panic value therefore travels as the CAUSE rather than only as its own stringified message — kept only in a context slot it collapses to one line at the render boundary, so the context map and the cause chain of the very error the Close raised reached no record at all — and the stack is captured here, inside the recover, because it is the only place the frames that ran still exist. The recovery boundaries of the event dispatcher and of the http kernel make the same two decisions for the same reason. */
 func closeServiceValue(closeable interface{ Close() error }) (closeErr error) {
     defer func() {
         recoveredValue := recover()
@@ -377,8 +410,9 @@ func closeServiceValue(closeable interface{ Close() error }) (closeErr error) {
             exceptioncontract.Context{
                 "recoveredType":  fmt.Sprintf("%T", recoveredValue),
                 "recoveredValue": fmt.Sprintf("%v", recoveredValue),
+                "panicStack":     string(debug.Stack()),
             },
-            nil,
+            exception.PanicCause(recoveredValue),
         )
     }()
 
@@ -400,7 +434,8 @@ func errorText(err error) (text string) {
 }
 
 type nodeKeyHeap struct {
-    items []string
+    items          []string
+    creationOrderOf map[string]int
 }
 
 func (instance *nodeKeyHeap) Len() int {
@@ -408,7 +443,21 @@ func (instance *nodeKeyHeap) Len() int {
 }
 
 func (instance *nodeKeyHeap) Less(leftIndex int, rightIndex int) bool {
-    return instance.items[leftIndex] > instance.items[rightIndex]
+    return closesBefore(instance.creationOrderOf, instance.items[leftIndex], instance.items[rightIndex])
+}
+
+/* closesBefore answers which of two services with no edge between them is torn down first: the one created LATER. Creation order is the only order in this container that carries a causal claim — a service built during the construction of another was needed by it, whether or not the edge was declared, and a logger resolved at boot is beneath everything resolved afterwards. The comparison this replaced was on the node key descending, which is a string comparison nobody wrote and which decided, by nothing but spelling, that a worker named app.worker lost its shutdown records while the same worker renamed zz.worker kept them.
+
+A node with no recorded creation is ordered as if created first, which closes it last: the only nodes without one are those the maps gained outside a creation, and there the key keeps deciding, exactly as before. */
+func closesBefore(creationOrderOf map[string]int, leftNodeKey string, rightNodeKey string) bool {
+    leftOrder := creationOrderOf[leftNodeKey]
+    rightOrder := creationOrderOf[rightNodeKey]
+
+    if leftOrder != rightOrder {
+        return leftOrder > rightOrder
+    }
+
+    return leftNodeKey > rightNodeKey
 }
 
 func (instance *nodeKeyHeap) Swap(leftIndex int, rightIndex int) {
@@ -485,8 +534,7 @@ func pointerKeyOf(value any) (pointerIdentity, bool) {
 
 /* teardownCloseOrder puts a set of created services into the order they have to be closed in: a dependent
 before everything it depends on, so nothing is torn down while something still using it is alive. Ties are
-broken by the node key descending, which is the order both teardowns used before either had a graph, so
-adding an edge never reshuffles the services around it.
+broken by creation order, latest first — see closesBefore for why that and not the node key.
 
 The edges are expected in the same key space as the nodes; an edge naming a node that was not created is
 dropped rather than followed, and a self-edge is ignored. What a cycle leaves behind is returned separately
@@ -498,7 +546,12 @@ request. Two implementations of it would be two chances to order a teardown diff
 func teardownCloseOrder(
     nodeKeys []string,
     edges map[string]map[string]struct{},
+    creationOrderOf map[string]int,
 ) ([]string, []string) {
+    if nil == creationOrderOf {
+        creationOrderOf = map[string]int{}
+    }
+
     adjacency := make(map[string]map[string]struct{}, len(nodeKeys))
     inDegree := make(map[string]int, len(nodeKeys))
 
@@ -543,7 +596,8 @@ func teardownCloseOrder(
     }
 
     availableHeap := &nodeKeyHeap{
-        items: available,
+        items:           available,
+        creationOrderOf: creationOrderOf,
     }
     heap.Init(availableHeap)
 
@@ -580,7 +634,7 @@ func teardownCloseOrder(
     sort.Slice(
         cycleNodeKeys,
         func(leftIndex int, rightIndex int) bool {
-            return cycleNodeKeys[leftIndex] > cycleNodeKeys[rightIndex]
+            return closesBefore(creationOrderOf, cycleNodeKeys[leftIndex], cycleNodeKeys[rightIndex])
         },
     )
 

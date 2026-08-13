@@ -795,3 +795,72 @@ func TestBoot_RegistersTheKernelListenersInEveryProcessShape(t *testing.T) {
         t.Fatal("expected the access-log listener after boot")
     }
 }
+
+/*
+TestCloseAndExitOnFailure_AnAbandonedTeardownExitsNonZero pins the clean
+shutdown against the shield the panic path has had since the exit-step budget
+was installed. The teardown loop is strictly sequential with no budget of its
+own, so one Close that never returns — a pooled connection draining to a peer
+that is gone — parked every service behind it and the process with them, on the
+HEALTHY path, while the panicking one had ten seconds and an escape. A teardown
+that had to be abandoned is not a clean shutdown and does not report one.
+*/
+func TestCloseAndExitOnFailure_AnAbandonedTeardownExitsNonZero(t *testing.T) {
+    originalStep := shieldedCloseStep
+    originalExit := applicationExit
+    defer func() {
+        shieldedCloseStep = originalStep
+        applicationExit = originalExit
+    }()
+
+    stepRan := false
+    shieldedCloseStep = func(stepName string, step func()) bool {
+        stepRan = true
+
+        return false
+    }
+
+    exitCode := 0
+    applicationExit = func(code int) {
+        exitCode = code
+    }
+
+    instance := &Application{}
+    instance.closeAndExitOnFailure()
+
+    if false == stepRan {
+        t.Fatalf("expected the teardown to run through the shield")
+    }
+
+    if 1 != exitCode {
+        t.Fatalf("expected an abandoned teardown to exit non-zero, got %d", exitCode)
+    }
+}
+
+/* a teardown that finished cleanly still exits zero: the shield must not turn every shutdown into a failure */
+func TestCloseAndExitOnFailure_ACompletedTeardownExitsZero(t *testing.T) {
+    originalStep := shieldedCloseStep
+    originalExit := applicationExit
+    defer func() {
+        shieldedCloseStep = originalStep
+        applicationExit = originalExit
+    }()
+
+    shieldedCloseStep = func(stepName string, step func()) bool {
+        step()
+
+        return true
+    }
+
+    exited := false
+    applicationExit = func(code int) {
+        exited = true
+    }
+
+    instance := &Application{}
+    instance.closeAndExitOnFailure()
+
+    if true == exited {
+        t.Fatalf("expected a clean teardown to leave the exit code alone")
+    }
+}

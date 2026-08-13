@@ -102,9 +102,11 @@ func containerNameStore(
 
             containerInstance.instances[serviceName] = value
             containerInstance.builtServiceNames[serviceName] = struct{}{}
+            containerInstance.recordCreationOrderLocked("service:" + serviceName)
 
             if nil != canonicalTargetType {
                 containerInstance.typeInstances[canonicalTargetType] = value
+                containerInstance.recordCreationOrderLocked("type:" + typeIdentityKey(canonicalTargetType))
             }
 
             return value, false, nil
@@ -124,6 +126,7 @@ func containerTypeStore(
             }
 
             containerInstance.typeInstances[canonicalTargetType] = value
+            containerInstance.recordCreationOrderLocked("type:" + typeIdentityKey(canonicalTargetType))
 
             return value, false, nil
         },
@@ -161,7 +164,13 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
     if false == instance.scopeVisible() && "" == parentKey {
         instance.containerInstance.mutex.RLock()
         memoizedValue, memoized := instance.containerInstance.instances[serviceName]
+        teardownFinished := instance.containerInstance.teardownFinished
         instance.containerInstance.mutex.RUnlock()
+
+        /* the fast path answers out of the map, so it is the path that must ask whether the map still means anything: the creation guard below refuses a closed container, but a memoized instance never reaches it, and a resolution performed after the teardown was answered with a closed service and a nil error */
+        if true == teardownFinished {
+            return nil, newContainerClosedError(serviceName)
+        }
 
         if true == memoized {
             return memoizedValue, nil

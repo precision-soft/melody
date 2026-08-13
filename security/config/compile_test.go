@@ -5,6 +5,9 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/exception"
+    exceptioncontract "github.com/precision-soft/melody/exception/contract"
+    httpcontract "github.com/precision-soft/melody/http/contract"
+    runtimecontract "github.com/precision-soft/melody/runtime/contract"
     "github.com/precision-soft/melody/security"
     securitycontract "github.com/precision-soft/melody/security/contract"
 )
@@ -389,4 +392,142 @@ func (instance *nilAnsweringAccessDecisionManager) DecideAny(token securitycontr
 
 func (instance *nilAnsweringAccessDecisionManager) WithRoleHierarchy(roleHierarchy *security.RoleHierarchy) securitycontract.AccessDecisionManager {
     return (*recordingAccessDecisionManager)(nil)
+}
+
+/* compileTypedNilDecisionManager stands in for an integrator's own manager: `var manager *myManager` handed to the setter is the footgun the guard closes */
+type compileTypedNilDecisionManager struct {
+    voters []securitycontract.Voter
+}
+
+func (instance *compileTypedNilDecisionManager) DecideAll(token securitycontract.Token, attributes []string, subject any) error {
+    if 0 == len(instance.voters) {
+        return nil
+    }
+
+    return nil
+}
+
+func (instance *compileTypedNilDecisionManager) DecideAny(token securitycontract.Token, attributes []string, subject any) error {
+    return instance.DecideAll(token, attributes, subject)
+}
+
+type compileTypedNilEntryPoint struct {
+    response httpcontract.Response
+}
+
+func (instance *compileTypedNilEntryPoint) Start(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (httpcontract.Response, error) {
+    return instance.response, nil
+}
+
+type compileTypedNilDeniedHandler struct {
+    response httpcontract.Response
+}
+
+func (instance *compileTypedNilDeniedHandler) Handle(runtimeInstance runtimecontract.Runtime, request httpcontract.Request, decisionErr error) (httpcontract.Response, error) {
+    return instance.response, nil
+}
+
+/*
+TestCompile_RefusesATypedNilOverrideDependency pins the three interfaces the
+override carries and the loop did not judge. A typed nil reads as declared to
+the plain comparison beside it, so the fallback to the global one is skipped,
+the firewall compiles green, the declared role hierarchy is dropped in silence
+— the capability check reads the typed nil correctly and skips the whole block
+— and the first request behind the firewall dereferences a nil receiver. The
+matcher, the token source and the login and logout handlers were already
+refused by name in this same loop; these three were not, and one of them
+decides access.
+*/
+func TestCompile_RefusesATypedNilOverrideDependency(t *testing.T) {
+    var typedNilManager *compileTypedNilDecisionManager
+    var typedNilEntryPoint *compileTypedNilEntryPoint
+    var typedNilDeniedHandler *compileTypedNilDeniedHandler
+
+    for _, testCase := range []struct {
+        name     string
+        override FirewallOverrideConfiguration
+        expected string
+    }{
+        {
+            name:     "access decision manager",
+            override: NewFirewallOverrideConfiguration().WithAccessDecisionManager(typedNilManager),
+            expected: "security firewall access decision manager is a typed nil",
+        },
+        {
+            name:     "entry point",
+            override: NewFirewallOverrideConfiguration().WithEntryPoint(typedNilEntryPoint),
+            expected: "security firewall entry point is a typed nil",
+        },
+        {
+            name:     "access denied handler",
+            override: NewFirewallOverrideConfiguration().WithAccessDeniedHandler(typedNilDeniedHandler),
+            expected: "security firewall access denied handler is a typed nil",
+        },
+    } {
+        builder := NewBuilder()
+
+        builder.AddStatelessFirewall(
+            "api",
+            security.NewPathPrefixMatcher("/api"),
+            nil,
+            &anonymousTokenSource{},
+            testCase.override,
+        )
+
+        _, compileErr := Compile(
+            Configuration{
+                global:    builder.global,
+                firewalls: builder.firewalls,
+            },
+        )
+
+        if nil == compileErr {
+            t.Fatalf("expected the typed nil %s to be refused", testCase.name)
+        }
+
+        if false == strings.Contains(compileErr.Error(), testCase.expected) {
+            t.Fatalf("expected the refusal to name the dependency, got %v", compileErr)
+        }
+
+        provider, isProvider := compileErr.(exceptioncontract.ContextProvider)
+        if false == isProvider {
+            t.Fatalf("expected the refusal to carry its context")
+        }
+
+        if "api" != provider.Context()["firewallName"] {
+            t.Fatalf("expected the refusal to name the firewall, got %v", provider.Context())
+        }
+
+        if string(security.SourceFirewall) != provider.Context()["source"] {
+            t.Fatalf("expected the refusal to name where the typed nil came from, got %v", provider.Context())
+        }
+    }
+}
+
+/* a dependency the configuration simply does not declare is a plain nil and travels: the guard judges the typed nil alone, and a firewall without a denied handler is the ordinary case */
+func TestCompile_AnAbsentDependencyIsNotRefused(t *testing.T) {
+    builder := NewBuilder()
+
+    builder.AddStatelessFirewall(
+        "api",
+        security.NewPathPrefixMatcher("/api"),
+        nil,
+        &anonymousTokenSource{},
+        NewFirewallOverrideConfiguration(),
+    )
+
+    compiled, compileErr := Compile(
+        Configuration{
+            global:    builder.global,
+            firewalls: builder.firewalls,
+        },
+    )
+
+    if nil != compileErr {
+        t.Fatalf("expected an undeclared dependency to compile, got %v", compileErr)
+    }
+
+    if nil == compiled {
+        t.Fatalf("expected a compiled configuration")
+    }
 }

@@ -928,3 +928,45 @@ func TestFirewallOverride_AFirewallThatInheritsNothingAndDeclaresNothingEnforces
         t.Fatalf("expected no rule to match")
     }
 }
+
+/* SetGlobal refuses at the door what Compile refuses at the end: a typed nil declared as the global dependency reads as declared everywhere downstream, and the firewall that inherits it compiles green over a value that dereferences on the first request. A plain nil is the ordinary "not declared" and still travels. */
+func TestBuilder_SetGlobalRefusesATypedNilDependency(t *testing.T) {
+    var typedNilManager *compileTypedNilDecisionManager
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            NewBuilder().SetGlobal(nil, nil, typedNilManager, nil, nil)
+        },
+        "security global access decision manager is a typed nil",
+    )
+
+    var typedNilEntryPoint *compileTypedNilEntryPoint
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            NewBuilder().SetGlobal(nil, nil, nil, typedNilEntryPoint, nil)
+        },
+        "security global entry point is a typed nil",
+    )
+
+    var typedNilDeniedHandler *compileTypedNilDeniedHandler
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            NewBuilder().SetGlobal(nil, nil, nil, nil, typedNilDeniedHandler)
+        },
+        "security global access denied handler is a typed nil",
+    )
+}
+
+/* a global configuration that declares none of the three is the ordinary case and is not refused */
+func TestBuilder_SetGlobalAcceptsUndeclaredDependencies(t *testing.T) {
+    builder := NewBuilder().SetGlobal(security.NewAccessControl(), nil, nil, nil, nil)
+
+    if nil == builder {
+        t.Fatalf("expected the builder back")
+    }
+}

@@ -33,6 +33,8 @@ func newScope(containerInstance *container, plan *scopePlan) containercontract.S
         creatingByName:  make(map[string]*creationState),
         creatingByType:  make(map[string]*creationState),
         dependencyGraph: make(map[string]map[string]struct{}),
+
+        creationOrderByNodeKey: make(map[string]int),
     }
     scopeInstance.container.Store(containerInstance)
 
@@ -62,6 +64,19 @@ type scope struct {
     creatingByName  map[string]*creationState
     creatingByType  map[string]*creationState
     dependencyGraph map[string]map[string]struct{}
+    /* the order in which this scope's teardown nodes came into being, the tie-break the container's teardown uses for the same reason: the two share one walk, and two rules for it would be two chances to order a teardown differently. Written under the scope mutex on the same lines the created maps are written. */
+    creationOrderByNodeKey map[string]int
+    creationOrderCounter   int
+}
+
+/* recordCreationOrderLocked stamps a teardown node the first time it comes into being; the scope mutex is held by every caller */
+func (instance *scope) recordCreationOrderLocked(nodeKey string) {
+    if _, stamped := instance.creationOrderByNodeKey[nodeKey]; true == stamped {
+        return
+    }
+
+    instance.creationOrderCounter = instance.creationOrderCounter + 1
+    instance.creationOrderByNodeKey[nodeKey] = instance.creationOrderCounter
 }
 
 func (instance *scope) Get(serviceName string) (any, error) {
@@ -441,6 +456,7 @@ func (instance *scope) OverrideProtectedInstanceWithOptions(
         }
 
         instance.createdInstances[serviceName] = value
+        instance.recordCreationOrderLocked(scopedNameNodeKey(serviceName))
     }
 
     overriddenTypes := make([]reflect.Type, 0, 1+len(propagatedTypes))
@@ -465,6 +481,7 @@ func (instance *scope) OverrideProtectedInstanceWithOptions(
             }
 
             instance.createdTypeInstances[overriddenType] = value
+            instance.recordCreationOrderLocked(scopedTypeNodeKey(typeIdentityKey(overriddenType)))
             instance.createdAliasNodeKeys[scopedTypeNodeKey(typeIdentityKey(overriddenType))] = scopedNameNodeKey(serviceName)
         }
     }
@@ -528,6 +545,7 @@ func (instance *scope) Close() error {
     createdTypeInstances := instance.createdTypeInstances
     createdAliasNodeKeys := instance.createdAliasNodeKeys
     evictedCreatedInstances := instance.evictedCreatedInstances
+    creationOrderByNodeKey := instance.creationOrderByNodeKey
 
     instance.instances = nil
     instance.typeInstances = nil
@@ -535,23 +553,25 @@ func (instance *scope) Close() error {
     instance.createdTypeInstances = nil
     instance.createdAliasNodeKeys = nil
     instance.evictedCreatedInstances = nil
+    instance.creationOrderByNodeKey = nil
     instance.container.Store(nil)
 
     /* the lock is released before anything is closed, and the scope is already marked closed above: a Close() that reaches back into the scope then reads a closed scope instead of deadlocking on a mutex its own caller holds, which is the ordering the container's own teardown uses */
     instance.mutex.Unlock()
 
-    return closeCreatedScopeInstances(createdInstances, createdTypeInstances, createdAliasNodeKeys, dependencyGraph, evictedCreatedInstances)
+    return closeCreatedScopeInstances(createdInstances, createdTypeInstances, createdAliasNodeKeys, dependencyGraph, evictedCreatedInstances, creationOrderByNodeKey)
 }
 
 /* closeCreatedScopeInstances closes each service the scope built, once. One instance filed under its name and its type is first collapsed onto the name node along the alias links recorded at filing time, with the edges of both nodes merged onto the survivor, so a dependency edge recorded against either alias constrains the one close that happens; whatever identity the links do not cover is still caught by the pointer/value marks at close time. A panicking or failing Close is recorded and the loop carries on, because a request scope closes on the way out of a handler and one bad service must not keep the rest of that request's services alive.
 
-The order is the scope's own dependency graph, dependents before their dependencies: a scoped repository holding a scoped transaction is the ordinary case now that a scope owns registrations, and closing the two by name would be a coin flip. Nodes the graph says nothing about, and nodes left over by a cycle, fall back to the sorted node key descending — stable, and the order this walk used before there was a graph at all. The evicted instances close after the ordered walk, under the same marks. */
+The order is the scope's own dependency graph, dependents before their dependencies: a scoped repository holding a scoped transaction is the ordinary case now that a scope owns registrations, and closing the two by name would be a coin flip. Nodes the graph says nothing about, and nodes left over by a cycle, fall back to creation order, latest first — the same tie-break the container's teardown applies, because the two share one walk. The evicted instances close after the ordered walk, under the same marks. */
 func closeCreatedScopeInstances(
     createdInstances map[string]any,
     createdTypeInstances map[reflect.Type]any,
     createdAliasNodeKeys map[string]string,
     dependencyGraph map[string]map[string]struct{},
     evictedCreatedInstances []any,
+    creationOrderByNodeKey map[string]int,
 ) error {
     type closer interface {
         Close() error
@@ -622,7 +642,22 @@ func closeCreatedScopeInstances(
         }
     }
 
-    closeOrder, cycleNodeKeys := teardownCloseOrder(canonicalNodeKeys, canonicalEdges)
+    /* an alias group is as old as its oldest member, the same rule the container's teardown applies to its own */
+    canonicalCreationOrder := make(map[string]int, len(canonicalNodeKeys))
+
+    for nodeKey, canonicalKey := range representativeOf {
+        nodeOrder, stamped := creationOrderByNodeKey[nodeKey]
+        if false == stamped {
+            continue
+        }
+
+        existingOrder, hasExisting := canonicalCreationOrder[canonicalKey]
+        if false == hasExisting || nodeOrder < existingOrder {
+            canonicalCreationOrder[canonicalKey] = nodeOrder
+        }
+    }
+
+    closeOrder, cycleNodeKeys := teardownCloseOrder(canonicalNodeKeys, canonicalEdges, canonicalCreationOrder)
 
     closedPointers := make(map[pointerIdentity]struct{})
     closedValues := make(map[any]struct{})
@@ -791,9 +826,11 @@ func (instance *scope) storeCreatedInstance(
         }
 
         instance.createdInstances[serviceName] = value
+        instance.recordCreationOrderLocked(scopedNameNodeKey(serviceName))
 
         if nil != canonicalType {
             instance.createdTypeInstances[canonicalType] = value
+            instance.recordCreationOrderLocked(scopedTypeNodeKey(typeIdentityKey(canonicalType)))
             instance.createdAliasNodeKeys[scopedTypeNodeKey(typeIdentityKey(canonicalType))] = scopedNameNodeKey(serviceName)
         }
 
@@ -806,6 +843,7 @@ func (instance *scope) storeCreatedInstance(
         }
 
         instance.createdTypeInstances[canonicalType] = value
+        instance.recordCreationOrderLocked(scopedTypeNodeKey(typeIdentityKey(canonicalType)))
     }
 
     return value, false, nil

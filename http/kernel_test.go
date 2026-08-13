@@ -22,6 +22,7 @@ import (
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
     "github.com/precision-soft/melody/session"
     sessioncontract "github.com/precision-soft/melody/session/contract"
+    "github.com/precision-soft/melody/validation"
 )
 
 func TestKernel_ResponseListenerReplacesResponseOnSuccessPath(t *testing.T) {
@@ -2566,5 +2567,63 @@ func TestKernel_MethodPolicyKeepsTheAutomaticOptionsAnswerByDefault(t *testing.T
 
     if nethttp.StatusNoContent != recorder.Code {
         t.Fatalf("expected the shipped policy to answer OPTIONS with %d, got %d", nethttp.StatusNoContent, recorder.Code)
+    }
+}
+
+type kernelHandlerErrorCaptureLogger struct {
+    loggingcontract.Logger
+    warningMessages []string
+    errorMessages   []string
+}
+
+func (instance *kernelHandlerErrorCaptureLogger) Warning(message string, context loggingcontract.Context) {
+    instance.warningMessages = append(instance.warningMessages, message)
+}
+
+func (instance *kernelHandlerErrorCaptureLogger) Error(message string, context loggingcontract.Context) {
+    instance.errorMessages = append(instance.errorMessages, message)
+}
+
+/*
+TestLogHandlerError_ARuleWiringFaultIsFiledAtError pins the classification on
+the writer that runs FIRST. A validation exception a handler returns is filed
+here and MARKED here, so the exception listener — which carries the same rule
+of its own — only attaches coordinates to it and never reaches its error
+branch. A struct tag naming a rule that does not exist refuses every request
+that route will ever serve, and it sat at warning among the users who mistyped
+their address.
+*/
+func TestLogHandlerError_ARuleWiringFaultIsFiledAtError(t *testing.T) {
+    capture := &kernelHandlerErrorCaptureLogger{Logger: logging.NewNopLogger()}
+
+    httpException := exception.BadRequest("validation failed")
+    httpException.SetContext(map[string]any{
+        "errors": validation.ValidationErrors{
+            validation.NewValidationError("email", "unknown validation rule", validation.ErrorUnknownRule, map[string]any{"rule": "reqiured"}),
+        },
+    })
+
+    logHandlerError(capture, "controller handler error", httpException, httptest.NewRequest("POST", "/api/subscribe", nil))
+
+    if 1 != len(capture.errorMessages) || 0 != len(capture.warningMessages) {
+        t.Fatalf("expected the wiring fault at error, got warnings %v and errors %v", capture.warningMessages, capture.errorMessages)
+    }
+}
+
+/* a deliberate 4xx blaming the submitted VALUE is a refusal and keeps the warning it always had: the classification must separate the declaration from the value, not raise every 4xx */
+func TestLogHandlerError_AGenuineFieldRefusalStaysAtWarning(t *testing.T) {
+    capture := &kernelHandlerErrorCaptureLogger{Logger: logging.NewNopLogger()}
+
+    httpException := exception.BadRequest("validation failed")
+    httpException.SetContext(map[string]any{
+        "errors": validation.ValidationErrors{
+            validation.NewValidationError("email", "this field is required", validation.ConstraintNotBlankErrorIsBlank, nil),
+        },
+    })
+
+    logHandlerError(capture, "controller handler error", httpException, httptest.NewRequest("POST", "/api/subscribe", nil))
+
+    if 1 != len(capture.warningMessages) || 0 != len(capture.errorMessages) {
+        t.Fatalf("expected the field refusal at warning, got warnings %v and errors %v", capture.warningMessages, capture.errorMessages)
     }
 }

@@ -1,6 +1,8 @@
 package config
 
 import (
+    "fmt"
+
     "github.com/precision-soft/melody/exception"
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
     "github.com/precision-soft/melody/internal"
@@ -160,6 +162,11 @@ func (instance *Builder) SetGlobal(
     if true == instance.globalConfigured {
         exception.Panic(exception.NewError("security global configuration may only be defined once", nil, nil))
     }
+
+    /* the three interface dependencies are refused as typed nils here the way the firewall's own are refused below: a plain nil means the global configuration declares none, which is ordinary, while a typed nil means one was declared and holds nothing — and the compile step reads it as declared, skips the fallback, and hands the runtime a value that dereferences on the first request behind the firewall */
+    refuseTypedNilGlobalDependency("access decision manager", accessDecisionManager)
+    refuseTypedNilGlobalDependency("entry point", entryPoint)
+    refuseTypedNilGlobalDependency("access denied handler", accessDeniedHandler)
 
     instance.globalConfigured = true
     instance.global.accessControl = accessControl
@@ -404,6 +411,28 @@ func (instance *Builder) validateFirewall(
             ),
         )
     }
+}
+
+/* refuseTypedNilGlobalDependency refuses at the door what Compile refuses at the end: a dependency the caller declared and that holds a typed nil. A plain nil is the ordinary "not declared" and travels; the typed nil is the one that reads as declared everywhere downstream. */
+func refuseTypedNilGlobalDependency(dependencyName string, dependency any) {
+    if nil == dependency {
+        return
+    }
+
+    if false == internal.IsNilInterface(dependency) {
+        return
+    }
+
+    exception.Panic(
+        exception.NewError(
+            "security global "+dependencyName+" is a typed nil",
+            exceptioncontract.Context{
+                "dependency":     dependencyName,
+                "dependencyType": fmt.Sprintf("%T", dependency),
+            },
+            nil,
+        ),
+    )
 }
 
 func NewFirewallOverrideConfiguration() FirewallOverrideConfiguration {
