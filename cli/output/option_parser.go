@@ -55,7 +55,7 @@ func NormalizeOption(option Option) Option {
     }
 
     /* the json format carries a single machine-readable document, so nothing around it may be colored */
-    if FormatJson == normalized.Format {
+    if true == IsJsonFormat(normalized.Format) {
         normalized.NoColor = true
     }
 

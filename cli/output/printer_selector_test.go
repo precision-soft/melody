@@ -4,11 +4,16 @@ import (
     "testing"
 )
 
-/* @info this is the one place that decides which printer a command's output goes through, and nothing had ever called it: a selector wired to the wrong branch would silently print a table where a script asked for json, which no exit code reports. It normalizes first, so a zero-value option — the shape a command that declares no flags hands it — still reaches a printer rather than nil. */
+/* this is the one place that decides which printer a command's output goes through: a selector wired to the wrong branch would silently print a table where a script asked for json, which no exit code reports. It normalizes first, so a zero-value option — the shape a command that declares no flags hands it — still reaches a printer rather than nil. Both json spellings have to reach it: they differ in whitespace alone, and a format the selector does not recognise falls back to a table. */
 func TestSelectPrinter_TheFormatDecidesThePrinter(t *testing.T) {
     jsonPrinter := SelectPrinter(Option{Format: FormatJson})
     if _, isJson := jsonPrinter.(*JsonPrinter); false == isJson {
         t.Fatalf("expected the json format to select the json printer, got %T", jsonPrinter)
+    }
+
+    prettyPrinter := SelectPrinter(Option{Format: FormatJsonPretty})
+    if _, isJson := prettyPrinter.(*JsonPrinter); false == isJson {
+        t.Fatalf("expected the pretty json format to select the json printer, got %T", prettyPrinter)
     }
 
     tablePrinter := SelectPrinter(Option{Format: FormatTable})
@@ -26,7 +31,7 @@ func TestSelectPrinter_TheFormatDecidesThePrinter(t *testing.T) {
     }
 }
 
-/* @info a caller that names a table width gets a printer bound to it, and one that names none gets the default — the two are different constructors, and a selector that always took the default would make the width flag inert. */
+/* a caller that names a table width gets a printer bound to it, and one that names none gets the default — the two are different constructors, and a selector that always took the default would make the width flag inert. */
 func TestSelectPrinter_ANamedTableWidthReachesThePrinter(t *testing.T) {
     narrow := SelectPrinter(Option{Format: FormatTable, TableMaxWidth: 40})
     wide := SelectPrinter(Option{Format: FormatTable, TableMaxWidth: 200})

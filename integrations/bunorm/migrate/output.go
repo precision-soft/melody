@@ -35,7 +35,7 @@ func newCommandOutput(writer io.Writer, option output.Option) *commandOutput {
 
 /* runnerOptionForCommand derives the per-query printer posture from the command's parsed flags: the command's writer and colour choice in text mode, a discarded writer under json — the document is the only byte the command may emit there. */
 func runnerOptionForCommand(writer io.Writer, option output.Option) RunnerOption {
-    if output.FormatJson == option.Format {
+    if true == output.IsJsonFormat(option.Format) {
         return RunnerOption{Writer: io.Discard, NoColor: true}
     }
 
@@ -43,7 +43,7 @@ func runnerOptionForCommand(writer io.Writer, option output.Option) RunnerOption
 }
 
 func (instance *commandOutput) isJson() bool {
-    return output.FormatJson == instance.option.Format
+    return output.IsJsonFormat(instance.option.Format)
 }
 
 /* wantsDetail decides whether the detail blocks are collected at all, and it is deliberately not the same question as --verbose. Verbosity is a rendering decision about TEXT — the README says so in as many words — while the json document is the machine contract, and shaping it with a display flag left `db:migrate --format=json` answering {"data":{}} for a run that applied five migrations: a pipeline recording what it deployed learned nothing, and the flag its author would have needed is documented as affecting the plain-text output alone. Under json the blocks are always collected; under text --verbose still decides. The cost is one extra query per run — the database identity block — paid only by a run that asked for the machine document. */

@@ -3182,3 +3182,65 @@ func driveOneIdleLoopMinute(t *testing.T, reportIdle bool) (*bytes.Buffer, chan 
 
     return buffer, finished, cancel
 }
+
+/* the arguments field is a list on every row, empty rather than null for the entry that declares none — which is most of them. A field whose json type changes with the outcome cannot be consumed at all: `jq '.data.ran[].arguments | length'` died on the first argument-less job, in the one document of this family that was left unguarded while its siblings — error, ran, failed, pruned — each got a normalizer of their own. */
+func TestRunnerCommand_TheArgumentsFieldIsAListOnEveryRow(t *testing.T) {
+    withArguments := newRecordingCommand("job:with")
+    withoutArguments := newRecordingCommand("job:without")
+
+    configuration := NewConfiguration().
+        Schedule("job:with", &EntryConfig{Schedule: &Schedule{Minute: "0"}, Arguments: []string{"--format=json"}}).
+        Schedule("job:without", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, withArguments, withoutArguments)
+    runner.now = func() time.Time {
+        return time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
+    }
+
+    buffer := &bytes.Buffer{}
+
+    cliCommand := &urfavecli.Command{
+        Name:   runner.Name(),
+        Flags:  runner.Flags(),
+        Writer: buffer,
+        Action: func(ctx context.Context, commandContext *urfavecli.Command) error {
+            return runner.Run(newRunnerTestRuntime(ctx), commandContext)
+        },
+    }
+
+    if runErr := cliCommand.Run(context.Background(), []string{runner.Name(), "--once", "--format=json"}); nil != runErr {
+        t.Fatalf("unexpected error running --once: %v", runErr)
+    }
+
+    document := struct {
+        Data struct {
+            Ran []struct {
+                Command   string    `json:"command"`
+                Arguments *[]string `json:"arguments"`
+            } `json:"ran"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal(buffer.Bytes(), &document); nil != decodeErr {
+        t.Fatalf("expected one json document, got %q: %v", buffer.String(), decodeErr)
+    }
+
+    if 2 != len(document.Data.Ran) {
+        t.Fatalf("expected both dispatched runs in the document, got %v", document.Data.Ran)
+    }
+
+    for _, row := range document.Data.Ran {
+        if nil == row.Arguments {
+            t.Fatalf("%s: expected an array, got a json null in %q", row.Command, buffer.String())
+        }
+    }
+
+    for _, row := range document.Data.Ran {
+        if "job:with" == row.Command && 1 != len(*row.Arguments) {
+            t.Fatalf("expected the declared argument to travel, got %v", *row.Arguments)
+        }
+
+        if "job:without" == row.Command && 0 != len(*row.Arguments) {
+            t.Fatalf("expected an empty list for the entry declaring none, got %v", *row.Arguments)
+        }
+    }
+}

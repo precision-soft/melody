@@ -78,6 +78,8 @@ func TestInMemoryBackend_LruEviction(t *testing.T) {
     _ = backend.Set("a", []byte("a"), 0)
     _ = backend.Set("b", []byte("b"), 0)
 
+    clockInstance.now = clockInstance.now.Add(recencyPromotionInterval)
+
     _, _, _ = backend.Get("a")
 
     _ = backend.Set("c", []byte("c"), 0)
@@ -95,6 +97,73 @@ func TestInMemoryBackend_LruEviction(t *testing.T) {
     _, exists, _ = backend.Get("c")
     if false == exists {
         t.Fatalf("expected c to exist")
+    }
+}
+
+func TestInMemoryBackend_AReadInsideThePromotionIntervalLeavesTheRecencyOrderWhereItWas(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    backend := NewInMemoryBackend(
+        2,
+        time.Hour,
+        clockInstance,
+    )
+    defer backend.Close()
+
+    _ = backend.Set("a", []byte("a"), 0)
+    _ = backend.Set("b", []byte("b"), 0)
+
+    clockInstance.now = clockInstance.now.Add(recencyPromotionInterval - time.Nanosecond)
+
+    _, _, _ = backend.Get("a")
+
+    _ = backend.Set("c", []byte("c"), 0)
+
+    _, exists, _ := backend.Get("a")
+    if true == exists {
+        t.Fatalf("expected the read inside the promotion interval to leave a at the back, so a is the victim")
+    }
+
+    _, exists, _ = backend.Get("b")
+    if false == exists {
+        t.Fatalf("expected b to remain")
+    }
+}
+
+func TestInMemoryBackend_AReadRefreshesTheAccessMarkEvenWithoutAPromotion(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    backend := NewInMemoryBackend(
+        10,
+        time.Hour,
+        clockInstance,
+    )
+    defer backend.Close()
+
+    _ = backend.Set("a", []byte("a"), 0)
+
+    clockInstance.now = clockInstance.now.Add(time.Millisecond)
+
+    _, _, _ = backend.Get("a")
+
+    backend.mutex.RLock()
+    entry := backend.entries["a"]
+    backend.mutex.RUnlock()
+
+    if clockInstance.now.UnixNano() != entry.item.LastAccessedAt().UnixNano() {
+        t.Fatalf(
+            "expected the read to refresh the access mark under the read lock, mark is %s and the read was at %s",
+            entry.item.LastAccessedAt(),
+            clockInstance.now,
+        )
+    }
+
+    if 1 != entry.item.HitCount() {
+        t.Fatalf("expected the read to count the hit, got %d", entry.item.HitCount())
+    }
+
+    if true == entry.isPromotionDue(clockInstance.now) {
+        t.Fatalf("expected no promotion to be due a millisecond after the write")
     }
 }
 

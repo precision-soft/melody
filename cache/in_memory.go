@@ -6,6 +6,7 @@ import (
     "strconv"
     "strings"
     "sync"
+    "sync/atomic"
     "time"
 
     cachecontract "github.com/precision-soft/melody/cache/contract"
@@ -20,10 +21,20 @@ const (
     minInt64 = -maxInt64 - 1
 )
 
+/* lastPromotedAtNano is the mark that keeps the read path off the exclusive lock: it is when this entry was last moved to the front, not when it was last read, and it is atomic because Get reads it while holding the lock in READ mode. Comparing against the last read instead would leave a key read every ten milliseconds forever below the interval and let it drift to the back of the list, which is the opposite of what the recency is for. */
 type lruEntry struct {
-    key         string
-    item        *Item
-    listElement *list.Element
+    key                string
+    item               *Item
+    listElement        *list.Element
+    lastPromotedAtNano atomic.Int64
+}
+
+func (instance *lruEntry) isPromotionDue(now time.Time) bool {
+    return recencyPromotionInterval <= time.Duration(now.UnixNano()-instance.lastPromotedAtNano.Load())
+}
+
+func (instance *lruEntry) markPromoted(now time.Time) {
+    instance.lastPromotedAtNano.Store(now.UnixNano())
 }
 
 /* NewInMemoryBackend builds the framework's in-memory cache backend and starts its cleanup goroutine, which only Close stops — an instance abandoned without Close keeps the goroutine, its ticker and the whole entry map alive for the rest of the process; there is no finalizer fallback. maxItems bounds the entry count: zero disables the bound and a negative value panics, so a bound computed wrong cannot silently disarm eviction. cleanupInterval is how often the sweep collects lapsed entries, defaulting to a minute when non-positive; it is not a lifetime applied to anything. */
@@ -193,13 +204,23 @@ func (instance *InMemoryBackend) Get(key string) ([]byte, bool, error) {
     }
 
     payload := entry.item.Payload()
+
+    /* the access mark is atomic, so the read path refreshes it without ever leaving the read lock */
+    entry.item.Touch(now)
+    promotionDue := entry.isPromotionDue(now)
+
     instance.mutex.RUnlock()
+
+    /* a key promoted recently answers without the exclusive lock at all. Taking it unconditionally made every hit a writer against a lock every other key shares, so a door the RWMutex advertises as a read had no read parallelism whatever; the entry that lapsed between the two sections is left to the sweep, since the reading above already answered it absent. */
+    if false == promotionDue {
+        return payload, true, nil
+    }
 
     instance.mutex.Lock()
     entry, exists = instance.entries[key]
     if true == exists && nil != entry && nil != entry.item {
         if false == instance.isExpiredAt(entry.item, now) {
-            entry.item.Touch(now)
+            entry.markPromoted(now)
             instance.lruList.MoveToFront(entry.listElement)
         } else {
             instance.deleteExpiredLocked(key, now)
@@ -334,6 +355,13 @@ func (instance *InMemoryBackend) Many(keys []string) (map[string][]byte, error) 
         }
 
         result[key] = entry.item.Payload()
+
+        entry.item.Touch(now)
+
+        if false == entry.isPromotionDue(now) {
+            continue
+        }
+
         hits = append(
             hits,
             hit{
@@ -343,6 +371,7 @@ func (instance *InMemoryBackend) Many(keys []string) (map[string][]byte, error) 
     }
     instance.mutex.RUnlock()
 
+    /* only the keys whose place in the list is actually stale reach the exclusive lock, so a batch of hot keys costs the same read lock a single Get costs */
     if 0 == len(hits) {
         return result, nil
     }
@@ -359,7 +388,7 @@ func (instance *InMemoryBackend) Many(keys []string) (map[string][]byte, error) 
             continue
         }
 
-        entry.item.Touch(now)
+        entry.markPromoted(now)
         instance.lruList.MoveToFront(entry.listElement)
     }
     instance.mutex.Unlock()
@@ -570,6 +599,9 @@ const cleanupChunkSize = 1024
 
 const evictionProbeLimit = 8
 
+/* how often one entry is allowed to cost the exclusive lock for its place in the recency list. Between two promotions of the same key the list says that key was read at most this long ago, which is all the eviction needs: the probe picks an expired victim first and falls back to the least recently promoted one, so the ordering only has to be right at a coarser grain than the reads. Every read still refreshes the access mark, which is atomic and costs nothing — what is bounded here is the LIST surgery, and with it the read path's need for the exclusive lock at all. */
+const recencyPromotionInterval = time.Second
+
 /* the sweep takes the keys once and then expires them in chunks, releasing the lock between chunks: Get takes the same exclusive lock to touch the recency list, so a single whole-map pass under one lock stalls every concurrent request for as long as the map is large. A key deleted meanwhile is simply not found. */
 func (instance *InMemoryBackend) cleanupExpired() {
     now := instance.clock.Now()
@@ -674,17 +706,21 @@ func (instance *InMemoryBackend) saveItemLocked(
 
     if true == exists && nil != entry {
         entry.item = item
+        entry.markPromoted(now)
         instance.lruList.MoveToFront(entry.listElement)
         return
     }
 
     element := instance.lruList.PushFront(key)
 
-    instance.entries[key] = &lruEntry{
+    freshEntry := &lruEntry{
         key:         key,
         item:        item,
         listElement: element,
     }
+    freshEntry.markPromoted(now)
+
+    instance.entries[key] = freshEntry
 }
 
 /* the walk toward the front is bounded: it looks for an expired victim before falling back to the least recently used one, and an unbounded search would make every insert into a full cache pay a whole-list scan under the exclusive lock. Expired entries are reclaimed anyway, lazily by the readers and periodically by the sweep. */

@@ -407,7 +407,7 @@ func (instance *RunnerCommand) renderRunReport(
     instance.writeMutex.Lock()
     defer instance.writeMutex.Unlock()
 
-    if output.FormatJson != option.Format {
+    if false == output.IsJsonFormat(option.Format) {
         _, _ = fmt.Fprintf(
             commandContext.Writer,
             "%s  dispatched %d of %d configured entries%s\n",
@@ -546,7 +546,7 @@ func (instance *RunnerCommand) runDue(runtimeInstance runtimecontract.Runtime, a
     return runErr
 }
 
-/* dueRun is one dispatched command inside a minute's document: what ran, under which schedule and argv, the run id its own records carry, how long it took and whether it failed. The error text is empty rather than absent on a run that succeeded, so the field keeps its json type across rows. */
+/* dueRun is one dispatched command inside a minute's document: what ran, under which schedule and argv, the run id its own records carry, how long it took and whether it failed. The error text is empty rather than absent on a run that succeeded and the argument list is empty rather than null for an entry that declares none, so both fields keep their json type across rows. */
 type dueRun struct {
     Command              string   `json:"command"`
     Schedule             string   `json:"schedule"`
@@ -609,7 +609,7 @@ func (instance *RunnerCommand) dispatchDue(
             runs = append(runs, dueRun{
                 Command:              launchedEntry.commandName,
                 Schedule:             launchedEntry.schedule,
-                Arguments:            launchedEntry.arguments,
+                Arguments:            argumentsOrEmpty(launchedEntry.arguments),
                 RunId:                runId,
                 DurationMilliseconds: time.Since(invokedAt).Milliseconds(),
                 Failed:               nil != invokeErr && false == cancelled,
@@ -685,6 +685,15 @@ func (instance *RunnerCommand) dispatchDue(
 
         return report, nil
     }
+}
+
+/* argumentsOrEmpty keeps the document's arguments field a list on every row, empty rather than null for the entry that declares none — which is most of them. It is the same rule errorTextOrEmpty keeps for the error text and failedCommandsOf for the failed list: a field whose json type changes with the outcome cannot be consumed at all, and `jq '.data.ran[].arguments | length'` died on the first row for a job configured without arguments. The empty slice is the document's own, so the configuration it was read from is not touched. */
+func argumentsOrEmpty(arguments []string) []string {
+    if nil == arguments {
+        return []string{}
+    }
+
+    return arguments
 }
 
 /* errorTextOrEmpty keeps the document's error field a string on every row: absent on a run that succeeded means a field whose json type changes with the outcome, which is the shape the machine contracts of this family were taken off. */

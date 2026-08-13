@@ -82,14 +82,19 @@ func (instance *EventCommand) Run(
         if output.FormatTable == option.Format {
             builder := output.NewTableBuilder()
             builder.AddSummaryLine("EVENTS: 0 total")
+            renderDeferredListenerBlock(builder, instance.deferredListeners())
             envelope.Table = builder.Build()
         } else {
-            envelope.Data = output.NewListPayload(
-                []eventListItem{},
-                0,
-                option.Limit,
-                option.Offset,
-            )
+            /* the declaration of what a serving process wires travels on this branch too. It does not come from the dispatcher — the command holds it — so a dispatcher that cannot be inspected costs the listing and nothing else, and "is access control wired?" keeps being answered by a declaration rather than by an absence that means "not in this process". */
+            envelope.Data = eventListPayload{
+                ListPayload: output.NewListPayload(
+                    []eventListItem{},
+                    0,
+                    option.Limit,
+                    option.Offset,
+                ),
+                ServingProcessListeners: instance.deferredListeners(),
+            }
         }
 
         envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
@@ -223,22 +228,7 @@ func (instance *EventCommand) Run(
             }
         }
 
-        deferredListeners := instance.deferredListeners()
-        if 0 < len(deferredListeners) {
-            deferredBlock := builder.AddBlock(
-                "SERVING-PROCESS LISTENERS",
-                []string{"event", "priority", "listener", "note"},
-            )
-
-            for _, deferredListener := range deferredListeners {
-                deferredBlock.AddRow(
-                    deferredListener.EventName,
-                    fmt.Sprintf("%d", deferredListener.Priority),
-                    deferredListener.ListenerName,
-                    deferredListener.Note,
-                )
-            }
-        }
+        renderDeferredListenerBlock(builder, instance.deferredListeners())
 
         envelope.Table = builder.Build()
     } else {
@@ -377,6 +367,27 @@ type eventListVerbosePayload struct {
 type eventListPayload struct {
     output.ListPayload[eventListItem]
     ServingProcessListeners []DeferredListener `json:"servingProcessListeners,omitempty"`
+}
+
+/* renderDeferredListenerBlock is called from both branches, the inspectable dispatcher's and the one that only warns: the declaration is the command's own and does not depend on being able to list anything. */
+func renderDeferredListenerBlock(builder *output.TableBuilder, deferredListeners []DeferredListener) {
+    if 0 == len(deferredListeners) {
+        return
+    }
+
+    deferredBlock := builder.AddBlock(
+        "SERVING-PROCESS LISTENERS",
+        []string{"event", "priority", "listener", "note"},
+    )
+
+    for _, deferredListener := range deferredListeners {
+        deferredBlock.AddRow(
+            deferredListener.EventName,
+            fmt.Sprintf("%d", deferredListener.Priority),
+            deferredListener.ListenerName,
+            deferredListener.Note,
+        )
+    }
 }
 
 func (instance *EventCommand) deferredListeners() []DeferredListener {

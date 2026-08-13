@@ -841,3 +841,61 @@ func TestEventCommand_DescendingOrderReachesTheListenerDetail(t *testing.T) {
         t.Fatalf("expected the dispatch rank to stay ascending inside an event, got %d", decoded.Data.Listeners[0].Order)
     }
 }
+
+/* the declaration of what a serving process wires is the command's own, not the dispatcher's, so a dispatcher that cannot be inspected costs the listing and nothing else. Dropping it there answered "is access control wired?" with an absence, which is the one answer the declaration exists to prevent — and the branch is the likelier one to be read, since a dispatcher that cannot be listed is already a reason to go looking. */
+func TestEventCommand_DispatcherWithoutInspection_StillDeclaresTheServingProcessListeners(t *testing.T) {
+    command := NewEventCommand(func() []DeferredListener {
+        return []DeferredListener{
+            {EventName: "kernel.request", Priority: 50, ListenerName: "security resolution listener", Note: "registered only in the http serving process"},
+        }
+    })
+
+    rendered, runErr := runDebugCommand(
+        command,
+        newRuntimeWithDispatcherWithoutInspection(),
+        []string{"--format=json"},
+    )
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    decoded := struct {
+        Data struct {
+            Items                   []struct{}         `json:"items"`
+            Total                   int                `json:"total"`
+            ServingProcessListeners []DeferredListener `json:"servingProcessListeners"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal([]byte(rendered), &decoded); nil != decodeErr {
+        t.Fatalf("failed to decode the rendered envelope: %v, rendered %q", decodeErr, rendered)
+    }
+
+    if 0 != decoded.Data.Total {
+        t.Fatalf("expected the listing to stay empty beside the warning, got %q", rendered)
+    }
+
+    if 1 != len(decoded.Data.ServingProcessListeners) {
+        t.Fatalf("expected the declaration to survive the branch that cannot list, got %q", rendered)
+    }
+
+    if "security resolution listener" != decoded.Data.ServingProcessListeners[0].ListenerName {
+        t.Fatalf("expected the declared listener, got %#v", decoded.Data.ServingProcessListeners[0])
+    }
+
+    if false == strings.Contains(rendered, "debug.notSupported") {
+        t.Fatalf("expected the warning to stay beside it, got %q", rendered)
+    }
+
+    tableRendered, tableErr := runDebugCommand(
+        command,
+        newRuntimeWithDispatcherWithoutInspection(),
+        []string{},
+    )
+    if nil != tableErr {
+        t.Fatalf("expected no error, got %v", tableErr)
+    }
+
+    if false == strings.Contains(tableRendered, "SERVING-PROCESS LISTENERS") {
+        t.Fatalf("expected the declaration block in the table format too, got %q", tableRendered)
+    }
+}

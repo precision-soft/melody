@@ -871,9 +871,35 @@ func runExampleCommand(major exampleMajor, workspace string, arguments ...string
 
 /* exampleJsonDocument isolates the command's json envelope from the boot log lines printed before it: the
 configuration is logged to stdout before the file logger exists, and those lines are json objects of their own.
-The envelope is pretty printed, so its opening brace is the only line that is exactly "{". */
+Under --format=json the envelope is one line like every log line above it, so what tells them apart is the meta
+key no log record carries; the last such line is the document, since the command writes it after its own boot.
+The brace fallback below reads a --format=json-pretty document, whose opening brace is the only line that is
+exactly "{". */
 func exampleJsonDocument(output string) string {
     lines := strings.Split(output, "\n")
+
+    for index := len(lines) - 1; 0 <= index; index = index - 1 {
+        trimmed := strings.TrimSpace(lines[index])
+        if false == strings.HasPrefix(trimmed, "{") {
+            continue
+        }
+
+        probe := struct {
+            Meta *struct {
+                Command string `json:"command"`
+            } `json:"meta"`
+        }{}
+
+        if decodeErr := json.Unmarshal([]byte(trimmed), &probe); nil != decodeErr {
+            continue
+        }
+
+        if nil == probe.Meta {
+            continue
+        }
+
+        return trimmed
+    }
 
     for index, line := range lines {
         if "{" == strings.TrimSpace(line) {

@@ -54,10 +54,16 @@ func NewFileStorageFromPath(path string) (*FileStorage, error) {
     return storage, nil
 }
 
-/* NewFileStorageFromFile builds the storage over a handle the caller owns and keeps owning: it is not closed here, and every write goes through that same handle rather than through a path. The atomicity its NewFileStorageFromPath sibling guarantees is therefore NOT available to this door — a temp file and a rename would unlink the inode the caller still holds, leaving it writing into a file nothing can reach. What this door guarantees instead: the snapshot is encoded whole before a byte is written, the write precedes the truncation, and the truncation cuts to the length just written, so no crash can leave a zero-length file and lose every persisted session. A kill landing inside the write itself can still leave a torn document, which the next construction reports as a decode failure rather than reading as an empty one. */
+/* NewFileStorageFromFile builds the storage over a handle the caller owns and keeps owning: it is not closed here, and every write goes through that same handle rather than through a path. The atomicity its NewFileStorageFromPath sibling guarantees is therefore NOT available to this door — a temp file and a rename would unlink the inode the caller still holds, leaving it writing into a file nothing can reach. What this door guarantees instead: the snapshot is encoded whole before a byte is written, the write precedes the truncation, and the truncation cuts to the length just written, so no crash can leave a zero-length file and lose every persisted session. A kill landing inside the write itself can still leave a torn document, which the next construction reports as a decode failure rather than reading as an empty one.
+
+The handle must be seekable and must not be opened for appending. Both are refused here rather than at the first save, since both are properties of what the caller opened and neither can improve later: appending in particular used to be accepted and then to corrupt silently, because every write landed after the document it was replacing. */
 func NewFileStorageFromFile(fileInstance *os.File) (*FileStorage, error) {
     if nil == fileInstance {
         return nil, exception.NewError("session storage file is nil", nil, nil)
+    }
+
+    if appendErr := refuseAppendModeHandle(fileInstance); nil != appendErr {
+        return nil, appendErr
     }
 
     decoded, err := readSessionFileFromHandle(fileInstance)
@@ -74,7 +80,7 @@ func NewFileStorageFromFile(fileInstance *os.File) (*FileStorage, error) {
     return storage, nil
 }
 
-/* FileStorage is recommended for development only. One reason is written here because it is invisible until the first redeploy: values are flushed as JSON and reloaded at construction, so a session survives a restart with its SHAPES changed — an int comes back float64, a struct comes back map[string]any, a time.Time comes back a string — while the same session read in-process keeps the types the handler stored. A type assertion on a session value therefore holds for the life of a process and starts failing after the first restart. */
+/* FileStorage is recommended for development only. Two reasons are written here because neither shows until the store has been up for a while. Values are flushed as JSON and reloaded at construction, so a session survives a restart with its SHAPES changed — an int comes back float64, a struct comes back map[string]any, a time.Time comes back a string — while the same session read in-process keeps the types the handler stored: a type assertion on a session value therefore holds for the life of a process and starts failing after the first restart. And every write re-encodes and fsyncs the whole snapshot, so what one save costs is set by how many sessions everyone else has: measured at about 6.7ms over 100 sessions, 9.1ms over 1 000 and 30ms over 10 000, which is a few dozen writes a second rather than a few thousand. */
 type FileStorage struct {
     mutex    sync.Mutex
     path     string
@@ -364,6 +370,22 @@ func writeSessionFileAtomically(path string, snapshot map[string]fileSessionEntr
     return nil
 }
 
+/* refuseAppendModeHandle asks the handle the only question that settles it, and asks it with a write of nothing: WriteAt refuses an appending handle before it looks at the bytes, so an empty slice answers the question and touches no file — a zero-length write on a handle that is not appending returns without reaching the descriptor at all. There is no portable way to read the open flags back otherwise, and os.File itself keeps the answer: it is the same field WriteAt consults on every save, so the door and the write agree by construction rather than by two guesses. */
+func refuseAppendModeHandle(fileInstance *os.File) error {
+    _, err := fileInstance.WriteAt([]byte{}, 0)
+    if nil == err {
+        return nil
+    }
+
+    return exception.NewError(
+        "session storage file is opened for appending",
+        exceptioncontract.Context{
+            "name": fileInstance.Name(),
+        },
+        err,
+    )
+}
+
 func writeSessionFileInPlace(fileInstance *os.File, snapshot map[string]fileSessionEntry) error {
     /* encode into an in-memory buffer first so a failed encode (for example a session value that is not JSON-marshalable) never truncates the live file and destroys the previously-persisted sessions; the file is only seeked, truncated and rewritten once the encode has succeeded, mirroring the validate-before-commit guarantee of writeSessionFileAtomically */
     var buffer bytes.Buffer
@@ -375,13 +397,10 @@ func writeSessionFileInPlace(fileInstance *os.File, snapshot map[string]fileSess
         return exception.NewError("failed to encode session storage file", nil, err)
     }
 
-    _, err = fileInstance.Seek(0, io.SeekStart)
-    if nil != err {
-        return exception.NewError("failed to seek session storage file", nil, err)
-    }
+    /* the write goes first and the truncation cuts to the length it produced, because the reverse order held a window in which the file was empty on disk: a process killed between a truncation to zero and the write that was to follow — an OOM kill, a docker kill, a deploy with no grace period — left a zero-length file, which the next boot reads as "no sessions at all" and answers by logging every user out without a single error. This door writes through a handle it does not own, so the temp-and-rename its FromPath sibling uses is not available to it: a rename would unlink the very inode the caller still holds. What remains is a window in which a torn document can survive a kill mid-write, and that one is written on the contract instead of being made to disappear.
 
-    /* the write goes first and the truncation cuts to the length it produced, because the reverse order held a window in which the file was empty on disk: a process killed between a truncation to zero and the write that was to follow — an OOM kill, a docker kill, a deploy with no grace period — left a zero-length file, which the next boot reads as "no sessions at all" and answers by logging every user out without a single error. This door writes through a handle it does not own, so the temp-and-rename its FromPath sibling uses is not available to it: a rename would unlink the very inode the caller still holds. What remains is a window in which a torn document can survive a kill mid-write, and that one is written on the contract instead of being made to disappear. */
-    _, err = fileInstance.Write(buffer.Bytes())
+    The offset is named on the write rather than sought beforehand, because a seek is advice a handle opened for appending is free to ignore: write(2) on an O_APPEND descriptor lands at the end of the file whatever was sought, so the snapshot went AFTER the previous document and the truncation below then cut the pair to the new length — keeping the old document's first bytes and calling them the session file. WriteAt refuses such a handle by contract instead, so the write either lands at zero or fails, and the failure reaches the caller as one. */
+    _, err = fileInstance.WriteAt(buffer.Bytes(), 0)
     if nil != err {
         return exception.NewError("failed to write session storage file", nil, err)
     }

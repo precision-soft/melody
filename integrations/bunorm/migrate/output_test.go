@@ -382,7 +382,16 @@ func TestCommandOutput_TheAbsentDatabaseIsJsonNull(t *testing.T) {
         t.Fatalf("unexpected error: %v", finishErr)
     }
 
-    if false == strings.Contains(namedBuffer.String(), `"database": "orders"`) {
+    namedDocument := struct {
+        Data struct {
+            Database map[string]any `json:"database"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal(namedBuffer.Bytes(), &namedDocument); nil != decodeErr {
+        t.Fatalf("failed to decode the document: %v, got %q", decodeErr, namedBuffer.String())
+    }
+
+    if "orders" != namedDocument.Data.Database["database"] {
         t.Fatalf("expected the named database in the document, got %q", namedBuffer.String())
     }
 }

@@ -30,7 +30,7 @@ func StandardFlags() []clicontract.Flag {
     return []clicontract.Flag{
         &clicontract.StringFlag{
             Name:  FlagNameFormat,
-            Usage: "output format: table|json",
+            Usage: "output format: table|json|json-pretty (json is one document per line)",
             Value: string(FormatTable),
             Validator: func(value string) error {
                 _, parseErr := parseFormat(value)

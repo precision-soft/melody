@@ -273,9 +273,7 @@ func resolveErrorContextJson(resolveErr error, option output.Option) string {
 
     normalizedContextBytes, normalizeMarshalErr := json.Marshal(redactedContext)
     if nil != normalizeMarshalErr {
-        fallbackString := fmt.Sprintf("%v", redactedContext)
-
-        return truncateErrorContextForFormat(fallbackString, option)
+        return unrepresentableErrorContextForFormat(redactedContext, option)
     }
 
     normalizedContext := (any)(nil)
@@ -290,9 +288,7 @@ func resolveErrorContextJson(resolveErr error, option output.Option) string {
 
     contextJsonBytes, marshalErr := json.Marshal(sanitizedContext)
     if nil != marshalErr {
-        fallbackString := fmt.Sprintf("%v", sanitizedContext)
-
-        return truncateErrorContextForFormat(fallbackString, option)
+        return unrepresentableErrorContextForFormat(sanitizedContext, option)
     }
 
     return truncateErrorContextForFormat(string(contextJsonBytes), option)
@@ -305,6 +301,26 @@ func emptyErrorContextJsonForFormat(option output.Option) string {
     }
 
     return "{}"
+}
+
+/* unrepresentableErrorContextForFormat answers a context json.Marshal refuses — a chan, a func, a complex, a MarshalJSON that fails — in the grammar of the format asking, the same split emptyErrorContextJsonForFormat makes. The sanitizing walk passes an unrecognised scalar through untouched, so this is reachable from any provider that puts one in a context, and the %v rendering it used to answer is Go syntax: `"errorContextJson": "map[listener:0x5f8e40]"`, on which the `.errorContextJson | fromjson` this line documents dies for that row alone. Wrapping it in an object keeps the field parseable on every row and keeps the rendering, which names the culprit, under a key that says what it is. The table keeps the bare rendering, where a person reads the value rather than parses it. */
+func unrepresentableErrorContextForFormat(contextValue any, option output.Option) string {
+    rendered := fmt.Sprintf("%v", contextValue)
+
+    if output.FormatTable == option.Format {
+        return truncateErrorContextForFormat(rendered, option)
+    }
+
+    rawBytes, marshalErr := json.Marshal(
+        map[string]string{
+            "raw": rendered,
+        },
+    )
+    if nil != marshalErr {
+        return emptyErrorContextJsonForFormat(option)
+    }
+
+    return string(rawBytes)
 }
 
 /* normalizeErrorCauseChain answers an empty list rather than a nil one, so the field stays an array in every row of one document — `jq '.data.items[].errorCauseChain[]'` used to die with "Cannot iterate over null" at the first service that resolved. It is the convention the envelope factory already applies to Warnings. The table renders both spellings identically. */

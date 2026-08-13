@@ -640,3 +640,79 @@ func TestRouterCommand_KeepsTheDocumentWhenAnAttributeCannotBeSerialized(t *test
         t.Fatalf("expected the serializable boolean to keep its type, got %#v", attributes["requiresLogin"])
     }
 }
+
+/* a self-referential attribute reaches json.Marshal, which answers a cycle error, which used to route the value into the %v fallback — and fmt has no cycle detection, so the command died of a stack overflow no recover in the command layer turns into a reported failure. The walk that command_container.go already carries replaces the cycle with its marker, and the report survives. */
+func TestRouterCommand_ACyclicAttributeIsRenderedAsAMarkerRatherThanKillingTheProcess(t *testing.T) {
+    cyclicAttribute := map[string]any{"name": "self-referential"}
+    cyclicAttribute["self"] = cyclicAttribute
+
+    router := http.NewRouter()
+    router.HandleWithOptions(
+        "/probe",
+        func(
+            runtimeInstance runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            return nil, nil
+        },
+        http.NewRouteOptions(
+            "probe.route",
+            []string{nethttp.MethodGet},
+            "",
+            nil,
+            nil,
+            nil,
+            nil,
+            0,
+            map[string]any{
+                "meta": cyclicAttribute,
+            },
+        ),
+    )
+
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(
+        http.ServiceRouter,
+        func(resolver containercontract.Resolver) (httpcontract.Router, error) {
+            return router, nil
+        },
+    )
+
+    rendered, runErr := runDebugCommand(
+        &RouterCommand{},
+        newTestRuntime(serviceContainer),
+        []string{"--format=json"},
+    )
+    if nil != runErr {
+        t.Fatalf("expected the document to be produced, got %v", runErr)
+    }
+
+    decoded := struct {
+        Data struct {
+            Items []struct {
+                Attributes map[string]any `json:"attributes"`
+            } `json:"items"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal([]byte(rendered), &decoded); nil != decodeErr {
+        t.Fatalf("failed to decode the rendered envelope: %v, rendered %q", decodeErr, rendered)
+    }
+
+    if 1 != len(decoded.Data.Items) {
+        t.Fatalf("expected the one route, got %d in %q", len(decoded.Data.Items), rendered)
+    }
+
+    meta, metaIsMap := decoded.Data.Items[0].Attributes["meta"].(map[string]any)
+    if false == metaIsMap {
+        t.Fatalf("expected the cyclic attribute to stay a map, got %#v", decoded.Data.Items[0].Attributes["meta"])
+    }
+
+    if "self-referential" != meta["name"] {
+        t.Fatalf("expected the rest of the attribute to survive the walk, got %#v", meta)
+    }
+
+    if errorContextCycleMarker != meta["self"] {
+        t.Fatalf("expected the cycle to be rendered as %q, got %#v", errorContextCycleMarker, meta["self"])
+    }
+}

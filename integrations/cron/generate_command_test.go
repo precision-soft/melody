@@ -2476,7 +2476,16 @@ func TestGenerateCommand_JsonReportsTheFailureAndWhatWasAlreadyWritten(t *testin
         t.Fatalf("expected the successful run to stay successful, got %v", successErr)
     }
 
-    if false == strings.Contains(successStdout, `"error": null`) {
+    successDocument := struct {
+        Error *struct {
+            Code string `json:"code"`
+        } `json:"error"`
+    }{}
+    if decodeErr := json.Unmarshal([]byte(successStdout), &successDocument); nil != decodeErr {
+        t.Fatalf("failed to decode the document: %v, got %q", decodeErr, successStdout)
+    }
+
+    if nil != successDocument.Error {
         t.Fatalf("expected no error on a successful run, got %q", successStdout)
     }
 }

@@ -96,7 +96,7 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
                     output.ParseOptionFromCommand(commandContext),
                 )
 
-                if output.FormatJson == resolvedOption.Format {
+                if true == output.IsJsonFormat(resolvedOption.Format) {
                     writer = io.Discard
                 }
 

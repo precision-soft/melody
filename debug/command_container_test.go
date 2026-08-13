@@ -993,7 +993,16 @@ func TestContainerCommand_SingleScopedServiceResolvesThroughTheRunScope(t *testi
         t.Fatalf("expected the scoped service to resolve, got %q", rendered)
     }
 
-    if false == strings.Contains(rendered, "\"lifetime\": \"scoped\"") {
+    scopedDecoded := struct {
+        Data struct {
+            Lifetime string `json:"lifetime"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal([]byte(rendered), &scopedDecoded); nil != decodeErr {
+        t.Fatalf("failed to decode the rendered envelope: %v, rendered %q", decodeErr, rendered)
+    }
+
+    if "scoped" != scopedDecoded.Data.Lifetime {
         t.Fatalf("expected the scoped lifetime in the details, got %q", rendered)
     }
 }
@@ -1252,7 +1261,22 @@ func TestContainerCommand_JsonItemFieldsKeepOneTypeAcrossRows(t *testing.T) {
         []string{"--format=json", "--build"},
     )
 
-    if false == strings.Contains(plainJsonRendered, `"errorContextJson": "{}"`) {
+    plainJsonDecoded := struct {
+        Data struct {
+            Items []struct {
+                ErrorContextJson *string `json:"errorContextJson"`
+            } `json:"items"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal([]byte(plainJsonRendered), &plainJsonDecoded); nil != decodeErr {
+        t.Fatalf("failed to decode the rendered envelope: %v, rendered %q", decodeErr, plainJsonRendered)
+    }
+
+    if 1 != len(plainJsonDecoded.Data.Items) {
+        t.Fatalf("expected the failing service in the document, got %d in %q", len(plainJsonDecoded.Data.Items), plainJsonRendered)
+    }
+
+    if nil == plainJsonDecoded.Data.Items[0].ErrorContextJson || "{}" != *plainJsonDecoded.Data.Items[0].ErrorContextJson {
         t.Fatalf("expected the json document to answer an empty context object, got %q", plainJsonRendered)
     }
 
@@ -1270,5 +1294,43 @@ func TestContainerCommand_JsonItemFieldsKeepOneTypeAcrossRows(t *testing.T) {
 
     if 1 != len(plainDecoded.Data.Items) || nil == plainDecoded.Data.Items[0].ErrorCauseChain {
         t.Fatalf("expected an array on a failure carrying no causes, got %q", plainJsonRendered)
+    }
+}
+
+/* the sanitizing walk passes an unrecognised scalar through untouched, so a context carrying a chan, a func or a complex reaches json.Marshal and is refused there. The field is documented as parseable json on every row — `.errorContextJson | fromjson` — and the %v rendering it used to answer is Go syntax, which parses nowhere. */
+func TestResolveErrorContextJson_AContextTheEncoderRefusesStaysParseableJson(t *testing.T) {
+    resolveErr := exception.NewError(
+        "boot failed",
+        exceptioncontract.Context{
+            "listener": make(chan struct{}),
+        },
+        errors.New("connection refused"),
+    )
+
+    jsonOption := output.Option{Format: output.FormatJson}
+
+    rendered := resolveErrorContextJson(resolveErr, jsonOption)
+
+    parsed := map[string]any{}
+    if parseErr := json.Unmarshal([]byte(rendered), &parsed); nil != parseErr {
+        t.Fatalf("expected a parseable context document, got %q: %v", rendered, parseErr)
+    }
+
+    raw, hasRaw := parsed["raw"].(string)
+    if false == hasRaw {
+        t.Fatalf("expected the rendering to travel under a key that says what it is, got %q", rendered)
+    }
+
+    if false == strings.Contains(raw, "listener") {
+        t.Fatalf("expected the rendering to name the culprit, got %q", rendered)
+    }
+
+    /* the table reads the value rather than parsing it, so it keeps the bare rendering */
+    tableRendered := resolveErrorContextJson(resolveErr, output.Option{Format: output.FormatTable, TableMaxWidth: 400})
+    if true == strings.HasPrefix(tableRendered, "{\"raw\"") {
+        t.Fatalf("expected the table to keep the bare rendering, got %q", tableRendered)
+    }
+    if false == strings.Contains(tableRendered, "listener") {
+        t.Fatalf("expected the table rendering to name the culprit, got %q", tableRendered)
     }
 }

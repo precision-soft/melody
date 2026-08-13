@@ -15,6 +15,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- the json envelope is one line, following the framework's printer: `db:status --format=json` and its siblings render a single closed document per run rather than an indented block, and `--format=json-pretty` renders the same document indented for reading by hand. Nothing that decodes the document is affected
+
 - README — the flags section no longer claims `--format=json` is unimplemented: under it every command accumulates its output and renders the one machine-readable json envelope, failure included
 - the commands no longer pre-print the failure they return: the cli runner's `[error]` line and the full log record already report it, and the third copy of the same message on the same console said nothing new. The deliberate exception stays — an unlock failure beside a failed migration is still printed, because the return keeps the migration's error and would lose it
 

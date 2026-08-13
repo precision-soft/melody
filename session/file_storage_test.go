@@ -782,6 +782,83 @@ func TestNewFileStorageFromFile_RefusesAHandleThatCannotBeSeeked(t *testing.T) {
     }
 }
 
+/* an appending handle ignores every seek, so each snapshot landed after the document it was replacing and the truncation then cut the pair to the new length. Refusing it at construction is the only place the operator can still be told: the saves that follow report success. */
+func TestNewFileStorageFromFile_RefusesAHandleOpenedForAppending(t *testing.T) {
+    directory := t.TempDir()
+    path := filepath.Join(directory, "session.json")
+
+    if writeErr := os.WriteFile(path, []byte("{}"), 0644); nil != writeErr {
+        t.Fatalf("unexpected error seeding the storage file: %s", writeErr.Error())
+    }
+
+    fileInstance, openErr := os.OpenFile(path, os.O_RDWR|os.O_APPEND, 0644)
+    if nil != openErr {
+        t.Fatalf("unexpected open error: %s", openErr.Error())
+    }
+
+    defer func() {
+        _ = fileInstance.Close()
+    }()
+
+    storage, storageErr := NewFileStorageFromFile(fileInstance)
+    if nil == storageErr {
+        t.Fatalf("expected an appending handle to be refused")
+    }
+
+    if nil != storage {
+        t.Fatalf("expected no storage over an appending handle")
+    }
+
+    if "session storage file is opened for appending" != storageErr.Error() {
+        t.Fatalf("expected the append refusal, got %q", storageErr.Error())
+    }
+}
+
+/* the refusal above is a door, not the guarantee: the write itself names its offset, so even a handle that reached the storage another way cannot land a snapshot at the end of the file. */
+func TestFileStorage_InPlaceWrite_RefusesToLandAnywhereButTheStartOfTheFile(t *testing.T) {
+    directory := t.TempDir()
+    path := filepath.Join(directory, "session.json")
+
+    if writeErr := os.WriteFile(path, []byte("{}"), 0644); nil != writeErr {
+        t.Fatalf("unexpected error seeding the storage file: %s", writeErr.Error())
+    }
+
+    fileInstance, openErr := os.OpenFile(path, os.O_RDWR|os.O_APPEND, 0644)
+    if nil != openErr {
+        t.Fatalf("unexpected open error: %s", openErr.Error())
+    }
+
+    defer func() {
+        _ = fileInstance.Close()
+    }()
+
+    writeErr := writeSessionFileInPlace(
+        fileInstance,
+        map[string]fileSessionEntry{
+            "session-1": {
+                Data:      map[string]any{"userId": 1},
+                ExpiresAt: 0,
+            },
+        },
+    )
+    if nil == writeErr {
+        t.Fatalf("expected the in-place write to refuse an appending handle")
+    }
+
+    if "failed to write session storage file" != writeErr.Error() {
+        t.Fatalf("expected the write refusal, got %q", writeErr.Error())
+    }
+
+    content, readErr := os.ReadFile(path)
+    if nil != readErr {
+        t.Fatalf("unexpected read error: %s", readErr.Error())
+    }
+
+    if "{}" != string(content) {
+        t.Fatalf("expected the refused write to leave the document untouched, got %q", string(content))
+    }
+}
+
 /* a snapshot file whose content is not the map the storage wrote is refused at construction: decoding it into a zero-value map would present an empty session store as a healthy one and silently log every user out, and the next write would overwrite whatever was really there. */
 func TestNewFileStorageFromPath_RefusesAFileThatIsNotASnapshot(t *testing.T) {
     directory := t.TempDir()

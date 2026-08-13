@@ -554,7 +554,7 @@ func (instance *GenerateCommand) reportWrites(
     emptyMessage string,
     runErr error,
 ) error {
-    if output.FormatJson == option.Format {
+    if true == output.IsJsonFormat(option.Format) {
         meta := output.NewMeta(instance.Name(), nil, option, startedAt, time.Since(startedAt), output.Version{})
         envelope := output.NewEnvelope(meta)
 

@@ -1564,7 +1564,7 @@ func TestExecuteRememberInFlightLeader_APanickingCacheAccessKeepsItsCauseAndItsS
         },
     )
 
-    _, waitErr := call.Wait(5*time.Second, "report:daily")
+    _, waitErr := call.Wait(context.Background(), 5*time.Second, "report:daily")
     if nil == waitErr {
         t.Fatal("expected the cache-side panic to surface as an error")
     }
@@ -1598,4 +1598,159 @@ type panickingRememberCache struct {
 
 func (instance *panickingRememberCache) Get(key string) (any, bool, error) {
     panic(instance.panicValue)
+}
+
+func TestRemember_ACanceledCallerContextEndsThatWaitAndLeavesTheFlightForTheOthers(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    backend := NewInMemoryBackend(
+        100,
+        time.Hour,
+        clockInstance,
+    )
+    defer backend.Close()
+
+    cacheManager := NewManager(backend, NewJsonSerializer())
+
+    releaseCallbackChannel := make(chan struct{})
+    callbackEnteredChannel := make(chan struct{})
+
+    var callbackCalls int64
+    callback := func(ctx context.Context) (any, error) {
+        atomic.AddInt64(&callbackCalls, 1)
+        close(callbackEnteredChannel)
+        <-releaseCallbackChannel
+        return "value", nil
+    }
+
+    leaderErrorChannel := make(chan error, 1)
+    go func() {
+        _, err := Remember(
+            cacheManager,
+            "report.daily",
+            time.Minute,
+            callback,
+            NewDefaultRememberOption(),
+        )
+        leaderErrorChannel <- err
+    }()
+
+    <-callbackEnteredChannel
+
+    abandonedContext, cancelAbandoned := context.WithCancel(context.Background())
+
+    abandonedErrorChannel := make(chan error, 1)
+    go func() {
+        _, err := Remember(
+            cacheManager,
+            "report.daily",
+            time.Minute,
+            callback,
+            NewDefaultRememberOption().WithContext(abandonedContext),
+        )
+        abandonedErrorChannel <- err
+    }()
+
+    /* the abandoned caller has to be parked on the flight before its context goes, or the cancellation would prove nothing about the wait */
+    time.Sleep(50 * time.Millisecond)
+
+    cancelAbandoned()
+
+    select {
+    case abandonedErr := <-abandonedErrorChannel:
+        if nil == abandonedErr {
+            t.Fatal("expected the abandoned caller to end with an error")
+        }
+        if false == errors.Is(abandonedErr, context.Canceled) {
+            t.Fatalf("expected context.Canceled as the cause, got %v", abandonedErr)
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatal("the abandoned caller stayed parked after its context was canceled")
+    }
+
+    select {
+    case leaderErr := <-leaderErrorChannel:
+        t.Fatalf("the leader answered while its callback was still running: %v", leaderErr)
+    default:
+    }
+
+    close(releaseCallbackChannel)
+
+    select {
+    case leaderErr := <-leaderErrorChannel:
+        if nil != leaderErr {
+            t.Fatalf("the leader was poisoned by the caller that left: %v", leaderErr)
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatal("the leader never answered")
+    }
+
+    if 1 != atomic.LoadInt64(&callbackCalls) {
+        t.Fatalf("expected the callback to run once for the whole flight, ran %d times", atomic.LoadInt64(&callbackCalls))
+    }
+}
+
+func TestRememberOption_ContextAnswersBackgroundUntilOneIsGiven(t *testing.T) {
+    if context.Background() != NewDefaultRememberOption().Context() {
+        t.Fatal("expected the constructor default to answer the background context")
+    }
+
+    if context.Background() != (&RememberOption{}).Context() {
+        t.Fatal("expected the zero value to answer the background context")
+    }
+
+    callerContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    option := (&RememberOption{}).WithContext(callerContext)
+
+    if callerContext != option.Context() {
+        t.Fatal("expected the option to answer the context it was given")
+    }
+
+    if false == option.EnableStampedeProtection() {
+        t.Fatal("expected a setter on the zero value to start from the constructor defaults")
+    }
+
+    if -1 != option.WaitTimeout() {
+        t.Fatalf("expected the default wait to survive the context setter, got %s", option.WaitTimeout())
+    }
+}
+
+func TestRemember_WithoutStampedeProtectionTheCallbackRunsUnderTheCallerContext(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    backend := NewInMemoryBackend(
+        10,
+        time.Hour,
+        clockInstance,
+    )
+    defer backend.Close()
+
+    cacheManager := NewManager(backend, NewJsonSerializer())
+
+    callerContext, cancelCaller := context.WithCancel(context.Background())
+
+    var observedContextError error
+
+    _, rememberErr := Remember(
+        cacheManager,
+        "report.uncoalesced",
+        time.Minute,
+        func(ctx context.Context) (any, error) {
+            cancelCaller()
+            observedContextError = ctx.Err()
+            return "value", nil
+        },
+        NewDefaultRememberOption().
+            WithStampedeProtectionEnabled(false).
+            WithContext(callerContext),
+    )
+    if nil != rememberErr {
+        t.Fatalf("remember error: %v", rememberErr)
+    }
+
+    if false == errors.Is(observedContextError, context.Canceled) {
+        t.Fatalf("expected the uncoalesced callback to run under the caller context, saw %v", observedContextError)
+    }
 }
