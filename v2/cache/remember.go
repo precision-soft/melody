@@ -52,7 +52,7 @@ func (instance *RememberOption) WithCancelable(isCancelable bool) *RememberOptio
     return instance
 }
 
-/* Remember answers the cached value, computing it through the callback on a miss and storing it. The computed value is run through the backend's stored shape before it is returned, so the miss answers exactly what every later hit answers — a callback's int comes back a float64 and its struct a map, and this makes that true from the first call rather than only from the second. The cost is that the round-trip is uniform: with the default JSON serializer an integer beyond 2^53 comes back changed on the computing call as well, not only on the cached reads. Where a cached value carries an integer that large, carry a version inside it or key it so it never decodes through JSON; a serializer that preserves integers is an opt-in planned for the major still under development. */
+/* Remember answers the cached value, computing it through the callback on a miss and storing it. The computed value is run through the backend's stored shape before it is returned, so the miss answers exactly what every later hit answers — a callback's int comes back a float64 and its struct a map, and this makes that true from the first call rather than only from the second. The cost is that the round-trip is uniform: with the default JSON serializer an integer beyond 2^53 comes back changed on the computing call as well, not only on the cached reads. Where a cached value carries an integer that large, carry a version inside it or key it so it never decodes through JSON; the major still under development fixes this in its default serializer. */
 func Remember(
     cacheInstance cachecontract.Cache,
     key string,
