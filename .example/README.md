@@ -165,6 +165,22 @@ Once started, open the application in your browser:
 
 - http://localhost:8080
 
+### Frontend bundle
+
+The pages are server-rendered HTML driven by a small TypeScript bundle: every link, form action and `fetch` target is built from a **route name** rather than a hardcoded path, against the manifest the application injects into each page as `window.melodyRoutes` (assembled in [`url/route_registry.go`](./url/route_registry.go)).
+
+The bundle is **generated, not committed** — its source lives in [`assets/`](./assets/) and the built file is git-ignored. Build it once before opening the application in a browser:
+
+```bash
+cd .example/assets
+npm ci
+npm run build      # assets/app.ts -> public/assets/app.js
+```
+
+Without this step the pages still load and every JSON endpoint still answers, but `public/assets/app.js` is a 404 and the browser interface does nothing: logging in, listing, editing and deleting all go through `window.melodyExample.*`, which the bundle is what installs.
+
+While iterating on the TypeScript, `npm run build:watch` rebuilds on save, and `npm run typecheck` runs `tsc --noEmit` over the sources.
+
 ### CLI mode
 
 The example also wires CLI commands. List them:
@@ -257,6 +273,8 @@ They are controlled independently via build tags.
 
 Depending on how you build the binary, you must ship different artifacts.
 
+> **Build the frontend bundle first.** `public/assets/app.js` is generated from [`assets/`](./assets/) and is not committed, so it exists only after `cd assets && npm ci && npm run build`. Under `melody_static_embedded` the `public/` directory is frozen into the binary at compile time (`//go:embed all:public`), so a binary built before that step carries no bundle and cannot gain one afterwards. The shared icons — `favicon.ico`, `assets/favicon.svg`, `assets/logo.png`, `assets/apple-touch-icon.png` — **are** committed and need no build step.
+
 ### A) Fully embedded “black-box” binary (recommended for a self-contained handout)
 
 Build:
@@ -271,7 +289,7 @@ Ship:
 
 Required at runtime:
 
-- nothing else
+- nothing else — the binary carries every `.env` file and every asset that was in `public/` **at build time**, the committed icons included
 
 ---
 

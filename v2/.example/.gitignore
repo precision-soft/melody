@@ -7,13 +7,13 @@
 /melody_melody_env_embedded_melody_static_embedded
 /melody_melody_static_embedded
 
-# shared assets (single source: <root>/.assets) synced into public/ at container startup
-/public/favicon.ico
-/public/assets/favicon.svg
-/public/assets/logo.png
-/public/assets/apple-touch-icon.png
+# the shared icons (favicon.ico, assets/favicon.svg, assets/logo.png, assets/apple-touch-icon.png) are
+# COMMITTED, so a fresh clone serves them without any prior step; <root>/.assets stays their single
+# source and the container entrypoint refreshes the committed copies from it at startup, which is a
+# no-op while they match
 
-# generated frontend bundle (esbuild: assets/app.ts -> public/assets/app.js)
+# generated frontend bundle (esbuild: assets/app.ts -> public/assets/app.js); build it with
+# `cd assets && npm ci && npm run build` before running or embedding the application
 /public/assets/app.js
 
 /.example

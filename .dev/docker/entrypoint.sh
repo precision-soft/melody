@@ -11,8 +11,9 @@ mkdir -p /go/pkg/mod
 mkdir -p /go/cache/go-build
 touch ${HOME}/.bash_history
 
-# sync shared assets (logo/favicon) into the example apps so they have a single
-# source of truth in .assets (the example copies are git-ignored and generated here)
+# refresh the shared icons (logo/favicon) in the example apps from their single source in .assets.
+# The example copies are COMMITTED, so a fresh clone serves them with no prior step; this pass only
+# carries a change made in .assets across to the three examples, and is a no-op while they match
 ASSETS_DIR="${WORKDIR}.assets"
 if [[ -d "${ASSETS_DIR}" ]]; then
     for EXAMPLE in "${WORKDIR}.example" "${WORKDIR}v2/.example" "${WORKDIR}v3/.example"; do
@@ -38,8 +39,12 @@ fi
 cd "${EXAMPLE_DIR}"
 
 # build the example frontend bundle (TypeScript -> public/assets/app.js) so the
-# example is functional in the browser on startup and picks up local .ts edits;
-# the committed bundle stays as the fallback if the build cannot run.
+# example is functional in the browser on startup and picks up local .ts edits.
+# The bundle is NOT committed — it is generated from assets/app.ts and git-ignored — so a build that
+# cannot run leaves no app.js at all: the pages load and every interaction through
+# window.melodyExample.* is dead until `cd assets && npm ci && npm run build` succeeds.
+# Which example this builds is decided by MELODY_DEV_EXAMPLE_DIR, so each of the three supervised
+# services (dev-v1, dev-v2, dev) builds its own major's bundle.
 if [[ -f "assets/package.json" ]] && command -v npm >/dev/null 2>&1; then
     echo "[melody-dev] building example frontend bundle"
     (
@@ -47,7 +52,7 @@ if [[ -f "assets/package.json" ]] && command -v npm >/dev/null 2>&1; then
         [[ -d node_modules ]] || npm ci --no-audit --no-fund
         npm run build
     ) && echo "[melody-dev] frontend bundle built" \
-        || echo "[melody-dev] frontend bundle build failed; serving the committed bundle"
+        || echo "[melody-dev] frontend bundle build FAILED; public/assets/app.js is absent and the browser interface will not work"
 
     # hot-reload the frontend bundle by polling the .ts sources: this host's bind
     # mount does not propagate inotify events into the container (so esbuild --watch

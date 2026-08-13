@@ -189,6 +189,17 @@ func prepareExampleWorkspace(major exampleMajor, workspace string) {
         fail("[%s] example application: write the workspace .env: %v", major.label, writeErr)
     }
 
+    /* the frontend bundle is generated from assets/app.ts and git-ignored, so it is in the tree only after a
+       build has run — the container entrypoint runs one per major at startup. Its absence is caught HERE, where
+       the cause can be named, instead of downstream as a bare 404 on /assets/app.js that reads like a routing
+       or static-surface fault. */
+    if _, statErr := os.Stat(filepath.Join(directory, "assets", "package.json")); nil == statErr {
+        bundlePath := filepath.Join(directory, "public", "assets", "app.js")
+        if _, bundleErr := os.Stat(bundlePath); nil != bundleErr {
+            fail("[%s] example application: %s has a frontend source in assets/ but no built bundle at public/assets/app.js — build it with `cd %s/assets && npm ci && npm run build` (the container entrypoint does this per major at startup): %v", major.label, major.relativeDirectory, major.relativeDirectory, bundleErr)
+        }
+    }
+
     if copyErr := os.CopyFS(filepath.Join(workspace, "public"), os.DirFS(filepath.Join(directory, "public"))); nil != copyErr {
         fail("[%s] example application: copy the public directory: %v", major.label, copyErr)
     }
@@ -465,12 +476,26 @@ const (
     exampleUserRoute          = "/categories/api/read/"
     exampleAdminRoute         = "/users/api/read/"
     exampleStaticAsset        = "/assets/app.css"
+    exampleFrontendBundle     = "/assets/app.js"
 )
+
+/* the icons every page links in its head. They are COMMITTED in each example's public/ — <root>/.assets is
+their single source and the container entrypoint refreshes them from it — so a checkout serves them with no
+prior step, and that is exactly what these assertions defend: they used to be git-ignored and produced only by
+the entrypoint, which made a build from a clean clone answer 404 for all four while the packaging matrix
+promised a binary requiring "nothing else" at runtime. */
+var exampleCommittedIconList = []string{
+    "/favicon.ico",
+    "/assets/favicon.svg",
+    "/assets/logo.png",
+    "/assets/apple-touch-icon.png",
+}
 
 func runExampleHttpAssertions(major exampleMajor, application *exampleApplication, redisAddress string, mysqlDsn string) {
     client := newExampleClient(major)
 
     assertExamplePublicRoutes(major, client)
+    assertExampleBrowserAssets(major, client)
     assertExampleAnonymousRejection(major, client)
     assertExampleLoginFlow(major, client)
     assertExampleStaticTraversal(major, client)
@@ -593,6 +618,62 @@ func assertExampleLoginFlow(major exampleMajor, client *exampleClient) {
         )
     }
     pass("[%s] the admin route answered 403 to the authenticated non-admin session", major.label)
+}
+
+/* assertExampleBrowserAssets asserts the two halves of what a browser needs before any of the example's pages
+does anything at all, and it asserts them on CONTENT rather than on the status code: a static surface answers 200
+for a file that is present and empty just as readily as for one that is whole.
+
+The first half is the icons every page links, which are committed and therefore owed by a bare checkout.
+
+The second is the frontend bundle. It is generated from assets/app.ts and deliberately NOT committed, so this is
+the one assertion here that depends on a build having run — the container entrypoint builds it per major, driven
+by MELODY_DEV_EXAMPLE_DIR. What it defends is the state the bundle came out of: every page loaded /assets/app.js
+and drove every interaction through window.melodyExample.*, while no assets/ directory existed in v1 or v2 at
+all, so the file could not be produced by anything and the whole browser interface was dead behind five pages
+that rendered perfectly. A 404 here means either that source or that build step is gone again. */
+func assertExampleBrowserAssets(major exampleMajor, client *exampleClient) {
+    for _, iconPath := range exampleCommittedIconList {
+        icon := client.call("GET", iconPath, "", "", "")
+
+        if http.StatusOK != icon.statusCode {
+            fail("[%s] %s answered %d, wanted 200 — the icon is committed in public/, so a checkout owes it with no build step", major.label, iconPath, icon.statusCode)
+        }
+        if 0 == len(icon.body) {
+            fail("[%s] %s answered 200 with an empty body — the file is present and truncated, which every status-code check reports as served", major.label, iconPath)
+        }
+    }
+    pass("[%s] the %d committed icons are served whole", major.label, len(exampleCommittedIconList))
+
+    bundle := client.call("GET", exampleFrontendBundle, "", "", "")
+    if http.StatusOK != bundle.statusCode {
+        fail("[%s] %s answered %d, wanted 200 — the browser interface is dead without it; the bundle is built from assets/app.ts by `npm run build`", major.label, exampleFrontendBundle, bundle.statusCode)
+    }
+
+    /* the bundle's whole contract with the pages is the object it installs on window: the pages call
+       window.melodyExample.http/ui/routing on every interaction, and a bundle that loads without installing it
+       leaves every one of them throwing on an undefined read */
+    for _, expected := range []string{"melodyExample", "melodyRoutes"} {
+        if false == strings.Contains(bundle.body, expected) {
+            fail("[%s] %s answered 200 but carries no %q — it is not the example's bundle", major.label, exampleFrontendBundle, expected)
+        }
+    }
+    pass("[%s] the frontend bundle is served and installs window.melodyExample (%d bytes)", major.label, len(bundle.body))
+
+    /* the manifest the bundle generates URLs from is spliced into every page. The RouteGenerator reads it as an
+       OBJECT under a "routes" key; a bare array — the shape v1 and v2 used to emit — decodes into a value whose
+       .routes is undefined, so the generator is built empty and throws on the first route name it is asked for. */
+    loginPage := client.call("GET", exampleLoginRoute, "", "", "")
+    if http.StatusOK != loginPage.statusCode {
+        fail("[%s] %s answered %d, wanted 200", major.label, exampleLoginRoute, loginPage.statusCode)
+    }
+    if false == strings.Contains(loginPage.body, `window.melodyRoutes = JSON.parse('{"routes":[`) {
+        fail("[%s] %s does not carry the route manifest in the envelope shape the frontend RouteGenerator reads", major.label, exampleLoginRoute)
+    }
+    if false == strings.Contains(loginPage.body, `src="`+exampleFrontendBundle+`"`) {
+        fail("[%s] %s does not load %s, so nothing installs window.melodyExample", major.label, exampleLoginRoute, exampleFrontendBundle)
+    }
+    pass("[%s] the login page carries the route manifest envelope and loads the bundle", major.label)
 }
 
 /* assertExampleStaticTraversal probes the static surface with percent-encoded dot segments, which a client will
