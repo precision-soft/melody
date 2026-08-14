@@ -1,8 +1,6 @@
 package subscriber
 
 import (
-    "strings"
-
     "github.com/precision-soft/melody/.example/event"
     "github.com/precision-soft/melody/.example/repository"
     "github.com/precision-soft/melody/.example/service"
@@ -50,7 +48,7 @@ func (instance *UserEventSubscriber) onUserCreated() melodyeventcontract.EventLi
             return byIdDeleteErr
         }
 
-        normalizedUsername := strings.ToLower(strings.TrimSpace(payloadInstance.User().Username))
+        normalizedUsername := repository.NormalizedUsername(payloadInstance.User().Username)
         if "" != normalizedUsername {
             byUsernameDeleteErr := cacheInstance.Delete(service.CacheKeyUserByUsername(normalizedUsername))
             if nil != byUsernameDeleteErr {
@@ -90,7 +88,7 @@ func (instance *UserEventSubscriber) onUserUpdated() melodyeventcontract.EventLi
             return byIdDeleteErr
         }
 
-        normalizedUsername := strings.ToLower(strings.TrimSpace(payloadInstance.User().Username))
+        normalizedUsername := repository.NormalizedUsername(payloadInstance.User().Username)
         if "" != normalizedUsername {
             byUsernameDeleteErr := cacheInstance.Delete(service.CacheKeyUserByUsername(normalizedUsername))
             if nil != byUsernameDeleteErr {
@@ -130,7 +128,7 @@ func (instance *UserEventSubscriber) onUserDeleted() melodyeventcontract.EventLi
             return byIdDeleteErr
         }
 
-        normalizedUsername := strings.ToLower(strings.TrimSpace(payloadInstance.Username()))
+        normalizedUsername := repository.NormalizedUsername(payloadInstance.Username())
         if "" != normalizedUsername {
             byUsernameDeleteErr := cacheInstance.Delete(service.CacheKeyUserByUsername(normalizedUsername))
             if nil != byUsernameDeleteErr {

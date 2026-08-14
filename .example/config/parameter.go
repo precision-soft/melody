@@ -16,11 +16,11 @@ func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.P
     registrar.RegisterParameter("app.catalog_title", "%APP_CATALOG_TITLE%")
     registrar.RegisterParameter("app.cron.product_user", "%APP_CRON_PRODUCT_USER%")
 
-    /* @info the optional-and-secret shapes the configuration supports: the refresh interval falls back to the parameter below when APP_REFRESH_INTERVAL is unset, and the api token registered automatically from .env is marked as a credential so debug:parameters redacts it along with anything whose template reads it */
+    /* the optional-and-secret shapes the configuration supports: the refresh interval falls back to the parameter below when APP_REFRESH_INTERVAL is unset, and the api token registered automatically from .env is marked as a credential so debug:parameters redacts it along with anything whose template reads it */
     registrar.RegisterParameter("app.default_refresh_interval", "5m")
     registrar.RegisterParameter("app.refresh_interval", "%env(default:app.default_refresh_interval:APP_REFRESH_INTERVAL)%")
 
-    /* @info the live integrations read their endpoints from parameters, each with a registered fallback so a partially set environment cannot leave a name the providers resolve undefined. An empty value is the switch: the example then wires the integration not at all. */
+    /* the live integrations read their endpoints from parameters, each with a registered fallback so a partially set environment cannot leave a name the providers resolve undefined. An empty value is the switch: the example then wires the integration not at all. */
     registrar.RegisterParameter("app.database.default_port", "3306")
     registrar.RegisterParameter(ParameterDatabaseHost, "%env(default::MYSQL_HOST)%")
     registrar.RegisterParameter(ParameterDatabasePort, "%env(default:app.database.default_port:MYSQL_PORT)%")

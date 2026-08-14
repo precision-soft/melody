@@ -60,7 +60,7 @@ func (instance *countingJournalRepository) Count(ctx context.Context) (int, erro
     return instance.count, nil
 }
 
-/* @info The report is stamped by the clock it was built with, not by the wall, which is what lets a test state the exact instant a reading carries. */
+/* The clock is injected rather than read from the wall, which is what lets the assertion name the exact instant the reading carries instead of a range. */
 func TestCatalogReportServiceStampsTheReadingWithTheInjectedClock(t *testing.T) {
     frozenTime := time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
     frozenClock := melodyclock.NewFrozenClock(frozenTime)
@@ -90,7 +90,6 @@ func TestCatalogReportServiceStampsTheReadingWithTheInjectedClock(t *testing.T) 
     }
 }
 
-/* @info A warm cache is what the backend is there for: the second reading must not go back to the repository, and it must say it came from the cache so the caller can tell how old the answer is. */
 func TestCatalogReportServiceServesTheSecondReadingFromTheCache(t *testing.T) {
     frozenClock := melodyclock.NewFrozenClock(time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC))
     backend := newRecordingReportBackend()
@@ -127,7 +126,6 @@ func TestCatalogReportServiceServesTheSecondReadingFromTheCache(t *testing.T) {
     }
 }
 
-/* @info Refresh is what the schedule calls, so it must ignore a warm cache and leave a new reading behind — otherwise the scheduled run would keep re-storing the answer it just read. */
 func TestCatalogReportServiceRefreshIgnoresTheWarmCache(t *testing.T) {
     frozenClock := melodyclock.NewFrozenClock(time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC))
     backend := newRecordingReportBackend()
@@ -164,7 +162,6 @@ func TestCatalogReportServiceRefreshIgnoresTheWarmCache(t *testing.T) {
     }
 }
 
-/* @info Both optional collaborators may be absent: an example booted with no redis and no database still answers, with the reading it can actually take. */
 func TestCatalogReportServiceWorksWithoutABackendOrAJournal(t *testing.T) {
     frozenClock := melodyclock.NewFrozenClock(time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC))
 

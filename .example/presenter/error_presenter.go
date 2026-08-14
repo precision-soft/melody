@@ -140,7 +140,7 @@ func buildApiResponse(
 
     acceptHeader := ""
     if nil != request && nil != request.HttpRequest() && nil != request.HttpRequest().Header {
-        /* @important every Accept line is joined before parsing: Get answers only the first line of a repeated field, and the accept header is list-typed, so a refusal the client sent on a second line would otherwise vanish */
+        /* every Accept line is joined before parsing: Get answers only the first line of a repeated field, and the accept header is list-typed, so a refusal the client sent on a second line would otherwise vanish */
         acceptHeader = strings.Join(request.HttpRequest().Header.Values("Accept"), ", ")
     }
 
@@ -148,7 +148,7 @@ func buildApiResponse(
     if nil != serializerManager {
         serializerInstance, err := serializerManager.ResolveByAcceptHeader(acceptHeader)
 
-        /* @important a header that refuses every available media type is answered as not acceptable on the error path exactly as the result handler answers it on the success path: falling through would render the failure in the very representation the client rejected; the incident itself is already in the application log by the time a presenter runs */
+        /* a header that refuses every available media type is answered as not acceptable on the error path exactly as the result handler answers it on the success path: falling through would render the failure in the very representation the client rejected; the incident itself is already in the application log by the time a presenter runs */
         if true == errors.Is(err, melodyserializer.ErrNotAcceptable) {
             return melodyhttp.EmptyResponse(nethttp.StatusNotAcceptable)
         }
@@ -199,7 +199,7 @@ func fallbackJsonResponse(statusCode int, payload any) melodyhttpcontract.Respon
     return response
 }
 
-/* @important the debug decision is the kernel environment, exactly as the framework exception listener
+/* the debug decision is the kernel environment, exactly as the framework exception listener
 reads it; when it cannot be determined the presenter stays closed and emits no cause material */
 func debugMode(runtimeInstance melodyruntimecontract.Runtime) bool {
     if nil == runtimeInstance {

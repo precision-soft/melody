@@ -34,6 +34,7 @@ The example lives entirely under the [`./.example/`](./) directory and follows a
 
 ```
 .example/
+├── assets/           # frontend bundle SOURCE (app.ts, melody-routes.ts) built into public/assets/app.js
 ├── cache/            # cache serializer for the example container
 ├── cli/              # CLI commands (app:info, product:list, catalog:journal, catalog:report:refresh)
 ├── config/           # application wiring; one file per module hook
@@ -42,19 +43,21 @@ The example lives entirely under the [`./.example/`](./) directory and follows a
 ├── handler/          # HTTP handlers (pages + JSON APIs), with category/, currency/, product/, user/ subpackages
 ├── page/             # HTML page templates
 ├── presenter/        # HTTP error / response presenters
-├── repository/       # repository interfaces + in-memory implementations
+├── repository/       # repository interfaces with an in-memory and a database-backed implementation each, plus the seed data and the helpers both share
 ├── route/            # named route constants and patterns
-├── security/         # session auth wiring (login/logout handlers, entry point, token resolver, password hasher)
-├── service/          # application services (CategoryService, CurrencyService, ProductService, UserService)
+├── security/         # session auth wiring (login/logout handlers, entry point, access denied handler, token resolver, password hasher)
+├── service/          # application services (Category, Currency, Product, User, plus the catalog journal and the catalog report)
 ├── subscriber/       # event subscribers
 ├── url/              # route registry adapters: the route manifest every page is given
-├── public/           # static assets (CSS / JS)
+├── public/           # static assets; app.css and index.html are committed, the icons and app.js are produced by the assets/ build
 ├── embedded_*.go     # build-tag–controlled embedding for env and static assets
 ├── main.go           # application entry point
 ├── go.mod / go.sum   # standalone module manifest
 ├── .env              # example env defaults
 └── .gitignore
 ```
+
+`var/` and `generated_conf/` are runtime output and are git-ignored, so they appear once the application has run rather than in a fresh clone.
 
 ### [`config/`](./config/) — application wiring
 
@@ -69,6 +72,10 @@ The [`config/`](./config/) package keeps [`main.go`](./main.go) small by groupin
 - [`parameter.go`](./config/parameter.go) — `RegisterParameters`: registers `melody.cron.*` parameters from `APP_CRON_*` env vars plus the example's own `app.*` parameters
 - [`service.go`](./config/service.go) — `registerServices`: container wiring for repositories, services, and the cache serializer
 - [`middleware.go`](./config/middleware.go) — example-specific HTTP middleware (`NewTimingMiddleware`)
+- [`cron.go`](./config/cron.go) — the `cron.Configuration` the generate command renders: which command runs on which schedule, and as which system user
+- [`database.go`](./config/database.go) — the bun manager registry and the MySQL provider, built only when the configuration published a host; an unset host leaves the registry nil and every repository falls back to its in-memory twin
+- [`redis.go`](./config/redis.go) — the rueidis client, the cache backend bound to `cache.ServiceCacheBackend`, and the rate limiter the write routes are put behind; an unset address leaves all three absent
+- [`bootstrap_resolver.go`](./config/bootstrap_resolver.go) — reads a parameter before the container exists, which is what lets the two files above decide whether to wire an integration at all
 
 ### Cron integration
 
@@ -138,11 +145,12 @@ Two details are worth reading in the source rather than guessed at:
 
 It only:
 
+- opens the signal context, which is what gives the process its graceful-shutdown window on the first `SIGINT` or `SIGTERM` — a second signal during a hung shutdown forces it down
 - constructs the Melody application using:
     - `embeddedEnvFiles` (from `embedded_env_*`)
     - `embeddedPublicFiles` (from `embedded_static_*`)
 - calls `config.Configure(app)`
-- runs the application
+- runs the application under that context
 
 All wiring and integration logic lives outside `main.go`.
 
@@ -189,7 +197,7 @@ npm run build
 
 That command does two things:
 
-- `sync-icons.mjs` copies the shared icons — `favicon.ico`, `assets/favicon.svg`, `assets/logo.png`, `assets/apple-touch-icon.png` — out of `<repository root>/.assets`, which is the **single place** they exist in the tree;
+- `sync-icons.mjs` copies the shared icons out of `<repository root>/.assets`, which is the **single place** they exist in the tree, renaming each to the name the pages link it by: `favicon.ico` → `public/favicon.ico`, `logo.svg` → `public/assets/favicon.svg`, and `logo.png` → both `public/assets/logo.png` and `public/assets/apple-touch-icon.png`;
 - esbuild bundles `assets/app.ts` into `public/assets/app.js`.
 
 Both destinations are git-ignored, so a checkout carries no copy of either and neither can go stale. Without this step the pages still load and every JSON endpoint still answers, but `public/assets/app.js` and the four icons are 404s and the browser interface does nothing: logging in, listing, editing and deleting all go through `window.melodyExample.*`, which the bundle is what installs.
@@ -220,13 +228,17 @@ The example schedules three commands in [`config/cron.go`](./config/cron.go) (`c
 
 ## API response envelope
 
-Most JSON endpoints return a small, consistent response envelope:
+Every JSON endpoint answers through the same envelope, built in [`presenter/error_presenter.go`](./presenter/error_presenter.go):
 
-- `status`
-- optional `data`
-- optional `error`
+- `success` — a boolean, so a caller branches on the envelope rather than on the status code
+- `payload` — the answer itself, `null` on a failure
+- `errors` — a list of messages, empty on success rather than absent
+- `context` — present only when the kernel environment enables debug material
+- `trace` — likewise
 
-This keeps frontend code predictable and minimizes ad-hoc handling.
+The envelope is the reason a client never decodes straight into the answer type: a decode that skipped it would read a failure as a zero value. The end-to-end harness unwraps it in `decodeExampleData` for exactly that reason.
+
+The two representations are negotiated: a client that asks for HTML gets the page or an HTML error, one that asks for JSON gets this envelope, and one whose `Accept` header refuses every representation the application can produce is answered `406` rather than being handed JSON it said it would not take.
 
 ---
 

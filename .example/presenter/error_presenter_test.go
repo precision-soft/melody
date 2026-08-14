@@ -65,7 +65,6 @@ func runtimeForEnvironment(t *testing.T, environmentName string) melodyruntimeco
     return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 }
 
-/* @info a header that refuses every available media type is answered as not acceptable on the error path exactly as the result handler answers it on the success path: the previous fall-through rendered the failure as json — the very representation the client rejected */
 func TestBuildApiResponseHonoursAnExplicitRefusal(t *testing.T) {
     containerInstance := melodycontainer.NewContainer()
 
@@ -100,9 +99,6 @@ func TestBuildApiResponseHonoursAnExplicitRefusal(t *testing.T) {
         t.Fatalf("expected the explicit refusal to be answered 406 on the error path, got %d", response.StatusCode())
     }
 }
-
-/* @important the presenter must reach the same decision the framework exception listener reaches, and
-must reach "no debug material" whenever the environment cannot be read at all */
 
 func TestDebugModeFollowsTheKernelEnvironment(t *testing.T) {
     if true == debugMode(runtimeForEnvironment(t, melodyconfig.EnvProduction)) {

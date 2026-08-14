@@ -2,6 +2,7 @@ package service
 
 import (
     "context"
+    "crypto/subtle"
     "fmt"
     "strings"
 
@@ -98,7 +99,7 @@ func (instance *UserService) FindById(id string) (*entity.User, bool, error) {
 }
 
 func (instance *UserService) FindByUsername(username string) (*entity.User, bool, error) {
-    normalizedUsername := strings.ToLower(strings.TrimSpace(username))
+    normalizedUsername := repository.NormalizedUsername(username)
     if "" == normalizedUsername {
         return nil, false, nil
     }
@@ -266,7 +267,8 @@ func (instance *UserService) AuthenticateByUsernameAndPasswordHash(
         return nil, false, nil
     }
 
-    if passwordSha256Hex != user.Password {
+    /* the digests are compared in constant time. The two are the same length and an attacker cannot steer the digest of a password they submit, so the leak this closes is narrow — but a credential comparison is the one place an example is read from to be copied, and the idiom worth copying is this one. */
+    if 1 != subtle.ConstantTimeCompare([]byte(passwordSha256Hex), []byte(user.Password)) {
         return nil, false, nil
     }
 

@@ -18,7 +18,7 @@ type inMemoryUserRepository struct {
     users []*entity.User
 }
 
-/* @info the returned slice is a copy, but a shallow one: the entity pointers stay shared with the
+/* the returned slice is a copy, but a shallow one: the entity pointers stay shared with the
 repository, so a caller that mutates an entity in place bypasses the lock */
 func (instance *inMemoryUserRepository) All(ctx context.Context) ([]*entity.User, error) {
     instance.mutex.RLock()
@@ -142,7 +142,7 @@ func (instance *inMemoryUserRepository) FindByUsername(ctx context.Context, user
 }
 
 func (instance *inMemoryUserRepository) findByUsernameLocked(username string) (*entity.User, bool) {
-    wanted := normalizedUsername(username)
+    wanted := NormalizedUsername(username)
 
     if "" == wanted {
         return nil, false
@@ -153,7 +153,7 @@ func (instance *inMemoryUserRepository) findByUsernameLocked(username string) (*
             continue
         }
 
-        if wanted == normalizedUsername(user.Username) {
+        if wanted == NormalizedUsername(user.Username) {
             return user, true
         }
     }
@@ -176,7 +176,7 @@ func (instance *inMemoryUserRepository) identifierListLocked() []string {
 }
 
 func (instance *inMemoryUserRepository) usernameTakenByAnotherLocked(username string, excludedId string) bool {
-    wanted := normalizedUsername(username)
+    wanted := NormalizedUsername(username)
     if "" == wanted {
         return false
     }
@@ -190,7 +190,7 @@ func (instance *inMemoryUserRepository) usernameTakenByAnotherLocked(username st
             continue
         }
 
-        if wanted == normalizedUsername(user.Username) {
+        if wanted == NormalizedUsername(user.Username) {
             return true
         }
     }

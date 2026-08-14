@@ -48,10 +48,8 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
 
         actorUserId, _ := Actor(runtimeInstance)
 
-        if true == hasRole(targetUser.Roles, entity.RoleAdmin) {
-            if actorUserId != targetUser.Id {
-                return presenter.ApiError(runtimeInstance, request, nethttp.StatusForbidden, "cannot modify another admin"), nil
-            }
+        if true == protectsAnotherAdmin(actorUserId, targetUser) {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusForbidden, "cannot modify another admin"), nil
         }
 
         normalizedUsername := strings.TrimSpace(dto.Username)
@@ -122,6 +120,19 @@ type adminUserUpdateRequest struct {
     Username string   `json:"username"`
     Password string   `json:"password"`
     Roles    []string `json:"roles"`
+}
+
+/* protectsAnotherAdmin answers whether the change the actor is asking for would touch an administrator who is not the actor. An administrator may edit and delete their own account and everyone below them, and may not reach a peer: an account that can grant roles is the one account whose holder must not be able to lock a colleague out or take their place quietly. Both the update and the delete door ask the same question, so the two cannot drift apart on who is protected — only on the words they refuse with. */
+func protectsAnotherAdmin(actorUserId string, targetUser *entity.User) bool {
+    if nil == targetUser {
+        return false
+    }
+
+    if false == hasRole(targetUser.Roles, entity.RoleAdmin) {
+        return false
+    }
+
+    return actorUserId != targetUser.Id
 }
 
 func hasRole(roles []string, role string) bool {
