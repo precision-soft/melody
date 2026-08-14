@@ -2,11 +2,11 @@ package cli
 
 import (
     "fmt"
-    "strings"
     "time"
 
     "github.com/precision-soft/melody/.example/service"
     melodyclicontract "github.com/precision-soft/melody/cli/contract"
+    melodyoutput "github.com/precision-soft/melody/cli/output"
     melodyruntimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
@@ -25,10 +25,37 @@ func (instance *ProductListCommand) Description() string {
 }
 
 func (instance *ProductListCommand) Flags() []melodyclicontract.Flag {
-    return []melodyclicontract.Flag{}
+    return melodyoutput.StandardFlags()
+}
+
+type productListItem struct {
+    Id          string `json:"id"`
+    Name        string `json:"name"`
+    Description string `json:"description"`
+    Category    string `json:"category"`
+    Currency    string `json:"currency"`
+    CreatedAt   string `json:"createdAt"`
+    UpdatedAt   string `json:"updatedAt"`
 }
 
 func (instance *ProductListCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
+    startedAt := time.Now()
+
+    option := melodyoutput.NormalizeOption(
+        melodyoutput.ParseOptionFromCommand(commandContext),
+    )
+
+    meta := melodyoutput.NewMeta(
+        instance.Name(),
+        commandContext.Args().Slice(),
+        option,
+        startedAt,
+        time.Duration(0),
+        melodyoutput.Version{},
+    )
+
+    envelope := melodyoutput.NewEnvelope(meta)
+
     productService := service.MustGetProductService(runtimeInstance.Container())
     categoryService := service.MustGetCategoryService(runtimeInstance.Container())
     currencyService := service.MustGetCurrencyService(runtimeInstance.Container())
@@ -38,17 +65,7 @@ func (instance *ProductListCommand) Run(runtimeInstance melodyruntimecontract.Ru
         return listErr
     }
 
-    headers := []string{
-        "ID",
-        "NAME",
-        "DESCRIPTION",
-        "CATEGORY",
-        "CURRENCY",
-        "CREATED_AT",
-        "UPDATED_AT",
-    }
-
-    rows := make([][]string, 0, len(products))
+    items := make([]productListItem, 0, len(products))
 
     for _, product := range products {
         if nil == product {
@@ -64,11 +81,8 @@ func (instance *ProductListCommand) Run(runtimeInstance melodyruntimecontract.Ru
             }
         }
 
-        currencyId := ""
         currencyName := "-"
-
-        currencyId = product.CurrencyId
-
+        currencyId := product.CurrencyId
         if "" != currencyId {
             currency, _, currencyErr := currencyService.FindById(currencyId)
             if nil == currencyErr && nil != currency {
@@ -76,60 +90,62 @@ func (instance *ProductListCommand) Run(runtimeInstance melodyruntimecontract.Ru
             }
         }
 
-        rows = append(rows, []string{
-            product.Id,
-            product.Name,
-            product.Description,
-            categoryName + "(" + categoryId + ")",
-            currencyName + "(" + currencyId + ")",
-            product.CreatedAt.Format(time.DateTime),
-            product.UpdatedAt.Format(time.DateTime),
+        items = append(items, productListItem{
+            Id:          product.Id,
+            Name:        product.Name,
+            Description: product.Description,
+            Category:    categoryName + "(" + categoryId + ")",
+            Currency:    currencyName + "(" + currencyId + ")",
+            CreatedAt:   product.CreatedAt.Format(time.DateTime),
+            UpdatedAt:   product.UpdatedAt.Format(time.DateTime),
         })
     }
 
-    printTable(headers, rows)
-    return nil
-}
+    /* the service answers oldest first, so the ascending default renders the catalogue in its creation order */
+    melodyoutput.ApplySortOrder(items, option.Order)
 
-func printTable(headers []string, rows [][]string) {
-    widths := make([]int, len(headers))
-    for i, header := range headers {
-        widths[i] = len(header)
-    }
+    total := len(items)
+    items = melodyoutput.WindowItems(items, option.Limit, option.Offset)
 
-    for _, row := range rows {
-        for i, col := range row {
-            if len(col) > widths[i] {
-                widths[i] = len(col)
-            }
+    if melodyoutput.FormatTable == option.Format {
+        builder := melodyoutput.NewTableBuilder()
+
+        summary := fmt.Sprintf("PRODUCTS: %d total", total)
+        if len(items) != total {
+            summary = fmt.Sprintf("%s | %d shown", summary, len(items))
         }
+        builder.AddSummaryLine(summary)
+
+        block := builder.AddBlock(
+            "PRODUCTS",
+            []string{"ID", "NAME", "DESCRIPTION", "CATEGORY", "CURRENCY", "CREATED_AT", "UPDATED_AT"},
+        )
+
+        for _, item := range items {
+            block.AddRow(
+                item.Id,
+                item.Name,
+                item.Description,
+                item.Category,
+                item.Currency,
+                item.CreatedAt,
+                item.UpdatedAt,
+            )
+        }
+
+        envelope.Table = builder.Build()
+    } else {
+        envelope.Data = melodyoutput.NewListPayload(
+            items,
+            total,
+            option.Limit,
+            option.Offset,
+        )
     }
 
-    printRow(headers, widths)
-    printSeparator(widths)
+    envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
 
-    for _, row := range rows {
-        printRow(row, widths)
-    }
-}
-
-func printRow(columns []string, widths []int) {
-    parts := make([]string, 0, len(columns))
-    for i, column := range columns {
-        padding := widths[i] - len(column)
-        parts = append(parts, column+strings.Repeat(" ", padding))
-    }
-
-    fmt.Println(strings.Join(parts, "  |  "))
-}
-
-func printSeparator(widths []int) {
-    parts := make([]string, 0, len(widths))
-    for _, width := range widths {
-        parts = append(parts, strings.Repeat("-", width))
-    }
-
-    fmt.Println(strings.Join(parts, "--+--"))
+    return melodyoutput.Render(commandContext.Writer, envelope, option)
 }
 
 var _ melodyclicontract.Command = (*ProductListCommand)(nil)

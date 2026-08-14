@@ -5,6 +5,7 @@ go 1.24.9
 require (
 	github.com/precision-soft/melody v1.18.0
 	github.com/precision-soft/melody/integrations/bunorm v1.0.1
+	github.com/precision-soft/melody/integrations/bunorm/migrate v1.1.0
 	github.com/precision-soft/melody/integrations/bunorm/mysql v1.1.5
 	github.com/precision-soft/melody/integrations/cron v1.1.0
 	github.com/precision-soft/melody/integrations/rueidis v1.1.0
@@ -32,6 +33,8 @@ replace github.com/precision-soft/melody => ../
 replace github.com/precision-soft/melody/integrations/cron => ../integrations/cron
 
 replace github.com/precision-soft/melody/integrations/bunorm => ../integrations/bunorm
+
+replace github.com/precision-soft/melody/integrations/bunorm/migrate => ../integrations/bunorm/migrate
 
 replace github.com/precision-soft/melody/integrations/bunorm/mysql => ../integrations/bunorm/mysql
 

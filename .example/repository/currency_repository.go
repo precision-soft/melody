@@ -6,6 +6,7 @@ import (
     "strings"
 
     "github.com/precision-soft/melody/.example/entity"
+    "github.com/precision-soft/melody/.example/migration"
     melodycontainer "github.com/precision-soft/melody/container"
     melodycontainercontract "github.com/precision-soft/melody/container/contract"
     "github.com/uptrace/bun"
@@ -44,11 +45,14 @@ func CurrencyRepositoryProvider(databaseServiceName string) melodycontainercontr
             return nil, databaseErr
         }
 
+        if migrateErr := migration.EnsureMigrated(context.Background(), database); nil != migrateErr {
+            return nil, migrateErr
+        }
+
         repositoryInstance := NewBunCurrencyRepository(database)
 
-        ensureSchemaErr := repositoryInstance.EnsureSchema(context.Background())
-        if nil != ensureSchemaErr {
-            return nil, ensureSchemaErr
+        if seedErr := repositoryInstance.seedIfEmpty(context.Background()); nil != seedErr {
+            return nil, seedErr
         }
 
         return repositoryInstance, nil

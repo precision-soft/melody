@@ -20,10 +20,6 @@ type collectingJournalRepository struct {
     appendErr error
 }
 
-func (instance *collectingJournalRepository) EnsureSchema(ctx context.Context) error {
-    return nil
-}
-
 func (instance *collectingJournalRepository) Append(ctx context.Context, entry *repository.CatalogJournalEntry) (*repository.CatalogJournalEntry, error) {
     if nil != instance.appendErr {
         return nil, instance.appendErr

@@ -833,10 +833,11 @@ func exampleTruncate(body string) string {
 assertions match on the text a reader sees rather than on the escapes around it. */
 var exampleAnsiPattern = regexp.MustCompile("\x1b\\[[0-9;]*[a-zA-Z]")
 
-/* runExampleCliAssertions exercises the command-line half of the same application. product:list declares NO
-flags in the v1 and v2 examples, so --limit is legitimately an unknown flag there; the flag layer is exercised
-through the framework's own debug:router instead, which declares the standard --format/--limit set in every
-major. */
+/* runExampleCliAssertions exercises the command-line half of the same application. product:list declares no
+flags in the v2 example and only its own --limit in v3, so the standard set is legitimately unknown there; the
+flag layer is exercised through the framework's own debug:router instead, which declares the standard
+--format/--limit set in every major. The v1 example commands carry the standard flag set themselves, and their
+process-side envelope is asserted by the V1 sections of stack.sh. */
 func runExampleCliAssertions(major exampleMajor, workspace string) {
     information := runExampleCommand(major, workspace, "app:info")
 

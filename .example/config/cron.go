@@ -2,6 +2,7 @@ package config
 
 import (
     "github.com/precision-soft/melody/.example/cli"
+    melodyclicontract "github.com/precision-soft/melody/cli/contract"
     melodycron "github.com/precision-soft/melody/integrations/cron"
     melodykernelcontract "github.com/precision-soft/melody/kernel/contract"
 )
@@ -22,4 +23,13 @@ func newCronConfiguration(kernelInstance melodykernelcontract.Kernel) *melodycro
         Schedule(melodycron.CommandName(cli.NewAppInfoCommand), &melodycron.EntryConfig{
             Schedule: &melodycron.Schedule{Minute: "0", Hour: "12"},
         })
+}
+
+/* cronRunnerCommands is the in-process half of the schedule: the same three commands newCronConfiguration schedules by name, instantiated for melody:cron:run to invoke when their minute comes. */
+func cronRunnerCommands() []melodyclicontract.Command {
+    return []melodyclicontract.Command{
+        cli.NewCatalogReportRefreshCommand(),
+        cli.NewProductListCommand(),
+        cli.NewAppInfoCommand(),
+    }
 }

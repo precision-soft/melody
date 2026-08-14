@@ -38,17 +38,8 @@ type bunCategoryRepository struct {
     database *bun.DB
 }
 
-/* EnsureSchema creates the table when it is absent and writes the opening nomenclature into it when it is empty. The seeding insert ignores duplicate keys because several example applications may reach an empty table at the same time, and losing that race is not a failure. */
-func (instance *bunCategoryRepository) EnsureSchema(ctx context.Context) error {
-    _, createErr := instance.database.
-        NewCreateTable().
-        Model((*categoryRow)(nil)).
-        IfNotExists().
-        Exec(ctx)
-    if nil != createErr {
-        return createErr
-    }
-
+/* seedIfEmpty writes the opening nomenclature into an empty table; the table itself belongs to the migration set the provider has already applied. The insert ignores duplicate keys because several example applications may reach an empty table at the same time, and losing that race is not a failure. */
+func (instance *bunCategoryRepository) seedIfEmpty(ctx context.Context) error {
     count, countErr := instance.database.
         NewSelect().
         Model((*categoryRow)(nil)).

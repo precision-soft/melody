@@ -1,11 +1,13 @@
 package cli
 
 import (
+    "fmt"
     "strconv"
     "time"
 
     "github.com/precision-soft/melody/.example/repository"
     melodyclicontract "github.com/precision-soft/melody/cli/contract"
+    melodyoutput "github.com/precision-soft/melody/cli/output"
     melodyexception "github.com/precision-soft/melody/exception"
     melodyruntimecontract "github.com/precision-soft/melody/runtime/contract"
 )
@@ -25,16 +27,19 @@ func (instance *CatalogJournalCommand) Description() string {
 }
 
 func (instance *CatalogJournalCommand) Flags() []melodyclicontract.Flag {
-    return []melodyclicontract.Flag{
-        &melodyclicontract.IntFlag{
-            Name:  "limit",
-            Usage: "how many entries to print",
-            Value: 10,
-        },
-    }
+    return melodyoutput.StandardFlags()
 }
 
-/* Run prints what has happened to the nomenclature, most recent first. The command is registered whether or not the database is configured, so the command surface does not change between environments; without a database it fails with the reason instead of being quietly absent. */
+type catalogJournalListItem struct {
+    Id         int64  `json:"id"`
+    Actor      string `json:"actor"`
+    Action     string `json:"action"`
+    Subject    string `json:"subject"`
+    SubjectId  string `json:"subjectId"`
+    RecordedAt string `json:"recordedAt"`
+}
+
+/* Run prints what has happened to the nomenclature, newest first; --order desc reads the same entries oldest first. The command is registered whether or not the database is configured, so the command surface does not change between environments; without a database it fails with the reason instead of being quietly absent. */
 func (instance *CatalogJournalCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
     if false == runtimeInstance.Container().Has(repository.ServiceCatalogJournalRepository) {
         return melodyexception.NewError(
@@ -44,42 +49,91 @@ func (instance *CatalogJournalCommand) Run(runtimeInstance melodyruntimecontract
         )
     }
 
+    startedAt := time.Now()
+
+    option := melodyoutput.NormalizeOption(
+        melodyoutput.ParseOptionFromCommand(commandContext),
+    )
+
+    meta := melodyoutput.NewMeta(
+        instance.Name(),
+        commandContext.Args().Slice(),
+        option,
+        startedAt,
+        time.Duration(0),
+        melodyoutput.Version{},
+    )
+
+    envelope := melodyoutput.NewEnvelope(meta)
+
     journalRepository := repository.MustGetCatalogJournalRepository(runtimeInstance.Container())
 
-    entries, latestErr := journalRepository.Latest(runtimeInstance.Context(), commandContext.Int("limit"))
+    /* the repository is asked for everything and the standard window is applied here, so --limit and --offset behave exactly as they do on every other enveloped command */
+    entries, latestErr := journalRepository.Latest(runtimeInstance.Context(), 0)
     if nil != latestErr {
         return latestErr
     }
 
-    headers := []string{
-        "ID",
-        "ACTOR",
-        "ACTION",
-        "SUBJECT",
-        "SUBJECT_ID",
-        "RECORDED_AT",
-    }
+    items := make([]catalogJournalListItem, 0, len(entries))
 
-    rows := make([][]string, 0, len(entries))
     for _, entry := range entries {
         if nil == entry {
             continue
         }
 
-        rows = append(rows, []string{
-            strconv.FormatInt(entry.Id, 10),
-            entry.Actor,
-            entry.Action,
-            entry.Subject,
-            entry.SubjectId,
-            entry.RecordedAt.UTC().Format(time.RFC3339),
+        items = append(items, catalogJournalListItem{
+            Id:         entry.Id,
+            Actor:      entry.Actor,
+            Action:     entry.Action,
+            Subject:    entry.Subject,
+            SubjectId:  entry.SubjectId,
+            RecordedAt: entry.RecordedAt.UTC().Format(time.RFC3339),
         })
     }
 
-    /* the same table helper product:list prints through, so both commands render alike */
-    printTable(headers, rows)
+    melodyoutput.ApplySortOrder(items, option.Order)
 
-    return nil
+    total := len(items)
+    items = melodyoutput.WindowItems(items, option.Limit, option.Offset)
+
+    if melodyoutput.FormatTable == option.Format {
+        builder := melodyoutput.NewTableBuilder()
+
+        summary := fmt.Sprintf("JOURNAL: %d total", total)
+        if len(items) != total {
+            summary = fmt.Sprintf("%s | %d shown", summary, len(items))
+        }
+        builder.AddSummaryLine(summary)
+
+        block := builder.AddBlock(
+            "JOURNAL",
+            []string{"ID", "ACTOR", "ACTION", "SUBJECT", "SUBJECT_ID", "RECORDED_AT"},
+        )
+
+        for _, item := range items {
+            block.AddRow(
+                strconv.FormatInt(item.Id, 10),
+                item.Actor,
+                item.Action,
+                item.Subject,
+                item.SubjectId,
+                item.RecordedAt,
+            )
+        }
+
+        envelope.Table = builder.Build()
+    } else {
+        envelope.Data = melodyoutput.NewListPayload(
+            items,
+            total,
+            option.Limit,
+            option.Offset,
+        )
+    }
+
+    envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
+
+    return melodyoutput.Render(commandContext.Writer, envelope, option)
 }
 
 var _ melodyclicontract.Command = (*CatalogJournalCommand)(nil)

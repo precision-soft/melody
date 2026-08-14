@@ -52,10 +52,12 @@ e2e_example_directory() {
     esac
 }
 
-# stack.sh drives the v3 example throughout: every one of its checks either exercises a module that exists only in
-# v3 (wiring, openapi, outbox, encrypt) or reaches its property through a command, a parameter or an app:info line
-# that only the v3 example application declares. It names v3 explicitly here so the choice is visible; the
-# coverage that DOES generalize across the majors lives in the run.sh harness, one section per major.
+# stack.sh drives the v3 example through this default: those checks either exercise a module that exists only in
+# v3 (wiring, openapi, outbox, encrypt) or reach their property through a command, a parameter or an app:info line
+# that only the v3 example application declares. It names v3 explicitly here so the choice is visible. The
+# sections whose banner begins with V1 address the v1 example through e2e_example_directory 1 instead of this
+# variable, for wiring only the v1 example carries; the coverage that DOES generalize across the majors lives in
+# the run.sh harness, one section per major.
 EXAMPLE_DIRECTORY_STRING="$(e2e_example_directory 3)"
 EXAMPLE_ENV_LOCAL_PATH_STRING="${EXAMPLE_DIRECTORY_STRING}/.env.local"
 

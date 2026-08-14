@@ -185,6 +185,37 @@ func TestStackScript_SecretNegativesRequireANonEmptyEntry(t *testing.T) {
     }
 }
 
+/* the V1 debug section carries the same leak negative for APP_API_TOKEN, under the same rule: an absent entry
+carries no credential either, so the presence guard must short-circuit the negative. */
+func TestStackScript_V1SecretNegativeRequiresANonEmptyEntry(t *testing.T) {
+    script := readStackScript(t)
+
+    sectionIndex := strings.Index(script, "check_section_start \"V1 DEBUG COMMANDS\"")
+    if -1 == sectionIndex {
+        t.Fatal("could not locate the v1 debug-commands section")
+    }
+
+    endIndex := strings.Index(script[sectionIndex:], "check_section_start \"V1 COMMAND OUTPUT ENVELOPE\"")
+    if -1 == endIndex {
+        t.Fatal("could not locate the end of the v1 debug-commands section")
+    }
+
+    region := script[sectionIndex : sectionIndex+endIndex]
+
+    guardIndex := strings.Index(region, "[[ \"\" = \"${V1_API_TOKEN_ENTRY_STRING}\" ]]")
+    negativeIndex := strings.Index(region, "grep -q 'example-api-token'")
+
+    if -1 == guardIndex {
+        t.Fatal("the APP_API_TOKEN negative must first assert the entry is non-empty, or a missing entry passes it")
+    }
+    if -1 == negativeIndex {
+        t.Fatal("could not locate the APP_API_TOKEN leak negative")
+    }
+    if guardIndex >= negativeIndex {
+        t.Fatal("the non-empty guard must precede (and short-circuit) the APP_API_TOKEN negative")
+    }
+}
+
 /* @info on a cold go build cache the holder outruns the marker-wait budget; the exclusive section must emit a
 distinct holder-marker-timeout diagnostic and NOT launch the contender, so a build delay is never misreported
 as a mutual-exclusion violation the lock never committed. */

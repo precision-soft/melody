@@ -1,4 +1,13 @@
-package repository
+package migration
+
+/*
+Shared test material for the migration package: a fake database/sql driver
+wrapped in a real *bun.DB, with a recorder observing every statement. The
+connection honours context cancellation before recording, so a statement in
+the recorded list is one that really reached the database — the WithoutCancel
+guard on the unlock is only observable against a driver that refuses a
+cancelled context.
+*/
 
 import (
     "context"
@@ -8,52 +17,17 @@ import (
     "io"
     "strings"
     "sync"
-    "time"
 
-    "github.com/precision-soft/melody/.example/entity"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect"
     "github.com/uptrace/bun/dialect/feature"
     "github.com/uptrace/bun/schema"
 )
 
-/* The shared test material of the package lives here, and only here: this is the one test file the layout rule exempts from having a source of its own. */
-
-/* fixtureTime is a fixed stamp, so an entity built for a validation assertion never carries a value that changes between runs. */
-var fixtureTime = time.Date(2026, time.August, 14, 12, 0, 0, 0, time.UTC)
-
-/* validProduct is a product every field of validateProduct accepts. Each assertion blanks exactly ONE field of it, so a refusal names the field the assertion is about rather than whichever one happens to be checked first. */
-func validProduct() *entity.Product {
-    return entity.NewProduct(
-        "prod-1",
-        "Keyboard",
-        "A keyboard",
-        "cat-1",
-        49.99,
-        "cur-1",
-        3,
-        fixtureTime,
-        fixtureTime,
-    )
-}
-
-func validUser() *entity.User {
-    return entity.NewUser("user-1", "user", "hash", []string{entity.RoleUser})
-}
-
-func validCategory() *entity.Category {
-    return entity.NewCategory("cat-1", "Peripherals")
-}
-
-func validCurrency() *entity.Currency {
-    return entity.NewCurrency("cur-1", "EUR", "Euro")
-}
-
-/* The fake database/sql driver below wraps a real *bun.DB around a statement recorder, so a bun repository guard can be proven on the exact SQL it emits without a live server. It mirrors the fixture of the migration package; the two cannot share code because a fixture is compiled only into its own package's test binary. */
-
 type queryRecorder struct {
     mutex     sync.Mutex
     queries   []string
+    execHook  func(query string) error
     queryHook func(query string) ([]string, [][]driver.Value, error)
 }
 
@@ -74,14 +48,21 @@ func (instance *queryRecorder) recordedQueries() []string {
     return queries
 }
 
-func (instance *queryRecorder) firstMatching(matcher func(query string) bool) string {
-    for _, query := range instance.recordedQueries() {
+func (instance *queryRecorder) reset() {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.queries = nil
+}
+
+func (instance *queryRecorder) firstIndexMatching(matcher func(query string) bool) int {
+    for index, query := range instance.recordedQueries() {
         if true == matcher(query) {
-            return query
+            return index
         }
     }
 
-    return ""
+    return -1
 }
 
 func (instance *queryRecorder) countMatching(matcher func(query string) bool) int {
@@ -95,18 +76,36 @@ func (instance *queryRecorder) countMatching(matcher func(query string) bool) in
     return count
 }
 
-/*
-countingRows answers every count select with the given total and every other
-select with no rows, which is all the seeding and listing guards need.
-*/
-func countingRows(total int64) func(query string) ([]string, [][]driver.Value, error) {
-    return func(query string) ([]string, [][]driver.Value, error) {
-        if true == strings.Contains(query, "count(*)") {
-            return []string{"count"}, [][]driver.Value{{total}}, nil
-        }
+func isMigrationLockInsert(query string) bool {
+    return strings.HasPrefix(query, "INSERT") && strings.Contains(query, "bun_migration_locks")
+}
 
-        return []string{}, nil, nil
+func isMigrationLockDelete(query string) bool {
+    return strings.HasPrefix(query, "DELETE") && strings.Contains(query, "bun_migration_locks")
+}
+
+func isMigrationStatusSelect(query string) bool {
+    return strings.HasPrefix(query, "SELECT") && strings.Contains(query, "bun_migrations")
+}
+
+func isExampleCreateTable(query string) bool {
+    return strings.HasPrefix(query, "CREATE TABLE") && strings.Contains(query, "melody_example_v1_")
+}
+
+/*
+appliedStatusRows answers the status select as if every registered migration
+had already been applied, which is how a process that lost the lock race
+observes a finished competitor.
+*/
+func appliedStatusRows() ([]string, [][]driver.Value) {
+    columns := []string{"id", "name", "group_id"}
+
+    rows := make([][]driver.Value, 0)
+    for index, migrationInstance := range Migrations.Sorted() {
+        rows = append(rows, []driver.Value{int64(index + 1), migrationInstance.Name, int64(1)})
     }
+
+    return columns, rows
 }
 
 type fakeConnection struct {
@@ -126,12 +125,26 @@ func (instance *fakeConnection) Begin() (driver.Tx, error) {
 }
 
 func (instance *fakeConnection) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
+    if nil != ctx.Err() {
+        return nil, ctx.Err()
+    }
+
     instance.recorder.record(query)
+
+    if nil != instance.recorder.execHook {
+        if hookErr := instance.recorder.execHook(query); nil != hookErr {
+            return nil, hookErr
+        }
+    }
 
     return &fakeResult{}, nil
 }
 
 func (instance *fakeConnection) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+    if nil != ctx.Err() {
+        return nil, ctx.Err()
+    }
+
     instance.recorder.record(query)
 
     if nil != instance.recorder.queryHook {
