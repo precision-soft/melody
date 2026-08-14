@@ -199,7 +199,7 @@ The hook is executed during provider open, after Melody defaults and typed confi
 
 ## Enhancements
 
-The core `bunorm` module ships three optional, dependency-free enhancements (standard library + Bun only). Paths below reference the v3 binding.
+The core `bunorm` module ships three optional enhancements with no dependency beyond the standard library, Bun and melody itself. Paths below reference the v3 binding, which is where they ship.
 
 ### Read/write split
 
@@ -214,7 +214,7 @@ readDatabase, _ := splitter.Reader()
 
 ### Field encryption
 
-The [`encrypt`](v3/encrypt) subpackage encrypts column values at rest with AES-256-GCM. Declare a field as [`encrypt.EncryptedString`](v3/encrypt/encrypted_string.go) (it implements `driver.Valuer`/`sql.Scanner`) and configure a process-wide cipher once at boot via [`encrypt.UseCipher`](v3/encrypt/encrypted_string.go). Keys are resolved by id through a [`KeyProvider`](v3/encrypt/key_provider.go), so ciphertext carries its key id for rotation.
+The [`encrypt`](v3/encrypt) subpackage encrypts column values at rest with AES-256-GCM. Declare a field as [`encrypt.EncryptedString`](v3/encrypt/encrypted_string.go) (it implements `driver.Valuer`/`sql.Scanner`) and configure a process-wide cipher once at boot via [`encrypt.UseCipher`](v3/encrypt/cipher_registry.go). Keys are resolved by id through a [`KeyProvider`](v3/encrypt/key_provider.go), so ciphertext carries its key id for rotation.
 
 ```go
 encrypt.UseCipher(encrypt.NewCipher(
@@ -226,7 +226,7 @@ type Customer struct {
 }
 ```
 
-The value is stored as `<keyId>:<base64(nonce||ciphertext)>` and is not searchable in encrypted form. `EncryptedString` masks its decrypted plaintext in `fmt`/`slog`/error output (its `String`/`LogValue` return `<redacted>`); use an explicit `string(value)` conversion when the real value is needed.
+The value is stored as a marker prefix (`<ENC>` and the format name, NUL-glued) followed by `<keyId>:<base64raw(nonce||ciphertext)>` — the marker is how a ciphertext is told apart from plaintext, and the base64 is unpadded; see [`v3/encrypt/README.md`](v3/encrypt/README.md) for the exact form. The value is not searchable in encrypted form. `EncryptedString` masks its decrypted plaintext in `fmt`/`slog`/error output (its `String`/`LogValue` return `<redacted>`); use an explicit `string(value)` conversion when the real value is needed.
 
 ### Audit trail
 

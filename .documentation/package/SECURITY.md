@@ -89,7 +89,7 @@ If a request matches a configured firewall, Melody always stores a security cont
 Token resolution outcomes:
 
 - **Authenticated token** when the resolved token returns `true == token.IsAuthenticated()` (for example [`security.AuthenticatedToken`](../../security/authenticated_token.go)).
-- **Anonymous token** when resolution returns `nil`, returns an error, or panics (see [`security.AnonymousToken`](../../security/anonymous_token.go)).
+- **Anonymous token** when resolution returns `nil` (see [`security.AnonymousToken`](../../security/anonymous_token.go)) — the request then continues anonymously. A resolution that returns an **error** or **panics** also stores the anonymous context, but the request is terminated on the spot through the `kernel.exception` dispatch and never reaches access control or the handler.
 
 Userland code must treat `token.IsAuthenticated()` as the canonical guard for accessing user identity or enforcing roles (or use [`security.IsGranted`](../../security/is_granted.go)).
 
@@ -128,6 +128,7 @@ import (
 	applicationcontract "github.com/precision-soft/melody/application/contract"
 	httpcontract "github.com/precision-soft/melody/http/contract"
 	kernelcontract "github.com/precision-soft/melody/kernel/contract"
+	runtimecontract "github.com/precision-soft/melody/runtime/contract"
 	"github.com/precision-soft/melody/security"
 	securityconfig "github.com/precision-soft/melody/security/config"
 	securitycontract "github.com/precision-soft/melody/security/contract"
@@ -136,7 +137,7 @@ import (
 type apiKeyLoginHandler struct{}
 
 func (instance *apiKeyLoginHandler) Login(
-	runtimeInstance any,
+	runtimeInstance runtimecontract.Runtime,
 	request httpcontract.Request,
 	input securitycontract.LoginInput,
 ) (*securitycontract.LoginResult, error) {
@@ -156,7 +157,7 @@ func (instance *apiKeyLoginHandler) Login(
 type apiKeyLogoutHandler struct{}
 
 func (instance *apiKeyLogoutHandler) Logout(
-	runtimeInstance any,
+	runtimeInstance runtimecontract.Runtime,
 	request httpcontract.Request,
 	input securitycontract.LogoutInput,
 ) (*securitycontract.LogoutResult, error) {
@@ -280,7 +281,7 @@ Rotate on the way out too: logout should clear the session ([`Session.Clear`](..
 - A session-backed login that does not call [`RegenerateSession`](../../session/manager.go) is vulnerable to **session fixation**: the id the victim arrived with stays valid and authenticated. Rotating is a per-application responsibility — the framework cannot do it for you, because only the login handler knows when the privilege change happens. See [Session fixation](#session-fixation).
 - `SecurityContextSetOnRuntime` stores the context in the runtime scope under `security/contract.ServiceSecurityContext`.
 - [`ApiKeyHeaderAuthenticator`](../../security/api_key_authenticator.go) compares the supplied header against the expected value with [`crypto/subtle.ConstantTimeCompare`](https://pkg.go.dev/crypto/subtle#ConstantTimeCompare) so timing differences do not leak the expected key.
-- Every refusal the decision manager produces carries the branch that produced it, in the exception context the response never renders: `reason` — one of the exported `RefusalReason*` constants — beside `strategy` and, where a single attribute was being weighed, `attribute`. The access control listener files one record per refusal naming the reason, the firewall and the matched rule, at warning; the one exception is `RefusalReasonNoVoterSupportsAttribute`, filed at **error**, because a firewall naming an attribute no configured voter looks at is a wiring fault answered fail-closed and nothing about the request can repair it. The record is filed before an access denied handler can answer and return, so a handler that answers the request itself no longer hides the refusal, and the error carried into `kernel.exception` is marked as already logged so the exception listener attaches its coordinates instead of filing a second record.
+- Every refusal the decision manager produces carries the branch that produced it, in the exception context the response never renders: `reason` — one of the exported `RefusalReason*` constants — beside `strategy` and, where a single attribute was being weighed, `attribute`. The access control listener files one record per refusal naming the reason, the firewall and the matched rule, at warning; the one exception is `RefusalReasonNoVoterSupportsAttribute`, filed at **error**, because a firewall naming an attribute no configured voter looks at is a wiring fault answered fail-closed and nothing about the request can repair it. The record is filed on whichever exit the path takes — a handler that answers the request itself no longer hides the refusal, and the record says what the handler did with it — and the error carried into `kernel.exception` is marked as already logged so the exception listener attaches its coordinates instead of filing a second record.
 - Both methods of the decision manager refuse an empty attribute list. `DecideAll` used to read it as an AND over nothing and grant, so a call site whose attributes came from a configuration value that resolved away was authorized rather than refused; it now answers `403` exactly as `DecideAny` always did. The compiled access control cannot produce a rule with no attribute, so this only ever affected a caller reaching the decision manager directly.
 - A typed nil — an interface variable holding a nil pointer — is refused wherever a nil is refused, both at the definition site and in `Compile`. Such a value is not equal to nil, so before this it survived both walls and was first dereferenced on the request path, outside any recovery. Declaring a dependency as `var handler *MyLoginHandler` and never assigning it now fails the boot with the piece named, rather than the first request that reaches it.
 - A constructor that takes a slice copies it. Keeping your own reference to the rules, authenticators or voters you registered and editing it afterwards changes nothing about the firewall that was built from it — the swap would otherwise land past every nil check and past compilation, in the decision path of a live request.
@@ -321,7 +322,7 @@ Rotate on the way out too: logout should clear the session ([`Session.Clear`](..
 - Auth: [`ApiKeyHeaderRule`](../../security/rule.go), [`ApiKeyHeaderAuthenticator`](../../security/api_key_authenticator.go), [`AuthenticatorManager`](../../security/authenticator_manager.go), [`AuthenticatorTokenSource`](../../security/token_source.go), [`ResolverTokenSource`](../../security/token_source.go)
 - Matchers: [`PathPrefixMatcher`](../../security/matcher.go)
 - Authorization: [`AccessDecisionManager`](../../security/access_decision_manager.go), [`RoleVoter`](../../security/voter.go), [`RoleHierarchyVoter`](../../security/role_hierarchy_voter.go)
-- Configuration: [`CompiledConfiguration`, `CompiledFirewall`, `CompiledSource`](../../security/compiled_configuration.go), [`FirewallRegistry`](../../security/firewall_registry.go), [`FirewallManager`](../../security/firewall_manager.go)
+- Configuration: [`CompiledConfiguration`, `CompiledFirewall`](../../security/compiled_configuration.go), [`Source`](../../security/security_context.go), [`FirewallRegistry`](../../security/firewall_registry.go), [`FirewallManager`](../../security/firewall_manager.go)
 - Context: [`SecurityContext`](../../security/security_context.go)
 
 ### Constructors
@@ -331,11 +332,11 @@ Rotate on the way out too: logout should clear the session ([`Session.Clear`](..
 - [`NewAccessControlExactRule(path string, attributes ...string)`](../../security/access_control.go)
 - [`NewAccessControlRegexRule(pattern string, attributes ...string)`](../../security/access_control.go)
 - [`NewAccessControlRuleWithSegmentPrefix(pathPrefix string, attributes ...string)`](../../security/access_control.go)
-- [`NewRoleHierarchy(hierarchy map[string][]string)`](../../security/role_hierarchy.go)
+- [`NewRoleHierarchy(inheritedRolesByRole map[string][]string)`](../../security/role_hierarchy.go)
 - [`NewAnonymousToken()`](../../security/anonymous_token.go)
 - [`NewAuthenticatedToken(userIdentifier string, roles []string)`](../../security/authenticated_token.go)
 - [`NewToken(user securitycontract.Token)`](../../security/token.go)
-- [`NewPathPrefixMatcher(pathPrefix string)`](../../security/matcher.go)
+- [`NewPathPrefixMatcher(prefix string)`](../../security/matcher.go)
 - [`NewApiKeyHeaderRule(matcher securitycontract.Matcher, headerName string, expectedValue string)`](../../security/rule.go)
 - [`NewApiKeyHeaderAuthenticator(headerName string, expectedValue string, userId string, roles []string)`](../../security/api_key_authenticator.go)
 - [`NewAuthenticatorManager(authenticators ...securitycontract.Authenticator)`](../../security/authenticator_manager.go)
@@ -390,10 +391,10 @@ Rotate on the way out too: logout should clear the session ([`Session.Clear`](..
     - [`(FirewallOverrideConfiguration).WithInheritGlobalAccessControl(inheritGlobalAccessControl bool) FirewallOverrideConfiguration`](../../security/config/security_module.go)
 - Access control builder:
     - [`NewAccessControlBuilder()`](../../security/config/access_control_builder.go)
-    - [`(*AccessControlBuilder).Require(path string, attributes ...string)`](../../security/config/access_control_builder.go)
-    - [`(*AccessControlBuilder).AllowAnonymous(path string)`](../../security/config/access_control_builder.go)
+    - [`(*AccessControlBuilder).Require(pathPrefix string, attributes ...string)`](../../security/config/access_control_builder.go)
+    - [`(*AccessControlBuilder).AllowAnonymous(pathPrefix string)`](../../security/config/access_control_builder.go)
     - [`(*AccessControlBuilder).Build() *security.AccessControl`](../../security/config/access_control_builder.go)
 - Access control merge strategies:
     - [`type AccessControlMergeStrategy`](../../security/config/security_module.go)
 - Compile:
-    - [`Compile(configuration Configuration) *security.CompiledConfiguration`](../../security/config/compile.go)
+    - [`Compile(configuration Configuration) (*security.CompiledConfiguration, error)`](../../security/config/compile.go)

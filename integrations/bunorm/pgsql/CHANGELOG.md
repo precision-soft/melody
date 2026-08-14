@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- bun's diagnostics are routed into the journal on the retry-less open path too: the `bunorm.RouteDiagnostics` call sat only in the retry loop, so the default provider — one built without a `RetryConfig` — opened its connection and left bun's declaration mistakes as unstructured lines on standard error, exactly the state the routing was added to end. The call now lives in the one open funnel every door shares — `Open`, `OpenContext`, the retry loop and the migration door alike
+
 ### Changed
 
 - the `bun` requirement moves to `v1.2.17`, with the dialect and driver packages in lockstep: the dialects verify at init that their version equals bun's and panic otherwise. v1.2.16 swallowed the failure of a migration read from a `.sql` file, which `integrations/bunorm/migrate` answered with `[success]` and exit 0 over a schema that never changed; the whole family moves together so no binary can assemble a mismatched pair

@@ -264,8 +264,6 @@ func (instance *Provider) openWithRetry(ctx context.Context, resolver containerc
         logger = logging.EmergencyLogger()
     }
 
-    bunorm.RouteDiagnostics(logger)
-
     attempt := uint32(0)
     maxAttempts := instance.retryConfig.MaxAttempts
     if 0 == maxAttempts {
@@ -380,6 +378,14 @@ func (instance *Provider) open(ctx context.Context, resolver containercontract.R
             ctxErr,
         )
     }
+
+    /* the routing lives here because open is the one funnel every door shares — Open, OpenContext, the retry loop and the migration door all pass through it. Routed only on the retry path, the default retry-less open left bun's declaration mistakes on standard error. RouteDiagnostics is once per process, so repeated attempts cost nothing. */
+    diagnosticsLogger, diagnosticsLoggerErr := logging.LoggerFromResolver(resolver)
+    if nil != diagnosticsLoggerErr {
+        diagnosticsLogger = logging.EmergencyLogger()
+    }
+
+    bunorm.RouteDiagnostics(diagnosticsLogger)
 
     configuration := config.ConfigMustFromResolver(resolver)
 

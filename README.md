@@ -4,7 +4,7 @@
 
 # Melody
 
-[![Go >= 1.22](https://img.shields.io/badge/go-%3E%3D1.22-00ADD8)](https://go.dev/)
+[![Go >= 1.22 (v1/v2) · 1.25 (v3)](https://img.shields.io/badge/go-%3E%3D1.22%20(v1%2Fv2)%20%C2%B7%201.25%20(v3)-00ADD8)](https://go.dev/)
 [![Go Report Card](https://goreportcard.com/badge/github.com/precision-soft/melody)](https://goreportcard.com/report/github.com/precision-soft/melody)
 [![Go Reference](https://pkg.go.dev/badge/github.com/precision-soft/melody.svg)](https://pkg.go.dev/github.com/precision-soft/melody)
 [![License MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -92,6 +92,7 @@ At a high level, a Melody application is assembled as follows:
 
 - **Application** ([code](./application/)) wires modules and services into a **container** ([code](./container/)).
 - A **runtime** ([code](./runtime/)) owns the lifecycle (boot/compile/run/shutdown) and creates request/command scopes.
+- The **kernel** ([code](./kernel/)) is the compiled heart handed to both fronts: it holds the container, the clock and the event dispatcher, and dispatches the kernel events a request travels through.
 - **HTTP** ([code](./http/)) uses the runtime + container scopes to run middleware and dispatch handlers.
 - **CLI** ([code](./cli/)) runs commands inside the same runtime/container infrastructure.
 - Cross-cutting packages are wired as services: [logging](./logging/), [event](./event/), [validation](./validation/), [cache](./cache/), [session](./session/), [security](./security/).
@@ -216,7 +217,7 @@ Key entry points:
 ## Packages
 
 The list below is the **v1** package surface (repository root). The actively maintained **v3** line adds
-`lock`, `mailer`, `messagebus`, `openapi`, `storage`, and `translation` — see the
+`lock`, `mailer`, `messagebus`, `openapi`, `storage`, `translation`, and `wiring` — see the
 [v3 package list](./v3/README.md#packages).
 
 Each package below links to its source folder and its package documentation.

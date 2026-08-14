@@ -70,7 +70,7 @@ The arguments mean:
 - `clockInstance`  
   A `clock/contract.Clock` used for expiration calculations.
 
-When `maxItems` is enabled and the backend reaches capacity, eviction is deterministic: it evicts an expired entry from the least-recently-used end first, otherwise it evicts the least-recently-used entry (see [`cache/in_memory.go`](../../cache/in_memory.go)).
+When `maxItems` is enabled and the backend reaches capacity, eviction probes a bounded tail of the recency list — eight entries — for an expired victim first, and otherwise evicts the least-recently-**promoted** entry (see [`cache/in_memory.go`](../../cache/in_memory.go)). Recency is kept at a coarse grain on purpose: a hit refreshes an atomic access mark under the read lock, and the entry moves to the front of the list at most once per second per key, so the read path does not pay the exclusive lock on every hit and the eviction order is right to within that interval rather than to the last read.
 
 ### The default backend is unbounded, and boot says so
 
@@ -145,7 +145,7 @@ func registerCacheOverrides(
 	register func(
 	serviceName string,
 	provider any,
-	options ...any,
+	options ...containercontract.RegisterOption,
 ),
 ) {
 	register(

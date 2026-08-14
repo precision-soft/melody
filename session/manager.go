@@ -87,7 +87,7 @@ func newManager(storage sessioncontract.Storage, ttl time.Duration, ownsStorage 
         )
     }
 
-    /* the sub-second refusal of the configuration door (config.MinimumSessionTtl), for the same manual wirers: below one second the value is not a short session, it is a broken one — the storage purges every lapsed entry on the write that stores the new one, so SaveSession reports success and persists nothing, and no sub-second lifetime survives the response reaching the client anyway. Zero keeps its meaning of no expiry. */
+    /* the sub-second refusal of the configuration door (config.MinimumSessionTtl), for the same manual wirers: below one second the value is not a short session, it is a broken one — the write succeeds, but the entry lapses before the response reaches the client and the cookie comes back, so every request that follows loads nothing, and a second is the finest unit http itself dates anything in. Zero keeps its meaning of no expiry. */
     if 0 < ttl && time.Second > ttl {
         exception.Panic(
             exception.NewError(
@@ -182,7 +182,7 @@ func (instance *Manager) RegenerateSession(sessionInstance sessioncontract.Sessi
 }
 
 func (instance *Manager) SaveSession(sessionInstance sessioncontract.Session) error {
-    /* the guard is IsNilInterface and not `nil ==`, the same as RegenerateSession: a typed nil session — the zero value of a *Session variable a caller left unassigned — is not equal to nil once it is carried in the interface, so a bare comparison lets it through and IsCleared below dereferences it. That panic replaces a returned error the caller can act on, and on the response path it happens inside the recovery defer, where a second panic escapes ServeHttp with no response at all. */
+    /* the guard is IsNilInterface and not `nil ==`, the same as RegenerateSession: a typed nil session — the zero value of a *Session variable a caller left unassigned — is not equal to nil once it is carried in the interface, so a bare comparison lets it through and Snapshot below dereferences it. That panic replaces a returned error the caller can act on, and on the response path it happens inside the recovery defer, where a second panic escapes ServeHttp with no response at all. */
     if true == internal.IsNilInterface(sessionInstance) {
         return exception.NewError("session is nil in save session", nil, nil)
     }

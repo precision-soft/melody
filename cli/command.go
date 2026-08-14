@@ -223,7 +223,7 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
                     panic(recoveredValue)
                 }()
 
-                /* a command that returns its error through a concrete typed pointer hands over a non-nil interface around a nil value: read as a failure it reaches Error() on a nil receiver on the printing line below. The same normalization guards the two Close results, which cross the substitutable runtime contract. */
+                /* a command that returns its error through a concrete typed pointer hands over a non-nil interface around a nil value: read as a failure it reaches Error() on a nil receiver on the printing line below. The same normalization guards the scope's Close result, which crosses the substitutable runtime contract. */
                 runErr := normalizeCliError(copied.Run(runtimeInstance, commandContext))
 
                 closeErrorByName := map[string]error{}

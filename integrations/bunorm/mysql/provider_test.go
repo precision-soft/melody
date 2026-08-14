@@ -3,10 +3,12 @@ package mysql
 import (
     "context"
     "errors"
+    "fmt"
     "math"
     "net"
     "os"
     "reflect"
+    "strings"
     "testing"
     "time"
 
@@ -17,6 +19,7 @@ import (
     "github.com/precision-soft/melody/exception"
     "github.com/precision-soft/melody/logging"
     loggingcontract "github.com/precision-soft/melody/logging/contract"
+    "github.com/uptrace/bun/schema"
 )
 
 type stubParameter struct {
@@ -182,6 +185,40 @@ func newTestProvider(providerOptions ...ProviderOption) *Provider {
         "database.password",
         providerOptions...,
     )
+}
+
+var bunDiagnosticsPinRan bool
+
+/* the routing is once per process, so this pin must own the first open of the test binary: it is declared before every other test of this file on purpose, the test files that sort before this one construct configurations without opening anything, and a repeated run in the same binary (-count above one) skips rather than reads a once another run consumed. The diagnostic is provoked through bun's public surface — a query carrying an argument with no placeholder — because what is pinned is that a retry-less open installs the journal as bun's destination, not that the adapter writes where it was pointed. */
+func TestOpenContext_ARetrylessOpenRoutesBunDiagnosticsIntoTheJournal(t *testing.T) {
+    if true == bunDiagnosticsPinRan {
+        t.Skip("the process-wide routing once was consumed by an earlier run in this binary; the pin proves on the first run")
+    }
+    bunDiagnosticsPinRan = true
+
+    logger := &capturingProviderLogger{}
+    resolver := newStubResolverWithLogger(logger)
+
+    provider := newTestProvider().
+        WithTimeoutConfig(NewTimeoutConfig(200*time.Millisecond, time.Second, time.Second))
+
+    _, openErr := provider.OpenContext(context.Background(), resolver)
+    if nil == openErr {
+        t.Fatal("expected the open against an unreachable host to fail")
+    }
+
+    _ = schema.SafeQuery("SELECT 1", []any{42})
+
+    routed := false
+    for _, record := range logger.entries {
+        if "bun diagnostic" == record.message && strings.Contains(fmt.Sprintf("%v", record.context["line"]), "placeholders") {
+            routed = true
+        }
+    }
+
+    if false == routed {
+        t.Fatal("the retry-less open did not route bun's diagnostics into the journal")
+    }
 }
 
 func TestNewProviderStoresParameterNamesAndAppliesOptions(t *testing.T) {

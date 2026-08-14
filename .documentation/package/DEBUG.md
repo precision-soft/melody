@@ -32,13 +32,13 @@ The `debug:container` list summary orders its segments `total | shown | ok | err
 
 ## Flags and output
 
-Every debug command declares [`output.DebugFlags()`](../../cli/output/standard_flag.go) as its flag set and renders its result through [`output.Render`](../../cli/output/renderer.go), so all six share one interface. `DebugFlags()` is [`output.StandardFlags()`](../../cli/output/standard_flag.go) with `--quiet` defaulted to `false`, since a debug command's headers are the point. See [CLI](CLI.md#standard-output-flags) for the full table of flags and defaults.
+Every debug command declares [`output.DebugFlags()`](../../cli/output/standard_flag.go) as its flag set — `debug:container` and `debug:middleware` appending their own `--build` beside it — and renders its result through [`output.Render`](../../cli/output/renderer.go), so all six share one interface. `DebugFlags()` is [`output.StandardFlags()`](../../cli/output/standard_flag.go) with `--quiet` defaulted to `false`, since a debug command's headers are the point. See [CLI](CLI.md#standard-output-flags) for the full table of flags and defaults.
 
-Three behaviours apply to every command on this page:
+Shared behaviours — the first, second and last applying to every command on this page, the middle two to the command each one names:
 
 - **`--format=json` prints the envelope document and nothing else** — no headers, no banners, no trailing prose, and on a single line — so `app debug:router --format=json | jq '.data'` works directly and a stream of documents can be read line by line. `--format=json-pretty` is the same document indented for reading by hand. Selecting json also **implies `--no-color`**: [`NormalizeOption`](../../cli/output/option_parser.go) forces it, so passing `--no-color=false` alongside does not put ANSI escapes back into the document.
-- **A command whose envelope carries an error exits non-zero.** [`Render`](../../cli/output/renderer.go) writes the envelope and then returns an exit error with code `1` when `Envelope.Error` is set, so `app debug:container app.repository.order || exit 1` fails a deployment gate on a service that does not resolve, instead of passing because the command "ran". The error is marked already-logged, so the rendered envelope is the only report.
-- **A route attribute the encoder cannot represent degrades instead of emptying the document.** Route attributes are arbitrary `any` from userland ([`WithRouteAttribute`](../../http/route_option.go)), and one unserializable value used to make the whole `debug:router --format=json` envelope fail to marshal, leaving zero bytes on stdout. A value that marshals keeps its json type; only one that cannot degrades to its `%v` rendering, which names the attribute rather than losing the report.
+- **A command whose envelope carries an error exits non-zero.** [`Render`](../../cli/output/renderer.go) writes the envelope and then returns an exit error with code `1` when `Envelope.Error` is set, so `app debug:container app.repository.order || exit 1` fails a deployment gate on a service that does not resolve, instead of passing because the command "ran". The error travels unmarked, so the exit path also writes it to the application log — the rendered envelope is the report a shell sees, the log record the one a deployment keeps.
+- **A route attribute the encoder cannot represent degrades instead of emptying the document.** Route attributes are arbitrary `any` from userland — the `attributes` argument of [`NewRouteOptions`](../../http/route_option.go), handed to the router through `HandleWithOptions` — and one unserializable value used to make the whole `debug:router --format=json` envelope fail to marshal, leaving zero bytes on stdout. A value that marshals keeps its json type; only one that cannot degrades to its `%v` rendering, which names the attribute rather than losing the report.
 - **`debug:middleware` items always carry `reason`**, empty where there is nothing to say. `--build` cannot fill `name` and `priority`: the build provider hands back the built chain alone, and correlating it with the described pipeline by position would be a guess, since the description also lists the inactive entries the build never produces. Read the default listing — which describes without building — when the name is what you need.
 - **`--format` and `--order` reject an unrecognised value** at argument-parsing time (`unsupported output format "…", expected "table", "json" or "json-pretty"`; `unsupported sort order "…", expected "asc" or "desc"`) rather than silently falling back to the default.
 
@@ -119,7 +119,7 @@ func main() {
         runtimeInstance,
     )
 
-    /* the registered command's action closes runtimeInstance.Scope() and runtimeInstance.Container() after it runs, so there is nothing to shut down here */
+    /* the registered command's action closes runtimeInstance.Scope() after it runs, and the exit handler closes the container, so there is nothing to shut down here */
     runErr := commandContext.Run(
         ctx,
         []string{"example", "debug:version"},

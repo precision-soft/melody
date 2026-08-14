@@ -25,7 +25,7 @@ Pool, timeout and retry defaults can be overridden via the chainable [`WithPoolC
 
 ### Defaults
 
-Applied when the matching config is not set ([`DefaultPoolConfig`](./pool_config.go), [`DefaultTimeoutConfig`](./timeout_config.go), [`DefaultRetryConfig`](./retry_config.go)):
+`PoolConfig` and `TimeoutConfig` defaults apply when the matching config is not set ([`DefaultPoolConfig`](./pool_config.go), [`DefaultTimeoutConfig`](./timeout_config.go)). The `RetryConfig` rows are different: an absent `RetryConfig` means **no retry at all**, and the listed values fill in field by field when a `RetryConfig` is supplied with that field zero or non-positive ([`DefaultRetryConfig`](./retry_config.go) builds the same shape for callers who want it whole):
 
 | Config          | Field                   | Default |
 |-----------------|-------------------------|---------|
@@ -45,7 +45,7 @@ Retrying is **opt-in**: without a `RetryConfig`, `Open` makes a single attempt.
 
 ## TLS
 
-Starting with `integrations/bunorm/pgsql/v3.1.0` the provider is **secure-by-default**: `pgdriver` negotiates a TLS handshake on every Postgres connection. Earlier releases hardcoded `pgdriver.WithInsecure(true)`, which silently disabled TLS.
+Starting with `integrations/bunorm/pgsql v1.1.4` the provider is **secure-by-default**: `pgdriver` negotiates a verified TLS handshake on every Postgres connection. Earlier releases of this module called `pgdriver.WithInsecure(false)`, which — despite the name — negotiated TLS with `InsecureSkipVerify: true`, so the server certificate was never checked.
 
 Two provider options expose the TLS knobs:
 

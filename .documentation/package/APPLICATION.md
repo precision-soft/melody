@@ -29,7 +29,7 @@ The application boot is split around configuration resolve:
 
 1. **Pre-resolve**: modules may register module-level configurations via [`ConfigModule`](../../application/contract/config_module.go), then register parameters via [`ParameterModule`](../../application/contract/parameter_module.go).
 2. **Resolve**: application configuration is resolved.
-3. **Post-resolve**: modules may register services via [`ServiceModule`](../../application/contract/service_module.go), then request-lifetime services via [`ScopedServiceModule`](../../application/contract/scoped_service_module.go), then register security/events/CLI/HTTP.
+3. **Post-resolve**: modules may register services via [`ServiceModule`](../../application/contract/service_module.go), then request-lifetime services via [`ScopedServiceModule`](../../application/contract/scoped_service_module.go), then — in this order — security, event subscribers, HTTP middlewares, HTTP routes and CLI commands.
 
 This allows HTTP/CLI module code to read resolved configuration values during registration, e.g.
 `kernelInstance.Config().MustGet("my.param").String()`.
@@ -51,7 +51,7 @@ The order is decided when the pipeline is built, not at registration:
 2. Registrations at **equal priority** keep **registration order**, the first registered being the outer one. A factory registration and a direct one share one registration sequence, so they compete on the same footing.
 3. `before` / `after` edges declared on a [`pipeline.NewHttpMiddlewareDefinition`](../../http/middleware/pipeline/definition.go) override both. The registrar exposes priority only; edges are for a pipeline assembled directly through [`pipeline.NewBuilder`](../../http/middleware/pipeline/builder.go).
 
-A middleware that answers a request itself, without calling `next`, short-circuits everything ordered inside it — the framework's own static middleware serves a matching file and returns without calling the rest of the chain. It is registered at a priority below the default, which keeps it outermost, so a request for a file that exists is answered before anything registered through the registrar observes it. [`(*HttpMiddleware).LastBuildReport`](../../application/http_middleware.go) reports the chain that was actually built and `debug:middleware` renders it. See [HTTP](HTTP.md) for the full ordering contract and for what a `before`/`after` edge does to the build when it names a definition that is not there.
+A middleware that answers a request itself, without calling `next`, short-circuits everything ordered inside it — the framework's own static middleware serves a matching file and returns without calling the rest of the chain. It is registered at a priority below the default, which keeps it outermost, so a request for a file that exists is answered before anything registered through the registrar observes it. [`(*HttpMiddleware).LastBuildReport`](../../application/http_middleware.go) reports the chain the serving process actually built, for in-process inspection; `debug:middleware` describes and — under `--build` — builds a report of its own rather than reading that record. See [HTTP](HTTP.md) for the full ordering contract and for what a `before`/`after` edge does to the build when it names a definition that is not there.
 
 ## Usage
 
@@ -72,6 +72,7 @@ import (
 
 	"github.com/precision-soft/melody/application"
 	applicationcontract "github.com/precision-soft/melody/application/contract"
+	containercontract "github.com/precision-soft/melody/container/contract"
 	"github.com/precision-soft/melody/http"
 	httpcontract "github.com/precision-soft/melody/http/contract"
 	kernelcontract "github.com/precision-soft/melody/kernel/contract"
@@ -118,8 +119,8 @@ func (instance *demoModule) RegisterServices(
 
 	registrar.RegisterService(
 		"service.demo.value",
-		func(serviceLocator any) (any, error) {
-			_ = serviceLocator
+		func(resolver containercontract.Resolver) (string, error) {
+			_ = resolver
 			return "value", nil
 		},
 	)
@@ -258,9 +259,9 @@ Boot fails fast where serving would be the widening: an **http** process whose `
 
 **The shutdown budget covers the request scopes as well as the connections.** `net/http`'s own `Shutdown` drains the connections the server still owns — and a **hijacked** connection is not one of them: a handler that upgrades to a websocket or takes the socket for any other reason removes it from the server's accounting, so `Shutdown` returns immediately and reports success while that handler is still running. Melody counts the request scopes the http kernel opened and waits for them under the *same* budget after `Shutdown` returns. A drain that finishes leaves the exit exactly as it was; one that does not is recorded as `http shutdown left request scopes open`, carrying the count, and the process exits non-zero — the same signal an overrun `Shutdown` gives, for the same reason. An application that serves upgraded connections should close them from a shutdown hook so the drain has something to succeed at; without one, the budget is what bounds the wait.
 
-On the way out, the record that explains a dying process is written **before** the teardown, through a logger that still writes: the exit handler refuses a container logger the teardown already closed and falls back to the emergency logger. A teardown failure that `Run`'s own close discovers turns into exit 1, symmetric with the cli path, which folds close failures into the command's result.
+On the way out, the record that explains a dying process is written **before** the teardown, through a logger that still writes: the exit handler climbs a ladder — the configured container logger while it still answers, a last-resort logger opened on the configured log destination when the container cannot, and the emergency logger when even that destination is unusable. A teardown failure that `Run`'s own close discovers turns into exit 1, symmetric with the cli path, which folds the run scope's close failure into the command's result while the container teardown belongs to the exit handler.
 
-A panic **during boot** exits fail-fast, without a container teardown: `Boot`'s own recover handler logs the record and exits, and by design does not attempt `Close` on a container that may be half built. Connections modules opened before the failing boot line — database pools, redis clients — are reclaimed by the process exit, not by their `Close`. A deployment whose backends require an orderly disconnect should treat a boot failure accordingly.
+A panic **during boot** exits fail-fast, with the container teardown run between the record and the exit: `Boot`'s own recover handler logs the record first, through a logger the teardown has not touched, then closes the container — which asks `IsClosed` before acting, so a container that never got built costs nothing — and exits. Connections modules opened before the failing boot line — database pools, redis clients — therefore get their `Close`, bounded by the same per-step budget the exit path applies to everything else.
 
 ### Middleware helpers
 

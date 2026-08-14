@@ -24,24 +24,23 @@ When a change touches multiple version lines, keep each line's edit self-contain
 
 Prerequisites:
 
-- Go (this repository is a Go module; see [`go.mod`](./go.mod))
-- Make (optional; used only if you rely on repository scripts)
-- Docker (optional; used only for the repository development shell under [`.dev/`](./.dev/))
+- Go (this repository is a Go workspace of several modules; see [`go.work`](./go.work) — the root [`go.mod`](./go.mod) is the v1 framework module)
+- Docker (required for the verification gate: [`.dev/validate/all.sh`](./.dev/validate/all.sh) runs every check inside the development container, and the git hooks `./dc` installs invoke it on commit and push)
 
 The quickest way into the development shell is the [`./dc`](./dc) wrapper, which also installs the repository git hooks:
 
 ```bash
 ./dc up:minimal   # core development shell
-./dc up:all       # plus integration services (Redis, RabbitMQ, MySQL, MinIO)
+./dc up:all       # plus integration services (RabbitMQ, Redis, MySQL, LocalStack, PostgreSQL, Mailpit, Prometheus, the OTLP collector)
 ```
 
 Inside the shell, the convenience functions described under
-[Development shell aliases](#development-shell-aliases) run the full verification matrix.
+[Development shell aliases](#development-shell-aliases) run the verification matrix for the module you are in; the whole-repository gate is `melody_validate_all` (alias `mva`, staged-files variant `mvs`), which delegates to [`.dev/validate/all.sh`](./.dev/validate/all.sh).
 
 ### Overriding host ports
 
-The committed [`.dev/docker/.env`](./.dev/docker/.env) maps each container to a default host port (the HTTP load balancer to `80`, the example app to `8180`, and the `up:all` services to `5673`,
-`15673`, `6380`, `3307`, `4566`). Every one of these is a `${VAR:-default}` lookup, so you can move any of them without editing the committed file: create an uncommitted `.dev/docker/.env.local`
+The committed [`.dev/docker/.env`](./.dev/docker/.env) carries the default host ports the compose file reads (the HTTP load balancer on `80`, the example app on `8180`, and the `up:all` services on
+`5673`/`15673` (RabbitMQ), `6380` (Redis), `3307` (MySQL), `4566` (LocalStack)); the compose file supplies its own defaults for the rest — `5433` (PostgreSQL), `1026`/`8026` (Mailpit), `9091` (Prometheus), `4317`/`4318` (the OTLP collector) — and the per-major `dev-v1`/`dev-v2` shells publish no host port. Each port is read in [`docker-compose.yml`](./.dev/docker/docker-compose.yml) as a `${VAR:-default}` lookup, so you can move any of them without editing the committed file: create an uncommitted `.dev/docker/.env.local`
 (gitignored, loaded after `.env` so it wins) and set only the ports you need to change. This is the supported way to run the melody dev stack alongside other local stacks that already use those ports.
 
 ```bash
@@ -62,7 +61,7 @@ Melody supports two independent embedding modes controlled by build tags:
 - Environment embedding: `melody_env_embedded` (see [`./application/environment_embedded.go`](./application/environment_embedded.go))
 - Static embedding: `melody_static_embedded` (see [`./application/static_embedded.go`](./application/static_embedded.go))
 
-All changes must be tested and vetted under **all supported build-tag combinations**, for both:
+All changes must be tested and vetted under **all supported build-tag combinations**, for every workspace module the change touches — the enforced gate, [`.dev/validate/all.sh`](./.dev/validate/all.sh), runs the matrix for the framework majors (repository root, [`v2/`](./v2/), [`v3/`](./v3/)), their example applications, and every integration module. The commands below show the matrix for the v1 pair:
 
 - the framework (repository root)
 - the example application ([`.example/`](./.example/))
@@ -130,7 +129,8 @@ It defines convenience functions for the verification matrix:
 - `gv` / `gt`: run `go vet` / `go test`
 - `goa`: run `gv` then `gt`
 - `gaee`, `gase`, `gaes`: run `goa` with `melody_env_embedded`, `melody_static_embedded`, or both
-- `gall`: run all embedded modes (env, static, both)
+- `gall`: run the three embedded modes (env, static, both) — the default no-tag combination is `goa`, run separately
+- `melody_validate_all` / `mva` (staged-files variant `melody_validate_staged` / `mvs`): the whole-repository gate, delegating to `.dev/validate/all.sh`
 
 It also defines build helpers that produce executable binaries:
 
@@ -180,7 +180,7 @@ The repository enforces a strict, opinionated style. Contributions are expected 
 #### Comments
 
 - All comments must be in **English**.
-- Use `/* ... */` for comments; do not use `//` (except for Go build/tool directives such as `//go:build` and `//go:embed`).
+- Use `/* ... */` for comments; do not use `//` (except for Go build/tool directives such as `//go:build` and `//go:embed`, the v3 wiring markers `//melody:service`/`//melody:scoped`/`//melody:bind` — which the wiring scanner reads from line comments only — and a linter directive such as `//nolint`).
 - A comment is the exception, not the norm. Where the code is clear, write none; where a comment stays, it states the constraint the code *currently* carries and cannot show for itself — not the history of a repair, and not what the code used to do. The long "why" belongs in `CHANGELOG.md` and in `.documentation/`.
 - In a test, the test name is the explanation. A comment there earns its place only by saying something about the *test* that the test cannot show: that the guard it drives is shadowed by a sibling, that the branch is unreachable through the public API, that a probe is shaped a particular way on purpose, or an external fact the code is aligned to.
 - Annotation markers (`@info`, `@important`, `@todo`) are not used.

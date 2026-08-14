@@ -14,7 +14,7 @@ Key types
 
 ## Defaults
 
-Applied when the matching config is not set ([`DefaultPoolConfig`](./pool_config.go), [`DefaultTimeoutConfig`](./timeout_config.go), [`DefaultRetryConfig`](./retry_config.go)):
+`PoolConfig` and `TimeoutConfig` defaults apply when the matching config is not set ([`DefaultPoolConfig`](./pool_config.go), [`DefaultTimeoutConfig`](./timeout_config.go)). The `RetryConfig` rows are different: an absent `RetryConfig` means **no retry at all**, and the listed values fill in field by field when a `RetryConfig` is supplied with that field zero or non-positive ([`DefaultRetryConfig`](./retry_config.go) builds the same shape for callers who want it whole):
 
 | Config          | Field                   | Default |
 |-----------------|-------------------------|---------|
@@ -81,7 +81,7 @@ can't discover MySQL version: <error>
 through the **standard library's** default logger, not through bun's, so nothing this provider sets can reach it. Routing it means `log.SetOutput`, which replaces the destination of the standard logger for the whole process — every dependency that logs through it, and your own `log` calls with it. That is the application's decision, not this package's, so if you want it, take it in your composition root:
 
 ```go
-log.SetOutput(logging.NewStandardErrorLogger(logger, "standard logger"))
+log.SetOutput(logging.NewStandardErrorLogger(logger, "standard logger").Writer())
 ```
 
 In practice the line is redundant wherever container stderr is already collected into the same place as the journal, and the melody record written microseconds later carries strictly more: the level, the connection context and the cause.

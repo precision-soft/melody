@@ -581,7 +581,7 @@ func listenerNameOf(listener eventcontract.EventListener) string {
     return function.Name()
 }
 
-/* refuseSkippedRequiredListeners answers the error a stop owes when a listener marked required sits among the listeners it skipped. A listener that stops propagation before a required listener behind it has run would silently skip that listener — the security access-control listener, for instance — and the caller would proceed as if it had run; the dispatch fails closed instead, unless the stopping listener is explicitly allowed to skip required listeners. Both marks default off, so an unmarked dispatch behaves exactly as before. */
+/* refuseSkippedRequiredListeners answers the error an early end of the dispatch owes when a listener marked required sits among the listeners it skipped — the end being a propagation stop or a listener failure alike. Either would silently skip that listener — the security access-control listener, for instance — and the caller would proceed as if it had run; the dispatch fails closed instead, unless the listener that ended it is explicitly allowed to skip required listeners. Both marks default off, so an unmarked dispatch behaves exactly as before. */
 func refuseSkippedRequiredListeners(
     eventName string,
     skippedListenerList []listenerWithPriority,

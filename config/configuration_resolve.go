@@ -80,7 +80,7 @@ func (instance *Configuration) resolveAll(deferUnresolvedReferences bool) error 
                 "parameter": name,
             }
 
-            /* the environment key is named beside the parameter because the two are not the same word to the operator: a MELODY_* key and its kernel.* alias are one *Parameter stored under both names, the sorted walk reaches the alias first (M sorts before k), and the failure therefore named "kernel.log_path" to someone who had only ever written MELODY_LOG_PATH — a name they could not find in their own configuration. The key is omitted for a parameter registered at runtime, which has none. */
+            /* the environment key is named beside the parameter because the two are not the same word to the operator: a MELODY_* key and its kernel.* alias are one *Parameter stored under both names, the tolerant pass defers the non-reserved name for an undefined reference, and the failure therefore named "kernel.log_path" to someone who had only ever written MELODY_LOG_PATH — a name they could not find in their own configuration. The key is omitted for a parameter registered at runtime, which has none. */
             if "" != parameter.environmentKey && parameter.environmentKey != name {
                 failureContext["environmentKey"] = parameter.environmentKey
             }
@@ -172,7 +172,7 @@ func (instance *Configuration) scanTemplate(
                 continue
             }
 
-            /* no closer right there — the run ended at a percent or ran out: the fragment is not a placeholder and the percent is data */
+            /* no closer right there — another percent interrupted before one: the fragment is not a placeholder and the percent is data; a fragment that runs out without a closer was already reported as the unterminated placeholder it is */
             builder.WriteByte('%')
             index = index + 1
 
@@ -216,7 +216,7 @@ func (instance *Configuration) scanTemplate(
     return builder.String(), nil
 }
 
-/* resolveEnvironmentPlaceholder resolves one %env(...)% construct sitting at the start of the fragment. A fragment with no closing ")%" is reported as consuming nothing, so the caller treats the percent as data; a closed fragment that is not a well-formed placeholder is an error, because a typo that silently survived as literal text is exactly what this reporting exists to catch. */
+/* resolveEnvironmentPlaceholder resolves one %env(...)% construct sitting at the start of the fragment. A fragment whose candidate is interrupted by another percent before any ")%" is reported as consuming nothing, so the caller treats the percent as data; a fragment that runs out with no closer at all, and a closed fragment that is not a well-formed placeholder, are errors, because a typo that silently survived as literal text is exactly what this reporting exists to catch. */
 func (instance *Configuration) resolveEnvironmentPlaceholder(
     fragment string,
     currentKey string,

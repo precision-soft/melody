@@ -198,7 +198,7 @@ func main() {
 
 - `cli.Register(...)` fails fast via the [`exception`](../../exception) package if the root command context, command, or runtime instance is nil.
 - Command names are normalized using `strings.TrimSpace(...)`. Empty names and duplicates are rejected.
-- Registered command execution will close `runtimeInstance.Scope()` and `runtimeInstance.Container()` after `Run(...)` and may return aggregated shutdown errors. On a panic the closes stay with the outer layers — the recover handler that owns the exit needs the container open to write the fatal record — and the finish banner reports `[failed]` before the panic is re-raised unchanged.
+- Registered command execution closes `runtimeInstance.Scope()` after `Run(...)` and may fold that close's failure into the command's result; the container is deliberately left open on either outcome — the recover handler that owns the exit resolves the final record's logger through it and closes it between the record and `os.Exit`. On a panic the finish banner reports `[failed]` before the panic is re-raised unchanged.
 - A table row must match its block: `AddRow(...)` panics on a row whose cell count disagrees with the block's declared columns; the single-token separator row (`TableRowSeparatorToken`) is the one exception.
 - The table builder and the envelope are not safe for concurrent use: a command assembling its table or warnings from parallel work funnels them through one goroutine.
 - The banners honour `--no-color`: they print as plain text, and under `--format=json` they are suppressed entirely so the document stays parseable.

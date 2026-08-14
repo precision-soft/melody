@@ -211,7 +211,7 @@ func (instance *InMemoryBackend) Get(key string) ([]byte, bool, error) {
 
     instance.mutex.RUnlock()
 
-    /* a key promoted recently answers without the exclusive lock at all. Taking it unconditionally made every hit a writer against a lock every other key shares, so a door the RWMutex advertises as a read had no read parallelism whatever; the entry that lapsed between the two sections is left to the sweep, since the reading above already answered it absent. */
+    /* a key promoted recently answers without the exclusive lock at all. Taking it unconditionally made every hit a writer against a lock every other key shares, so a door the RWMutex advertises as a read had no read parallelism whatever; an entry found lapsed under the read lock is answered absent and left to the sweep, because deleting it needs the exclusive lock this path exists to avoid. */
     if false == promotionDue {
         return payload, true, nil
     }
@@ -602,7 +602,7 @@ const evictionProbeLimit = 8
 /* how often one entry is allowed to cost the exclusive lock for its place in the recency list. Between two promotions of the same key the list says that key was read at most this long ago, which is all the eviction needs: the probe picks an expired victim first and falls back to the least recently promoted one, so the ordering only has to be right at a coarser grain than the reads. Every read still refreshes the access mark, which is atomic and costs nothing — what is bounded here is the LIST surgery, and with it the read path's need for the exclusive lock at all. */
 const recencyPromotionInterval = time.Second
 
-/* the sweep takes the keys once and then expires them in chunks, releasing the lock between chunks: Get takes the same exclusive lock to touch the recency list, so a single whole-map pass under one lock stalls every concurrent request for as long as the map is large. A key deleted meanwhile is simply not found. */
+/* the sweep takes the keys once and then expires them in chunks, releasing the lock between chunks: every write takes the same exclusive lock, and a Get whose promotion is due takes it too, so a single whole-map pass under one lock stalls every concurrent request for as long as the map is large. A key deleted meanwhile is simply not found. */
 func (instance *InMemoryBackend) cleanupExpired() {
     now := instance.clock.Now()
 
@@ -723,7 +723,7 @@ func (instance *InMemoryBackend) saveItemLocked(
     instance.entries[key] = freshEntry
 }
 
-/* the walk toward the front is bounded: it looks for an expired victim before falling back to the least recently used one, and an unbounded search would make every insert into a full cache pay a whole-list scan under the exclusive lock. Expired entries are reclaimed anyway, lazily by the readers and periodically by the sweep. */
+/* the walk toward the front is bounded: it looks for an expired victim before falling back to the least recently promoted one, and an unbounded search would make every insert into a full cache pay a whole-list scan under the exclusive lock. Expired entries are reclaimed anyway, lazily by the readers and periodically by the sweep. */
 func (instance *InMemoryBackend) evictOneLocked(now time.Time) {
     probed := 0
     for element := instance.lruList.Back(); nil != element && evictionProbeLimit > probed; element = element.Prev() {

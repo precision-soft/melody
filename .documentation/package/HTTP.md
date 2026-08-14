@@ -88,7 +88,7 @@ The HTTP kernel wraps `request.Body` with `http.MaxBytesReader` when `Http().Max
 
 A urlencoded body is buffered before `ParseForm` drains it, so a later reader — the HMAC body-hash check above all — still sees the raw bytes. When that read **fails**, or when the body **does not parse** (an invalid percent escape), the kernel refuses the request instead of dispatching it: `413` when the request-body ceiling stopped the read, `400` otherwise, negotiated between html and json like every other kernel refusal. The handler is never reached, because either failure leaves a request whose form is indistinguishable from an empty submission — a real submission would otherwise be processed as a blank one. A multipart body is left untouched (`ParseForm` does not read it), so the disk spooling for large uploads is preserved.
 
-`Request.Input` reads post, then query, then the route parameters, and delivers the single value a key carries. The request bags keep the single and the repeated key apart by type: a key that appeared once is the string it is, while a genuinely repeated key (`?a=1&a=2`) is a slice, and reading it as one string panics naming the key — read it through `bag.StringSlice` over `Request.Query()`/`Request.Post()`.
+`Request.Input` reads post, then query, then the route parameters, and delivers the single value a key carries; on a genuinely repeated key it answers the **first** value, because the caller asked by name and cannot act on a panic. The request bags keep the single and the repeated key apart by type: a key that appeared once is the string it is, while a repeated key (`?a=1&a=2`) is a slice, and reading the bag itself with `bag.String` panics naming the key — read it through `bag.StringSlice` over `Request.Query()`/`Request.Post()`.
 
 ## CORS
 
@@ -160,13 +160,13 @@ A requirement declared on a parameter is validated against the value that is act
 
 ## HTTP method semantics
 
-* [`HEAD`](../../http) requests are matched against explicit `HEAD` routes and also against `GET` routes. When a `GET` route handles a `HEAD` request, Melody keeps the same status code and headers as the `GET` handler while suppressing the response body during [`WriteToHttpResponseWriter`](../../http/response.go).
+* [`HEAD`](../../http) requests are matched against explicit `HEAD` routes and also against `GET` routes. When a `GET` route handles a `HEAD` request, Melody keeps the same status code and headers as the `GET` handler while suppressing the response body during [`WriteToHttpResponseWriter`](../../http/response_writer.go).
 * [`OPTIONS`](../../http) responses may be generated automatically by the HTTP kernel when a path matches but the incoming method does not map to a userland handler.
 * The `Allow` header is derived from the methods registered for the matched path. When `GET` is registered, `HEAD` is also advertised in `Allow`.
 
 ## Middleware ordering
 
-The chain is ordered by [`orderDefinitions`](../../http/middleware/pipeline/builder.go) and applied by [`wrapWithMiddlewares`](../../http/router_utility.go), which wraps from the last element inwards — so the **first** element of the built chain is the **outermost** one. The contract that follows:
+The chain is ordered by [`orderDefinitions`](../../http/middleware/pipeline/builder.go) and applied by [`wrapWithMiddlewaresRecording`](../../http/router_utility.go), which wraps from the last element inwards — so the **first** element of the built chain is the **outermost** one. The contract that follows:
 
 * A **lower** priority value sits **further out**: it wraps everything after it, so it runs earlier on the way in and sees the response last on the way out. [`Use`](../../application/http_middleware.go) registers at `MiddlewarePriorityDefault` (`0`); [`UseWithPriority`](../../application/http_middleware.go) states the value.
 * Middlewares registered at **equal priority** run in **registration order**, the first registered being the outer one. The tie-break is the registration rank, not the definition's name.
@@ -399,7 +399,7 @@ Where the list itself comes from is the application's business — a constant as
 ## Footguns & caveats
 
 * Route names must be unique. URL generation relies on a [`RouteRegistry`](../../http/contract/route_registry.go) entry for the route name.
-* An optional route parameter (`:param?`) is only legal as the **last** segment of a pattern. An omitted optional is dropped wherever it sits, while a match only ever ends early at the tail, so `/blog/:locale?/posts` would let [`UrlGenerator`](../../http/url_generator.go) mint `/blog/posts` — a path this router answers with a `404`. Registering such a pattern panics at the definition site; move the optional to the end, or register the two patterns separately.
+* An optional route parameter (`:param?`) is only legal as the **last** segment of a pattern, unless it carries a **non-empty default** — the default is always substituted, so the segment never drops. An omitted optional without one is dropped wherever it sits, while a match only ever ends early at the tail, so `/blog/:locale?/posts` would let [`UrlGenerator`](../../http/url_generator.go) mint `/blog/posts` — a path this router answers with a `404`. Registering the defaultless shape panics at the definition site; move the optional to the end, give it a non-empty default, or register the two patterns separately.
 * [`UrlGeneratorMustFromContainer`](../../http/service_resolver.go) is a fail-fast helper and will panic if `ServiceUrlGenerator` is missing or has an invalid type.
 * [`RateLimitMiddleware`](../../http/middleware/rate_limit.go) keys on the client IP alone when no [`SetKeyExtractor`](../../http/middleware/rate_limit.go) is given, so `SimpleRateLimit(n)` is a budget of `n` requests per minute per IP **across the whole service**, not per route. Set an explicit key extractor for a per-route or per-user budget. The IP comes from the direct peer, so behind a reverse proxy every client collapses onto the proxy's address: pass [`NewForwardedClientIpResolver`](../../http/middleware/client_ip.go) to [`SetClientIpResolver`](../../http/middleware/rate_limit.go) — it walks `X-Forwarded-For` against the trusted-proxy policy and falls back to the direct peer whenever the chain cannot be trusted. `SimpleRateLimit`, `IpRateLimit` and `UserRateLimit` build their config internally and return only the middleware, so there is nothing left to call `SetClientIpResolver` on: behind a proxy reach instead for [`SimpleRateLimitWithResolver`](../../http/middleware/rate_limit.go), [`IpRateLimitWithResolver`](../../http/middleware/rate_limit.go) or [`UserRateLimitWithResolver`](../../http/middleware/rate_limit.go), which take the resolver as their last argument — in the `User` variant it decides the anonymous fallback key alone, since a request carrying a user id is keyed on that id. The three plain helpers stay correct wherever the direct peer *is* the client.
 * Both in-memory limiters bound how many distinct keys they track ([`SetMaxKeys`](../../http/middleware/rate_limit.go), default 1,000,000), because the key is attacker-influenced and the map would otherwise grow without bound. Once the map is full and reclaiming idle entries frees nothing, a request under an unseen key is **denied** rather than tracked — a deliberate fail-closed choice, so size the ceiling above the distinct-client count you expect. Reclamation walks the map at most once per window, so the bound cannot be turned into a per-request cost.
@@ -443,7 +443,7 @@ Where the list itself comes from is the application's business — a constant as
 
 * Router and registry:
     * [`NewRouter()`](../../http/router.go)
-    * [`NewRouterWithRouteRegistry(httpcontract.RouteRegistry)`](../../http/router.go)
+    * [`NewRouterWithRouteRegistry(*http.RouteRegistry)`](../../http/router.go)
     * [`NewRouteRegistry()`](../../http/route_registry.go)
     * [`NewRouteGroup(router httpcontract.Router, pathPrefix string) httpcontract.RouteGroup`](../../http/router_group.go)
     * [`NewRouteOptions(name string, methods []string, host string, schemes []string, requirements map[string]string, defaults map[string]string, locales []string, priority int, attributes map[string]any) httpcontract.RouteOptions`](../../http/route_option.go)
